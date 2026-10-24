@@ -244,7 +244,7 @@ none of the rules below are its.
 
 The document's top-level frames shown one at a time, fitted to a fullscreen window, with nothing of
 the editor around them and nothing to edit with. `OndinApp::presenting` holds a `Presenting {
-frames, at, was_fullscreen, stepped_at }` while it runs.
+frames, at, was_fullscreen, stepped_at, view, to_top }` while it runs.
 
 - **Doors.** `Action::Present`: `Ctrl+Alt+Enter` in normal mode, `menu::Item::Present` (*Present*,
   `PLAY`, `Group::View`) in the palette and the cheatsheet's File section, and the View menu's last
@@ -267,9 +267,18 @@ frames, at, was_fullscreen, stepped_at }` while it runs.
   and a right-click step back, stopping at either end; Home and End jump; Escape leaves.
   `stop_presenting` leaves fullscreen unless the window was fullscreen before. A shown frame that no
   longer resolves ends it.
-- **Drawing.** The scene goes through `canvas.render` with present mode's own camera, centred on
-  the frame at `fit_zoom` (the tighter axis, no margin, clamped to `MIN_ZOOM..MAX_ZOOM`). The
-  editing camera and selection are untouched, so leaving restores the view. A matte in the canvas
+- **Zoom**, because a tall frame fitted to the screen's height is too small to read. `Ctrl`+wheel
+  (or `Alt`+wheel) zooms in at the cursor; the plain wheel and `Shift`+wheel then scroll. The wheel
+  is parsed as the canvas parses it (`canvas::wheel_travel`, `canvas::wheel_zoom_factor`).
+  `hold_on_frame` holds the view on the frame, every frame so a resize refits: on each axis the
+  frame stays centred while it is narrower than the screen, and once wider its edges stay outside
+  the screen's. Zooming out to the fit or past it is the fit (`view` back to `None`). The zoom is
+  kept across steps, since frames presented together are usually one size; a step to another frame
+  (keys, click, Home/End) sets `to_top`, and the next frame drawn opens at the new frame's top,
+  centred across. A frame the kept zoom no longer magnifies opens fitted, and the zoom is dropped.
+- **Drawing.** The scene goes through `canvas.render` with present mode's own camera: `view`, else
+  centred on the frame at `fit_zoom` (the tighter axis, no margin, clamped to `MIN_ZOOM..MAX_ZOOM`).
+  The editing camera and selection are untouched, so leaving restores the view. A matte in the canvas
   background colour then covers everything outside the frame: its neighbours, and a child
   overflowing an unclipped frame. No selection, guides, grids, frame tags, rulers or status bar.
 - **The counter**, a pill at the bottom with the frame's name and *n / total*, shows for

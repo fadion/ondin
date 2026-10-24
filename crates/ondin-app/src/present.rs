@@ -4,8 +4,9 @@
 //! overlay or command needs to know it exists. Focus mode, which hides the panels
 //! while editing goes on, is a different thing.
 
+use crate::view::Camera;
 use ondin_core::NodeId;
-use ondin_core::kurbo::Rect;
+use ondin_core::kurbo::{Point, Rect, Vec2};
 
 /// A presentation in progress.
 #[derive(Clone, Debug)]
@@ -18,6 +19,13 @@ pub(crate) struct Presenting {
     pub was_fullscreen: bool,
     /// When the frame last changed, in egui's clock — what times the counter's fade.
     pub stepped_at: f64,
+    /// The view zoomed in on the frame (`Ctrl`+wheel), or `None` while it is
+    /// fitted whole. Kept across steps: frames presented together are usually
+    /// one size.
+    pub view: Option<Camera>,
+    /// Set by a step that moves: the next frame drawn opens at the new frame's
+    /// top, centred across, at the zoom `view` carries.
+    pub to_top: bool,
 }
 
 impl Presenting {
@@ -25,20 +33,25 @@ impl Presenting {
     pub fn step(&mut self, by: isize, now: f64) -> bool {
         let last = self.frames.len().saturating_sub(1) as isize;
         let next = (self.at as isize + by).clamp(0, last) as usize;
-        let moved = next != self.at;
-        self.at = next;
-        self.stepped_at = now;
-        moved
+        self.go(next, now)
     }
 
     /// Go to the first (`false`) or last (`true`) frame.
     pub fn jump(&mut self, to_end: bool, now: f64) {
-        self.at = if to_end {
+        let to = if to_end {
             self.frames.len().saturating_sub(1)
         } else {
             0
         };
+        self.go(to, now);
+    }
+
+    fn go(&mut self, to: usize, now: f64) -> bool {
+        let moved = to != self.at;
+        self.to_top |= moved;
+        self.at = to;
         self.stepped_at = now;
+        moved
     }
 }
 
@@ -70,6 +83,31 @@ pub(crate) fn fit_zoom(frame: Rect, px: (u32, u32)) -> f64 {
     (f64::from(px.0) / w)
         .min(f64::from(px.1) / h)
         .clamp(crate::view::MIN_ZOOM, crate::view::MAX_ZOOM)
+}
+
+/// Hold a zoomed view on `frame`: zoomed out to the fit or past it is the fit
+/// (`None`); otherwise, on each axis, the frame stays centred while it is
+/// narrower than the screen, and its edges stay outside the screen's once it is
+/// wider — so a tall frame zooms about its middle and the wheel scrolls it.
+pub(crate) fn hold_on_frame(view: Camera, frame: Rect, px: (u32, u32)) -> Option<Camera> {
+    if view.zoom <= fit_zoom(frame, px) {
+        return None;
+    }
+    let axis = |at: f64, lo: f64, hi: f64, screen: u32| {
+        let half = f64::from(screen) / view.zoom / 2.0;
+        if hi - lo <= 2.0 * half {
+            (lo + hi) / 2.0
+        } else {
+            at.clamp(lo + half, hi - half)
+        }
+    };
+    Some(Camera {
+        center: Point::new(
+            axis(view.center.x, frame.x0, frame.x1, px.0),
+            axis(view.center.y, frame.y0, frame.y1, px.1),
+        ),
+        zoom: view.zoom,
+    })
 }
 
 /// How long the frame counter stays after a step, and how long it then takes to
@@ -136,6 +174,8 @@ impl crate::app::OndinApp {
             at,
             was_fullscreen,
             stepped_at: ctx.input(|i| i.time),
+            view: None,
+            to_top: false,
         });
     }
 
@@ -152,8 +192,10 @@ impl crate::app::OndinApp {
     /// window over a matte of the canvas colour, and a counter after each step.
     ///
     /// → ↓ Space Page Down Enter and a click step on; ← ↑ Page Up Backspace and a
-    /// right-click step back; Home and End jump; Escape leaves. Nothing else is
-    /// read, so no command can edit what nobody can see being edited.
+    /// right-click step back; Home and End jump; Escape leaves. `Ctrl`+wheel
+    /// zooms in on the frame and the wheel then scrolls it ([`hold_on_frame`]).
+    /// Nothing else is read, so no command can edit what nobody can see being
+    /// edited.
     pub(crate) fn present_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
@@ -206,10 +248,36 @@ impl crate::app::OndinApp {
             self.stop_presenting(&ctx);
             return;
         };
-        let camera = crate::view::Camera {
+        let fitted = Camera {
             center: bounds.center(),
             zoom: fit_zoom(bounds, px),
         };
+        let (pan, zoom) = crate::canvas::wheel_travel(&ctx, rect.height());
+        let Some(p) = self.presenting.as_mut() else {
+            return;
+        };
+        let mut view = p.view.unwrap_or(fitted);
+        if std::mem::take(&mut p.to_top) {
+            let top = Point::new(bounds.center().x, f64::NEG_INFINITY);
+            view = hold_on_frame(
+                Camera {
+                    center: top,
+                    ..view
+                },
+                bounds,
+                px,
+            )
+            .unwrap_or(fitted);
+        }
+        view.pan_pixels(Vec2::new(f64::from(pan.x * ppp), f64::from(pan.y * ppp)));
+        if zoom != 0.0 {
+            let at = ctx.pointer_hover_pos().unwrap_or(rect.center()) - rect.min;
+            let at = Vec2::new(f64::from(at.x * ppp), f64::from(at.y * ppp));
+            view.zoom_by(crate::canvas::wheel_zoom_factor(zoom), at, px);
+        }
+        // Every frame, not only on a wheel: a window resize changes the fit.
+        p.view = hold_on_frame(view, bounds, px);
+        let camera = p.view.unwrap_or(fitted);
         self.session.set_chrome_ghost(None);
         let (doc, res, overrides) = self.session.render_inputs();
         if let Some(tex) = self.canvas.render(doc, res, overrides, &camera, px, ground) {
@@ -229,10 +297,12 @@ impl crate::app::OndinApp {
             let v = camera.world_to_screen(ondin_core::kurbo::Point::new(x, y), px);
             rect.min + egui::vec2(v.x as f32 / ppp, v.y as f32 / ppp)
         };
+        // Within the screen: zoomed in, the frame runs past it.
         let shown = egui::Rect::from_min_max(
             to_screen(bounds.x0, bounds.y0),
             to_screen(bounds.x1, bounds.y1),
-        );
+        )
+        .intersect(rect);
         for r in [
             egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, shown.min.y)),
             egui::Rect::from_min_max(egui::pos2(rect.min.x, shown.max.y), rect.max),
@@ -323,7 +393,9 @@ mod tests {
         assert_eq!(order, vec![b, a, d, c]);
     }
 
-    /// Stepping stops at both ends and says whether it moved.
+    /// Stepping stops at both ends and says whether it moved; a step that moves
+    /// sends the view to the new frame's top, one that stops at an end leaves
+    /// it where it is.
     #[test]
     fn stepping_stops_at_the_ends() {
         let mut ids = IdSource::new(0x9B);
@@ -332,13 +404,59 @@ mod tests {
             at: 0,
             was_fullscreen: false,
             stepped_at: 0.0,
+            view: None,
+            to_top: false,
         };
         assert!(!p.step(-1, 1.0), "nothing before the first");
+        assert!(!p.to_top, "and the view stays where it was scrolled");
         assert!(p.step(1, 2.0));
+        assert!(p.to_top, "a new frame opens at its top");
+        p.to_top = false;
         assert!(!p.step(1, 3.0), "nothing after the last");
         assert_eq!(p.at, 1);
         p.jump(false, 4.0);
         assert_eq!(p.at, 0);
+        assert!(p.to_top, "a jump too");
+    }
+
+    /// A zoomed view of a tall frame: centred across while it is narrower than
+    /// the screen, its edges kept off-screen along it, and at or past the fit
+    /// back to the fit.
+    ///
+    /// flip: `hold_on_frame` keeping the centre where the frame fits, rather
+    /// than centring → fails at "centred across".
+    #[test]
+    fn a_zoomed_view_holds_on_the_frame() {
+        let tall = Rect::new(0.0, 0.0, 400.0, 2000.0);
+        let px = (1600, 1000);
+        assert!(
+            (fit_zoom(tall, px) - 0.5).abs() < 1e-9,
+            "fixture: fitted by height"
+        );
+        let at = |x: f64, y: f64, zoom: f64| {
+            hold_on_frame(
+                Camera {
+                    center: Point::new(x, y),
+                    zoom,
+                },
+                tall,
+                px,
+            )
+        };
+
+        let held = at(-300.0, -50.0, 2.0).expect("zoomed in");
+        assert_eq!(held.center.x, 200.0, "centred across: 800 px wide on 1600");
+        assert_eq!(held.center.y, 250.0, "the top edge held at the screen's");
+        let held = at(0.0, 1990.0, 2.0).expect("zoomed in");
+        assert_eq!(held.center.y, 1750.0, "the bottom edge too");
+        let held = at(-300.0, 1000.0, 5.0).expect("zoomed in");
+        assert_eq!(
+            held.center.x, 160.0,
+            "wider than the screen: edges held across"
+        );
+
+        assert!(at(200.0, 1000.0, 0.5).is_none(), "the fit is the fit");
+        assert!(at(200.0, 1000.0, 0.2).is_none(), "and past it");
     }
 
     /// A frame twice as wide as tall fits a square canvas by its width.

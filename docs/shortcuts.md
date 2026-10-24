@@ -304,10 +304,12 @@ non-goal**; `DashboardState::selected` is one path and every verb takes one docu
 | `→` `↓` `Space` `Page Down` `Enter` · click | next frame |
 | `←` `↑` `Page Up` `Backspace` · right-click | previous frame |
 | `Home` / `End` | first / last frame |
+| `Ctrl`/`Alt`+wheel | zoom in on the frame at the cursor; back to the fit at or below it |
+| wheel · `Shift`+wheel | scroll the zoomed frame vertically / horizontally |
 | `Escape` | leave |
 
-Stepping stops at either end. `present_ui` reads these and nothing else: `OndinApp::ui` returns
-before `input::resolve` while presenting, so no editor chord runs (`design/app-canvas-chrome.md`).
+Stepping stops at either end. A step to another frame keeps the zoom and opens the frame at its
+top. `present_ui` reads these and nothing else: `OndinApp::ui` returns before `input::resolve` while presenting, so no editor chord runs (`design/app-canvas-chrome.md`).
 
 ## 9. Gesture modifiers
 

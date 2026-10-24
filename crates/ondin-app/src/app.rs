@@ -13517,6 +13517,46 @@ mod library_wiring_tests {
             "Delete edits nothing while presenting (the selected frame stands)"
         );
 
+        let zoom_in = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 3.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        let scroll_down = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -20.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let view = |app: &OndinApp| app.presenting.as_ref().and_then(|p| p.view);
+        whole_frame(&ctx, &mut app, vec![zoom_in]);
+        whole_frame(&ctx, &mut app, vec![scroll_down]);
+        let zoomed = view(&app).expect("Ctrl+wheel zooms in on the frame");
+        // The window is 820pt tall at one pixel per point, and the frames' tops are at 0.
+        let top_gap = |v: crate::view::Camera| v.center.y - 820.0 / v.zoom / 2.0;
+        assert!(
+            top_gap(zoomed) > 1.0,
+            "fixture: scrolled down off the frame's top, at {}",
+            top_gap(zoomed)
+        );
+        assert_eq!(
+            app.session.camera, camera,
+            "without touching the editor's view"
+        );
+        whole_frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowRight, Default::default())],
+        );
+        let next = view(&app).expect("the next frame keeps the zoom");
+        assert_eq!(next.zoom, zoomed.zoom, "at the same level");
+        assert!(
+            top_gap(next).abs() < 1e-6 && (next.center.x - 9200.0).abs() < 1e-6,
+            "and opens at its top, centred across: {:?}",
+            next.center
+        );
+
         whole_frame(&ctx, &mut app, vec![escape()]);
         assert!(app.presenting.is_none(), "Escape leaves");
         assert_eq!(app.session.selection.ids(), &[c], "the selection as it was");

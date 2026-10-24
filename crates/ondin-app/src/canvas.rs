@@ -6457,9 +6457,6 @@ impl OndinApp {
     /// arrives as `Ctrl`+wheel (winit raises `PinchGesture` only on macOS/iOS), so
     /// `egui::Event::Zoom` is not handled.
     fn wheel_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
-        /// Zoom per pixel of wheel travel, as egui's own `scroll_zoom_speed`.
-        const ZOOM_SPEED: f64 = 1.0 / 200.0;
-
         // The canvas's own overlay areas (origin fields, *Done* pill) must not
         // swallow the wheel; every other overlay keeps it.
         let Some(hover) = resp.hover_pos().or_else(|| {
@@ -6474,41 +6471,7 @@ impl OndinApp {
         }) else {
             return;
         };
-        // Read before taking the input lock — `Context::options` takes its own.
-        let per_line = ui
-            .ctx()
-            .options(|o| o.input_options.line_scroll_speed)
-            .max(1.0);
-
-        let (pan, zoom) = ui.input(|i| {
-            let (mut pan, mut zoom) = (egui::Vec2::ZERO, 0.0_f32);
-            for ev in &i.events {
-                let egui::Event::MouseWheel {
-                    unit,
-                    delta,
-                    modifiers,
-                    ..
-                } = ev
-                else {
-                    continue;
-                };
-                let d = match unit {
-                    egui::MouseWheelUnit::Point => *delta,
-                    egui::MouseWheelUnit::Line => *delta * per_line,
-                    egui::MouseWheelUnit::Page => *delta * rect.height(),
-                };
-                // `x + y` when modified: the platform may have swapped the axis.
-                // `Alt` aliases `Ctrl` (`docs/shortcuts.md` §9).
-                if modifiers.command || modifiers.alt {
-                    zoom += d.x + d.y;
-                } else if modifiers.shift {
-                    pan.x += d.x + d.y;
-                } else {
-                    pan += d;
-                }
-            }
-            (pan, zoom)
-        });
+        let (pan, zoom) = wheel_travel(ui.ctx(), rect.height());
 
         if pan != egui::Vec2::ZERO {
             self.session
@@ -6520,9 +6483,9 @@ impl OndinApp {
                 ((hover.x - rect.min.x) * ppp) as f64,
                 ((hover.y - rect.min.y) * ppp) as f64,
             );
-            // Clamped: a trackpad can deliver a whole gesture in one frame.
-            let factor = (zoom as f64 * ZOOM_SPEED).exp().clamp(0.2, 5.0);
-            self.session.camera.zoom_by(factor, local, self.canvas_px);
+            self.session
+                .camera
+                .zoom_by(wheel_zoom_factor(zoom), local, self.canvas_px);
         }
     }
 
@@ -8895,6 +8858,50 @@ fn badge_text_angle(dir: egui::Vec2) -> f32 {
     const HALF: f32 = std::f32::consts::PI;
     let a = dir.angle();
     a - (a / HALF).round() * HALF
+}
+
+/// This frame's wheel travel in points, as `(pan, zoom)`: `Ctrl` or `Alt` zooms,
+/// `Shift` pans sideways, a plain wheel pans. `page` is what one page of a
+/// page-unit wheel is worth. Shared by the canvas and present mode.
+pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32) -> (egui::Vec2, f32) {
+    // Read before taking the input lock — `Context::options` takes its own.
+    let per_line = ctx.options(|o| o.input_options.line_scroll_speed).max(1.0);
+    ctx.input(|i| {
+        let (mut pan, mut zoom) = (egui::Vec2::ZERO, 0.0_f32);
+        for ev in &i.events {
+            let egui::Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+                ..
+            } = ev
+            else {
+                continue;
+            };
+            let d = match unit {
+                egui::MouseWheelUnit::Point => *delta,
+                egui::MouseWheelUnit::Line => *delta * per_line,
+                egui::MouseWheelUnit::Page => *delta * page,
+            };
+            // `x + y` when modified: the platform may have swapped the axis.
+            // `Alt` aliases `Ctrl` (`docs/shortcuts.md` §9).
+            if modifiers.command || modifiers.alt {
+                zoom += d.x + d.y;
+            } else if modifiers.shift {
+                pan.x += d.x + d.y;
+            } else {
+                pan += d;
+            }
+        }
+        (pan, zoom)
+    })
+}
+
+/// The zoom factor for `zoom` points of [`wheel_travel`], at egui's own
+/// `scroll_zoom_speed`. Clamped: a trackpad can deliver a whole gesture in one
+/// frame.
+pub(crate) fn wheel_zoom_factor(zoom: f32) -> f64 {
+    (f64::from(zoom) / 200.0).exp().clamp(0.2, 5.0)
 }
 
 /// The layer the origin fields for `id` live in, shared by `origin_fields` and

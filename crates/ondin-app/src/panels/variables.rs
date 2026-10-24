@@ -2089,12 +2089,12 @@ fn style_group_row(
     open
 }
 
-/// The description field over row `rect`, when the browser is typing `of`'s —
-/// across the whole row, past the indent. Answers whether it drew, so the row
-/// draws nothing else.
+/// The description field in box `r` — where the row's rename field sits — when
+/// the browser is typing `of`'s. Answers whether it drew, so the row draws
+/// nothing else in its place.
 fn describe_row(
     ui: &mut egui::Ui,
-    rect: egui::Rect,
+    r: egui::Rect,
     of: Described,
     b: &mut Browser,
     acts: &mut Vec<Act>,
@@ -2105,10 +2105,6 @@ fn describe_row(
     if *o != of {
         return false;
     }
-    let r = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + INDENT - 6.0, rect.top() + 3.0),
-        egui::pos2(rect.right() - 6.0, rect.bottom() - 3.0),
-    );
     let id = ui.id().with(("describe", of));
     let field = edit_field(ui, r, text, id, 11.5, Some("Description"), None);
     ui.painter().rect_stroke(
@@ -2141,9 +2137,6 @@ fn style_row(
     let id = ui.id().with(("style-row", s.id));
     let (rect, mut resp) =
         ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::click());
-    if describe_row(ui, rect, Described::Style(s.id), b, acts) {
-        return;
-    }
     if !s.description.is_empty() {
         resp = resp.on_hover_text(&s.description);
     }
@@ -2158,14 +2151,18 @@ fn style_row(
         egui::vec2(14.0, 14.0),
     );
     crate::panels::styles::paint_preview(ui.painter(), doc, s, sw);
+    // A rename's and a description's field share the box past the preview.
+    let r = egui::Rect::from_min_max(
+        egui::pos2(sw.right() + 6.0, rect.top() + 3.0),
+        egui::pos2(rect.right() - 40.0, rect.bottom() - 3.0),
+    );
+    if describe_row(ui, r, Described::Style(s.id), b, acts) {
+        return;
+    }
     let refused = b.refused.clone();
     if let Some(Edit::Style { style, text }) = b.edit.as_mut()
         && *style == s.id
     {
-        let r = egui::Rect::from_min_max(
-            egui::pos2(sw.right() + 6.0, rect.top() + 3.0),
-            egui::pos2(rect.right() - 40.0, rect.bottom() - 3.0),
-        );
         let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
         ui.painter().rect_stroke(
             r,
@@ -2428,7 +2425,13 @@ fn var_row(
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, 4, color::text_a(18));
     }
-    if describe_row(ui, rect, Described::Variable(v.id), b, acts) {
+    // From where the rename field starts, across the cells: a variable's name
+    // column is too narrow for a sentence.
+    let field = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + INDENT - 6.0, rect.top() + 3.0),
+        egui::pos2(rect.right() - 6.0, rect.bottom() - 3.0),
+    );
+    if describe_row(ui, field, Described::Variable(v.id), b, acts) {
         return;
     }
     let name_rect = egui::Rect::from_min_size(rect.min, egui::vec2(NAME_W, ROW_H));
@@ -3638,7 +3641,10 @@ mod tests {
             [s, t]
         );
 
-        // *Description* types over the row and commits trimmed.
+        // *Description* types where the name was, the preview kept, and
+        // commits trimmed.
+        let shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        let name_at = text_left(&shapes, "base").expect("the leaf is drawn");
         app.var_act(Act::StartEdit(Edit::Describe {
             of: Described::Style(t),
             text: String::new(),
@@ -3646,7 +3652,12 @@ mod tests {
         let shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
         assert!(
             last_text(&shapes, "base").is_none(),
-            "the field covers the row"
+            "the field covers the name"
+        );
+        let hint_at = text_left(&shapes, "Description").expect("the field's hint");
+        assert!(
+            (hint_at - name_at).abs() <= 6.0,
+            "the field sits where the name was: {hint_at} vs {name_at}"
         );
         app.var_act(Act::Describe(Described::Style(t), " The page ".into()));
         let desc = |app: &OndinApp| app.session.doc.styles().get(t).unwrap().description.clone();
@@ -3972,6 +3983,22 @@ mod tests {
             match shape {
                 egui::Shape::Text(t) if t.galley.text() == s => {
                     *out = Some(t.pos + t.galley.rect.center().to_vec2());
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|x| find(x, s, out)),
+                _ => {}
+            }
+        }
+        let mut out = None;
+        shapes.iter().for_each(|c| find(&c.shape, s, &mut out));
+        out
+    }
+
+    /// The left edge of the last text `s` the pass painted.
+    fn text_left(shapes: &[egui::epaint::ClippedShape], s: &str) -> Option<f32> {
+        fn find(shape: &egui::Shape, s: &str, out: &mut Option<f32>) {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    *out = Some(t.pos.x + t.galley.rect.left());
                 }
                 egui::Shape::Vec(v) => v.iter().for_each(|x| find(x, s, out)),
                 _ => {}

@@ -286,6 +286,9 @@ pub(crate) struct NodeDto {
     /// (§15 D982). Bound layers are wire ids, checked on load with the links.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub props: Vec<Keyed<crate::variant::Property>>,
+    /// A main's or a set's description, absent when it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     /// Where a vault node was vendored from (§15 D1012), absent on every node
     /// outside the vault — which `crate::kit::check` holds on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -402,6 +405,7 @@ impl NodeDto {
             set: n.set().cloned(),
             variant: n.variant().to_vec(),
             props: n.props().to_vec(),
+            description: n.description().to_string(),
             origin: n.origin().map(|o| OriginDto {
                 kit: o.kit.clone(),
                 node: o.node.to_wire(),
@@ -494,6 +498,7 @@ impl NodeDto {
             // repeated property id, and refusing would lose the artwork. It is a
             // function of the list, so the same bytes give one document.
             props: crate::item::rekey_repeats(self.props),
+            description: self.description,
             origin: self
                 .origin
                 .map(|o| -> Result<_, IoError> {

@@ -1538,6 +1538,7 @@ fn variables_match_the_canvas_in_every_mode() {
                 cells: [(light, a), (dark, b)].into_iter().collect(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }]);
         id
@@ -2044,6 +2045,7 @@ fn bound_text_colour_and_side_width_are_written_as_var() {
                 cells: [(mode, cell)].into_iter().collect(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }]);
     }
@@ -2339,6 +2341,7 @@ fn a_use_in_another_mode_draws_that_modes_values() {
                 cells: cells.into_iter().collect(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }]);
     }

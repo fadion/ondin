@@ -647,6 +647,7 @@ fn a_bound_field_reports_its_drawn_value() {
                 cells: cells.into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
     let red = ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255);

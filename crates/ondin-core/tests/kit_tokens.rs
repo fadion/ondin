@@ -112,6 +112,7 @@ fn kit() -> Kit {
                 cells: [(day, Cell::Color(WHITE)), (night, Cell::Color(NAVY))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::AddVariable {
@@ -122,6 +123,7 @@ fn kit() -> Kit {
                 cells: [(day, Cell::Number(1.0)), (night, Cell::Number(2.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::AddStyle {
@@ -131,6 +133,7 @@ fn kit() -> Kit {
                 value: StyleValue::Fills(gold.clone()),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         create(icon, root, 0, frame(24.0, 24.0), "Icon"),
@@ -624,6 +627,7 @@ fn a_vault_node_bound_to_the_documents_own_variable_is_refused() {
                 cells: [(modes[0], Cell::Color(RED))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::SetFills {
@@ -654,6 +658,7 @@ fn an_alias_of_the_documents_own_to_a_kits_reads_through_the_mapping() {
             cells: [(modes[0], Cell::Alias(held))].into(),
             origin: None,
             forked: None,
+            description: String::new(),
         },
     }]))
     .unwrap();
@@ -703,6 +708,7 @@ fn a_kits_alias_of_a_third_kits_variable_is_inserted() {
                 cells: [(light, Cell::Alias(held))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::SetFills {
@@ -839,6 +845,7 @@ fn a_kit_variable_named_as_a_held_one_asks_for_the_update() {
                     cells: [(k.day, Cell::Color(RED)), (night, Cell::Color(GOLD))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFills {
@@ -1132,6 +1139,7 @@ fn a_documents_own_style_reading_a_removed_kit_variable_is_detached() {
             value: StyleValue::Fills(bound(held)),
             origin: None,
             forked: None,
+            description: String::new(),
         },
     }]))
     .unwrap();
@@ -1187,6 +1195,7 @@ fn a_main_roots_visibility_binding_is_not_a_change() {
                     cells: modes.iter().map(|m| (*m, Cell::Boolean(true))).collect(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetVisibleVar {
@@ -1351,6 +1360,7 @@ fn adopting_a_kits_modes_leaves_another_kit_reading_its_first() {
                 cells: [(night, Cell::Color(NAVY)), (day, Cell::Color(WHITE))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         create(chip, broot, 0, frame(10.0, 10.0), "Chip"),
@@ -1529,6 +1539,7 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
                     cells: [(modes[0], Cell::Color(RED)), (modes[1], Cell::Color(GOLD))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::AddStyle {
@@ -1538,6 +1549,7 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
                     value: StyleValue::Fills(bound(tag)),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFills {
@@ -1629,6 +1641,7 @@ fn a_removal_matches_a_drifted_copys_fills_by_item() {
                     cells: modes.iter().map(|m| (*m, Cell::Color(RED))).collect(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFills {
@@ -1798,6 +1811,7 @@ fn a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy() {
                     value: StyleValue::Strokes(strokes.clone()),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetStrokes {
@@ -1860,6 +1874,7 @@ fn kit_with_numbers(
             cells: modes.iter().map(|m| (*m, Cell::Number(x))).collect(),
             origin: None,
             forked: None,
+            description: String::new(),
         },
     };
     k.doc
@@ -2061,6 +2076,7 @@ fn a_kits_effects_style_with_a_bound_blur_lands_on_the_consumers_copy() {
                     value: StyleValue::Effects(effects.clone()),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetEffects {
@@ -2146,6 +2162,7 @@ fn a_documents_own_stroke_and_effects_styles_detach_a_removed_kit_number() {
                 }])),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::AddStyle {
@@ -2155,6 +2172,7 @@ fn a_documents_own_stroke_and_effects_styles_detach_a_removed_kit_number() {
                 value: StyleValue::Effects(keyed_by_position([shadow])),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -2246,6 +2264,7 @@ fn make_local_forks_a_style_with_its_variables_remapped() {
                     value: StyleValue::Fills(bound(k.brand)),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFillStyle {

@@ -16,7 +16,9 @@ use crate::node::{
     BlockStyle, CharSpans, Fill, FillRule, MaskMode, Node, NodeKind, Paint, ParaSpans,
     ParagraphStyle, Pivot, Stroke, TextStyle,
 };
-use crate::op::{ApplyOutcome, DirtySet, GeometryPatch, OpError, Operation, Transaction};
+use crate::op::{
+    ApplyOutcome, Described, DirtySet, GeometryPatch, OpError, Operation, Transaction,
+};
 use kurbo::{Affine, RoundedRectRadii};
 use peniko::Color;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -126,6 +128,7 @@ impl Document {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            description: String::new(),
             origin: None,
             mode: None,
             corner_vars: Default::default(),
@@ -1327,6 +1330,36 @@ impl Document {
                 let old = std::mem::replace(&mut s.name, name.clone());
                 Ok(Operation::SetStyleName { id: *id, name: old })
             }
+            // Nothing is dirtied: a description is never drawn.
+            Operation::SetDescription { of, text } => {
+                let slot = match of {
+                    Described::Node(id) => {
+                        &mut self
+                            .nodes
+                            .get_mut(id)
+                            .ok_or(OpError::NoSuchNode(*id))?
+                            .description
+                    }
+                    Described::Style(id) => {
+                        &mut self
+                            .styles
+                            .styles
+                            .get_mut(id)
+                            .ok_or(OpError::NoSuchStyle(*id))?
+                            .description
+                    }
+                    Described::Variable(id) => {
+                        &mut self
+                            .variables
+                            .vars
+                            .get_mut(id)
+                            .ok_or(OpError::NoSuchVariable(*id))?
+                            .description
+                    }
+                };
+                let old = std::mem::replace(slot, text.clone());
+                Ok(Operation::SetDescription { of: *of, text: old })
+            }
             Operation::SetStyleValue { id, value } => {
                 if !crate::style::survives_save(value) {
                     return Err(OpError::NonFinite);
@@ -1631,6 +1664,7 @@ impl Document {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            description: String::new(),
             origin: None,
             mode: None,
             corner_vars: Default::default(),
@@ -2937,6 +2971,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
                     })
                 })
                 .collect(),
+            description: n.description.clone(),
             // **Never carried** (§15 D1012): a copy of a vendored node does not live
             // in the vault, and `kit::check` refuses an origin outside it. The kit
             // verbs write the origin after minting their copies here.
@@ -3150,6 +3185,7 @@ mod tests {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            description: String::new(),
             origin: None,
             mode: None,
             corner_vars: Default::default(),

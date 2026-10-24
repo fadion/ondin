@@ -107,7 +107,7 @@ pub use node::{
     Side, Stroke, StrokeAlign, StrokeSides, TextRef, TextSizing, miter_degrees_of_ratio,
     miter_ratio_of_degrees,
 };
-pub use op::{ApplyOutcome, DirtySet, GeometryPatch, OpError, Operation, Transaction};
+pub use op::{ApplyOutcome, Described, DirtySet, GeometryPatch, OpError, Operation, Transaction};
 pub use query::{
     boolean_placeholder, group_chain, hit_test, is_effectively_locked, is_within, local_box,
     nodes_in_view, outline_at, pivot_world,

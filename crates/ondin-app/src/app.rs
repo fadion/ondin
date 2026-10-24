@@ -427,6 +427,8 @@ pub struct OndinApp {
     pub(crate) popover_heard: bool,
     /// In-progress name edit (node id + buffer); commits once, on defocus.
     pub(crate) name_edit: Option<(NodeId, String)>,
+    /// In-progress description edit on a component card; commits once, on defocus.
+    pub(crate) desc_edit: Option<(NodeId, String)>,
     /// System and web fonts, loaded into core on demand.
     pub(crate) fonts: FontService,
     /// The background update check and the staged update it offers a restart for.
@@ -1193,6 +1195,7 @@ impl OndinApp {
             cut_move: None,
             clipboard_stamp: None,
             name_edit: None,
+            desc_edit: None,
             fonts,
             updater: Default::default(),
             previews: crate::fonts::FontPreviews::default(),
@@ -5055,6 +5058,7 @@ impl OndinApp {
         self.text = None;
         self.mode = Mode::Normal;
         self.name_edit = None;
+        self.desc_edit = None;
         self.collapsed.clear();
         self.layer_filter = None;
         self.layer_drag = None;
@@ -9825,6 +9829,7 @@ mod image_drop_tests {
                     cells: [(mode, Cell::Color(Color::from_rgba8(0, 0, 255, 255)))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFills {
@@ -9845,6 +9850,7 @@ mod image_drop_tests {
                     value: StyleValue::Fills(red),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFillStyle {
@@ -9916,6 +9922,7 @@ mod paste_properties_report_tests {
                 cells: [(mode, Cell::Color(Color::from_rgba8(0, 0, 255, 255)))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         (id, op)
@@ -9944,6 +9951,7 @@ mod paste_properties_report_tests {
                 cells: [(mode, Cell::Number(2.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         let stroke = |width_var| {
@@ -10084,6 +10092,7 @@ mod paste_properties_report_tests {
                     value: StyleValue::Fills(red),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFillStyle {

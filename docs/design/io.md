@@ -84,6 +84,7 @@ Fields in that form, and the particular rule each adds:
 | `NodeDto::effects` | Skipped when empty. Its test fixture is two same-kind entries on an artboard, to catch dedupe-by-kind. |
 | `Stroke::miter_limit` | Weaker kind: `#[serde(default = "default_miter_limit")]` with no skip, so every stroke writes it. Old documents re-save with a new key; invariant 9 (re-save of what was loaded) still holds. |
 | Text: `spans`, `para_spans`, `paragraph`, `block`, `ParagraphStyle::marker`/`level`/`optical_margins` | Absent on uniform text. |
+| `NodeDto::description`, `Style::description`, `Variable::description` | Skipped when empty; absent means none. |
 
 A bump **is** required when a field's meaning changes or its default would silently alter old documents. A bump is also taken for an *older build's* sake: a reader that does not know a version refuses it, where an older one would silently drop the new fields (v5, v6, v7, v8 below). Fields added while a version was unreleased joined it without a new bump.
 

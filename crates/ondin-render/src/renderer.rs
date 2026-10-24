@@ -1272,6 +1272,7 @@ impl RenderOverrides {
             | Operation::SetVariantSet { .. }
             | Operation::SetVariant { .. }
             | Operation::SetProperties { .. }
+            | Operation::SetDescription { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }

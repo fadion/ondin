@@ -366,6 +366,7 @@ fn a_bound_opacity_exports_at_its_percentage() {
                     cells: [(mode, Cell::Number(40.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -432,6 +433,7 @@ fn a_bound_stroke_width_exports_at_its_number() {
                 cells: [(mode, Cell::Number(7.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -482,6 +484,7 @@ fn a_bound_fill_and_visibility_export_in_the_mode_in_force() {
                 cells: cells.into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
     f.doc

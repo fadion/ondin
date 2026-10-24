@@ -1393,6 +1393,7 @@ mod canvas_tests {
                     cells: [(mode, Cell::Number(10.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -1565,6 +1566,7 @@ mod canvas_tests {
                     cells: [(mode, Cell::Number(10.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));

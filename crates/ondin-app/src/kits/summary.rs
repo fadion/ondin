@@ -530,6 +530,7 @@ mod tests {
                 cells: [(day, cell)].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }
     }

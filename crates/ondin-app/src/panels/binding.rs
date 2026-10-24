@@ -1204,6 +1204,7 @@ impl OndinApp {
                 cells: modes.into_iter().map(|m| (m, value.clone())).collect(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         });
         // The bind names the variable by id and reads only the field, so it is
@@ -2076,7 +2077,11 @@ fn list_row(
         egui::FontId::proportional(10.5),
         theme::text::FAINT,
     );
-    resp
+    if v.description.is_empty() {
+        resp
+    } else {
+        resp.on_hover_text(&v.description)
+    }
 }
 
 #[cfg(test)]
@@ -2138,6 +2143,7 @@ mod tests {
                     cells: [(mode, Cell::Color(Color::WHITE))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::AddVariable {
@@ -2148,6 +2154,7 @@ mod tests {
                     cells: [(mode, Cell::Number(6.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -2305,6 +2312,7 @@ mod tests {
                     cells: [(mode, Cell::Number(i as f64))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             })
             .collect();
@@ -2710,6 +2718,7 @@ mod tests {
                 cells: [(mode, Cell::Color(Color::BLACK))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }])));
         let table = app.session.doc.variables();
@@ -2878,6 +2887,7 @@ mod tests {
                     cells: [(mode, Cell::Color(Color::BLACK))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -3281,6 +3291,7 @@ mod tests {
                     cells: [(mode, Cell::Number(12.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -3488,6 +3499,7 @@ mod tests {
                 cells: [(mode, Cell::Boolean(false))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }])));
         let key = FieldKey::Visible { id: rect };

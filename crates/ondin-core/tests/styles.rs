@@ -233,6 +233,7 @@ fn a_name_is_unique_within_its_slot() {
         value: StyleValue::Fills(Vec::new()),
         origin: None,
         forked: None,
+        description: String::new(),
     };
     assert!(matches!(
         commit(&mut f, vec![Operation::AddStyle { style: twin }]),
@@ -244,6 +245,7 @@ fn a_name_is_unique_within_its_slot() {
         value: StyleValue::Strokes(Vec::new()),
         origin: None,
         forked: None,
+        description: String::new(),
     };
     commit(&mut f, vec![Operation::AddStyle { style: stroke }])
         .expect("a stroke style may share a fill style's name");
@@ -266,6 +268,7 @@ fn renaming_a_style_group_moves_its_slots_styles() {
             value,
             origin: None,
             forked: None,
+            description: String::new(),
         };
         commit(f, vec![Operation::AddStyle { style }]).unwrap();
         id
@@ -302,6 +305,63 @@ fn styles_round_trip_and_a_dangling_binding_is_refused() {
     let broken = text.replacen("\"styles\": [", "\"styles_gone\": [", 1);
     assert_ne!(broken, text, "the fixture writes a styles table");
     assert!(ondin_core::io::load(broken.as_bytes()).is_err());
+}
+
+/// A style's and a variable's descriptions are saved and loaded, and absent from
+/// the file while empty.
+#[test]
+fn descriptions_round_trip_and_are_absent_while_empty() {
+    use ondin_core::Described;
+    let mut f = fixture();
+    let s = styled(&mut f);
+    let empty = String::from_utf8(ondin_core::io::save(&f.doc).unwrap()).unwrap();
+    assert!(
+        !empty.contains("description"),
+        "nothing written while empty"
+    );
+    let (mode, var) = (f.ids.mint_mode(), f.ids.mint_var());
+    commit(
+        &mut f,
+        vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(RED))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetDescription {
+                of: Described::Style(s),
+                text: "Cards that float".into(),
+            },
+            Operation::SetDescription {
+                of: Described::Variable(var),
+                text: "The one accent".into(),
+            },
+        ],
+    )
+    .unwrap();
+    let back = ondin_core::io::load(&ondin_core::io::save(&f.doc).unwrap()).unwrap();
+    assert_eq!(
+        back.styles().get(s).unwrap().description,
+        "Cards that float"
+    );
+    assert_eq!(
+        back.variables().get(var).unwrap().description,
+        "The one accent"
+    );
 }
 
 fn instance(f: &mut F) -> NodeId {
@@ -363,6 +423,7 @@ fn an_instances_style_is_an_override() {
                     value: StyleValue::Fills(vec![blue]),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFillStyle {
@@ -460,6 +521,7 @@ fn a_paste_keeps_rebinds_or_detaches_a_style() {
                 value: StyleValue::Fills(vec![green]),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }]))
         .unwrap();
@@ -525,6 +587,7 @@ fn deleting_a_variable_inside_a_style_detaches_the_style() {
                     cells: [(m, Cell::Color(GREEN))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetStyleValue { id: s, value },
@@ -574,6 +637,7 @@ fn an_effects_style_binding_a_number_its_kind_lacks_is_refused() {
                     cells: [(mode, Cell::Number(4.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ],
@@ -591,6 +655,7 @@ fn an_effects_style_binding_a_number_its_kind_lacks_is_refused() {
                 value: StyleValue::Effects(ondin_core::keyed_by_position([blur])),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }],
     );

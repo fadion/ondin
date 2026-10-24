@@ -45,6 +45,7 @@ fn var(id: VarId, name: &str, kind: VarKind, cells: [(ModeId, Cell); 2]) -> Vari
         cells: cells.into(),
         origin: None,
         forked: None,
+        description: String::new(),
     }
 }
 
@@ -475,6 +476,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
                     cells: [(m, Cell::Color(RED))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -526,6 +528,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
                     cells: [(m, Cell::Number(4.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -609,6 +612,7 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
                     cells: [(m, Cell::Color(RED))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -896,6 +900,7 @@ fn deleting_a_mode_and_renaming_a_group() {
                 cells: [(f.light, Cell::Number(1.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }]))
         .unwrap();
@@ -1430,6 +1435,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                             version: 1,
                         }),
                         forked: None,
+                        description: String::new(),
                     },
                 },
             ]))

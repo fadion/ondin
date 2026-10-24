@@ -1823,6 +1823,7 @@ mod tests {
                 cells: [(mode, Cell::Number(10.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         assert!(s.commit(Transaction(vec![
@@ -2824,6 +2825,7 @@ mod tests {
                     value: ondin_core::style::StyleValue::Fills(vec![]),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetFills {

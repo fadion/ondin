@@ -13889,6 +13889,7 @@ mod several_layer_binding_tests {
                     cells: [(mode, Cell::Number(6.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -14053,6 +14054,7 @@ mod several_layer_binding_tests {
                     cells: [(light, Cell::Color(white)), (dark, Cell::Color(black))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ];
@@ -14099,6 +14101,7 @@ mod several_layer_binding_tests {
                     cells: [(mode, Cell::Number(40.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::CreateNode {

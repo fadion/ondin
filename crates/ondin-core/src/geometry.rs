@@ -1453,6 +1453,7 @@ mod tests {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            description: String::new(),
             origin: None,
             mode: None,
             corner_vars: Default::default(),

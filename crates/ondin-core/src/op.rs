@@ -14,6 +14,15 @@ use kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size};
 use peniko::Color;
 use rustc_hash::FxHashSet;
 
+/// What a description belongs to ([`Operation::SetDescription`]): a main (or a
+/// set), a style or a variable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Described {
+    Node(NodeId),
+    Style(crate::style::StyleId),
+    Variable(crate::variable::VarId),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
     CreateNode {
@@ -250,6 +259,12 @@ pub enum Operation {
     SetProperties {
         id: NodeId,
         props: Vec<Keyed<crate::variant::Property>>,
+    },
+    /// The description a main, a style or a variable carries: free text for the
+    /// people and the agents using it, never drawn. Empty is none.
+    SetDescription {
+        of: Described,
+        text: String,
     },
     /// The ground behind and around the frames — the one operation with no node
     /// to name (§15 D18). A solid colour, not a `Brush`: nothing lies behind it
@@ -576,7 +591,10 @@ impl Operation {
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }
             | Operation::SetStyleValue { .. }
-            | Operation::SetStyleOrigin { .. } => None,
+            | Operation::SetStyleOrigin { .. }
+            // A description is text beside the thing, never a field a copy
+            // follows or an edit merges on.
+            | Operation::SetDescription { .. } => None,
         }
     }
 
@@ -746,6 +764,7 @@ impl Operation {
             | Operation::SetStyleName { .. }
             | Operation::SetStyleValue { .. }
             | Operation::SetStyleOrigin { .. }
+            | Operation::SetDescription { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
             | Operation::SetEffectsStyle { .. }
@@ -873,6 +892,17 @@ impl Operation {
             Operation::SetKitModes { kit, modes } => {
                 doc.variables().kits().get(kit) == modes.as_ref()
             }
+            Operation::SetDescription { of, text } => match of {
+                Described::Node(id) => node(id).is_some_and(|n| n.description == *text),
+                Described::Style(id) => doc
+                    .styles()
+                    .get(*id)
+                    .is_some_and(|s| s.description == *text),
+                Described::Variable(id) => doc
+                    .variables()
+                    .get(*id)
+                    .is_some_and(|v| v.description == *text),
+            },
             Operation::SetFillStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().fills == *style)
             }
@@ -1481,6 +1511,7 @@ mod changes_ink_tests {
                     value: crate::style::StyleValue::Fills(vec![]),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::RemoveStyle { id: style },
@@ -1513,6 +1544,7 @@ mod changes_ink_tests {
                     cells: Default::default(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::RemoveVariable {
@@ -1522,8 +1554,12 @@ mod changes_ink_tests {
                 id: crate::variable::VarId(id),
                 name: "w".into(),
             },
+            Operation::SetDescription {
+                of: Described::Node(id),
+                text: "d".into(),
+            },
         ];
-        assert_eq!(invisible.len(), 33, "the whole false arm");
+        assert_eq!(invisible.len(), 34, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),
@@ -1567,6 +1603,7 @@ mod changes_ink_tests {
                     cells: Default::default(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetKitModes {

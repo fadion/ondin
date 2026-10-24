@@ -626,7 +626,15 @@ impl OndinApp {
             | Face::Instance { .. }
             | Face::Instances { .. } => {
                 self.panel(ui, "Component", None, |app, ui| match &face {
-                    Face::Main { name, instances } => main_body(ui, name, *instances, &mut act),
+                    Face::Main { name, instances } => {
+                        if name_line(ui, None, name, Some(*instances)) {
+                            act = Some(Act::SelectAllInstances);
+                        }
+                        if let Some(id) = app.session.selection.single() {
+                            app.description_field(ui, id);
+                        }
+                        main_tail(ui, &mut act);
+                    }
                     // *Variant in Button* over the derived, read-only name, a
                     // dropdown per property, then *Duplicate*; the name carries
                     // its instance count.
@@ -647,6 +655,7 @@ impl OndinApp {
                         if name_and_count(ui, &name, Some(*instances)).clicked {
                             act = Some(Act::SelectAllInstances);
                         }
+                        app.description_field(ui, *main);
                         app.variant_rows(ui, *main);
                         main_tail(ui, &mut act);
                     }
@@ -662,6 +671,7 @@ impl OndinApp {
                         // One line, the main's name alone; the outline hexagon says
                         // it is an instance.
                         heading(ui, false, "", link, None, &summary, &mut act);
+                        description_note(&app.session.doc, *main, ui);
                         // A kit instance names where its main lives.
                         let kit = app.kit_line(*main);
                         if let Some(k) = &kit {
@@ -722,6 +732,55 @@ impl OndinApp {
         // A main's or a set's own properties, under its card.
         self.inspector_properties(ui);
         self.component_act(act);
+    }
+
+    /// A main's or a set's description, typed under its face: wraps as it grows,
+    /// buffered in `desc_edit` and committed once, on defocus.
+    pub(super) fn description_field(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        let Some(saved) = self
+            .session
+            .doc
+            .get(id)
+            .map(|n| n.description().to_string())
+        else {
+            return;
+        };
+        let mut text = match &self.desc_edit {
+            Some((d, buf)) if *d == id => buf.clone(),
+            _ => saved.clone(),
+        };
+        ui.add_space(DESC_GAP);
+        let resp = ui::field_frame()
+            .inner_margin(egui::Margin::symmetric(ui::FIELD_PAD_X as i8, 5))
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .id(ui.id().with(("description", id)))
+                        .frame(egui::Frame::NONE)
+                        .desired_rows(1)
+                        .desired_width(f32::INFINITY)
+                        .font(egui::FontId::proportional(DESC_PT))
+                        .hint_text(egui::RichText::new("Add a description").size(DESC_PT)),
+                )
+            })
+            .inner;
+        if resp.gained_focus() || resp.changed() {
+            self.desc_edit = Some((id, text.clone()));
+        }
+        // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
+        if resp.lost_focus()
+            && let Some((d, val)) = self.desc_edit.take()
+            && d == id
+            && ui::defocus_commits(&resp)
+        {
+            let text = val.trim().to_string();
+            if text != saved {
+                self.commit_edit(Transaction(vec![Operation::SetDescription {
+                    of: ondin_core::Described::Node(id),
+                    text,
+                }]));
+            }
+        }
     }
 
     /// What a click on either part of the components inspector asked for, done.
@@ -1116,7 +1175,9 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::RemoveStyle { .. }
         | O::SetStyleName { .. }
         | O::SetStyleOrigin { .. }
-        | O::SetStyleValue { .. } => None,
+        | O::SetStyleValue { .. }
+        // A main's description is the main's, never an instance's override.
+        | O::SetDescription { .. } => None,
     }
 }
 
@@ -1596,18 +1657,6 @@ fn reset_row(
     });
 }
 
-/// A main's face: the filled hexagon, the name and its instance count on **one
-/// line**, and *Duplicate*.
-fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<Act>) {
-    if name_line(ui, None, name, Some(instances)) {
-        *act = Some(Act::SelectAllInstances);
-    }
-    // *Duplicate* 4pt closer under the one-line face. Here and not in
-    // `main_tail`, which a variant's face shares under its property rows.
-    ui.add_space(-4.0);
-    main_tail(ui, act);
-}
-
 /// A card's one-line face: the glyph in its slot (`None` for the filled hexagon),
 /// the name beside it, and — with `instances` — the count after the name
 /// ([`count_link`]). A main's face and a set's on the Variants card share this
@@ -1688,6 +1737,35 @@ fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> Na
 
 /// A face's name size, and the count's after it.
 const NAME_PT: f32 = 13.0;
+/// A description's text size, and the air above it on a card.
+const DESC_PT: f32 = 11.5;
+const DESC_GAP: f32 = 2.0;
+
+/// An instance's main's description, read-only and dim under its face: the
+/// variant's own, else its set's. Nothing when neither has one.
+fn description_note(doc: &ondin_core::Document, main: NodeId, ui: &mut egui::Ui) {
+    let own = doc.get(main).map(|n| n.description()).unwrap_or_default();
+    let text = if own.is_empty() {
+        ondin_core::variant::set_of(doc, main)
+            .and_then(|s| doc.get(s))
+            .map(|s| s.description())
+            .unwrap_or_default()
+    } else {
+        own
+    };
+    if text.is_empty() {
+        return;
+    }
+    ui.add_space(DESC_GAP);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(DESC_PT)
+                .color(theme::text::DIM),
+        )
+        .wrap(),
+    );
+}
 /// The air between a face's name and its count.
 const COUNT_GAP: f32 = 6.0;
 
@@ -2135,6 +2213,34 @@ mod tests {
         );
     }
 
+    /// **A main's card offers its description; an instance's card reads it.**
+    /// The main's face draws the field's hint until there is one, and its
+    /// instance's face draws the text under the main's name.
+    ///
+    /// flip: `description_note` returning at once → fails at "the instance reads it".
+    #[test]
+    fn a_mains_description_is_typed_on_its_card_and_read_on_its_instances() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set_one(f.m);
+        let out = settle(&mut f.app, &ctx);
+        let has = |out: &egui::FullOutput, s: &str| texts(out).iter().any(|(t, _)| t == s);
+        assert!(has(&out, "Add a description"), "{:?}", texts(&out));
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetDescription {
+                    of: ondin_core::Described::Node(f.m),
+                    text: "The primary action".into(),
+                }]))
+        );
+        let out = settle(&mut f.app, &ctx);
+        assert!(has(&out, "The primary action"), "the field holds it");
+        f.app.session.selection.set_one(f.i);
+        let out = settle(&mut f.app, &ctx);
+        assert!(has(&out, "The primary action"), "the instance reads it");
+    }
+
     /// Every text the frame painted with its fallback colour — what a galley
     /// painted in one colour carries.
     fn inks(out: &egui::FullOutput) -> Vec<(String, egui::Rect, egui::Color32)> {
@@ -2326,6 +2432,7 @@ mod tests {
             cells: [(mode, ondin_core::variable::Cell::Number(n))].into(),
             origin: None,
             forked: None,
+            description: String::new(),
         };
         let mut ops = vec![
             Operation::AddMode {
@@ -2410,6 +2517,7 @@ mod tests {
                     cells: [(mode, ondin_core::variable::Cell::Number(30.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ];
@@ -4826,6 +4934,7 @@ mod tests {
                     cells: [(mode, Cell::Boolean(true))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -4890,6 +4999,7 @@ mod tests {
                     cells: [(mode, Cell::String("Sign in".into()))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -4998,6 +5108,7 @@ mod tests {
                 cells: [(mode, Cell::Boolean(true))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         assert!(v.app.commit_edit(Transaction(vec![

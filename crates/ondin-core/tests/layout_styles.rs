@@ -88,6 +88,7 @@ fn fixture() -> F {
                 cells: [(mode, Cell::Number(12.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))

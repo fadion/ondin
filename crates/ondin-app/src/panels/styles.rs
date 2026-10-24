@@ -1099,6 +1099,11 @@ impl OndinApp {
                                     egui::FontId::proportional(10.5),
                                     color::text_a(102),
                                 );
+                                let resp = if s.description.is_empty() {
+                                    resp
+                                } else {
+                                    resp.on_hover_text(&s.description)
+                                };
                                 if resp.clicked() {
                                     pick = Some(s.id);
                                 }
@@ -1751,6 +1756,7 @@ mod tests {
                     cells: [(mode, Cell::Number(4.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));
@@ -1788,6 +1794,7 @@ mod tests {
                 cells: [(mode, Cell::String(family.into()))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         assert!(app.session.commit(Transaction(vec![

@@ -141,7 +141,10 @@ fn mode(op: &Operation) -> Mode {
         | Operation::RemoveStyle { .. }
         | Operation::SetStyleName { .. }
         | Operation::SetStyleValue { .. }
-        | Operation::SetStyleOrigin { .. } => Mode::Skip,
+        | Operation::SetStyleOrigin { .. }
+        // A main's description is the main's; an instance reads it through its
+        // link.
+        | Operation::SetDescription { .. } => Mode::Skip,
     }
 }
 

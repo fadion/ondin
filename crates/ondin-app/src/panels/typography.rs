@@ -8726,6 +8726,7 @@ mod skip_ink_tests {
                     cells: [(mode, Cell::String("Sign in".into()))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));

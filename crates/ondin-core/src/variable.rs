@@ -183,6 +183,9 @@ pub struct Variable {
     /// rather than forking the kit's variable twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked: Option<VarOrigin>,
+    /// What the variable is for, in the user's words; empty is none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 impl Variable {
@@ -1843,6 +1846,7 @@ mod tests {
                 .into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         );
         t.vars.insert(
@@ -1858,6 +1862,7 @@ mod tests {
                 .into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         );
         (t, light, dark, brand, accent)

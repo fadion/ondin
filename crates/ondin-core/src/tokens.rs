@@ -604,6 +604,7 @@ pub(crate) fn plan<'a>(
             cells,
             origin: Some(o),
             forked: None,
+            description: var.description.clone(),
         };
         match held {
             None => {
@@ -687,6 +688,7 @@ pub(crate) fn plan<'a>(
                         value,
                         origin: Some(o),
                         forked: None,
+                        description: style.description.clone(),
                     },
                 });
             }
@@ -701,6 +703,13 @@ pub(crate) fn plan<'a>(
                 }
                 if h.value != value {
                     plan.ops.push(Operation::SetStyleValue { id: to, value });
+                    wrote = true;
+                }
+                if h.description != style.description {
+                    plan.ops.push(Operation::SetDescription {
+                        of: crate::op::Described::Style(to),
+                        text: style.description.clone(),
+                    });
                     wrote = true;
                 }
                 if h.origin.as_ref().map(|x| x.version) != Some(o.version) {
@@ -1190,6 +1199,7 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
                 cells,
                 origin: None,
                 forked: var.origin.clone(),
+                description: var.description.clone(),
             },
         });
         out.made.0 += 1;
@@ -1237,6 +1247,7 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
                 value: remap.remap_value(&style.value),
                 origin: None,
                 forked: Some(o.clone()),
+                description: style.description.clone(),
             },
         });
         out.made.1 += 1;

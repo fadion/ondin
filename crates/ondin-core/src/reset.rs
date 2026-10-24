@@ -78,6 +78,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         set: _,
         variant: _,
         props: _,
+        description: _,
         // A vendored node's provenance (§15 D1012) — never on a copy, so never an
         // override.
         origin: _,

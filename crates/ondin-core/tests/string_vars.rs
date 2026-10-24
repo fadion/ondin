@@ -39,6 +39,7 @@ fn var(id: VarId, name: &str, kind: VarKind, cells: [(ModeId, Cell); 2]) -> Vari
         cells: cells.into(),
         origin: None,
         forked: None,
+        description: String::new(),
     }
 }
 
@@ -656,6 +657,7 @@ fn a_copys_family_binding_goes_with_its_mains_text_style() {
                 })),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         }]))
         .unwrap();

@@ -42,6 +42,7 @@ fn fixture() -> F {
         cells: cells.into(),
         origin: None,
         forked: None,
+        description: String::new(),
     };
     doc.apply(&Transaction(vec![
         Operation::CreateNode {

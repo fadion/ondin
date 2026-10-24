@@ -335,6 +335,9 @@ pub struct Style {
     /// variable — `None` for every other.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked: Option<StyleOrigin>,
+    /// What the style is for, in the user's words; empty is none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 impl Style {
@@ -960,6 +963,7 @@ pub fn create_ops(
             value,
             origin: None,
             forked: None,
+            description: String::new(),
         },
     }];
     ops.extend(nodes.iter().map(|n| bind_op(*n, slot, Some(id))));

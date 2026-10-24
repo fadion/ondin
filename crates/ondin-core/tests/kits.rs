@@ -2525,6 +2525,7 @@ fn a_variants_own_visibility_binding_is_not_a_change() {
                     cells: [(mode, ondin_core::Cell::Boolean(false))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             ondin_core::Operation::SetVisibleVar {

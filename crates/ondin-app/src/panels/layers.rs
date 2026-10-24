@@ -5370,6 +5370,7 @@ mod bound_eye_tests {
                     cells: [(mode, Cell::Boolean(true))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ])));

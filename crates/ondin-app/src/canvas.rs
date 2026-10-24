@@ -20383,6 +20383,7 @@ mod string_binding_session_tests {
                     cells: [(mode, Cell::String("Sign in".into()))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -20510,6 +20511,7 @@ mod bound_resize_tests {
                     cells: [(mode, Cell::Number(100.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))

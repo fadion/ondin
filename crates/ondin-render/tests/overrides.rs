@@ -672,6 +672,7 @@ fn a_dropped_copy_previews_at_its_opacity_bound_or_not() {
                     cells: [(mode, Cell::Number(30.0))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]))
@@ -2541,6 +2542,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 cells: Default::default(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::RemoveVariable { id: var },
@@ -2573,6 +2575,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 cells: Default::default(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::SetKitModes {
@@ -2592,6 +2595,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 value: ondin_core::style::StyleValue::Fills(vec![]),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
         Operation::RemoveStyle { id: style },
@@ -4155,6 +4159,7 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
                 cells: [(mode, Cell::Number(14.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -4277,6 +4282,7 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
                 cells: [(mode, Cell::Number(16.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -4379,6 +4385,7 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
                 cells: [(mode, Cell::Boolean(false))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -4477,6 +4484,7 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
                 cells: [(mode, Cell::Boolean(false))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -4540,6 +4548,7 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
                 cells: [(mode, Cell::Number(14.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -4586,6 +4595,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
             cells: [(mode, Cell::Number(x))].into(),
             origin: None,
             forked: None,
+            description: String::new(),
         },
     };
     doc.apply(&Transaction(vec![
@@ -4687,6 +4697,7 @@ fn a_copy_bound_on_its_own_previews_its_mains_resize_as_committed() {
             cells: [(mode, Cell::Number(x))].into(),
             origin: None,
             forked: None,
+            description: String::new(),
         },
     };
     doc.apply(&Transaction(vec![
@@ -4879,6 +4890,7 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
                 cells: [(mode, Cell::Number(90.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -5006,6 +5018,7 @@ fn a_rect_with_bound_corners_previews_rounded_when_relaid_or_ghosted() {
                 cells: [(mode, Cell::Number(8.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -5074,6 +5087,7 @@ fn a_variable_cell_previews_on_what_reads_it() {
             cells: [(mode, cell)].into(),
             origin: None,
             forked: None,
+            description: String::new(),
         },
     };
     doc.apply(&Transaction(vec![
@@ -5178,6 +5192,7 @@ fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
                 cells: [(mode, Cell::Number(40.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -5271,6 +5286,7 @@ fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
                 cells: [(mode, Cell::Number(9.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))
@@ -5373,6 +5389,7 @@ fn an_effect_binding_previews_as_the_number_it_will_draw() {
                 cells: [(mode, Cell::Number(9.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         },
     ]))

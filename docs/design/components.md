@@ -483,6 +483,11 @@ Inspector:
   of*), instances among other layers, a variant (*Variant in*). A child's line (*In Card instance* /
   *Local to this instance*), the mixed selection's line and the binding line are rows of the identity
   card (`inspector_component` takes a `ComponentPart`: `Identity` / `Cards`).
+- **Description**: a main's and a variant's Component card and a set's *Variants* card show a
+  multiline field under the name (hint *Add a description*; buffered in `OndinApp::desc_edit`,
+  committed trimmed on defocus). A single instance's card shows its main's description dim under the
+  main's name — the variant's own, else its set's (`component::description_note`); it is never an
+  override. A row of the swap picker hovers its main's description (`SwapTarget::description`).
 - A face's instance count is on its name's line and is the *Select all*
   (`component::name_line(ui, glyph, name, instances)`; at zero plain `text::DIM` and dead).
 - Resets: *Reset all*, and a ⋯ overflow with *Reset fields N*, *Restore removed children N*, *Reset
@@ -530,11 +535,15 @@ variant* is the verb that takes the next free combination; an instance's name is
 - `Node::variant: Vec<String>` — a variant's values, one per property in the set's order.
 - `Node::props: Vec<Keyed<Property>>` — component properties of a main or set:
   `Property { name, kind: PropKind::{Boolean, Text, Swap, Nested}, bound: Vec<NodeId>, filter: String }`.
-- Ops `SetVariantSet`, `SetVariant`, `SetProperties`, each inverting to the old value; no ink, no-ops in
-  `absorb`, skipped by `propagate::mode`, never written by `reset::state_ops` — **never followed or
-  overridden**. Saved unbumped (additive).
-- `Node::make_copy_of` is the one place a node becomes a linked copy (linked; swap, flag, values and
-  properties cleared); every door that makes an instance node goes through it.
+- `Node::description: String` (`description()`) — what a main or set is for, in the user's words; empty
+  is none. Written by `SetDescription { of: Described::Node(id), text }`, the one op a style's and a
+  variable's description share (§5.3f). An instance reads its main's through the link, so a copy never
+  holds one; a duplicated main keeps its own (`remap_subtree` copies it).
+- Ops `SetVariantSet`, `SetVariant`, `SetProperties`, `SetDescription`, each inverting to the old value;
+  no ink, no-ops in `absorb`, skipped by `propagate::mode`, never written by `reset::state_ops` —
+  **never followed or overridden**. Saved unbumped (additive).
+- `Node::make_copy_of` is the one place a node becomes a linked copy (linked; swap, flag, values,
+  properties and description cleared); every door that makes an instance node goes through it.
 
 **`variant::check`** (as `LinkRule::Variant`):
 

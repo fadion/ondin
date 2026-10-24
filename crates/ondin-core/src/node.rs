@@ -115,6 +115,9 @@ pub struct Node {
     /// The **component properties** this main or set defines. Empty on a
     /// variant, whose properties are its set's.
     pub(crate) props: Vec<Keyed<crate::variant::Property>>,
+    /// What this main or set is for, in the user's words; empty is none. A copy
+    /// never keeps it: an instance reads its main's.
+    pub(crate) description: String,
     /// Where this node was **vendored from**, when part of a kit main in the
     /// document's vault (§5.3e). A copy never keeps it (`remap_subtree`); only
     /// the kit verbs write one (`crate::kit::check`).
@@ -168,6 +171,11 @@ impl Node {
         self.set = None;
         self.variant.clear();
         self.props.clear();
+        self.description.clear();
+    }
+    /// What this main or set is for, in the user's words; empty is none.
+    pub fn description(&self) -> &str {
+        &self.description
     }
     /// The variant properties, if this frame is a component set.
     pub fn set(&self) -> Option<&crate::variant::VariantSet> {

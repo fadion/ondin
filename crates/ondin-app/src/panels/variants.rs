@@ -364,13 +364,16 @@ fn dropdown(
 /// whether the dropdown is open — the caller asks for the library's kits while it
 /// is, so a kit's mains not yet used here can be listed (§15 D1019). The search
 /// lives in egui's memory under the dropdown's id while it is open and is cleared
-/// when it closes, so every opening starts from the whole filtered list.
+/// when it closes, so every opening starts from the whole filtered list. A row
+/// hovers its main's description, read in `doc` or the kit's published state.
+#[allow(clippy::too_many_arguments)]
 fn swap_picker(
     ui: &mut egui::Ui,
     salt: impl std::hash::Hash + std::fmt::Debug + Copy,
     width: f32,
     shown: &str,
     current: Option<NodeId>,
+    doc: &ondin_core::Document,
     options: impl Fn(&str) -> Vec<SwapOption>,
     enabled: Option<&str>,
 ) -> (Option<SwapTarget>, bool) {
@@ -425,7 +428,12 @@ fn swap_picker(
                             for (target, name, _) in group {
                                 let on =
                                     matches!(target, SwapTarget::Here(id) if current == Some(id));
-                                if ui.add(egui::Button::selectable(on, name)).clicked() {
+                                let mut row = ui.add(egui::Button::selectable(on, name));
+                                let about = target.description(doc);
+                                if !about.is_empty() {
+                                    row = row.on_hover_text(about);
+                                }
+                                if row.clicked() {
                                     pick = Some(target);
                                     ui.close();
                                 }
@@ -457,6 +465,22 @@ pub(crate) enum SwapTarget {
         published: std::sync::Arc<ondin_core::kit::Published>,
         main: NodeId,
     },
+}
+
+impl SwapTarget {
+    /// The main's description, read in `doc` or the kit's published state;
+    /// empty when it has none.
+    fn description(&self, doc: &ondin_core::Document) -> String {
+        let (d, id) = match self {
+            SwapTarget::Here(m) => (doc, *m),
+            SwapTarget::Kit {
+                published, main, ..
+            } => (published.document(), *main),
+        };
+        d.get(id)
+            .map(|n| n.description().to_string())
+            .unwrap_or_default()
+    }
 }
 
 /// A main the swap picker offers: what it swaps to, its name, and the kit it
@@ -798,6 +822,8 @@ impl OndinApp {
         if super::component::name_line(ui, Some(icon::SQUARES_FOUR), &name, Some(instances)) {
             select_all = true;
         }
+        self.description_field(ui, set);
+        let doc = &self.session.doc;
         if let Some(text) = &clash {
             note(ui, icon::WARNING, text);
         }
@@ -1503,8 +1529,16 @@ impl OndinApp {
                 let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
                 let options = |search: &str| swap_list(first, "", search);
-                let (pick, open) =
-                    swap_picker(ui, ("swap-pick", first), w, &shown, current, options, None);
+                let (pick, open) = swap_picker(
+                    ui,
+                    ("swap-pick", first),
+                    w,
+                    &shown,
+                    current,
+                    doc,
+                    options,
+                    None,
+                );
                 swap_open |= open;
                 match pick {
                     Some(SwapTarget::Here(m)) => {
@@ -1551,8 +1585,16 @@ impl OndinApp {
                 let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
                 let options = |search: &str| swap_list(first, "", search);
-                let (pick, open) =
-                    swap_picker(ui, ("main-pick", first), w, &shown, current, options, None);
+                let (pick, open) = swap_picker(
+                    ui,
+                    ("main-pick", first),
+                    w,
+                    &shown,
+                    current,
+                    doc,
+                    options,
+                    None,
+                );
                 swap_open |= open;
                 if let Some(SwapTarget::Here(m)) = pick {
                     let ops: Vec<ondin_core::Operation> = roots
@@ -1950,7 +1992,8 @@ impl OndinApp {
                                 .unwrap_or_default()
                         };
                         let salt = ("prop-swap", first, p.id);
-                        let (pick, open) = swap_picker(ui, salt, w, &shown, current, options, None);
+                        let (pick, open) =
+                            swap_picker(ui, salt, w, &shown, current, doc, options, None);
                         swap_open |= open;
                         match pick {
                             Some(SwapTarget::Here(m)) => {

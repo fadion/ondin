@@ -916,6 +916,61 @@ fn a_property_is_a_view_over_its_bound_fields() {
     assert_eq!(p.bound, vec![f.llabel]);
 }
 
+/// **A main's or a set's description is its own**: written by one op and undone
+/// by its inverse, saved and loaded, never propagated to an instance, and never
+/// copied onto a new one.
+///
+/// flip: `make_copy_of` keeping `description` → fails at "a new instance".
+#[test]
+fn a_description_stays_on_what_it_describes() {
+    use ondin_core::Described;
+    let mut f = fixture();
+    let (main, set) = (f.small, f.s);
+    f.commit(vec![
+        Operation::SetDescription {
+            of: Described::Node(main),
+            text: "The compact button".into(),
+        },
+        Operation::SetDescription {
+            of: Described::Node(set),
+            text: "Buttons".into(),
+        },
+    ]);
+    assert_eq!(f.doc.get(main).unwrap().description(), "The compact button");
+    assert_eq!(f.doc.get(f.i).unwrap().description(), "", "not propagated");
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(main).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(made[0]).unwrap().description(),
+        "",
+        "a new instance"
+    );
+
+    let loaded = io::load(&io::save(&f.doc).unwrap()).unwrap();
+    assert_eq!(loaded.get(set).unwrap().description(), "Buttons");
+
+    let before = f.doc.clone();
+    let out = f
+        .doc
+        .apply(&Transaction(vec![Operation::SetDescription {
+            of: Described::Node(set),
+            text: String::new(),
+        }]))
+        .unwrap();
+    assert_eq!(f.doc.get(set).unwrap().description(), "");
+    f.doc.apply(&out.inverse).unwrap();
+    assert_eq!(f.doc, before);
+}
+
 /// *Combine as variants*: one property, each main's name a value, names kept.
 #[test]
 fn combining_mains_makes_a_set_of_their_names() {
@@ -1583,6 +1638,7 @@ fn a_styled_layer_crosses_a_switch_and_a_structural_add() {
                     value: StyleValue::Fills(fills(r)),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         )

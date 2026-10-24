@@ -23,7 +23,7 @@ use eframe::egui;
 use ondin_core::peniko::Color;
 use ondin_core::style::{self as sty, Style, StyleId, StyleSlot};
 use ondin_core::variable::{self as var, Cell, Mode, ModeId, Value, VarId, VarKind, Variable};
-use ondin_core::{Document, NodeId, Operation, Transaction};
+use ondin_core::{Described, Document, NodeId, Operation, Transaction};
 use std::collections::{BTreeMap, HashSet};
 
 /// The name column, a mode column and the panel's padding (G2): 340 with one
@@ -96,6 +96,11 @@ enum Edit {
         path: String,
         text: String,
     },
+    /// A variable's or a style's description, typed across its whole row.
+    Describe {
+        of: Described,
+        text: String,
+    },
 }
 
 impl Edit {
@@ -107,7 +112,8 @@ impl Edit {
             | Edit::Mode { text, .. }
             | Edit::Group { text, .. }
             | Edit::Style { text, .. }
-            | Edit::StyleGroup { text, .. } => text,
+            | Edit::StyleGroup { text, .. }
+            | Edit::Describe { text, .. } => text,
         }
     }
 }
@@ -228,6 +234,8 @@ enum Act {
     DeleteStyles(Vec<StyleId>, String),
     /// A style group renamed within its slot.
     StyleGroupName(StyleSlot, String, String),
+    /// A variable's or a style's description typed.
+    Describe(Described, String),
     /// `Alt`+click on a style group's caret: every style group takes the state
     /// this one's click gives it.
     ToggleAllStyles(String),
@@ -593,12 +601,12 @@ impl OndinApp {
         };
         let rows = match &menu {
             Menu::Add => 3.0,
-            Menu::Var(_) => 4.0,
+            Menu::Var(_) => 5.0,
             Menu::Mode(_) if table.modes().len() > 1 => 6.5,
             Menu::Mode(_) => 3.0,
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
-            Menu::Style(_) => 4.0,
+            Menu::Style(_) => 5.0,
             Menu::StyleGroup(..) => 3.0,
             Menu::KitMap(kit, _) => table.kits().get(kit).map_or(0, |k| k.modes.len()) as f32 + 1.5,
         };
@@ -657,6 +665,13 @@ impl OndinApp {
                             }
                             if row(ui, icon::COPY, "Duplicate") {
                                 acts.push(Act::Duplicate(v.id));
+                                close = true;
+                            }
+                            if row(ui, icon::TEXT_ALIGN_LEFT, "Description") {
+                                acts.push(Act::StartEdit(Edit::Describe {
+                                    of: Described::Variable(v.id),
+                                    text: v.description.clone(),
+                                }));
                                 close = true;
                             }
                             let n = users.get(&v.id).map_or(0, Vec::len);
@@ -807,6 +822,13 @@ impl OndinApp {
                                 acts.push(Act::StartEdit(Edit::Style {
                                     style: st.id,
                                     text: st.name.clone(),
+                                }));
+                                close = true;
+                            }
+                            if row(ui, icon::TEXT_ALIGN_LEFT, "Description") {
+                                acts.push(Act::StartEdit(Edit::Describe {
+                                    of: Described::Style(st.id),
+                                    text: st.description.clone(),
                                 }));
                                 close = true;
                             }
@@ -1012,6 +1034,17 @@ impl OndinApp {
                     }
                 }
             }
+            Act::Describe(of, text) => {
+                let op = Operation::SetDescription {
+                    of,
+                    text: text.trim().to_string(),
+                };
+                let same = op.changes_nothing(doc);
+                self.var_edit_done();
+                if !same {
+                    self.commit_edit(Transaction(vec![op]));
+                }
+            }
             Act::ToggleAllStyles(key) => {
                 let all = style_group_keys(doc);
                 if let Some(b) = self.var_browser.as_mut() {
@@ -1148,6 +1181,7 @@ impl OndinApp {
                         cells: modes.into_iter().map(|m| (m, cell.clone())).collect(),
                         origin: None,
                         forked: None,
+                        description: String::new(),
                     },
                 });
                 if self.commit_edit(Transaction(ops))
@@ -2055,6 +2089,44 @@ fn style_group_row(
     open
 }
 
+/// The description field over row `rect`, when the browser is typing `of`'s —
+/// across the whole row, past the indent. Answers whether it drew, so the row
+/// draws nothing else.
+fn describe_row(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    of: Described,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) -> bool {
+    let Some(Edit::Describe { of: o, text }) = b.edit.as_mut() else {
+        return false;
+    };
+    if *o != of {
+        return false;
+    }
+    let r = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + INDENT - 6.0, rect.top() + 3.0),
+        egui::pos2(rect.right() - 6.0, rect.bottom() - 3.0),
+    );
+    let id = ui.id().with(("describe", of));
+    let field = edit_field(ui, r, text, id, 11.5, Some("Description"), None);
+    ui.painter().rect_stroke(
+        r,
+        4,
+        egui::Stroke::new(1.0, color::ACCENT),
+        egui::StrokeKind::Outside,
+    );
+    if b.edit_focus {
+        b.edit_focus = false;
+        field.request_focus();
+    }
+    if ui::defocus_commits(&field) {
+        acts.push(Act::Describe(of, text.clone()));
+    }
+    true
+}
+
 /// One style's row on the *Styles* tab, `depth` in past its slot's: its preview,
 /// its name past its group's path, its count. A rename types the whole name.
 fn style_row(
@@ -2067,7 +2139,14 @@ fn style_row(
     acts: &mut Vec<Act>,
 ) {
     let id = ui.id().with(("style-row", s.id));
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::click());
+    let (rect, mut resp) =
+        ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::click());
+    if describe_row(ui, rect, Described::Style(s.id), b, acts) {
+        return;
+    }
+    if !s.description.is_empty() {
+        resp = resp.on_hover_text(&s.description);
+    }
     let menu_open = matches!(&b.menu, Some((Menu::Style(m), _)) if *m == s.id);
     if menu_open {
         ui.painter().rect_filled(rect, 4, color::text_a(23));
@@ -2349,6 +2428,9 @@ fn var_row(
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, 4, color::text_a(18));
     }
+    if describe_row(ui, rect, Described::Variable(v.id), b, acts) {
+        return;
+    }
     let name_rect = egui::Rect::from_min_size(rect.min, egui::vec2(NAME_W, ROW_H));
 
     // The name: the leaf, or the whole name while it is being renamed.
@@ -2441,7 +2523,10 @@ fn var_row(
                 acts.push(Act::Select(users.to_vec()));
             }
         }
-        let name_resp = ui.interact(name_rect, id.with("name-hit"), egui::Sense::click());
+        let mut name_resp = ui.interact(name_rect, id.with("name-hit"), egui::Sense::click());
+        if !v.description.is_empty() {
+            name_resp = name_resp.on_hover_text(&v.description);
+        }
         if ui::double_clicked(ui, &name_resp) {
             acts.push(Act::StartEdit(Edit::Name {
                 var: v.id,
@@ -3476,6 +3561,7 @@ mod tests {
                 )]),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         assert!(app.commit_edit(Transaction(vec![
@@ -3551,6 +3637,21 @@ mod tests {
             style_group_members(&app.session.doc, StyleSlot::Fills, "surface"),
             [s, t]
         );
+
+        // *Description* types over the row and commits trimmed.
+        app.var_act(Act::StartEdit(Edit::Describe {
+            of: Described::Style(t),
+            text: String::new(),
+        }));
+        let shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        assert!(
+            last_text(&shapes, "base").is_none(),
+            "the field covers the row"
+        );
+        app.var_act(Act::Describe(Described::Style(t), " The page ".into()));
+        let desc = |app: &OndinApp| app.session.doc.styles().get(t).unwrap().description.clone();
+        assert_eq!(desc(&app), "The page");
+        assert!(app.var_browser.as_ref().unwrap().edit.is_none());
 
         app.var_act(Act::StartEdit(Edit::Style {
             style: s,
@@ -4127,6 +4228,7 @@ mod tests {
                     cells: [(light, Cell::Color(Color::WHITE))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetKitModes {
@@ -4160,6 +4262,7 @@ mod tests {
                         version: 1,
                     }),
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::AddStyle {
@@ -4173,6 +4276,7 @@ mod tests {
                         version: 1,
                     }),
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::CreateNode {
@@ -4221,6 +4325,7 @@ mod tests {
                 cells: [(light, Cell::Number(1.0))].into(),
                 origin: None,
                 forked: None,
+                description: String::new(),
             },
         };
         let ids: Vec<VarId> = (0..3).map(|_| app.session.ids.mint_var()).collect();
@@ -4339,6 +4444,7 @@ mod tests {
                     cells: [(light, Cell::Color(Color::WHITE))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]);
@@ -4374,6 +4480,7 @@ mod tests {
                     cells: [(light, Cell::Color(Color::BLACK))].into(),
                     origin: None,
                     forked: None,
+                    description: String::new(),
                 },
             },
             Operation::SetVariableCell {

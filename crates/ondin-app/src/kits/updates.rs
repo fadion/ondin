@@ -890,6 +890,7 @@ mod tests {
                         version: 4,
                     }),
                     forked: None,
+                    description: String::new(),
                 },
             },
         ]);

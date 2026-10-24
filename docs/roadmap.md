@@ -19,7 +19,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
 - **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,
   min/max W/H (`binding::FieldKey`).
-- **Preferred mains for swap** (`components.md`).
 - **Present mode**: step between frames, fit to frame, fullscreen, and no selection chrome. It only
   hides the panels today.
 

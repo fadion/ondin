@@ -420,9 +420,13 @@ fn swap_picker(
                     .show(ui, |ui| {
                         for (heading, group) in swap_groups(found) {
                             if let Some(h) = &heading {
-                                // A kit's heading wears the kit glyph; *This
-                                // document*, which is no kit, does not.
-                                let glyph = (!h.kit.is_empty()).then_some(icon::PACKAGE);
+                                // A kit's heading wears the kit glyph, *Preferred*
+                                // a star; *This document*, which is no kit, none.
+                                let glyph = match h.kit.as_str() {
+                                    "" => None,
+                                    PREFERRED => Some(icon::STAR),
+                                    _ => Some(icon::PACKAGE),
+                                };
                                 swap_heading(ui, glyph, &h.name, &h.status);
                             }
                             for (target, name, _) in group {
@@ -487,6 +491,9 @@ impl SwapTarget {
 /// comes from as a heading — or `None` for one of the document's own (§5.3e, 4F).
 type SwapOption = (SwapTarget, String, Option<KitHeading>);
 
+/// The heading key of a swap property's preferred mains, which no kit id can be.
+const PREFERRED: &str = "\u{1}preferred";
+
 /// A swap picked from a kit main not yet vendored, kept until the card is drawn:
 /// building it takes the id source, which the card's borrow of the document
 /// holds (§15 D1019).
@@ -523,13 +530,28 @@ fn swap_list(
     shelves: &[Shelved],
     copy: NodeId,
     filter: &str,
+    preferred: &[NodeId],
     search: &str,
 ) -> Vec<SwapOption> {
     let name_of = |d: &ondin_core::Document, id: NodeId| {
         d.get(id).map(|n| n.name().to_string()).unwrap_or_default()
     };
+    // A swap property's preferred mains lead, in their own order and once.
+    let first = swap::preferred(doc, copy, preferred, search);
+    let lead: Vec<SwapOption> = first
+        .iter()
+        .map(|&m| {
+            let heading = KitHeading {
+                kit: PREFERRED.into(),
+                name: "Preferred".into(),
+                status: String::new(),
+            };
+            (SwapTarget::Here(m), name_of(doc, m), Some(heading))
+        })
+        .collect();
     let mut out: Vec<SwapOption> = swap::options(doc, copy, filter, search)
         .into_iter()
+        .filter(|m| !first.contains(m))
         .map(|m| {
             let h = crate::kits::index::kit_heading(doc, kits, m);
             (SwapTarget::Here(m), name_of(doc, m), h)
@@ -573,22 +595,25 @@ fn swap_list(
         );
     }
     out.sort_by(|a, b| a.1.cmp(&b.1));
-    out
+    lead.into_iter().chain(out).collect()
 }
 
 /// The swap picker's list grouped as 4F has it (§15 D1014): the document's own
 /// mains first, under *This document* only when a kit group follows, then one
-/// group per kit by name, each in the name order `swap::options` gave.
+/// group per kit by name, each in the name order `swap::options` gave. A swap
+/// property's *Preferred* mains lead them all, under their own heading.
 ///
 /// **Grouped by the kit's id, not its heading's name**: two kits may share a
 /// name, and two the library has lost may both read *Kit* (`arch-scribe`'s
 /// reading of the first cut, which keyed on the name).
 fn swap_groups(found: Vec<SwapOption>) -> Vec<(Option<KitHeading>, Vec<SwapOption>)> {
+    let mut preferred: Option<(KitHeading, Vec<SwapOption>)> = None;
     let mut own = Vec::new();
     let mut kits: Vec<(KitHeading, Vec<SwapOption>)> = Vec::new();
     for o in found {
         match o.2.clone() {
             None => own.push(o),
+            Some(h) if h.kit == PREFERRED => preferred.get_or_insert((h, Vec::new())).1.push(o),
             Some(h) => match kits.iter_mut().find(|(k, _)| k.kit == h.kit) {
                 Some((_, g)) => g.push(o),
                 None => kits.push((h, vec![o])),
@@ -596,9 +621,12 @@ fn swap_groups(found: Vec<SwapOption>) -> Vec<(Option<KitHeading>, Vec<SwapOptio
         }
     }
     kits.sort_by_key(|(h, _)| (h.name.to_lowercase(), h.kit.clone()));
-    let mut out = Vec::new();
+    // *Preferred* leads, in the property's order.
+    let named = preferred.is_some() || !kits.is_empty();
+    let mut out: Vec<(Option<KitHeading>, Vec<SwapOption>)> =
+        preferred.into_iter().map(|(h, g)| (Some(h), g)).collect();
     if !own.is_empty() {
-        let heading = (!kits.is_empty()).then(|| KitHeading {
+        let heading = named.then(|| KitHeading {
             kit: String::new(),
             name: "This document".into(),
             status: String::new(),
@@ -1492,8 +1520,8 @@ impl OndinApp {
             .iter()
             .filter_map(|k| self.kit_shelf.current(k).map(|p| (k.clone(), p)))
             .collect();
-        let swap_list = |copy: NodeId, filter: &str, search: &str| {
-            swap_list(doc, &kits, &shelves, copy, filter, search)
+        let swap_list = |copy: NodeId, filter: &str, preferred: &[NodeId], search: &str| {
+            swap_list(doc, &kits, &shelves, copy, filter, preferred, search)
         };
         let mut kit_swap: Option<KitSwap> = None;
         let mut swap_open = false;
@@ -1528,7 +1556,7 @@ impl OndinApp {
                 }
                 let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
-                let options = |search: &str| swap_list(first, "", search);
+                let options = |search: &str| swap_list(first, "", &[], search);
                 let (pick, open) = swap_picker(
                     ui,
                     ("swap-pick", first),
@@ -1584,7 +1612,7 @@ impl OndinApp {
                 row_label(ui, "Main", None);
                 let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
-                let options = |search: &str| swap_list(first, "", search);
+                let options = |search: &str| swap_list(first, "", &[], search);
                 let (pick, open) = swap_picker(
                     ui,
                     ("main-pick", first),
@@ -1988,7 +2016,7 @@ impl OndinApp {
                         let copy = variant::counterparts(doc, first, p).first().copied();
                         let w = ui.available_width();
                         let options = |search: &str| {
-                            copy.map(|c| swap_list(c, &p.filter, search))
+                            copy.map(|c| swap_list(c, &p.filter, &p.preferred, search))
                                 .unwrap_or_default()
                         };
                         let salt = ("prop-swap", first, p.id);
@@ -2552,6 +2580,7 @@ fn rebind(
                         PropKind::Swap => filter.to_string(),
                         PropKind::Boolean | PropKind::Text | PropKind::Nested => String::new(),
                     },
+                    preferred: Vec::new(),
                 },
             ));
         }
@@ -2697,6 +2726,87 @@ fn property_row(
                 .size(11.0)
                 .color(theme::text::DIM),
         );
+        preferred_rows(ui, doc, owner, p, edits);
+    }
+}
+
+/// A swap property's preferred mains, under its filter: one row each — the star,
+/// the main's name, a × that drops it — then a picker that adds one. The swap
+/// picker lists them first, in this order (`swap::preferred`).
+fn preferred_rows(
+    ui: &mut egui::Ui,
+    doc: &ondin_core::Document,
+    owner: NodeId,
+    p: &Keyed<Property>,
+    edits: &mut Vec<Deferred>,
+) {
+    let item = p.id;
+    let write = |edits: &mut Vec<Deferred>, preferred: Vec<NodeId>| {
+        edits.push(defer(move |cx| {
+            Ok(variant::edit_property(cx.doc, owner, item, |q| {
+                Some(Property {
+                    preferred: preferred.clone(),
+                    ..q.clone()
+                })
+            }))
+        }));
+    };
+    for (i, m) in p.preferred.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+            ui.label(
+                egui::RichText::new(icon::STAR)
+                    .font(theme::icon_font(14.0))
+                    .color(theme::text::MUTED),
+            );
+            // A main since deleted keeps its place, named as gone.
+            let (name, ink) = match doc.get(*m).filter(|n| n.component()) {
+                Some(n) => (n.name().to_string(), theme::text::STRONG),
+                None => ("Deleted main".to_string(), theme::text::DIM),
+            };
+            let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
+            ui.add_sized(
+                egui::vec2(w, ui::CONTROL_H),
+                egui::Label::new(egui::RichText::new(name).size(12.0).color(ink)).truncate(),
+            );
+            if ui::field_button(ui, icon::X, ui::CONTROL_H, 12.0, ui::FieldButton::Off)
+                .on_hover_text("No longer preferred")
+                .clicked()
+            {
+                let mut next = p.preferred.clone();
+                next.remove(i);
+                write(edits, next);
+            }
+        });
+    }
+    let Some(slot) = p.bound.first().copied() else {
+        return;
+    };
+    let options = |search: &str| -> Vec<SwapOption> {
+        swap::options(doc, slot, "", search)
+            .into_iter()
+            .filter(|m| !p.preferred.contains(m))
+            .map(|m| {
+                let name = doc.get(m).map(|n| n.name().to_string()).unwrap_or_default();
+                (SwapTarget::Here(m), name, None)
+            })
+            .collect()
+    };
+    let w = ui.available_width();
+    let (pick, _) = swap_picker(
+        ui,
+        ("prop-preferred", owner, p.id),
+        w,
+        "Add a preferred main…",
+        None,
+        doc,
+        options,
+        None,
+    );
+    if let Some(SwapTarget::Here(m)) = pick {
+        let mut next = p.preferred.clone();
+        next.push(m);
+        write(edits, next);
     }
 }
 
@@ -2738,6 +2848,7 @@ fn new_swap_property(
             kind: PropKind::Swap,
             bound: vec![slot],
             filter,
+            preferred: Vec::new(),
         },
     ));
     Some(Transaction(vec![ondin_core::Operation::SetProperties {
@@ -2873,6 +2984,7 @@ mod tests {
             kind,
             bound,
             filter: String::new(),
+            preferred: Vec::new(),
         };
         let props = vec![
             Keyed::new(a, prop("Show icon", PropKind::Boolean, vec![x])),
@@ -2944,7 +3056,11 @@ mod tests {
     /// **The swap picker groups as 4F has it** (§15 D1014): the document's own
     /// mains first, under *This document* only when a kit follows, then one group
     /// per kit alphabetically, each keeping the name order it was given. Without a
-    /// kit the list is the flat one it always was, with no heading at all.
+    /// kit the list is the flat one it always was, with no heading at all. A swap
+    /// property's *Preferred* group leads.
+    ///
+    /// flip: `swap_groups` grouping `PREFERRED` as a kit → fails at "preferred
+    /// first" (kits sort after the document's group).
     #[test]
     fn the_swap_picker_lists_own_mains_first_then_each_kit() {
         let mut ids = ondin_core::IdSource::new(0xBE);
@@ -2994,6 +3110,31 @@ mod tests {
         let alone = swap_groups(vec![(here(b), "Icon / Logo".into(), None)]);
         assert_eq!(alone.len(), 1);
         assert!(alone[0].0.is_none(), "no heading without a kit");
+
+        // *Preferred* leads in the order given, and names the document's group.
+        let star = kit(PREFERRED, "Preferred");
+        let preferred = swap_groups(vec![
+            (here(c), "Icon / Quote".into(), star.clone()),
+            (here(a), "Icon / Arrow".into(), star),
+            (here(b), "Icon / Logo".into(), None),
+        ]);
+        let shape: Vec<(Option<String>, Vec<NodeId>)> = preferred
+            .iter()
+            .map(|(h, g)| {
+                (
+                    h.as_ref().map(|h| h.name.clone()),
+                    g.iter().map(id_of).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Some("Preferred".into()), vec![c, a]),
+                (Some("This document".into()), vec![b]),
+            ],
+            "preferred first and unsorted; the rest under a heading"
+        );
     }
 
     /// **A swap to a kit main the document has never used** (§15 D1019), both
@@ -3446,6 +3587,7 @@ mod tests {
             &shelves,
             nested,
             "",
+            &[],
             "",
         );
         assert!(
@@ -3645,6 +3787,7 @@ mod tests {
             &shelves,
             nested,
             "",
+            &[],
             "",
         );
         assert_eq!(
@@ -3678,7 +3821,7 @@ mod tests {
             ..k.clone()
         };
         let shelves = [(newer.clone(), p.clone())];
-        let list = swap_list(&app.session.doc, &[newer], &shelves, nested, "", "");
+        let list = swap_list(&app.session.doc, &[newer], &shelves, nested, "", &[], "");
         assert_eq!(
             shape(&list),
             vec![

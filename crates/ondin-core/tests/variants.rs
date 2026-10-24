@@ -284,6 +284,7 @@ fn the_variant_rules_are_held_after_the_last_op() {
                 kind: PropKind::Boolean,
                 bound,
                 filter: String::new(),
+                preferred: Vec::new(),
             },
         )]
     };
@@ -1454,6 +1455,7 @@ fn mains_sharing_a_property_id() -> (Document, IdSource, [NodeId; 4], ondin_core
                 kind: PropKind::Text,
                 bound: vec![bound],
                 filter: String::new(),
+                preferred: Vec::new(),
             },
         )]
     };
@@ -1580,6 +1582,7 @@ fn a_file_repeating_a_property_id_loads_with_the_repeat_rekeyed() {
             kind: PropKind::Text,
             bound: Vec::new(),
             filter: String::new(),
+            preferred: Vec::new(),
         },
     ));
     doc.apply(&Transaction(vec![Operation::SetProperties {

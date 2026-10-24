@@ -728,6 +728,24 @@ fn the_options_filter_by_prefix_and_search() {
     assert_eq!(swap::options(&f.doc, f.r, "Icons", "heart"), vec![f.heart]);
 }
 
+/// Preferred mains come in their own order, once, searched, and only those the
+/// slot can show: a group main for a frame slot and an id that is no main are
+/// passed over.
+///
+/// flip: `preferred` dropping the `can_swap_to || can_relink_to` test → fails at
+/// "the group main is passed over".
+#[test]
+fn preferred_mains_keep_their_order_and_skip_what_cannot_stand() {
+    let f = fixture();
+    let list = [f.star, f.dot, f.heart, f.star, f.root];
+    assert_eq!(
+        swap::preferred(&f.doc, f.r, &list, ""),
+        vec![f.star, f.heart],
+        "the group main is passed over, the root is no main, a repeat once"
+    );
+    assert_eq!(swap::preferred(&f.doc, f.r, &list, "HEART"), vec![f.heart]);
+}
+
 #[test]
 fn a_swapped_copy_round_trips_through_a_file() {
     let mut f = fixture();

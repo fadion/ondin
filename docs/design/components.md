@@ -430,7 +430,6 @@ any other pass that recomputes a copy's value.
 
 - Relinking a top-level instance to a kit main not yet vendored (the *Main* row offers the
   document's mains, vendored kit mains among them).
-- *Preferred mains* for swap (`roadmap.md` *Now*).
 - Pushing an instance's changes to its main, and a verb that un-makes a component (it would owe a
   detach) — `roadmap.md` *Later*.
 - Unruled, parked in `roadmap.md`: a main-scoped guide not copied into instances; whether a group
@@ -534,7 +533,7 @@ variant* is the verb that takes the next free combination; an instance's name is
 - `Node::set: Option<VariantSet>` — the set's variant properties, each `VariantProp { name, values }`.
 - `Node::variant: Vec<String>` — a variant's values, one per property in the set's order.
 - `Node::props: Vec<Keyed<Property>>` — component properties of a main or set:
-  `Property { name, kind: PropKind::{Boolean, Text, Swap, Nested}, bound: Vec<NodeId>, filter: String }`.
+  `Property { name, kind: PropKind::{Boolean, Text, Swap, Nested}, bound: Vec<NodeId>, filter: String, preferred: Vec<NodeId> }`.
 - `Node::description: String` (`description()`) — what a main or set is for, in the user's words; empty
   is none. Written by `SetDescription { of: Described::Node(id), text }`, the one op a style's and a
   variable's description share (§5.3f). An instance reads its main's through the link, so a copy never
@@ -660,6 +659,13 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   `swap::suggested_filter` (shown main's name less its last segment), edited in its own row; the
   picker searches within it. Every nested copy also gets a *Swap* row offering every main of its kind,
   unfiltered. The filter scopes what is offered, never what is valid.
+- A swap property's **preferred mains** (`Property::preferred`, ids of mains, saved as wire ids) lead
+  its picker under a *Preferred* heading with a star, in their own order and past the filter
+  (`swap::preferred`); the rest of the list leaves them out. One that is no longer a main the slot
+  can show is passed over, not removed. Edited on the main under the filter row
+  (`variants::preferred_rows`): a row per main with a ×, then *Add a preferred main…* over
+  `swap::options` at the bound slot. Copies remap them by the swap's rule (`remap_subtree`), and
+  vendoring by `kit::relink`. The nested copy's own *Swap* row and the *Main* row offer none.
 
 ### Variants chrome — `panels/variants.rs`, `panels/component.rs`
 
@@ -709,7 +715,7 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   named by its values and wears the filled hexagon.
 - Departures from the mockup kept: values edited from a chip's popup rather than in place and dragged;
   binding from one line rather than `{}` buttons on layers/Appearance/Type; defining through the header
-  `+` menu, with no *Default* row and no *Preferred mains*.
+  `+` menu, with no *Default* row; *Preferred mains* as rows under the filter, not a list of their own.
 
 ### Nested component properties
 

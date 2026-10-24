@@ -2967,6 +2967,12 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
                             .iter()
                             .map(|b| map.get(b).copied().unwrap_or(*b))
                             .collect(),
+                        // The swap's rule: remapped when the main came along.
+                        preferred: p
+                            .preferred
+                            .iter()
+                            .map(|m| map.get(m).copied().unwrap_or(*m))
+                            .collect(),
                         ..p.clone()
                     })
                 })

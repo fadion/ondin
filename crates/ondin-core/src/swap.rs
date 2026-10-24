@@ -180,6 +180,27 @@ pub fn options(doc: &Document, root: NodeId, filter: &str, search: &str) -> Vec<
     out.into_iter().map(|n| n.id).collect()
 }
 
+/// A swap property's `preferred` mains that `root` can show, in their order and
+/// matching `search` as [`options`] does; past the property's filter, which
+/// scopes the rest of the list. An id that is no main, or one the slot cannot
+/// take, is passed over, and a repeat is offered once.
+pub fn preferred(doc: &Document, root: NodeId, preferred: &[NodeId], search: &str) -> Vec<NodeId> {
+    let search = search.trim().to_lowercase();
+    let mut out: Vec<NodeId> = Vec::new();
+    for &m in preferred {
+        let Some(n) = doc.get(m).filter(|n| n.component) else {
+            continue;
+        };
+        if !out.contains(&m)
+            && n.name.to_lowercase().contains(&search)
+            && (can_swap_to(doc, root, m) || can_relink_to(doc, root, m))
+        {
+            out.push(m);
+        }
+    }
+    out
+}
+
 /// A swap property's suggested filter: the name of the main the slot shows, less
 /// its last segment — `Button - Icons - Star` gives `Button - Icons`. The
 /// separator is the last character that is neither alphanumeric nor a space, cut

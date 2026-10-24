@@ -604,6 +604,7 @@ fn a_text_property_reset_takes_the_mains_binding_back() {
         kind: ondin_core::variant::PropKind::Text,
         bound: vec![f.text],
         filter: String::new(),
+        preferred: Vec::new(),
     };
     let (_, overridden) = ondin_core::variant::property_state(&f.doc, made[0], &p).unwrap();
     assert!(overridden, "typed over, it is an override");

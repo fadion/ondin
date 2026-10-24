@@ -925,6 +925,7 @@ fn a_showing_is_one_per_owner_and_binds_only_a_nested_instance() {
                 kind: PropKind::Nested,
                 bound,
                 filter: String::new(),
+                preferred: Vec::new(),
             },
         )
     };

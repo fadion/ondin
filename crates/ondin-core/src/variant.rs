@@ -79,6 +79,12 @@ pub struct Property {
     /// the filter changed stands. Empty, and unwritten, on the other kinds.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub filter: String,
+    /// A swap property's **preferred mains**: offered first in the picker, in
+    /// this order and past the filter (`swap::preferred`). An id that is no longer
+    /// a main the slot can show is passed over, not removed. Empty, and unwritten,
+    /// on the other kinds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "wire_ids")]
+    pub preferred: Vec<NodeId>,
 }
 
 /// Node ids in a saved property, written as wire strings like every other id in
@@ -2335,6 +2341,7 @@ pub fn set_shown(
                 kind: PropKind::Nested,
                 bound: slots,
                 filter: String::new(),
+                preferred: Vec::new(),
             },
         )),
         (None, false) => return None,
@@ -2569,6 +2576,7 @@ pub fn define(
             kind,
             bound,
             filter,
+            preferred: Vec::new(),
         },
     ));
     Some((
@@ -2659,9 +2667,14 @@ mod tests {
                 seq: 7,
             }],
             filter: String::new(),
+            preferred: Vec::new(),
         };
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.contains("\"ab:7\""), "{json}");
+        assert!(
+            !json.contains("preferred"),
+            "nor an empty preferred list: {json}"
+        );
         assert!(
             !json.contains("filter"),
             "an empty filter is not written: {json}"

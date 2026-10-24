@@ -383,6 +383,7 @@ fn reserving_ids_skips_past_property_ids() {
         kind: PropKind::Text,
         bound: Vec::new(),
         filter: String::new(),
+        preferred: Vec::new(),
     }));
     doc.apply(&Transaction(vec![
         Operation::CreateNode {

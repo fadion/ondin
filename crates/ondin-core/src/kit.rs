@@ -1239,8 +1239,8 @@ pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
     scratch
 }
 
-/// Point every link, swap and bound layer in `nodes` that `map` knows at its
-/// new id — [`adopt`]'s map applied to a pasted subtree, before it is inserted.
+/// Point every link, swap, bound layer and preferred main in `nodes` that `map`
+/// knows at its new id — [`adopt`]'s map applied to a pasted subtree, before it is inserted.
 pub fn relink(nodes: &mut [Node], map: &FxHashMap<NodeId, NodeId>) {
     let to = |id: &mut NodeId| {
         if let Some(n) = map.get(id) {
@@ -1256,6 +1256,7 @@ pub fn relink(nodes: &mut [Node], map: &FxHashMap<NodeId, NodeId>) {
         }
         for p in &mut n.props {
             p.value.bound.iter_mut().for_each(to);
+            p.value.preferred.iter_mut().for_each(to);
         }
     }
 }

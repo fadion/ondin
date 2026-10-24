@@ -4070,6 +4070,7 @@ mod tests {
                         kind: PropKind::Text,
                         bound: vec![label, llabel],
                         filter: String::new(),
+                        preferred: Vec::new(),
                     },
                 )],
             },
@@ -4571,6 +4572,7 @@ mod tests {
                         kind: PropKind::Text,
                         bound: vec![count],
                         filter: String::new(),
+                        preferred: Vec::new(),
                     },
                 )],
             },
@@ -4786,6 +4788,7 @@ mod tests {
                 kind: PropKind::Boolean,
                 bound: vec![v.label],
                 filter: String::new(),
+                preferred: Vec::new(),
             },
         ));
         assert!(

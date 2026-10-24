@@ -64,12 +64,11 @@ impl OndinApp {
     pub(crate) fn document_menu(&mut self, ui: &mut egui::Ui, title: String) {
         let ctx = ui.ctx().clone();
         let open = self.open_menu == TopMenu::Document;
-        // A head pads its content `HEAD_PAD` each side to match an icon button's
-        // optical box; here the content is the name, which has to stay exactly
-        // where it was before it became a menu — 12 from the mark, as on the
-        // library screen (§15 D962). So the head starts that much to the left and
-        // its hover ground reaches back into the gap rather than moving the name.
-        ui.add_space(-crate::ui::HEAD_PAD);
+        // A head insets its content `HEAD_LEAD`; here the content is the name,
+        // which has to stay 12 from the mark, as on the library screen. So the
+        // head starts that much to the left and its hover ground reaches back into
+        // the gap rather than moving the name.
+        ui.add_space(-crate::ui::HEAD_LEAD);
         let head = crate::ui::menu_head(
             ui,
             egui::RichText::new(title)

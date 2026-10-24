@@ -396,10 +396,13 @@ pub fn dropdown_place(
 /// control height.
 const HEAD_H: f32 = 26.0;
 
-/// Empty space a head keeps on each side of its content, `(HEAD_H - 16) / 2`, so
-/// it occupies the same optical box an [`icon_button`] does and the two space
-/// evenly in one cluster.
+/// Empty space a head keeps after its caret, `(HEAD_H - 16) / 2`, the inset an
+/// [`icon_button`] gives its glyph, so the two space evenly in one cluster.
 pub(crate) const HEAD_PAD: f32 = 5.0;
+
+/// The space before a head's content: [`HEAD_PAD`] plus 2, since the caret's ink
+/// is narrower than its glyph box and leaves the right side looking wider.
+pub(crate) const HEAD_LEAD: f32 = HEAD_PAD + 2.0;
 
 /// The head of a top-bar dropdown — a mark, `gap` points, then a caret — sensed as
 /// one rect, lit like an [`icon_button`] and held lit while `open`. Hand-painted:
@@ -421,7 +424,7 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
 
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(
-            HEAD_PAD + lead.size().x + gap + caret.size().x + HEAD_PAD,
+            HEAD_LEAD + lead.size().x + gap + caret.size().x + HEAD_PAD,
             HEAD_H,
         ),
         egui::Sense::click(),
@@ -442,7 +445,7 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
             p.galley(pos, g.clone(), egui::Color32::PLACEHOLDER);
         }
     };
-    let ink = rect.left() + HEAD_PAD;
+    let ink = rect.left() + HEAD_LEAD;
     ink_of(&lead, at(&lead, ink));
     ink_of(&caret, at(&caret, ink + lead.size().x + gap));
     resp
@@ -4956,7 +4959,7 @@ mod head_tests {
         assert!((measure(5.0) - measure(1.0) - 4.0).abs() < 1e-3);
     }
 
-    /// A head and an icon button inset their glyphs the same distance from their box edge (`HEAD_PAD`).
+    /// A head's trailing pad (`HEAD_PAD`) is the inset an icon button gives its glyph.
     #[test]
     fn a_head_and_an_icon_button_inset_their_glyphs_alike() {
         let ctx = egui::Context::default();

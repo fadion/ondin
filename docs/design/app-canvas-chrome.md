@@ -58,11 +58,12 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   *Show toolbar*, *Show status messages*, *Present mode*.
 - **Snap**: *Snap to shapes*, *Snap to guides*, *Snap to grid*, *Snap to baselines* (last: no
   accelerator, not Illustrator's).
-- **Zoom** (`zoom_control`): a text field on top, focused at open, empty with the current zoom as
-  its hint; Enter applies `OndinApp::apply_typed_zoom` (`150`, `150%`, `37.5 %`; about the canvas
+- **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
+  value; Enter applies `OndinApp::apply_typed_zoom` (`150`, `150%`, `37.5 %`; about the canvas
   centre, clamped like every zoom; anything else says *"Type a zoom percentage, like 150"*) and
-  closes the menu. Below it *Zoom in*, *Zoom out*, *Actual size*, *Fit to page*, *Fit selection*.
-  `OndinApp::zoom_entry` holds the typed text, `None` while the menu is shut.
+  closes the menu — an untouched value applies nothing, since it reads the rounded zoom. Below it
+  *Zoom in*, *Zoom out*, *Actual size*, *Fit to page*, *Fit selection*. `OndinApp::zoom_entry`
+  holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
   messages*.

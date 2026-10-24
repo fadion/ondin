@@ -656,8 +656,8 @@ pub struct OndinApp {
     /// Which of the top bar's dropdowns is open, if any; one field so two menus
     /// can never overlap.
     pub(crate) open_menu: TopMenu,
-    /// What is typed in the zoom dropdown's field; `None` while the dropdown is shut,
-    /// so each opening starts empty and focused.
+    /// What is typed in the zoom dropdown's field while it has focus; `None` otherwise,
+    /// when the field shows the live zoom.
     zoom_entry: Option<String>,
     /// The floating insert picker, while it is open.
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
@@ -6221,32 +6221,30 @@ impl OndinApp {
             self.zoom_entry = None;
             return;
         }
-        let opening = self.zoom_entry.is_none();
-
         // Right-aligned under the readout.
         let anchor = egui::pos2(
             head.rect.right() - MENU_W,
             head.rect.bottom() + crate::ui::MENU_GAP,
         );
         self.dropdown(&ctx, "zoom-menu", anchor, MENU_W, &head, |app, ui| {
-            // A typed percentage, the current one as the hint; Enter applies it.
-            let mut text = app.zoom_entry.take().unwrap_or_default();
+            // The live zoom until the field is focused, then what is typed; Enter applies it.
+            let shown = format!("{zoom}%");
+            let mut text = app.zoom_entry.take().unwrap_or_else(|| shown.clone());
             let field = crate::ui::text_field(
                 ui,
                 egui::vec2(ui.available_width(), ITEM_H),
                 &mut text,
-                &format!("{zoom}%"),
+                "Zoom",
                 11.5,
             );
-            if opening {
-                field.request_focus();
-            }
-            app.zoom_entry = Some(text);
             if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                let typed = app.zoom_entry.take().unwrap_or_default();
-                app.apply_typed_zoom(&typed);
+                // Untouched, it reads the rounded zoom: applying it would nudge the camera.
+                if text != shown {
+                    app.apply_typed_zoom(&text);
+                }
                 app.open_menu = TopMenu::None;
             }
+            app.zoom_entry = field.has_focus().then_some(text);
             ui.add_space(3.0);
             for (glyph, text, action) in [
                 (

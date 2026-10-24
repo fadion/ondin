@@ -22,8 +22,6 @@ stale while its ask still reads true.
   `SetLink` except cut-move (`app.rs` `paste_cut_move`).
 - **A sweep gradient is rewritten as linear.** `paint::kind_of` files it under the Linear tab, and an
   angle edit rewrites it (`paint::with_linear_angle`). Imported SVGs carry sweeps.
-- **The inspector's and picker's hex fields drop an 8-digit value's alpha** (`ui::parse_hex`;
-  `inspector::paint_hex_field`, `picker` `hex_row`). The variables browser reads it (`variables.rs`).
 - **SVG export drops text properties without reporting them**: `svg::run_attrs` writes no
   `font-variation-settings` beyond weight, no `font-feature-settings`, no baseline shift and no
   `xml:lang`, and `svg::report_node` names none of them. The code export writes the first two

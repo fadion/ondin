@@ -283,7 +283,7 @@ impl OndinApp {
                 let Some((node, slot)) = self.picker.as_ref().map(|p| (p.node, p.slot)) else {
                     return;
                 };
-                self.write_slot_rgb(node, slot, color);
+                self.write_slot_rgb(node, slot, color, None);
                 if !pick.stay
                     && let Some(p) = &mut self.picker
                 {

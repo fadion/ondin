@@ -911,16 +911,14 @@ impl OndinApp {
                 // `SelectionAll` is exempt: over a set that disagrees there is no
                 // one colour to compare against, and `current` is a stand-in.
                 let mixed = matches!(slot, PaintSlot::SelectionAll(_));
-                let unchanged = !mixed && parse_hex(&text) == parse_hex(&hex_of(current));
+                let unchanged = !mixed && ui::hex_matches(&text, current);
                 let abandoned = !ui::defocus_commits(&resp);
                 if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged && !abandoned) {
                     let rgb = Color::from_rgba8(r, g, b, 255);
-                    // ⚠️ **Over a selection, each paint keeps its own opacity**
-                    // (`write_slot_rgb`): `current` over a *Mixed* row is a
-                    // stand-in brush, so sending its alpha would flatten the set.
-                    // The plane and the strips send a whole brush on purpose and
-                    // have no opacity field; the hex field does.
-                    self.write_slot_rgb(node, slot, rgb);
+                    // ⚠️ **Over a selection, an untyped alpha leaves each paint its
+                    // own opacity** (`write_slot_rgb`): `current` over a *Mixed* row
+                    // is a stand-in brush, so sending its alpha would flatten the set.
+                    self.write_slot_rgb(node, slot, rgb, ui::parse_hex_alpha(&text));
                     if let Some(p) = &mut self.picker {
                         p.hex = None;
                     }
@@ -971,17 +969,25 @@ impl OndinApp {
             });
         });
     }
-    /// Give `slot`'s edited colour this RGB and keep its alpha — what typing a hex
-    /// does, and what the eyedropper does (its rule 3). One transaction.
+    /// Give `slot`'s edited colour this RGB, at `alpha` when one was typed
+    /// (`RRGGBBAA`) and at its own alpha otherwise — what typing a hex does, and
+    /// what the eyedropper does (its rule 3). One transaction.
     ///
-    /// ⚠️ **Over a selection, each paint keeps its own opacity**: this owns the
-    /// colour and the `%` beside it owns the number, and over a set that disagrees
-    /// there is no one number to send with the colour. The plane and the strips send
-    /// a whole brush on purpose; the hex does not.
-    pub(crate) fn write_slot_rgb(&mut self, node: NodeId, slot: PaintSlot, rgb: Color) {
+    /// ⚠️ **Over a selection without a typed alpha, each paint keeps its own
+    /// opacity**: over a set that disagrees there is no one number to send with the
+    /// colour. The plane and the strips send a whole brush on purpose; the hex does
+    /// not.
+    pub(crate) fn write_slot_rgb(
+        &mut self,
+        node: NodeId,
+        slot: PaintSlot,
+        rgb: Color,
+        alpha: Option<f32>,
+    ) {
+        let alpha = alpha.filter(|_| slot.takes_alpha());
         if let PaintSlot::SelectionAll(target) = slot {
             let tx = self.edit_paints_all(target, move |b| {
-                Brush::Solid(rgb.with_alpha(paint::alpha_of(b)))
+                Brush::Solid(rgb.with_alpha(alpha.unwrap_or_else(|| paint::alpha_of(b))))
             });
             self.commit_edit(tx);
             return;
@@ -997,7 +1003,7 @@ impl OndinApp {
             .map_or(0, |p| p.stop)
             .min(stops.len() - 1);
         let mut next = stops.clone();
-        next[index].1 = rgb.with_alpha(stops[index].1.components[3]);
+        next[index].1 = rgb.with_alpha(alpha.unwrap_or(stops[index].1.components[3]));
         self.write_slot(node, slot, paint::with_stops(&brush, next));
     }
     /// The colours already in this document, most-used first — how a second shape
@@ -1350,7 +1356,12 @@ mod tests {
         let mut picker = Picker::new(a, PaintSlot::Fill(0), egui::pos2(400.0, 300.0));
         picker.stop = 1;
         app.picker = Some(picker);
-        app.write_slot_rgb(a, PaintSlot::Fill(0), Color::from_rgba8(0, 0, 255, 255));
+        app.write_slot_rgb(
+            a,
+            PaintSlot::Fill(0),
+            Color::from_rgba8(0, 0, 255, 255),
+            None,
+        );
         let fill = &app.session.doc.get(a).expect("a").paint().fills[0];
         let Some(Brush::Gradient(g)) = fill.brush.literal() else {
             panic!("still a gradient")
@@ -1678,6 +1689,11 @@ mod mixed_hex_tests {
 
     /// Click into the hex field, replace its text with `00FF00`, press `Enter`.
     fn type_a_green(ctx: &egui::Context, app: &mut OndinApp) {
+        type_hex(ctx, app, "00FF00");
+    }
+
+    /// Click into the hex field, replace its text with `hex`, press `Enter`.
+    fn type_hex(ctx: &egui::Context, app: &mut OndinApp, hex: &str) {
         for _ in 0..2 {
             frame(ctx, app, Vec::new());
         }
@@ -1695,7 +1711,7 @@ mod mixed_hex_tests {
         frame(ctx, app, vec![button(false)]);
         // **One `Event::Text` replaces the whole buffer**, because
         // `ui::select_all_on_focus` selects it on `gained_focus` — no Backspace.
-        frame(ctx, app, vec![egui::Event::Text("00FF00".into())]);
+        frame(ctx, app, vec![egui::Event::Text(hex.into())]);
         frame(
             ctx,
             app,
@@ -1761,6 +1777,31 @@ mod mixed_hex_tests {
             "control: B goes green at 40%"
         );
         assert_eq!(rgba8(&app, a), [255, 0, 0, 255], "control: A is untouched");
+    }
+
+    /// A typed `RRGGBBAA` is one opacity for every layer of a Mixed row, and the
+    /// stop's opacity for a single slot.
+    /// flip: `write_slot_rgb`'s `alpha` forced to `None` → fails at A's alpha.
+    #[test]
+    fn an_eight_digit_hex_sends_its_alpha() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = two_rects(&ctx, (1.0, 0.4));
+        app.session.selection.set(vec![a, b]);
+        app.picker = Some(Picker::new(
+            a,
+            PaintSlot::SelectionAll(PaintTarget::Fill),
+            egui::pos2(400.0, 300.0),
+        ));
+        type_hex(&ctx, &mut app, "00FF0080");
+        assert_eq!(rgba8(&app, a), [0, 255, 0, 128], "A takes the typed alpha");
+        assert_eq!(rgba8(&app, b), [0, 255, 0, 128], "and so does B");
+
+        let ctx = egui::Context::default();
+        let (mut app, _a, b) = two_rects(&ctx, (1.0, 0.4));
+        app.session.selection.set(vec![b]);
+        app.picker = Some(Picker::new(b, PaintSlot::Fill(0), egui::pos2(400.0, 300.0)));
+        type_hex(&ctx, &mut app, "#0000FFC0");
+        assert_eq!(rgba8(&app, b), [0, 0, 255, 192], "one slot takes it too");
     }
 
     /// **A bare click through the picker's hex field writes nothing.** `hex_row`

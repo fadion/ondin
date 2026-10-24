@@ -75,8 +75,9 @@ the Variables face or an Image brush is showing: a face with no button cannot st
 stands in for the edited stop's in the plane, hue and hex (`Picker::preview`, with a dim *was
 XXXXXX*), for the eye only: nothing previews on the canvas, because the next sample would read it. A
 pick writes through `OndinApp::write_slot_rgb`, the hex field's door: the RGB is set and that paint's
-or stop's alpha kept; over a *Mixed* row (`SelectionAll`) each paint keeps its own opacity (§15
-D540). One transaction.
+or stop's alpha kept (a hex typed as `RRGGBBAA` sends its alpha, which every paint in scope takes);
+over a *Mixed* row (`SelectionAll`) each paint otherwise keeps its own opacity (§15 D540). One
+transaction.
 
 ### Input routing (`input.rs`)
 

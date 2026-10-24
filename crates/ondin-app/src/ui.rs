@@ -3666,8 +3666,8 @@ pub fn select_all_on_focus(ui: &egui::Ui, resp: &egui::Response, text: &str) {
 /// Parse `RGB` / `RRGGBB` / `RRGGBBAA`, with or without a leading `#`, and with
 /// any surrounding whitespace.
 ///
-/// The hash is optional (a pasted colour carries one, a typed one does not). Alpha
-/// is the opacity field's business, so an eight-digit value's last pair is dropped.
+/// The hash is optional (a pasted colour carries one, a typed one does not). An
+/// eight-digit value's last pair is [`parse_hex_alpha`]'s.
 pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
     let s = s.trim().trim_start_matches('#').trim();
     if !s.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -3683,6 +3683,26 @@ pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
         6 | 8 => Some([b(0, 2)?, b(2, 2)?, b(4, 2)?]),
         _ => None,
     }
+}
+
+/// The alpha of a valid eight-digit `RRGGBBAA`, as 0..1; `None` for a spelling
+/// without one, where a hex field keeps the paint's own opacity.
+pub fn parse_hex_alpha(s: &str) -> Option<f32> {
+    parse_hex(s)?;
+    let s = s.trim().trim_start_matches('#').trim();
+    (s.len() == 8)
+        .then(|| u8::from_str_radix(&s[6..8], 16).ok())
+        .flatten()
+        .map(|a| f32::from(a) / 255.0)
+}
+
+/// Whether typed hex `text` names `current` at 8 bits a channel, alpha included
+/// only when typed — compared as bytes, so committing an untouched field over an
+/// off-lattice colour writes nothing.
+pub fn hex_matches(text: &str, current: ondin_core::peniko::Color) -> bool {
+    let byte = |a: f32| (a.clamp(0.0, 1.0) * 255.0).round() as u8;
+    parse_hex(text) == parse_hex(&hex_of(current))
+        && parse_hex_alpha(text).is_none_or(|a| byte(a) == byte(current.components[3]))
 }
 
 /// The app's mark, `icons/icon-64.png`, compiled in for the top bars: 64 pixels
@@ -3896,6 +3916,17 @@ mod tests {
         assert_eq!(parse_hex("6D#8CD9"), None);
         assert_eq!(parse_hex("#"), None);
         assert_eq!("#6D8CD9FF".len(), HEX_CHAR_LIMIT);
+    }
+
+    /// Only an eight-digit value carries an alpha; the shorter spellings leave it to
+    /// the paint.
+    #[test]
+    fn only_eight_digits_carry_an_alpha() {
+        assert_eq!(parse_hex_alpha("#6D8CD980"), Some(128.0 / 255.0));
+        assert_eq!(parse_hex_alpha(" 6d8cd9ff "), Some(1.0));
+        assert_eq!(parse_hex_alpha("6D8CD9"), None);
+        assert_eq!(parse_hex_alpha("fff"), None);
+        assert_eq!(parse_hex_alpha("6D8CD9G0"), None);
     }
 
     /// `Color -> Hsv -> Color` is the identity at 8-bit precision, low alpha included.

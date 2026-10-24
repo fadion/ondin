@@ -2181,9 +2181,9 @@ impl OndinApp {
                         if let Some([r, g, b]) =
                             ui::parse_hex(&text).filter(|_| ui::defocus_commits(&resp))
                         {
-                            now = Some(Some(
-                                Color::from_rgba8(r, g, b, 255).with_alpha(shown.components[3]),
-                            ));
+                            // A typed `RRGGBBAA` sets the opacity; a shorter hex keeps it.
+                            let alpha = ui::parse_hex_alpha(&text).unwrap_or(shown.components[3]);
+                            now = Some(Some(Color::from_rgba8(r, g, b, 255).with_alpha(alpha)));
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

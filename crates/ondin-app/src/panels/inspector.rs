@@ -7684,12 +7684,13 @@ impl OndinApp {
             // bare click, and `lost_focus()` fires on two frames. `mixed` always
             // writes. A hex over a binding is a literal that detaches it, so a bound
             // field writes outright rather than through `edited_brush`.
-            let unchanged =
-                !mixed && bound.is_none() && parse_hex(&text) == parse_hex(&hex_of(current));
+            // A typed `RRGGBBAA` sets the opacity too; a shorter hex keeps it.
+            let unchanged = !mixed && bound.is_none() && ui::hex_matches(&text, current);
+            let typed_alpha = ui::parse_hex_alpha(&text).filter(|_| slot.takes_alpha());
             if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged) {
                 let rgb = ondin_core::peniko::Color::from_rgba8(r, g, b, 255);
                 if bound.is_some() {
-                    let lit = rgb.with_alpha(current.components[3]);
+                    let lit = rgb.with_alpha(typed_alpha.unwrap_or(current.components[3]));
                     let ids = match slot {
                         PaintSlot::Selection(..) => self.session.selection.ids().to_vec(),
                         _ => vec![id],
@@ -7710,15 +7711,17 @@ impl OndinApp {
                     self.commit_edit(tx);
                     return;
                 }
-                // Each paint keeps its own opacity.
+                // Without a typed alpha, each paint keeps its own opacity.
                 if let PaintSlot::SelectionAll(target) = slot {
                     let tx = self.edit_paints_all(target, move |b| {
-                        Brush::Solid(rgb.with_alpha(paint::alpha_of(b)))
+                        Brush::Solid(
+                            rgb.with_alpha(typed_alpha.unwrap_or_else(|| paint::alpha_of(b))),
+                        )
                     });
                     self.commit_edit(tx);
                     return;
                 }
-                let alpha = current.components[3];
+                let alpha = typed_alpha.unwrap_or(current.components[3]);
                 let next = paint::with_stops(brush, vec![(0.0, rgb.with_alpha(alpha))]);
                 self.write_slot(id, slot, next);
             }
@@ -17673,6 +17676,32 @@ mod paint_hex_field_tests {
             "control: a typed colour is written — got {typed:?}, wanted {want:?}"
         );
         assert_eq!(depth, 1, "control: and once, not twice");
+    }
+
+    /// A typed `RRGGBBAA` writes its alpha as the fill's opacity; a six-digit hex keeps it.
+    /// flip: `typed_alpha` forced to `None` → fails at the eight-digit alpha.
+    #[test]
+    fn an_eight_digit_hex_sets_the_opacity_too() {
+        let (colour, depth) = drive(Some("33669980"));
+        assert!(
+            (colour[3] - 128.0 / 255.0).abs() < 1e-6,
+            "the eight-digit alpha lands — got {colour:?}"
+        );
+        assert!(
+            (colour[0] - 0x33 as f32 / 255.0).abs() < 1e-6,
+            "with its colour"
+        );
+        assert_eq!(depth, 1);
+        let (colour, _) = drive(Some("336699"));
+        assert_eq!(colour[3], 1.0, "control: a six-digit hex keeps the opacity");
+        // The fixture is `[0.5, 0.25, 0.125]`, which `hex_of` rounds to `804020`: an alpha
+        // typed over the same colour is still a change.
+        let (colour, depth) = drive(Some("80402040"));
+        assert!(
+            (colour[3] - 64.0 / 255.0).abs() < 1e-6,
+            "an alpha-only edit lands"
+        );
+        assert_eq!(depth, 1);
     }
 
     /// `Escape` abandons a typed colour: `lost_focus()` alone reads a cancel as a confirm, so

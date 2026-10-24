@@ -1398,18 +1398,11 @@ fn kind_word(k: VarKind) -> &'static str {
     }
 }
 
-/// `RGB`, `RRGGBB` or `RRGGBBAA`, a leading `#` optional — a colour variable
-/// carries its own alpha (D1038), so the last pair is kept here where the
-/// inspector's hex field drops it.
+/// `RGB`, `RRGGBB` or `RRGGBBAA`, a leading `#` optional; a colour variable
+/// carries its own alpha, opaque when none is typed.
 fn parse_colour(s: &str) -> Option<Color> {
     let [r, g, b] = ui::parse_hex(s)?;
-    let digits = s.trim().trim_start_matches('#').trim();
-    let a = if digits.len() == 8 {
-        u8::from_str_radix(&digits[6..8], 16).ok()?
-    } else {
-        255
-    };
-    Some(Color::from_rgba8(r, g, b, a))
+    Some(Color::from_rgba8(r, g, b, 255).with_alpha(ui::parse_hex_alpha(s).unwrap_or(1.0)))
 }
 
 /// What a cell shows when it is not being typed into, and what typing starts

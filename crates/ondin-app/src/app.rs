@@ -2009,7 +2009,10 @@ impl OndinApp {
         if self.drag.is_none() && self.layer_drag.is_none() && !field {
             return false;
         }
-        self.drag = Drag::None;
+        // A live marquee has been selecting as it went; put back what it started from.
+        if let Drag::Marquee { base, .. } = std::mem::replace(&mut self.drag, Drag::None) {
+            self.session.selection = *base;
+        }
         // Guide and variable-cell previews live outside `RenderOverrides`.
         self.guide_previews.clear();
         self.var_cell_preview = None;

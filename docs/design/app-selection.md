@@ -31,9 +31,11 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   `OndinApp::marquee_candidates`, filtered by `OndinApp::may_select_in_bulk`
   (= `query::is_effectively_locked`). The visibility filter is `apply_marquee`'s own and uses the
   node's own flag: a layer inside a hidden group *can* be marqueed. The modifier held at the press
-  decides what the band does on release (`preview::MarqueeMode`): none replaces the selection,
-  `Shift` toggles each layer it covers, `Alt` removes them. The node tool's point marquee follows
-  the same rule.
+  decides what the band does (`preview::MarqueeMode`): none replaces the selection, `Shift`
+  toggles each layer it covers, `Alt` removes them. It selects **live**, every frame of the drag,
+  applied to the selection held at the press (`Drag::Marquee::base`), so a toggle does not flip
+  back and forth and a cancel restores that selection. The node tool's point marquee follows the
+  same modes but resolves on release.
 - `Ctrl+A` (`OndinApp::select_all`): same candidates (locked excluded, hidden included). With the
   candidate range empty it selects the frames themselves (`root_artboards`), filtered too. Emptiness is
   asked of the range **before** the lock filter (`marquee_range`).

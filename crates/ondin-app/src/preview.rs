@@ -143,10 +143,15 @@ pub enum Drag {
     Pivot {
         id: NodeId,
     },
-    /// Rubber-band selection from `origin` to the current pointer, resolved on release.
+    /// Rubber-band selection from `origin` to the current pointer. A layer marquee
+    /// selects live; a point marquee (node tool) resolves on release.
     Marquee {
         origin: Point,
         mode: MarqueeMode,
+        /// The layer selection at the press. Each frame applies the band to it
+        /// afresh, or a Shift marquee would flip a layer on every frame; a cancel
+        /// puts it back.
+        base: Box<crate::session::Selection>,
     },
     /// Drawing a new shape. `id` is minted up front so the preview is stable
     /// across frames; committed once on release.

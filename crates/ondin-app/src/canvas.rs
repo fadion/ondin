@@ -1705,6 +1705,7 @@ impl OndinApp {
                     // The press, not where the drag was recognised.
                     origin: grab_world,
                     mode: MarqueeMode::from_modifiers(shift, ui.input(|i| i.modifiers.alt)),
+                    base: Box::new(self.session.selection.clone()),
                 };
             }
         }
@@ -1809,13 +1810,17 @@ impl OndinApp {
                     self.session.set_preview(&tx);
                 }
             }
+            // Selects as it goes, so the layers it takes light up under it.
+            Drag::Marquee { origin, mode, base } => {
+                let (origin, mode, base) = (*origin, *mode, base.clone());
+                self.apply_marquee(origin, world, mode, &base);
+            }
             // Guide and crop drags are owned by `guide_input`/`image_edit_input`;
-            // a pivot or marquee drag has nothing to preview through the renderer.
+            // a pivot drag has nothing to preview through the renderer.
             Drag::CropPan { .. }
             | Drag::CropResize { .. }
             | Drag::Pivot { .. }
             | Drag::Guide(_)
-            | Drag::Marquee { .. }
             | Drag::TextSelect
             | Drag::None => {}
         }
@@ -1956,7 +1961,7 @@ impl OndinApp {
                     self.place_image_at(start);
                 }
             }
-            Drag::Marquee { origin, mode } => self.apply_marquee(origin, world, mode),
+            Drag::Marquee { origin, mode, base } => self.apply_marquee(origin, world, mode, &base),
             // `pivot_at` answers `None` back at the centre, which clears the field.
             Drag::Pivot { id } => {
                 let pivot = self.pivot_at(id, world);
@@ -2759,7 +2764,17 @@ impl OndinApp {
         (delta + result.adjust, result.marks)
     }
 
-    fn apply_marquee(&mut self, origin: Point, end: Point, mode: MarqueeMode) {
+    /// Selects by the band from `origin` to `end`, applied by `mode` to `base`,
+    /// the selection the marquee started from. Leaves the selection untouched
+    /// when the answer is what it already holds, and gives `base` back whole
+    /// (key layer included) when the band changes nothing.
+    fn apply_marquee(
+        &mut self,
+        origin: Point,
+        end: Point,
+        mode: MarqueeMode,
+        base: &crate::session::Selection,
+    ) {
         let area = KRect::new(
             origin.x.min(end.x),
             origin.y.min(end.y),
@@ -2782,7 +2797,7 @@ impl OndinApp {
                 picked.push(child);
             }
         }
-        let mut next = self.session.selection.ids().to_vec();
+        let mut next = base.ids().to_vec();
         match mode {
             MarqueeMode::Replace => next = picked,
             MarqueeMode::Toggle => {
@@ -2797,7 +2812,11 @@ impl OndinApp {
             }
             MarqueeMode::Subtract => next.retain(|n| !picked.contains(n)),
         }
-        self.session.selection.set(next);
+        if next == base.ids() {
+            self.session.selection = base.clone();
+        } else if next != self.session.selection.ids() {
+            self.session.selection.set(next);
+        }
     }
 
     // --- shape creation ---------------------------------------------------
@@ -3949,7 +3968,7 @@ impl OndinApp {
                     self.session.commit(tx);
                 }
             }
-            Drag::Marquee { origin, mode } if released => {
+            Drag::Marquee { origin, mode, .. } if released => {
                 self.drag = Drag::None;
                 self.marquee_points(origin, world, mode);
             }
@@ -4165,6 +4184,7 @@ impl OndinApp {
                 self.drag = Drag::Marquee {
                     origin: world,
                     mode: MarqueeMode::from_modifiers(shift, alt),
+                    base: Box::new(self.session.selection.clone()),
                 };
             }
         }
@@ -11290,7 +11310,8 @@ mod autopan_tests {
         assert!(
             Drag::Marquee {
                 origin: ondin_core::kurbo::Point::ZERO,
-                mode: MarqueeMode::Replace
+                mode: MarqueeMode::Replace,
+                base: Default::default(),
             }
             .autopans()
         );
@@ -17014,6 +17035,98 @@ mod select_drag_tests {
             "the original stays put"
         );
     }
+
+    /// A marquee selects while it is dragged, drops a layer the band leaves, holds
+    /// a Shift toggle steady across frames, and a cancel restores the selection it
+    /// started from.
+    /// flip: make `update_drag`'s `Drag::Marquee` arm a no-op → fails at "mid-drag".
+    #[test]
+    fn a_marquee_selects_live_and_a_cancel_puts_the_selection_back() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        let at = |app: &OndinApp, x, y| app.to_screen(Point::new(x, y), AREA, 1.0);
+        let button = |pos, pressed, modifiers| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        let none = egui::Modifiers::NONE;
+        let ids = |app: &OndinApp| {
+            let mut v = app.session.selection.ids().to_vec();
+            v.sort();
+            v
+        };
+        let both = {
+            let mut v = vec![a, b];
+            v.sort();
+            v
+        };
+
+        // Clear of the rulers: the world origin 200 into the canvas.
+        app.session.camera.center -= Vec2::new(200.0, 200.0);
+        let start = at(&app, -20.0, -20.0);
+        frame_with(&ctx, &mut app, none, vec![egui::Event::PointerMoved(start)]);
+        frame_with(
+            &ctx,
+            &mut app,
+            none,
+            vec![egui::Event::PointerMoved(start), button(start, true, none)],
+        );
+        for p in [at(&app, 60.0, 50.0), at(&app, 150.0, 50.0)] {
+            frame_with(&ctx, &mut app, none, vec![egui::Event::PointerMoved(p)]);
+        }
+        assert!(
+            matches!(app.drag, Drag::Marquee { .. }),
+            "the fixture's press has to start a marquee"
+        );
+        assert_eq!(ids(&app), vec![a], "mid-drag, the band has already taken a");
+        let over_b = at(&app, 250.0, 50.0);
+        frame_with(
+            &ctx,
+            &mut app,
+            none,
+            vec![egui::Event::PointerMoved(over_b)],
+        );
+        assert_eq!(ids(&app), both, "reaching b takes it too");
+        let back = at(&app, 150.0, 50.0);
+        frame_with(&ctx, &mut app, none, vec![egui::Event::PointerMoved(back)]);
+        assert_eq!(ids(&app), vec![a], "and pulling back lets b go");
+        frame_with(&ctx, &mut app, none, vec![button(back, false, none)]);
+        assert_eq!(ids(&app), vec![a], "the release keeps what the band showed");
+
+        // Shift toggles against the press-time selection, the same answer every frame.
+        let shift = egui::Modifiers::SHIFT;
+        app.gesture_cancelled = false;
+        frame_with(
+            &ctx,
+            &mut app,
+            shift,
+            vec![egui::Event::PointerMoved(start)],
+        );
+        frame_with(
+            &ctx,
+            &mut app,
+            shift,
+            vec![egui::Event::PointerMoved(start), button(start, true, shift)],
+        );
+        for p in [at(&app, 60.0, 50.0), over_b, over_b, over_b] {
+            frame_with(&ctx, &mut app, shift, vec![egui::Event::PointerMoved(p)]);
+        }
+        assert_eq!(
+            ids(&app),
+            vec![b],
+            "a toggled off and b on, and they stay so"
+        );
+
+        assert!(app.cancel_gesture(&ctx));
+        assert_eq!(
+            ids(&app),
+            vec![a],
+            "a cancel restores the press-time selection"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -17968,6 +18081,7 @@ mod marquee_selectability_tests {
             Point::new(-50.0, -50.0),
             Point::new(200.0, 200.0),
             MarqueeMode::Replace,
+            &Default::default(),
         );
         let got = app.session.selection.ids().to_vec();
 
@@ -18010,7 +18124,8 @@ mod marquee_selectability_tests {
         let [a, b, c] = [0, 1, 2].map(|i| rect(&mut doc, &mut ids, board, i));
         app.session.adopt_document(doc, None);
         let band = |app: &mut OndinApp, x0: f64, x1: f64, mode| {
-            app.apply_marquee(Point::new(x0, -5.0), Point::new(x1, 15.0), mode);
+            let base = app.session.selection.clone();
+            app.apply_marquee(Point::new(x0, -5.0), Point::new(x1, 15.0), mode, &base);
             let mut got = app.session.selection.ids().to_vec();
             got.sort();
             got

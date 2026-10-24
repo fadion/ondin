@@ -5315,6 +5315,23 @@ impl OndinApp {
                             }
                         }
                     }
+                    // Where along the path the pattern starts, for every patterned style;
+                    // signed, as SVG's `stroke-dashoffset` is.
+                    if style != DashStyle::Solid {
+                        let mut offset = s.dash_offset;
+                        let resp = value_field(
+                            ui,
+                            egui::vec2(inner, CELL),
+                            Prefix::Icon(icon::ARROW_LINE_RIGHT),
+                            &mut offset,
+                            Scrub::whole(0.5).range(-ui::MAX_STROKE_WIDTH..=ui::MAX_STROKE_WIDTH),
+                            |d| d.custom_formatter(ui::number(2)),
+                        )
+                        .on_hover_text("Dash offset — slides the pattern along the path");
+                        self.stroke_valve(&resp, scope, index, move |st| {
+                            st.dash_offset = offset;
+                        });
+                    }
 
                     // --- the ends and the corners, common to all four ----------
                     ui.scope(|ui| {
@@ -16566,6 +16583,37 @@ mod rhythm_tests {
         app.stroke_menu = Some(0);
         let out = pass(&mut app, &ctx);
         check("stroke popover", &out);
+        // Dashed: the pattern's row and the offset row below it.
+        let rect_id = app.session.selection.single().expect("the rect");
+        let mut dashed = app
+            .session
+            .doc
+            .get(rect_id)
+            .unwrap()
+            .paint()
+            .strokes
+            .to_vec();
+        dashed[0].dashes = vec![4.0, 2.0];
+        let tx = app.strokes_tx(PaintScope::Node(rect_id), dashed);
+        assert!(app.session.commit(tx), "the fixture's stroke is dashed");
+        let out = pass(&mut app, &ctx);
+        check("stroke popover, dashed", &out);
+        let glyphs = |out: &egui::FullOutput| {
+            fn walk(s: &egui::Shape, v: &mut Vec<String>) {
+                match s {
+                    egui::Shape::Text(t) => v.push(t.galley.text().to_string()),
+                    egui::Shape::Vec(x) => x.iter().for_each(|s| walk(s, v)),
+                    _ => {}
+                }
+            }
+            let mut v = Vec::new();
+            out.shapes.iter().for_each(|c| walk(&c.shape, &mut v));
+            v
+        };
+        assert!(
+            glyphs(&out).iter().any(|t| t == icon::ARROW_LINE_RIGHT),
+            "a dashed stroke's popover offers the dash offset"
+        );
         app.stroke_menu = None;
 
         text_node(&mut app);

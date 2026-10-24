@@ -237,6 +237,7 @@ two strokes would otherwise occlude each other, and the rows travel with a reord
 **Dash/cap/join popover** (`app::POPOVER_W`, 272): four modes, each showing only its own fields.
 
 - The mode comes from `Stroke::dash_style()`. `pattern_for` carries numbers across switches; a mode with nothing to inherit falls back to multiples of the width.
+- **Dash offset** (`Stroke::dash_offset`, SVG's `stroke-dashoffset`) is one full-width field under each patterned mode's own row, absent for *Solid*: signed, capped at ±`MAX_STROKE_WIDTH`, valved like the other dash numbers.
 - Cap and join are common to all modes. Cap is a named combo, *Straight / Rounded / Extended* (`cap_label`). The join row is `Ui::disable`d where the kind has no corner: dimmed, not reset. Mitre angle shows only when `joins && join == Miter`.
 - **Custom list.** A buffered comma-separated field applied on `ui::defocus_commits`. Unparseable, all-zero or single-number input leaves the model alone. It writes only when the text differs from what `dash_list_text` would print.
 - The popover stays open when a cap is chosen: the dismiss test asks whether the click landed on a layer floating above.

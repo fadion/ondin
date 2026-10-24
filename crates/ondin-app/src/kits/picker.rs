@@ -8,7 +8,7 @@
 //! it into one flat list across every kit, best match first (3F). A click places
 //! an instance at the viewport's centre, at the document's top level; a tile dragged
 //! out of the panel and let go over the canvas places it centred there, inside the
-//! frame under the pointer if there is one.
+//! frame or layout group under the pointer if there is one.
 
 use super::index::{KitEntry, Load, Pixels, kits_in, raster_fit, tile_subject, tiles_of};
 use crate::app::OndinApp;
@@ -793,27 +793,43 @@ impl OndinApp {
         self.place_kit_at(ctx, source, self.canvas_rect.center(), false);
     }
 
-    /// The frame a tile let go at `world` lands in: the topmost shown, unlocked one
-    /// under the point, `None` for the canvas. A frame that is or sits in a component
-    /// is passed over, since the component rules may refuse an instance there.
-    fn drop_frame_at(&self, world: ondin_core::kurbo::Point) -> Option<NodeId> {
-        let doc = &self.session.doc;
-        let in_component = |f: NodeId| {
-            std::iter::successors(doc.get(f), |n| n.parent().and_then(|p| doc.get(p)))
-                .any(|n| n.component() || n.link().is_some() || n.set().is_some())
+    /// The container a tile let go at `world` lands in: the topmost shown, unlocked
+    /// frame or group with a layout under the point, `None` for the canvas. One that
+    /// is or sits in a component is passed over, since the component rules may refuse
+    /// an instance there, and so is one inside a boolean.
+    fn drop_container_at(&self, world: ondin_core::kurbo::Point) -> Option<NodeId> {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        // A boolean's operands are geometry, not places to put things.
+        let refused = |f: NodeId| {
+            std::iter::successors(doc.get(f), |n| n.parent().and_then(|p| doc.get(p))).any(|n| {
+                n.component()
+                    || n.link().is_some()
+                    || n.set().is_some()
+                    || matches!(n.kind(), ondin_core::NodeKind::Boolean { .. })
+            })
         };
-        self.with_frames(|i| {
-            i.boxes
-                .iter()
-                .rev()
-                .find(|(f, b)| {
-                    b.contains(world)
-                        && doc.shown(*f)
-                        && !ondin_core::is_effectively_locked(doc, *f)
-                        && !in_component(*f)
-                })
-                .map(|(f, _)| *f)
-        })
+        let takes = |n: &ondin_core::Node| match n.kind() {
+            ondin_core::NodeKind::Artboard { .. } => true,
+            ondin_core::NodeKind::Group => n.display().is_some(),
+            _ => false,
+        };
+        // Pre-order in child order is paint order: the last hit is the topmost.
+        let mut hit = None;
+        let mut stack = vec![doc.root()];
+        while let Some(id) = stack.pop() {
+            let Some(node) = doc.get(id) else { continue };
+            if id != doc.root()
+                && takes(node)
+                && res.world_bounds(id).is_some_and(|b| b.contains(world))
+                && doc.shown(id)
+                && !ondin_core::is_effectively_locked(doc, id)
+                && !refused(id)
+            {
+                hit = Some(id);
+            }
+            stack.extend(node.children().iter().rev().copied());
+        }
+        hit
     }
 
     /// A click's, a drop's or `Enter`'s placement, run once a frame has shown
@@ -834,12 +850,12 @@ impl OndinApp {
 
     /// Place an instance of `source` centred on the screen point `at`, as one
     /// undoable step, and select it — a click's viewport centre at the document's top
-    /// level, or where a dragged tile was let go (`dropped`), inside the frame there
-    /// ([`Self::drop_frame_at`]).
+    /// level, or where a dragged tile was let go (`dropped`), inside the container
+    /// there ([`Self::drop_container_at`]).
     fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2, dropped: bool) {
         let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
         let parent = dropped
-            .then(|| self.drop_frame_at(centre))
+            .then(|| self.drop_container_at(centre))
             .flatten()
             .unwrap_or(self.session.doc.root());
         let built = match &source {
@@ -1898,9 +1914,10 @@ pub(crate) mod tests {
     }
 
     /// A tile let go over a frame lands inside it, centred on the release point,
-    /// though the frame is turned; a click still lands at the top level.
+    /// though the frame is turned; a click still lands at the top level; a group
+    /// takes a drop only once it has a layout.
     /// flip: `centred` shifting in world space rather than the parent's → fails at
-    /// "centred on the release".
+    /// "centred on the release"; `drop_container_at` refusing groups → "flex group".
     #[test]
     fn a_tile_dropped_on_a_frame_lands_inside_it() {
         use ondin_core::kurbo::{Point, Size};
@@ -1939,6 +1956,57 @@ pub(crate) mod tests {
             app.session.doc.get(inst).unwrap().parent(),
             Some(doc_root),
             "a click"
+        );
+
+        // A group with a layout takes a drop too, at the end of its flow; a plain group
+        // does not.
+        let (group, item) = (app.session.ids.mint(), app.session.ids.mint());
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: doc_root,
+                index: 0,
+                kind: ondin_core::NodeKind::Group,
+                transform: Some(Affine::translate((3000.0, 3000.0))),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: item,
+                parent: group,
+                index: 0,
+                kind: ondin_core::NodeKind::Rect {
+                    size: Size::new(200.0, 200.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+        ])));
+        let over = app.to_screen(Point::new(3100.0, 3100.0), app.canvas_rect, 1.0);
+        let source = kit_source(&mut app, &id, badge);
+        app.place_kit_at(&ctx, source, over, true);
+        let inst = app.session.selection.single().expect("placed");
+        assert_eq!(
+            app.session.doc.get(inst).unwrap().parent(),
+            Some(doc_root),
+            "plain group"
+        );
+        app.undo();
+        assert!(app.session.commit(Transaction(vec![Operation::SetDisplay {
+            id: group,
+            display: Some(ondin_core::container::Display::Flex(Default::default())),
+        }])));
+        let source = kit_source(&mut app, &id, badge);
+        app.place_kit_at(&ctx, source, over, true);
+        let inst = app.session.selection.single().expect("placed");
+        assert_eq!(
+            app.session.doc.get(inst).unwrap().parent(),
+            Some(group),
+            "flex group"
+        );
+        assert_eq!(
+            app.session.doc.get(group).unwrap().children().last(),
+            Some(&inst)
         );
         let _ = std::fs::remove_dir_all(&root);
     }

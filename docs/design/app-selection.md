@@ -68,10 +68,11 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 ### `Alt+Shift+click` designates the key layer
 
 The key is what align aligns to, a boolean's base operand, and which layer becomes the mask. An
-unselected layer is added first; inside an existing boolean it is a reorder to index 0. The chord
-starts **no drag on the artwork** (Alt alone would duplicate on any travelled release); on the box's
-own chrome it drags normally — the refusal sits inside `begin_select_drag` below the pivot, line-end
-and handle arms (so `Alt+Shift` on a corner is a proportional, centred resize).
+unselected layer is added first; inside an existing boolean it is a reorder to index 0. Only the
+click designates: an `Alt+Shift` **drag** on the artwork is an Alt-duplicate locked to one axis, a
+common enough gesture to outweigh a designating click that slips past the drag threshold. On the
+box's own chrome the chord keeps the handle's meaning (`Alt+Shift` on a corner is a proportional,
+centred resize).
 
 ### `Alt` on a resting pointer measures (`measure.rs`, `canvas::draw_measures`)
 

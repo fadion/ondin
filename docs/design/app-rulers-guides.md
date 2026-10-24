@@ -124,7 +124,7 @@ pointer.
 `Drag::Spacing { id, band, anchor, base }` — band grabbed, press in the container's local space, the
 value the band **drew** there. The band may belong to an unselected container under the pointer.
 
-- Its press sits above the `Alt+Shift` key-designation refusal; a band drag designates and duplicates
+- Its press sits ahead of the artwork's, so a band's `Alt+Shift` drag (all four sides) duplicates
   nothing. Modifiers choose sides and step, read every frame.
 - Each frame previews one `SetDisplay`, led by a `SetSpacingVars` cutting touched bound slots whose
   value leaves their variable's number.

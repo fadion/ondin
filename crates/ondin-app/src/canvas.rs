@@ -1671,15 +1671,9 @@ impl OndinApp {
             }
         }
 
-        // A selected container's gap or padding band: above the Alt+Shift refusal,
-        // since that chord is the band's all-sides drag.
+        // A selected container's gap or padding band, ahead of the artwork, whose
+        // Alt+Shift drag is a constrained duplicate.
         if self.begin_spacing_drag(grab, rect, ppp) {
-            return;
-        }
-
-        // Alt+Shift on the artwork starts no drag, so a key-layer designation that
-        // slips past the drag threshold cannot leave an Alt-duplicate behind.
-        if shift && ui.input(|i| i.modifiers.alt) {
             return;
         }
 
@@ -16933,6 +16927,92 @@ mod autopan_ownership_tests {
                  scrolled and the cancel that spends it"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod select_drag_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use crate::canvas::headless_app_tests::app_with_two_rects;
+
+    const AREA: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(800.0, 600.0),
+    };
+    const ALT_SHIFT: egui::Modifiers = egui::Modifiers {
+        alt: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    };
+
+    /// One frame through `normal_mode_input` with `ALT_SHIFT` held.
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        frame_with(ctx, app, ALT_SHIFT, events);
+    }
+
+    fn frame_with(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        modifiers: egui::Modifiers,
+        events: Vec<egui::Event>,
+    ) {
+        let input = egui::RawInput {
+            screen_rect: Some(AREA),
+            modifiers,
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            let resp = ui.interact(
+                AREA,
+                egui::Id::new("alt-shift-probe"),
+                egui::Sense::click_and_drag(),
+            );
+            app.normal_mode_input(ui, &resp, AREA, 1.0);
+        });
+    }
+
+    /// An Alt+Shift drag on a selected layer leaves a copy, moved along one axis only.
+    /// flip: restore the Alt+Shift early return in `begin_select_drag` → fails at the count.
+    #[test]
+    fn an_alt_shift_drag_duplicates_along_one_axis() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        app.session.selection.set(vec![a]);
+        let root = app.session.doc.root();
+        let press = app.to_screen(Point::new(50.0, 50.0), AREA, 1.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: ALT_SHIFT,
+        };
+
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(press)]);
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(press), button(press, true)],
+        );
+        let to = press + egui::vec2(60.0, 10.0);
+        for step in [press + egui::vec2(30.0, 5.0), to, to] {
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(step)]);
+        }
+        frame(&ctx, &mut app, vec![button(to, false)]);
+
+        let children = app.session.doc.get(root).unwrap().children().to_vec();
+        assert_eq!(children.len(), 3, "the drag has to leave a copy");
+        let copy = *children.iter().find(|&&c| c != a && c != b).unwrap();
+        let moved = app.session.doc.get(copy).unwrap().transform().translation();
+        assert_eq!(moved.y, 0.0, "Shift locks the copy to the horizontal");
+        assert!(moved.x > 0.0, "and it travels along it ({moved:?})");
+        assert_eq!(
+            app.session.doc.get(a).unwrap().transform().translation(),
+            Vec2::ZERO,
+            "the original stays put"
+        );
     }
 }
 

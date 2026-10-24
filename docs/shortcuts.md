@@ -320,9 +320,9 @@ top stroke · `Shift`+click eyedropper stays armed · `Shift`+marquee toggles wh
   through the exhaustive `Tool::click_makes`.
 - **A click while Space is held does nothing, for every tool** (§15 D293): Space+click is a pan
   that has not travelled; it is one binding, not a guard per arm.
-- **`Alt`+`Shift` reaches the resize handles.** The key-layer chord refuses to start any select
-  drag (a slipped designation would leave an Alt-drag duplicate), a refusal that moved below the
-  handle arms.
+- **`Alt`+`Shift` is a click on one gesture and a drag on another.** A click designates the key
+  layer; a drag on the artwork is a duplicate locked to one axis, and on a handle a proportional,
+  centred resize.
 
 **The arrows had a second claimant.** `input::resolve` is pure and knows nothing of a gesture in
 flight, so `dispatch` drops `Nudge` (and `SizeStep`, §15 D346) while a create drag is up; otherwise

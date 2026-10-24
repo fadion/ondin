@@ -175,6 +175,10 @@ pub enum PaintKind {
     Solid,
     Linear,
     Radial,
+    /// A sweep (conic) gradient, which imported SVGs carry. Not in
+    /// [`PaintKind::ALL`]: the picker has no tab that makes one, so it edits a sweep
+    /// it is given and converts it only on an explicit tab click.
+    Sweep,
     /// A picture. Deliberately not in [`PaintKind::ALL`] (the picker's tab strip):
     /// the other three convert into one another, an image is picked from a file
     /// dialog, and a fourth tab would turn a photograph into a gradient on click.
@@ -190,6 +194,7 @@ impl PaintKind {
             PaintKind::Solid => "Solid",
             PaintKind::Linear => "Linear",
             PaintKind::Radial => "Radial",
+            PaintKind::Sweep => "Angular",
             PaintKind::Image => "Image",
         }
     }
@@ -423,8 +428,8 @@ pub fn kind_of(brush: &Brush) -> PaintKind {
     match brush {
         Brush::Gradient(g) => match g.gradient.kind {
             GradientKind::Radial(_) => PaintKind::Radial,
-            // Sweep is not offered by the UI.
-            _ => PaintKind::Linear,
+            GradientKind::Linear(_) => PaintKind::Linear,
+            GradientKind::Sweep(_) => PaintKind::Sweep,
         },
         Brush::Image(_) => PaintKind::Image,
         _ => PaintKind::Solid,
@@ -589,6 +594,10 @@ pub fn default_brush(kind: PaintKind, stops: Vec<(f32, Color)>, box_size: Size) 
         PaintKind::Radial => Brush::Gradient(
             Gradient::new_radial(Point::new(w * 0.5, h * 0.5), (w.min(h) * 0.5) as f32).into(),
         ),
+        // A full turn about the centre, starting at three o'clock.
+        PaintKind::Sweep => Brush::Gradient(
+            Gradient::new_sweep(Point::new(w * 0.5, h * 0.5), 0.0, std::f32::consts::TAU).into(),
+        ),
         // No default image exists (an image is an id). Unreachable today; a later
         // caller gets a grey solid rather than a panic in release, and a debug
         // assert so a test finds it first.
@@ -691,11 +700,15 @@ pub fn linear_angle(brush: &Brush) -> Option<f64> {
 
 /// Re-aim a linear gradient at `degrees`, spanning `box_size` through its
 /// centre — the CSS `linear-gradient(<angle>)` framing, so the ramp always
-/// covers the shape whatever the angle.
+/// covers the shape whatever the angle. Any other brush comes back unchanged:
+/// re-aiming a radial or a sweep would rewrite it as linear.
 pub fn with_linear_angle(brush: &Brush, degrees: f64, box_size: Size) -> Brush {
     let Brush::Gradient(g) = brush else {
         return brush.clone();
     };
+    if !matches!(g.gradient.kind, GradientKind::Linear(_)) {
+        return brush.clone();
+    }
     let (w, h) = (box_size.width.max(1.0), box_size.height.max(1.0));
     let (sin, cos) = degrees.to_radians().sin_cos();
     let half = (w * cos.abs() + h * sin.abs()) * 0.5;
@@ -1033,6 +1046,33 @@ mod tests {
             "the picker's tab strip must not offer Image"
         );
         assert_eq!(label_of(&an_image()), "Image");
+    }
+
+    /// A sweep is its own kind, labelled *Angular*, and a linear-angle edit leaves it a
+    /// sweep; converting it is an explicit kind change.
+    /// flip: `kind_of`'s sweep arm filed under `Linear` → fails at the kind.
+    #[test]
+    fn a_sweep_keeps_its_kind() {
+        let sweep = default_brush(
+            PaintKind::Sweep,
+            vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
+            BOX,
+        );
+        assert_eq!(kind_of(&sweep), PaintKind::Sweep);
+        assert_eq!(label_of(&sweep), "Angular");
+        assert!(!PaintKind::ALL.contains(&PaintKind::Sweep));
+        assert_eq!(
+            with_linear_angle(&sweep, 45.0, BOX),
+            sweep,
+            "an angle edit does not re-aim a sweep as a linear"
+        );
+        let linear = convert(&sweep, PaintKind::Linear, BOX);
+        assert_eq!(kind_of(&linear), PaintKind::Linear);
+        assert_eq!(
+            stops_of(&linear),
+            stops_of(&sweep),
+            "a conversion keeps the stops"
+        );
     }
 
     #[test]

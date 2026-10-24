@@ -20,8 +20,6 @@ stale while its ask still reads true.
 - **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an
   outer instance; `components.md` says a root "changes main by relinking", but nothing writes
   `SetLink` except cut-move (`app.rs` `paste_cut_move`).
-- **A sweep gradient is rewritten as linear.** `paint::kind_of` files it under the Linear tab, and an
-  angle edit rewrites it (`paint::with_linear_angle`). Imported SVGs carry sweeps.
 - **SVG export drops text properties without reporting them**: `svg::run_attrs` writes no
   `font-variation-settings` beyond weight, no `font-feature-settings`, no baseline shift and no
   `xml:lang`, and `svg::report_node` names none of them. The code export writes the first two
@@ -49,8 +47,9 @@ stale while its ask still reads true.
   (`tools::joinable_ends`, `canvas::join_points`).
 - **Gradient editing.** On-canvas handles; a linear gradient's two ends (only an angle today, spanning
   the box: `paint::with_linear_angle`); a radial's radius and ellipse (`paint::with_radial_centre`,
-  `GradientBrush::transform`); conic in the picker (`paint::PaintKind::ALL` has no sweep, though the
-  model and both renderers do).
+  `GradientBrush::transform`); conic in the picker (`paint::PaintKind::Sweep` has no tab and no
+  geometry editor, though the model and both renderers draw it; a fifth tab does not fit the strip
+  beside *Variables* at 10pt).
 - **Colour entry beyond hex** — RGB/HSL/HSB fields and CSS `rgb()`/`hsl()` input — and **recent
   colours** beside the document swatches (`picker::document_swatches`).
 - **Select same** (fill, stroke, font, effect) and **select inverse**, in the palette

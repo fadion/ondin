@@ -385,7 +385,11 @@ impl OndinApp {
             ui.spacing_mut().item_spacing.x = TAB_GAP;
             let selected = match on_vars {
                 true => 3,
-                false => PaintKind::ALL.iter().position(|k| *k == kind).unwrap_or(0),
+                // A sweep has no tab, so none is lit; clicking one converts it.
+                false => PaintKind::ALL
+                    .iter()
+                    .position(|k| *k == kind)
+                    .unwrap_or(tabs),
             };
             let track = inner_w - CLOSE_W - TAB_GAP;
             let live = |i: usize| i == 3 || gradients || PaintKind::ALL[i] == PaintKind::Solid;
@@ -457,6 +461,7 @@ impl OndinApp {
             PaintKind::Solid => {}
             PaintKind::Linear => self.linear_controls(ui, node, slot, brush, box_size),
             PaintKind::Radial => self.radial_controls(ui, node, slot, brush, box_size),
+            PaintKind::Sweep => self.sweep_controls(ui, node, slot, brush),
             // Unreachable (the guard above returned); spelled out so removing that
             // guard stops compiling here rather than drawing a stop bar over a photo.
             PaintKind::Image => {}
@@ -541,6 +546,25 @@ impl OndinApp {
                 let next = paint::reverse_stops(brush);
                 self.write_slot(node, slot, next);
             }
+        });
+    }
+    /// An imported sweep's face: the preview chip and *Reverse the stops*. Its
+    /// geometry has no editor yet, and nothing here rewrites it; the stops and the
+    /// opacity edit as on any gradient.
+    fn sweep_controls(&mut self, ui: &mut egui::Ui, node: NodeId, slot: PaintSlot, brush: &Brush) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 7.0;
+            self.preview_chip(ui, brush);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let unit = ui::CONTROL_H;
+                if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, 15.0, ui::FieldButton::Off)
+                    .on_hover_text("Reverse the stops")
+                    .clicked()
+                {
+                    let next = paint::reverse_stops(brush);
+                    self.write_slot(node, slot, next);
+                }
+            });
         });
     }
     /// Preview chip with a draggable centre handle, plus CX/CY fields.

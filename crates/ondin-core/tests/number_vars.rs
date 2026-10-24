@@ -658,6 +658,59 @@ fn drawn_numbers(doc: &Document, id: NodeId) -> [Option<f64>; 4] {
     doc.resolved_effects(id, doc.get(id).unwrap().effects())[0].numbers()
 }
 
+/// **Paste properties carries the effect stack, a bound number by the paste rule**:
+/// pasted within the document the shadow's spread lands bound to the same variable;
+/// pasted after the variable is gone, at the 40 it drew.
+///
+/// flip: `paste_properties` copying `vars` verbatim → fails at *"a paste with the
+/// variable gone commits"*.
+#[test]
+fn paste_properties_carries_effects_by_the_paste_rule() {
+    use ondin_core::EFFECT_SPREAD;
+    let mut f = fixture();
+    let item = shadowed(&mut f);
+    let ops = ondin_core::bind_effect_ops(&f.doc, f.rect, item, EFFECT_SPREAD, f.muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let other = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: other,
+            parent: f.frame,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+    assert!(f.doc.get(other).unwrap().effects().is_empty());
+    let props = ondin_core::build::properties_of(&f.doc, f.rect).unwrap();
+    let tx = ondin_core::build::paste_properties(&f.doc, &[other], &props, &mut f.ids);
+    let mut kept = f.doc.clone();
+    kept.apply(&tx).unwrap();
+    assert_eq!(
+        effect(&kept, other).vars[EFFECT_SPREAD],
+        Some(f.muted),
+        "kept"
+    );
+    assert_eq!(drawn_numbers(&kept, other)[EFFECT_SPREAD], Some(40.0));
+
+    let tx = Transaction(ondin_core::variable::remove_ops(&f.doc, &[f.muted]));
+    f.doc.apply(&tx).unwrap();
+    let tx = ondin_core::build::paste_properties(&f.doc, &[other], &props, &mut f.ids);
+    f.doc
+        .apply(&tx)
+        .expect("a paste with the variable gone commits");
+    let e = effect(&f.doc, other);
+    assert_eq!(
+        (e.numbers()[EFFECT_SPREAD], e.vars[EFFECT_SPREAD]),
+        (Some(40.0), None),
+        "at the 40 it drew"
+    );
+}
+
 /// **A bound effect number draws and reaches at its variable's number** (§15
 /// D1074): the shadow's spread bound to `opacity/muted` (40 in Light) draws a
 /// 40 spread over a literal 0, and the rect's ink grows by it — the shadow's

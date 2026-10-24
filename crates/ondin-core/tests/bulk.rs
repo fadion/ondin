@@ -1156,6 +1156,35 @@ fn pasting_properties_paints_through_a_group_and_fades_only_the_group() {
     );
 }
 
+/// Pasted effects stop at the outermost member, as opacity does: a shadow on the
+/// group and on each child would draw twice.
+/// flip: `set_effects_all` walking `paint_targets` → fails at "the group took the blur".
+#[test]
+fn pasting_properties_puts_effects_on_the_group_alone() {
+    let mut f = Fixture::new();
+    let source = f.add(f.artboard, rect());
+    let blur = ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 3.0 });
+    let item = f.ids.mint_item();
+    f.commit(Transaction(vec![Operation::SetEffects {
+        id: source,
+        effects: vec![ondin_core::Keyed::new(item, blur.clone())],
+    }]));
+    let group = f.add(f.artboard, NodeKind::Group);
+    let a = f.add(group, rect());
+
+    let props = build::properties_of(&f.doc, source).unwrap();
+    let tx = build::paste_properties(&f.doc, &[group], &props, &mut f.ids);
+    f.commit(tx);
+
+    let effects = f.doc.get(group).unwrap().effects();
+    assert_eq!(effects.len(), 1, "the group took the blur");
+    assert_eq!(effects[0].value, blur);
+    assert!(
+        f.doc.get(a).unwrap().effects().is_empty(),
+        "its child did not"
+    );
+}
+
 /// **Pasting what a layer already looks like produces no operations**, so the
 /// chord cannot fill the history with undo steps that change nothing.
 ///

@@ -3833,6 +3833,12 @@ pub struct Properties {
     pub drawn_strokes: Vec<Brush>,
     /// Each stroke's width as it drew at the copy: the detach a paste falls back to.
     pub drawn_widths: Vec<f64>,
+    /// The effect stack, whole. It lands on the outermost targets, as opacity does:
+    /// a shadow on a group and on each child would draw twice.
+    pub effects: Vec<crate::Effect>,
+    /// Each effect's numbers as they drew at the copy, in [`crate::EffectVars`]'
+    /// places, `None` where unbound: the detach a paste falls back to.
+    pub drawn_effect_numbers: Vec<[Option<f64>; 4]>,
 }
 
 /// A layer's appearance, or `None` for a kind that has none to give.
@@ -3846,6 +3852,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
     }
     let fills = crate::item::values(&node.paint().fills);
     let strokes = crate::item::values(&node.paint().strokes);
+    let effects = crate::item::values(node.effects());
     let t = doc.variables();
     let mut carried: Vec<crate::variable::CarriedVar> = Vec::new();
     for v in fills
@@ -3854,6 +3861,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
         .chain(strokes.iter().map(|s| &s.brush))
         .filter_map(crate::BrushSource::var)
         .chain(strokes.iter().filter_map(|s| s.width_var))
+        .chain(effects.iter().flat_map(|e| e.vars.into_iter().flatten()))
         .chain(node.opacity_var())
     {
         if let Some(var) = t.get(v)
@@ -3883,8 +3891,19 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
                 None => s.width,
             })
             .collect(),
+        drawn_effect_numbers: effects
+            .iter()
+            .map(|e| {
+                let mut drawn = [None; 4];
+                for (slot, var) in e.vars.iter().enumerate() {
+                    drawn[slot] = var.map(|v| doc.effect_number_drawn_in(t, id, v, slot));
+                }
+                drawn
+            })
+            .collect(),
         fills,
         strokes,
+        effects,
         opacity: doc.drawn_opacity(id),
         opacity_var: node.opacity_var(),
         carried,
@@ -3893,9 +3912,9 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
 
 /// Give every target in scope the appearance in `props`.
 ///
-/// [`set_fills_all`], [`set_strokes_all`] and [`set_opacity_all`] (outermost
-/// members alone) composed; each drops targets that already agree, so pasting a
-/// layer's own properties is empty.
+/// [`set_fills_all`] and [`set_strokes_all`] (through groups), then
+/// [`set_effects_all`] and [`set_opacity_all`] (outermost members alone), composed;
+/// each drops targets that already agree, so pasting a layer's own properties is empty.
 ///
 /// A bound paint is kept where this document has the variable, else rebound to
 /// this document's variable of the same name and kind ([`crate::variable::rebind`]),
@@ -3950,8 +3969,26 @@ pub fn paste_properties(
             }
         })
         .collect();
+    let effects: Vec<crate::Effect> = props
+        .effects
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let mut e = e.clone();
+            for slot in 0..e.vars.len() {
+                let Some(v) = e.vars[slot] else { continue };
+                e.vars[slot] = crate::variable::rebind(t, &props.carried, v);
+                if e.vars[slot].is_none() {
+                    let drawn = props.drawn_effect_numbers.get(i).and_then(|d| d[slot]);
+                    e.set_number(slot, drawn.unwrap_or(0.0));
+                }
+            }
+            e
+        })
+        .collect();
     let mut ops = set_fills_all(doc, ids, &fills, src).0;
     ops.extend(set_strokes_all(doc, ids, &strokes, src).0);
+    ops.extend(set_effects_all(doc, ids, &effects, src).0);
     match props
         .opacity_var
         .and_then(|v| crate::variable::rebind(t, &props.carried, v))
@@ -3962,6 +3999,38 @@ pub fn paste_properties(
             }
         }
         None => ops.extend(set_opacity_all(doc, ids, props.opacity).0),
+    }
+    Transaction(ops)
+}
+
+/// Give every **outermost** member of `ids` exactly this effect stack, keeping
+/// each layer's own item ids by position. Outermost for [`set_opacity_all`]'s
+/// reason: effects composite down the tree.
+pub fn set_effects_all(
+    doc: &Document,
+    ids: &[NodeId],
+    effects: &[crate::Effect],
+    src: &mut IdSource,
+) -> Transaction {
+    let mut ops = Vec::new();
+    let mut fresh = crate::item::PastTheEnd::default();
+    for id in outermost(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        if matches!(node.kind(), NodeKind::Root) {
+            continue;
+        }
+        let own = node.effects();
+        if own.len() != effects.len() || own.iter().zip(effects).any(|(o, e)| o.value != *e) {
+            ops.push(Operation::SetEffects {
+                id,
+                effects: crate::item::rekey_by_position(
+                    own,
+                    effects.iter().cloned(),
+                    &mut fresh,
+                    src,
+                ),
+            });
+        }
     }
     Transaction(ops)
 }

@@ -10,8 +10,9 @@
 //! mode — 340 wide with one mode, 96 more per mode to three, the mode columns
 //! scrolling sideways past that — variables grouped by the slash path in their
 //! names, each with its usage count and its cells, edited in place. Build step 3
-//! draws the *Styles* tab (§15 D1063): one group per card, each style's preview,
-//! name and count, and its *Rename*, *Edit*, *Select* and *Delete*.
+//! draws the *Styles* tab (§15 D1063): one group per card, inside it a group per
+//! slash path as the variables have, each style's preview, name and count, and
+//! its *Rename*, *Edit*, *Select* and *Delete*.
 
 use crate::app::OndinApp;
 use crate::panels::PaintSlot;
@@ -89,6 +90,12 @@ enum Edit {
         style: StyleId,
         text: String,
     },
+    /// A style group's path, within its slot.
+    StyleGroup {
+        slot: StyleSlot,
+        path: String,
+        text: String,
+    },
 }
 
 impl Edit {
@@ -99,7 +106,8 @@ impl Edit {
             | Edit::Cell { text, .. }
             | Edit::Mode { text, .. }
             | Edit::Group { text, .. }
-            | Edit::Style { text, .. } => text,
+            | Edit::Style { text, .. }
+            | Edit::StyleGroup { text, .. } => text,
         }
     }
 }
@@ -117,6 +125,8 @@ enum Menu {
     ConfirmMode(ModeId),
     /// A style's row: *Rename*, *Edit*, *Select*, *Delete* (G8).
     Style(StyleId),
+    /// A style group's header: *Rename group*, *Select*, *Delete group*.
+    StyleGroup(StyleSlot, String),
     /// A kit's mapping for one of the document's modes (D1038 (b), §15 D1065):
     /// the kit's modes, then *Match by name*.
     KitMap(String, ModeId),
@@ -214,7 +224,13 @@ enum Act {
     /// A style renamed, its *Edit* opened, deleted (G8, G9; §15 D1063).
     StyleName(StyleId, String),
     EditStyle(StyleId),
-    DeleteStyle(StyleId),
+    /// Styles deleted — one, or a group's — and the name the status gives them.
+    DeleteStyles(Vec<StyleId>, String),
+    /// A style group renamed within its slot.
+    StyleGroupName(StyleSlot, String, String),
+    /// `Alt`+click on a style group's caret: every style group takes the state
+    /// this one's click gives it.
+    ToggleAllStyles(String),
     /// A kit's mapping entry for a document mode set to a kit mode, or cleared
     /// to match by name (§15 D1065).
     KitMap(String, ModeId, Option<ModeId>),
@@ -583,6 +599,7 @@ impl OndinApp {
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
             Menu::Style(_) => 4.0,
+            Menu::StyleGroup(..) => 3.0,
             Menu::KitMap(kit, _) => table.kits().get(kit).map_or(0, |k| k.modes.len()) as f32 + 1.5,
         };
         let size = egui::vec2(menu_w, rows * MENU_ROW_H + 24.0);
@@ -828,7 +845,44 @@ impl OndinApp {
                                 MENU_ROW_H,
                             );
                             if del.clicked() {
-                                acts.push(Act::DeleteStyle(st.id));
+                                acts.push(Act::DeleteStyles(vec![st.id], st.name.clone()));
+                                close = true;
+                            }
+                        }
+                        Menu::StyleGroup(slot, path) => {
+                            if row(ui, icon::PENCIL_SIMPLE, "Rename group") {
+                                acts.push(Act::StartEdit(Edit::StyleGroup {
+                                    slot: *slot,
+                                    path: path.clone(),
+                                    text: path.clone(),
+                                }));
+                                close = true;
+                            }
+                            let members = style_group_members(doc, *slot, path);
+                            let mut who: Vec<NodeId> = members
+                                .iter()
+                                .flat_map(|s| sty::users(doc, *s))
+                                .filter(|u| !doc.in_vault(*u))
+                                .collect();
+                            who.sort();
+                            who.dedup();
+                            let select = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(who.len()))
+                                    .enabled(!who.is_empty()),
+                                MENU_ROW_H,
+                            );
+                            if select.clicked() {
+                                acts.push(Act::Select(who));
+                                close = true;
+                            }
+                            let del = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::TRASH, "Delete group").danger(true),
+                                MENU_ROW_H,
+                            );
+                            if del.clicked() {
+                                acts.push(Act::DeleteStyles(members, path.clone()));
                                 close = true;
                             }
                         }
@@ -938,14 +992,44 @@ impl OndinApp {
                 }
             }
             Act::EditStyle(id) => self.edit_style(id),
-            Act::DeleteStyle(id) => {
-                let name = doc
-                    .styles()
-                    .get(id)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default();
-                let n = sty::users(doc, id).len();
-                let tx = Transaction(sty::remove_ops(doc, &[id]));
+            Act::StyleGroupName(slot, from, to) => {
+                let to = to.trim().trim_matches('/').to_string();
+                if to == from {
+                    self.var_edit_done();
+                    return;
+                }
+                if to.split('/').any(|s| s.trim().is_empty()) && !to.is_empty() {
+                    self.var_refuse("A group's name cannot have an empty part.".into());
+                    return;
+                }
+                match sty::rename_group_ops(doc, slot, &from, &to) {
+                    Err(clash) => self.var_refuse(format!("{clash} already exists.")),
+                    Ok(ops) => {
+                        self.var_edit_done();
+                        if !ops.is_empty() {
+                            self.commit_edit(Transaction(ops));
+                        }
+                    }
+                }
+            }
+            Act::ToggleAllStyles(key) => {
+                let all = style_group_keys(doc);
+                if let Some(b) = self.var_browser.as_mut() {
+                    match b.collapsed.contains(&key) {
+                        true => b.collapsed.retain(|p| !all.contains(p)),
+                        false => b.collapsed.extend(all),
+                    }
+                }
+            }
+            Act::DeleteStyles(ids, name) => {
+                if ids.is_empty() {
+                    return;
+                }
+                let mut who: Vec<NodeId> = ids.iter().flat_map(|s| sty::users(doc, *s)).collect();
+                who.sort();
+                who.dedup();
+                let n = who.len();
+                let tx = Transaction(sty::remove_ops(doc, &ids));
                 // No confirmation; the status says it, and one undo restores (D1038 (6)).
                 if self.commit_edit(tx) {
                     self.session.info(match n {
@@ -1360,6 +1444,41 @@ fn group_members<'a>(table: &'a ondin_core::Variables, path: &str) -> Vec<&'a Va
     table.local().filter(|v| in_group(&v.name, path)).collect()
 }
 
+/// The document's own styles of `slot` under group `path` — what its menu
+/// deletes and selects the users of.
+fn style_group_members(doc: &Document, slot: StyleSlot, path: &str) -> Vec<StyleId> {
+    doc.styles()
+        .of_slot(slot)
+        .filter(|s| s.origin.is_none() && in_group(&s.name, path))
+        .map(|s| s.id)
+        .collect()
+}
+
+/// The key a slot's collapse is kept under, apart from every variable group's
+/// path by a leading `\u{1}` — and a kit's by its id after it.
+fn slot_key(kit: Option<&str>, slot: StyleSlot) -> String {
+    match kit {
+        None => format!("\u{1}{}", slot.title()),
+        Some(k) => format!("\u{1}{k}\u{1}{}", slot.title()),
+    }
+}
+
+/// The key a style group's collapse is kept under, inside its slot's.
+fn style_group_key(kit: Option<&str>, slot: StyleSlot, path: &str) -> String {
+    format!("{}\u{1}{path}", slot_key(kit, slot))
+}
+
+/// Every style group's key — what `Alt`+click folds or opens at once.
+fn style_group_keys(doc: &Document) -> HashSet<String> {
+    doc.styles()
+        .iter()
+        .filter_map(|s| {
+            let (group, _) = var::split_name(&s.name);
+            (!group.is_empty()).then(|| style_group_key(s.kit(), s.slot(), group))
+        })
+        .collect()
+}
+
 /// A typed cell: `--name` aliases another variable of the kind, a colour takes
 /// a hex (its alpha too, eight digits), a number takes an expression, and a
 /// string takes the text as typed, spaces and all (§15 D1069).
@@ -1722,13 +1841,7 @@ fn styles_tab(
                     ui.add_space(6.0);
                     super::binding::kit_header(ui, &super::binding::kit_name(doc, k), b.inner_w);
                 }
-                // The collapse is the document's set, keyed apart from every
-                // variable group's path by a leading `\u{1}` — and a kit's by its
-                // id after it.
-                let key = match kit {
-                    None => format!("\u{1}{}", slot.title()),
-                    Some(k) => format!("\u{1}{k}\u{1}{}", slot.title()),
-                };
+                let key = slot_key(kit, slot);
                 let open = !b.collapsed.contains(&key) || !query.is_empty();
                 ui.add_space(2.0);
                 let (rect, resp) =
@@ -1777,19 +1890,179 @@ fn styles_tab(
                 if !open {
                     continue;
                 }
+                // Then the slot's own groups, by the slash path in the names:
+                // the top level first, with no header, then each group's.
+                let mut groups: BTreeMap<&str, (Vec<&Style>, usize)> = BTreeMap::new();
+                for s in doc.styles().of_slot(slot).filter(|s| s.kit() == kit) {
+                    groups.entry(var::split_name(&s.name).0).or_default().1 += 1;
+                }
                 for s in shown {
-                    style_row(ui, doc, s, users.get(&s.id).map_or(0, Vec::len), b, acts);
+                    groups
+                        .entry(var::split_name(&s.name).0)
+                        .or_default()
+                        .0
+                        .push(s);
+                }
+                for (path, (rows, total)) in groups {
+                    if rows.is_empty() {
+                        continue;
+                    }
+                    let depth = if path.is_empty() {
+                        0.0
+                    } else {
+                        let g = StyleGroupRow {
+                            kit,
+                            slot,
+                            path,
+                            shown: rows.len(),
+                            total,
+                            filtered: picked.is_some(),
+                        };
+                        if !style_group_row(ui, &g, b, acts) {
+                            continue;
+                        }
+                        GROUP_STEP
+                    };
+                    for s in rows {
+                        let count = users.get(&s.id).map_or(0, Vec::len);
+                        style_row(ui, doc, s, count, depth, b, acts);
+                    }
                 }
             }
         });
 }
 
-/// One style's row on the *Styles* tab: its preview, its whole name, its count.
+/// How far a style group sits in from its slot, and its rows with it.
+const GROUP_STEP: f32 = 14.0;
+
+/// A style group's header, as drawn.
+struct StyleGroupRow<'a> {
+    kit: Option<&'a str>,
+    slot: StyleSlot,
+    path: &'a str,
+    shown: usize,
+    total: usize,
+    filtered: bool,
+}
+
+/// A style group's header, `GROUP_STEP` in from its slot's: its caret, its path,
+/// its count. Double-click renames it, a right-click opens its menu; a kit's
+/// folds and nothing else. Answers whether the group is open.
+fn style_group_row(
+    ui: &mut egui::Ui,
+    g: &StyleGroupRow,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) -> bool {
+    ui.add_space(2.0);
+    let key = style_group_key(g.kit, g.slot, g.path);
+    let open = !b.collapsed.contains(&key) || !b.query.trim().is_empty();
+    let id = ui.id().with(("style-group", &key));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(b.inner_w, GROUP_H), egui::Sense::click());
+    let left = rect.left() + GROUP_STEP;
+    let refused = b.refused.clone();
+    if let Some(Edit::StyleGroup { slot, path, text }) = b.edit.as_mut()
+        && *slot == g.slot
+        && path == g.path
+        && g.kit.is_none()
+    {
+        let r = egui::Rect::from_min_max(
+            egui::pos2(left + 20.0, rect.top() + 2.0),
+            egui::pos2(rect.right() - 40.0, rect.bottom() - 2.0),
+        );
+        let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
+        ui.painter().rect_stroke(
+            r,
+            4,
+            egui::Stroke::new(1.0, color::ACCENT),
+            egui::StrokeKind::Outside,
+        );
+        if b.edit_focus {
+            b.edit_focus = false;
+            resp.request_focus();
+        }
+        ui::select_all_on_focus(ui, &resp, text);
+        if ui::defocus_commits(&resp) {
+            acts.push(Act::StyleGroupName(
+                g.slot,
+                g.path.to_string(),
+                text.clone(),
+            ));
+        }
+        return open;
+    }
+    let menu_open =
+        matches!(&b.menu, Some((Menu::StyleGroup(s, p), _)) if *s == g.slot && p == g.path);
+    let p = ui.painter();
+    if menu_open {
+        p.rect_filled(rect, 4, color::text_a(23));
+    } else if resp.hovered() {
+        p.rect_filled(rect, 4, color::text_a(16));
+    }
+    p.text(
+        egui::pos2(left + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        if open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        },
+        egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
+        theme::text::FAINT,
+    );
+    let name = p.layout_no_wrap(
+        g.path.to_string(),
+        egui::FontId::proportional(11.5),
+        color::TEXT,
+    );
+    let name_w = name.size().x;
+    p.galley(
+        egui::pos2(left + 23.0, rect.center().y - name.size().y / 2.0),
+        name,
+        color::TEXT,
+    );
+    let count = if g.filtered {
+        format!("{} of {}", g.shown, g.total)
+    } else {
+        g.total.to_string()
+    };
+    p.text(
+        egui::pos2(left + 23.0 + name_w + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        count,
+        egui::FontId::proportional(10.5),
+        theme::text::FAINT,
+    );
+    if g.kit.is_none() && ui::double_clicked(ui, &resp) {
+        acts.push(Act::StartEdit(Edit::StyleGroup {
+            slot: g.slot,
+            path: g.path.to_string(),
+            text: g.path.to_string(),
+        }));
+    } else if resp.clicked() && ui.input(|i| i.modifiers.alt) {
+        acts.push(Act::ToggleAllStyles(key));
+    } else if resp.clicked() {
+        acts.push(Act::Toggle(key));
+    } else if g.kit.is_none()
+        && resp.secondary_clicked()
+        && let Some(at) = resp.interact_pointer_pos()
+    {
+        acts.push(Act::OpenMenu(
+            Menu::StyleGroup(g.slot, g.path.to_string()),
+            at + egui::vec2(6.0, 8.0),
+        ));
+    }
+    open
+}
+
+/// One style's row on the *Styles* tab, `depth` in past its slot's: its preview,
+/// its name past its group's path, its count. A rename types the whole name.
 fn style_row(
     ui: &mut egui::Ui,
     doc: &Document,
     s: &Style,
     count: usize,
+    depth: f32,
     b: &mut Browser,
     acts: &mut Vec<Act>,
 ) {
@@ -1802,7 +2075,7 @@ fn style_row(
         ui.painter().rect_filled(rect, 4, color::text_a(18));
     }
     let sw = egui::Rect::from_min_size(
-        egui::pos2(rect.left() + INDENT, rect.center().y - 7.0),
+        egui::pos2(rect.left() + INDENT + depth, rect.center().y - 7.0),
         egui::vec2(14.0, 14.0),
     );
     crate::panels::styles::paint_preview(ui.painter(), doc, s, sw);
@@ -1835,7 +2108,7 @@ fn style_row(
     p.text(
         egui::pos2(sw.right() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        &s.name,
+        var::split_name(&s.name).1,
         egui::FontId::proportional(11.5),
         theme::text::STRONG,
     );
@@ -3179,9 +3452,10 @@ mod tests {
         );
     }
 
-    /// **The *Styles* tab lists a style under its card, and *Delete* detaches its
-    /// users, says so, and undoes whole** (G8, D1038 (6); §15 D1063). A rename
-    /// to a name its slot already holds is refused.
+    /// **The *Styles* tab lists a style under its card and its path's group, and
+    /// *Delete* detaches its users, says so, and undoes whole** (G8, D1038 (6);
+    /// §15 D1063). A folded group hides its rows, *Rename group* moves its
+    /// styles, and a rename to a name its slot already holds is refused.
     #[test]
     fn the_styles_tab_lists_renames_and_deletes() {
         let (ctx, mut app) = app();
@@ -3234,13 +3508,48 @@ mod tests {
         for _ in 0..2 {
             shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
         }
+        assert!(last_text(&shapes, "raised").is_some(), "the row is drawn");
         assert!(
-            last_text(&shapes, "surface/raised").is_some(),
-            "the row is drawn"
+            last_text(&shapes, "surface").is_some(),
+            "under its path's group"
         );
         assert!(
             last_text(&shapes, "Fill").is_some(),
             "under its card's group"
+        );
+        let key = style_group_key(None, StyleSlot::Fills, "surface");
+        app.var_act(Act::Toggle(key.clone()));
+        let shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        assert!(
+            last_text(&shapes, "raised").is_none(),
+            "a folded group hides its rows"
+        );
+        assert!(
+            last_text(&shapes, "surface").is_some(),
+            "and keeps its header"
+        );
+        app.var_act(Act::Toggle(key));
+
+        // *Rename group* moves both, and back.
+        app.var_act(Act::StyleGroupName(
+            StyleSlot::Fills,
+            "surface".into(),
+            "card".into(),
+        ));
+        let name = |app: &OndinApp, id| app.session.doc.styles().get(id).unwrap().name.clone();
+        assert_eq!(
+            (name(&app, s), name(&app, t)),
+            ("card/raised".into(), "card/base".into())
+        );
+        app.var_act(Act::StyleGroupName(
+            StyleSlot::Fills,
+            "card".into(),
+            "surface".into(),
+        ));
+        assert_eq!(name(&app, s), "surface/raised");
+        assert_eq!(
+            style_group_members(&app.session.doc, StyleSlot::Fills, "surface"),
+            [s, t]
         );
 
         app.var_act(Act::StartEdit(Edit::Style {
@@ -3253,7 +3562,7 @@ mod tests {
             Some("surface/base already exists.")
         );
 
-        app.var_act(Act::DeleteStyle(s));
+        app.var_act(Act::DeleteStyles(vec![s], "surface/raised".into()));
         assert!(app.session.doc.styles().get(s).is_none());
         let n = app.session.doc.get(rect).unwrap();
         assert_eq!(n.styles().fills, None);
@@ -3969,11 +4278,7 @@ mod tests {
             "made default"
         );
         app.var_act(Act::MoveMode(last, 2));
-        assert_eq!(
-            modes(&app),
-            ["Day", "Day copy 2", "Day copy"],
-            "moved back"
-        );
+        assert_eq!(modes(&app), ["Day", "Day copy 2", "Day copy"], "moved back");
 
         let copy = app.session.doc.variables().modes()[2].id;
         let frame = app.session.ids.mint();

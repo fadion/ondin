@@ -17,8 +17,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   colours** beside the document swatches (`picker::document_swatches`).
 - **Adding layout to a loose selection** should infer direction, gap and padding from where the
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
-- **Groups in the styles browser** for slash paths (`variables.rs` `styles_tab`), as variables have
-  (`Menu::Group`).
 - **Descriptions** on components, styles and variables — no field on `Style`, `Variable` or a main.
   An agent over MCP reads them too.
 - **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,

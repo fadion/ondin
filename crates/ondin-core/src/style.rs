@@ -995,6 +995,46 @@ pub fn free_name(styles: &Styles, slot: StyleSlot, base: &str) -> String {
         .expect("an unbounded range finds a free name")
 }
 
+/// The renames that move the document's own styles of `slot` in group `from`
+/// (and its subgroups) to `to`, empty for the top level — the browser's *Rename
+/// group*. `Err` with the first name that would land on a style already there,
+/// `variable::rename_group_ops`'s refusal.
+pub fn rename_group_ops(
+    doc: &crate::Document,
+    slot: StyleSlot,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Operation>, String> {
+    let moved = |name: &str| -> Option<String> {
+        let rest = name.strip_prefix(from)?.strip_prefix('/')?;
+        Some(if to.is_empty() {
+            rest.to_string()
+        } else {
+            format!("{to}/{rest}")
+        })
+    };
+    let own: Vec<&Style> = doc
+        .styles()
+        .of_slot(slot)
+        .filter(|s| s.origin.is_none())
+        .collect();
+    let mut ops = Vec::new();
+    for s in &own {
+        let Some(next) = moved(&s.name) else { continue };
+        if own
+            .iter()
+            .any(|o| o.name == next && moved(&o.name).is_none())
+        {
+            return Err(next);
+        }
+        ops.push(Operation::SetStyleName {
+            id: s.id,
+            name: next,
+        });
+    }
+    Ok(ops)
+}
+
 /// `value` with every paint bound to one of `vars` **detached to the colour it
 /// draws in `mode`** — what deleting a variable does to the styles that use it
 /// (`variable::remove_ops`), in the document's default mode: a style is read by

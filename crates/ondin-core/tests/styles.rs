@@ -249,6 +249,43 @@ fn a_name_is_unique_within_its_slot() {
         .expect("a stroke style may share a fill style's name");
 }
 
+/// **Renaming a group moves its styles of that slot**, subgroups too; a name
+/// already held outside the group refuses it, and another slot's style of the
+/// same path stays.
+///
+/// flip: `moved` in `rename_group_ops` keeping the old prefix → fails at the new name.
+#[test]
+fn renaming_a_style_group_moves_its_slots_styles() {
+    let mut f = fixture();
+    let s = styled(&mut f);
+    let add = |f: &mut F, name: &str, value: StyleValue| {
+        let id = f.ids.mint_style();
+        let style = Style {
+            id,
+            name: name.into(),
+            value,
+            origin: None,
+            forked: None,
+        };
+        commit(f, vec![Operation::AddStyle { style }]).unwrap();
+        id
+    };
+    let deep = add(&mut f, "surface/inset/low", StyleValue::Fills(Vec::new()));
+    let stroke = add(&mut f, "surface/raised", StyleValue::Strokes(Vec::new()));
+    let ops =
+        ondin_core::style::rename_group_ops(&f.doc, StyleSlot::Fills, "surface", "card").unwrap();
+    commit(&mut f, ops).unwrap();
+    let name = |f: &F, id| f.doc.styles().get(id).unwrap().name.clone();
+    assert_eq!(name(&f, s), "card/raised");
+    assert_eq!(name(&f, deep), "card/inset/low");
+    assert_eq!(name(&f, stroke), "surface/raised", "another slot's stays");
+    add(&mut f, "raised", StyleValue::Fills(Vec::new()));
+    assert_eq!(
+        ondin_core::style::rename_group_ops(&f.doc, StyleSlot::Fills, "card", ""),
+        Err("raised".to_string())
+    );
+}
+
 /// The table and the bindings round-trip through a save; a file binding a
 /// style it does not hold is refused.
 #[test]

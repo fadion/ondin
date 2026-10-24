@@ -24,8 +24,6 @@ stale while its ask still reads true.
   `font-variation-settings` beyond weight, no `font-feature-settings`, no baseline shift and no
   `xml:lang`, and `svg::report_node` names none of them. The code export writes the first two
   (`code::walk`).
-- **Status messages overwrite each other.** `session.info` and `fail` share one slot, so a later
-  message in the same handler hides a refusal (`take_dropped_images`, `place_image_action`).
 - **Command palette coverage.** The Document menu's *Make this a kit*, *Kits used…*, *Stop sharing as
   kit* and *Show in library* are not registry `Item`s, and quarter turns
   (`inspector::rotate_selection_quarter`) are not in `palette::palette_commands`.

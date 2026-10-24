@@ -43,6 +43,8 @@ pub struct Status {
     /// When it was written: the floating status bar shows a message for a few
     /// seconds from here. Writing the same sentence again restarts the clock.
     pub at: Instant,
+    /// The frame it was written in (`EditorSession::next_status_pass`).
+    pass: u64,
 }
 
 impl Default for Status {
@@ -52,6 +54,7 @@ impl Default for Status {
             text: String::new(),
             kind: StatusKind::Info,
             at: Instant::now(),
+            pass: 0,
         }
     }
 }
@@ -432,6 +435,9 @@ pub struct EditorSession {
     /// overwrites that status can carry them ([`Self::last_detached`]).
     last_detached: (Vec<String>, Vec<String>),
     status: Status,
+    /// Which frame a status write belongs to ([`Self::next_status_pass`]): writes in
+    /// one frame are one handler's, and join after an error.
+    status_pass: u64,
 }
 
 /// **The flex-item properties a resize changed on the user's behalf** — the
@@ -495,6 +501,7 @@ impl EditorSession {
             flex_receipt: None,
             last_detached: Default::default(),
             status: Status::default(),
+            status_pass: 0,
         }
     }
 
@@ -1360,21 +1367,50 @@ impl EditorSession {
     }
 
     pub fn info(&mut self, text: impl Into<String>) {
-        self.status = Status {
-            text: text.into(),
-            kind: StatusKind::Info,
-            at: Instant::now(),
-        };
+        self.say(text.into(), StatusKind::Info);
     }
 
     pub fn fail(&mut self, text: impl Into<String>) {
+        self.say(text.into(), StatusKind::Error);
+    }
+
+    /// Start a new frame's status writes; the app calls it once a frame.
+    pub fn next_status_pass(&mut self) {
+        self.status_pass += 1;
+    }
+
+    /// Write the status line. **An error written this frame is never replaced**: a
+    /// later message joins it, so a refusal is not hidden by the report that follows
+    /// it in the same handler. A sentence already there is not said twice. A write in
+    /// a later frame replaces whatever is showing, as a new action's report should.
+    fn say(&mut self, text: String, kind: StatusKind) {
+        let old = &self.status;
+        // An empty write is a clear, and clears.
+        let join = old.pass == self.status_pass
+            && old.kind == StatusKind::Error
+            && !old.text.is_empty()
+            && !text.is_empty();
+        let (text, kind) = match join {
+            true if old.text.split(STATUS_JOIN).any(|t| t == text) => {
+                (old.text.clone(), StatusKind::Error)
+            }
+            true => (
+                format!("{}{STATUS_JOIN}{text}", old.text),
+                StatusKind::Error,
+            ),
+            false => (text, kind),
+        };
         self.status = Status {
-            text: text.into(),
-            kind: StatusKind::Error,
+            text,
+            kind,
             at: Instant::now(),
+            pass: self.status_pass,
         };
     }
 }
+
+/// What separates two messages joined on the status line.
+pub const STATUS_JOIN: &str = " · ";
 
 /// The canvas ground a document starts on, and the one the Appearance panel's
 /// reset button returns to: the design's near-black `#171718`.
@@ -1724,6 +1760,46 @@ mod tests {
             name: None,
         }])));
         id
+    }
+
+    /// A message after a refusal in the same frame joins it instead of hiding it, once
+    /// per sentence; a later frame's message replaces it, and an info is replaced.
+    /// flip: `say` without the join → fails at the first joined text.
+    #[test]
+    fn a_refusal_on_screen_is_joined_not_replaced() {
+        let mut s = EditorSession::new();
+        s.fail("photo.heic is not a format Ondin reads");
+        s.info("Placed 2 images");
+        assert_eq!(
+            s.status().text,
+            "photo.heic is not a format Ondin reads · Placed 2 images"
+        );
+        assert_eq!(
+            s.status().kind,
+            StatusKind::Error,
+            "and it stays coloured as one"
+        );
+        s.info("Placed 2 images");
+        assert_eq!(
+            s.status().text,
+            "photo.heic is not a format Ondin reads · Placed 2 images",
+            "a sentence already there is not said twice"
+        );
+
+        s.next_status_pass();
+        s.info("Copied");
+        assert_eq!(
+            s.status().text,
+            "Copied",
+            "the next action's report replaces it"
+        );
+        s.info("Pasted");
+        assert_eq!(
+            s.status().text,
+            "Pasted",
+            "an info is replaced, even in one frame"
+        );
+        assert_eq!(s.status().kind, StatusKind::Info);
     }
 
     /// A door's edit over a bound field names what it cut (W alone, then both), and

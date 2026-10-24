@@ -6566,6 +6566,8 @@ mod tests {
         );
 
         let info_text = "SENTINEL-INFO Imported 3 documents";
+        // A later action's report, so a later frame's: in one frame it would join.
+        app.session.next_status_pass();
         app.session.info(info_text);
         let lit = status_dot_color(&mut app, &ctx).expect("a report is marked too");
         assert_ne!(

@@ -1353,6 +1353,8 @@ impl eframe::App for OndinApp {
     /// The frame body: everything the app draws and decides, once per pass.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // First: this frame's status writes join one another, not the last frame's.
+        self.session.next_status_pass();
 
         // Above the view branch: a launch can land on either screen.
         self.recovery_modal(&ctx);
@@ -15810,6 +15812,8 @@ mod component_verb_tests {
             ondin_core::subtree_nodes(doc, &[doc.root()]).len()
         };
         let refused = |app: &mut OndinApp, sel: Vec<NodeId>, why: NotMain, case: &str| {
+            // Each case is its own action, in its own frame.
+            app.session.next_status_pass();
             app.session.selection.set(sel);
             assert_eq!(app.create_component_refusal(), Some(why), "{case}");
             let before = count(app);

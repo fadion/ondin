@@ -169,7 +169,7 @@ Both commit through `session.commit`, not `commit_edit`, whose one extra (arming
 selection-chrome hide) a visibility switch has nothing to look at.
 
 Rename opens the same `renaming_layer` field as a layers-panel double-click, showing the panel if
-hidden. It **refuses a multi-selection** and **refuses in present mode** (no panels are drawn, so
+hidden. It **refuses a multi-selection** and **refuses in focus mode** (no panels are drawn, so
 it would arm against a field that never renders).
 
 **`Ctrl+R` is rename, not rulers** (Illustrator/Photoshop). Rulers keep `Shift+R` and `Ctrl+R` is
@@ -204,14 +204,14 @@ one is designated (§15 D113).
 | `Ctrl+Shift+;` | snap to guides | ✅ both spellings |
 | — | snap to baselines | **unbound** (§15 D355) |
 | `Ctrl+Alt+;` | lock guides | ✅ Illustrator |
-| `Ctrl+\` | present mode (hide all chrome) | ✅ Figma's show/hide-UI |
+| `Ctrl+\` | focus mode (hide all chrome) | ✅ Figma's show/hide-UI |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show status messages | **unbound** (§15 D1025) |
 
 `ViewSwitch::accel` answers `None` for exactly the three unbound rows (`LayoutGrid`,
 `StatusMessages`, `SnapBaselines`): no convention to match, a menu one click away. They are listed
-so nobody calls a free chord parity. `Ctrl+\` maps to present mode, which already is "hide all
+so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide all
 chrome, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
 Guide lock is a workspace toggle on `OndinApp`, not a per-guide property (`architecture.md` §9.4).
 `theme::install` switches `zoom_with_keyboard` off, the only egui chord that collided; check it
@@ -419,7 +419,7 @@ combinations asserts the two **partition** the space.
 `OndinApp::escape` is an `else if` chain, so the order is the whole content; re-derive it from the
 code rather than editing this sentence:
 
-present mode → a bindable field's menu / `--` list / mode menu → a style card's menu, picker, name
+focus mode → a bindable field's menu / `--` list / mode menu → a style card's menu, picker, name
 or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
@@ -429,7 +429,7 @@ an edit → the point selection → the pivot handle → the entered group (sele
 not Select (to Select) → **the layer selection**, the fall-through `else`.
 
 🚨 A prose ordering is the least checkable thing this project writes down: an earlier list omitted
-rungs and put the layer selection above the tool, and `context-menus.md` §10 had present mode and
+rungs and put the layer selection above the tool, and `context-menus.md` §10 had focus mode and
 the entered group on the wrong side.
 
 ⚠️ **The chrome-field rung sits below the gesture** (§15 D821): a valved numeric field's cancel must
@@ -444,7 +444,7 @@ a context menu, a top-bar dropdown (`Action::Escape if open_menu != None`), a mo
 colour picker and the five inspector/Export popovers close on `Escape` and pay out no rung —
 dismissing something opened by accident must not deselect or drop the tool. 🚨 **Only a popover on
 screen takes the press** (§15 D847): a flag outlives its popover when the panel drawing it is
-skipped (non-text selection, present mode), and `Escape` was swallowed for the session; such a flag
+skipped (non-text selection, focus mode), and `Escape` was swallowed for the session; such a flag
 is cleared by the press, which then pays out its rung. ⚠️ **Image editing's card is deliberately
 not in that set**: it is a tool, and leaving it is the ladder's last rung.
 
@@ -535,7 +535,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, toolbar, status messages, present, and the snap switches.
+  grid, layout grid, layers panel, toolbar, status messages, focus, and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
   drives stay in step while the chord is a second caller that never sees the row.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,

@@ -25,7 +25,7 @@ variable*).
 - **R2** — A menu is claimed per region: the canvas, a layers row, the layers panel's background,
   and an inspector field (§6.7). Widgets that already use the secondary button keep it (gradient
   stop bar, ruler).
-- **R3** — An open menu is `Escape`'s first rung, above present mode: one press closes only the
+- **R3** — An open menu is `Escape`'s first rung, above focus mode: one press closes only the
   menu. While open the menu holds the keyboard (`input::resolve` does not run). The same
   one-press-one-rung rule holds for the top-bar dropdowns and the inspector popovers.
 - **R4** — One floating slot: opening a context menu closes the top-bar dropdowns, the colour
@@ -180,7 +180,7 @@ and *Duplicate as component* draw the filled hexagon.
 |---|---|---|
 | Hide / Show | `Ctrl+Shift+H` | *Show* only when every selected layer is hidden, as the action shows only then (a mixed selection hides); never dims |
 | Lock / Unlock | `Ctrl+Shift+L` | *Unlock* only when every selected layer's **own** flag is set, as the action unlocks only then; never dims |
-| Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer, and *"Leave present mode to rename"* in present mode, where the panel that holds the field is hidden; live on a lock |
+| Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer, and *"Leave focus mode to rename"* in focus mode, where the panel that holds the field is hidden; live on a lock |
 
 ### Navigate
 
@@ -293,14 +293,14 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Export all | `Ctrl+Alt+E` | re-runs every saved export spec; dims *"No layer in this document has export settings"* |
 | Export all frames… | — | every visible top-level frame: its own export rows, else a 1× PNG (`export.md`); dims *"No frames on the canvas"* |
 | *—* | | |
-| Show rulers ✓ | `Shift+R` | dims *"Present mode hides the rulers"* in present mode |
+| Show rulers ✓ | `Shift+R` | dims *"Focus mode hides the rulers"* in focus mode |
 | Show guides ✓ | `Ctrl+;` | |
 | Lock guides ✓ | `Ctrl+Alt+;` | the way back once guides are locked (C7) |
 | Show grid ✓ | `Ctrl+'` | |
 | Show layout grid ✓ | — | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
-switches less *Show layers*, *Show toolbar*, *Show status messages* and *Present mode*.
+switches less *Show layers*, *Show toolbar*, *Show status messages* and *Focus mode*.
 
 ### 6.2 Layers panel background
 
@@ -383,7 +383,7 @@ No variable is offered on a field's label badge (it scrubs).
 - **The four image fit modes** — image editing's card owns them.
 - **Text on path** — the Text tool's gesture; the menu has only the way out (*Detach from path*).
 - **Type controls in a text session** — the Type card is beside it.
-- **Show layers, Show toolbar, Present mode, Show status messages** on the canvas menu —
+- **Show layers, Show toolbar, Focus mode, Show status messages** on the canvas menu —
   chrome-wide switches, one click away in the View menu.
 - **Collapse all / Expand all** — the layers panel header has the button.
 - **Guide colour and position** — the inspector, for a selected guide.

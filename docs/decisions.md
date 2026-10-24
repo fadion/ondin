@@ -143,7 +143,8 @@ Decided non-goals are in `docs/non-goals.md`.
 
 - **D134** A control that does not apply is shown disabled, never removed.
 - **D345** Dropping in the layers panel chooses the parent level by horizontal travel.
-- **D750** Present mode hides chrome but keeps guides and layout grids.
+- **D750** Focus mode hides chrome but keeps guides and layout grids.
+- **Focus mode and present mode are separate modes**: focus mode is for editing with the chrome hidden; present mode is view-only.
 - **D749** The dashboard's default page is set only in Settings.
 - **D768** Open and Recover ask or save before replacing the open document.
 - **The eyedropper picks what is seen**, anywhere in the window: on the canvas the rendered pixel, composited over the ground, with egui's overlays never in it; elsewhere a frame of the window frozen while armed, chrome included. Hovering previews nothing on the canvas, since the next sample would read the preview.

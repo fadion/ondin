@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, the cheatsheet and present mode
+# Canvas chrome, the top bar's menus, the command palette, the cheatsheet and focus mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the top bar's View/Snap menus and Settings button, the command palette, the shortcut
-cheatsheet, and present mode. Part of §9.4.
+cheatsheet, and focus mode. Part of §9.4.
 
 ## 9.4 Gesture chrome
 
@@ -55,7 +55,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show layers*,
-  *Show toolbar*, *Show status messages*, *Present mode*.
+  *Show toolbar*, *Show status messages*, *Focus mode*.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
@@ -67,11 +67,11 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
   messages*.
-- All are **view state**, not document state. All but present mode are kept in `prefs.view`
+- All are **view state**, not document state. All but focus mode are kept in `prefs.view`
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides* and
-  present mode; a launch never opens in present mode.
+  focus mode; a launch never opens in focus mode.
 
 ### Settings
 
@@ -157,7 +157,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **Verbs with no other door.** *Export as HTML… / React… / Vue…*, one row per `code::Target`, dim
   with nothing selected, aliases *code*, *html*, *react*, *vue*, *zip*. *Show ‹card›*: the cards the
   inspector drew last frame (`cards_shown`) are live; cards drawn earlier this session but not now
-  (`cards_seen`) are dim, *Not shown for this selection*; in present mode all are dim. Running one
+  (`cards_seen`) are dim, *Not shown for this selection*; in focus mode all are dim. Running one
   sets `reveal_card`, and `panel_full` opens that card, scrolls it to the top and focuses its first
   field: the first widget drawn in it that senses click, drag and focus (`first_field`), which a
   value or text field does and a button or a reorder grip does not. Tool rows (*Tool:
@@ -172,7 +172,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   open it owns the keyboard: `palette::read_keys` takes its keys at the top of the frame, before any
   panel draws, and `input::resolve` does not run. ↑↓ wrap, Page Up/Down move eight rows, Escape
   closes whatever is typed, the chord again closes, and the cheatsheet's chord (read first, since
-  the palette's `/` would take it too) swaps the palette for the sheet. It works in present mode.
+  the palette's `/` would take it too) swaps the palette for the sheet. It works in focus mode.
 - **Not listed:** nudge, size step, point stepping, opacity digits, Escape and Enter, text chords
   outside a text session, `PasteRelease`.
 
@@ -214,30 +214,34 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   steps, Escape, Enter, `PasteRelease`, opacity digits). It checks actions, not spellings, so a
   second key for an action already shown is the hand list's to carry (`Item::alt_accel`).
 
-## Present mode
+## Focus mode
+
+Focus mode (`OndinApp::focus`, `ViewSwitch::Focus`, `Ctrl+\`, the palette's *focus* or *zen*) is
+the editing mode that hides the chrome. Present mode is a separate, view-only mode and none of the
+rules below are its.
 
 - Hides exactly: top bar, layers pane, tool rail, inspector, picker, ruler bars. Everything edited
   *with* stays — guides, layout grids, selection box, handles, size badge, hover outline, frame tags —
-  and the canvas works normally. The **floating status bar stays** (it carries *"Present mode — Escape
+  and the canvas works normally. The **floating status bar stays** (it carries *"Focus mode — Escape
   to leave"*).
-- On Windows/Linux the top bar is the title bar, so caption buttons go too; `chrome::present_strip`
+- On Windows/Linux the top bar is the title bar, so caption buttons go too; `chrome::focus_strip`
   shows them in a 32pt strip when the pointer reaches the window's top edge with no button held, keeps
   it while hovered or a button is down. Approaching from the canvas below shows nothing.
 - It **overrides** the switches it reads (rulers, layers, toolbar) without changing them, so leaving
-  restores the user's workspace. The canvas menu opens in present mode with *Show rulers* dimmed
-  (*"Present mode hides the rulers"*); the other View rows stay live.
-- Escape is handled **first** in `OndinApp::escape`. A context menu open in present mode takes the
+  restores the user's workspace. The canvas menu opens in focus mode with *Show rulers* dimmed
+  (*"Focus mode hides the rulers"*); the other View rows stay live.
+- Escape is handled **first** in `OndinApp::escape`. A context menu open in focus mode takes the
   first Escape (R3 returns before `escape`), the second leaves the mode. The popover arm asks for a
-  popover heard last frame (present mode draws none). Kit dialogs are drawn outside the `!present`
+  popover heard last frame (focus mode draws none). Kit dialogs are drawn outside the `!focus`
   guard so they get the first Escape.
 - **Every flag `modal_is_up` reads must be a card drawn whenever it is set**, or an undrawn card holds
   every key.
 
 ## Traps
 
-- Folding `present` into some overlay's predicate: present mode does not hide overlays; read §15 D750
+- Folding `focus` into some overlay's predicate: focus mode does not hide overlays; read §15 D750
   first.
-- A modal flag set behind a `!present` draw guard swallows all keys in present mode.
+- A modal flag set behind a `!focus` draw guard swallows all keys in focus mode.
 - Deriving the escape clip from overrides makes resized children pop out of their frame.
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
   frame's input; `just_opened` is all that stops the opening press closing it.

@@ -7,7 +7,7 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 ## 9.4 Rulers
 
 - Two 20pt bars, view state (`OndinApp::show_rulers`, on by default, `Shift+R`, *View ▸ Show
-  rulers*). Every reader asks `OndinApp::rulers_on()` (which includes `!present`), so hit test and
+  rulers*). Every reader asks `OndinApp::rulers_on()` (which includes `!focus`), so hit test and
   paint agree.
 - **Selection band**: a tinted `ACCENT_900` band spans the selection's world extent on each bar's
   axis, its two end coordinates in `ACCENT_200`, read through the preview layer. A tick number under a
@@ -30,7 +30,7 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 
 | Switch | Chord | Predicate |
 | --- | --- | --- |
-| Show guides | `Ctrl+;` | `guides_on()` = `show_guides` (present mode does **not** hide guides) |
+| Show guides | `Ctrl+;` | `guides_on()` = `show_guides` (focus mode does **not** hide guides) |
 | Lock guides | `Ctrl+Alt+;` | `guides_pickable()` = `guides_on() && !lock_guides` |
 
 - `guide_lines()` is empty when guides are off (no snapping to invisible lines).

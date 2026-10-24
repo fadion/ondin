@@ -26,7 +26,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 - Images: fills, raster import (dialog, drag-and-drop, paste), framing, image editing (crop, orientation, tile scale, seven per-pixel adjustments), export in all three writers, missing-image placeholder with *Replace…* (§5.5a, §7.1, §9.2).
 - Pan/zoom viewport; R-tree culling for many artboards.
 - Rulers and ruler guides, global or scoped to one frame; guides are document state (§5.5, §9.4).
-- Present mode: hides all chrome, Escape returns (§9.4).
+- Focus mode: hides all chrome, Escape returns (§9.4).
 - Undo/redo: unlimited, transactional, gesture-granular.
 - Save/load: native versioned document format with deterministic bytes.
 - Export: SVG (semantic), PNG and JPEG (CPU renderer, no GPU needed), JSON snapshot (AI handoff).

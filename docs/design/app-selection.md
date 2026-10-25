@@ -82,7 +82,8 @@ unselected layer is added first; inside an existing boolean it is a reorder to i
 click designates: an `Alt+Shift` **drag** on the artwork is an Alt-duplicate locked to one axis, a
 common enough gesture to outweigh a designating click that slips past the drag threshold. On the
 box's own chrome the chord keeps the handle's meaning (`Alt+Shift` on a corner is a proportional,
-centred resize).
+centred resize). Shift-click and a Shift or Alt marquee keep the key while it stays selected; a
+plain click or marquee replaces the selection and clears it.
 
 ### `Alt` on a resting pointer measures (`measure.rs`, `canvas::draw_measures`)
 

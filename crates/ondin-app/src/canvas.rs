@@ -2765,7 +2765,10 @@ impl OndinApp {
             {
                 continue;
             }
-            let NodeKind::Artboard { size } = node.kind() else {
+            // The display node's kind, as `draw_layout_grids` reads: the used box,
+            // where a hug, a stretch or a bound size draws the grid.
+            let Some(NodeKind::Artboard { size }) = self.session.display_node(id).map(|n| n.kind())
+            else {
                 continue;
             };
             let Some(world) = self.session.resolved.world_transform(id) else {
@@ -2862,7 +2865,8 @@ impl OndinApp {
     /// Selects by the band from `origin` to `end`, applied by `mode` to `base`,
     /// the selection the marquee started from. Leaves the selection untouched
     /// when the answer is what it already holds, and gives `base` back whole
-    /// (key layer included) when the band changes nothing.
+    /// (key layer included) when the band changes nothing. A Shift or Alt band
+    /// keeps `base`'s key while it is still selected.
     fn apply_marquee(
         &mut self,
         origin: Point,
@@ -2911,6 +2915,13 @@ impl OndinApp {
             self.session.selection = base.clone();
         } else if next != self.session.selection.ids() {
             self.session.selection.set(next);
+            // `set` clears the key; a Shift or Alt band keeps it while it stays,
+            // as Shift-click does (`set_key` ignores one no longer selected).
+            if !matches!(mode, MarqueeMode::Replace)
+                && let Some(key) = base.key()
+            {
+                self.session.selection.set_key(key);
+            }
         }
     }
 
@@ -18347,6 +18358,58 @@ mod marquee_selectability_tests {
             MarqueeMode::Replace
         );
     }
+
+    /// A Shift or Alt band keeps the key layer while it stays selected, as
+    /// Shift-click does.
+    ///
+    /// flip: `apply_marquee` not restoring `base`'s key → fails at "a Shift band
+    /// keeps the key".
+    #[test]
+    fn a_shift_or_alt_marquee_keeps_the_key_layer() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x5A13);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let board = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: board,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(200.0, 200.0),
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        }]))
+        .expect("an artboard");
+        // Ten wide, at x = 0, 20 and 40.
+        let [a, b, c] = [0, 1, 2].map(|i| rect(&mut doc, &mut ids, board, i));
+        app.session.adopt_document(doc, None);
+        let band = |app: &mut OndinApp, x0: f64, x1: f64, mode| {
+            let base = app.session.selection.clone();
+            app.apply_marquee(Point::new(x0, -5.0), Point::new(x1, 15.0), mode, &base);
+            app.session.selection.key()
+        };
+        app.session.selection.set(vec![a, b]);
+        app.session.selection.set_key(b);
+        assert_eq!(
+            band(&mut app, 35.0, 55.0, MarqueeMode::Toggle),
+            Some(b),
+            "a Shift band keeps the key"
+        );
+        assert!(app.session.selection.contains(c), "fixture: c added");
+        assert_eq!(
+            band(&mut app, 35.0, 55.0, MarqueeMode::Subtract),
+            Some(b),
+            "an Alt band keeps it"
+        );
+        assert_eq!(
+            band(&mut app, 15.0, 25.0, MarqueeMode::Subtract),
+            None,
+            "until it is the layer taken away"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -20756,5 +20819,72 @@ mod join_and_grid_snap_tests {
         }
         app.show_layout_grids = false;
         assert!(app.snapping(&[]).guides.x.is_empty(), "not while hidden");
+    }
+
+    /// A frame whose W is bound draws its grid on the bound width, and the snap
+    /// lines are the drawn edges, not the stored literal 0's.
+    ///
+    /// flip: `layout_grid_lines` reading the stored kind → fails at "snaps to the
+    /// drawn edge".
+    #[test]
+    fn a_layout_grid_snaps_on_the_box_it_is_drawn_on() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x703);
+        let root = app.session.doc.root();
+        let (frame, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+        let mut grid = ondin_core::LayoutGrid::new(ondin_core::GridAxis::Columns);
+        grid.count = 2;
+        grid.gutter = 20.0;
+        grid.margin = 10.0;
+        grid.align = ondin_core::GridAlign::Stretch;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                },
+                transform: Some(Affine::translate((100.0, 0.0))),
+                name: None,
+            },
+            Operation::SetLayoutGrids {
+                id: frame,
+                grids: ondin_core::keyed_by_position([grid]),
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "size/w".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(300.0))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ])));
+        let bind = ondin_core::build::bind_size_ops(&app.session.doc, frame, [Some(var), None]);
+        assert!(app.session.commit(Transaction(bind)), "W bound");
+        app.show_layout_grids = true;
+        app.snap_guides = true;
+        let xs = app.snapping(&[]).guides.x;
+        // 300 wide: columns of 130 at 10 and 160.
+        for x in [110.0, 240.0, 260.0, 390.0] {
+            assert!(
+                xs.iter().any(|v| (v - x).abs() < 1e-9),
+                "snaps to the drawn edge {x}: {xs:?}"
+            );
+        }
     }
 }

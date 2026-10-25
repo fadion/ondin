@@ -2706,7 +2706,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "ondin-app"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "arboard",
  "dirs",
@@ -2735,7 +2735,7 @@ dependencies = [
 
 [[package]]
 name = "ondin-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
  "flo_curves",
@@ -2755,7 +2755,7 @@ dependencies = [
 
 [[package]]
 name = "ondin-export"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "image",
  "ondin-core",
@@ -2768,14 +2768,14 @@ dependencies = [
 
 [[package]]
 name = "ondin-mcp"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ondin-core",
 ]
 
 [[package]]
 name = "ondin-render"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "image",
  "kurbo",

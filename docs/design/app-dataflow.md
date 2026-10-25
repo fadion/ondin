@@ -60,24 +60,79 @@ input event (winit/egui)
 - **The falling edge arrives one frame before the number does:** a valve committing from the falling edge must be handed the typed value by the field, not read it from the response.
 - **Picker pointer targets** (`picker::pointer_slot`): a click on the saturation plane sets neither `dragged` nor `changed`, so it commits directly; a press previews through `preview_slot` before it travels. The press arm claims the frame only if `preview_slot` returned a non-empty transaction.
 - **`edit_valve` reports whether it committed; no caller predicts it.** `inspector::valve_slot` retargeting a Group Colors row must use the return. The `bool` is `EditorSession::commit`'s "the commit took", true even if `changes_nothing` dropped the transaction.
-- **Text fields:** a `TextEdit` ends on focus loss but commits only if the key was not `Escape`. `ui::defocus_commits(resp)` (`lost_focus() && !key_pressed(Escape)`) is the one spelling, used by the hex field, `char_hex`, the layer-name field, stroke-dash list, Export prefix/suffix; the clear of the buffer must run on every way out. Grid-card CSS fields (`layout::grid::css_field`) compare text with the seeded text, not what is shown (a `Mixed` field shows nothing).
+- **Text fields:** a `TextEdit` ends on focus loss but commits only if the key was not `Escape`. `ui::defocus_commits(resp)` (`lost_focus() && !key_pressed(Escape)`) is the one spelling, used by the colour text fields (`colour_text_field`, `paint_hex_field`, `char_hex`), the layer-name field, stroke-dash list, Export prefix/suffix; the clear of the buffer must run on every way out. Grid-card CSS fields (`layout::grid::css_field`) compare text with the seeded text, not what is shown (a `Mixed` field shows nothing).
 - **A field not drawn on the frame it loses focus commits nothing**; the inspector hold cures this for every field. **A card keeping one write per frame drops the earlier row's write** when a click on another control in the same card shares the frame: the Component card commits each row's write in turn (`own_rows`; a text row's reset wins over its typed field); the Variants and Properties cards defer writes and build them once the card is drawn (`OndinApp::run_edits`), naming a property by item id (a set's property/value, which has none, by name followed through the frame's renames).
 - **Type panel axes:** the variable-axis field is valved like `axis_slider`; both read `axis_coords_after` (including `clear_at_default`).
-- **The `lost_focus` gate:** `app.rs · valve_condition_gate::nothing_commits_on_the_expression_d316_removed` reads every `.rs` under `crates/`, blanks `//` comments, and fails on any `lost_focus()` with `changed()` within 160 characters. Exempt with a `valve-gate-not-a-commit` marker in a comment beside the line (not a path list), placed last in its comment block. It does not cover a bare `lost_focus()` commit (e.g. picker hex field, ~700 characters apart); an `Escape` gate would need ~8 markers across 6 files and is not built.
+- **The `lost_focus` gate:** `app.rs · valve_condition_gate::nothing_commits_on_the_expression_d316_removed` reads every `.rs` under `crates/`, blanks `//` comments, and fails on any `lost_focus()` with `changed()` within 160 characters. Exempt with a `valve-gate-not-a-commit` marker in a comment beside the line (not a path list), placed last in its comment block. It does not cover a bare `lost_focus()` commit (e.g. the picker's `colour_text_field`); an `Escape` gate would need ~8 markers across 6 files and is not built.
 
 ### Colour picker
 
-It keeps no colour of its own: it reads its target brush through `display_node` each frame and writes each edit to the slot. It keeps only intent the document cannot hold: selected gradient stop, the hue behind a grey, a half-typed hex. Its window opens beside the field it edits every time (`Picker::spawn`; `placed` forces `current_pos` on the first frame; `default_size` height zero so the first-frame estimate is not clamped). A picker requested by a header `+` has no row yet: parked in `OndinApp::pending_picker` and claimed by the created row next frame. Retargeting keeps its position.
+It keeps no colour of its own: it reads its target brush through `display_node` each frame and writes each edit to the slot. It keeps only intent the document cannot hold: selected gradient stop, the hue behind a grey, a half-typed colour. Its window opens beside the field it edits every time (`Picker::spawn`; `placed` forces `current_pos` on the first frame; `default_size` height zero so the first-frame estimate is not clamped). A picker requested by a header `+` has no row yet: parked in `OndinApp::pending_picker` and claimed by the created row next frame. Retargeting keeps its position.
 
-The hex row opens with a pick button (`Picker::picking`), the eyedropper's door into this one slot
-(§9.4). Only the Solid and gradient faces draw the row, so `picker_body` disarms the button whenever
-the Variables face or an Image brush is showing: a face with no button cannot stay armed. While it is armed the picker takes no click, only picks (§9.4), and the hovered colour
-stands in for the edited stop's in the plane, hue and hex (`Picker::preview`, with a dim *was
-XXXXXX*), for the eye only: nothing previews on the canvas, because the next sample would read it. A
-pick writes through `OndinApp::write_slot_rgb`, the hex field's door: the RGB is set and that paint's
-or stop's alpha kept (a hex typed as `RRGGBBAA` sends its alpha, which every paint in scope takes);
-over a *Mixed* row (`SelectionAll`) each paint otherwise keeps its own opacity (§15 D540). One
-transaction.
+**The value row** (`hex_row`): the pick button, the format chooser, the colour in that format, the
+opacity.
+
+- **Formats** (`picker::Format`): Hex, RGB, HSL, HSB, one choice for the whole app
+  (`Prefs::colour_format`, a string key; an unknown key reads as Hex). The chooser
+  (`format_chooser`) is a 44pt button over an `egui::Popup::menu` whose rows show the current colour
+  in each format. The inspector's paint rows stay hex.
+- **Hex is a text field** (`colour_text_field`), buffered and committed on defocus. **RGB, HSL and
+  HSB are three scrub fields** (`channel_fields`: `DragValue`s through `ui::bare_drag_value_parsed`,
+  `update_while_editing(false)`), previewing through `valve_slot` like the panel's numbers, one undo
+  step per edit. HSB is the plane's own HSV and HSL is computed from it, both through the picker's
+  `intent` (`channel_brush`), so B to 0 and back keeps the hue. A whole colour typed or pasted into
+  one channel field sets the whole colour.
+- **Over a *Mixed* row** (`PaintSlot::SelectionAll`) a field format falls back to the text field,
+  reading *Mixed*: layers that disagree have no one channel to show.
+
+The pick button (`Picker::picking`) is the eyedropper's door into this one slot (§9.4). Only the
+Solid and gradient faces draw the row, so `picker_body` disarms the button whenever the Variables
+face or an Image brush is showing: a face with no button cannot stay armed. While it is armed the
+picker takes no click, only picks (§9.4), and the hovered colour stands in for the edited stop's in
+the plane, hue and value row (`Picker::preview`), for the eye only: nothing previews on the canvas,
+because the next sample would read it. Hex shows a dim *was XXXXXX* beside the field; a channel
+format tints its fields accent and shows the old colour as a chip in the chooser. A pick writes
+through `OndinApp::write_slot_rgb`, the typed colour's door: the RGB is set and that paint's or
+stop's alpha kept (a colour typed with an alpha sends it, and every paint in scope takes it); over a
+*Mixed* row each paint otherwise keeps its own opacity (§15 D540). One transaction.
+
+**Colour text** (`colour_text`: `parse`, `matches`, `refusal`, `Typed`) is the one parser behind
+every colour field — the picker's text and channel fields, the inspector's paint rows
+(`inspector::paint_hex_field`), the Type panel's colour field and variable cells
+(`variables::parse_colour`) — so typing or pasting a colour from CSS or another tool needs no
+conversion to hex first.
+
+- It reads hex (`RGB`, `RGBA`, `RRGGBB`, `RRGGBBAA`, `#` optional), `rgb()`/`rgba()` and
+  `hsl()`/`hsla()` in comma or space syntax with `/ alpha`, percentages, hue in deg/rad/grad/turn,
+  and the CSS named colours plus `transparent`, in any case. Channels out of range clamp, as CSS does.
+- Bytes go through `Color::from_rgba8`'s arithmetic, so a hex stores the float it always did.
+- `Typed::alpha` is `Some` only when the text spelled an alpha. A typed alpha sets the alpha; without
+  one a paint keeps its own and a variable cell is opaque.
+- `matches` compares as bytes, the alpha only when typed: committing an untouched field over an
+  off-lattice colour writes nothing.
+- Committed text that does not parse writes nothing and puts *Not a colour: <text>* in the floating
+  status (`refusal`, quiet for empty text, a `--name` and *Mixed*). A variable cell refuses with its
+  own sentence instead.
+- `ui::COLOUR_CHAR_LIMIT` (64) is room for any pasted CSS colour: a field too short for the paste
+  refuses it whole.
+
+**Recent colours** (`Prefs::recent_colours`, `OndinApp::remember_colour`): the last six distinct
+colours, RGB only, compared as bytes, most recent first. They are the person's, not the document's,
+app-wide and kept across launches, so the colour just used is one click away in the next file.
+
+- Recorded when a colour is committed, never during a drag (each call rewrites the preferences
+  file), and only what changed it: a click or a drag's release on the plane or a strip
+  (`write_stop_colour`, not a radial centre's drag), a field edit, a swatch click, `write_slot_rgb` (a typed colour, a picker's eyedropper), the eyedropper's selection
+  pick, the inspector's paint rows and the Type panel's colour field.
+- The Solid face's swatches are two rows of six (`document_swatches`): the recent colours (clock
+  glyph) above the document's own (`icon::FILE`, `document_palette`, most-used first). An empty place
+  draws a faint outline, so the face does not grow the first time a colour is committed. A swatch
+  sets the colour and the paint keeps its alpha.
+- **Every face is one height**, so nothing jumps under the pointer: the gradient faces' plane is 96pt
+  against the Solid face's 104, because their geometry row and stop bar take the room of the alpha
+  slider and swatches; the Variables face takes the Solid face's measured height (a 226pt list
+  until measured). `HEIGHT_HINT` (320), roughly the tallest face, places the window clear of the
+  screen edge. Changing one face's rows means re-balancing the others.
 
 ### Input routing (`input.rs`)
 

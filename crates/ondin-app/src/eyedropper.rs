@@ -312,6 +312,7 @@ impl OndinApp {
                         &mut self.session.ids,
                     );
                     self.commit_edit(tx);
+                    self.remember_colour(color);
                 }
                 if !pick.stay {
                     self.disarm_dropper();

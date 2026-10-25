@@ -209,6 +209,14 @@ pub struct Prefs {
     /// The View and Snap switches, written as they change
     /// (`OndinApp::remember_view_switches`).
     pub view: ViewPrefs,
+    /// The colour picker's value-row format, as `panels::picker::Format::key`
+    /// names it, with [`Self::dashboard_page`]'s degrade-to-default rule (to Hex).
+    pub colour_format: String,
+    /// The colours last committed from a picker, a colour field or the
+    /// eyedropper, most recent first, as sRGB 0..1 without alpha: a swatch sets
+    /// the colour and the paint keeps its own opacity. The person's, not the
+    /// document's, so they carry from one file to the next.
+    pub recent_colours: Vec<[f32; 3]>,
 }
 
 impl Default for Prefs {
@@ -245,6 +253,8 @@ impl Default for Prefs {
             last_document: None,
             palette_recent: Vec::new(),
             view: ViewPrefs::default(),
+            colour_format: "hex".into(),
+            recent_colours: Vec::new(),
         }
     }
 }

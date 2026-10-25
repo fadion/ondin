@@ -1514,7 +1514,7 @@ fn style_group_keys(doc: &Document) -> HashSet<String> {
 }
 
 /// A typed cell: `--name` aliases another variable of the kind, a colour takes
-/// a hex (its alpha too, eight digits), a number takes an expression, and a
+/// any colour text (`crate::colour_text`, its alpha too), a number takes an expression, and a
 /// string takes the text as typed, spaces and all (§15 D1069).
 fn parse_cell(
     table: &ondin_core::Variables,
@@ -1553,7 +1553,7 @@ fn parse_cell(
     match v.kind {
         VarKind::Color => parse_colour(text)
             .map(Cell::Color)
-            .ok_or_else(|| "A colour is a hex, like 8BA5E0, or --name.".to_string()),
+            .ok_or_else(|| "A colour is a hex or CSS colour, like 8BA5E0, or --name.".to_string()),
         VarKind::Number => crate::expr::eval(text)
             .filter(|x| x.is_finite())
             .map(Cell::Number)
@@ -1584,11 +1584,10 @@ fn kind_word(k: VarKind) -> &'static str {
     }
 }
 
-/// `RGB`, `RRGGBB` or `RRGGBBAA`, a leading `#` optional; a colour variable
-/// carries its own alpha, opaque when none is typed.
+/// Any colour a field reads (`crate::colour_text`); a colour variable carries its
+/// own alpha, opaque when none is typed.
 fn parse_colour(s: &str) -> Option<Color> {
-    let [r, g, b] = ui::parse_hex(s)?;
-    Some(Color::from_rgba8(r, g, b, 255).with_alpha(ui::parse_hex_alpha(s).unwrap_or(1.0)))
+    Some(crate::colour_text::parse(s)?.color(1.0))
 }
 
 /// What a cell shows when it is not being typed into, and what typing starts
@@ -3441,7 +3440,7 @@ mod tests {
         assert!(app.var_browser.is_some() && app.kit_picker.is_none());
     }
 
-    /// A cell takes a hex — its alpha too, a colour variable carrying its own
+    /// A cell takes a colour — its alpha too, a colour variable carrying its own
     /// (D1038) — an alias as `--name`, and refuses a loop with a sentence,
     /// keeping the field open.
     #[test]

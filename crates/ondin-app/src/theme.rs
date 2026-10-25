@@ -294,8 +294,10 @@ pub mod icon {
     /// Vertical where the editor's overflow is horizontal: a row's own menu reads
     /// as belonging to the row, and the design draws it that way.
     pub const DOTS_THREE_VERTICAL: &str = "\u{e208}";
-    /// The dashboard's *Recent*.
+    /// The dashboard's *Recent*, and the picker's recent-colours row.
     pub const CLOCK_COUNTER_CLOCKWISE: &str = "\u{e1a0}";
+    /// The picker's row of the colours in this document.
+    pub const FILE: &str = "\u{e230}";
     /// The dashboard's *All files*, and the placeholder on a card with no
     /// thumbnail yet.
     pub const FILES: &str = "\u{e710}";
@@ -693,6 +695,7 @@ pub mod icon {
         ("sliders", SLIDERS),
         ("dots-three-vertical", DOTS_THREE_VERTICAL),
         ("clock-counter-clockwise", CLOCK_COUNTER_CLOCKWISE),
+        ("file", FILE),
         ("files", FILES),
         ("squares-four", SQUARES_FOUR),
         ("pencil-simple", PENCIL_SIMPLE),

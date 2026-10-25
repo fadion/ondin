@@ -15,13 +15,14 @@ use super::layout::SizeMode;
 use super::paint::{self, PaintDrag, PaintKind, PaintList, PaintSlot};
 use super::picker::Picker;
 use crate::app::OndinApp;
+use crate::colour_text;
 use crate::preview::{Handle, PointRef, Side};
 use crate::session::EditorSession;
 use crate::theme::{self, color, icon};
 use crate::tools;
 use crate::ui::{
-    self, Prefix, Scrub, Swatch, card, field_row_active, hex_of, icon_button, parse_hex,
-    segment_label, segmented, swatch, value_field,
+    self, Prefix, Scrub, Swatch, card, field_row_active, hex_of, icon_button, segment_label,
+    segmented, swatch, value_field,
 };
 use eframe::egui;
 use ondin_core::Brush;
@@ -7792,8 +7793,9 @@ impl OndinApp {
     /// The editable hex for a solid paint row.
     ///
     /// Buffered and applied on defocus, so "6D" is not committed on the way to
-    /// "6D8CD9". Alpha is the row's opacity field. `mixed` shows the word, which
-    /// `parse_hex` rejects, so typing over it needs no special case.
+    /// "6D8CD9". Any CSS colour reads (`colour_text`). Alpha is the row's opacity
+    /// field. `mixed` shows the word, which does not parse, so typing over it needs
+    /// no special case.
     pub(super) fn paint_hex_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -7822,7 +7824,7 @@ impl OndinApp {
         let limit = if text.starts_with('-') {
             usize::MAX
         } else {
-            ui::HEX_CHAR_LIMIT
+            ui::COLOUR_CHAR_LIMIT
         };
         // A refused `--name` tail dims as it is typed.
         use ondin_core::variable::VarKind;
@@ -7885,11 +7887,16 @@ impl OndinApp {
             // bare click, and `lost_focus()` fires on two frames. `mixed` always
             // writes. A hex over a binding is a literal that detaches it, so a bound
             // field writes outright rather than through `edited_brush`.
-            // A typed `RRGGBBAA` sets the opacity too; a shorter hex keeps it.
-            let unchanged = !mixed && bound.is_none() && ui::hex_matches(&text, current);
-            let typed_alpha = ui::parse_hex_alpha(&text).filter(|_| slot.takes_alpha());
-            if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged) {
-                let rgb = ondin_core::peniko::Color::from_rgba8(r, g, b, 255);
+            // A typed alpha sets the opacity too; a colour without one keeps it.
+            let unchanged = !mixed && bound.is_none() && colour_text::matches(&text, current);
+            let typed = colour_text::parse(&text);
+            if let Some(why) = colour_text::refusal(&text) {
+                self.session.info(why);
+            }
+            let typed_alpha = typed.and_then(|t| t.alpha).filter(|_| slot.takes_alpha());
+            if let Some(t) = typed.filter(|_| !unchanged) {
+                let rgb = t.color(1.0);
+                self.remember_colour(rgb);
                 if bound.is_some() {
                     let lit = rgb.with_alpha(typed_alpha.unwrap_or(current.components[3]));
                     let ids = match slot {
@@ -9259,18 +9266,20 @@ impl OndinApp {
         !tx.0.is_empty()
     }
     /// Preview a slot edit while a control is dragged, commit once on release.
+    /// Whether it committed this frame; for a character slot, whether the gesture
+    /// ended, its session deciding the commit.
     pub(crate) fn valve_slot(
         &mut self,
         resp: &egui::Response,
         id: NodeId,
         slot: PaintSlot,
         brush: Brush,
-    ) {
+    ) -> bool {
         // A character attribute has its own valve: a live editing session is the
         // preview and commits at its end (§9.3).
         if let Some(cs) = slot.char_scoped() {
             self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Valve(resp));
-            return;
+            return resp.drag_stopped() || ui::defocus_commits(resp);
         }
         let tx = self.slot_transaction(id, slot, brush.clone());
         // Asked of the valve, not predicted from the response: a prediction would
@@ -9281,6 +9290,7 @@ impl OndinApp {
         if committing {
             self.retarget_after(slot, &brush);
         }
+        committing
     }
 
     /// Follow the picker onto whatever the edit just turned its slot into, so the

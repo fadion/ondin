@@ -13,8 +13,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   `GradientBrush::transform`); conic in the picker (`paint::PaintKind::Sweep` has no tab and no
   geometry editor, though the model and both renderers draw it; a fifth tab does not fit the strip
   beside *Variables* at 10pt).
-- **Colour entry beyond hex** — RGB/HSL/HSB fields and CSS `rgb()`/`hsl()` input — and **recent
-  colours** beside the document swatches (`picker::document_swatches`).
 - **Adding layout to a loose selection** should infer direction, gap and padding from where the
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
 - **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,

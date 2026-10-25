@@ -22,11 +22,9 @@
 use super::binding::{FaceTarget, FieldKey};
 use super::paint::{self, PaintKind, PaintSlot};
 use crate::app::OndinApp;
+use crate::colour_text;
 use crate::theme::{self, color, icon};
-use crate::ui::{
-    self, Hsv, color_to_egui, field_row, hex_of, icon_button, mask_corners, parse_hex,
-    segment_label,
-};
+use crate::ui::{self, Hsv, color_to_egui, hex_of, icon_button, mask_corners, segment_label};
 use eframe::egui;
 use eframe::egui::emath::GuiRounding as _;
 use ondin_core::Brush;
@@ -124,7 +122,7 @@ impl Picker {
 /// tabs. 272 is what the *Variables* tab's label needs; every face stretches to it.
 pub(super) const WIDTH: f32 = 272.0;
 /// Roughly the tallest face, for placing the window clear of the screen edge.
-pub(super) const HEIGHT_HINT: f32 = 300.0;
+pub(super) const HEIGHT_HINT: f32 = 320.0;
 const PAD: f32 = 11.0;
 /// The picker is one more card hanging beside the panel, so its rows are
 /// [`ui::CONTROL_H`] like the panel's and the two popovers'.
@@ -142,6 +140,152 @@ const TRACK_H: f32 = 9.0;
 const STOP_BAR_H: f32 = 11.0;
 /// Corner radius of the document-palette chips along the bottom of the card.
 const SWATCH_RADIUS: f32 = 5.0;
+/// The swatch rows: one chip's height, and the air between the recent row and the
+/// document's.
+const SWATCH_H: f32 = 14.0;
+const SWATCH_ROW_GAP: f32 = 6.0;
+/// Chips in each swatch row.
+const SWATCHES: usize = 6;
+/// How many colours the recent row remembers: as many as it shows.
+const RECENT_COLOURS: usize = SWATCHES;
+/// The value row's spacing, and its format button's and opacity field's widths.
+const ROW_GAP: f32 = 5.0;
+const CHOOSER_W: f32 = 44.0;
+const PCT_W: f32 = 40.0;
+/// The value row's right inset, under a text field's 9 so the opacity sits nearer
+/// the edge and leaves the channels their room.
+const ROW_PAD_R: f32 = 6.0;
+/// The format menu's width, which holds `223 100 100` beside `HSB`.
+const MENU_W: f32 = 150.0;
+
+/// How the value row shows and takes the colour, a choice kept for the whole app
+/// (`Prefs::colour_format`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Format {
+    Hex,
+    Rgb,
+    Hsl,
+    Hsb,
+}
+
+impl Format {
+    pub(crate) const ALL: [Format; 4] = [Format::Hex, Format::Rgb, Format::Hsl, Format::Hsb];
+
+    /// The name the preferences file stores.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Format::Hex => "hex",
+            Format::Rgb => "rgb",
+            Format::Hsl => "hsl",
+            Format::Hsb => "hsb",
+        }
+    }
+
+    /// A stored name read back; anything unrecognised is Hex.
+    pub(crate) fn from_key(key: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|f| f.key() == key)
+            .unwrap_or(Format::Hex)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Format::Hex => "Hex",
+            Format::Rgb => "RGB",
+            Format::Hsl => "HSL",
+            Format::Hsb => "HSB",
+        }
+    }
+
+    /// Each field's tooltip and the most it holds; Hex has no fields.
+    fn channels(self) -> [(&'static str, f64); 3] {
+        match self {
+            Format::Hex | Format::Rgb => [
+                ("Red · 0–255", 255.0),
+                ("Green · 0–255", 255.0),
+                ("Blue · 0–255", 255.0),
+            ],
+            Format::Hsl => [
+                ("Hue · 0–360", 360.0),
+                ("Saturation · 0–100", 100.0),
+                ("Lightness · 0–100", 100.0),
+            ],
+            Format::Hsb => [
+                ("Hue · 0–360", 360.0),
+                ("Saturation · 0–100", 100.0),
+                ("Brightness · 0–100", 100.0),
+            ],
+        }
+    }
+
+    /// `c` as this format's three numbers. HSB and HSL come from `hsv`, the
+    /// picker's remembered intent for `c`, so a grey keeps its hue.
+    fn values(self, c: Color, hsv: Hsv) -> [f64; 3] {
+        let [h, s, third] = match self {
+            Format::Hex | Format::Rgb => {
+                let k = c.components;
+                return [k[0], k[1], k[2]].map(|v| f64::from(v) * 255.0);
+            }
+            Format::Hsb => [hsv.h, hsv.s, hsv.v],
+            Format::Hsl => hsl_of(hsv),
+        };
+        [
+            f64::from(h) * 360.0,
+            f64::from(s) * 100.0,
+            f64::from(third) * 100.0,
+        ]
+    }
+
+    /// `hsv` with channel `i` of this format set to `v`, in the format's units.
+    fn with_channel(self, hsv: Hsv, i: usize, v: f32) -> Hsv {
+        let units = [360.0, 100.0, 100.0];
+        let set = |mut c: [f32; 3]| {
+            c[i] = v / units[i];
+            c
+        };
+        match self {
+            Format::Hsb => {
+                let [h, s, b] = set([hsv.h, hsv.s, hsv.v]);
+                Hsv::new(h, s, b, hsv.a)
+            }
+            Format::Hsl => {
+                let [h, s, l] = set(hsl_of(hsv));
+                hsv_of_hsl(h, s, l, hsv.a)
+            }
+            Format::Hex | Format::Rgb => hsv,
+        }
+    }
+
+    /// The colour as the format's menu row reads it.
+    fn preview(self, c: Color, hsv: Hsv) -> String {
+        match self {
+            Format::Hex => hex_of(c),
+            _ => self
+                .values(c, hsv)
+                .map(|v| format!("{}", v.round()))
+                .join(" "),
+        }
+    }
+}
+
+/// HSV's hue, saturation and value as HSL's hue, saturation and lightness, all 0..1.
+fn hsl_of(hsv: Hsv) -> [f32; 3] {
+    let l = hsv.v * (1.0 - hsv.s / 2.0);
+    let s = if l <= 0.0 || l >= 1.0 {
+        0.0
+    } else {
+        (hsv.v - l) / l.min(1.0 - l)
+    };
+    [hsv.h, s, l]
+}
+
+/// [`hsl_of`]'s inverse.
+fn hsv_of_hsl(h: f32, s: f32, l: f32, a: f32) -> Hsv {
+    let v = l + s * l.min(1.0 - l);
+    let sv = if v <= 0.0 { 0.0 } else { 2.0 * (1.0 - l / v) };
+    Hsv::new(h, sv, v, a)
+}
 /// The picker window's name, which `picker_window` also makes its `Area` id and
 /// so its layer's.
 ///
@@ -444,7 +588,7 @@ impl OndinApp {
             });
         });
         // The face keeps the Solid face's height so nothing jumps under the
-        // pointer — measured from that face when last drawn, a 206-point list
+        // pointer — measured from that face when last drawn, a 226-point list
         // until then.
         let face_top = ui.cursor().top();
         let solid_h = egui::Id::new("picker-solid-face-h");
@@ -452,7 +596,7 @@ impl OndinApp {
             let h = ui
                 .ctx()
                 .data(|d| d.get_temp::<f32>(solid_h))
-                .unwrap_or(ui::CONTROL_H + ui::POPOVER_SECTION_GAP + 206.0);
+                .unwrap_or(ui::CONTROL_H + ui::POPOVER_SECTION_GAP + 226.0);
             self.variables_face(ui, k, bound, inner_w, h);
             return close;
         }
@@ -484,7 +628,7 @@ impl OndinApp {
         let plane_h = if kind == PaintKind::Solid {
             104.0
         } else {
-            76.0
+            96.0
         };
         self.sv_plane(ui, node, slot, brush, index, current, inner_w, plane_h);
         self.hue_slider(ui, node, slot, brush, index, current, inner_w);
@@ -863,8 +1007,8 @@ impl OndinApp {
         );
         (rect, resp)
     }
-    /// Hex + opacity for the selected stop. Hex is buffered so a half-typed
-    /// value is not parsed on every keystroke.
+    /// The value row for the selected stop: the pick button, the format chooser,
+    /// the colour in that format, and the opacity.
     #[allow(clippy::too_many_arguments)]
     fn hex_row(
         &mut self,
@@ -878,8 +1022,15 @@ impl OndinApp {
     ) {
         let stops = paint::stops_of(brush);
         let single = stops.len() == 1;
-        field_row(ui, egui::vec2(width, ROW_H), |ui| {
-            ui.spacing_mut().item_spacing.x = 9.0;
+        let format = Format::from_key(&self.prefs.colour_format);
+        // Over layers that disagree there is no one channel to show, so a field
+        // format falls back to the text field, reading *Mixed*.
+        let mixed = matches!(slot, PaintSlot::SelectionAll(_));
+        // The pick button sits as far from the row's left edge as from its top
+        // and bottom: (row − hairlines − button) / 2.
+        let left = (ROW_H - ui::FIELD_BORDER_H - 20.0) / 2.0;
+        ui::field_row_inset(ui, egui::vec2(width, ROW_H), left, ROW_PAD_R, |ui| {
+            ui.spacing_mut().item_spacing.x = ROW_GAP;
             // The eyedropper's door into this one slot (the design's P1).
             let picking = self.picker.as_ref().is_some_and(|p| p.picking);
             let pick = icon_button(ui, icon::EYEDROPPER, 20.0, 14.0, picking, true)
@@ -891,68 +1042,26 @@ impl OndinApp {
                 p.preview = None;
             }
             let was = self.picker.as_ref().and_then(|p| p.was.clone());
-            let mut text = self
-                .picker
-                .as_ref()
-                .and_then(|p| p.hex.clone())
-                .unwrap_or_else(|| hex_of(current));
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut text)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(60.0)
-                    .char_limit(ui::HEX_CHAR_LIMIT)
-                    .font(egui::FontId::proportional(11.5)),
-            );
-            if let Some(was) = &was {
-                ui.label(
-                    egui::RichText::new(format!("was {was}"))
-                        .size(10.5)
-                        .color(theme::color::text_a(97)),
+            // Beside three fields there is no room for Hex's *was* label, so the
+            // edited colour rides the chooser as a chip.
+            let was_chip = was
+                .as_deref()
+                .and_then(colour_text::parse)
+                .filter(|_| format != Format::Hex)
+                .map(|t| t.color(1.0));
+            self.format_chooser(ui, format, current, was_chip);
+            let pct_w = if slot.takes_alpha() { PCT_W } else { 0.0 };
+            if format == Format::Hex || mixed {
+                let retargeted =
+                    self.colour_text_field(ui, node, slot, current, format, was.as_deref(), pct_w);
+                if retargeted {
+                    return;
+                }
+            } else {
+                let previewing = was.is_some();
+                self.channel_fields(
+                    ui, node, slot, brush, index, current, format, previewing, pct_w,
                 );
-            }
-            ui::select_all_on_focus(ui, &resp, &text);
-            if (resp.has_focus() || resp.changed())
-                && let Some(p) = &mut self.picker
-            {
-                p.hex = Some(text.clone());
-            }
-            // Applied on defocus (which Enter also triggers), not per keystroke,
-            // so "6D" does not land as a colour on the way to "6D8CD9". Clearing
-            // the buffer also strips a typed or pasted `#`: the field falls back
-            // to `hex_of`, which never writes one.
-            //
-            // 🚨 **[`ui::defocus_commits`] and not a bare `lost_focus()`**: `Escape`
-            // surrenders focus too, so a bare check commits the value being
-            // cancelled. The condition stays `lost_focus()` and the *write* is what
-            // `Escape` suppresses, because the buffer clear below must run on every
-            // defocus. No gate sees this shape; `grep -rn "lost_focus()"` does.
-            if resp.lost_focus() {
-                // 🚨 **Nothing is written unless the typed colour differs from the
-                // one that is there** (as `inspector::paint_hex_field` does),
-                // compared as *bytes*: `text` is seeded from `hex_of`, which rounds
-                // to 8 bits, so a colour the HSV plane produced would otherwise come
-                // back changed — with an undo step — by a click that typed nothing.
-                // `SelectionAll` is exempt: over a set that disagrees there is no
-                // one colour to compare against, and `current` is a stand-in.
-                let mixed = matches!(slot, PaintSlot::SelectionAll(_));
-                let unchanged = !mixed && ui::hex_matches(&text, current);
-                let abandoned = !ui::defocus_commits(&resp);
-                if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged && !abandoned) {
-                    let rgb = Color::from_rgba8(r, g, b, 255);
-                    // ⚠️ **Over a selection, an untyped alpha leaves each paint its
-                    // own opacity** (`write_slot_rgb`): `current` over a *Mixed* row
-                    // is a stand-in brush, so sending its alpha would flatten the set.
-                    self.write_slot_rgb(node, slot, rgb, ui::parse_hex_alpha(&text));
-                    if let Some(p) = &mut self.picker {
-                        p.hex = None;
-                    }
-                    if matches!(slot, PaintSlot::SelectionAll(_)) {
-                        return;
-                    }
-                }
-                if let Some(p) = &mut self.picker {
-                    p.hex = None;
-                }
             }
             if !slot.takes_alpha() {
                 return;
@@ -966,6 +1075,10 @@ impl OndinApp {
                 } else {
                     paint::alpha_of(brush) * 100.0
                 };
+                // Held to its budget, which `channel_fields` leaves it: the theme's
+                // minimum width would push it over the last channel.
+                ui.spacing_mut().interact_size.x = PCT_W;
+                ui.spacing_mut().button_padding.x = 0.0;
                 let r = ui::bare_drag_value(
                     ui,
                     egui::DragValue::new(&mut pct)
@@ -993,9 +1106,300 @@ impl OndinApp {
             });
         });
     }
+    /// The value row's text face: the Hex format's field, and every format's over a
+    /// *Mixed* row. Any CSS colour reads (`colour_text`). Buffered, so a half-typed
+    /// value is not parsed on every keystroke.
+    ///
+    /// Whether it wrote over a selection, which retargets the picker, so the rest
+    /// of the row is not drawn against the slot it left.
+    #[allow(clippy::too_many_arguments)]
+    fn colour_text_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        node: NodeId,
+        slot: PaintSlot,
+        current: Color,
+        format: Format,
+        was: Option<&str>,
+        pct_w: f32,
+    ) -> bool {
+        let mixed = matches!(slot, PaintSlot::SelectionAll(_));
+        let shown = if mixed && format != Format::Hex {
+            "Mixed".to_string()
+        } else {
+            hex_of(current)
+        };
+        let mut text = self
+            .picker
+            .as_ref()
+            .and_then(|p| p.hex.clone())
+            .unwrap_or_else(|| shown.clone());
+        // Hex leaves room for the *was* label; standing in for three fields, the
+        // field takes their room.
+        let width = match format {
+            Format::Hex => 60.0,
+            _ => ui.available_width() - pct_w - ROW_GAP,
+        };
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .frame(egui::Frame::NONE)
+                .desired_width(width)
+                .char_limit(ui::COLOUR_CHAR_LIMIT)
+                .font(egui::FontId::proportional(11.5)),
+        );
+        if let Some(was) = was.filter(|_| format == Format::Hex) {
+            ui.label(
+                egui::RichText::new(format!("was {was}"))
+                    .size(10.5)
+                    .color(theme::color::text_a(97)),
+            );
+        }
+        ui::select_all_on_focus(ui, &resp, &text);
+        if (resp.has_focus() || resp.changed())
+            && let Some(p) = &mut self.picker
+        {
+            p.hex = Some(text.clone());
+        }
+        // Applied on defocus (which Enter also triggers), not per keystroke, so
+        // "6D" does not land as a colour on the way to "6D8CD9". Clearing the
+        // buffer also strips a typed `#`: the field falls back to `hex_of`.
+        //
+        // 🚨 **[`ui::defocus_commits`] and not a bare `lost_focus()`**: `Escape`
+        // surrenders focus too, so a bare check commits the value being
+        // cancelled. The condition stays `lost_focus()` and the *write* is what
+        // `Escape` suppresses, because the buffer clear must run on every defocus.
+        if !resp.lost_focus() {
+            return false;
+        }
+        if let Some(p) = &mut self.picker {
+            p.hex = None;
+        }
+        if !ui::defocus_commits(&resp) || text == shown {
+            return false;
+        }
+        // 🚨 **Nothing is written unless the typed colour differs from the one
+        // that is there** (as `inspector::paint_hex_field` does), compared as
+        // *bytes*: a colour the HSV plane produced would otherwise come back
+        // changed, with an undo step, by a click that typed nothing. `SelectionAll`
+        // is exempt: over a set that disagrees, `current` is a stand-in.
+        match colour_text::parse(&text) {
+            Some(_) if !mixed && colour_text::matches(&text, current) => false,
+            // ⚠️ **Over a selection, an untyped alpha leaves each paint its own
+            // opacity** (`write_slot_rgb`): sending the stand-in's would flatten
+            // the set.
+            Some(t) => {
+                self.write_slot_rgb(node, slot, t.color(1.0), t.alpha);
+                mixed
+            }
+            None => {
+                if let Some(why) = colour_text::refusal(&text) {
+                    self.session.info(why);
+                }
+                false
+            }
+        }
+    }
+    /// The value row's three channel fields in `format`, each a scrub field
+    /// previewing through the valve as the panel's numbers do. A whole colour
+    /// typed or pasted into one sets the whole colour.
+    ///
+    /// `previewing` tints the numbers while the eyedropper shows a colour that
+    /// has not been written.
+    #[allow(clippy::too_many_arguments)]
+    fn channel_fields(
+        &mut self,
+        ui: &mut egui::Ui,
+        node: NodeId,
+        slot: PaintSlot,
+        brush: &Brush,
+        index: usize,
+        current: Color,
+        format: Format,
+        previewing: bool,
+        pct_w: f32,
+    ) {
+        let hsv = self.hsv_of(current);
+        let values = format.values(current, hsv);
+        let gaps = if pct_w > 0.0 { 3.0 } else { 2.0 };
+        let w = ((ui.available_width() - pct_w - ROW_GAP * gaps) / 3.0).max(1.0);
+        let hairline = egui::Stroke::new(1.0, theme::color::text_a(20));
+        let mut last = egui::Rect::NOTHING;
+        for (i, (name, max)) in format.channels().into_iter().enumerate() {
+            let mut v = values[i];
+            let start = v;
+            let whole = std::cell::Cell::new(None);
+            let refused = std::cell::RefCell::new(None);
+            // A slot of fixed width, the number centred in it: a field sized by its
+            // text would widen at some values and push its neighbours along.
+            let (cell, _) =
+                ui.allocate_exact_size(egui::vec2(w, ui.available_height()), egui::Sense::hover());
+            let fill = egui::Layout::centered_and_justified(egui::Direction::LeftToRight);
+            let resp = ui
+                .scope_builder(egui::UiBuilder::new().max_rect(cell).layout(fill), |ui| {
+                    ui.spacing_mut().interact_size.x = w;
+                    ui.spacing_mut().button_padding.x = 0.0;
+                    if previewing {
+                        ui.visuals_mut().override_text_color = Some(color::ACCENT_200);
+                    }
+                    // Read only when the edit ends, so a number half-typed is never
+                    // mistaken for a colour on the way.
+                    let field = egui::DragValue::new(&mut v)
+                        .range(0.0..=max)
+                        .speed(ui::scrub(if max > 100.0 { 1.0 } else { 0.5 }))
+                        .max_decimals(0)
+                        .update_while_editing(false);
+                    ui::bare_drag_value_parsed(ui, field, |s| {
+                        crate::expr::eval(s).or_else(|| match colour_text::parse(s) {
+                            Some(t) => {
+                                whole.set(Some(t));
+                                Some(start)
+                            }
+                            None => {
+                                *refused.borrow_mut() = colour_text::refusal(s);
+                                None
+                            }
+                        })
+                    })
+                })
+                .inner
+                .on_hover_text(name);
+            // In the middle of the gap before the field.
+            let x = cell.left() - ROW_GAP / 2.0;
+            ui.painter().vline(x, resp.rect.y_range(), hairline);
+            last = egui::Rect::from_x_y_ranges(cell.x_range(), resp.rect.y_range());
+            // Untouched, the brush as it is: converting back from HSL would move
+            // the colour by a rounding, and a bare click would commit it.
+            let next = if v == start {
+                brush.clone()
+            } else {
+                self.channel_brush(brush, index, current, hsv, format, i, v as f32)
+            };
+            // Only an edit is remembered: the valve also commits the brush a bare
+            // click left as it was.
+            let colour = paint::stops_of(&next)
+                .get(index)
+                .map(|s| s.1)
+                .filter(|_| v != start);
+            if self.valve_slot(&resp, node, slot, next)
+                && let Some(c) = colour
+            {
+                self.remember_colour(c);
+            }
+            if ui::defocus_commits(&resp) {
+                if let Some(t) = whole.get() {
+                    self.write_slot_rgb(node, slot, t.color(1.0), t.alpha);
+                }
+                if let Some(why) = refused.take() {
+                    self.session.info(why);
+                }
+            }
+        }
+        // And one before the opacity, which the row draws next.
+        if pct_w > 0.0 {
+            let x = last.right() + ROW_GAP / 2.0;
+            ui.painter().vline(x, last.y_range(), hairline);
+        }
+    }
+    /// `brush` with the selected stop's channel `i` of `format` set to `v`. An HSB or
+    /// HSL edit goes through the picker's remembered HSV, so dragging a channel to an
+    /// edge of the cube and back keeps the hue, as the plane does.
+    #[allow(clippy::too_many_arguments)]
+    fn channel_brush(
+        &mut self,
+        brush: &Brush,
+        index: usize,
+        current: Color,
+        hsv: Hsv,
+        format: Format,
+        i: usize,
+        v: f32,
+    ) -> Brush {
+        let colour = match format {
+            Format::Rgb => {
+                let mut k = current.components;
+                k[i] = (v / 255.0).clamp(0.0, 1.0);
+                Color::new(k)
+            }
+            Format::Hsb | Format::Hsl => {
+                let next = format.with_channel(hsv, i, v);
+                if let Some(p) = &mut self.picker {
+                    p.intent = Some((next, next.to_color().to_rgba8().to_u8_array()));
+                }
+                next.to_color()
+            }
+            Format::Hex => current,
+        };
+        let mut stops = paint::stops_of(brush);
+        if let Some(s) = stops.get_mut(index) {
+            s.1 = colour;
+        }
+        paint::with_stops(brush, stops)
+    }
+    /// The value row's format button, and its menu, whose rows each read the
+    /// colour in their format, so the menu doubles as a read-out. `was` is the
+    /// edited colour while the eyedropper shows another, as a chip.
+    fn format_chooser(
+        &mut self,
+        ui: &mut egui::Ui,
+        format: Format,
+        current: Color,
+        was: Option<Color>,
+    ) {
+        let (rect, resp) =
+            ui.allocate_exact_size(egui::vec2(CHOOSER_W, 20.0), egui::Sense::click());
+        let p = ui.painter();
+        let ground = theme::color::text_a(if resp.hovered() { 32 } else { 15 });
+        p.rect_filled(rect, egui::CornerRadius::same(4), ground);
+        let mut x = rect.left() + 6.0;
+        if let Some(was) = was {
+            let chip = egui::Rect::from_center_size(
+                egui::pos2(x + 4.0, rect.center().y),
+                egui::vec2(8.0, 8.0),
+            );
+            p.rect_filled(chip, egui::CornerRadius::same(2), color_to_egui(was));
+            x += 12.0;
+        }
+        p.text(
+            egui::pos2(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            format.label(),
+            egui::FontId::proportional(10.5),
+            theme::text::MUTED,
+        );
+        p.text(
+            egui::pos2(rect.right() - 5.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            icon::CARET_DOWN,
+            theme::icon_font(9.0),
+            theme::text::MUTED,
+        );
+        let resp = resp.on_hover_text("Colour format");
+        let hsv = self.hsv_of(current);
+        let mut picked = None;
+        egui::Popup::menu(&resp).gap(ui::MENU_GAP).show(|ui| {
+            ui::menu_rows(ui);
+            ui.set_width(MENU_W);
+            for f in Format::ALL {
+                let preview = f.preview(current, hsv);
+                let row = ui::MenuRow::new("", f.label())
+                    .accel(Some(&preview))
+                    .checked(f == format);
+                if ui::menu_row(ui, row, ui::MENU_ITEM_H).clicked() {
+                    picked = Some(f);
+                }
+            }
+        });
+        if let Some(f) = picked.filter(|f| *f != format) {
+            self.prefs.colour_format = f.key().into();
+            self.prefs.save();
+            if let Some(p) = &mut self.picker {
+                p.hex = None;
+            }
+        }
+    }
     /// Give `slot`'s edited colour this RGB, at `alpha` when one was typed
-    /// (`RRGGBBAA`) and at its own alpha otherwise — what typing a hex does, and
-    /// what the eyedropper does (its rule 3). One transaction.
+    /// (`RRGGBBAA`) and at its own alpha otherwise — what typing a colour does, and
+    /// what the eyedropper does (its rule 3). One transaction, and a recent colour.
     ///
     /// ⚠️ **Over a selection without a typed alpha, each paint keeps its own
     /// opacity**: over a set that disagrees there is no one number to send with the
@@ -1008,6 +1412,7 @@ impl OndinApp {
         rgb: Color,
         alpha: Option<f32>,
     ) {
+        self.remember_colour(rgb);
         let alpha = alpha.filter(|_| slot.takes_alpha());
         if let PaintSlot::SelectionAll(target) = slot {
             let tx = self.edit_paints_all(target, move |b| {
@@ -1030,8 +1435,10 @@ impl OndinApp {
         next[index].1 = rgb.with_alpha(alpha.unwrap_or(stops[index].1.components[3]));
         self.write_slot(node, slot, paint::with_stops(&brush, next));
     }
-    /// The colours already in this document, most-used first — how a second shape
-    /// gets the exact fill the first one has.
+    /// The recent colours (`Prefs::recent_colours`) over the document's own,
+    /// most-used first — how a second shape gets the exact fill the first one has,
+    /// or the colour used a minute ago. Empty places keep their row, so the face
+    /// does not grow the first time a colour is committed.
     #[allow(clippy::too_many_arguments)]
     fn document_swatches(
         &mut self,
@@ -1043,68 +1450,111 @@ impl OndinApp {
         current: Color,
         width: f32,
     ) {
-        const N: usize = 6;
-        let palette = self.document_palette(N);
-        if palette.is_empty() {
-            return;
-        }
+        const GLYPH_W: f32 = 14.0;
+        const GLYPH_GAP: f32 = 6.0;
+        let recent: Vec<Color> = self
+            .prefs
+            .recent_colours
+            .iter()
+            .map(|&[r, g, b]| Color::new([r, g, b, 1.0]))
+            .collect();
+        let document = self.document_palette(SWATCHES);
         let gap = 5.0;
-        let cw = (width - gap * (palette.len() - 1) as f32) / palette.len() as f32;
-        let (row, _) = ui.allocate_exact_size(egui::vec2(width, 14.0), egui::Sense::empty());
+        let (block, _) = ui.allocate_exact_size(
+            egui::vec2(width, SWATCH_H * 2.0 + SWATCH_ROW_GAP),
+            egui::Sense::empty(),
+        );
+        let x0 = block.min.x + GLYPH_W + GLYPH_GAP;
+        let cw = (block.max.x - x0 - gap * (SWATCHES - 1) as f32) / SWATCHES as f32;
+        let rows = [
+            (icon::CLOCK_COUNTER_CLOCKWISE, "Recent colours", &recent),
+            (icon::FILE, "In this document", &document),
+        ];
         let mut chosen = None;
-        for (i, col) in palette.iter().enumerate() {
-            // **Rounded to whole pixels — but not for the fill's sake.** epaint
-            // snaps every `RectShape` itself
-            // (`TessellationOptions::round_rects_to_pixels`); what it does not snap
-            // is a `Mesh`, so this puts `mask_corners` and `ui.interact` on the
-            // same grid as the fill.
-            let rect = egui::Rect::from_min_size(
-                egui::pos2(row.min.x + i as f32 * (cw + gap), row.min.y),
-                egui::vec2(cw, 14.0),
-            )
-            .round_to_pixels(ui.pixels_per_point());
-            let resp = ui.interact(rect, ui.id().with(("swatch", i)), egui::Sense::click());
-            let p = ui.painter();
-            let radius = egui::CornerRadius::same(SWATCH_RADIUS as u8);
-            // **One rounded rect, and nothing underneath it.** A mask over a square
-            // fill hard-steps the corners (a `Mesh` is not feathered), and
-            // `paint_checkerboard` lays a **white** base that a rounded fill
-            // anti-aliases against, haloing the chip. So the board is drawn only
-            // when there is transparency to show, inset so the fill's soft edge
-            // never lands on it.
-            //
-            // **One physical pixel, not one point**: `shrink(1.0)` is 1.5 device
-            // pixels at 150% and the gap comes out uneven; dividing by the scale
-            // keeps the board on the pixel grid.
-            if col.components[3] < 1.0 {
-                let inset = 1.0 / ui.pixels_per_point();
-                ui::paint_checkerboard(p, rect.shrink(inset), 4.0);
-                mask_corners(p, rect.shrink(inset), SWATCH_RADIUS - inset, color::CARD);
-            }
-            p.rect_filled(rect, radius, color_to_egui(*col));
-            // The inspector chips' hairline: a dark drawing would otherwise fill
-            // this row with invisible chips. Unconditional, *under* the in-use ring
-            // below rather than instead of it.
-            p.rect_stroke(
-                rect,
-                radius,
-                egui::Stroke::new(1.0, ui::SWATCH_HAIRLINE),
-                egui::StrokeKind::Inside,
+        for (r, (glyph, tip, colours)) in rows.into_iter().enumerate() {
+            let top = block.min.y + r as f32 * (SWATCH_H + SWATCH_ROW_GAP);
+            let glyph_rect = egui::Rect::from_min_size(
+                egui::pos2(block.min.x, top),
+                egui::vec2(GLYPH_W, SWATCH_H),
             );
-            // Ring the one already in use.
-            if col.components[..3] == current.components[..3] {
+            ui.painter().text(
+                glyph_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                glyph,
+                theme::icon_font(12.0),
+                theme::text::DIM,
+            );
+            ui.interact(
+                glyph_rect,
+                ui.id().with(("swatch-row", r)),
+                egui::Sense::hover(),
+            )
+            .on_hover_text(tip);
+            for i in 0..SWATCHES {
+                // **Rounded to whole pixels — but not for the fill's sake.** epaint
+                // snaps every `RectShape` itself
+                // (`TessellationOptions::round_rects_to_pixels`); what it does not snap
+                // is a `Mesh`, so this puts `mask_corners` and `ui.interact` on the
+                // same grid as the fill.
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(x0 + i as f32 * (cw + gap), top),
+                    egui::vec2(cw, SWATCH_H),
+                )
+                .round_to_pixels(ui.pixels_per_point());
+                let radius = egui::CornerRadius::same(SWATCH_RADIUS as u8);
+                let Some(col) = colours.get(i) else {
+                    ui.painter().rect_stroke(
+                        rect,
+                        radius,
+                        egui::Stroke::new(1.0, theme::color::text_a(28)),
+                        egui::StrokeKind::Inside,
+                    );
+                    continue;
+                };
+                let resp = ui.interact(rect, ui.id().with(("swatch", r, i)), egui::Sense::click());
+                let p = ui.painter();
+                // **One rounded rect, and nothing underneath it.** A mask over a
+                // square fill hard-steps the corners (a `Mesh` is not feathered), and
+                // `paint_checkerboard` lays a **white** base that a rounded fill
+                // anti-aliases against, haloing the chip. So the board is drawn only
+                // when there is transparency to show, inset so the fill's soft edge
+                // never lands on it.
+                //
+                // **One physical pixel, not one point**: `shrink(1.0)` is 1.5 device
+                // pixels at 150% and the gap comes out uneven; dividing by the scale
+                // keeps the board on the pixel grid.
+                if col.components[3] < 1.0 {
+                    let inset = 1.0 / ui.pixels_per_point();
+                    ui::paint_checkerboard(p, rect.shrink(inset), 4.0);
+                    mask_corners(p, rect.shrink(inset), SWATCH_RADIUS - inset, color::CARD);
+                }
+                p.rect_filled(rect, radius, color_to_egui(*col));
+                // The inspector chips' hairline: a dark drawing would otherwise fill
+                // this row with invisible chips. Unconditional, *under* the in-use
+                // ring below rather than instead of it.
                 p.rect_stroke(
                     rect,
                     radius,
-                    egui::Stroke::new(1.5, color::ACCENT_200),
-                    egui::StrokeKind::Outside,
+                    egui::Stroke::new(1.0, ui::SWATCH_HAIRLINE),
+                    egui::StrokeKind::Inside,
                 );
-            }
-            if resp.clicked() {
-                chosen = Some(*col);
+                // Ring the one already in use, compared as bytes: a recent colour
+                // and the document's may differ below the eighth bit.
+                if hex_of(*col) == hex_of(current) {
+                    p.rect_stroke(
+                        rect,
+                        radius,
+                        egui::Stroke::new(1.5, color::ACCENT_200),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                if resp.clicked() {
+                    chosen = Some(*col);
+                }
             }
         }
         if let Some(col) = chosen {
+            self.remember_colour(col);
             // The swatch carries the colour, the alpha slider owns the alpha — over
             // a selection, **each paint's own**, as in `hex_row`: a Mixed row's
             // swatch grid and hex field are the same edit by two doors.
@@ -1139,6 +1589,22 @@ impl OndinApp {
             .map(|u| u.color)
             .collect()
     }
+    /// Put `c`'s colour first among the recent colours, once — called where a
+    /// colour is committed, never during a drag, since each call rewrites the
+    /// preferences file.
+    pub(crate) fn remember_colour(&mut self, c: Color) {
+        let [r, g, b, _] = c.components;
+        let rgb = [r, g, b];
+        let same = |o: &[f32; 3]| hex_of(Color::new([o[0], o[1], o[2], 1.0])) == hex_of(c);
+        let recent = &mut self.prefs.recent_colours;
+        if recent.first().is_some_and(same) {
+            return;
+        }
+        recent.retain(|o| !same(o));
+        recent.insert(0, rgb);
+        recent.truncate(RECENT_COLOURS);
+        self.prefs.save();
+    }
     // --- plumbing ----------------------------------------------------------
     /// HSV for a colour, honouring what the picker last wrote — see
     /// [`Picker::intent`] for the three components and why one of them is not
@@ -1168,7 +1634,9 @@ impl OndinApp {
         }
         stops[index].1 = hsv.to_color();
         let next = paint::with_stops(brush, stops);
-        self.pointer_slot(resp, node, slot, next);
+        if self.pointer_slot(resp, node, slot, next) {
+            self.remember_colour(hsv.to_color());
+        }
     }
     /// Commit a slot edit driven by a pointer gesture: the **press** shows the colour
     /// at once, a drag keeps showing it, and the release commits.
@@ -1185,16 +1653,23 @@ impl OndinApp {
     ///
     /// Shown rather than committed, because the gesture is not over: the release
     /// commits through `clicked()` if it never travelled, or through the valve's
-    /// `drag_stopped()` if it did, clearing the preview.
-    fn pointer_slot(&mut self, resp: &egui::Response, node: NodeId, slot: PaintSlot, brush: Brush) {
+    /// `drag_stopped()` if it did, clearing the preview. Whether this frame
+    /// committed.
+    fn pointer_slot(
+        &mut self,
+        resp: &egui::Response,
+        node: NodeId,
+        slot: PaintSlot,
+        brush: Brush,
+    ) -> bool {
         // A cancelled drag across the plane must not land as a click on
         // release, which is the one way a colour could still get through.
         if self.gesture_cancelled {
-            return;
+            return false;
         }
         if resp.clicked() {
             self.write_slot(node, slot, brush);
-            return;
+            return true;
         }
         // `is_pointer_button_down_on` and `dragged` overlap once travel begins;
         // the valve owns that half.
@@ -1206,9 +1681,9 @@ impl OndinApp {
             // edit; `true` because the button is down. Nothing downstream does it:
             // `edit_note` reads `dragged()` and `changed()`, which a press sets neither.
             self.note_live_edit(true);
-            return;
+            return false;
         }
-        self.valve_slot(resp, node, slot, brush);
+        self.valve_slot(resp, node, slot, brush)
     }
 }
 /// A slider knob: a filled circle in the value's own colour, ringed white.
@@ -1649,9 +2124,10 @@ mod mixed_hex_tests {
     };
 
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
-    /// Inside the hex field's hit band (x 420…485, y 512…537) with the picker
-    /// spawned at `(400, 300)`, in points at any `pixels_per_point`.
-    const HEX_FIELD: egui::Pos2 = egui::pos2(450.0, 524.0);
+    /// Inside the hex field's hit band (past the pick button and the format
+    /// chooser, y 512…537) with the picker spawned at `(400, 300)`, in points at
+    /// any `pixels_per_point`.
+    const HEX_FIELD: egui::Pos2 = egui::pos2(500.0, 524.0);
 
     /// Two rects, one solid fill each, at the two given alphas.
     fn two_rects(ctx: &egui::Context, alphas: (f32, f32)) -> (OndinApp, NodeId, NodeId) {
@@ -1718,24 +2194,25 @@ mod mixed_hex_tests {
 
     /// Click into the hex field, replace its text with `hex`, press `Enter`.
     fn type_hex(ctx: &egui::Context, app: &mut OndinApp, hex: &str) {
+        type_at(ctx, app, HEX_FIELD, hex);
+    }
+
+    /// Click into the field at `at`, replace its text with `text`, press `Enter`.
+    fn type_at(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2, text: &str) {
         for _ in 0..2 {
             frame(ctx, app, Vec::new());
         }
         let button = |pressed| egui::Event::PointerButton {
-            pos: HEX_FIELD,
+            pos: at,
             button: egui::PointerButton::Primary,
             pressed,
             modifiers: Default::default(),
         };
-        frame(
-            ctx,
-            app,
-            vec![egui::Event::PointerMoved(HEX_FIELD), button(true)],
-        );
+        frame(ctx, app, vec![egui::Event::PointerMoved(at), button(true)]);
         frame(ctx, app, vec![button(false)]);
         // **One `Event::Text` replaces the whole buffer**, because
         // `ui::select_all_on_focus` selects it on `gained_focus` — no Backspace.
-        frame(ctx, app, vec![egui::Event::Text(hex.into())]);
+        frame(ctx, app, vec![egui::Event::Text(text.into())]);
         frame(
             ctx,
             app,
@@ -1755,7 +2232,7 @@ mod mixed_hex_tests {
     /// **A hex typed over a Mixed row leaves each layer its own opacity.** The hex
     /// is typed rather than preset, so the events must reach *this* widget.
     ///
-    /// flip: delete `hex_row`'s `SelectionAll` branch → fails at B's alpha. The
+    /// flip: delete `write_slot_rgb`'s `SelectionAll` branch → fails at B's alpha. The
     /// `undo_depth` assertion (one edit, one step) and the single-layer control
     /// stay green under it; the control shows the loss is the scope, not the
     /// field's arithmetic.
@@ -1828,14 +2305,14 @@ mod mixed_hex_tests {
         assert_eq!(rgba8(&app, b), [0, 0, 255, 192], "one slot takes it too");
     }
 
-    /// **A bare click through the picker's hex field writes nothing.** `hex_row`
-    /// would parse its own unchanged text back: `parse_hex` gives `u8`s and
-    /// `from_rgba8` re-expands them, so `0.5` came back `0.5019608` and cost an
-    /// undo step. The typed control guards against a guard that refuses everything.
+    /// **A bare click through the picker's hex field writes nothing.** Parsing the
+    /// field's own unchanged text back gives bytes that `from_rgba8` re-expands, so
+    /// `0.5` would come back `0.5019608` and cost an undo step. The typed control
+    /// guards against a guard that refuses everything.
     ///
-    /// flip: `!mixed` inverted to `mixed` in `hex_row` → fails at the colour
-    /// (`[0.5019608, …]` against `[0.5, …]`); the Mixed-row test above stays green,
-    /// so both are needed.
+    /// `colour_text_field` has two guards, `text == shown` and the byte-compared
+    /// `matches` arm; either alone keeps this green, so a flip has to drop both
+    /// → fails at the colour (`[0.5019608, …]` against `[0.5, …]`).
     #[test]
     fn a_bare_click_through_the_hex_field_writes_nothing() {
         let ctx = egui::Context::default();
@@ -1942,6 +2419,273 @@ mod mixed_hex_tests {
             [0, 255, 0, 255],
             "control: a typed hex still writes, or the guard refuses everything"
         );
+    }
+
+    /// The picker on B's own fill, in `format`.
+    fn on_b(ctx: &egui::Context, format: Format) -> (OndinApp, NodeId) {
+        let (mut app, _a, b) = two_rects(ctx, (1.0, 0.4));
+        app.prefs.colour_format = format.key().into();
+        app.session.selection.set(vec![b]);
+        app.picker = Some(Picker::new(b, PaintSlot::Fill(0), egui::pos2(400.0, 300.0)));
+        (app, b)
+    }
+
+    /// Every text the picker draws this frame, with its centre.
+    fn texts(ctx: &egui::Context, app: &mut OndinApp) -> Vec<(String, egui::Pos2)> {
+        text_rects(ctx, app)
+            .into_iter()
+            .map(|(t, r)| (t, r.center()))
+            .collect()
+    }
+
+    /// Every text the picker draws this frame, with its box.
+    fn text_rects(ctx: &egui::Context, app: &mut OndinApp) -> Vec<(String, egui::Rect)> {
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+                ..Default::default()
+            },
+            |ui| app.picker_ui(ui.ctx()),
+        );
+        out.shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) => Some((
+                    t.galley.text().to_owned(),
+                    t.galley.rect.translate(t.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Where the `nth` (left to right) drawn text reading `text` sits, on the value
+    /// row (the plane and strips draw none).
+    fn field_at(ctx: &egui::Context, app: &mut OndinApp, text: &str, nth: usize) -> egui::Pos2 {
+        for _ in 0..2 {
+            frame(ctx, app, Vec::new());
+        }
+        let mut at: Vec<egui::Pos2> = texts(ctx, app)
+            .into_iter()
+            .filter(|(t, _)| t == text)
+            .map(|(_, p)| p)
+            .collect();
+        at.sort_by(|a, b| a.x.total_cmp(&b.x));
+        *at.get(nth)
+            .unwrap_or_else(|| panic!("the row draws {text:?} at least {} times", nth + 1))
+    }
+
+    /// Any CSS colour typed into the hex lands, its alpha with it; without one the
+    /// paint keeps its own.
+    ///
+    /// flip: `colour_text::parse` without its `rgb()` branch → fails at the first
+    /// assertion.
+    #[test]
+    fn a_css_colour_typed_into_the_hex_lands() {
+        let ctx = egui::Context::default();
+        let (mut app, b) = on_b(&ctx, Format::Hex);
+        type_hex(&ctx, &mut app, "rgb(0 255 0 / 50%)");
+        assert_eq!(rgba8(&app, b), [0, 255, 0, 128]);
+        type_hex(&ctx, &mut app, "rebeccapurple");
+        assert_eq!(
+            rgba8(&app, b),
+            [102, 51, 153, 128],
+            "a name has no alpha, so the 50% stays"
+        );
+    }
+
+    /// Text that is not a colour writes nothing, spends no undo step, and says so.
+    ///
+    /// flip: `colour_text::refusal` answering `None` → fails at the status.
+    #[test]
+    fn text_that_is_not_a_colour_is_refused_aloud() {
+        let ctx = egui::Context::default();
+        let (mut app, b) = on_b(&ctx, Format::Hex);
+        let (before, depth) = (rgba8(&app, b), app.session.history.undo_depth());
+        type_hex(&ctx, &mut app, "rgb(1 2)");
+        assert_eq!(rgba8(&app, b), before, "nothing written");
+        assert_eq!(app.session.history.undo_depth(), depth, "no undo step");
+        assert_eq!(app.session.status().text, "Not a colour: rgb(1 2)");
+    }
+
+    /// In RGB the value row is three fields, and typing one sets that channel
+    /// alone; the opacity is the paint's own.
+    ///
+    /// flip: `channel_brush` writing channel 0 whatever `i` is → fails at the
+    /// green field.
+    #[test]
+    fn an_rgb_field_sets_its_one_channel() {
+        let ctx = egui::Context::default();
+        let (mut app, b) = on_b(&ctx, Format::Rgb);
+        assert_eq!(
+            rgba8(&app, b),
+            [0, 0, 255, 102],
+            "fixture: B is blue at 40%"
+        );
+        let red = field_at(&ctx, &mut app, "0", 0);
+        type_at(&ctx, &mut app, red, "255");
+        assert_eq!(rgba8(&app, b), [255, 0, 255, 102], "R set, G and B kept");
+        let green = field_at(&ctx, &mut app, "0", 0);
+        type_at(&ctx, &mut app, green, "128");
+        assert_eq!(rgba8(&app, b), [255, 128, 255, 102], "then G");
+        assert_eq!(app.session.history.undo_depth(), 2, "one step per field");
+    }
+
+    /// A whole colour typed into a channel field sets the whole colour, so a paste
+    /// never needs a trip back to Hex.
+    ///
+    /// flip: the channel parser dropping its `colour_text::parse` fallback → fails
+    /// at the assertion (the text is refused and nothing changes).
+    #[test]
+    fn a_whole_colour_in_a_channel_field_sets_the_colour() {
+        let ctx = egui::Context::default();
+        let (mut app, b) = on_b(&ctx, Format::Rgb);
+        let red = field_at(&ctx, &mut app, "0", 0);
+        type_at(&ctx, &mut app, red, "hsl(120 100% 25%)");
+        assert_eq!(rgba8(&app, b), [0, 128, 0, 102]);
+        assert_eq!(app.session.history.undo_depth(), 1, "one paste, one step");
+    }
+
+    /// HSB's B taken to 0 and back keeps the hue and saturation, as the plane does:
+    /// the fields go through the picker's remembered HSV, not through black.
+    ///
+    /// flip: `channel_brush` not storing `intent` → fails at the return trip (black
+    /// then reads 0 0 0, so the row has forgotten the blue).
+    #[test]
+    fn hsb_brightness_keeps_the_hue_through_black() {
+        let ctx = egui::Context::default();
+        let (mut app, b) = on_b(&ctx, Format::Hsb);
+        // Blue reads 240 100 100: B is the second 100.
+        let brightness = field_at(&ctx, &mut app, "100", 1);
+        type_at(&ctx, &mut app, brightness, "0");
+        assert_eq!(rgba8(&app, b)[..3], [0, 0, 0], "fixture: black");
+        let brightness = field_at(&ctx, &mut app, "0", 0);
+        type_at(&ctx, &mut app, brightness, "100");
+        assert_eq!(rgba8(&app, b), [0, 0, 255, 102], "blue again, not grey");
+    }
+
+    /// The channel fields hold their places whatever they read, and an opaque
+    /// colour's `100%` clears the hairline before it.
+    ///
+    /// flip: the fields sized by their text (a plain `scope` instead of the fixed
+    /// cell, with egui's button padding) → fails at "holds its place", by 1.8pt;
+    /// `PCT_W` at 34 → fails at "clears".
+    #[test]
+    fn the_channel_fields_hold_their_places_and_the_opacity_clears_them() {
+        // The G and B fields' texts and the opacity's, with R at `r`.
+        let measure = |r: u8| {
+            let ctx = egui::Context::default();
+            let (mut app, a, _b) = two_rects(&ctx, (1.0, 1.0));
+            app.prefs.colour_format = Format::Rgb.key().into();
+            app.session.commit(Transaction(vec![Operation::SetFills {
+                id: a,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(r, 122, 26, 255)).into(),
+                    visible: true,
+                }]),
+            }]));
+            app.session.selection.set(vec![a]);
+            app.picker = Some(Picker::new(a, PaintSlot::Fill(0), egui::pos2(400.0, 300.0)));
+            for _ in 0..2 {
+                frame(&ctx, &mut app, Vec::new());
+            }
+            let shown = text_rects(&ctx, &mut app);
+            let find = |s: &str| shown.iter().find(|(t, _)| t == s).expect(s).1;
+            (find("122"), find("26"), find("100"))
+        };
+        let (g_wide, b, pct) = measure(255);
+        let (g_narrow, _, _) = measure(1);
+        assert_eq!(
+            g_wide.center(),
+            g_narrow.center(),
+            "G holds its place as R goes from 255 to 1"
+        );
+        // Fields sit at equal pitch, each centred in its cell, so the B cell's
+        // right edge is half a cell past its centre; the hairline is half a gap on.
+        let pitch = b.center().x - g_wide.center().x;
+        let hairline = b.center().x + (pitch - ROW_GAP) / 2.0 + ROW_GAP / 2.0;
+        assert!(
+            pct.left() >= hairline + 4.0,
+            "the opacity clears the hairline: 100% starts at {}, the hairline is at {hairline}",
+            pct.left()
+        );
+    }
+
+    /// Over a Mixed row a field format falls back to one text field reading
+    /// *Mixed*, which takes a whole colour as the hex does.
+    #[test]
+    fn a_mixed_row_in_a_field_format_takes_a_whole_colour() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = two_rects(&ctx, (1.0, 0.4));
+        app.prefs.colour_format = Format::Rgb.key().into();
+        app.session.selection.set(vec![a, b]);
+        app.picker = Some(Picker::new(
+            a,
+            PaintSlot::SelectionAll(PaintTarget::Fill),
+            egui::pos2(400.0, 300.0),
+        ));
+        let mixed = field_at(&ctx, &mut app, "Mixed", 0);
+        type_at(&ctx, &mut app, mixed, "00FF00");
+        assert_eq!(rgba8(&app, a), [0, 255, 0, 255]);
+        assert_eq!(rgba8(&app, b), [0, 255, 0, 102], "each keeps its opacity");
+    }
+
+    /// A committed colour goes first among the recent colours, once, and the list
+    /// holds as many as the row shows.
+    ///
+    /// flip: `remember_colour` without its `retain` → fails at "once".
+    #[test]
+    fn a_committed_colour_goes_first_among_the_recent() {
+        let ctx = egui::Context::default();
+        let (mut app, _b) = on_b(&ctx, Format::Hex);
+        type_hex(&ctx, &mut app, "00FF00");
+        let first = |app: &OndinApp| app.prefs.recent_colours.first().copied();
+        assert_eq!(
+            first(&app),
+            Some([0.0, 1.0, 0.0]),
+            "a typed hex is remembered"
+        );
+        let c = |v: u8| Color::from_rgba8(v, v, v, 255);
+        app.remember_colour(c(10));
+        app.remember_colour(Color::from_rgba8(0, 255, 0, 255));
+        assert_eq!(
+            app.prefs.recent_colours.len(),
+            2,
+            "once: the green moved to the front rather than appearing twice"
+        );
+        for v in 20..30 {
+            app.remember_colour(c(v));
+        }
+        assert_eq!(app.prefs.recent_colours.len(), SWATCHES);
+        assert_eq!(first(&app), Some(c(29).components[..3].try_into().unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    /// A stored format reads back, and anything else is Hex.
+    #[test]
+    fn a_stored_format_reads_back() {
+        for f in Format::ALL {
+            assert_eq!(Format::from_key(f.key()), f);
+        }
+        assert_eq!(Format::from_key("oklch"), Format::Hex);
+    }
+
+    /// HSL and HSV convert to each other, and the menu row reads the CSS numbers.
+    #[test]
+    fn hsl_and_hsv_agree() {
+        let hsv = Hsv::new(223.0 / 360.0, 0.5, 0.85, 1.0);
+        let [h, s, l] = hsl_of(hsv);
+        let back = hsv_of_hsl(h, s, l, 1.0);
+        assert!((back.s - hsv.s).abs() < 1e-5 && (back.v - hsv.v).abs() < 1e-5);
+        let blue = Color::from_rgba8(109, 140, 217, 255);
+        let hsv = Hsv::from_color(blue);
+        assert_eq!(Format::Rgb.preview(blue, hsv), "109 140 217");
+        assert_eq!(Format::Hsl.preview(blue, hsv), "223 59 64");
+        assert_eq!(Format::Hsb.preview(blue, hsv), "223 50 85");
     }
 }
 
@@ -2265,7 +3009,7 @@ mod grid_orphan_tests {
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
     /// `mixed_hex_tests`' hit band for the hex field, at the same spawn; repeated
     /// because the two modules are independent fixtures.
-    const HEX_FIELD: egui::Pos2 = egui::pos2(450.0, 524.0);
+    const HEX_FIELD: egui::Pos2 = egui::pos2(500.0, 524.0);
 
     fn grid(count: u32, color: Color) -> LayoutGrid {
         LayoutGrid {

@@ -2205,7 +2205,7 @@ impl OndinApp {
                         egui::TextEdit::singleline(&mut text)
                             .frame(egui::Frame::NONE)
                             .desired_width(62.0)
-                            .char_limit(ui::HEX_CHAR_LIMIT)
+                            .char_limit(ui::COLOUR_CHAR_LIMIT)
                             .font(egui::FontId::proportional(11.5)),
                     );
                     ui::select_all_on_focus(ui, &resp, &text);
@@ -2216,12 +2216,22 @@ impl OndinApp {
                     // the guard, the write inside.
                     if resp.lost_focus() {
                         self.char_hex = None;
-                        if let Some([r, g, b]) =
-                            ui::parse_hex(&text).filter(|_| ui::defocus_commits(&resp))
-                        {
-                            // A typed `RRGGBBAA` sets the opacity; a shorter hex keeps it.
-                            let alpha = ui::parse_hex_alpha(&text).unwrap_or(shown.components[3]);
-                            now = Some(Some(Color::from_rgba8(r, g, b, 255).with_alpha(alpha)));
+                        if ui::defocus_commits(&resp) {
+                            // A typed alpha sets the opacity; a colour without one keeps it.
+                            // Compared as bytes, so a click through the field writes nothing.
+                            match crate::colour_text::parse(&text) {
+                                Some(_) if crate::colour_text::matches(&text, shown) => {}
+                                Some(t) => {
+                                    let c = t.color(shown.components[3]);
+                                    self.remember_colour(c);
+                                    now = Some(Some(c));
+                                }
+                                None => {
+                                    if let Some(why) = crate::colour_text::refusal(&text) {
+                                        self.session.info(why);
+                                    }
+                                }
+                            }
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -6898,7 +6908,7 @@ mod tests {
                         egui::TextEdit::singleline(&mut hex)
                             .frame(egui::Frame::NONE)
                             .desired_width(62.0)
-                            .char_limit(ui::HEX_CHAR_LIMIT)
+                            .char_limit(ui::COLOUR_CHAR_LIMIT)
                             .font(egui::FontId::proportional(11.5)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

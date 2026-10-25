@@ -989,7 +989,25 @@ pub fn field_row<R>(
     framed_row(ui, size, field_frame(), add)
 }
 
-/// [`field_row`]'s body, for the one caller that needs a different border.
+/// [`field_row`] with its own side insets, for a row that starts on a button
+/// rather than text (the picker's value row).
+pub fn field_row_inset<R>(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    left: f32,
+    right: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let margin = egui::Margin {
+        left: left as i8,
+        right: right as i8,
+        top: 0,
+        bottom: 0,
+    };
+    framed_row(ui, size, field_frame().inner_margin(margin), add)
+}
+
+/// [`field_row`]'s body, for the callers that need a different frame.
 fn framed_row<R>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -3519,14 +3537,23 @@ fn strip_drag_value_chrome(ui: &mut egui::Ui) {
 /// The paint rows and the picker's hex row already are fields, and a second
 /// bordered box for the opacity inside one reads as bolted on.
 pub fn bare_drag_value(ui: &mut egui::Ui, value: egui::DragValue<'_>) -> egui::Response {
+    bare_drag_value_parsed(ui, value, crate::expr::eval)
+}
+
+/// [`bare_drag_value`] reading typed text with `parser` rather than plain
+/// arithmetic — the picker's channel fields, which also take a whole colour.
+pub fn bare_drag_value_parsed<'a>(
+    ui: &mut egui::Ui,
+    value: egui::DragValue<'a>,
+    parser: impl 'a + Fn(&str) -> Option<f64>,
+) -> egui::Response {
     ui.scope(|ui| {
         strip_drag_value_chrome(ui);
-        // Arithmetic, as in every other field, and no clamping of a stored value
-        // outside a caller's `.range(0.0..=100.0)`: egui's default would rewrite
-        // it each frame and report a user edit. Both go on last, the `DragValue`
-        // being finished.
+        // No clamping of a stored value outside a caller's `.range(0.0..=100.0)`:
+        // egui's default would rewrite it each frame and report a user edit. Both
+        // go on last, the `DragValue` being finished.
         let value = scrub_speed_for(ui.ctx(), value)
-            .custom_parser(crate::expr::eval)
+            .custom_parser(parser)
             .clamp_existing_to_range(false);
         let resp = ui.add(value);
         if resp.dragged() {
@@ -3630,10 +3657,10 @@ pub fn hex_of(c: ondin_core::peniko::Color) -> String {
     )
 }
 
-/// How many characters a hex field accepts: `#RRGGBBAA`, the longest form
-/// anyone pastes. The alpha digits are read and discarded (see [`parse_hex`]),
-/// but a field that refuses to hold them refuses the paste outright.
-pub const HEX_CHAR_LIMIT: usize = 9;
+/// How many characters a colour field accepts: room for any CSS colour anyone
+/// pastes (`crate::colour_text`), since a field that refuses to hold one refuses
+/// the paste outright.
+pub const COLOUR_CHAR_LIMIT: usize = 64;
 
 /// Whether a text field's edit has ended and is meant to be kept: the frame it
 /// lost focus, unless `Escape` is what took the focus away.
@@ -3664,48 +3691,6 @@ pub fn select_all_on_focus(ui: &egui::Ui, resp: &egui::Response, text: &str) {
             egui::text::CCursor::new(text.chars().count()),
         )));
     state.store(ui.ctx(), resp.id);
-}
-
-/// Parse `RGB` / `RRGGBB` / `RRGGBBAA`, with or without a leading `#`, and with
-/// any surrounding whitespace.
-///
-/// The hash is optional (a pasted colour carries one, a typed one does not). An
-/// eight-digit value's last pair is [`parse_hex_alpha`]'s.
-pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
-    let s = s.trim().trim_start_matches('#').trim();
-    if !s.chars().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    let b = |i: usize, n: usize| u8::from_str_radix(&s[i..i + n], 16).ok();
-    match s.len() {
-        3 => {
-            let (r, g, bl) = (b(0, 1)?, b(1, 1)?, b(2, 1)?);
-            // `F` means `FF`, not `F0`: 0x11 per step, so `FFF` is white.
-            Some([r * 17, g * 17, bl * 17])
-        }
-        6 | 8 => Some([b(0, 2)?, b(2, 2)?, b(4, 2)?]),
-        _ => None,
-    }
-}
-
-/// The alpha of a valid eight-digit `RRGGBBAA`, as 0..1; `None` for a spelling
-/// without one, where a hex field keeps the paint's own opacity.
-pub fn parse_hex_alpha(s: &str) -> Option<f32> {
-    parse_hex(s)?;
-    let s = s.trim().trim_start_matches('#').trim();
-    (s.len() == 8)
-        .then(|| u8::from_str_radix(&s[6..8], 16).ok())
-        .flatten()
-        .map(|a| f32::from(a) / 255.0)
-}
-
-/// Whether typed hex `text` names `current` at 8 bits a channel, alpha included
-/// only when typed — compared as bytes, so committing an untouched field over an
-/// off-lattice colour writes nothing.
-pub fn hex_matches(text: &str, current: ondin_core::peniko::Color) -> bool {
-    let byte = |a: f32| (a.clamp(0.0, 1.0) * 255.0).round() as u8;
-    parse_hex(text) == parse_hex(&hex_of(current))
-        && parse_hex_alpha(text).is_none_or(|a| byte(a) == byte(current.components[3]))
 }
 
 /// The app's mark, `icons/icon-64.png`, compiled in for the top bars: 64 pixels
@@ -3893,43 +3878,11 @@ mod tests {
         assert!(!changed);
     }
 
+    /// `hex_of` writes six digits and never a hash or the alpha.
     #[test]
-    fn hex_round_trips_through_parse() {
+    fn hex_of_writes_six_digits() {
         let c = ondin_core::peniko::Color::from_rgba8(0x6D, 0x8C, 0xD9, 0x80);
         assert_eq!(hex_of(c), "6D8CD9");
-        assert_eq!(parse_hex("6D8CD9"), Some([0x6D, 0x8C, 0xD9]));
-        assert_eq!(parse_hex("fff"), Some([0xFF, 0xFF, 0xFF]));
-        assert_eq!(parse_hex("nope"), None);
-        assert_eq!(parse_hex("12345"), None);
-    }
-
-    /// `parse_hex` takes a colour with or without a hash; `hex_of` never returns one.
-    #[test]
-    fn a_hash_is_optional_going_in_and_never_comes_back_out() {
-        for spelling in ["#6D8CD9", "6D8CD9", "  #6d8cd9  ", "#6D8CD9FF"] {
-            assert_eq!(
-                parse_hex(spelling),
-                Some([0x6D, 0x8C, 0xD9]),
-                "{spelling:?} did not parse"
-            );
-        }
-        assert_eq!(parse_hex("#fff"), Some([0xFF, 0xFF, 0xFF]));
-        let round_tripped = ondin_core::peniko::Color::from_rgba8(0x6D, 0x8C, 0xD9, 0xFF);
-        assert_eq!(hex_of(round_tripped), "6D8CD9", "the hash must not survive");
-        assert_eq!(parse_hex("6D#8CD9"), None);
-        assert_eq!(parse_hex("#"), None);
-        assert_eq!("#6D8CD9FF".len(), HEX_CHAR_LIMIT);
-    }
-
-    /// Only an eight-digit value carries an alpha; the shorter spellings leave it to
-    /// the paint.
-    #[test]
-    fn only_eight_digits_carry_an_alpha() {
-        assert_eq!(parse_hex_alpha("#6D8CD980"), Some(128.0 / 255.0));
-        assert_eq!(parse_hex_alpha(" 6d8cd9ff "), Some(1.0));
-        assert_eq!(parse_hex_alpha("6D8CD9"), None);
-        assert_eq!(parse_hex_alpha("fff"), None);
-        assert_eq!(parse_hex_alpha("6D8CD9G0"), None);
     }
 
     /// `Color -> Hsv -> Color` is the identity at 8-bit precision, low alpha included.
@@ -4494,7 +4447,7 @@ mod tests {
                 |ui| {
                     let resp = ui.add(
                         egui::TextEdit::singleline(text)
-                            .char_limit(HEX_CHAR_LIMIT)
+                            .char_limit(COLOUR_CHAR_LIMIT)
                             .desired_width(62.0),
                     );
                     select_all_on_focus(ui, &resp, text);

@@ -564,12 +564,17 @@ pub const EYEBROW_PT: f32 = 9.5;
 /// A [`fold_head`]'s row height: the icon buttons beside it.
 pub const FOLD_HEAD_H: f32 = 20.0;
 
+/// How far a [`fold_head`]'s caret sits above the capitals' centre line, in
+/// points. An optical correction: a chevron's weight is in its arms, so one
+/// centred by its ink reads low beside the capitals.
+pub const FOLD_CARET_LIFT: f32 = 2.0;
+
 /// A pane section's fold header (Pages, Layers): [`section_head`]'s caret and
 /// eyebrow, but one press target over just the two, which both brighten while it
 /// is hovered. Answers the press and the eyebrow's baseline, for text set beside it.
 ///
-/// Placed by ink, not by layout box: the caret's ink and the eyebrow's capitals
-/// share the row's centre line, which their boxes put a point or two apart.
+/// Placed by ink, not by layout box: the eyebrow's capitals sit on the row's
+/// centre line, and the caret [`FOLD_CARET_LIFT`] above it.
 pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response, f32) {
     let caret = if open {
         icon::CARET_DOWN
@@ -602,7 +607,11 @@ pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response,
     let word_top = top(&word);
     let baseline = word_top + baseline_in(&word);
     let p = ui.painter();
-    p.galley(egui::pos2(rect.left(), top(&glyph)), glyph, ink);
+    p.galley(
+        egui::pos2(rect.left(), top(&glyph) - FOLD_CARET_LIFT),
+        glyph,
+        ink,
+    );
     p.galley(egui::pos2(rect.left() + word_x, word_top), word, ink);
     (resp, baseline)
 }

@@ -793,8 +793,9 @@ impl OndinApp {
         self.place_kit_at(ctx, source, self.canvas_rect.center(), false);
     }
 
-    /// The container a tile let go at `world` lands in: the topmost shown, unlocked
-    /// frame or group with a layout under the point, `None` for the canvas. One that
+    /// The container a tile let go at `world` lands in: the topmost unlocked frame
+    /// or group with a layout that shows under the point (its ancestors' eyes and
+    /// clips included), `None` for the canvas. One that
     /// is or sits in a component is passed over, since the component rules may refuse
     /// an instance there, and so is one inside a boolean.
     fn drop_container_at(&self, world: ondin_core::kurbo::Point) -> Option<NodeId> {
@@ -814,20 +815,27 @@ impl OndinApp {
             _ => false,
         };
         // Pre-order in child order is paint order: the last hit is the topmost.
+        // A hidden layer's subtree is not descended, nor a clipping one's when
+        // the point is outside it: nothing in there shows at the point.
         let mut hit = None;
         let mut stack = vec![doc.root()];
         while let Some(id) = stack.pop() {
             let Some(node) = doc.get(id) else { continue };
+            let under = res.world_bounds(id).is_some_and(|b| b.contains(world));
+            if id != doc.root() && !self.shown_visible(id) {
+                continue;
+            }
             if id != doc.root()
                 && takes(node)
-                && res.world_bounds(id).is_some_and(|b| b.contains(world))
-                && doc.shown(id)
+                && under
                 && !ondin_core::is_effectively_locked(doc, id)
                 && !refused(id)
             {
                 hit = Some(id);
             }
-            stack.extend(node.children().iter().rev().copied());
+            if id == doc.root() || under || !node.clip() {
+                stack.extend(node.children().iter().rev().copied());
+            }
         }
         hit
     }
@@ -2007,6 +2015,71 @@ pub(crate) mod tests {
         assert_eq!(
             app.session.doc.get(group).unwrap().children().last(),
             Some(&inst)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A frame whose own eye is on but whose parent is hidden, or whose part
+    /// under the point its parent clips away, does not take a drop: the tile
+    /// lands on the canvas, where it can be seen.
+    ///
+    /// flip: `drop_container_at` testing the frame's own eye → fails at "hidden
+    /// parent"; descending into a clipping frame the point is outside → fails at
+    /// "clipped away".
+    #[test]
+    fn a_tile_dropped_on_a_frame_that_cannot_be_seen_lands_on_the_canvas() {
+        use ondin_core::kurbo::{Point, Size};
+        let ctx = egui::Context::default();
+        let root = temp_root("drop-unseen");
+        let (id, _set, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let doc_root = app.session.doc.root();
+        let frame = |id, parent, at: (f64, f64), side: f64| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: ondin_core::NodeKind::Artboard {
+                size: Size::new(side, side),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let [hidden, inner, clipper, overflow] = std::array::from_fn(|_| app.session.ids.mint());
+        assert!(app.session.commit(Transaction(vec![
+            frame(hidden, doc_root, (5000.0, 5000.0), 400.0),
+            frame(inner, hidden, (0.0, 0.0), 200.0),
+            Operation::SetVisible {
+                id: hidden,
+                visible: false,
+            },
+            frame(clipper, doc_root, (8000.0, 8000.0), 100.0),
+            frame(overflow, clipper, (50.0, 50.0), 200.0),
+        ])));
+        assert!(
+            app.session.doc.get(clipper).unwrap().clip(),
+            "fixture: P clips"
+        );
+        let mut parent_of_drop = |world: Point| {
+            let at = app.to_screen(world, app.canvas_rect, 1.0);
+            let source = kit_source(&mut app, &id, badge);
+            app.place_kit_at(&ctx, source, at, true);
+            let inst = app.session.selection.single().expect("placed");
+            app.session.doc.get(inst).unwrap().parent()
+        };
+        assert_eq!(
+            parent_of_drop(Point::new(5100.0, 5100.0)),
+            Some(doc_root),
+            "hidden parent"
+        );
+        assert_eq!(
+            parent_of_drop(Point::new(8080.0, 8080.0)),
+            Some(overflow),
+            "inside the clip, the drop still lands in the frame"
+        );
+        assert_eq!(
+            parent_of_drop(Point::new(8200.0, 8200.0)),
+            Some(doc_root),
+            "clipped away"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

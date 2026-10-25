@@ -659,7 +659,7 @@ pub type SizeVars = [Option<VarId>; 2];
 pub type LimitVars = [Option<VarId>; 4];
 
 /// A text layer's bindings, slot by slot ([`TEXT_CONTENT`] … [`TEXT_PARAGRAPH_SPACING`]):
-/// the content and family to string variables (§15 D1069), the size, weight,
+/// the content and family to string variables, the size, weight,
 /// line height, letter spacing and paragraph spacing to number variables.
 ///
 /// **On the node beside the kind, as [`SizeVars`] sits beside the size**: a
@@ -674,7 +674,7 @@ pub type LimitVars = [Option<VarId>; 4];
 /// **The content binding is the text, whole**: an edit of the text — on the
 /// canvas, through a component's text property, or a range styled — detaches it
 /// to what was written (`crate::build::keep_text_bindings`). **Every other
-/// binding is the node's default**, as a text style's values are (§15 D1067): a
+/// binding is the node's default**, as a text style's values are: a
 /// run or paragraph given a value of its own keeps it, and applying a text
 /// style, which holds plain values, detaches the slots it holds
 /// ([`TEXT_STYLED`]). A number binding reads its variable as the number the
@@ -917,7 +917,7 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
             s.width = doc.stroke_width_drawn_in(doc.variables(), id, v);
         }
     }
-    // And an effect's bound numbers theirs (§15 D1074), and a size limit its px.
+    // And an effect's bound numbers theirs, and a size limit its px.
     node.effects = doc.resolved_effects(id, &node.effects).into_owned();
     node.item = doc.limits_drawn_in(doc.variables(), id, node.item);
     node.item.limit_vars = Default::default();
@@ -1275,7 +1275,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 n.size_vars = vars;
             }
             // A text's bindings the same way, slot by slot, its fallback the
-            // twin's drawn string or number (§15 D1069).
+            // twin's drawn string or number.
             if n.text_vars.iter().any(Option::is_some) {
                 let mut vars = n.text_vars;
                 for (k, var) in vars.iter_mut().enumerate() {
@@ -2038,7 +2038,7 @@ pub(crate) fn check<'a>(
             return Err(VarRule::BadBinding(n.id));
         }
         // A content or a family binds a string, a type number a number, and
-        // only on a text (§15 D1069).
+        // only on a text.
         if n.text_vars.iter().any(Option::is_some)
             && (!matches!(n.kind, crate::NodeKind::Text { .. })
                 || n.text_vars

@@ -134,8 +134,7 @@ impl FieldKey {
 
     /// Whether the field is one the keyboard types into — the `--` list's door
     /// and `Backspace`'s, which the field menu names as its accelerators. The eye
-    /// is clicked, never typed (§15 D1059), and the family and weight picked (§15
-    /// D1069).
+    /// is clicked, never typed, and the family and weight picked.
     pub(crate) fn typed(self) -> bool {
         !matches!(
             self,

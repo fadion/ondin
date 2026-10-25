@@ -312,9 +312,9 @@ pub(crate) struct NodeDto {
     /// D1061), absent when neither is. New in v8.
     #[serde(default, skip_serializing_if = "no_size_vars")]
     pub size_vars: crate::variable::SizeVars,
-    /// The variables a text's content, family and type numbers are bound to
-    /// (§15 D1069), absent when none is; up to the last bound slot, so a file
-    /// with the first two slots only loads. New in v8.
+    /// The variables a text's content, family and type numbers are bound to,
+    /// absent when none is; up to the last bound slot, so a file with the first
+    /// two slots only loads. New in v8.
     #[serde(
         default,
         skip_serializing_if = "no_text_vars",

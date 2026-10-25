@@ -728,7 +728,7 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
                 continue; // `check` refuses it
             }
             // 🚨 **A text style's values are plain, and a binding under one
-            // goes** (§15 D1069). `build::keep_text_bindings` detaches them where
+            // goes**. `build::keep_text_bindings` detaches them where
             // the user applies the style, but a copy receives its main's
             // `SetTypeStyle` from propagation, after that pass — and kept bound,
             // it drew its variable over the value written here.
@@ -973,12 +973,12 @@ pub fn create_ops(
 
 /// `node`'s values in `slot` **as drawn** — what a style made of it would hold.
 ///
-/// A bound family or type number is read as drawn (§15 D1069): a text style holds
+/// A bound family or type number is read as drawn: a text style holds
 /// plain values, and a bound layer's literal is empty or 0. Binding the layer to
 /// the style then detaches it (`build::keep_text_bindings`), the style's being
 /// the same value.
 /// Read by [`create_ops`] for its source and by the inspector's *Create* when it
-/// asks whether several layers agree (§15 D1077) — compared on the literal, two
+/// asks whether several layers agree — compared on the literal, two
 /// layers bound to different families both read `""` and agreed, and the style
 /// then rewrote the second one's family to the first one's.
 pub fn value_drawn(doc: &Document, node: NodeId, slot: StyleSlot) -> Option<StyleValue> {

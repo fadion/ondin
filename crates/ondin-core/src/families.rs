@@ -61,8 +61,8 @@ pub fn families_in_use(doc: &Document) -> FamilyUses {
 /// - Where a style or a layer's defaults change family, its axis and feature
 ///   settings go with the old typeface; a run's stay.
 /// - Runs naming `from` are rewritten on every layer.
-/// - A bound family's variable has every cell holding `from` rewritten; a kit's
-///   variable is read-only and is left.
+/// - A bound family's variable, and every variable its aliases reach, has every
+///   cell holding `from` rewritten; a kit's variable is read-only and is left.
 ///
 /// Commit it through the session's door, which propagates, so instances whose
 /// family follows their main's keep following.
@@ -110,6 +110,23 @@ pub fn replace_family(doc: &Document, from: &str, to: &str) -> Transaction {
             });
         } else if let Some(spans) = new_spans {
             ops.push(Operation::SetTextSpans { id, spans });
+        }
+    }
+
+    // Every variable an alias in a bound one reaches, since the family is held
+    // where the chain ends; `vars` doubles as the seen set, so a loop ends.
+    let mut i = 0;
+    while let Some(&var) = vars.get(i) {
+        i += 1;
+        let Some(v) = doc.variables().get(var) else {
+            continue;
+        };
+        for cell in v.cells.values() {
+            if let Cell::Alias(next) = cell
+                && !vars.contains(next)
+            {
+                vars.push(*next);
+            }
         }
     }
 
@@ -263,6 +280,76 @@ mod tests {
         assert!(
             replace_family(&doc, "Gone Sans", "Inter").0.is_empty(),
             "nothing left to replace"
+        );
+    }
+
+    /// A family bound through an alias is replaced in the variable that holds
+    /// it, the alias left standing.
+    ///
+    /// flip: `replace_family` rewriting only the bound variable's own cells →
+    /// fails at "the held cell is rewritten".
+    #[test]
+    fn a_family_reached_through_an_alias_is_replaced_where_it_is_held() {
+        use crate::variable::{Mode, TEXT_FAMILY, VarKind, Variable, text_vars_at};
+        let mut ids = IdSource::new(0xFB);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let heading = ids.mint();
+        let mode = ids.mint_mode();
+        let (brand, alias) = (ids.mint_var(), ids.mint_var());
+        let var = |id, name: &str, cell| Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::String,
+            cells: [(mode, cell)].into(),
+            origin: None,
+            forked: None,
+            description: String::new(),
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: heading,
+                parent: root,
+                index: 0,
+                kind: text("Inter", None),
+                transform: None,
+                name: None,
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Base".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: var(brand, "Brand/Display", Cell::String("Gone Sans".into())),
+            },
+            Operation::AddVariable {
+                var: var(alias, "Heading font", Cell::Alias(brand)),
+            },
+        ]))
+        .unwrap();
+        let bind = crate::build::bind_text_ops(&doc, heading, text_vars_at(TEXT_FAMILY, alias));
+        doc.apply(&Transaction(bind)).unwrap();
+        assert!(
+            families_in_use(&doc).iter().any(|(n, _)| n == "Gone Sans"),
+            "the fixture lists the aliased family"
+        );
+
+        doc.apply(&replace_family(&doc, "Gone Sans", "Inter"))
+            .unwrap();
+        let cell = |v| doc.variables().get(v).unwrap().cells[&mode].clone();
+        assert_eq!(
+            cell(brand),
+            Cell::String("Inter".into()),
+            "the held cell is rewritten"
+        );
+        assert_eq!(cell(alias), Cell::Alias(brand), "the alias stands");
+        assert!(
+            !families_in_use(&doc).iter().any(|(n, _)| n == "Gone Sans"),
+            "and the family is no longer listed"
         );
     }
 }

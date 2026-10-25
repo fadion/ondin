@@ -1429,29 +1429,19 @@ impl OndinApp {
     /// Variant `v` picked over `subject`: its weight, slope and axes, each
     /// layer's own other axes kept.
     fn apply_variant(&mut self, subject: &TypeSubject, v: &text::FontVariant) {
-        {
-            let attrs = |coords: &[AxisSetting]| {
-                let mut merged = coords.to_vec();
-                for axis in &v.coords {
-                    match merged.iter_mut().find(|a| a.tag == axis.tag) {
-                        Some(existing) => existing.value = axis.value,
-                        None => merged.push(*axis),
-                    }
-                }
-                vec![
-                    CharAttr::Weight(v.weight),
-                    CharAttr::Italic(v.italic),
-                    CharAttr::Variations(merged),
-                ]
-            };
-            // So the first layer's hand-set axes do not land on the rest.
-            self.apply_char_attrs_each(subject, |m| attrs(&attr!(m, Variations, Variations)));
-        }
+        // So the first layer's hand-set axes do not land on the rest.
+        self.apply_char_attrs_each(subject, |m| {
+            variant_attrs(v, &attr!(m, Variations, Variations))
+        });
     }
 
     /// *Bold* (`bold`) or *Italic* over `subject`, as `Ctrl+B`/`Ctrl+I` and the
     /// panel's two toggles do it: the family's own face in that direction
     /// (`text::bold_step`, `text::italic_step`), or a status line saying it has none.
+    ///
+    /// Each layer steps from its own weight and slope, the on/off decision shared.
+    /// Over a range whose other attribute is ragged only the toggled one is
+    /// written, so Italic never flattens the weights and Bold never the slopes.
     pub(crate) fn toggle_face(&mut self, subject: &TypeSubject, bold: bool) {
         let family = attr!(subject, Family, Family);
         let weight = attr!(subject, Weight, Weight);
@@ -1463,12 +1453,22 @@ impl OndinApp {
             false => text::FaceOffer::of(&family),
         };
         let mixed_weight = subject.mixed(CharAttrKind::Weight);
-        let step = match bold {
+        let mixed_italic = subject.mixed(CharAttrKind::Italic);
+        let step = |weight, italic| match bold {
             true => text::bold_step(&offer, weight, italic, mixed_weight),
-            false => text::italic_step(&offer, weight, italic, subject.mixed(CharAttrKind::Italic)),
+            false => text::italic_step(&offer, weight, italic, mixed_italic),
         };
-        match step {
-            Some(v) => self.apply_variant(subject, &v),
+        match step(weight, italic) {
+            Some(_) => self.apply_char_attrs_each(subject, |m| {
+                let Some(v) = step(attr!(m, Weight, Weight), attr!(m, Italic, Italic)) else {
+                    return Vec::new();
+                };
+                match bold {
+                    true if m.ragged(CharAttrKind::Italic) => vec![CharAttr::Weight(v.weight)],
+                    false if m.ragged(CharAttrKind::Weight) => vec![CharAttr::Italic(v.italic)],
+                    _ => variant_attrs(&v, &attr!(m, Variations, Variations)),
+                }
+            }),
             None => self.session.info(match bold {
                 true if weight >= text::BOLD_FROM && !mixed_weight => {
                     format!("{family} has nothing lighter")
@@ -4241,6 +4241,23 @@ fn char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, b
         changes |= moved;
     }
     (tx, changes)
+}
+
+/// The writes that put face `v` on text whose axes are `coords`: its weight,
+/// slope and axes, the other axes kept.
+fn variant_attrs(v: &text::FontVariant, coords: &[AxisSetting]) -> Vec<CharAttr> {
+    let mut merged = coords.to_vec();
+    for axis in &v.coords {
+        match merged.iter_mut().find(|a| a.tag == axis.tag) {
+            Some(existing) => existing.value = axis.value,
+            None => merged.push(*axis),
+        }
+    }
+    vec![
+        CharAttr::Weight(v.weight),
+        CharAttr::Italic(v.italic),
+        CharAttr::Variations(merged),
+    ]
 }
 
 /// [`char_attrs_tx`] for `subject`'s own layer alone.
@@ -8071,6 +8088,26 @@ mod several_layer_tests {
         );
     }
 
+    /// **Italic over layers of three weights keeps each layer's weight**.
+    ///
+    /// flip: `toggle_face` stepping every layer from the first's weight → fails
+    /// at *"each layer keeps its weight"* (`[400, 400, 400]`).
+    #[test]
+    fn italic_over_layers_of_several_weights_keeps_each_weight() {
+        let (_ctx, mut app, texts) = three();
+        let all = TypeSubject::several(&app, &texts).expect("a several-layer subject");
+        app.toggle_face(&all, false);
+        let faces: Vec<_> = texts
+            .iter()
+            .map(|id| (style(&app, *id).weight, style(&app, *id).italic))
+            .collect();
+        assert_eq!(
+            faces,
+            vec![(400, true), (700, true), (400, true)],
+            "each layer keeps its weight"
+        );
+    }
+
     /// Two layers of one weight told apart only by `wdth` read as two faces;
     /// both at the same `wdth`, one face.
     ///
@@ -10370,6 +10407,77 @@ mod valve_arm_tests {
         assert_eq!(face(&app), (400, true), "and Ctrl+B again un-bolds");
         app.text_chord(TextChord::Italic);
         assert_eq!(face(&app), (400, false));
+    }
+
+    /// **Italic over a range of two weights keeps each weight, and Bold over a
+    /// range of two slopes keeps each slope**: "hello" 400 and "world" 700.
+    ///
+    /// flip: `toggle_face` writing the whole variant over a ragged range (the
+    /// `ragged` arms dropped) → fails at *"world stays bold"*.
+    #[test]
+    fn bold_and_italic_over_a_mixed_range_keep_the_other_attribute() {
+        let (_ctx, mut app, id) = app_with_text_of("hello world");
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        let mut spans = subject.spans.clone();
+        spans.set(6..11, CharAttr::Weight(700), &subject.style);
+        app.session
+            .commit(Transaction(vec![Operation::SetTextSpans { id, spans }]));
+        app.begin_edit_text(Some(id), None);
+        assert!(
+            app.text.as_ref().is_some_and(|s| s.id == id),
+            "a live session"
+        );
+        let at = |app: &OndinApp, byte: usize| {
+            let s = TypeSubject::of(app, id).expect("a subject");
+            let attrs = s.spans.resolve(&s.style, byte);
+            (
+                attrs.get(CharAttrKind::Weight),
+                attrs.get(CharAttrKind::Italic),
+            )
+        };
+        assert_eq!(
+            at(&app, 7).0,
+            CharAttr::Weight(700),
+            "fixture: world is bold"
+        );
+        app.text_chord(TextChord::Italic);
+        assert_eq!(
+            at(&app, 7),
+            (CharAttr::Weight(700), CharAttr::Italic(true)),
+            "world stays bold"
+        );
+        assert_eq!(
+            at(&app, 1),
+            (CharAttr::Weight(400), CharAttr::Italic(true)),
+            "hello stays regular"
+        );
+
+        let (_ctx, mut app, id) = app_with_text_of("hello world");
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        let mut spans = subject.spans.clone();
+        spans.set(6..11, CharAttr::Italic(true), &subject.style);
+        app.session
+            .commit(Transaction(vec![Operation::SetTextSpans { id, spans }]));
+        app.begin_edit_text(Some(id), None);
+        app.text_chord(TextChord::Bold);
+        let at = |app: &OndinApp, byte: usize| {
+            let s = TypeSubject::of(app, id).expect("a subject");
+            let attrs = s.spans.resolve(&s.style, byte);
+            (
+                attrs.get(CharAttrKind::Weight),
+                attrs.get(CharAttrKind::Italic),
+            )
+        };
+        assert_eq!(
+            at(&app, 7),
+            (CharAttr::Weight(700), CharAttr::Italic(true)),
+            "world stays italic"
+        );
+        assert_eq!(
+            at(&app, 1),
+            (CharAttr::Weight(700), CharAttr::Italic(false)),
+            "hello stays upright"
+        );
     }
 
     /// A held `Alt`+`→` stops at `MAX_TRACKING_PCT` and `Alt`+`←` at the min, in px and em.

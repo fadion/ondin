@@ -403,11 +403,13 @@ pub const BOLD_FROM: u16 = 600;
 /// On at [`BOLD_FROM`] and up, unless `mixed` (a selection of several weights
 /// is made bold, never un-bolded). Off steps toward 400 and on toward 700: to
 /// the variant of the same slope nearest the target in that direction, else
-/// along `wght`. A family core knows nothing of gets the bare weight.
+/// along `wght`. A mixed selection takes the variant nearest 700 whichever side
+/// `weight`, its first run's, lies on. A family core knows nothing of gets the
+/// bare weight.
 pub fn bold_step(offer: &FaceOffer, weight: u16, italic: bool, mixed: bool) -> Option<FontVariant> {
     let on = weight >= BOLD_FROM && !mixed;
     let target: u16 = if on { 400 } else { 700 };
-    let toward = |w: u16| if on { w < weight } else { w > weight };
+    let toward = |w: u16| mixed || if on { w < weight } else { w > weight };
     let bare = |w: u16| FontVariant {
         name: face_name(w, italic),
         weight: w,
@@ -6718,10 +6720,12 @@ mod tests {
     }
 
     /// *Bold* steps to the nearest face of the same slope toward 700 or 400, else
-    /// along `wght`, and refuses where the family has nothing that way.
+    /// along `wght`, and refuses where the family has nothing that way; a mixed
+    /// selection takes the face nearest 700 whatever its first run.
     ///
-    /// flip: dropping the `toward` filter in `bold_step` → fails at "mixed is made
-    /// bold, nothing above 900" (it steps down to 600).
+    /// flip: dropping the `toward` filter in `bold_step` → fails at "a family with
+    /// one weight has no bold"; `toward` ignoring `mixed` → fails at "mixed from
+    /// 900 is made bold".
     #[test]
     fn bold_steps_to_the_nearest_face_that_way() {
         let statics = FaceOffer {
@@ -6749,8 +6753,21 @@ mod tests {
         );
         assert_eq!(
             w(&statics, 900, false, true),
-            None,
-            "mixed is made bold, nothing above 900"
+            Some((600, false)),
+            "mixed from 900 is made bold, not refused"
+        );
+        let inter_like = FaceOffer {
+            variants: vec![
+                variant(400, false),
+                variant(700, false),
+                variant(800, false),
+            ],
+            ..FaceOffer::default()
+        };
+        assert_eq!(
+            w(&inter_like, 700, false, true),
+            Some((700, false)),
+            "mixed from 700 is made bold, not extra bold"
         );
         assert_eq!(
             w(&statics, 400, true, false),

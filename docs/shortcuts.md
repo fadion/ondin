@@ -387,6 +387,9 @@ The rule is core's (`text.md` §5.4, *Bold and italic*):
   slope in that direction, else along `wght`.
 - **Italic** takes the other slope's variant nearest in weight, else the bare flag when an `ital` or
   `slnt` axis can carry it. A mixed selection is made italic; upright is always reachable.
+- Each layer steps from its own weight and slope. Over a range of several weights Italic writes the
+  slope alone, and over a range of several slopes Bold writes the weight alone, so neither flattens
+  the other.
 - **Nothing that way** refuses with a status line: *X has no bold*, *X has nothing lighter*, *X has
   no italic*. No faux bold or oblique is drawn, so a family with no slope has no italic.
 - A family core has not been handed gets the bare weight or flag.

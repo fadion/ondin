@@ -94,11 +94,13 @@ copies at every depth through the reverse link map, each level compared against 
 - `propagate::mode`, wildcard-free, picks the comparison:
   - **whole** — transform, geometry, text with spans, the span ops, name, visibility, opacity, pivot,
     clip, mask, mask mode, fill rule, display mode (`SetMode`), the variable bindings (`SetCornerVars`,
-    `SetSpacingVars`, `SetVisibleVar`, `SetSizeVars`, `SetTextVars`, `SetOpacityVar`) and the card
+    `SetSpacingVars`, `SetVisibleVar`, `SetSizeVars`, `SetOpacityVar`) and the card
     styles (`SetFillStyle`, `SetStrokeStyle`, `SetEffectsStyle`, `SetTypeStyle`, `SetLayoutStyle`);
   - **fields** — text/paragraph/block style, insets, display, layout item: a JSON merge
     (`merge_present`) over the **union** of keys, absence a value of its own, a changed enum variant
-    followed whole so two variants never mix;
+    followed whole so two variants never mix. `SetTextVars` and an item's `limit_vars` follow **slot
+    by slot**, as the literals beside them follow field by field: compared whole, a copy binding
+    another slot kept none of the main's new bindings and drew their placeholder literal 0;
   - **items** — the keyed lists;
   - **skip** — locks, links, swaps, variant/property ops, everything structural.
 - **An instance root's placement is its own**: `SetTransform`, `SetInsets`, `SetLayoutItem`,

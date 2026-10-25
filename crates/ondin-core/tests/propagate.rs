@@ -1422,3 +1422,117 @@ fn a_copys_own_gradient_follows_its_mains_resize() {
         other => panic!("a gradient: {other:?}"),
     }
 }
+
+/// One mode and a variable per cell, in order.
+fn vars(f: &mut F, cells: Vec<(ondin_core::VarKind, ondin_core::Cell)>) -> Vec<ondin_core::VarId> {
+    let mode = f.ids.mint_mode();
+    let mut ops = vec![Operation::AddMode {
+        mode: ondin_core::Mode {
+            id: mode,
+            name: "Light".into(),
+        },
+        index: 0,
+        cells: vec![],
+    }];
+    let mut made = Vec::new();
+    for (k, (kind, cell)) in cells.into_iter().enumerate() {
+        let id = f.ids.mint_var();
+        made.push(id);
+        ops.push(Operation::AddVariable {
+            var: ondin_core::Variable {
+                id,
+                name: format!("v/{k}"),
+                kind,
+                cells: [(mode, cell)].into(),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        });
+    }
+    f.doc.apply(&Transaction(ops)).expect("the table");
+    made
+}
+
+/// **A main binding its size reaches a copy that binds another slot**: the
+/// copy's family binding stays, its size is bound too and draws the variable,
+/// never the literal 0 the bind wrote.
+///
+/// flip: `follow` without its `SetTextVars` arm (the array compared whole) →
+/// fails at *"the size binding reached the copy"*.
+#[test]
+fn a_size_binding_reaches_a_copy_bound_on_another_slot() {
+    use ondin_core::variable::{TEXT_FAMILY, TEXT_SIZE};
+    let mut f = fixture();
+    let made = vars(
+        &mut f,
+        vec![
+            (
+                ondin_core::VarKind::String,
+                ondin_core::Cell::String("Inter".into()),
+            ),
+            (ondin_core::VarKind::Number, ondin_core::Cell::Number(32.0)),
+        ],
+    );
+    let (family, size) = (made[0], made[1]);
+    let mut own = [None; 7];
+    own[TEXT_FAMILY] = Some(family);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.it, own);
+    f.doc
+        .apply(&Transaction(ops))
+        .expect("the copy's family bound");
+    let mut main = [None; 7];
+    main[TEXT_SIZE] = Some(size);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.t, main);
+    commit_all(&mut f, ops);
+    let vars = f.doc.get(f.it).unwrap().text_vars();
+    assert_eq!(
+        vars[TEXT_SIZE],
+        Some(size),
+        "the size binding reached the copy"
+    );
+    assert_eq!(
+        vars[TEXT_FAMILY],
+        Some(family),
+        "the copy's own binding stays"
+    );
+    match f.doc.resolved_kind(f.it).unwrap().as_ref() {
+        NodeKind::Text { style, .. } => assert_eq!(style.font_size, 32.0),
+        other => panic!("text: {other:?}"),
+    }
+}
+
+/// **A main binding its max width reaches a copy that binds its min width**:
+/// both bindings on the copy, never a max width of the literal `Px(0)` unbound.
+///
+/// flip: the `SetLayoutItem` arm without its slot-wise `limit_vars` → fails at
+/// *"the max width binding reached the copy"*.
+#[test]
+fn a_limit_binding_reaches_a_copy_bound_on_another_limit() {
+    let mut f = fixture();
+    let made = vars(
+        &mut f,
+        vec![
+            (ondin_core::VarKind::Number, ondin_core::Cell::Number(5.0)),
+            (ondin_core::VarKind::Number, ondin_core::Cell::Number(300.0)),
+        ],
+    );
+    let (min, max) = (made[0], made[1]);
+    let ops = ondin_core::build::bind_limit_ops(&f.doc, f.ia, 0, min);
+    f.doc
+        .apply(&Transaction(ops))
+        .expect("the copy's min bound");
+    let ops = ondin_core::build::bind_limit_ops(&f.doc, f.a, 1, max);
+    commit_all(&mut f, ops);
+    let item = *f.doc.get(f.ia).unwrap().item();
+    assert_eq!(
+        item.limit_vars[1],
+        Some(max),
+        "the max width binding reached the copy"
+    );
+    assert_eq!(
+        item.limit_vars[0],
+        Some(min),
+        "the copy's own binding stays"
+    );
+}

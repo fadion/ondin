@@ -74,7 +74,6 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetSpacingVars { .. }
         | Operation::SetVisibleVar { .. }
         | Operation::SetSizeVars { .. }
-        | Operation::SetTextVars { .. }
         | Operation::SetOpacityVar { .. }
         // And a card's style (§15 D1062, D1038 F9): the main's own style is no
         // override, another one or a detach is.
@@ -88,7 +87,9 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetBlockStyle { .. }
         | Operation::SetInsets { .. }
         | Operation::SetDisplay { .. }
-        | Operation::SetLayoutItem { .. } => Mode::Fields,
+        | Operation::SetLayoutItem { .. }
+        // Slot by slot, beside the text style's fields (`follow`).
+        | Operation::SetTextVars { .. } => Mode::Fields,
         Operation::SetFills { .. }
         | Operation::SetStrokes { .. }
         | Operation::SetEffects { .. }
@@ -1367,7 +1368,19 @@ pub(crate) fn follow(
             O::SetLayoutItem { item: n, .. },
             O::SetLayoutItem { item: o, .. },
             O::SetLayoutItem { item: c, .. },
-        ) => changed(c, fields(o, n, c)).map(|item| O::SetLayoutItem { id: m, item }),
+        ) => {
+            let mut item = fields(o, n, c);
+            item.limit_vars = slots(&o.limit_vars, &n.limit_vars, &c.limit_vars);
+            changed(c, item).map(|item| O::SetLayoutItem { id: m, item })
+        }
+        // Slot by slot, as the literals beside them follow field by field: a copy
+        // binding another slot otherwise keeps none of the main's new bindings and
+        // draws their placeholder literals.
+        (
+            O::SetTextVars { vars: n, .. },
+            O::SetTextVars { vars: o, .. },
+            O::SetTextVars { vars: c, .. },
+        ) => changed(c, slots(o, n, c)).map(|vars| O::SetTextVars { id: m, vars }),
         // Whole value: the copy follows when its old value is the main's old value,
         // and only if the edit changed anything.
         _ => {
@@ -1382,6 +1395,11 @@ pub(crate) fn follow(
 
 fn changed<T: PartialEq>(cur: &T, next: T) -> Option<T> {
     (next != *cur).then_some(next)
+}
+
+/// `cur` with each slot that still held `old`'s taking `new`'s.
+fn slots<T: Copy + PartialEq, const N: usize>(old: &[T; N], new: &[T; N], cur: &[T; N]) -> [T; N] {
+    std::array::from_fn(|k| if cur[k] == old[k] { new[k] } else { cur[k] })
 }
 
 /// `cur` with every field `old` → `new` changed where `cur` still held `old`'s.

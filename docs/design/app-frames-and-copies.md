@@ -80,8 +80,10 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
   duplicate, not a nesting), holds only layers copied from inside it, or `paste_is_held` refuses.
   *Paste here* and the panel's *Paste* do not take this path.
 - **Paste to replace** (`OndinApp::paste_to_replace`, the layer menu's row, no chord): each selected outermost
-  unlocked layer is replaced by a copy of the **whole** clipboard, its union box
-  (`clipboard_from`) centred on the target's box, in the target's slot of its parent. Targets go as
+  unlocked layer is replaced by a copy of the **whole** clipboard, its union box centred on the
+  target's box, in the target's slot of its parent. The union box is `clip_box`: the originals'
+  boxes now while every one is still in the document, else the copy-time `clipboard_from`, so an
+  original moved since the copy does not throw the aim off. Targets go as
   `delete_layers` deletes them (a frame's guides first, `relink_for_delete`); one undo step, and the
   copies end selected. The counts of copied layers and targets never need to match.
 - Several copies from one parent: `insert_subtrees` advances each index only past earlier inserts at or

@@ -1093,13 +1093,18 @@ pub fn outline_text(
 
 /// Whether *Outline stroke* has something to turn into a shape: a shape, path or
 /// boolean with a visible stroke. A frame (whose children would be lost), a group
-/// and text are refused.
+/// and text are refused, and so is a mask that would be grouped.
 pub fn can_outline_stroke(doc: &Document, id: NodeId) -> bool {
     doc.get(id).is_some_and(|n| {
+        let strokes = n.paint().strokes.iter().filter(|s| s.visible).count();
+        let grouped = strokes > 1 || n.paint().fills.iter().any(|f| f.visible);
         !matches!(
             n.kind(),
             NodeKind::Root | NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Text { .. }
-        ) && n.paint().strokes.iter().any(|s| s.visible)
+        ) && strokes > 0
+            // Grouped, a mask would mask its own stroke paths and stop masking
+            // the siblings above it.
+            && !(n.mask() && grouped)
     })
 }
 
@@ -1110,9 +1115,9 @@ pub fn can_outline_stroke(doc: &Document, id: NodeId) -> bool {
 /// A layer with no visible fill and one stroke is replaced by that path, which
 /// keeps everything about the layer but its geometry and paint. Otherwise the
 /// layer, stripped of its strokes, and the stroke paths above it go into a new group
-/// in its slot; the group takes the layer's effects and opacity, which composite
-/// over both. A layer with no visible fill is not kept. Returns the transaction and
-/// the layer to select.
+/// in its slot; the group takes the layer's effects, visibility and opacity, bound
+/// or not, which composite over both. A layer with no visible fill is not kept.
+/// Returns the transaction and the layer to select.
 pub fn outline_stroke(
     doc: &Document,
     res: &Resolved,
@@ -1164,6 +1169,9 @@ pub fn outline_stroke(
         return Ok((tx, made));
     }
 
+    if node.mask() {
+        return Err(OpError::WrongKindForOp);
+    }
     let (mut tx, g) = group(doc, res, ids, &[id])?;
     let local = res.used_local(doc, id).unwrap_or(node.transform());
     for (i, (ink, brush)) in inks.into_iter().enumerate() {
@@ -1198,12 +1206,34 @@ pub fn outline_stroke(
             effects: Vec::new(),
         });
     }
-    // A bound opacity stays on the layer: the group would need the binding moved too.
-    if node.opacity_var().is_none() && node.opacity() != 1.0 {
+    // Visibility and opacity composite over the stroke paths too, so they move
+    // to the group, a binding with its literal.
+    if !node.visible() || node.visible_var().is_some() {
+        tx.0.push(Operation::SetVisible {
+            id: g,
+            visible: node.visible(),
+        });
+        if let Some(var) = node.visible_var() {
+            tx.0.push(Operation::SetVisibleVar {
+                id: g,
+                var: Some(var),
+            });
+            tx.0.push(Operation::SetVisibleVar { id, var: None });
+        }
+        tx.0.push(Operation::SetVisible { id, visible: true });
+    }
+    if node.opacity_var().is_some() || node.opacity() != 1.0 {
         tx.0.push(Operation::SetOpacity {
             id: g,
             opacity: node.opacity(),
         });
+        if let Some(var) = node.opacity_var() {
+            tx.0.push(Operation::SetOpacityVar {
+                id: g,
+                var: Some(var),
+            });
+            tx.0.push(Operation::SetOpacityVar { id, var: None });
+        }
         tx.0.push(Operation::SetOpacity { id, opacity: 1.0 });
     }
     if has_fill {

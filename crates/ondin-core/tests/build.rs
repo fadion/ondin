@@ -2936,6 +2936,85 @@ fn outline_stroke_groups_a_filled_layer_with_its_stroke() {
     );
 }
 
+/// **A grouped outline keeps the layer's look**: a hidden filled layer stays
+/// hidden, strokes and all; a bound opacity moves to the group with its binding;
+/// and a filled mask is refused rather than made to mask its own strokes.
+///
+/// flip: the group branch leaving visibility on the layer → fails at *"hidden,
+/// strokes and all"*; leaving a bound opacity there → fails at *"the binding
+/// moved"*; `can_outline_stroke` without its mask test → fails at *"a filled
+/// mask is refused"*.
+#[test]
+fn outline_stroke_keeps_visibility_opacity_and_masks() {
+    let mut f = Fixture::new();
+    let id = stroked_square(&mut f, ondin_core::StrokeAlign::Center);
+    let white = keyed_by_position([ondin_core::Fill {
+        brush: ondin_core::peniko::Color::WHITE.into(),
+        visible: true,
+    }]);
+    let mode = f.ids.mint_mode();
+    let half = f.ids.mint_var();
+    f.commit(Transaction(vec![
+        Operation::SetFills {
+            id,
+            fills: white.clone(),
+        },
+        Operation::SetVisible { id, visible: false },
+        Operation::AddMode {
+            mode: ondin_core::Mode {
+                id: mode,
+                name: "Light".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: ondin_core::Variable {
+                id: half,
+                name: "half".into(),
+                kind: ondin_core::VarKind::Number,
+                cells: [(mode, ondin_core::Cell::Number(50.0))].into(),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+        Operation::SetOpacity { id, opacity: 0.0 },
+        Operation::SetOpacityVar {
+            id,
+            var: Some(half),
+        },
+    ]));
+    let (tx, g) = build::outline_stroke(&f.doc, &f.resolved(), &mut f.ids, id).unwrap();
+    f.commit(tx);
+    let drawn = |c: NodeId| f.doc.shown(c) && f.doc.shown(g);
+    let inside = f.children_of(g);
+    assert_eq!(inside.len(), 2, "fixture: the layer and its stroke");
+    assert!(inside.iter().all(|c| !drawn(*c)), "hidden, strokes and all");
+    assert_eq!(
+        f.doc.get(g).unwrap().opacity_var(),
+        Some(half),
+        "the binding moved"
+    );
+    assert_eq!(f.doc.get(id).unwrap().opacity_var(), None);
+
+    let mask = stroked_square(&mut f, ondin_core::StrokeAlign::Center);
+    f.commit(Transaction(vec![
+        Operation::SetFills {
+            id: mask,
+            fills: white,
+        },
+        Operation::SetMask {
+            id: mask,
+            mask: true,
+        },
+    ]));
+    assert!(
+        !build::can_outline_stroke(&f.doc, mask),
+        "a filled mask is refused"
+    );
+}
+
 /// **What `can_outline` says yes and no to, and the one kind where it is a question
 /// about *state*** (§15 D230).
 ///

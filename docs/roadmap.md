@@ -1,14 +1,13 @@
 # Ondin — Roadmap
 
-Open work only. **Now · Immediately** is what a designer reaches for and does not find, **Later ·
-Before MCP** is larger work that lands before MCP and Command Mode, and the other **Later** sections are
-deferred with a stated reason or trigger. Decided non-goals are in `non-goals.md`; built work is
-described in `architecture.md`. Refs are file + function name, never line numbers. Read the code before
-picking an item up — an item's premise can go stale while its ask still reads true.
+Open work only. **Later · First** is the editor's remaining gaps, which land before MCP and Command
+Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it. The
+other **Later** sections are deferred with a stated reason or trigger. Decided non-goals are in
+`non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
+numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
+reads true.
 
-## Now · Immediately
-
-## Later · Before MCP
+## Later · First
 
 - **Pages.** `Document` has one root (and the kit vault). Settle it before MCP fixes the snapshot and
   tool surface around a single page.
@@ -33,6 +32,58 @@ picking an item up — an item's premise can go stale while its ask still reads 
 - **A default font preference** — `FontService::default_text_parts` is Inter.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
+## Later · Second
+
+- **Colour review.** A card (Document menu, palette) over the selection or the document that groups
+  near-identical raw colours — fills, strokes, gradient stops, effect and text-run colours — by OKLab
+  distance, alpha compared apart. Each group grows around its most-used colour so A≈B≈C cannot chain,
+  and shows its members as one split patch with hex, use count and distance; clicking a swatch selects
+  its users. *Merge* into a chosen member, or *Merge into a new variable…*, is one transaction through
+  recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
+  colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
+  eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
+- **Contrast overlay.** A *View* toggle over the view or a selected layer, group or frame: each text
+  layer is measured against the backdrop actually drawn behind it (rendered with the text hidden,
+  through `RenderOverrides`), taking the worst sample under the glyphs after opacity. WCAG AA by size
+  and weight (4.5 : 1, 3 : 1 at large sizes), AAA and APCA as options, non-text 3 : 1 as an opt-in.
+  A failing layer gets a red outline and a `3.1 : 1 · needs 4.5` badge; clicking it offers the nearest
+  passing lightness at the same hue, or a passing variable. Checks every mode and reports the worst.
+  The same check as `ondin check contrast` for CI.
+- **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
+  `Item::Rename`, one layer, exists.
+- **Design tokens as DTCG JSON** — export and import of variables, modes and styles (`typography`,
+  `shadow`, `gradient`), beside the `tokens.css` code export writes (`code::tokens`). Slash paths
+  become groups; a number is a `dimension` or a `number` by what it binds (scoping, in *First*, makes
+  this explicit); strings and booleans without a DTCG type ride in `$extensions`, as does each
+  variable's id, so import matches by id, then path, and a rename made in code is not a delete plus a
+  create. Import shows what is added, changed, removed and renamed, and applies as one transaction.
+  A `tokens.json` can also be linked like a kit: `watch_kits`' pill offers its changes. Also
+  `ondin tokens export`.
+- **Document diff.** `ondin diff a.ondin b.ondin` reports changes by node identity ("Button/Primary:
+  fill #2563EB → #1D4ED8; *Label* moved 4 px"), and a visual diff marks the changed regions over the
+  canvas. The same compare in the version history card (`versions.rs`), a git merge driver later. Rests
+  on deterministic serialization and stable ids.
+- **Data-driven renders** — `ondin render` of a component once per row of a CSV, its rows feeding
+  component properties, and export of every frame under every mode in one command. The CLI has
+  `gui`, `serve`, `export` and `mcp-proxy` (`main.rs` `parse`).
+- **A fidelity report for code export.** Render the HTML output in a browser, as `code_fidelity.rs`
+  does, and report to the user what did not translate (background blur in SVG, a property with no
+  CSS) instead of drifting silently.
+- **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
+  as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
+  mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,
+  sizes, radius, visibility, type numbers); a direction change needs an enum binding for flex
+  direction. Per-node overrides keyed by breakpoint are not the plan: every reader would take them.
+- **Interaction states in code export.** A variant property marked as an interaction state, its values
+  tied to `:hover`, `:active`, `:focus-visible` and `:disabled`; the exporter diffs each state's
+  variant against the default and writes only what changed. That needs a key pairing each state's
+  layers with the default's; layer names are fragile, so settle one before building. A state whose
+  layers do not pair falls back to the prop and is reported
+  approximated. The prop stays either way, for forcing a state. Live hover in present mode is
+  prototyping, a non-goal.
+- **Command Mode's navigation first** — leap labels and structural `hjkl` navigation (`foundations.md`
+  §13) need no Luau, and could ship before the command line and scripting.
+
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).
@@ -40,7 +91,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
 - **CSS layout properties §5.3c defers** — non-`auto` margin, `order`, named grid areas,
   `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float.
 - **A per-component review table for kit updates** — deferred, not declined (§15 D1010 (3), D1011 5D).
-- **Team publishing of kits, and servers** — undesigned (§15 D1010).
 - **Binding the other users of an extracted value** after *Extract into variable…* (§15 D1037, D1038).
 - **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)) — trigger: a preset
   with a bindable field. The only one, `prefs::ExportPreset`, has none.

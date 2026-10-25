@@ -76,7 +76,7 @@ The popover lists per kit "v8 → v9" and what the update changes (component, va
 ## Not built / non-goals
 
 - A per-component review table before accepting an update is the next phase, not a non-goal; the popover leaves room for its disclosure.
-- Team publishing is later (`roadmap.md`). Real-time collaboration is a non-goal (§12): a kit reaches another machine through the synced base folder (§5.11a), with no network code.
+- Team publishing is not planned. Real-time collaboration is a non-goal (§12): a kit reaches another machine through the synced base folder (§5.11a), with no network code.
 
 ## Traps
 

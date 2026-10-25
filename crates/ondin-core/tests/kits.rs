@@ -597,7 +597,7 @@ fn a_consumer_and_a_kit_round_trip_through_a_file() {
     let back = io::load(&bytes).unwrap();
     assert_eq!(back, d);
     assert_eq!(io::save(&back).unwrap(), bytes);
-    assert_eq!(back.schema_version(), 8);
+    assert_eq!(back.schema_version(), 9);
 }
 
 /// A file whose `vault` key went missing — what a v5 build would make of a v6
@@ -646,8 +646,8 @@ fn a_published_state_inside_a_published_state_is_refused() {
     );
 }
 
-/// A v5 file loads as the current version — two steps that are each a number
-/// and nothing else (`migrate_5_to_6`, `migrate_6_to_7`).
+/// A v5 file loads as the current version, through steps that are each a number
+/// and nothing else (`migrate_5_to_6` onwards).
 #[test]
 fn a_v5_file_loads_as_the_current_version() {
     let (d, _) = consumer();
@@ -655,6 +655,22 @@ fn a_v5_file_loads_as_the_current_version() {
     v["schema_version"] = 5.into();
     let back = io::load(&serde_json::to_vec(&v).unwrap()).unwrap();
     assert_eq!(back, d);
+}
+
+/// A v8 kit, published document and all, loads as the current version and
+/// saves as v9 inside and out (`migrate_8_to_9`).
+#[test]
+fn a_v8_kit_loads_and_saves_as_v9() {
+    let k = kit();
+    let mut v: serde_json::Value = serde_json::from_slice(&io::save(&k.doc).unwrap()).unwrap();
+    assert!(v["published"]["document"].is_object(), "fixture: published");
+    v["schema_version"] = 8.into();
+    v["published"]["document"]["schema_version"] = 8.into();
+    let back = io::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    assert_eq!(back, k.doc);
+    let saved: serde_json::Value = serde_json::from_slice(&io::save(&back).unwrap()).unwrap();
+    assert_eq!(saved["schema_version"], 9);
+    assert_eq!(saved["published"]["document"]["schema_version"], 9);
 }
 
 /// Copy a kit instance out of `from` through the clipboard's text form — the

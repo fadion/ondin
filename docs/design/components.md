@@ -540,7 +540,7 @@ variant* is the verb that takes the next free combination; an instance's name is
   holds one; a duplicated main keeps its own (`remap_subtree` copies it).
 - Ops `SetVariantSet`, `SetVariant`, `SetProperties`, `SetDescription`, each inverting to the old value;
   no ink, no-ops in `absorb`, skipped by `propagate::mode`, never written by `reset::state_ops` —
-  **never followed or overridden**. Saved unbumped (additive).
+  **never followed or overridden**. `description` and `Property::preferred` are new in v9.
 - `Node::make_copy_of` is the one place a node becomes a linked copy (linked; swap, flag, values,
   properties and description cleared); every door that makes an instance node goes through it.
 

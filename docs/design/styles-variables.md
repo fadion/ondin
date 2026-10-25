@@ -41,7 +41,7 @@ A **variable** is a named, typed value — **colour, number, string or boolean**
 
 Readers built on `mode_at` (which counts the node itself): `resolve_var`, `resolve_brush`, `resolved_paint`, `resolve_corners`, `resolved_display`, `shown`, `resolved_kind` (applies `text_drawn_in`), `resolved_item` (applies `limits_drawn_in`), `drawn_opacity`, `stroke_width_drawn_in`, `resolved_effects`.
 
-**`variable::check` is a post-condition of every transaction and a check of the loader**; it refuses a dangling binding rather than repairing it. Save format v7/v8 (§5.11); operations, invalidation and the paste rule are in §5.7, §5.11, §5.9.
+**`variable::check` is a post-condition of every transaction and a check of the loader**; it refuses a dangling binding rather than repairing it. Save format v7–v9 (§5.11); operations, invalidation and the paste rule are in §5.7, §5.11, §5.9.
 
 ### The binding shapes
 

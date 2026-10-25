@@ -36,6 +36,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             5 => migrate_5_to_6(&mut value),
             6 => migrate_6_to_7(&mut value),
             7 => migrate_7_to_8(&mut value),
+            8 => migrate_8_to_9(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -243,5 +244,21 @@ fn migrate_7_to_8(value: &mut Value) {
         .filter(|d| d.is_object())
     {
         inner["schema_version"] = Value::from(8u32);
+    }
+}
+
+/// v8 → v9: bound size limits and type numbers, descriptions and preferred mains.
+/// A number and nothing else: a v8 file holds none of them. The bump is for the
+/// older build, which would lay a bound limit out at its literal 0, refuse a
+/// widened `text_vars` as a parse error, and drop descriptions and preferred mains.
+/// The published document's number moves too, as in `migrate_6_to_7`.
+fn migrate_8_to_9(value: &mut Value) {
+    value["schema_version"] = Value::from(9u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(9u32);
     }
 }

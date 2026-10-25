@@ -410,7 +410,7 @@ fn the_table_and_its_bindings_round_trip_through_a_save() {
     assert_eq!(back, f.doc);
     assert_eq!(ondin_core::io::save(&back).unwrap(), bytes);
     let text = String::from_utf8(bytes).unwrap();
-    assert!(text.contains("\"schema_version\": 8"), "written as v8");
+    assert!(text.contains("\"schema_version\": 9"), "written as v9");
     assert!(
         text.contains("\"alpha\": 0.25"),
         "the `%` rides in the binding"

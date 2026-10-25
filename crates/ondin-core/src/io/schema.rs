@@ -286,7 +286,7 @@ pub(crate) struct NodeDto {
     /// (§15 D982). Bound layers are wire ids, checked on load with the links.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub props: Vec<Keyed<crate::variant::Property>>,
-    /// A main's or a set's description, absent when it has none.
+    /// A main's or a set's description, absent when it has none. New in v9.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// Where a vault node was vendored from (§15 D1012), absent on every node
@@ -314,7 +314,7 @@ pub(crate) struct NodeDto {
     pub size_vars: crate::variable::SizeVars,
     /// The variables a text's content, family and type numbers are bound to,
     /// absent when none is; up to the last bound slot, so a file with the first
-    /// two slots only loads. New in v8.
+    /// two slots only loads. New in v8 with two slots; the number slots in v9.
     #[serde(
         default,
         skip_serializing_if = "no_text_vars",

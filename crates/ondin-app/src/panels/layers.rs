@@ -1090,7 +1090,7 @@ impl OndinApp {
         // one-shot; re-requesting whenever focus is absent would regrab it on the
         // frame Enter or Escape takes it away.
         let fid = rename_field_id(id);
-        if ui.ctx().read_response(fid).is_none() {
+        if crate::ui::widget_rect(ui.ctx(), fid).is_none() {
             ui.ctx().memory_mut(|m| m.request_focus(fid));
         }
         // Sits where the painted name sat — see `rename_field_rect`.

@@ -137,3 +137,4 @@ ondin-app/src/
 - `layers::depth_range` and `TreeRow::closed` must not be conflated; a collapsed container takes drops only through its own outline.
 - Layers tree: the drag-state guard must be asked what it says on the release frame; egui clears `pointer.down` on that frame.
 - Cursor claims go through two APIs (`Context::set_cursor_icon`, `Response::on_hover_cursor`); grep both.
+- Ask where a widget is, or which layer it is on, with `ui::widget_rect`, never `Context::read_response`: in egui 0.35 building a `Response` surrenders the widget's focus on a frame whose click landed elsewhere, so the inspector hold reading the focused field that way dropped a page name field opened by the `+`. Pinned by `pages::tests::a_page_added_by_its_button_arrives_focused`.

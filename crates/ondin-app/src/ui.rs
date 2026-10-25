@@ -2285,6 +2285,20 @@ pub const BUTTON_R: u8 = 5;
 /// [`BUTTON_R`] plus this gap, to stay concentric with the button.
 const FOCUS_GAP: f32 = 2.0;
 
+/// Where widget `id` was registered, this pass or the last, read without side
+/// effects. Not `Context::read_response`: building a `Response` surrenders the
+/// widget's focus on a frame whose click landed elsewhere, so reading the focused
+/// widget that way drops a field focused by the click that opened it.
+pub fn widget_rect(ctx: &egui::Context, id: egui::Id) -> Option<egui::WidgetRect> {
+    ctx.viewport(|v| {
+        v.this_pass
+            .widgets
+            .get(id)
+            .or_else(|| v.prev_pass.widgets.get(id))
+            .copied()
+    })
+}
+
 /// The accent hairline around whatever the keyboard has focused, like CSS
 /// `:focus-visible`. Call it once at the end of a modal's body (`settings::card`
 /// does). It paints nothing unless a key put the focus there: `Tab` turns the mode
@@ -2308,7 +2322,7 @@ pub fn focus_ring(ui: &egui::Ui) {
     let Some(id) = ctx.memory(|m| m.focused()) else {
         return;
     };
-    let Some(rect) = ctx.read_response(id).map(|r| r.rect) else {
+    let Some(rect) = widget_rect(ctx, id).map(|w| w.rect) else {
         return;
     };
     ui.painter().rect_stroke(

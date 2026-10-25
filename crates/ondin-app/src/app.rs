@@ -7285,8 +7285,8 @@ impl OndinApp {
             .is_some();
         if popover
             || focused
-                .and_then(|id| ctx.read_response(id))
-                .is_some_and(|r| r.layer_id == layer)
+                .and_then(|id| crate::ui::widget_rect(ctx, id))
+                .is_some_and(|w| w.layer_id == layer)
         {
             self.inspector_hold = Some(self.session.selection.clone());
         }

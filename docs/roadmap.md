@@ -81,6 +81,20 @@ reads true.
   prototyping, a non-goal.
 - **Command Mode's navigation first** — leap labels and structural `hjkl` navigation (`foundations.md`
   §13) need no Luau, and could ship before the command line and scripting.
+- **Private mode**, for sharing a screen without exposing names (a client's or a company's name is
+  often the first segment of a component's). A view flag saved as a preference, so a restart mid-call
+  does not come back revealing; a shortcut, a palette command, and an accent *Private* pill in the top
+  bar that turns it off. It hides names, not content: layer, frame, component, page, document and
+  project names are masked by kind and position ("Frame", "Page 2"); text, images, colours, and style
+  and variable names stay. Masked, not removed, so a frame label still selects its frame. Pages and
+  Layers fold as an overlay (`prefs.pages_folded || private`), leaving the fold preferences as they
+  were. Every drawn name goes through one function, toasts included; today views read `.name()`
+  directly in some twenty files. Doors that need the real name (rename, layer search) decline with
+  *Leave private mode to rename*. The library masks document and project names and keeps thumbnails.
+  The guard is a leak test: a document whose every name carries a sentinel, whole frames with each
+  surface open (inspector, palette, menus, popovers, library), failing on any drawn text holding it.
+  First the chrome, canvas labels, inspector, toasts and palette with that test; then the popovers,
+  kits and library.
 
 ## Later · Components and layout
 

@@ -191,8 +191,16 @@ impl OndinApp {
     }
 
     /// Open the row of `page`, made by the last commit, for renaming into that
-    /// commit's undo step.
+    /// commit's undo step. A list dragged tall enough for every row grows by
+    /// the new one rather than hiding it.
     fn start_new_page_rename(&mut self, page: NodeId) {
+        let rows = self.session.doc.pages().len() as f32 * ROW_H;
+        if let Some(h) = self.prefs.pages_height
+            && h >= rows - ROW_H - 0.5
+        {
+            self.prefs.pages_height = Some(h.max(rows));
+            self.prefs.save();
+        }
         self.start_page_rename(page);
         if let Some(r) = &mut self.pages.renaming {
             r.fold = Some((self.session.history.undo_depth(), self.session.commits()));
@@ -758,10 +766,12 @@ impl OndinApp {
                 .font(egui::FontId::proportional(12.5))
                 .text_color(color::TEXT),
         );
-        // Focus once, on the field's first frame (the layer rename's rule).
+        // Focus once, on the field's first frame (the layer rename's rule), and
+        // bring the row into a list scrolled or dragged short.
         if !r.focused {
             r.focused = true;
             resp.request_focus();
+            ui.scroll_to_rect(row, None);
             let all = egui::text::CCursorRange::two(
                 egui::text::CCursor::new(0),
                 egui::text::CCursor::new(r.text.chars().count()),
@@ -1111,6 +1121,28 @@ mod tests {
         let during = divider(&mut app);
         assert!(app.pages.renaming.is_some(), "fixture: the field is open");
         assert_eq!(during, before, "nothing below moves");
+    }
+
+    /// A list dragged to show every row grows by the page added to it; one dragged
+    /// shorter keeps its height.
+    ///
+    /// flip: `start_new_page_rename` without its growth → fails at "grows by a row".
+    #[test]
+    fn a_list_showing_every_page_grows_by_the_new_one() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = two_pages(&ctx);
+        app.prefs.pages_height = Some(2.0 * ROW_H);
+        app.add_page();
+        assert_eq!(app.prefs.pages_height, Some(3.0 * ROW_H), "grows by a row");
+
+        app.prefs.pages_height = Some(ROW_H);
+        app.pages.renaming = None;
+        app.duplicate_page(app.session.page);
+        assert_eq!(
+            app.prefs.pages_height,
+            Some(ROW_H),
+            "a short list stays short"
+        );
     }
 
     /// *Delete page* asks first when the page has layers, and deletes an empty

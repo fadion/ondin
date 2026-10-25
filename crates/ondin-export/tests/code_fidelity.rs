@@ -1796,6 +1796,72 @@ fn bound_type_numbers_match_the_canvas_in_every_mode() {
     }
 }
 
+/// A paragraph with a spacing of its own keeps it under a bound default, even
+/// where it equals the variable's value in the mode exported.
+///
+/// flip: `Walk::text` telling a paragraph's own spacing by its value → fails at
+/// *"one paragraph draws the variable"*, the second paragraph bound too.
+#[test]
+fn a_paragraph_spacing_of_its_own_stays_under_a_bound_default() {
+    use ondin_core::variable::{Cell, Mode, TEXT_PARAGRAPH_SPACING, VarKind, Variable};
+    let mut d = Doc::new();
+    let mode = d.ids.mint_mode();
+    d.apply(vec![Operation::AddMode {
+        mode: Mode {
+            id: mode,
+            name: "Mode 1".into(),
+        },
+        index: 0,
+        cells: vec![],
+    }]);
+    let space = d.ids.mint_var();
+    d.apply(vec![Operation::AddVariable {
+        var: Variable {
+            id: space,
+            name: "space".into(),
+            kind: VarKind::Number,
+            cells: [(mode, Cell::Number(6.0))].into_iter().collect(),
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }]);
+    let f = d.frame(None, 0.0, 0.0, 300.0, 130.0, "Board");
+    let kind = text_node("One\nTwo\nThree", TextSizing::Auto, body_style(), |_| {});
+    let t = d.add(Some(f), kind, Affine::translate((12.0, 10.0)), "Copy");
+    let ops = ondin_core::bind_text_ops(
+        &d.doc,
+        t,
+        ondin_core::variable::text_vars_at(TEXT_PARAGRAPH_SPACING, space),
+    );
+    d.apply(ops);
+    let Some(NodeKind::Text { paragraph, .. }) = d.doc.get(t).map(|n| n.kind().clone()) else {
+        panic!("a text");
+    };
+    // "Two" spaced 6 of its own, the variable's value here.
+    let spans = ondin_core::ParaSpans::from_parts(
+        vec![ondin_core::Span {
+            start: 4,
+            end: 8,
+            attr: ondin_core::ParaAttr::Spacing(ondin_core::Length::Px(6.0)),
+        }],
+        &paragraph,
+    );
+    d.apply(vec![Operation::SetParagraphSpans { id: t, spans }]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, doc.get(doc.root()).unwrap().children());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert_eq!(
+        css.matches("margin-top: calc(var(--space) * 1px)").count(),
+        1,
+        "one paragraph draws the variable:\n{css}"
+    );
+    assert!(
+        css.contains("margin-top: 6px"),
+        "the other its own 6:\n{css}"
+    );
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

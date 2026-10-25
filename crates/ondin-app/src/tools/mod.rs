@@ -19,7 +19,7 @@ use ondin_core::kurbo::{
 use ondin_core::peniko::Color;
 use ondin_core::{
     Document, Fill, GeometryPatch, ImageEntry, ImageId, NodeId, NodeKind, Operation, Resolved,
-    Stroke, TextSizing, TextStyle, Transaction, geometry, keyed_by_position,
+    Stroke, TextSizing, Transaction, geometry, keyed_by_position,
 };
 
 /// The active canvas tool. `Select` manipulates existing nodes; the others draw
@@ -374,6 +374,7 @@ pub fn resize_to_handle(
             ..
         } => railed_patch(
             res.used_kind_of(node),
+            &node.text_vars(),
             rail,
             opts.scaling,
             Rect::from_origin_size(inset.to_point(), size),
@@ -442,9 +443,11 @@ fn railed_box(kind: &NodeKind, rail: &ondin_core::kurbo::BezPath) -> Option<Rect
 /// On a rail a resize edits the rail: the patch both resize doors write
 /// ([`resize_to_handle`] and [`scale_geometry`]), from the drawn box to `want`,
 /// holding `hold`'s corner. Solved against the type this transaction will leave
-/// ([`kind_to_solve_against`]); `drawn` stays the unscaled box.
+/// ([`kind_to_solve_against`]), `bound` the node's text bindings; `drawn` stays
+/// the unscaled box.
 fn railed_patch(
     kind: &NodeKind,
+    bound: &ondin_core::TextVars,
     rail: &ondin_core::kurbo::BezPath,
     scaling: Scaling,
     drawn: Rect,
@@ -453,6 +456,7 @@ fn railed_patch(
 ) -> GeometryPatch {
     let solve_against = kind_to_solve_against(
         kind,
+        bound,
         scaling,
         ratio(drawn.width(), want.width()),
         ratio(drawn.height(), want.height()),
@@ -1020,6 +1024,7 @@ fn scale_geometry(
             id,
             geometry: railed_patch(
                 res.used_kind_of(node),
+                &node.text_vars(),
                 rail,
                 scaling,
                 drawn,
@@ -1089,60 +1094,62 @@ fn scale_geometry(
     }
 }
 
-/// The four text scopes as a photographic scale of `s` leaves them.
+/// Text `kind` with its four scopes as a photographic scale of `s` leaves them;
+/// `None` for anything but a text.
 ///
 /// Every absolute length scales (`Length::scaled` multiplies `Px` and leaves `Em`).
 /// The span lists are re-normalized against the scaled defaults, so a span with its
-/// own indent does not rejoin the node's. Split out of [`scale_scalars`] so a rail
-/// can be solved against the type it will end up with.
-fn scaled_text_scopes(
-    style: &TextStyle,
-    spans: &ondin_core::CharSpans,
-    para_spans: &ondin_core::ParaSpans,
-    paragraph: &ondin_core::ParagraphStyle,
-    s: f64,
-) -> (
-    TextStyle,
-    ondin_core::CharSpans,
-    ondin_core::ParagraphStyle,
-    ondin_core::ParaSpans,
-) {
-    let scaled = style.scaled(s);
-    let new_spans = spans.scaled(s, &scaled);
-    let new_paragraph = paragraph.scaled(s);
-    let new_para_spans = para_spans.scaled(s, &new_paragraph);
-    (scaled, new_spans, new_paragraph, new_para_spans)
-}
-
-/// The node kind [`railed_resize`] should measure against, given the scaling the
-/// same gesture is about to apply: a photographic scale multiplies the type, and a
-/// rail's box depends on the curve and the type. `None` measures the kind unchanged.
-fn kind_to_solve_against(
-    kind: &NodeKind,
-    scaling: Scaling,
-    csx: f64,
-    csy: f64,
-) -> Option<NodeKind> {
-    let s = scaling.scalar(csx, csy)?;
+/// own indent does not rejoin the node's. A type number `bound` binds keeps the
+/// value it came in with, as a bound stroke width's 0 stays 0: a bound size's
+/// literal 0, scaled, would clamp to 1 and detach the binding. Split out of
+/// [`scale_scalars`] so a rail can be solved against the type it will end up with.
+fn scaled_text(kind: &NodeKind, s: f64, bound: &ondin_core::TextVars) -> Option<NodeKind> {
     // Cloned and mutated so a new `NodeKind::Text` field travels through on its own.
     let mut out = kind.clone();
     let NodeKind::Text {
-        style,
-        spans,
-        para_spans,
-        paragraph,
-        ..
+        style, paragraph, ..
     } = &mut out
     else {
         return None;
     };
-    let (new_style, new_spans, new_paragraph, new_para_spans) =
-        scaled_text_scopes(style, spans, para_spans, paragraph, s);
-    **style = new_style;
-    *spans = new_spans;
-    *paragraph = new_paragraph;
-    *para_spans = new_para_spans;
+    **style = style.scaled(s);
+    *paragraph = paragraph.scaled(s);
+    for (k, var) in bound
+        .iter()
+        .enumerate()
+        .skip(ondin_core::variable::TEXT_SIZE)
+    {
+        if var.is_some() {
+            ondin_core::variable::copy_text_slot(k, kind, &mut out);
+        }
+    }
+    // The spans after the defaults they are normalized against are final.
+    if let NodeKind::Text {
+        style,
+        spans,
+        paragraph,
+        para_spans,
+        ..
+    } = &mut out
+    {
+        *spans = spans.scaled(s, style);
+        *para_spans = para_spans.scaled(s, paragraph);
+    }
     Some(out)
+}
+
+/// The node kind [`railed_resize`] should measure against, given the scaling the
+/// same gesture is about to apply: a photographic scale multiplies the type, and a
+/// rail's box depends on the curve and the type, and a number `bound` binds does
+/// not scale. `None` measures the kind unchanged.
+fn kind_to_solve_against(
+    kind: &NodeKind,
+    bound: &ondin_core::TextVars,
+    scaling: Scaling,
+    csx: f64,
+    csy: f64,
+) -> Option<NodeKind> {
+    scaled_text(kind, scaling.scalar(csx, csy)?, bound)
 }
 
 /// The edits that make a scale photographic: stroke widths, corner radii and font
@@ -1225,18 +1232,20 @@ fn scale_scalars(
             });
         }
         // Both style ops pass `spans: None`; the scaled lists arrive in the span ops.
-        NodeKind::Text {
-            style,
-            spans,
-            para_spans,
-            paragraph,
-            ..
-        } => {
-            let (scaled, spans, paragraph, para_spans) =
-                scaled_text_scopes(style, spans, para_spans, paragraph, s);
+        NodeKind::Text { .. } => {
+            let Some(NodeKind::Text {
+                style,
+                spans,
+                para_spans,
+                paragraph,
+                ..
+            }) = scaled_text(node.kind(), s, &node.text_vars())
+            else {
+                return;
+            };
             ops.push(Operation::SetTextStyle {
                 id,
-                style: scaled,
+                style: *style,
                 spans: None,
             });
             ops.push(Operation::SetTextSpans { id, spans });
@@ -2926,7 +2935,7 @@ pub fn rewrite_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ondin_core::IdSource;
+    use ondin_core::{IdSource, TextStyle};
 
     /// A crop handle holds the opposite edges and stops at the picture.
     #[test]
@@ -7177,6 +7186,75 @@ mod tests {
             "the type size stayed at {}",
             style.font_size
         );
+    }
+
+    /// A photographic scale leaves a bound size at its literal 0, so the binding
+    /// still reads it as its own and the text draws its variable.
+    ///
+    /// flip: `scaled_text`'s copy of the bound slots dropped → fails at *"still
+    /// bound"*, the size clamped to 1 and detached.
+    #[test]
+    fn scaling_a_text_keeps_its_bound_size() {
+        use ondin_core::variable::TEXT_SIZE;
+        let (mut doc, _, group, text) = group_with_auto_text();
+        let mut ids = IdSource::new(8);
+        let (mode, var) = (ids.mint_mode(), ids.mint_var());
+        doc.apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: ondin_core::Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: ondin_core::Variable {
+                    id: var,
+                    name: "type/size".into(),
+                    kind: ondin_core::VarKind::Number,
+                    cells: [(mode, ondin_core::Cell::Number(32.0))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .unwrap();
+        let bind = ondin_core::bind_text_ops(
+            &doc,
+            text,
+            ondin_core::variable::text_vars_at(TEXT_SIZE, var),
+        );
+        doc.apply(&Transaction(bind)).unwrap();
+        let res = Resolved::rebuild(&doc);
+        let local = ondin_core::local_box(&doc, &res, group).expect("group box");
+        let tx = resize_group(
+            &doc,
+            &res,
+            group,
+            local,
+            Handle::BottomRight,
+            Point::new(local.max_x() * 2.0, local.max_y() * 2.0),
+            Resize {
+                scaling: Scaling::Photographic,
+                ..Default::default()
+            },
+        );
+        // The commit's pass, which judges the size written against the binding.
+        let tx = ondin_core::build::keep_text_bindings(&doc, tx);
+        doc.apply(&tx).unwrap();
+        let node = doc.get(text).unwrap();
+        assert_eq!(node.text_vars()[TEXT_SIZE], Some(var), "still bound");
+        let NodeKind::Text { style, .. } = node.kind() else {
+            panic!("not text")
+        };
+        assert_eq!(style.font_size, 0.0, "the literal 0");
+        let Some(NodeKind::Text { style, .. }) = doc.resolved_kind(text).map(|k| k.into_owned())
+        else {
+            panic!("not text")
+        };
+        assert_eq!(style.font_size, 32.0, "the variable drawn");
     }
 
     /// A group with an auto-sized text layer and a rect beside it, so the group has

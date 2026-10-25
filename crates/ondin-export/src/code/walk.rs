@@ -1954,9 +1954,13 @@ impl Walk<'_> {
                 "white-space",
                 if wraps { white_space } else { "pre" }.into(),
             ));
-            // A paragraph with no spacing of its own draws the bound default.
-            let bound = vars[ondin_core::variable::TEXT_PARAGRAPH_SPACING]
-                .filter(|_| p_style.spacing == paragraph.spacing);
+            // A paragraph with no spacing of its own draws the bound default —
+            // asked of the spans, since one of its own may equal this mode's value.
+            let own = para_spans.as_slice().iter().any(|s| {
+                (s.start..s.end).contains(&start)
+                    && matches!(s.attr, ondin_core::ParaAttr::Spacing(_))
+            });
+            let bound = vars[ondin_core::variable::TEXT_PARAGRAPH_SPACING].filter(|_| !own);
             if !first && let Some(var) = bound {
                 let v = match paragraph.spacing {
                     ondin_core::Length::Em(_) => {

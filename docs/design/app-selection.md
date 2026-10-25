@@ -111,8 +111,8 @@ plain click or marquee replaces the selection and clears it.
 - The tree un-collapses and scrolls to a canvas selection; one header button collapses or expands all.
 - **Rename**: double-click, `Ctrl+R`, `F2` and the context menu's *Rename* all set `renaming_layer`;
   the field requests focus itself on the first frame it draws, detected with
-  `read_response(id).is_none()`. One undo step; `Escape` discards. The chord shows the layers panel if
-  hidden and refuses a multi-selection.
+  `ui::widget_rect(id).is_none()`. One undo step; `Escape` discards. The chord shows the layers panel if
+  hidden, unfolds its Layers section and refuses a multi-selection.
 
 ## Traps
 

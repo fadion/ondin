@@ -10,7 +10,7 @@
 use crate::app::OndinApp;
 use crate::preview::Drag;
 use crate::theme::{self, color, icon};
-use crate::ui::{eyebrow, icon_button};
+use crate::ui::{FOLD_HEAD_H, baseline_in, fold_head, icon_button};
 use eframe::egui;
 use ondin_core::{NodeId, Operation, Transaction, build};
 
@@ -37,6 +37,11 @@ pub(crate) struct PagesState {
     renaming: Option<Renaming>,
     /// A row being dragged to reorder the pages, and the slot it would drop into.
     drag: Option<(NodeId, Option<usize>)>,
+    /// A page with layers waiting on *Delete page*'s confirmation.
+    pub(crate) deleting: Option<NodeId>,
+    /// Where the `+` was drawn, for tests that press it.
+    #[cfg(test)]
+    plus: Option<egui::Rect>,
 }
 
 /// A page row's rename in flight.
@@ -161,7 +166,7 @@ impl OndinApp {
         let tx = Transaction(vec![Operation::AddPage {
             id,
             index: doc.pages().len(),
-            name: name.clone(),
+            name,
             ground: doc.ground(self.session.page),
             draft: false,
             mode: None,
@@ -170,13 +175,7 @@ impl OndinApp {
             return;
         }
         self.go_to_page(id);
-        self.pages.renaming = Some(Renaming {
-            page: id,
-            text: name,
-            fold: Some((self.session.history.undo_depth(), self.session.commits())),
-            focused: false,
-        });
-        self.pages_unfold();
+        self.start_new_page_rename(id);
         self.session.info("Added a page");
     }
 
@@ -189,6 +188,15 @@ impl OndinApp {
             focused: false,
         });
         self.pages_unfold();
+    }
+
+    /// Open the row of `page`, made by the last commit, for renaming into that
+    /// commit's undo step.
+    fn start_new_page_rename(&mut self, page: NodeId) {
+        self.start_page_rename(page);
+        if let Some(r) = &mut self.pages.renaming {
+            r.fold = Some((self.session.history.undo_depth(), self.session.commits()));
+        }
     }
 
     /// Commit a rename. An empty name or the name it has changes nothing.
@@ -209,7 +217,8 @@ impl OndinApp {
 
     /// *Duplicate page*: a copy of `page` directly below it, named `… copy`, its
     /// layers copied the way *Duplicate* copies them and its guides with them,
-    /// made current. One undo step.
+    /// made current with its name open for typing. Duplicating and naming it are
+    /// one undo step.
     pub(crate) fn duplicate_page(&mut self, page: NodeId) {
         self.finish_text_first();
         let doc = &self.session.doc;
@@ -282,14 +291,82 @@ impl OndinApp {
         }
         if self.session.commit(Transaction(ops)) {
             self.go_to_page(id);
+            self.start_new_page_rename(id);
             self.session.info("Duplicated the page");
         }
     }
 
-    /// *Delete page*: its guides, then its layers — a main among them detaching its
+    /// *Delete page*: an empty page goes at once; one with layers asks first
+    /// ([`Self::page_delete_confirmation`]).
+    pub(crate) fn delete_page(&mut self, page: NodeId) {
+        let doc = &self.session.doc;
+        let has_layers = doc.get(page).is_some_and(|n| !n.children().is_empty());
+        if has_layers && doc.pages().len() > 1 {
+            self.pages.deleting = Some(page);
+        } else {
+            self.delete_page_now(page);
+        }
+    }
+
+    /// *Delete page?*: what goes, then *Cancel* and *Delete*. `Escape`, the
+    /// backdrop and the ✕ cancel.
+    pub(crate) fn page_delete_confirmation(&mut self, ctx: &egui::Context) {
+        let Some(page) = self.pages.deleting else {
+            return;
+        };
+        let Some(layers) = self.session.doc.get(page).map(|n| n.children().len()) else {
+            self.pages.deleting = None;
+            return;
+        };
+        let name = self.page_name(page);
+        let body = format!(
+            "“{name}” and its {} go with it. Ctrl+Z brings them back.",
+            match layers {
+                1 => "1 layer".to_string(),
+                n => format!("{n} layers"),
+            }
+        );
+        let (mut delete, mut cancel) = (false, false);
+        let modal = crate::settings::card("confirm-page-delete", ctx, |ui| {
+            ui.set_width(crate::ui::menu_inner_w(320.0, crate::settings::PAD));
+            if crate::settings::modal_title(ui, "Delete page?") {
+                cancel = true;
+            }
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(body)
+                        .size(12.0)
+                        .color(theme::text::MUTED),
+                )
+                .wrap(),
+            );
+            ui.add_space(crate::settings::FOOTER_GAP);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
+                {
+                    cancel = true;
+                }
+                if crate::settings::text_button(ui, "Delete", crate::ui::FieldButton::Danger)
+                    .clicked()
+                {
+                    delete = true;
+                }
+            });
+        });
+        if delete {
+            self.pages.deleting = None;
+            self.delete_page_now(page);
+        } else if cancel || modal.should_close() {
+            self.pages.deleting = None;
+        }
+    }
+
+    /// Delete `page`: its guides, then its layers — a main among them detaching its
     /// instances on other pages, as *Delete* does — then the page. Leaving the
     /// current page lands on the one above it. One undo step; the last page stays.
-    pub(crate) fn delete_page(&mut self, page: NodeId) {
+    pub(crate) fn delete_page_now(&mut self, page: NodeId) {
         self.finish_text_first();
         let doc = &self.session.doc;
         let Some(index) = doc.page_index(page) else {
@@ -408,36 +485,43 @@ impl OndinApp {
                 left: crate::panels::layers::PAD_X,
                 right: crate::panels::layers::PAD_X,
                 top: 14,
-                bottom: if folded { 10 } else { 7 },
+                // Folded, as far above the divider as the Layers header sits below it.
+                bottom: if folded { 9 } else { 7 },
             })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let caret = if folded {
-                        icon::CARET_RIGHT
-                    } else {
-                        icon::CARET_DOWN
-                    };
-                    if icon_button(ui, caret, 16.0, 11.0, false, true)
-                        .on_hover_text(if folded { "Show pages" } else { "Fold pages" })
-                        .clicked()
-                    {
+                    let (head, baseline) = fold_head(ui, "Pages", !folded);
+                    if head.clicked() {
                         self.prefs.pages_folded = !folded;
                         self.prefs.save();
                     }
-                    ui.label(eyebrow("Pages"));
                     if folded {
+                        // On the eyebrow's baseline, which centring the two would miss.
                         ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(self.page_name(self.session.page))
-                                .size(12.0)
-                                .color(theme::text::MUTED),
+                        // Clear of the `+` and its gap.
+                        let room = ui.available_width() - 20.0 - 2.0 * ui.spacing().item_spacing.x;
+                        let mut job = egui::text::LayoutJob::simple_singleline(
+                            self.page_name(self.session.page),
+                            egui::FontId::proportional(12.0),
+                            theme::text::MUTED,
                         );
+                        job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
+                        let name = ui.painter().layout_job(job);
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(name.size().x, FOLD_HEAD_H),
+                            egui::Sense::hover(),
+                        );
+                        let top = baseline - baseline_in(&name);
+                        ui.painter()
+                            .galley(egui::pos2(rect.left(), top), name, theme::text::MUTED);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, icon::PLUS, 20.0, 15.0, false, true)
-                            .on_hover_text("New page")
-                            .clicked()
+                        let plus = icon_button(ui, icon::PLUS, 20.0, 15.0, false, true);
+                        #[cfg(test)]
                         {
+                            self.pages.plus = Some(plus.rect);
+                        }
+                        if plus.on_hover_text("New page").clicked() {
                             self.add_page();
                         }
                     });
@@ -661,7 +745,9 @@ impl OndinApp {
             egui::Stroke::new(1.0, color::ACCENT),
             egui::StrokeKind::Inside,
         );
-        let resp = ui.put(
+        // `place`, not `put`: the field is shorter than its row, and `put` would
+        // pull the rows below up to the field's bottom.
+        let resp = ui.place(
             field.shrink2(egui::vec2(4.0, 0.0)),
             egui::TextEdit::singleline(&mut r.text)
                 .id(id)
@@ -857,7 +943,7 @@ mod tests {
         let before = app.session.doc.clone();
 
         app.go_to_page(second);
-        app.delete_page(second);
+        app.delete_page_now(second);
         assert!(!app.session.doc.is_page(second));
         assert_eq!(app.session.page, first, "the page above");
         assert!(
@@ -924,5 +1010,145 @@ mod tests {
         app.step_page(-1);
         app.step_page(-1);
         assert_eq!(app.session.page, first);
+    }
+
+    /// One whole app frame, 1320 × 820.
+    fn whole_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let mut frame = eframe::Frame::_new_kittest();
+        let time = ctx.input(|i| i.time) + 0.1;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(app, ui, &mut frame),
+        );
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// The page the `+` adds arrives with its name field focused, and `Escape`
+    /// closes the field — through whole frames, since what took the focus was a
+    /// panel drawn after the section.
+    ///
+    /// flip: `inspector_panel` reading the focused widget by `read_response` →
+    /// fails at "arrives focused".
+    #[test]
+    fn a_page_added_by_its_button_arrives_focused() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, _) = two_pages(&ctx);
+        app.view = crate::app::View::Editor;
+        for _ in 0..3 {
+            whole_frame(&ctx, &mut app, vec![]);
+        }
+        let at = app.pages.plus.expect("the + was drawn").center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        whole_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        whole_frame(&ctx, &mut app, vec![button(true)]);
+        whole_frame(&ctx, &mut app, vec![button(false)]);
+        let field = egui::Id::new(("page-rename", app.session.page));
+        assert_eq!(
+            app.session.doc.pages().len(),
+            3,
+            "fixture: the + added a page"
+        );
+        whole_frame(&ctx, &mut app, vec![]);
+        assert_eq!(ctx.memory(|m| m.focused()), Some(field), "arrives focused");
+
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        whole_frame(&ctx, &mut app, vec![]);
+        assert!(app.pages.renaming.is_none(), "Escape closes the field");
+    }
+
+    /// The Pages section stands still while a row is renamed: the divider under
+    /// it stays put.
+    ///
+    /// flip: the field laid with `ui.put` → fails at "nothing below moves".
+    #[test]
+    fn renaming_a_page_moves_nothing_below_it() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [first, ..]) = two_pages(&ctx);
+        let divider = |app: &mut OndinApp| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(300.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.pages_section(ui),
+            );
+            crate::ui::widget_rect(&ctx, egui::Id::new("pages-divider"))
+                .expect("the divider was drawn")
+                .rect
+        };
+        divider(&mut app);
+        let before = divider(&mut app);
+        app.start_page_rename(first);
+        // The scroll area is sized by the frame before's content.
+        divider(&mut app);
+        let during = divider(&mut app);
+        assert!(app.pages.renaming.is_some(), "fixture: the field is open");
+        assert_eq!(during, before, "nothing below moves");
+    }
+
+    /// *Delete page* asks first when the page has layers, and deletes an empty
+    /// one at once.
+    #[test]
+    fn deleting_a_page_with_layers_asks_first() {
+        let ctx = egui::Context::default();
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        app.delete_page(second);
+        assert!(app.session.doc.is_page(second), "not yet");
+        assert_eq!(app.pages.deleting, Some(second));
+        assert!(app.modal_is_up());
+        app.pages.deleting = None;
+
+        app.add_page();
+        let empty = app.session.page;
+        app.pages.renaming = None;
+        app.delete_page(empty);
+        assert!(
+            !app.session.doc.is_page(empty),
+            "an empty page goes at once"
+        );
+        assert!(app.pages.deleting.is_none());
+    }
+
+    /// *Duplicate page* opens the copy's name for typing, and duplicating and
+    /// naming it are one undo step.
+    #[test]
+    fn a_duplicated_page_is_named_in_the_same_step() {
+        let ctx = egui::Context::default();
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        app.duplicate_page(second);
+        let copy = app.session.page;
+        let r = app.pages.renaming.take().expect("the copy's name is open");
+        assert_eq!(r.page, copy);
+        app.commit_page_name(copy, "Pricing v2", r.fold);
+        assert_eq!(app.page_name(copy), "Pricing v2");
+        assert!(app.session.undo());
+        assert!(!app.session.doc.is_page(copy), "one step takes both away");
     }
 }

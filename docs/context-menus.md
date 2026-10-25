@@ -375,10 +375,10 @@ Opened on a row of the layers pane's Pages section, without switching to that pa
 | Row | Chord | Shown / enabled |
 |---|---|---|
 | Rename | — | opens the row's name field, as a double-click does |
-| Duplicate page | — | a copy directly below, named *‹name› copy* (then *‹name› copy 2*, …), its layers copied as *Duplicate* copies them and its guides with them; becomes current |
+| Duplicate page | — | a copy directly below, named *‹name› copy* (then *‹name› copy 2*, …), its layers copied as *Duplicate* copies them and its guides with them; becomes current with its name open, duplicating and naming one undo step |
 | Draft ✓ | — | ticked on a draft page |
 | *—* | | |
-| Delete page | — | destructive styling; dims *"A document keeps at least one page"* on the last page. Deletes its guides and layers, detaching instances elsewhere of a main on it, then the page; one undo step |
+| Delete page | — | destructive styling; dims *"A document keeps at least one page"* on the last page. A page with layers asks first (*Delete page?*); an empty one goes at once. Deletes its guides and layers, detaching instances elsewhere of a main on it, then the page; one undo step |
 
 ---
 

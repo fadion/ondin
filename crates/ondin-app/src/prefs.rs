@@ -131,6 +131,9 @@ pub struct Prefs {
     /// Whether the layers pane's Pages section is folded to its header
     /// (`crate::pages`). A preference for `layers_width`'s reason.
     pub pages_folded: bool,
+    /// Whether the layers pane's Layers section is folded to its header, hiding
+    /// every layer name.
+    pub layers_folded: bool,
     /// How tall the Pages section's list was dragged to, in points; `None` fits
     /// up to six rows.
     pub pages_height: Option<f32>,
@@ -242,6 +245,7 @@ impl Default for Prefs {
             // every upgraded install.
             layers_width: crate::panels::layers::DEFAULT_W,
             pages_folded: false,
+            layers_folded: false,
             pages_height: None,
             // `0` seconds would be autosave off, `0` days would empty the trash
             // on every delete, `false` would turn version history off, and empty

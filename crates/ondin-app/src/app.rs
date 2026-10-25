@@ -13,7 +13,7 @@ use crate::preview::{Drag, PenState, PointSet, TextSession};
 use crate::session::{EditorSession, StatusKind};
 use crate::theme::{self, color, icon};
 use crate::tools::Tool;
-use crate::ui::{eyebrow, field_row, icon_button, panel_frame};
+use crate::ui::{field_row, icon_button, panel_frame};
 use eframe::egui;
 use ondin_core::kurbo::{Point, Rect, Vec2};
 use ondin_core::{
@@ -1420,6 +1420,7 @@ impl eframe::App for OndinApp {
         self.handle_close_request(&ctx);
         self.close_confirmation(&ctx);
         self.value_delete_confirmation(&ctx);
+        self.page_delete_confirmation(&ctx);
 
         // Both screens are the same window, and the updater reports to both bars.
         crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
@@ -1982,6 +1983,10 @@ impl OndinApp {
             return;
         };
         self.show_layers = true;
+        if self.prefs.layers_folded {
+            self.prefs.layers_folded = false;
+            self.prefs.save();
+        }
         self.renaming_layer = Some((*id, name));
         // Focus is requested by `layer_rename_field` on its first draw: focusing an id
         // with no AccessKit node yet panics `accesskit_consumer`.
@@ -6587,6 +6592,7 @@ impl OndinApp {
             || self.confirming_close
             || !self.recovery.pending.is_empty()
             || self.deleting_value.is_some()
+            || self.pages.deleting.is_some()
             || self.publishing.is_some()
             || self.making_local.is_some()
             || self.kits_used_open
@@ -6991,11 +6997,15 @@ impl OndinApp {
                 ui.set_min_width(ui.available_width());
                 // Pages first: the tree below is the current page's.
                 self.pages_section(ui);
+                // Folded, the pane keeps its width and shows no layer names, for
+                // a screen shared with people who should not read them.
+                let folded = self.prefs.layers_folded;
                 egui::Frame::NONE
                     .inner_margin(egui::Margin {
                         left: crate::panels::layers::PAD_X,
                         right: crate::panels::layers::PAD_X,
-                        top: 14,
+                        // The divider above sits as far from the Pages list.
+                        top: 9,
                         bottom: 9,
                     })
                     .show(ui, |ui| {
@@ -7003,7 +7013,13 @@ impl OndinApp {
                         let field = egui::Id::new("layer-search");
                         let searching = self.layer_filter.is_some();
                         ui.horizontal(|ui| {
-                            ui.label(eyebrow("Layers"));
+                            if crate::ui::fold_head(ui, "Layers", !folded).0.clicked() {
+                                self.prefs.layers_folded = !folded;
+                                self.prefs.save();
+                            }
+                            if folded {
+                                return;
+                            }
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -7054,7 +7070,7 @@ impl OndinApp {
                             );
                         });
 
-                        if let Some(filter) = &mut self.layer_filter {
+                        if !folded && let Some(filter) = &mut self.layer_filter {
                             ui.add_space(4.0);
                             field_row(ui, egui::vec2(ui.available_width(), 28.0), |ui| {
                                 ui.add(
@@ -7073,6 +7089,9 @@ impl OndinApp {
                         }
                     });
 
+                if folded {
+                    return;
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     // No bar, though it still scrolls.

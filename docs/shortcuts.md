@@ -169,7 +169,7 @@ Both commit through `session.commit`, not `commit_edit`, whose one extra (arming
 selection-chrome hide) a visibility switch has nothing to look at.
 
 Rename opens the same `renaming_layer` field as a layers-panel double-click, showing the panel if
-hidden. It **refuses a multi-selection** and **refuses in focus mode** (no panels are drawn, so
+hidden and unfolding its Layers section. It **refuses a multi-selection** and **refuses in focus mode** (no panels are drawn, so
 it would arm against a field that never renders).
 
 **`Ctrl+R` is rename, not rulers** (Illustrator/Photoshop). Rulers keep `Shift+R` and `Ctrl+R` is

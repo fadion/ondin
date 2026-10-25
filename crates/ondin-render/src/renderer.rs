@@ -171,9 +171,10 @@ pub struct RenderOverrides {
     /// Outlines for the booleans this gesture reshapes, keyed by node — the
     /// preview's twin of `Resolved`'s cache. See [`Self::reevaluate_booleans`].
     boolean: FxHashMap<NodeId, kurbo::BezPath>,
-    /// A ground being dragged in the picker. Not part of the scene walk (the
-    /// backdrop is the clear colour), so it rides here only to reach the caller.
-    canvas_background: Option<Color>,
+    /// A page's ground being dragged in the picker. Not part of the scene walk
+    /// (the backdrop is the clear colour), so it rides here only to reach the
+    /// caller.
+    ground: Option<(NodeId, Color)>,
     /// Artwork drawn to *explain* a mode rather than preview an edit — today the
     /// faded whole picture behind a layer being cropped — glued to the `NodeId`
     /// layer that [`Self::unsnapped`] needs.
@@ -200,7 +201,7 @@ impl RenderOverrides {
         self.nodes.is_empty()
             && self.ghosts.is_empty()
             && self.order.is_empty()
-            && self.canvas_background.is_none()
+            && self.ground.is_none()
     }
 
     /// `parent`'s children in the order this preview gives them, where it
@@ -235,9 +236,10 @@ impl RenderOverrides {
         ondin_core::container::laid_grid(&PreviewView { doc, ov: self, res }, id)
     }
 
-    /// The ground this preview asks for, if it touches the ground at all.
-    pub fn canvas_background(&self) -> Option<Color> {
-        self.canvas_background
+    /// The ground this preview asks for on `page`, if it touches that page's
+    /// ground at all.
+    pub fn ground(&self, page: NodeId) -> Option<Color> {
+        self.ground.filter(|(p, _)| *p == page).map(|(_, c)| c)
     }
 
     pub fn get(&self, id: NodeId) -> Option<&NodeOverride> {
@@ -1267,9 +1269,13 @@ impl RenderOverrides {
                     node,
                 });
             }
-            Operation::SetCanvasBackground { background } => {
-                self.canvas_background = Some(*background);
+            Operation::SetPageGround { id, ground } => {
+                self.ground = Some((*id, *ground));
             }
+            // A draft flag and the page order are chrome.
+            Operation::SetPageDraft { .. } | Operation::MovePage { .. } => {}
+            // A page coming or going is structural, as the vault is.
+            Operation::AddPage { .. } | Operation::RemovePage { .. } => return None,
             // Nothing the renderer draws, absorbed as a no-op rather than refused so
             // the rest of the transaction still previews. Guides and layout grids are
             // egui chrome the app previews from its own gesture state, and so is the

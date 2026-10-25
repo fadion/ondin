@@ -213,7 +213,7 @@ fn summary(doc: &Document, value: &StyleValue) -> String {
 /// whose layers draw its variable's width.
 fn width_shown(doc: &Document, s: &ondin_core::Stroke) -> f64 {
     match s.width_var {
-        Some(v) => doc.stroke_width_drawn_in(doc.variables(), doc.root(), v),
+        Some(v) => doc.stroke_width_drawn_in(doc.variables(), NodeId::NOWHERE, v),
         None => s.width,
     }
 }
@@ -237,7 +237,7 @@ fn preview_colour(doc: &Document, value: &StyleValue) -> Option<ondin_core::peni
         StyleValue::Effects(_) | StyleValue::Text(_) | StyleValue::Layout(_) => return None,
     };
     let b = brushes.first()?;
-    match doc.resolve_brush(doc.root(), b).into_owned() {
+    match doc.resolve_brush(NodeId::NOWHERE, b).into_owned() {
         Brush::Solid(c) => Some(c),
         other => crate::panels::paint::stops_of(&other)
             .first()
@@ -1458,7 +1458,7 @@ mod tests {
         assert_eq!(fill_style(&app, a), Some(s), "a stays styled");
         // A selection holding a layer that does not use the style ends the edit.
         let c = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![Operation::CreateNode {
             id: c,
             parent: root,

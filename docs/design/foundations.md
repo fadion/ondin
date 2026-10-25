@@ -10,7 +10,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 
 ### In scope
 
-- Multiple artboards on an infinite canvas. Node tree: Root → Artboard → (Artboard | Group | Rect | Ellipse | Line | Path | Text)\*, with arbitrarily nested groups and frames.
+- Pages, each an infinite canvas of artboards (§5.5). Node tree per page: Root → Artboard → (Artboard | Group | Rect | Ellipse | Line | Path | Text)\*, with arbitrarily nested groups and frames.
 - Layers panel: tree view, reorder, rename, visibility, lock.
 - Shapes: rectangle (corner radius), ellipse, line, freeform path.
 - Text: plain text nodes plus rich text (mixed runs, OpenType feature UI, per-paragraph attributes, lists with nesting and markers, decoration skip-ink, text-on-path via `NodeKind::Text::on_path`), editable in-canvas (§5.4, §9.2).

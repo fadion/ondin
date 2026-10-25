@@ -109,7 +109,8 @@ fn column_through_the_seam(zoom: f64, phase: f64) -> Vec<u8> {
         view: Rect::new(0.0, y0, w as f64 / zoom, y0 + vh),
         pixel_size: (w, h),
     };
-    let (rgba, _, _) = VelloCpuRenderer::new().render_to_rgba(&d, &res, &vp, &ImageStore::new());
+    let (rgba, _, _) =
+        VelloCpuRenderer::new().render_to_rgba(&d, &res, &vp, &ImageStore::new(), d.first_page());
     // Well inside the 800-wide rects horizontally, so only the shared edge is in play.
     let x = 100usize;
     (0..h as usize)
@@ -188,7 +189,8 @@ fn a_sub_pixel_shape_survives_snapping() {
         view: Rect::new(0.0, 0.0, 400.0, 400.0),
         pixel_size: (100, 100), // 0.25x: the 2-unit bar is half a device pixel
     };
-    let (rgba, _, _) = VelloCpuRenderer::new().render_to_rgba(&d, &res, &vp, &ImageStore::new());
+    let (rgba, _, _) =
+        VelloCpuRenderer::new().render_to_rgba(&d, &res, &vp, &ImageStore::new(), d.first_page());
     let ink = (0..100usize)
         .filter(|y| rgba[(y * 100 + 50) * 4 + 3] > 0)
         .count();

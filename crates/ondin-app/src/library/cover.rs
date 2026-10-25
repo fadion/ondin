@@ -545,23 +545,26 @@ fn render(dir: Option<&Path>, entry: &Entry, key: &str) -> Result<Rgba, NoCover>
     decode(&png).ok_or(NoCover::Blank)
 }
 
-/// Render the document to a PNG, framed on everything it contains.
+/// Render the document's first page that is not a draft to a PNG, framed on
+/// everything on it.
 ///
 /// A file that will not read or load is `Unreadable` (a broken document the
-/// dashboard marks); a document with no extent is `Blank` (an ordinary empty one).
+/// dashboard marks); a page with no extent is `Blank` (an ordinary empty one).
 fn rasterize(entry: &Entry) -> Result<Vec<u8>, NoCover> {
     let bytes = std::fs::read(&entry.path).map_err(|_| NoCover::Unreadable)?;
     let doc = ondin_core::io::load(&bytes).map_err(|_| NoCover::Unreadable)?;
     let res = ondin_core::Resolved::rebuild(&doc);
-    // An empty document gets no cover: the card's plain plate is its honest
+    // The first page that is not a draft, or the first page when every one is.
+    let page = doc.gathered_pages().next().unwrap_or(doc.first_page());
+    // An empty page gets no cover: the card's plain plate is its honest
     // picture, and an invented square would repeat on every fresh file.
-    let view = ondin_export::extent(&res, &[doc.root()]).ok_or(NoCover::Blank)?;
+    let view = ondin_export::extent(&res, &[page]).ok_or(NoCover::Blank)?;
     let (w, h) = (view.width().max(1.0), view.height().max(1.0));
     // Fit the longest edge, never magnify: a 40×40 icon document should be drawn
     // at 40 pixels and centred by the card, not blown up to 400 and blurred.
     let scale = (COVER_MAX_PX / w.max(h)).min(1.0);
     let vp = ondin_export::png::viewport_at(view, scale);
-    Ok(ondin_export::png::png(&doc, &res, &vp))
+    Ok(ondin_export::png::png(&doc, &res, &vp, page))
 }
 
 /// PNG bytes to RGBA8.

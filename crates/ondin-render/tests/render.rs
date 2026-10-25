@@ -156,7 +156,14 @@ fn culling_excludes_out_of_view_nodes() {
         pixel_size: (100, 100),
     };
     let mut painter = RecordingPainter::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
 
     // Only the near rect should have been painted (artboard has no background).
     assert_eq!(painter.fills.len(), 1, "exactly the in-view rect is drawn");
@@ -170,7 +177,14 @@ fn full_view_draws_all_shapes() {
         pixel_size: (400, 400),
     };
     let mut painter = RecordingPainter::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
     assert_eq!(painter.fills.len(), 2, "both rects drawn when both in view");
 }
 
@@ -188,6 +202,7 @@ fn gpu_scene_builds_without_device() {
         &vp,
         &RenderOverrides::default(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     // No panic == pass; the scene is populated via the shared walk.
 }
@@ -200,7 +215,14 @@ fn artboards_push_a_clip_layer_so_content_cannot_overflow() {
         pixel_size: (400, 400),
     };
     let mut painter = RecordingPainter::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
 
     assert_eq!(painter.layers.len(), 1, "one layer, for the artboard");
     assert!(painter.layers[0].0, "the artboard layer must carry a clip");
@@ -214,7 +236,7 @@ fn artboards_push_a_clip_layer_so_content_cannot_overflow() {
 #[test]
 fn a_frame_with_clipping_off_neither_clips_nor_culls_its_contents() {
     let (mut doc, _res, _near, far) = two_rect_doc();
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     // Put the second rect well outside the 2000×2000 frame.
     doc.apply(&Transaction(vec![Operation::SetTransform {
         id: far,
@@ -230,7 +252,14 @@ fn a_frame_with_clipping_off_neither_clips_nor_culls_its_contents() {
     let count = |doc: &Document| {
         let res = Resolved::rebuild(doc);
         let mut painter = RecordingPainter::default();
-        scene::build(doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+        scene::build(
+            doc,
+            &res,
+            &vp,
+            &RenderOverrides::default(),
+            doc.first_page(),
+            &mut painter,
+        );
         assert_eq!(painter.depth, 0, "every pushed layer was popped");
         (painter.layers.clone(), painter.fills.len())
     };
@@ -269,7 +298,14 @@ fn transparent_nodes_get_their_own_layer_rather_than_faded_paint() {
         pixel_size: (400, 400),
     };
     let mut painter = RecordingPainter::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
 
     assert!(
         painter.layers.iter().any(|(clip, a)| !clip && *a == 0.5),
@@ -291,7 +327,14 @@ fn fully_opaque_unclipped_nodes_cost_no_layer() {
         pixel_size: (400, 400),
     };
     let mut painter = RecordingPainter::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
     // Two rects, both opaque: only the artboard's clip layer exists.
     assert_eq!(painter.layers.len(), 1);
 }
@@ -359,7 +402,14 @@ fn gradient_fills_reach_the_backend_intact() {
         pixel_size: (400, 400),
     };
     let mut painter = BrushRecorder(Vec::new());
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
 
     // The gradient must survive as a gradient — collapsing it to a colour (or
     // dropping the fill) is what made gradients invisible before.
@@ -470,7 +520,14 @@ fn an_image_is_framed_by_its_shape_and_its_stroke_agrees() {
         pixel_size: (400, 400),
     };
     let mut painter = FramingRecorder::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
 
     let (image_fills, solid_fills): (Vec<_>, Vec<_>) = painter
         .fills
@@ -628,6 +685,7 @@ fn record_strokes(doc: &Document, res: &Resolved) -> StrokeRecorder {
             pixel_size: (300, 300),
         },
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut r,
     );
     r
@@ -804,6 +862,7 @@ fn record_order(doc: &Document, res: &Resolved) -> Vec<(&'static str, u8)> {
             pixel_size: (300, 300),
         },
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut r,
     );
     r.seen
@@ -1212,6 +1271,7 @@ fn record_sequence(doc: &Document, res: &Resolved) -> Sequence {
             pixel_size: (300, 300),
         },
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut s,
     );
     assert_eq!(s.depth, 0, "every pushed layer was popped");
@@ -1262,6 +1322,7 @@ fn an_outside_stroke_on_a_frame_is_built_from_the_frames_own_box() {
             pixel_size: (300, 300),
         },
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut r,
     );
     assert_eq!(r.widths, vec![8.0], "doubled");
@@ -1387,7 +1448,7 @@ fn a_frames_fill_stack_paints_in_order_behind_its_children() {
     // `stroked_frame` gives a clipping frame with one white fill, one child and a
     // border; two more fills go on top of the white — the middle one hidden.
     let (mut doc, _) = stroked_frame(vec![stroke(1, true)], 1.0);
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: ab,
         fills: keyed_by_position([
@@ -1417,6 +1478,7 @@ fn a_frames_fill_stack_paints_in_order_behind_its_children() {
             pixel_size: (300, 300),
         },
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut r,
     );
     assert_eq!(r.depth, 0, "every pushed layer was popped");
@@ -1507,6 +1569,7 @@ fn record(doc: &Document, res: &Resolved) -> RecordingPainter {
         res,
         &whole_view(),
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut painter,
     );
     painter
@@ -1567,7 +1630,7 @@ fn a_mask_paints_nothing_and_clips_the_run_above_it() {
 #[test]
 fn a_second_mask_ends_the_first_ones_run_instead_of_nesting() {
     let (mut doc, _res, near, far) = two_rect_doc();
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     let mut ids = IdSource::new(0xBEEF);
     let (m2, top) = (ids.mint(), ids.mint());
     // Children end up bottom-first as [near, far, m2, top].
@@ -1812,6 +1875,7 @@ fn record_bands(doc: &Document, res: &Resolved) -> BandRecorder {
             pixel_size: (500, 500),
         },
         &RenderOverrides::default(),
+        doc.first_page(),
         &mut r,
     );
     r
@@ -2019,7 +2083,14 @@ fn a_group_masked_by_a_group_that_masks_internally_is_not_culled_away() {
             pixel_size: (400, 400),
         };
         let mut p = RecordingPainter::default();
-        scene::build(doc, res, &vp, &RenderOverrides::default(), &mut p);
+        scene::build(
+            doc,
+            res,
+            &vp,
+            &RenderOverrides::default(),
+            doc.first_page(),
+            &mut p,
+        );
         p.fills.len()
     };
 
@@ -2153,7 +2224,14 @@ fn parked_fills(kind: NodeKind, n: usize) -> usize {
         pixel_size: (500, 500),
     };
     let mut painter = RecordingPainter::default();
-    scene::build(&doc, &res, &vp, &RenderOverrides::default(), &mut painter);
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
     assert_eq!(painter.depth, 0, "every pushed layer was popped");
     painter.fills.len()
 }

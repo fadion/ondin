@@ -233,7 +233,7 @@ fn insert_under(
 }
 
 fn insert(d: &mut Document, ids: &mut IdSource, k: &Kit, main: NodeId) -> NodeId {
-    let root = d.root();
+    let root = d.first_page();
     insert_under(d, ids, k, main, root)
 }
 
@@ -249,7 +249,7 @@ fn first_child(doc: &Document, id: NodeId) -> NodeId {
 
 /// Accept `k`'s current publish, through the commit's passes.
 fn accept(d: &mut Document, ids: &mut IdSource, k: &Kit) -> kit::Update {
-    let u = kit::update(d, ids, L_ID, version(k), published(k)).unwrap();
+    let u = kit::update(d, ids, d.first_page(), L_ID, version(k), published(k)).unwrap();
     let mut tx = u.tx.clone();
     ondin_core::propagate::owed(d, &mut tx, ids);
     d.apply(&tx).expect("an accepted update commits");
@@ -297,7 +297,7 @@ fn an_insert_vendors_the_kits_variables_and_the_instance_reads_them() {
     let k = kit();
     let (mut d, mut ids, _) = consumer(&[]);
     let before = d.clone();
-    let root = d.root();
+    let root = d.first_page();
     let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 1, published(&k), k.icon, root).unwrap();
     let undo = d.apply(&tx).unwrap().inverse;
 
@@ -347,7 +347,7 @@ fn the_mapping_reads_by_name_then_the_first_and_a_hand_set_entry_wins() {
     let k = kit();
     let (mut d, mut ids, modes) = consumer(&["Light", "Night"]);
     let (light, night) = (modes[0], modes[1]);
-    let root = d.root();
+    let root = d.first_page();
     let dark = ids.mint();
     d.apply(&Transaction(vec![
         create(dark, root, 0, frame(100.0, 100.0), "Dark"),
@@ -416,7 +416,7 @@ fn an_update_rewrites_the_kits_variables_and_removes_what_it_dropped() {
     let held = d.variables().iter().next().unwrap().id;
     // D's own layer, bound to the kit's variable.
     let mine = ids.mint();
-    let root = d.root();
+    let root = d.first_page();
     d.apply(&Transaction(vec![
         create(mine, root, 0, rect(), "Mine"),
         Operation::SetFills {
@@ -516,7 +516,7 @@ fn an_insert_over_older_kit_modes_asks_for_the_update() {
         }]))
         .unwrap();
     kit::publish(&mut k.doc, None, 2);
-    let root = d.root();
+    let root = d.first_page();
     let r = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.badge, root);
     assert!(
         matches!(r, Err(KitError::Modes(ref kit)) if kit == L_ID),
@@ -549,7 +549,7 @@ fn a_carrying_paste_vendors_the_kits_variables_too() {
     let payload = io::clip::read(&text).unwrap().unwrap();
 
     let mut e = Document::new(ids.mint());
-    let root = e.root();
+    let root = e.first_page();
     let placements: Vec<Placement> = payload
         .subtrees
         .into_iter()
@@ -719,7 +719,7 @@ fn a_kits_alias_of_a_third_kits_variable_is_inserted() {
     .expect("A's own alias of L's brand");
     kit::publish(&mut a, None, 2);
     let (mut d, mut ids, _) = consumer(&[]);
-    let root = d.root();
+    let root = d.first_page();
     let av = a.meta().kit.as_ref().unwrap().version;
     let (tx, inst) =
         kit::insert(&d, &mut ids, A_ID, av, a.published().unwrap(), card, root).expect("plans");
@@ -739,7 +739,7 @@ fn paste(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSource) -
     let vars = ondin_core::variable::carried(from, &subtrees);
     let text = io::clip::write_carrying(&subtrees, &kits, &[], &vars, None, "x").unwrap();
     let payload = io::clip::read(&text).unwrap().unwrap();
-    let root = to.root();
+    let root = to.first_page();
     let placements: Vec<Placement> = payload
         .subtrees
         .into_iter()
@@ -788,7 +788,7 @@ fn kit_a(k: &Kit) -> (Document, IdSource, NodeId) {
     let mut ids = IdSource::new(0xAF);
     let mut a = Document::new(ids.mint());
     let card = ids.mint();
-    let root = a.root();
+    let root = a.first_page();
     a.apply(&Transaction(vec![create(
         card,
         root,
@@ -855,7 +855,7 @@ fn a_kit_variable_named_as_a_held_one_asks_for_the_update() {
         ]))
         .unwrap();
     assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
-    let root = d.root();
+    let root = d.first_page();
     let r = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.icon, root);
     assert!(
         matches!(r, Err(KitError::Modes(ref kit)) if kit == L_ID),
@@ -942,7 +942,15 @@ fn a_third_kits_version_alone_is_no_change_to_publish() {
         }]))
         .unwrap();
     assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
-    let u = kit::update(&a, &mut aids, L_ID, version(&k), published(&k)).unwrap();
+    let u = kit::update(
+        &a,
+        &mut aids,
+        a.first_page(),
+        L_ID,
+        version(&k),
+        published(&k),
+    )
+    .unwrap();
     let mut tx = u.tx;
     ondin_core::propagate::owed(&a, &mut tx, &mut aids);
     a.apply(&tx).unwrap();
@@ -1024,7 +1032,7 @@ fn a_third_kit_held_newer_than_the_kit_carrying_it_is_reused() {
     add_dusk(&mut k);
     let (mut d, mut ids, _) = consumer(&[]);
     insert(&mut d, &mut ids, &k, k.badge);
-    let root = d.root();
+    let root = d.first_page();
     let pa = a.published().unwrap();
     let r = kit::insert(&d, &mut ids, A_ID, 1, pa, card, root);
     let (tx, inst) = r.expect("inserts");
@@ -1050,12 +1058,20 @@ fn accept_all_takes_a_kit_carrying_a_newer_third_kit_in_either_order() {
     let mut k = kit();
     let (mut a, mut aids, card) = kit_a(&k);
     let (mut d, mut ids, _) = consumer(&[]);
-    let root = d.root();
+    let root = d.first_page();
     let (tx, _) = kit::insert(&d, &mut ids, A_ID, 1, a.published().unwrap(), card, root).unwrap();
     d.apply(&tx).unwrap();
     add_dusk(&mut k);
     // A takes L's new publish and publishes again.
-    let u = kit::update(&a, &mut aids, L_ID, version(&k), published(&k)).unwrap();
+    let u = kit::update(
+        &a,
+        &mut aids,
+        a.first_page(),
+        L_ID,
+        version(&k),
+        published(&k),
+    )
+    .unwrap();
     let mut tx = u.tx;
     ondin_core::propagate::owed(&a, &mut tx, &mut aids);
     a.apply(&tx).unwrap();
@@ -1065,6 +1081,7 @@ fn accept_all_takes_a_kit_carrying_a_newer_third_kit_in_either_order() {
     let u = kit::update_all(
         &d,
         &mut ids,
+        d.first_page(),
         &[
             (A_ID, av, a.published().unwrap()),
             (L_ID, version(&k), published(&k)),
@@ -1227,7 +1244,7 @@ fn a_main_roots_visibility_binding_is_not_a_change() {
 /// follow — and what it forked.
 fn make_local(d: &mut Document, ids: &mut IdSource, inst: NodeId) -> (NodeId, kit::MadeLocal) {
     let main = d.get(inst).unwrap().link().unwrap();
-    let mut made = kit::make_local_report(d, ids, &[main]);
+    let mut made = kit::make_local_report(d, ids, d.first_page(), &[main]);
     let mut tx = std::mem::take(&mut made.tx);
     ondin_core::propagate::owed(d, &mut tx, ids);
     // The undo in `tx`'s place: what a test hands back is what takes it back.
@@ -1384,7 +1401,7 @@ fn adopting_a_kits_modes_leaves_another_kit_reading_its_first() {
 
     let k = kit();
     let (mut d, mut ids, _) = consumer(&[]);
-    let root = d.root();
+    let root = d.first_page();
     let (tx, b_inst) =
         kit::insert(&d, &mut ids, B_ID, 1, b.published().unwrap(), chip, root).unwrap();
     d.apply(&tx).unwrap();
@@ -1826,7 +1843,7 @@ fn a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy() {
         .expect("the badge stroked by Edge");
     assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
     let (mut d, mut ids, _) = consumer(&[]);
-    let root = d.root();
+    let root = d.first_page();
     let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.badge, root).unwrap();
     d.apply(&tx).expect("the insert commits");
     let spare = d
@@ -2091,7 +2108,7 @@ fn a_kits_effects_style_with_a_bound_blur_lands_on_the_consumers_copy() {
         .expect("the badge shadowed by Glow");
     assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
     let (mut d, mut ids, _) = consumer(&[]);
-    let root = d.root();
+    let root = d.first_page();
     let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.badge, root).unwrap();
     d.apply(&tx).expect("the insert commits");
     let spare = d

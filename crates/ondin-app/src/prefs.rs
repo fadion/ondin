@@ -128,6 +128,12 @@ pub struct Prefs {
     /// which also filters out a width changed only by the window getting too
     /// narrow to hold it.
     pub layers_width: f32,
+    /// Whether the layers pane's Pages section is folded to its header
+    /// (`crate::pages`). A preference for `layers_width`'s reason.
+    pub pages_folded: bool,
+    /// How tall the Pages section's list was dragged to, in points; `None` fits
+    /// up to six rows.
+    pub pages_height: Option<f32>,
     /// Where the library lives, or `None` for `~/.ondin` (`crate::library::root`).
     ///
     /// The one preference whose loss is not cosmetic: lose it and the app opens
@@ -235,6 +241,8 @@ impl Default for Prefs {
             // An `f32`'s own default of 0.0 would clamp the panel to `MIN_W` on
             // every upgraded install.
             layers_width: crate::panels::layers::DEFAULT_W,
+            pages_folded: false,
+            pages_height: None,
             // `0` seconds would be autosave off, `0` days would empty the trash
             // on every delete, `false` would turn version history off, and empty
             // strings would be nav and sort ids matching nothing.

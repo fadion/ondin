@@ -155,7 +155,7 @@ fn consumer() -> (Document, IdSource) {
 }
 
 fn insert(doc: &mut Document, ids: &mut IdSource, k: &Kit, main: NodeId) -> NodeId {
-    let root = doc.root();
+    let root = doc.first_page();
     let (tx, made) = kit::insert(doc, ids, L_ID, 4, published(k), main, root).unwrap();
     doc.apply(&tx).expect("one kit insert, one transaction");
     made
@@ -191,7 +191,7 @@ fn an_insert_vendors_the_main_and_places_an_instance() {
     let k = kit();
     let (mut d, mut ids) = consumer();
     let before = d.clone();
-    let root = d.root();
+    let root = d.first_page();
     let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 4, published(&k), k.icon, root).unwrap();
     let undo = d.apply(&tx).unwrap().inverse;
 
@@ -244,7 +244,7 @@ fn the_vault_is_never_resolved_nor_picked() {
 
     let mut res = Resolved::rebuild(&d);
     assert!(res.world_bounds(copy).is_none() && res.world_bounds(dot).is_none());
-    let hits = hit_test(&res, &d, Point::new(5.0, 5.0), 0.0);
+    let hits = hit_test(&res, &d, d.first_page(), Point::new(5.0, 5.0), 0.0);
     assert!(!hits.is_empty(), "the instance is under the point");
     assert!(hits.iter().all(|h| !d.in_vault(*h)), "{hits:?}");
 
@@ -257,7 +257,7 @@ fn the_vault_is_never_resolved_nor_picked() {
     assert!(out.dirty.0.contains(&dot), "the fixture dirtied the vault");
     res.update(&d, &out.dirty);
     assert!(res.world_bounds(dot).is_none() && res.world_bounds(copy).is_none());
-    let hits = hit_test(&res, &d, Point::new(5.0, 5.0), 0.0);
+    let hits = hit_test(&res, &d, d.first_page(), Point::new(5.0, 5.0), 0.0);
     assert!(hits.contains(&inst) && hits.iter().all(|h| !d.in_vault(*h)));
 }
 
@@ -383,7 +383,7 @@ fn a_transitive_main_keeps_the_kit_it_came_from() {
     );
 
     let (mut d, mut ids) = consumer();
-    let root = d.root();
+    let root = d.first_page();
     let (tx, _) = kit::insert(&d, &mut ids, L_ID, 7, &p, chip, root).unwrap();
     d.apply(&tx).unwrap();
     let origins: Vec<Origin> = vault_children(&d)
@@ -459,7 +459,7 @@ fn a_third_kits_main_keeps_its_own_name_or_none() {
     let p = kit::freeze(&ldoc).unwrap();
 
     let (mut d, mut ids) = consumer();
-    let root = d.root();
+    let root = d.first_page();
     let (tx, _) = kit::insert(&d, &mut ids, L_ID, 1, &p, chip, root).unwrap();
     d.apply(&tx).unwrap();
     let names: Vec<(String, Option<String>)> = vault_children(&d)
@@ -510,7 +510,7 @@ fn the_vault_keeps_its_rules() {
     };
 
     // A vendored main taken out of the vault keeps an origin it may not.
-    let root = d.root();
+    let root = d.first_page();
     assert_eq!(
         refused(
             &mut d,
@@ -597,7 +597,7 @@ fn a_consumer_and_a_kit_round_trip_through_a_file() {
     let back = io::load(&bytes).unwrap();
     assert_eq!(back, d);
     assert_eq!(io::save(&back).unwrap(), bytes);
-    assert_eq!(back.schema_version(), 9);
+    assert_eq!(back.schema_version(), io::CURRENT_SCHEMA_VERSION);
 }
 
 /// A file whose `vault` key went missing — what a v5 build would make of a v6
@@ -715,7 +715,7 @@ fn a_vendored_mains_preferred_mains_name_the_vaults_copies() {
     let (mut d, mut ids) = consumer();
     insert(&mut d, &mut ids, &k, k.card);
     prefer_icon(&mut k, 5);
-    let u = kit::update(&d, &mut ids, L_ID, 5, published(&k)).unwrap();
+    let u = kit::update(&d, &mut ids, d.first_page(), L_ID, 5, published(&k)).unwrap();
     let mut tx = u.tx.clone();
     ondin_core::propagate::owed(&d, &mut tx, &mut ids);
     d.apply(&tx).expect("the update commits");
@@ -724,9 +724,9 @@ fn a_vendored_mains_preferred_mains_name_the_vaults_copies() {
 }
 
 /// A v8 kit, published document and all, loads as the current version and
-/// saves as v9 inside and out (`migrate_8_to_9`).
+/// saves as it inside and out: every rung of the ladder moves the nested number.
 #[test]
-fn a_v8_kit_loads_and_saves_as_v9() {
+fn a_v8_kit_loads_and_saves_as_the_current_version() {
     let k = kit();
     let mut v: serde_json::Value = serde_json::from_slice(&io::save(&k.doc).unwrap()).unwrap();
     assert!(v["published"]["document"].is_object(), "fixture: published");
@@ -735,8 +735,9 @@ fn a_v8_kit_loads_and_saves_as_v9() {
     let back = io::load(&serde_json::to_vec(&v).unwrap()).unwrap();
     assert_eq!(back, k.doc);
     let saved: serde_json::Value = serde_json::from_slice(&io::save(&back).unwrap()).unwrap();
-    assert_eq!(saved["schema_version"], 9);
-    assert_eq!(saved["published"]["document"]["schema_version"], 9);
+    let current = io::CURRENT_SCHEMA_VERSION;
+    assert_eq!(saved["schema_version"], current);
+    assert_eq!(saved["published"]["document"]["schema_version"], current);
 }
 
 /// Copy a kit instance out of `from` through the clipboard's text form — the
@@ -759,7 +760,7 @@ fn try_paste_across(
     let text =
         io::clip::write_carrying(&subtrees, &kits, &[], &Default::default(), None, "Icon").unwrap();
     let payload = io::clip::read(&text).unwrap().unwrap();
-    let root = to.root();
+    let root = to.first_page();
     let placements: Vec<Placement> = payload
         .subtrees
         .into_iter()
@@ -861,7 +862,7 @@ fn a_carrying_paste_over_an_older_held_main_asks_for_the_update() {
     let version = k.doc.meta().kit.as_ref().unwrap().version;
     let mut d = Document::new(IdSource::new(0xDD).mint());
     let mut dids = IdSource::new(0xDE);
-    let root = d.root();
+    let root = d.first_page();
     let (tx, card) =
         kit::insert(&d, &mut dids, L_ID, version, published(&k), k.card, root).unwrap();
     d.apply(&tx).unwrap();
@@ -901,7 +902,7 @@ fn a_kit_built_on_this_one_is_refused_naming_the_main() {
     .unwrap();
     let m1 = kit::freeze(&m).unwrap();
     // L takes *Card2* while it nests nothing.
-    let lroot = k.doc.root();
+    let lroot = k.doc.first_page();
     let mut lids = IdSource::new(0xA9);
     let (tx, _) = kit::insert(&k.doc, &mut lids, K_ID, 1, &m1, card2, lroot).unwrap();
     k.doc.apply(&tx).unwrap();
@@ -926,7 +927,7 @@ fn a_kit_built_on_this_one_is_refused_naming_the_main() {
         "the insert names Icon"
     );
     assert!(
-        named(kit::update(&k.doc, &mut lids, K_ID, 2, &m2).map(|_| ())),
+        named(kit::update(&k.doc, &mut lids, k.doc.first_page(), K_ID, 2, &m2).map(|_| ())),
         "and so does the update"
     );
 }
@@ -962,7 +963,7 @@ fn a_carried_main_left_out_detaches_what_nests_it() {
     .unwrap();
     let m1 = kit::freeze(&m).unwrap();
     let (mut d, mut dids) = consumer();
-    let droot = d.root();
+    let droot = d.first_page();
     let (tx, inst) = kit::insert(&d, &mut dids, K_ID, 1, &m1, card2, droot).unwrap();
     d.apply(&tx).unwrap();
 
@@ -1009,7 +1010,7 @@ fn a_kit_never_vendors_itself() {
     );
     assert!(k.doc.vault().is_none(), "nothing vendored");
 
-    let root = k.doc.root();
+    let root = k.doc.first_page();
     let p = k.doc.published().unwrap().clone();
     let (tx, made) = kit::insert(&k.doc, &mut lids, L_ID, 4, &p, k.icon, root).unwrap();
     k.doc.apply(&tx).unwrap();
@@ -1051,7 +1052,7 @@ fn a_variant_newer_than_the_held_set_asks_for_an_update() {
         ]))
         .expect("a third variant");
     let p5 = kit::freeze(&k.doc).unwrap();
-    let root = d.root();
+    let root = d.first_page();
     assert_eq!(
         kit::insert(&d, &mut ids, L_ID, 5, &p5, medium, root).unwrap_err(),
         kit::KitError::NeedsUpdate(medium)
@@ -1070,7 +1071,7 @@ fn a_copy_of_a_kit_instance_is_an_instance_without_an_origin() {
     let k = kit();
     let (mut d, mut ids) = consumer();
     let inst = insert(&mut d, &mut ids, &k, k.icon);
-    let root = d.root();
+    let root = d.first_page();
     let dup = instance(&mut d, &mut ids, inst, root);
     assert_eq!(d.get(dup).unwrap().link(), d.get(inst).unwrap().link());
     assert!(d.get(dup).unwrap().origin().is_none());
@@ -1105,7 +1106,7 @@ fn the_change_count_is_what_consumers_would_receive() {
         .unwrap();
     let mut ids = IdSource::new(0xAD);
     let fresh = ids.mint();
-    let root = k.doc.root();
+    let root = k.doc.first_page();
     k.doc
         .apply(&Transaction(vec![
             create(fresh, root, 0, frame(30.0, 30.0), "Chip"),
@@ -1193,7 +1194,7 @@ fn a_mains_place_is_not_a_change_and_its_order_is() {
     let c = kit::changes(&k.doc);
     assert!(!c.any(), "nothing to publish");
 
-    let root = k.doc.root();
+    let root = k.doc.first_page();
     let last = k.doc.get(root).unwrap().children().len() - 1;
     k.doc
         .apply(&Transaction(vec![Operation::Reorder {
@@ -1254,7 +1255,7 @@ fn a_third_kits_version_alone_is_not_a_change() {
     }]))
     .unwrap();
     let k3 = kit::freeze(&kdoc).unwrap();
-    let u = kit::update(&ldoc, &mut lids, K_ID, 3, &k3).unwrap();
+    let u = kit::update(&ldoc, &mut lids, ldoc.first_page(), K_ID, 3, &k3).unwrap();
     let mut tx = u.tx;
     ondin_core::propagate::owed(&ldoc, &mut tx, &mut lids);
     ldoc.apply(&tx).unwrap();
@@ -1272,7 +1273,7 @@ fn a_third_kits_version_alone_is_not_a_change() {
 #[test]
 fn a_regroup_and_a_rename_are_worth_a_publish() {
     let mut k = kit();
-    let root = k.doc.root();
+    let root = k.doc.first_page();
     k.doc
         .apply(&Transaction(vec![Operation::Reparent {
             id: k.set,
@@ -1298,7 +1299,15 @@ fn a_regroup_and_a_rename_are_worth_a_publish() {
 /// inverse that undoes it.
 fn accept(d: &mut Document, ids: &mut IdSource, k: &Kit) -> (kit::Update, Transaction) {
     let version = k.doc.meta().kit.as_ref().unwrap().version;
-    let u = kit::update(d, ids, L_ID, version, k.doc.published().unwrap()).unwrap();
+    let u = kit::update(
+        d,
+        ids,
+        d.first_page(),
+        L_ID,
+        version,
+        k.doc.published().unwrap(),
+    )
+    .unwrap();
     let mut tx = u.tx.clone();
     ondin_core::propagate::owed(d, &mut tx, ids);
     let undo = d.apply(&tx).expect("an accepted update commits").inverse;
@@ -1398,7 +1407,7 @@ fn a_removed_component_is_made_local_and_a_dropped_layer_goes() {
     let (u, _) = accept(&mut d, &mut ids, &k);
     assert_eq!(u.made_local, vec![card]);
     let n = d.get(card).unwrap();
-    assert_eq!(n.parent(), Some(d.root()), "out of the vault");
+    assert_eq!(n.parent(), Some(d.first_page()), "out of the vault");
     assert!(n.component(), "an ordinary main");
     assert!(
         d.capture_subtree(card)
@@ -1432,7 +1441,7 @@ fn an_update_vendors_a_main_it_newly_reaches() {
     insert(&mut d, &mut ids, &k, k.icon);
     let mut lids = IdSource::new(0xAD);
     let pip = lids.mint();
-    let root = k.doc.root();
+    let root = k.doc.first_page();
     k.doc
         .apply(&Transaction(vec![
             create(pip, root, 0, frame(6.0, 6.0), "Pip"),
@@ -1481,9 +1490,9 @@ fn make_local_reveals_the_copy_and_promotes_no_instance() {
     .unwrap();
     let before = d.clone();
 
-    let tx = kit::make_local(&d, &mut ids, &[card]);
+    let tx = kit::make_local(&d, &mut ids, d.first_page(), &[card]);
     let undo = d.apply(&tx).expect("make local commits").inverse;
-    assert_eq!(d.get(card).unwrap().parent(), Some(d.root()));
+    assert_eq!(d.get(card).unwrap().parent(), Some(d.first_page()));
     assert!(d.get(card).unwrap().component());
     assert!(
         d.capture_subtree(card)
@@ -1523,12 +1532,12 @@ fn make_local_on_a_nested_kit_main_leaves_the_kits_components_the_kits() {
     let icon = d.get(nested).unwrap().link().unwrap();
     let before = d.clone();
 
-    let mut tx = kit::make_local(&d, &mut ids, &[icon]);
+    let mut tx = kit::make_local(&d, &mut ids, d.first_page(), &[icon]);
     ondin_core::propagate::owed(&d, &mut tx, &mut ids);
     d.apply(&tx).expect("make local commits");
     assert_eq!(
         d.get(icon).unwrap().parent(),
-        Some(d.root()),
+        Some(d.first_page()),
         "Icon revealed"
     );
     let kits_icon = d.get(nested).unwrap().link().unwrap();
@@ -1584,7 +1593,7 @@ fn make_local_on_a_nested_kit_main_leaves_the_kits_components_the_kits() {
 
     // One undo of the make-local is the state before it.
     let mut d2 = before.clone();
-    let mut tx = kit::make_local(&d2, &mut ids, &[icon]);
+    let mut tx = kit::make_local(&d2, &mut ids, d2.first_page(), &[icon]);
     ondin_core::propagate::owed(&d2, &mut tx, &mut ids);
     let undo2 = d2.apply(&tx).unwrap().inverse;
     d2.apply(&undo2).unwrap();
@@ -1772,7 +1781,7 @@ fn a_kit_rename_arrives_with_its_update() {
 fn a_swap_to_an_unused_kit_main_vendors_it_at_the_swap() {
     let k = kit();
     let (mut d, mut ids) = consumer();
-    let root = d.root();
+    let root = d.first_page();
     let [glyph, glyph_dot, row] = [(); 3].map(|_| ids.mint());
     d.apply(&Transaction(vec![
         create(glyph, root, 0, frame(24.0, 24.0), "Glyph"),
@@ -1896,8 +1905,15 @@ fn an_update_does_not_depend_on_the_vaults_order() {
     accept(&mut d, &mut ids, &k);
     assert_eq!(layers(&d, card_copy), ["Dot", "Ring"], "in order: one ring");
 
-    let u =
-        kit::update(&e, &mut eids, L_ID, 5, k.doc.published().unwrap()).expect("the update builds");
+    let u = kit::update(
+        &e,
+        &mut eids,
+        e.first_page(),
+        L_ID,
+        5,
+        k.doc.published().unwrap(),
+    )
+    .expect("the update builds");
     let mut tx = u.tx;
     ondin_core::propagate::owed(&e, &mut tx, &mut eids);
     e.apply(&tx).expect("the update commits");
@@ -1932,7 +1948,7 @@ fn a_variant_taken_out_of_its_set_keeps_its_instances() {
     let (mut d, mut ids) = consumer();
     let inst = insert(&mut d, &mut ids, &k, k.small);
     let main = d.get(inst).unwrap().link().unwrap();
-    let (root, small) = (k.doc.root(), k.small);
+    let (root, small) = (k.doc.first_page(), k.small);
     edit_and_publish(
         &mut k,
         vec![Operation::Reparent {
@@ -2073,7 +2089,7 @@ fn placed_card(
     });
     kit::publish(&mut kit_doc, None, 1).unwrap();
     let (mut d, mut ids) = consumer();
-    let droot = d.root();
+    let droot = d.first_page();
     let (tx, inst) = kit::insert(
         &d,
         &mut ids,
@@ -2106,8 +2122,15 @@ fn placed_card(
 fn republish_and_accept(g: &mut Grouping, ops: Vec<Operation>) {
     g.kit.apply(&Transaction(ops)).unwrap();
     kit::publish(&mut g.kit, None, 2).unwrap();
-    let u = kit::update(&g.d, &mut g.ids, L_ID, 2, g.kit.published().unwrap())
-        .expect("the update builds");
+    let u = kit::update(
+        &g.d,
+        &mut g.ids,
+        g.d.first_page(),
+        L_ID,
+        2,
+        g.kit.published().unwrap(),
+    )
+    .expect("the update builds");
     door(&mut g.d, &mut g.ids, u.tx);
 }
 
@@ -2372,7 +2395,7 @@ fn a_third_kits_newer_main_asks_for_its_update() {
     let l7 = kit::freeze(&ldoc).unwrap();
 
     let (mut d, mut ids) = consumer();
-    let root = d.root();
+    let root = d.first_page();
     let (tx, _) = kit::insert(&d, &mut ids, L_ID, 7, &l7, chip, root).unwrap();
     d.apply(&tx).unwrap();
 
@@ -2382,7 +2405,7 @@ fn a_third_kits_newer_main_asks_for_its_update() {
         .unwrap();
     kdoc.set_published(kit::freeze(&kdoc));
     let k3 = kdoc.published().unwrap().clone();
-    let u = kit::update(&ldoc, &mut lids, K_ID, 3, &k3).unwrap();
+    let u = kit::update(&ldoc, &mut lids, ldoc.first_page(), K_ID, 3, &k3).unwrap();
     let mut tx = u.tx;
     ondin_core::propagate::owed(&ldoc, &mut tx, &mut lids);
     ldoc.apply(&tx).unwrap();
@@ -2390,7 +2413,7 @@ fn a_third_kits_newer_main_asks_for_its_update() {
 
     assert!(
         matches!(
-            kit::update(&d, &mut ids, L_ID, 8, &l8).map(|_| ()),
+            kit::update(&d, &mut ids, d.first_page(), L_ID, 8, &l8).map(|_| ()),
             Err(kit::KitError::NeedsUpdate(_))
         ),
         "an update owed, named as one"
@@ -2400,7 +2423,7 @@ fn a_third_kits_newer_main_asks_for_its_update() {
         [(L_ID, 8, &l8), (K_ID, 3, &k3)],
     ] {
         let mut d = d.clone();
-        let u = kit::update_all(&d, &mut ids, &kits).expect("both together build");
+        let u = kit::update_all(&d, &mut ids, d.first_page(), &kits).expect("both together build");
         let mut tx = u.tx;
         ondin_core::propagate::owed(&d, &mut tx, &mut ids);
         d.apply(&tx).expect("and commit");
@@ -2420,7 +2443,9 @@ fn a_third_kits_newer_main_asks_for_its_update() {
     // again, *Accept all*'s case, both commit, *Chip* as L published it.
     for kits in [vec![(K_ID, 3, &k3)], vec![(K_ID, 3, &k3), (L_ID, 7, &l7)]] {
         let mut d = d.clone();
-        let mut tx = kit::update_all(&d, &mut ids, &kits).unwrap().tx;
+        let mut tx = kit::update_all(&d, &mut ids, d.first_page(), &kits)
+            .unwrap()
+            .tx;
         ondin_core::propagate::owed(&d, &mut tx, &mut ids);
         d.apply(&tx)
             .expect("K's update commits before L has taken it");

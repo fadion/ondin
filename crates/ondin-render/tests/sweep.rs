@@ -45,8 +45,13 @@ fn render(start: f32) -> (Vec<u8>, usize) {
         view: Rect::new(0.0, 0.0, 100.0, 100.0),
         pixel_size: (100, 100),
     };
-    let (px, w, _) =
-        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ImageStore::default());
+    let (px, w, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &vp,
+        &ImageStore::default(),
+        doc.first_page(),
+    );
     (px, w as usize)
 }
 

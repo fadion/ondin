@@ -3519,7 +3519,7 @@ mod tests {
         let mut app = app_on(&ctx, dir.clone());
         let Slotted { nested, .. } = slotted(&mut app);
         let v4 = ondin_core::io::load(&std::fs::read(&path).unwrap()).unwrap();
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         let (tx, _) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,
@@ -3682,7 +3682,7 @@ mod tests {
 
     fn slotted(app: &mut OndinApp) -> Slotted {
         use ondin_core::{Operation, build};
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let [glyph, row] = [(); 2].map(|_| app.session.ids.mint());
         let frame = |id, index, name: &str| Operation::CreateNode {
             id,
@@ -3806,7 +3806,7 @@ mod tests {
         assert!(matches!(list[1].0, SwapTarget::Here(m) if m == glyph));
 
         // *Badge* vendored at v4; the library now says v5.
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (tx, _) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,

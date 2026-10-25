@@ -74,9 +74,9 @@ pub(crate) struct Clip {
 /// and gives back every link the cut's delete took.
 #[derive(Clone, Debug)]
 pub(crate) struct CutMove {
-    /// The document's root at the cut, standing for "this document": a paste
-    /// into another one relinks nothing.
-    doc_root: NodeId,
+    /// A page of the document at the cut, standing for "this document": a paste
+    /// into one that does not have it relinks nothing.
+    doc_page: NodeId,
     /// The cut layers, in the clipboard's order — the roots of its subtrees.
     roots: Vec<NodeId>,
     /// Each link the delete took.
@@ -328,10 +328,10 @@ mod in_flight_tests {
 /// bounds the drop rule is defined against.
 #[derive(Default)]
 pub(crate) struct FrameIndex {
-    /// The revision `frames` was read at, or `None` for never.
-    at: Option<u64>,
-    /// Every artboard, depth-first in child order (paint order, which readers rely on;
-    /// [`OndinApp::artboards`]).
+    /// The revision and page `frames` was read at, or `None` for never.
+    at: Option<(u64, NodeId)>,
+    /// Every artboard on the current page, depth-first in child order (paint order,
+    /// which readers rely on; [`OndinApp::artboards`]).
     frames: Vec<NodeId>,
     /// Every layer that carries a canvas tag, in paint order ([`OndinApp::tagged`]).
     tagged: Vec<NodeId>,
@@ -502,6 +502,9 @@ pub struct OndinApp {
     pub(crate) layer_filter: Option<String>,
     /// A layer row being dragged to reorder or reparent it.
     pub(crate) layer_drag: Option<LayerDrag>,
+    /// The Pages section's own state (`crate::pages`): the row being renamed or
+    /// dragged, and the page the frame last showed.
+    pub(crate) pages: crate::pages::PagesState,
     /// Whether the panel's drag edge is lit, and since when.
     pub(crate) layers_edge: EdgeDwell,
     /// Set when the window manager asked to close and there are unsaved edits.
@@ -872,6 +875,8 @@ pub(crate) struct ContextMenu {
     /// (`docs/context-menus.md` §8). An item rather than an index, as the menu is
     /// rebuilt each frame ([`crate::menu::navigate`]).
     pub highlight: Option<crate::menu::Item>,
+    /// The *Move to page* row's rect while its list of pages is open beside it.
+    pub flyout: Option<egui::Rect>,
 }
 
 /// How long the selection chrome stays away after the last keystroke, or after a
@@ -1159,6 +1164,7 @@ impl OndinApp {
             self.library.local.save();
         }
         self.session.adopt_document(doc, Some(path));
+        self.reopen_last_page();
         if self.prefs.collapse_groups_on_open {
             self.collapse_all();
         }
@@ -1224,6 +1230,7 @@ impl OndinApp {
             collapsed: HashSet::new(),
             opacity_entry: None,
             renaming_layer: None,
+            pages: Default::default(),
             layers_synced_selection: Vec::new(),
             scroll_layers_to_selection: false,
             opening: None,
@@ -1506,6 +1513,8 @@ impl eframe::App for OndinApp {
         if ctx.input(|i| i.pointer.any_pressed()) {
             self.session.end_edit_run();
         }
+        // An undo or redo that followed its step to another page, last frame.
+        self.notice_page_change();
         self.leave_a_scope_the_selection_left();
 
         // Whether this frame's `Tab` was ours (point editing or a live text session),
@@ -1857,6 +1866,7 @@ impl OndinApp {
             }
             Action::ZoomReset => self.session.camera.zoom = 1.0,
             Action::ZoomFit => self.zoom_to(self.document_bounds()),
+            Action::StepPage(next) => self.step_page(if next { 1 } else { -1 }),
             Action::ZoomSelection => self.zoom_to(self.selection_bounds()),
             Action::ToggleView(sw) => self.set_view_switch(sw, !self.view_switch(sw)),
             Action::ToggleHidden => self.toggle_hidden(),
@@ -2362,7 +2372,7 @@ impl OndinApp {
         })
     }
 
-    /// Replace the selection with every layer in the document sharing the source
+    /// Replace the selection with every layer on the current page sharing the source
     /// layer's fills, strokes, font or effects ([`Self::select_same_source`]),
     /// the source included. Locked layers are left out and counted, as
     /// `select_by_color` does.
@@ -2404,7 +2414,7 @@ impl OndinApp {
         };
         let mut found = Vec::new();
         let mut stack: Vec<NodeId> = doc
-            .get(doc.root())
+            .get(self.session.page)
             .map(|r| r.children().iter().rev().copied().collect())
             .unwrap_or_default();
         while let Some(id) = stack.pop() {
@@ -2498,7 +2508,7 @@ impl OndinApp {
                 ids.extend(node.children().iter().copied());
             }
         }
-        if let Some(root) = self.session.doc.get(self.session.doc.root()) {
+        if let Some(root) = self.session.doc.get(self.session.page) {
             ids.extend(root.children().iter().copied().filter(|c| {
                 !matches!(
                     self.session.doc.get(*c).map(|n| n.kind()),
@@ -2835,14 +2845,18 @@ impl OndinApp {
         self.select_main(target);
     }
 
-    /// Select `main` (a main or a node inside one) and bring it into view, unless it is
-    /// a vendored kit main: that lives in the vault and is never selected. *Go to main
-    /// in the kit* is the kit's own verb.
+    /// Select `main` (a main or a node inside one) and bring it into view — on its
+    /// own page, which becomes current — unless it is a vendored kit main: that
+    /// lives in the vault and is never selected. *Go to main in the kit* is the
+    /// kit's own verb.
     pub(crate) fn select_main(&mut self, main: NodeId) {
         if self.session.doc.in_vault(main) {
             self.session
                 .info("Its main is in a kit, not in this document");
             return;
+        }
+        if let Some(page) = self.session.doc.page_of(main) {
+            self.go_to_page(page);
         }
         self.session.selection.set_one(main);
         self.reveal_selection();
@@ -2910,7 +2924,8 @@ impl OndinApp {
     }
 
     /// *Select all instances* of the selected main — or, on a set, of every
-    /// variant in it.
+    /// variant in it — on the current page: a selection never spans pages, so
+    /// the status line counts the ones elsewhere.
     pub(crate) fn select_all_instances(&mut self) {
         let Some(main) = self.session.selection.single() else {
             return;
@@ -2921,15 +2936,27 @@ impl OndinApp {
         } else {
             vec![main]
         };
-        let all: Vec<NodeId> = mains
+        let (here, elsewhere): (Vec<NodeId>, Vec<NodeId>) = mains
             .iter()
             .flat_map(|m| ondin_core::component::instances_of(doc, *m))
-            .collect();
-        if all.is_empty() {
-            self.session.info("No instances of this component");
+            .partition(|i| doc.page_of(*i) == Some(self.session.page));
+        let away = match elsewhere.len() {
+            0 => String::new(),
+            1 => " — 1 more on other pages".to_string(),
+            n => format!(" — {n} more on other pages"),
+        };
+        if here.is_empty() {
+            self.session.info(match away.is_empty() {
+                true => "No instances of this component".to_string(),
+                false => format!("No instances on this page{away}"),
+            });
             return;
         }
-        self.session.selection.set(all);
+        if !away.is_empty() {
+            self.session
+                .info(format!("Selected {} instance(s){away}", here.len()));
+        }
+        self.session.selection.set(here);
     }
 
     /// The selected mains, when *Combine as variants* could take them: two or
@@ -3192,7 +3219,7 @@ impl OndinApp {
         }
     }
 
-    fn zoom_to(&mut self, bounds: Option<Rect>) {
+    pub(crate) fn zoom_to(&mut self, bounds: Option<Rect>) {
         let Some(bounds) = bounds else {
             return;
         };
@@ -3228,9 +3255,9 @@ impl OndinApp {
         }
     }
 
-    /// Everything in the document — what `Action::ZoomFit` fits.
-    fn document_bounds(&self) -> Option<Rect> {
-        self.session.preview_world_bounds(self.session.doc.root())
+    /// Everything on the current page — what `Action::ZoomFit` fits.
+    pub(crate) fn document_bounds(&self) -> Option<Rect> {
+        self.session.preview_world_bounds(self.session.page)
     }
 
     /// The selection's union — what `Action::ZoomSelection` fits. `None` with an
@@ -3244,15 +3271,16 @@ impl OndinApp {
             .reduce(|a, b| a.union(b))
     }
 
-    /// Fill [`FrameIndex`] if this revision has not been walked yet, then hand the caller
-    /// what it wants. A closure rather than a `Ref`, so no caller can hold the borrow
-    /// across a nested lookup and panic the `RefCell`.
+    /// Fill [`FrameIndex`] if this revision of this page has not been walked yet, then
+    /// hand the caller what it wants. A closure rather than a `Ref`, so no caller can
+    /// hold the borrow across a nested lookup and panic the `RefCell`.
     pub(crate) fn with_frames<R>(&self, f: impl FnOnce(&FrameIndex) -> R) -> R {
         let mut index = self.frame_index.borrow_mut();
-        if index.at != Some(self.session.revision()) {
+        let at = (self.session.revision(), self.session.page);
+        if index.at != Some(at) {
             // Paint order: the last match is the innermost of nested frames.
             let doc = &self.session.doc;
-            let all = ondin_core::subtree_nodes(doc, &[doc.root()]);
+            let all = ondin_core::subtree_nodes(doc, &[self.session.page]);
             index.components = all
                 .iter()
                 .filter_map(|id| doc.get(*id))
@@ -3283,7 +3311,7 @@ impl OndinApp {
                 .iter()
                 .filter_map(|id| Some((*id, self.session.resolved.world_bounds(*id)?)))
                 .collect();
-            index.at = Some(self.session.revision());
+            index.at = Some(at);
             index.walks += 1;
         }
         f(&index)
@@ -3306,12 +3334,12 @@ impl OndinApp {
         self.with_frames(|i| i.tagged.clone())
     }
 
-    /// The frames sitting straight on the canvas, in z-order — for the marquee and
-    /// Ctrl+A, which must not offer a frame and its contents together.
+    /// The frames sitting straight on the current page, in z-order — for the marquee
+    /// and Ctrl+A, which must not offer a frame and its contents together.
     pub(crate) fn root_artboards(&self) -> Vec<NodeId> {
         self.session
             .doc
-            .get(self.session.doc.root())
+            .get(self.session.page)
             .map(|root| {
                 root.children()
                     .iter()
@@ -3363,7 +3391,7 @@ fn paste_aim(from: Option<Rect>, world: Point) -> Vec2 {
 /// One rule for Ctrl+V and Ctrl+D. The scope is the caller's to resolve, since paste
 /// must survive the original's frame being deleted. `step` is [`GUIDE_PASTE_OFFSET`],
 /// or zero for paste in place.
-fn pasted_guide(from: &Guide, id: GuideId, owner: Option<NodeId>, step: f64) -> Guide {
+fn pasted_guide(from: &Guide, id: GuideId, owner: NodeId, step: f64) -> Guide {
     Guide {
         id,
         owner,
@@ -3632,18 +3660,26 @@ impl OndinApp {
     }
 
     /// Paste the copied guides, each **into the scope its original had**, offset along
-    /// its own axis. Returns whether there was anything to paste. A guide whose frame
-    /// has since been deleted falls back to the canvas rather than being dropped.
+    /// its own axis. Returns whether there was anything to paste. A canvas-wide guide
+    /// lands on the current page; a guide whose frame has since been deleted, or is on
+    /// another page, falls back to the current page's canvas rather than being dropped.
     fn paste_guides(&mut self, step: f64) -> bool {
         let Some(guides) = self.guide_clipboard.clone() else {
             return false;
         };
+        let page = self.session.page;
         let mut ops = Vec::new();
         let mut ids = Vec::new();
         let mut orphaned = 0;
         for guide in guides {
-            let owner = guide.owner.filter(|o| self.session.doc.contains(*o));
-            if owner != guide.owner {
+            let doc = &self.session.doc;
+            let framed = !doc.is_page(guide.owner);
+            let owner = if framed && doc.page_of(guide.owner) == Some(page) {
+                guide.owner
+            } else {
+                page
+            };
+            if framed && owner == page {
                 orphaned += 1;
             }
             let id = GuideId(self.session.ids.mint());
@@ -3735,7 +3771,7 @@ impl OndinApp {
         };
         if !d.links.is_empty() {
             self.cut_move = Some(CutMove {
-                doc_root: self.session.doc.root(),
+                doc_page: self.session.page,
                 roots: self
                     .clipboard
                     .iter()
@@ -3955,14 +3991,15 @@ impl OndinApp {
             return false;
         };
         let templates = &clip.subtrees;
-        let fallback = self.session.doc.root();
+        let fallback = self.session.page;
         let mut placements = Vec::new();
         for template in templates {
-            // Back where it came from if that parent still exists, else the canvas.
+            // Back where it came from if that parent is still on this page, else this
+            // page's canvas: a paste never lands on a page out of sight.
             let parent = template
                 .first()
                 .and_then(|n| n.parent())
-                .filter(|p| self.session.doc.contains(*p))
+                .filter(|p| self.session.doc.page_of(*p) == Some(fallback))
                 .unwrap_or(fallback);
             // Just above the original (the template still carries its id); appended
             // when the original is gone.
@@ -4407,7 +4444,7 @@ impl OndinApp {
             .filter_map(|p| p.nodes.first().map(|n| n.id()))
             .collect();
         if cut.stamp != self.clipboard_stamp
-            || cut.doc_root != doc.root()
+            || !doc.is_page(cut.doc_page)
             || cut.roots != roots
             || placements
                 .iter()
@@ -4596,7 +4633,8 @@ impl OndinApp {
         // Every link into what goes, read before the commit, so a cut can give them back.
         let doc = &self.session.doc;
         let going: HashSet<NodeId> = build::subtree_nodes(doc, &ids).into_iter().collect();
-        let held: Vec<(NodeId, NodeId, Option<NodeId>)> = build::subtree_nodes(doc, &[doc.root()])
+        let pages: Vec<NodeId> = doc.page_ids().collect();
+        let held: Vec<(NodeId, NodeId, Option<NodeId>)> = build::subtree_nodes(doc, &pages)
             .into_iter()
             .filter(|id| !going.contains(id))
             .filter_map(|id| {
@@ -5147,6 +5185,7 @@ impl OndinApp {
         self.drop_recovery();
         self.session.adopt_document(doc, Some(path.to_path_buf()));
         self.reset_transient_state();
+        self.reopen_last_page();
         // After the reset, which empties `collapsed`.
         if self.prefs.collapse_groups_on_open {
             self.collapse_all();
@@ -5171,6 +5210,7 @@ impl OndinApp {
         self.collapsed.clear();
         self.layer_filter = None;
         self.layer_drag = None;
+        self.pages = Default::default();
         self.picker = None;
         self.kit_picker = None;
         self.kit_placing = None;
@@ -5774,7 +5814,8 @@ impl OndinApp {
     /// a `CharAttr::Family` span.
     fn document_families(&self) -> std::collections::HashSet<String> {
         let mut families = std::collections::HashSet::new();
-        let mut stack = vec![self.session.doc.root()];
+        // Every page: switching to one must not wait for its fonts.
+        let mut stack: Vec<NodeId> = self.session.doc.page_ids().collect();
         while let Some(id) = stack.pop() {
             let Some(node) = self.session.doc.get(id) else {
                 continue;
@@ -6381,7 +6422,7 @@ impl OndinApp {
                 ),
                 (
                     icon::CORNERS_OUT,
-                    "Fit to page",
+                    "Zoom to fit",
                     crate::input::Action::ZoomFit,
                 ),
                 // `SELECTION`, not a guessed `corners-in`: a wrong Phosphor codepoint renders blank.
@@ -6948,6 +6989,8 @@ impl OndinApp {
                 // The retune is for the edge only, or the content's text would go accent-blue.
                 ui.set_style(inner_style);
                 ui.set_min_width(ui.available_width());
+                // Pages first: the tree below is the current page's.
+                self.pages_section(ui);
                 egui::Frame::NONE
                     .inner_margin(egui::Margin {
                         left: crate::panels::layers::PAD_X,
@@ -7917,6 +7960,7 @@ mod guide_copy_tests {
     fn a_pasted_guide_keeps_its_axis_colour_and_scope() {
         let mut ids = IdSource::new(0x9A57E);
         let frame = ids.mint();
+        let page = ids.mint();
         let red = ondin_core::peniko::Color::from_rgba8(200, 30, 60, 255);
 
         let scoped = Guide {
@@ -7924,7 +7968,7 @@ mod guide_copy_tests {
             axis: GuideAxis::Vertical,
             position: 120.0,
             color: Some(red),
-            owner: Some(frame),
+            owner: frame,
         };
         let fresh = GuideId(ids.mint());
         let copy = pasted_guide(&scoped, fresh, scoped.owner, GUIDE_PASTE_OFFSET);
@@ -7935,7 +7979,7 @@ mod guide_copy_tests {
             Some(red),
             "a recoloured guide copies recoloured"
         );
-        assert_eq!(copy.owner, Some(frame), "and stays in its frame");
+        assert_eq!(copy.owner, frame, "and stays in its frame");
         assert_eq!(copy.position, 120.0 + GUIDE_PASTE_OFFSET);
 
         // A global guide copies global.
@@ -7944,10 +7988,10 @@ mod guide_copy_tests {
             axis: GuideAxis::Horizontal,
             position: -40.5,
             color: None,
-            owner: None,
+            owner: page,
         };
-        let copy = pasted_guide(&global, GuideId(ids.mint()), None, GUIDE_PASTE_OFFSET);
-        assert_eq!(copy.owner, None);
+        let copy = pasted_guide(&global, GuideId(ids.mint()), page, GUIDE_PASTE_OFFSET);
+        assert_eq!(copy.owner, page);
         assert_eq!(
             copy.color, None,
             "still following the default, not frozen to it"
@@ -7961,16 +8005,17 @@ mod guide_copy_tests {
     fn a_pasted_guide_whose_frame_is_gone_lands_on_the_canvas() {
         let mut ids = IdSource::new(0x9A57E);
         let gone = ids.mint();
+        let page = ids.mint();
         let orphan = Guide {
             id: GuideId(ids.mint()),
             axis: GuideAxis::Vertical,
             position: 60.0,
             color: None,
-            owner: Some(gone),
+            owner: gone,
         };
         // What `paste_guides` computes when `doc.contains(gone)` is false.
-        let copy = pasted_guide(&orphan, GuideId(ids.mint()), None, GUIDE_PASTE_OFFSET);
-        assert_eq!(copy.owner, None);
+        let copy = pasted_guide(&orphan, GuideId(ids.mint()), page, GUIDE_PASTE_OFFSET);
+        assert_eq!(copy.owner, page);
         // The number is carried across unchanged (nothing to reproject against).
         assert_eq!(copy.position, 60.0 + GUIDE_PASTE_OFFSET);
     }
@@ -8009,14 +8054,15 @@ mod guide_copy_tests {
     #[test]
     fn a_guide_pasted_in_place_keeps_its_own_number() {
         let mut ids = IdSource::new(0x9A57E);
+        let page = ids.mint();
         let guide = Guide {
             id: GuideId(ids.mint()),
             axis: GuideAxis::Horizontal,
             position: -40.5,
             color: None,
-            owner: None,
+            owner: page,
         };
-        let copy = pasted_guide(&guide, GuideId(ids.mint()), None, 0.0);
+        let copy = pasted_guide(&guide, GuideId(ids.mint()), page, 0.0);
         assert_eq!(
             copy.position, -40.5,
             "a step of zero is the whole of paste in place"
@@ -8043,7 +8089,7 @@ mod guide_copy_tests {
                         axis: GuideAxis::Vertical,
                         position,
                         color: None,
-                        owner: None,
+                        owner: app.session.page,
                     })
                     .collect(),
             );
@@ -9829,7 +9875,7 @@ mod image_drop_tests {
     /// empty document they are all the drop's own.
     fn pictures(app: &OndinApp) -> Vec<NodeId> {
         let doc = &app.session.doc;
-        doc.get(doc.root())
+        doc.get(doc.first_page())
             .map(|n| n.children().to_vec())
             .unwrap_or_default()
     }
@@ -9929,7 +9975,7 @@ mod image_drop_tests {
         };
         let ctx = egui::Context::default();
         let mut app = app_with_an_empty_document(&ctx);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (a, b) = (app.session.ids.mint(), app.session.ids.mint());
         let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
         let style = app.session.ids.mint_style();
@@ -10177,7 +10223,7 @@ mod paste_properties_report_tests {
                 },
                 add_brand,
                 add_only,
-                rect(src, there.root()),
+                rect(src, there.first_page()),
                 Operation::SetFills {
                     id: src,
                     fills: keyed_by_position([Fill {
@@ -10201,7 +10247,7 @@ mod paste_properties_report_tests {
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0xB2B);
         app.session.adopt_document(Document::new(ids.mint()), None);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let ids = &mut app.session.ids;
         let mode = ids.mint_mode();
         let (_, add_brand) = colour(ids, mode, "brand/primary");
@@ -10400,7 +10446,7 @@ mod ungroup_tests {
             }
         }
         let mut n = 0;
-        walk(&app.session.doc, app.session.doc.root(), &mut n);
+        walk(&app.session.doc, app.session.doc.first_page(), &mut n);
         n
     }
 
@@ -10424,7 +10470,7 @@ mod ungroup_tests {
         assert_eq!(
             app.session
                 .doc
-                .get(app.session.doc.root())
+                .get(app.session.doc.first_page())
                 .unwrap()
                 .children(),
             &made[..],
@@ -10738,7 +10784,7 @@ mod library_wiring_tests {
         let before = app.session.revision();
         app.autosave_tick(&ctx);
         // 20 MB of picture keeps the serialise running when this commits.
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let id = app.session.ids.mint();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
             id,
@@ -10793,7 +10839,7 @@ mod library_wiring_tests {
         let mut app = app_with_a_photo(&ctx, root.clone());
         app.save_file(false);
         let path = app.session.path.clone().expect("filed");
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let id = app.session.ids.mint();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
             id,
@@ -12457,7 +12503,7 @@ mod library_wiring_tests {
         let root = temp_root("kit-bar");
         let mut app = app_at(&ctx, root.clone());
         let main = app.session.ids.mint();
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {
                 id: main,
@@ -12784,7 +12830,7 @@ mod library_wiring_tests {
         let mut app = app_at(&ctx, root.clone());
 
         let id = app.session.ids.mint();
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let parts = crate::fonts::FontService::default_text_parts();
         app.session
             .try_commit(ondin_core::Transaction(vec![
@@ -12862,7 +12908,7 @@ mod library_wiring_tests {
             moved: fn(&mut OndinApp, ondin_core::NodeId, ondin_core::NodeId),
         ) -> (f32, f32, usize) {
             let mut app = app_at(ctx, root.to_path_buf());
-            let doc_root = app.session.doc.root();
+            let doc_root = app.session.doc.first_page();
             let (a, b) = (app.session.ids.mint(), app.session.ids.mint());
             let rect = |id| ondin_core::Operation::CreateNode {
                 id,
@@ -12954,7 +13000,7 @@ mod library_wiring_tests {
         fn typed(ctx: &egui::Context, root: &std::path::Path) -> (OndinApp, ondin_core::NodeId) {
             let mut app = app_at(ctx, root.to_path_buf());
             let id = app.session.ids.mint();
-            let parent = app.session.doc.root();
+            let parent = app.session.doc.first_page();
             let parts = crate::fonts::FontService::default_text_parts();
             app.session
                 .try_commit(ondin_core::Transaction(vec![
@@ -13037,7 +13083,7 @@ mod library_wiring_tests {
         let root = temp_root("text-chord");
         let mut app = app_at(&ctx, root.clone());
         let id = app.session.ids.mint();
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let parts = crate::fonts::FontService::default_text_parts();
         app.session
             .try_commit(ondin_core::Transaction(vec![
@@ -13099,7 +13145,7 @@ mod library_wiring_tests {
         let root = temp_root("escape-chrome");
         let mut app = app_at(&ctx, root.clone());
         let id = app.session.ids.mint();
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         app.session
             .try_commit(ondin_core::Transaction(vec![
                 ondin_core::Operation::CreateNode {
@@ -13320,7 +13366,7 @@ mod library_wiring_tests {
         });
 
         let doc = &app.session.doc;
-        let group = ondin_core::subtree_nodes(doc, &[doc.root()])
+        let group = ondin_core::subtree_nodes(doc, &[doc.first_page()])
             .into_iter()
             .find(|&id| doc.get(id).unwrap().name() == "logo")
             .expect("the SVG became a group named for its file");
@@ -13367,7 +13413,7 @@ mod library_wiring_tests {
         let mut app = app_at(&ctx, root_dir.clone());
         app.canvas_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
         let shape = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: shape,
@@ -13614,7 +13660,7 @@ mod library_wiring_tests {
         crate::theme::install(&ctx);
         let root = temp_root("present");
         let mut app = app_at(&ctx, root.clone());
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         let (b, c) = (app.session.ids.mint(), app.session.ids.mint());
         let frame = |id, index, x: f64, name: &str| ondin_core::Operation::CreateNode {
             id,
@@ -13729,7 +13775,7 @@ mod library_wiring_tests {
         let root = temp_root("focus-publish");
         let mut app = app_at(&ctx, root.clone());
         let main = app.session.ids.mint();
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {
                 id: main,
@@ -14102,7 +14148,7 @@ mod context_menu_rule_tests {
             }
         }
         let mut n = 0;
-        walk(&app.session.doc, app.session.doc.root(), &mut n);
+        walk(&app.session.doc, app.session.doc.first_page(), &mut n);
         n
     }
 
@@ -14402,7 +14448,7 @@ mod clipboard_crossing_tests {
             }
         }
         let mut out = Vec::new();
-        walk(&app.session.doc, app.session.doc.root(), &mut out);
+        walk(&app.session.doc, app.session.doc.first_page(), &mut out);
         out
     }
 
@@ -15399,7 +15445,7 @@ mod zoom_range_tests {
     use crate::view::{MAX_ZOOM, MIN_ZOOM};
     use ondin_core::kurbo::Rect;
 
-    /// *Fit to page* on a box too small to fill the canvas stops at `MAX_ZOOM`, and
+    /// *Zoom to fit* on a box too small to fill the canvas stops at `MAX_ZOOM`, and
     /// on one too large at `MIN_ZOOM`, asserted by the constants rather than literals.
     ///
     /// flip: `MAX_ZOOM` at `100.0` and `zoom.clamp(0.02, 256.0)` restored at the call site → fails at the first assertion with 256.0 against 100.0
@@ -15788,7 +15834,7 @@ mod component_verb_tests {
         let ctx = egui::Context::default();
         let (mut app, m, i) = main_and_instance(&ctx);
         let r = app.session.doc.get(m).unwrap().children()[0];
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         app.session.selection.set_one(m);
         app.copy_selection(&ctx);
         assert!(app.paste_clipboard_beside(r));
@@ -15865,7 +15911,7 @@ mod component_verb_tests {
         let (mut app, m, i) = main_and_instance(&ctx);
         let r = app.session.doc.get(m).unwrap().children()[0];
         let c = app.session.doc.get(i).unwrap().children()[0];
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let [loc, m2] = [(); 2].map(|_| app.session.ids.mint());
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
@@ -15996,7 +16042,7 @@ mod component_verb_tests {
         assert_eq!(got, want, "a main selects its instances");
 
         let m2 = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: m2,
@@ -16091,7 +16137,7 @@ mod component_verb_tests {
         ]))
         .unwrap();
         let published = ondin_core::kit::freeze(&kit).unwrap();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (tx, inst) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,
@@ -16124,7 +16170,9 @@ mod component_verb_tests {
         );
 
         app.session.selection.set(vec![inst, main]);
-        app.session.selection.retain_existing(&app.session.doc);
+        app.session
+            .selection
+            .retain_existing(&app.session.doc, app.session.page);
         assert_eq!(app.session.selection.ids(), &[inst], "the vault id pruned");
 
         // Copied into another document, it lands an instance.
@@ -16888,7 +16936,7 @@ mod component_verb_tests {
         };
         let count = |app: &OndinApp| {
             let doc = &app.session.doc;
-            ondin_core::subtree_nodes(doc, &[doc.root()]).len()
+            ondin_core::subtree_nodes(doc, &[doc.first_page()]).len()
         };
         let refused = |app: &mut OndinApp, sel: Vec<NodeId>, why: NotMain, case: &str| {
             // Each case is its own action, in its own frame.
@@ -16936,7 +16984,7 @@ mod component_verb_tests {
             "§15 D1003 (12)'s sentence, word for word"
         );
 
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let page = app.session.ids.mint();
         let frame = NodeKind::Artboard {
             size: Size::new(500.0, 500.0),
@@ -16974,7 +17022,7 @@ mod component_verb_tests {
     fn combine_refuses_mains_of_two_kinds() {
         let ctx = egui::Context::default();
         let (mut app, m, _) = main_and_instance(&ctx);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (g, r, f) = (
             app.session.ids.mint(),
             app.session.ids.mint(),
@@ -17231,7 +17279,7 @@ mod select_same_tests {
         let ctx = eframe::egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0x5A3E);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let frame = ids.mint();
         let r = [(); 5].map(|_| ids.mint());
         let mut ops = vec![Operation::CreateNode {
@@ -17353,7 +17401,7 @@ mod paste_target_tests {
         let ctx = eframe::egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0x9A57);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let [a, b, r, q] = [(); 4].map(|_| ids.mint());
         let at = |id, parent, kind, x: f64, y: f64| Operation::CreateNode {
             id,
@@ -17453,7 +17501,7 @@ mod paste_target_tests {
         let F {
             mut app, ctx, r, q, ..
         } = fixture();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let slot = app
             .session
             .doc

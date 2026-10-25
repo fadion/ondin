@@ -618,7 +618,7 @@ mod tests {
         ondin_core::kit::publish(&mut kit, None, 1);
 
         let mut d = ondin_core::Document::new(ids.mint());
-        let droot = d.root();
+        let droot = d.first_page();
         for main in [icon, badge] {
             let (tx, _) = ondin_core::kit::insert(
                 &d,
@@ -676,8 +676,13 @@ mod tests {
         ]))
         .unwrap();
         ondin_core::kit::publish(&mut kit, None, 2);
-        let u = ondin_core::kit::update_all(&d, &mut ids, &[(KIT, 2, kit.published().unwrap())])
-            .unwrap();
+        let u = ondin_core::kit::update_all(
+            &d,
+            &mut ids,
+            d.first_page(),
+            &[(KIT, 2, kit.published().unwrap())],
+        )
+        .unwrap();
         let s = summary(&d, &u);
 
         let [k] = &s.kits[..] else {

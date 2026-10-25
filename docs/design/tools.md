@@ -57,21 +57,22 @@ menu on the press would take the release as a row pick):
 
 `context-menus.md` is the spec for every row. This section covers the machinery.
 
-- **One registry, six targets.** `menu::Item` is one enum of verbs; `Item::spec()` gives each its label, glyph, accelerator and `Group`. `menu::build` sorts requested rows into the canonical group order, so a menu function chooses *which* rows appear, never which group they go in. Emitted order within a group is kept: a `Group` buys a separator, not a position. `build` returns `Vec<Vec<Row>>`, so an empty group takes its separator with it.
+- **One registry, seven targets.** `menu::Item` is one enum of verbs; `Item::spec()` gives each its label, glyph, accelerator and `Group`. `menu::build` sorts requested rows into the canonical group order, so a menu function chooses *which* rows appear, never which group they go in. Emitted order within a group is kept: a `Group` buys a separator, not a position. `build` returns `Vec<Vec<Row>>`, so an empty group takes its separator with it.
 - **Promotion.** `Row::promote()` is the one exception: a verb a kind lifts into its head is moved, not duplicated (*Ungroup* on a group, *Flatten* on a boolean).
 - **Rows map to actions.** Most rows hand to an `input::Action`, so a row and its chord cannot mean different things. Rows with no chord (*Paste here*, *Add point here*, key-layer and base-operand designations, guide verbs, or anything `shortcuts.md` does not bind) call their canvas verb directly.
 - **Exhaustive matches.** `Item::spec`'s accelerator match and `menu::ViewState::get` are exhaustive. A chord comes from `ViewSwitch::accel()`; `Row::checked` takes an `Option` so a caller with no answer can say so.
 - `every_view_switch_is_on_exactly_one_menu` checks membership, not cardinality, across the hand-written `VIEW_MENU` and `SNAP_MENU`. The canvas menu's view rows derive from `VIEW_MENU` minus `context-menus.md` §6.1's excludes.
 
-**A region opens only the menu it claimed** (R2). Three responses read `secondary_clicked()`: the
-canvas, a layers row and the layers panel background (`picker::stop_bar` keeps its own right-click
-for removing a gradient stop). The canvas resolves five of the six targets, in order:
+**A region opens only the menu it claimed** (R2). Four responses read `secondary_clicked()`: the
+canvas, a layers row, the layers panel background and a Pages row, which opens the page menu
+(`Target::Page`; `picker::stop_bar` keeps its own right-click for removing a gradient stop). The
+canvas resolves five of the seven targets, in order:
 
 1. a live text session;
 2. a point selection;
 3. a guide (`guide_at` answers `None` while guides are locked, so the canvas menu carries *Lock guides* itself);
 4. `pick_at_pointer` → `pick_for_click`, the query a left-click runs, including `Ctrl` deep-select and a frame's name tag;
-5. the page.
+5. the empty canvas.
 
 Between the second and the third, the edited gradient's handles keep the button and open no menu
 (`gradient_secondary`, the stop bar's twin): a right-click on a stop's dot removes it, and one on any

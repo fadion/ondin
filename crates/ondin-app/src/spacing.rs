@@ -655,7 +655,8 @@ impl OndinApp {
     /// `None`, so a pointer over an item never lights its container.
     fn spacing_hover(&self, world: Point) -> Option<NodeId> {
         let doc = &self.session.doc;
-        let top = *ondin_core::hit_test(&self.session.resolved, doc, world, 0.0).first()?;
+        let top = *ondin_core::hit_test(&self.session.resolved, doc, self.session.page, world, 0.0)
+            .first()?;
         let laid = doc.resolved_display(top).is_some();
         let free = ondin_core::group_chain(doc, top, self.entered_group).is_empty()
             && ondin_core::component::instance_root(doc, top).is_none()
@@ -1875,7 +1876,7 @@ mod canvas_tests {
         for locked in [false, true] {
             let (mut app, _) = app_with_a_row(&ctx);
             let line = app.session.ids.mint();
-            let root = app.session.doc.root();
+            let root = app.session.doc.first_page();
             let mut ops = vec![Operation::CreateNode {
                 id: line,
                 parent: root,
@@ -1941,7 +1942,7 @@ mod canvas_tests {
 
         let (mut app, row) = app_with_a_row(&ctx);
         let group = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: group,
@@ -1969,7 +1970,7 @@ mod canvas_tests {
         );
         let place = ondin_core::Placement {
             nodes: app.session.doc.capture_subtree(row).unwrap(),
-            parent: app.session.doc.root(),
+            parent: app.session.doc.first_page(),
             index: None,
         };
         let (mut tx, made) = ondin_core::insert_subtrees(
@@ -2111,7 +2112,7 @@ mod canvas_tests {
             &mut app.session.ids,
             &[ondin_core::Placement {
                 nodes: doc.capture_subtree(row).unwrap(),
-                parent: doc.root(),
+                parent: doc.first_page(),
                 index: None,
             }],
             Default::default(),
@@ -2243,7 +2244,7 @@ mod canvas_tests {
         let ctx = egui::Context::default();
         let (mut app, row) = app_with_a_row(&ctx);
         let outer = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let mut item = *app.session.doc.get(row).unwrap().item();
         item.width = Dimension::FitContent;
         assert!(app.session.commit(Transaction(vec![

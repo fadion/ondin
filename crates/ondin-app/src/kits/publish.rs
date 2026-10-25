@@ -318,6 +318,11 @@ impl OndinApp {
                 (c.tokens, "its variables and styles"),
             ])
         });
+        // Mains on draft pages a published main uses go too, and are named.
+        let carried: Vec<String> = ondin_core::kit::carried_from_drafts(&self.session.doc)
+            .into_iter()
+            .filter_map(|id| self.session.doc.get(id).map(|n| n.name().to_string()))
+            .collect();
         let Some(version) = ondin_core::kit::publish(
             &mut self.session.doc,
             Some(note),
@@ -331,13 +336,21 @@ impl OndinApp {
             return;
         }
         let name = self.session.document_title();
+        let drafts = match carried.as_slice() {
+            [] => String::new(),
+            [one] => format!(" · {one} from a draft page, which a component uses"),
+            many => format!(
+                " · {} from draft pages, which components use",
+                many.join(", ")
+            ),
+        };
         self.session.info(match count {
-            0 => format!("Published {name} v{version} · {other}"),
+            0 => format!("Published {name} v{version} · {other}{drafts}"),
             n if changes.as_ref().is_some_and(|c| c.tokens) => format!(
-                "Published {name} v{version} · {n} component{} and its variables and styles",
+                "Published {name} v{version} · {n} component{} and its variables and styles{drafts}",
                 plural(n)
             ),
-            n => format!("Published {name} v{version} · {n} component{}", plural(n)),
+            n => format!("Published {name} v{version} · {n} component{}{drafts}", plural(n)),
         });
     }
 }
@@ -509,7 +522,7 @@ mod tests {
         meta.name = Some("Atlas".into());
         app.session.doc.set_meta(meta);
         let main = app.session.ids.mint();
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: main,
@@ -595,7 +608,7 @@ mod tests {
         meta.kit = Some(Default::default());
         app.session.doc.set_meta(meta);
         let [set, small, large, note] = [(); 4].map(|_| app.session.ids.mint());
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let frame = |id, parent, index, name: &str| Operation::CreateNode {
             id,
             parent,

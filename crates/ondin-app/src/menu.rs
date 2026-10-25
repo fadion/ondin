@@ -55,6 +55,8 @@ pub enum Target {
     TextSession,
     /// A point selection in the node tool (§6.5).
     Points,
+    /// A row of the layers pane's Pages section (`crate::pages`): the page menu.
+    Page(NodeId),
 }
 
 /// §3's canonical order, which is the order a menu is built in.
@@ -87,11 +89,13 @@ pub enum Group {
     Kits,
     Text,
     Panels,
+    /// The page verbs (`crate::pages`): the page menu's last row, and the palette's.
+    Pages,
 }
 
 impl Group {
     /// The canonical order, and the order [`fn@build`] emits in.
-    const ORDER: [Group; 16] = [
+    const ORDER: [Group; 17] = [
         Group::Head,
         Group::Clipboard,
         Group::Properties,
@@ -108,6 +112,7 @@ impl Group {
         Group::Kits,
         Group::Text,
         Group::Panels,
+        Group::Pages,
     ];
 
     /// The name the palette shows beside a row, so two similar labels can be told
@@ -128,6 +133,7 @@ impl Group {
             Group::Kits => "Components",
             Group::Text => "Text",
             Group::Panels => "Panels",
+            Group::Pages => "Pages",
         }
     }
 }
@@ -214,6 +220,12 @@ pub enum Item {
     GoToMain,
     /// *Detach instance* (`Ctrl+Alt+B`) — on an instance.
     DetachInstance,
+    /// *Move to page ▸* — the layer menu's row that opens the list of the other
+    /// pages ([`Self::MoveTo`]); runs nothing itself.
+    MoveToPage,
+    /// Move the selection to this page (`OndinApp::move_selection_to_page`): a row
+    /// of *Move to page ▸*'s list, and the palette's *Move to page: …*.
+    MoveTo(NodeId),
     /// *Accept kit updates* (§5.3e) — on a kit instance whose kit has a newer publish.
     AcceptKitUpdates,
     /// *Make local…* (§5.3e) — on a kit instance: make its vendored main the
@@ -318,7 +330,24 @@ pub enum Item {
     /// Every top-level frame into a folder the user picks: a frame's own export
     /// settings, else a 1× PNG.
     ExportFrames,
+    /// [`Self::ExportFrames`] for every page that is not a draft, a folder per
+    /// page. Offered only when the document has more than one page.
+    ExportFramesAllPages,
     ViewSwitch(ViewSwitch),
+
+    // --- pages (`crate::pages`) --------------------------------------------
+    // The page menu's rows act on the page it was opened on (`Target::Page`).
+    RenamePage,
+    DuplicatePage,
+    /// Checkable: whether the page is a draft.
+    PageDraft,
+    DeletePage,
+    /// *New page* (the Pages section's `+`).
+    NewPage,
+    /// `Ctrl+PageDown` / `Ctrl+PageUp`; `true` is the next page.
+    StepPage(bool),
+    /// The palette's *Go to page: …*.
+    GoToPage(NodeId),
 
     // --- guides (§6.3) ----------------------------------------------------
     DeleteGuide,
@@ -513,6 +542,7 @@ impl Item {
         Item::SelectAllInstances,
         Item::GoToMain,
         Item::DetachInstance,
+        Item::MoveToPage,
         Item::AcceptKitUpdates,
         Item::MakeLocal,
         Item::ResetInstance,
@@ -554,11 +584,16 @@ impl Item {
         Item::ZoomFit,
         Item::ExportAll,
         Item::ExportFrames,
+        Item::ExportFramesAllPages,
         Item::ViewSwitch(ViewSwitch::Rulers),
         Item::ViewSwitch(ViewSwitch::Guides),
         Item::ViewSwitch(ViewSwitch::GuideLock),
         Item::ViewSwitch(ViewSwitch::Grid),
         Item::ViewSwitch(ViewSwitch::LayoutGrid),
+        Item::RenamePage,
+        Item::DuplicatePage,
+        Item::PageDraft,
+        Item::DeletePage,
         Item::DeleteGuide,
         Item::ClearGuides,
         Item::AddPointHere,
@@ -698,6 +733,14 @@ impl Item {
                 Some("Ctrl+Alt+B"),
                 Group::Structure,
             ),
+            Item::MoveToPage => s(
+                "Move to page",
+                icon::ARROW_SQUARE_OUT,
+                None,
+                Group::Structure,
+            ),
+            // Labelled with the page's name by the list and the palette.
+            Item::MoveTo(_) => s("Move to page", icon::FILE, None, Group::Pages),
             Item::AcceptKitUpdates => s(
                 "Accept kit updates",
                 icon::ARROW_CIRCLE_DOWN,
@@ -859,6 +902,12 @@ impl Item {
                 Group::Export,
             ),
             Item::ExportFrames => s("Export all frames…", icon::EXPORT, None, Group::Export),
+            Item::ExportFramesAllPages => s(
+                "Export frames, all pages…",
+                icon::EXPORT,
+                None,
+                Group::Export,
+            ),
 
             Item::SelectAll => s("Select all", icon::SCAN, Some("Ctrl+A"), Group::Clipboard),
             Item::ZoomFit => s(
@@ -891,6 +940,28 @@ impl Item {
                 Group::View,
             ),
 
+            Item::RenamePage => s("Rename", icon::PENCIL_SIMPLE, None, Group::Pages),
+            Item::DuplicatePage => s("Duplicate page", icon::COPY, None, Group::Pages),
+            Item::PageDraft => s("Draft", icon::FILE, None, Group::Pages),
+            Item::DeletePage => Spec {
+                danger: true,
+                ..s("Delete page", icon::TRASH, None, Group::Pages)
+            },
+            Item::NewPage => s("New page", icon::PLUS, None, Group::Pages),
+            Item::StepPage(true) => s(
+                "Next page",
+                icon::ARROW_DOWN,
+                Some("Ctrl+PageDown"),
+                Group::Pages,
+            ),
+            Item::StepPage(false) => s(
+                "Previous page",
+                icon::ARROW_UP,
+                Some("Ctrl+PageUp"),
+                Group::Pages,
+            ),
+            // Labelled with the page's name by the palette.
+            Item::GoToPage(_) => s("Go to page", icon::FILE, None, Group::Pages),
             Item::DeleteGuide => Spec {
                 danger: true,
                 ..s("Delete guide", icon::TRASH, Some("Del"), Group::Clipboard)
@@ -1159,7 +1230,7 @@ impl Item {
             Item::CopyAsSvg => &["svg", "vector"],
             Item::CopyAsCss => &["css", "style", "code"],
             Item::CopyAsPng(_) => &["png", "bitmap", "raster", "image"],
-            Item::ExportFrames => &["artboards", "png", "export"],
+            Item::ExportFrames | Item::ExportFramesAllPages => &["artboards", "png", "export"],
             Item::ExportCode(_) => &["code", "html", "react", "vue", "zip"],
             Item::ToggleHidden => &["hide", "show", "visibility"],
             Item::ToggleLocked => &["lock", "unlock"],
@@ -1174,6 +1245,8 @@ impl Item {
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
+            Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
+            Item::MoveTo(_) => &["page", "send"],
             Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
             Item::ZoomFit => &["fit", "all"],
             Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
@@ -1251,6 +1324,7 @@ impl Item {
             Item::ZoomFit => Action::ZoomFit,
             Item::ZoomSelection => Action::ZoomSelection,
             Item::ExportAll => Action::ExportAll,
+            Item::StepPage(next) => Action::StepPage(next),
             _ => return None,
         })
     }
@@ -1428,6 +1502,11 @@ pub struct Context<'a> {
     /// The property the one selected linked layer drives, when its field differs
     /// from the main's — what offers *Reset Label text*.
     pub property_reset: Option<String>,
+    /// The page menu's page is a draft — the tick on *Draft*.
+    pub page_draft: bool,
+    /// The document has one page — what dims *Delete page*, and leaves *Move to
+    /// page* nowhere to go.
+    pub one_page: bool,
 }
 
 /// A layer's part in a component, for the menu's component rows.
@@ -1534,6 +1613,7 @@ pub fn build(cx: &Context<'_>) -> Vec<Vec<Row>> {
         Target::TextSession => text_session_menu(cx),
         Target::Points => points_menu(cx),
         Target::Layer { .. } => layer_menu(cx),
+        Target::Page(_) => page_menu(cx),
     };
     let mut out: Vec<Vec<Row>> = Vec::new();
     for group in Group::ORDER {
@@ -1566,6 +1646,9 @@ fn canvas_menu(cx: &Context<'_>) -> Vec<Row> {
         ),
         Row::new(Item::ExportFrames).dim_if(!cx.any_frames, "No frames on the canvas"),
     ];
+    if !cx.one_page {
+        rows.push(Row::new(Item::ExportFramesAllPages));
+    }
     // *Lock guides* is here because with guides locked a guide is not a target (C7).
     rows.extend(view_rows(cx));
     rows
@@ -1591,6 +1674,19 @@ fn guide_menu(cx: &Context<'_>) -> Vec<Row> {
         Row::new(Item::ViewSwitch(ViewSwitch::GuideLock))
             .checked(cx.view.get(ViewSwitch::GuideLock)),
         Row::new(Item::ViewSwitch(ViewSwitch::Guides)).checked(cx.view.get(ViewSwitch::Guides)),
+    ]
+}
+
+/// A page row's menu (`crate::pages`): opened on a page without switching to it.
+/// *Delete page* is dim, not absent, on the last page, and says why.
+fn page_menu(cx: &Context<'_>) -> Vec<Row> {
+    vec![
+        Row::new(Item::RenamePage).promote(),
+        Row::new(Item::DuplicatePage).promote(),
+        Row::new(Item::PageDraft)
+            .checked(Some(cx.page_draft))
+            .promote(),
+        Row::new(Item::DeletePage).dim_if(cx.one_page, "A document keeps at least one page"),
     ]
 }
 
@@ -1893,6 +1989,13 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .dim_if(locked, why),
         );
     }
+    // Last of the group: it takes the layers off this page. A list of the other
+    // pages opens beside it (`OndinApp::context_menu_ui`).
+    rows.push(
+        Row::new(Item::MoveToPage)
+            .dim_if(cx.one_page, "This document has one page")
+            .dim_if(locked, why),
+    );
 
     // --- order ------------------------------------------------------------
     // Never dimmed for being already frontmost: `z_order` reports an empty transaction as an info line.
@@ -2287,6 +2390,7 @@ impl OndinApp {
             },
             // A fresh menu belongs to the pointer; the first `↓` takes it (§8).
             highlight: None,
+            flyout: None,
         }
     }
 
@@ -2302,6 +2406,7 @@ impl OndinApp {
         };
         let (at, target, world, just_opened) = (menu.at, menu.target, menu.world, menu.just_opened);
         let mut highlight = menu.highlight;
+        let mut flyout = menu.flyout;
 
         // Rebuilt from live state every frame so checkable rows update; the
         // clipboard is the snapshot `menu` carries.
@@ -2380,7 +2485,17 @@ impl OndinApp {
                                 Some(why) => resp.on_hover_text(why),
                                 None => resp,
                             };
-                            if resp.clicked() {
+                            // *Move to page* opens its list on hover or click; any
+                            // other row hovered closes it.
+                            if row.item == Item::MoveToPage && row.enabled {
+                                crate::ui::paint_submenu_caret(ui, resp.rect);
+                                if resp.hovered() || resp.clicked() {
+                                    flyout = Some(resp.rect);
+                                }
+                            } else if resp.hovered() {
+                                flyout = None;
+                            }
+                            if resp.clicked() && row.item != Item::MoveToPage {
                                 chosen = Some(row.item);
                             }
                         }
@@ -2388,6 +2503,44 @@ impl OndinApp {
                 });
             })
             .response;
+
+        // *Move to page*'s list: every page but the current one, beside its row.
+        let mut in_flyout = false;
+        if let Some(row) = flyout {
+            let pages: Vec<(NodeId, String)> = self
+                .session
+                .doc
+                .page_ids()
+                .filter(|p| *p != self.session.page)
+                .map(|p| (p, self.page_name(p)))
+                .collect();
+            let w = MENU_W;
+            // `height` for one group of these rows, 1pt apart.
+            let n = pages.len() as f32;
+            let h = crate::ui::MENU_BORDER * 2.0 + MENU_PAD * 2.0 + n * ROW_H + (n - 1.0).max(0.0);
+            let size = egui::vec2(w, h);
+            let pos = crate::ui::flyout_place(ctx, row, size, MENU_PAD);
+            let fly = egui::Area::new(egui::Id::new("context-menu-pages"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(pos)
+                .show(ctx, |ui| {
+                    crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                        ui.set_width(crate::ui::menu_inner_w(w, MENU_PAD));
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        for (page, name) in &pages {
+                            let style = crate::ui::MenuRow::new("", name);
+                            if crate::ui::menu_row(ui, style, ROW_H).clicked() {
+                                chosen = Some(Item::MoveTo(*page));
+                            }
+                        }
+                    });
+                })
+                .response;
+            in_flyout = fly.contains_pointer();
+        }
+        if let Some(m) = self.context_menu.as_mut() {
+            m.flyout = flyout;
+        }
 
         if let Some(item) = chosen {
             self.context_menu = None;
@@ -2397,7 +2550,11 @@ impl OndinApp {
         }
 
         // Not on the frame that opened it; see [`ContextMenu::just_opened`].
-        if !just_opened && ctx.input(|i| i.pointer.any_click()) && !area.contains_pointer() {
+        if !just_opened
+            && ctx.input(|i| i.pointer.any_click())
+            && !area.contains_pointer()
+            && !in_flyout
+        {
             self.context_menu = None;
         } else if let Some(menu) = self.context_menu.as_mut() {
             menu.just_opened = false;
@@ -2444,7 +2601,7 @@ impl OndinApp {
             can_replace: self.clipboard.is_some() && open.payload_current,
             kinds,
             state,
-            any_guides: !self.session.doc.guides().is_empty(),
+            any_guides: self.page_guides().next().is_some(),
             view: ViewState {
                 rulers: self.view_switch(ViewSwitch::Rulers),
                 guides: self.view_switch(ViewSwitch::Guides),
@@ -2552,6 +2709,11 @@ impl OndinApp {
             // A tree walk per frame that stops at the first layer with a spec.
             any_exports: self.document_exports_anything(),
             any_frames: !self.exported_frames().is_empty(),
+            page_draft: match target {
+                Target::Page(p) => self.session.doc.page(p).is_some_and(|p| p.draft),
+                _ => false,
+            },
+            one_page: self.session.doc.pages().len() == 1,
         }
     }
 
@@ -2623,6 +2785,26 @@ impl OndinApp {
             Item::Copy if in_text => self.copy_text_selection(ctx),
             Item::PasteHere if in_text => self.paste_text_selection(),
             Item::SelectAll if in_text => self.select_all_text(),
+
+            // --- pages (`crate::pages`) -------------------------------------
+            // The page menu's rows act on its page; the rest are the palette's.
+            Item::RenamePage | Item::DuplicatePage | Item::PageDraft | Item::DeletePage => {
+                let Target::Page(page) = target else {
+                    return;
+                };
+                match item {
+                    Item::RenamePage => self.start_page_rename(page),
+                    Item::DuplicatePage => self.duplicate_page(page),
+                    Item::PageDraft => self.toggle_page_draft(page),
+                    _ => self.delete_page(page),
+                }
+            }
+            Item::NewPage => self.add_page(),
+            Item::StepPage(next) => self.dispatch(ctx, Action::StepPage(next)),
+            Item::GoToPage(page) => self.go_to_page(page),
+            Item::MoveTo(page) => self.move_selection_to_page(page),
+            // Opens its list beside it (`context_menu_ui`); a click on it does nothing.
+            Item::MoveToPage => {}
 
             // --- straight to the keymap's own verb -------------------------
             Item::Cut => self.dispatch(ctx, Action::Cut),
@@ -2748,6 +2930,7 @@ impl OndinApp {
             Item::CopyAsCss => self.copy_as_css(ctx),
             Item::CopyAsPng(scale) => self.copy_as_png(scale),
             Item::ExportFrames => self.export_frames(),
+            Item::ExportFramesAllPages => self.export_frames_all_pages(),
             Item::ReverseSubpaths => self.dispatch(ctx, Action::ReverseSubpaths),
 
             // --- the ones a keyboard cannot express ------------------------
@@ -2838,13 +3021,10 @@ impl OndinApp {
                     self.resize_to_original(id, w, h);
                 }
             }
-            // `build::guides_of` covers a subtree; this is the whole document.
+            // `build::guides_of` covers a subtree; this is the whole page.
             Item::ClearGuides => {
                 let ops: Vec<Operation> = self
-                    .session
-                    .doc
-                    .guides()
-                    .iter()
+                    .page_guides()
                     .map(|g| Operation::RemoveGuide { id: g.id })
                     .collect();
                 let n = ops.len();
@@ -3027,6 +3207,8 @@ mod tests {
             property_reset: None,
             any_exports: true,
             any_frames: true,
+            page_draft: false,
+            one_page: false,
         }
     }
 
@@ -3240,11 +3422,11 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 28 rows in the canonical group order, with the empty
+    /// A primitive's menu is 29 rows in the canonical group order, with the empty
     /// head collapsed. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_twenty_eight_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_twenty_nine_rows_in_canonical_group_order() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let groups = build(&open(
@@ -3255,7 +3437,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 28, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 8, "the head is empty and must collapse");
 
         assert_eq!(
@@ -3275,6 +3457,7 @@ mod tests {
                 "Use as mask",
                 "Outline shape",
                 "Outline stroke",
+                "Move to page",
                 "Bring to front",
                 "Bring forward",
                 "Send backward",
@@ -3333,7 +3516,7 @@ mod tests {
     }
 
     /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 6 ·
-    /// Properties 2 · Structure 9 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
+    /// Properties 2 · Structure 10 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
     /// Export 4.
     #[test]
     fn a_booleans_menu_is_the_long_end_of_the_range() {
@@ -3347,11 +3530,11 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 34, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 35, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
-    /// arithmetic in each case's message. The linked boolean is the long end, at 36.
+    /// arithmetic in each case's message. The linked boolean is the long end, at 37.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -3368,41 +3551,41 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 31, plus *Flip to other side* and \
+                "text on a rail: the plain 32, plus *Flip to other side* and \
                  *Detach from path*",
-                33,
+                34,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
                 }),
             ),
             (
-                "a main frame: head 1 · Clipboard 6 · Properties 2 · Structure 4 \
+                "a main frame: head 1 · Clipboard 6 · Properties 2 · Structure 5 \
                  (*Group selection*, *Frame selection*, *Duplicate as component*, \
-                 *Select all instances*) · Order 4 · Transform 2 · State 3 · \
-                 Navigate 1 · Export 4",
-                27,
+                 *Select all instances*, *Move to page*) · Order 4 · Transform 2 · \
+                 State 3 · Navigate 1 · Export 4",
+                28,
                 count(Kind::Frame, &|cx| cx.role = Role::Main),
             ),
             (
                 "an instance frame: a main's, with *Go to main component*, *Reset \
                  all* and *Detach instance* for its two",
-                28,
+                29,
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 28, with *Go to \
+                "a linked shape in an instance: the primitive's 29, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                29,
+                30,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
                 }),
             ),
             (
-                "a bound text child: text's 31, with *Go to main component*, \
+                "a bound text child: text's 32, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                33,
+                34,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -3411,9 +3594,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 33, with the bound \
+                "a bound text child on a rail: the railed 34, with the bound \
                  child's three rows for *Create component*",
-                35,
+                36,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3424,9 +3607,9 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 34, with the bound child's three rows for *Create component* — \
+                 35, with the bound child's three rows for *Create component* — \
                  the long end",
-                36,
+                37,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3479,11 +3662,11 @@ mod tests {
         assert_eq!(hexagons(false), 0, "an ordinary row paints its glyph");
     }
 
-    /// A text layer's menu is 31 rows: head 4 · Clipboard 6 · Properties 2 ·
-    /// Structure 5 · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 4. The
+    /// A text layer's menu is 32 rows: head 4 · Clipboard 6 · Properties 2 ·
+    /// Structure 6 · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 4. The
     /// fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_thirty_one_rows() {
+    fn a_text_layers_menu_is_thirty_two_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -3499,7 +3682,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 31, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 32, "{:?}", labels(&groups));
     }
 
     /// The component rows sit in Structure directly after *Frame selection*, one
@@ -3619,7 +3802,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 28, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             groups
@@ -4189,7 +4372,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 28, "{:?}", labels(&groups));
+        assert_eq!(all, 29, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",
@@ -5611,7 +5794,7 @@ mod kit_rows_tests {
 
         let mut app = app_on(&ctx, root.clone());
         let consumer = app.session.path.clone().unwrap();
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         let (tx, inst) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,

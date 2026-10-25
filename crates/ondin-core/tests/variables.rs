@@ -122,7 +122,7 @@ fn fixture() -> F {
 /// `live` against a rebuild, node by node over what a bound corner can move.
 fn assert_matches_rebuild(doc: &Document, live: &Resolved) {
     let fresh = Resolved::rebuild(doc);
-    for id in ondin_core::subtree_nodes(doc, &[doc.root()]) {
+    for id in ondin_core::subtree_nodes(doc, &[doc.first_page()]) {
         assert_eq!(live.used_kind(doc, id), fresh.used_kind(doc, id), "{id:?}");
         assert_eq!(live.world_bounds(id), fresh.world_bounds(id), "{id:?}");
         assert_eq!(live.ink_bounds(id), fresh.ink_bounds(id), "{id:?}");
@@ -410,7 +410,11 @@ fn the_table_and_its_bindings_round_trip_through_a_save() {
     assert_eq!(back, f.doc);
     assert_eq!(ondin_core::io::save(&back).unwrap(), bytes);
     let text = String::from_utf8(bytes).unwrap();
-    assert!(text.contains("\"schema_version\": 9"), "written as v9");
+    let version = format!(
+        "\"schema_version\": {}",
+        ondin_core::io::CURRENT_SCHEMA_VERSION
+    );
+    assert!(text.contains(&version), "written at the current version");
     assert!(
         text.contains("\"alpha\": 0.25"),
         "the `%` rides in the binding"
@@ -493,7 +497,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
         BrushSource::Literal(Brush::Solid(NAVY))
     );
     // And it pastes: the commit's check is satisfied.
-    let root = bare.root();
+    let root = bare.first_page();
     let (tx, _) = ondin_core::insert_subtrees(
         &bare,
         &mut ids,
@@ -564,7 +568,7 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
 
     let target = |doc: &mut Document, ids: &mut IdSource| {
         let id = ids.mint();
-        let root = doc.root();
+        let root = doc.first_page();
         doc.apply(&Transaction(vec![Operation::CreateNode {
             id,
             parent: root,

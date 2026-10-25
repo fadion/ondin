@@ -1656,7 +1656,8 @@ impl OndinApp {
     /// selection (`build::colors_in`); one walk serves both, so neither misses a
     /// new place a colour can hide.
     fn document_palette(&self, want: usize) -> Vec<Color> {
-        ondin_core::colors_in(&self.session.doc, &[self.session.doc.root()])
+        let pages: Vec<NodeId> = self.session.doc.page_ids().collect();
+        ondin_core::colors_in(&self.session.doc, &pages)
             .into_iter()
             .take(want)
             .map(|u| u.color)

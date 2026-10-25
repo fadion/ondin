@@ -178,6 +178,7 @@ fn render_gpu_store(
             &view,
             Color::TRANSPARENT,
             store,
+            doc.first_page(),
         )
         .expect("render");
     let bpr = (SIDE * 4).div_ceil(256) * 256;
@@ -231,7 +232,13 @@ fn render_gpu_store(
 
 fn render_cpu(doc: &Document, res: &Resolved) -> Vec<u8> {
     VelloCpuRenderer::new()
-        .render_to_rgba(doc, res, &viewport(), &ImageStore::default())
+        .render_to_rgba(
+            doc,
+            res,
+            &viewport(),
+            &ImageStore::default(),
+            doc.first_page(),
+        )
         .0
 }
 
@@ -1372,6 +1379,7 @@ fn draw(g: &mut Gpu, doc: &Document, res: &Resolved, vp: &Viewport, view: &wgpu:
             view,
             Color::TRANSPARENT,
             &ImageStore::default(),
+            doc.first_page(),
         )
         .expect("render");
 }
@@ -1384,6 +1392,7 @@ fn job_count(doc: &Document, res: &Resolved, vp: &Viewport) -> usize {
         vp,
         &RenderOverrides::default(),
         &ImageStore::default(),
+        doc.first_page(),
     )
     .1
     .len()

@@ -281,7 +281,7 @@ impl OndinApp {
                 self.kit_picker = None;
                 // Loaded at the open, not on the first frame, so nothing done
                 // before that frame is overwritten by the load (§15 D1054).
-                let root = self.session.doc.root();
+                let root = self.session.doc.first_page();
                 Some(Browser {
                     focus: true,
                     collapsed: self.var_collapsed.get(&root).cloned().unwrap_or_default(),
@@ -304,10 +304,10 @@ impl OndinApp {
         };
         // **Collapsed groups are the document's, not the panel's** (D1038
         // G-series, §15 D1054): loaded from the app's per-document sets — keyed
-        // by the root's id, which a file keeps across saves and loads — whenever
-        // the document under the browser is not the one it loaded for, and
-        // written back after the frame's acts.
-        let root = self.session.doc.root();
+        // by the first page's id, which a file keeps across saves and loads —
+        // whenever the document under the browser is not the one it loaded for,
+        // and written back after the frame's acts.
+        let root = self.session.doc.first_page();
         if b.root != Some(root) {
             b.collapsed = self.var_collapsed.get(&root).cloned().unwrap_or_default();
             b.root = Some(root);
@@ -575,7 +575,7 @@ impl OndinApp {
         }
         // The collapsed groups written through to the document's own set, so
         // they outlive the browser and follow the document (§15 D1054).
-        let root = self.session.doc.root();
+        let root = self.session.doc.first_page();
         if let Some(b) = &self.var_browser
             && self.var_collapsed.get(&root) != Some(&b.collapsed)
         {
@@ -1072,10 +1072,10 @@ impl OndinApp {
                     });
                 }
             }
-            // The picker rides a node-less slot, so its node is the document's
-            // root, which the slot never reads (`PaintSlot::VarCell`).
+            // The picker rides a node-less slot, so its node is the current
+            // page, which the slot never reads (`PaintSlot::VarCell`).
             Act::OpenPicker(var, mode, at) => {
-                let root = doc.root();
+                let root = self.session.page;
                 let slot = PaintSlot::VarCell(var, mode);
                 match self.picker.as_mut() {
                     Some(p) => p.retarget(root, slot),
@@ -3115,15 +3115,16 @@ pub(crate) fn inherited_mode(doc: &Document, id: NodeId) -> Option<(ModeId, Opti
 }
 
 impl OndinApp {
-    /// A frame's *Mode* row, in its identity card under its name (D1038 (a); §15
-    /// D1042): set, the mode reads bright; inherited, dim and naming its source —
-    /// *Light · from Hero / Desktop*, *Light · default*. A click opens the menu,
-    /// *Inherit* first. Drawn only for a frame, and only in a document that has
-    /// a mode to set.
+    /// A frame's or a page's *Mode* row, in its identity card under its name
+    /// (D1038 (a); §15 D1042): set, the mode reads bright; inherited, dim and
+    /// naming its source — *Light · from Hero / Desktop*, *Dark · from page*,
+    /// *Light · default*. A click opens the menu, *Inherit* first. Drawn only in a
+    /// document that has a mode to set.
     pub(crate) fn frame_mode_row(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let doc = &self.session.doc;
         let Some(node) = doc.get(id) else { return };
-        if !matches!(node.kind(), ondin_core::NodeKind::Artboard { .. }) {
+        let page = doc.is_page(id);
+        if !page && !matches!(node.kind(), ondin_core::NodeKind::Artboard { .. }) {
             return;
         }
         let table = doc.variables();
@@ -3138,6 +3139,7 @@ impl OndinApp {
                 };
                 let name = table.mode(m).map(|m| m.name.clone()).unwrap_or_default();
                 let from = match from.and_then(|f| doc.get(f)) {
+                    Some(f) if doc.is_page(f.id()) => "· from page".into(),
                     Some(f) => format!("· from {}", f.name()),
                     None => "· default".into(),
                 };
@@ -3251,10 +3253,17 @@ impl OndinApp {
                 egui::FontId::new(12.0, egui::FontFamily::Name("phosphor".into())),
                 theme::text::DIM,
             );
-            let resp = resp.on_hover_text(if set {
-                "The mode this frame sets for itself and everything in it"
-            } else {
-                "Inherited — pick a mode to set one for this frame and everything in it"
+            let resp = resp.on_hover_text(match (page, set) {
+                (false, true) => "The mode this frame sets for itself and everything in it",
+                (false, false) => {
+                    "Inherited — pick a mode to set one for this frame and everything in it"
+                }
+                (true, true) => {
+                    "The mode every frame on this page reads in, unless it sets its own"
+                }
+                (true, false) => {
+                    "The document's default — pick a mode for every frame on this page"
+                }
             });
             if resp.clicked() {
                 self.mode_menu = if open { None } else { Some((id, rect)) };
@@ -3538,7 +3547,7 @@ mod tests {
         app.var_act(Act::NewVar(VarKind::Color));
         let v = the_only_var(&app);
         let rect = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::CreateNode {
                 id: rect,
@@ -3587,7 +3596,7 @@ mod tests {
     fn the_styles_tab_lists_renames_and_deletes() {
         let (ctx, mut app) = app();
         let rect = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let item = app.session.ids.mint_item();
         let (s, t) = (app.session.ids.mint_style(), app.session.ids.mint_style());
         let style = |id, name: &str| Operation::AddStyle {
@@ -3797,7 +3806,7 @@ mod tests {
             .map(|m| m.id)
             .collect();
         let (outer, inner) = (app.session.ids.mint(), app.session.ids.mint());
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let frame = |id, parent| Operation::CreateNode {
             id,
             parent,
@@ -4276,7 +4285,7 @@ mod tests {
             brush: Color::from_rgba8(220, 180, 40, 255).into(),
             visible: true,
         }]);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let tx = Transaction(vec![
             Operation::AddMode {
                 mode: Mode {
@@ -4453,7 +4462,7 @@ mod tests {
 
         let copy = app.session.doc.variables().modes()[2].id;
         let frame = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: frame,

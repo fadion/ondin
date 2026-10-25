@@ -139,7 +139,7 @@ an empty selection.
 | `Ctrl` `+` / `=` | zoom in | ✅ both spellings |
 | `Ctrl` `−` | zoom out | ✅ |
 | `Ctrl+0` | 100% | ✅ Sketch |
-| `Ctrl+1` / `Shift+1` | fit | ✅ Sketch / Figma (§L1) |
+| `Ctrl+1` / `Shift+1` | fit the current page | ✅ Sketch / Figma (§L1) |
 | `Shift+0` | 100% | ✅ Figma |
 | `Ctrl+2` / `Shift+2` | **zoom to selection** | ✅ Sketch / Figma |
 
@@ -304,6 +304,7 @@ non-goal**; `DashboardState::selected` is one path and every verb takes one docu
 | `→` `↓` `Space` `Page Down` `Enter` · click | next frame |
 | `←` `↑` `Page Up` `Backspace` · right-click | previous frame |
 | `Home` / `End` | first / last frame |
+| `Ctrl+PageDown` / `Ctrl+PageUp` | first frame of the next / previous page presented |
 | `Ctrl`/`Alt`+wheel | zoom in on the frame at the cursor; back to the fit at or below it |
 | wheel · `Shift`+wheel | scroll the zoomed frame vertically / horizontally |
 | `Escape` | leave |
@@ -415,9 +416,10 @@ combinations asserts the two **partition** the space.
 
 | Key | Action | |
 |---|---|---|
-| `Ctrl+Z` | undo | ✅ |
-| `Ctrl+Shift+Z`, `Ctrl+Y` | redo | ✅ |
-| `Ctrl+A` | select all | ✅ |
+| `Ctrl+Z` | undo | ✅ a step with nothing on the current page switches to the page its layers are on and selects them (`design/app-chrome.md`, *Pages*) |
+| `Ctrl+Shift+Z`, `Ctrl+Y` | redo | ✅ as undo |
+| `Ctrl+A` | select all | ✅ the current page's layers |
+| `Ctrl+PageDown` / `Ctrl+PageUp` | next / previous page | ✅ as a browser steps tabs; stops at either end (`Action::StepPage`). Plain `Page Down`/`Page Up` stay present mode's |
 | `Ctrl+G` / `Ctrl+Shift+G` | group / ungroup | ✅ |
 | `Ctrl+Alt+G` | frame selection | ✅ Figma (§15 D987); free because the group chords are `cmd_only`. `ctrl_alt_g_frames_and_leaves_the_group_chords_alone` |
 | `Shift+A` | add flex layout, read from where the children sit; a loose selection is framed first | ✅ Figma's chord. Plain `A` is the Node tool, read with no Shift. `shift_a_adds_a_layout_and_leaves_a_alone` |

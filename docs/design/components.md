@@ -355,7 +355,7 @@ state). Refused as `OpError::BadLink(NodeId, LinkRule)`:
 
 ### Save format
 
-Item ids and the component fields arrived with schema v5 (`CURRENT_SCHEMA_VERSION` is now 8).
+Item ids and the component fields arrived with schema v5 (the current version is in `io.md`).
 `migrate_4_to_5` gives each existing item `"id": "0:<index>"` (`ItemId::positional`), keeping an id an
 item already has — deterministic, so re-saves are byte-identical. `component`/`link` are additive but
 bumped anyway: the loader has no `deny_unknown_fields`, so an older build would silently drop every
@@ -523,6 +523,9 @@ Menus: *Create component*, *Detach instance*, *Duplicate as component*, *Select 
 main component* in Structure after *Frame selection* (`context-menus.md` §4); *Reset all* on an
 instance and *Reset <name>* on a linked child, **omitted** when `reset::Drift::any` is false
 (`context-menus.md` §3's exception). Toasts are text-only `EditorSession::info` lines naming `Ctrl+Z`.
+A selection never spans pages, so *Select all instances* selects those on the current page and the
+status line counts the ones on other pages; *Go to main component* switches to the main's page
+(`OndinApp::select_main`).
 
 ### Variants and component properties — `variant.rs`
 

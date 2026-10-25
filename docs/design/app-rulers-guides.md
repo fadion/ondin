@@ -24,6 +24,8 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 
 - Saved with the document (§5.5); **drawn as egui chrome, not scene content** — one hairline at any
   zoom, above clipping frames, invisible to `ondin export`.
+- **Only the current page's guides** are drawn, picked and snapped to: those it owns and those of
+  frames on it (`OndinApp::page_guides`).
 - Not to be confused with `snap.rs::Guide`, a transient one-frame line explaining a snap.
 
 ### Switches
@@ -51,7 +53,8 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
   `commit_inner` also drops a no-op `SetGuideScope`.
 - **Scope comes from the release point**: inside a frame scopes the guide to the innermost frame
   (`rulers::frame_at_world`, via the frame's inverse world transform, so rotated frames count by their
-  true rectangle); outside is global. The commit is one `SetGuideScope`.
+  true rectangle); outside, the guide runs the whole canvas, owned by the current page. The commit
+  is one `SetGuideScope`.
 - A frame-scoped guide's position field and ruler chip show the **offset from its frame** — the one
   exception to §9.3's world-space rule.
 - **Latched at the press** (`GuideDrag::rulers_shown`): whether the bars exist. `update_guide_drag`
@@ -69,8 +72,9 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
   hand (every copy clears the other). `property_clipboard` is a third, independent slot.
 - `app::pasted_guide(from, id, owner, step)` is the one placement rule for paste and duplicate: fresh
   id, axis and colour carried, position stepped by `GUIDE_PASTE_OFFSET` (= `PASTE_OFFSET.x`), or no
-  step for paste-in-place. Scope carries; a guide whose frame is gone falls back to the canvas with its
-  number unchanged, and the message says how many. Both counts come from the ops built, not the
+  step for paste-in-place. Scope carries; a page-wide guide lands on the current page, and one whose
+  frame is gone or on another page falls back to the current page's canvas with its number
+  unchanged, and the message says how many. Both counts come from the ops built, not the
   selection.
 - Copy also writes axis and number to the **system** clipboard — `Event::Paste` only fires when the OS
   clipboard holds something. `Ctrl+X` works on guides.
@@ -90,7 +94,7 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 | Selected | 2px `color::SELECT` (overrides a recoloured guide) + chip |
 
 - A frame-scoped guide shows a dotted continuation beyond its frame on hover/selection, same width and
-  colour; none for global guides or guides in rotated frames (`rulers::upright`). The solid segment is
+  colour; none for page-wide guides or guides in rotated frames (`rulers::upright`). The solid segment is
   clipped by the frame, the dotted one by the viewport.
 - **Discard cursor**: dragging a guide back onto its ruler shows `Bitmap::Discard` (Phosphor
   `trash-simple`; fallback `CursorIcon::NoDrop`), from `GuideDrag::announces_discard()` =

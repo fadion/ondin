@@ -378,7 +378,7 @@ fn load_on_a_small_stack(bytes: Vec<u8>) -> Result<Document, String> {
 fn a_deep_chain_of_mains_loads_on_a_small_stack() {
     const N: usize = 2_000;
     let open = load_on_a_small_stack(chain_of_mains(N, false)).expect("a chain loads");
-    assert_eq!(open.get(open.root()).unwrap().children().len(), N);
+    assert_eq!(open.get(open.first_page()).unwrap().children().len(), N);
     let closed = load_on_a_small_stack(chain_of_mains(N, true)).expect_err("a loop is refused");
     assert!(
         closed.contains("contains an instance of itself"),

@@ -109,8 +109,13 @@ fn the_scene_draws_a_gradient_across_its_drawn_box() {
         view: Rect::new(0.0, 0.0, 200.0, 100.0),
         pixel_size: (200, 100),
     };
-    let (rgba, _, _) =
-        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ondin_render::ImageStore::new());
+    let (rgba, _, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &vp,
+        &ondin_render::ImageStore::new(),
+        doc.first_page(),
+    );
     let px = rgba[(50 * 200 + 75) * 4] as i32;
     assert!((150..235).contains(&px), "three quarters up the ramp: {px}");
 }
@@ -123,7 +128,7 @@ fn the_scene_draws_a_gradient_across_its_drawn_box() {
 #[test]
 fn the_svg_export_maps_a_gradient_onto_its_drawn_box() {
     let (doc, res, board) = stretched();
-    let out = ondin_export::svg::svg(&doc, &res, Some(board));
+    let out = ondin_export::svg::svg(&doc, &res, doc.first_page(), Some(board));
     assert!(
         out.contains(r#"gradientTransform="matrix(2 0 0 1 0 0)""#),
         "{out}"

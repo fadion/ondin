@@ -1149,7 +1149,11 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::InsertSubtree { .. }
         | O::Reparent { .. }
         | O::Reorder { .. }
-        | O::SetCanvasBackground { .. }
+        | O::SetPageGround { .. }
+        | O::SetPageDraft { .. }
+        | O::AddPage { .. }
+        | O::RemovePage { .. }
+        | O::MovePage { .. }
         | O::AddGuide { .. }
         | O::RemoveGuide { .. }
         | O::SetGuidePosition { .. }
@@ -2075,7 +2079,7 @@ mod tests {
                 &mut f.app.session.ids,
                 &[Placement {
                     nodes: doc.capture_subtree(f.m).unwrap(),
-                    parent: doc.root(),
+                    parent: doc.first_page(),
                     index: None,
                 }],
                 Default::default(),
@@ -3355,7 +3359,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         let host = f.app.session.ids.mint();
-        let root = f.app.session.doc.root();
+        let root = f.app.session.doc.first_page();
         let pin = ondin_core::Insets {
             right: Some(ondin_core::LengthPct::Px(5.0)),
             top: Some(ondin_core::LengthPct::Px(5.0)),
@@ -3602,7 +3606,7 @@ mod tests {
     /// Answers the Tag main.
     fn swapped_to_a_tag(n: &mut N) -> NodeId {
         let [tag, dot] = [(); 2].map(|_| n.app.session.ids.mint());
-        let root = n.app.session.doc.root();
+        let root = n.app.session.doc.first_page();
         assert!(n.app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: tag,
@@ -4709,7 +4713,7 @@ mod tests {
             .and_then(|s| s.link())
             .expect("the slot is a Badge instance");
         let set = n.app.session.ids.mint();
-        let root = n.app.session.doc.root();
+        let root = n.app.session.doc.first_page();
         let index = n.app.session.doc.get(root).unwrap().children().len();
         assert!(n.app.session.commit(Transaction(vec![
             Operation::CreateNode {
@@ -6246,7 +6250,7 @@ mod tests {
             &mut v.app.session.ids,
             &[Placement {
                 nodes: doc.capture_subtree(v.small).unwrap(),
-                parent: doc.root(),
+                parent: doc.first_page(),
                 index: None,
             }],
             Default::default(),
@@ -6685,7 +6689,7 @@ mod tests {
                 &mut f.app.session.ids,
                 &[Placement {
                     nodes: doc.capture_subtree(f.m).unwrap(),
-                    parent: doc.root(),
+                    parent: doc.first_page(),
                     index: None,
                 }],
                 Default::default(),
@@ -6745,7 +6749,7 @@ mod tests {
                 &mut v.app.session.ids,
                 &[Placement {
                     nodes: doc.capture_subtree(v.large).unwrap(),
-                    parent: doc.root(),
+                    parent: doc.first_page(),
                     index: None,
                 }],
                 Default::default(),
@@ -6772,7 +6776,7 @@ mod tests {
 
         let mut f = fixture(&ctx);
         let card = f.app.session.ids.mint();
-        let root = f.app.session.doc.root();
+        let root = f.app.session.doc.first_page();
         assert!(f.app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: card,
@@ -6796,7 +6800,7 @@ mod tests {
                 &mut f.app.session.ids,
                 &[Placement {
                     nodes: doc.capture_subtree(card).unwrap(),
-                    parent: doc.root(),
+                    parent: doc.first_page(),
                     index: None,
                 }],
                 Default::default(),

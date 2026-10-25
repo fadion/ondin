@@ -4452,7 +4452,7 @@ fn a_boolean_operand_is_neither_offered_as_a_rail_nor_accepted_as_one() {
     // And the pick never offers it. The click is on the shared edge, in world
     // space — the artboard's own offset included, since `outline_at` works there.
     let edge = f.world_origin(front) + kurbo::Vec2::new(0.0, 30.0);
-    let picked = ondin_core::query::outline_at(&res, &f.doc, edge, 4.0);
+    let picked = ondin_core::query::outline_at(&res, &f.doc, f.doc.first_page(), edge, 4.0);
     assert!(
         picked != Some(operands[0]) && picked != Some(operands[1]),
         "the pick must not answer an operand: {picked:?}"
@@ -4467,7 +4467,7 @@ fn a_boolean_operand_is_neither_offered_as_a_rail_nor_accepted_as_one() {
     // own space, so the outline passes through origin + (0, 20).
     let left = f.world_origin(loose) + kurbo::Vec2::new(0.0, 20.0);
     assert_eq!(
-        ondin_core::query::outline_at(&res, &f.doc, left, 4.0),
+        ondin_core::query::outline_at(&res, &f.doc, f.doc.first_page(), left, 4.0),
         Some(loose),
         "a plain shape is still a rail candidate"
     );
@@ -4517,7 +4517,7 @@ fn a_frame_is_not_a_rail_and_taking_one_would_strand_its_guides() {
             axis: ondin_core::GuideAxis::Vertical,
             position: 20.0,
             color: None,
-            owner: Some(inner),
+            owner: inner,
         },
     }]));
     assert_eq!(f.doc.guides().len(), 1, "fixture: the guide is scoped");

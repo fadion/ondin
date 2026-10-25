@@ -69,7 +69,7 @@ impl Doc {
 
     fn add(&mut self, parent: Option<NodeId>, kind: NodeKind, at: Affine, name: &str) -> NodeId {
         let id = self.ids.mint();
-        let parent = parent.unwrap_or(self.doc.root());
+        let parent = parent.unwrap_or(self.doc.first_page());
         let index = self.doc.get(parent).map_or(0, |p| p.children().len());
         self.apply(vec![Operation::CreateNode {
             id,
@@ -470,7 +470,7 @@ fn holds_as(
     limit: f64,
     export: fn(&Document, &Resolved, &[NodeId]) -> CodeExport,
 ) {
-    let origins: Vec<NodeId> = doc.get(doc.root()).expect("root").children().to_vec();
+    let origins: Vec<NodeId> = doc.get(doc.first_page()).expect("root").children().to_vec();
     let export = export(doc, res, &origins);
     assert!(
         export.approximated.is_empty(),
@@ -1707,7 +1707,7 @@ fn variables_match_the_canvas_in_every_mode() {
     }
     let (doc, res) = d.done();
     holds("variables", &doc, &res);
-    let export = html_of(&doc, &res, doc.get(doc.root()).unwrap().children());
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
     let tokens =
         String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
     assert!(
@@ -1808,7 +1808,7 @@ fn bound_type_numbers_match_the_canvas_in_every_mode() {
     }
     let (doc, res) = d.done();
     holds_within("bound-type", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
-    let export = html_of(&doc, &res, doc.get(doc.root()).unwrap().children());
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
     let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
     for read in [
         "font-size: max(1px, calc(var(--size) * 1px))",
@@ -1874,7 +1874,7 @@ fn a_paragraph_spacing_of_its_own_stays_under_a_bound_default() {
     );
     d.apply(vec![Operation::SetParagraphSpans { id: t, spans }]);
     let (doc, res) = d.done();
-    let export = html_of(&doc, &res, doc.get(doc.root()).unwrap().children());
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
     let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
     assert_eq!(
         css.matches("margin-top: calc(var(--space) * 1px)").count(),

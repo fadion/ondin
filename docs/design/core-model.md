@@ -1,6 +1,6 @@
 # Core model: modules, identity, nodes, document
 
-`ondin-core` holds the document model: ids, the node tree, the `Document` that owns it, and the non-node document state (canvas background, guides). This file covers §5.1 (module layout), §5.2 (identity), §5.3 (node model) and §5.5 (document). Operations, builders, history, `Resolved` and queries are in `core-ops.md`.
+`ondin-core` holds the document model: ids, the node tree, the `Document` that owns it, its pages, and the non-node document state (each page's ground and draft flag, guides). This file covers §5.1 (module layout), §5.2 (identity), §5.3 (node model) and §5.5 (document). Operations, builders, history, `Resolved` and queries are in `core-ops.md`.
 
 ## 5. ondin-core
 
@@ -12,6 +12,7 @@ ondin-core/src/
 ├─ id.rs           # NodeId { actor, seq }, IdSource
 ├─ node.rs         # Node, NodeKind, Paint, Fill, Stroke, TextStyle, Pivot
 ├─ effect.rs       # Effect, EffectKind, Shadow, Filters — the effect stack and its escape (§5.3a)
+├─ page.rs         # Page { id, ground, draft }, free_name — the page table's half of a page (§5.5)
 ├─ guide.rs        # Guide, GuideId, GuideAxis — ruler guides; document state, not nodes (§5.5)
 ├─ layout.rs       # LayoutGrid, GridAxis, GridAlign, tracks() — a frame's columns and rows;
 │                  #   chrome over a node, never in the scene (§5.3b)
@@ -140,7 +141,7 @@ Rules and reasons:
 - **Frame placement.** An `Artboard` hangs off `Root`, another `Artboard` or a `Group`, never under a `Boolean` or a mask. `build::can_parent` states the *parent* rule; `Document::frame_may_sit_under` the *ancestor* rule (walks to root for a boolean, or a node with `mask` set — `document::bars_frames`, since a group can carry a frame into an operand or mask at any depth). Enforced in create, insert, reparent, `SetMask` on a node whose subtree holds a frame, and the loader; violation is `OpError::ArtboardPlacement`. Frames nest (a card or component inside a page) and sit in groups (a flex row of cards is a group of frames). A frame as masked content (a sibling above a mask) is allowed.
 - **`Artboard` is the type name; "frame" is the user's word.** Every string a designer reads says frame; the variant, serde tag and MCP snapshot's `"artboard"` keep the older word. (§15 D21)
 - **Names** are written at creation or copy and never recomputed. Fresh nodes are numbered among new siblings; a copy increments a numbered name. Only the user and a boolean relabelled by an operation change (§9.4) rewrite it. Duplicate sibling names are legal (§5.7b).
-- **`Root` may hold loose shapes.** A layer dragged out of a frame needs a destination, and "no frame" is honest. Creation agrees: a shape drawn outside every frame is created at the root. Frames follow the same rule as shapes in both directions, unless a group is above, when the node stays in that group (§9.4).
+- **`Root` may hold loose shapes.** A layer dragged out of a frame needs a destination, and "no frame" is honest. Creation agrees: a shape drawn outside every frame is created at the current page's root. Frames follow the same rule as shapes in both directions, unless a group is above, when the node stays in that group (§9.4).
 - **`clip` is node-level, not an `Artboard` field.** It is a property of the layer like `visible`; `NodeKind::clips_children()` spells which kinds have a frame to clip to. Defaults on for frames. The DTO projection and loader both normalise an inert `clip` so it neither reaches a document nor survives a round trip (otherwise a first open-and-save moves bytes). The flag *can* be set on a kind that ignores it (`op_set_clip` lets it sit). Readers (`scene::paint_node`, SVG writer, both `bounds_cover_subtree` copies, `menu.rs`) read `Node::clip` themselves and kind-gate with a `match`. Clip off also turns off subtree culling against the frame (§6.1).
 - **`mask`** is node-level and not the same switch: a masking node paints nothing; its outline clips the **run of siblings above it** in the same parent, up to the next mask or end of list (a second mask begins a second run). `clip` cuts a container's children to its own frame; `mask` cuts its siblings to its own outline. `Document::governing_mask` states the run rule (nearest preceding sibling with the flag; `None` for a mask itself). It is read two ways that must agree: the hit test asks backwards, node by node; `scene::paint_node`, the SVG writer's child loop and the two bounds passes in `resolve` carry it forwards (`MaskRun`, `mask_box`). If they disagree, fix the forward reader. Both spellings are asserted against the same sibling arrangement (`ops::a_mask_governs_up_to_the_next_one_and_is_never_masked_itself`, `render::a_second_mask_ends_the_first_ones_run_instead_of_nesting`). Nothing masks inside a `Boolean` (children are operands), so the flag there is inert — and the hit test must honour that or a pasted mask makes part of a boolean unclickable. `NodeKind::can_mask()` = `!Artboard && (takes_paint() || Group)`; Root and Artboard are excluded in writing (a frame already has `clips_children`). Unlike `clip`, `SetMask` is **refused** on a kind that cannot honour it (`WrongKindForOp`), because the walk must decide whether the layer paints. (§15 D282)
 - **`mask_mode`** is a field beside the flag so the mode survives the flag going off and on (an `Option` payload would lose *Alpha* on toggle). It is writable on a non-mask; `SetMaskMode` is its own op. `Shape` = hard-edged outline clip (default); `Alpha` = the mask's own alpha per pixel. **Luminance is absent on a dependency, not a decision**: vello's GPU `push_layer` takes no mask and no Porter-Duff compose moves colour into alpha, so it cannot be expressed in the compositor and a CPU-only version would make canvas and export disagree. (§15 D288)
@@ -163,20 +164,31 @@ Rules and reasons:
 pub struct Document {
     schema_version: u32,
     nodes: FxHashMap<NodeId, Node>,
-    root: NodeId,
-    vault: Option<NodeId>,              // a SECOND parentless Root holding vendored kit mains — §5.3e
-    canvas_background: peniko::Color,   // the ground behind and around the frames
+    pages: Vec<Page>,                   // in order; never empty
+    vault: Option<NodeId>,              // another parentless Root, never a page: vendored kit mains — §5.3e
     guides: Vec<Guide>,                 // ruler guides; unordered
     published: Option<Arc<kit::Published>>, // a kit's last publish, frozen; outside undo — §5.3e
 }
+pub struct Page {                  // page.rs — what a page has that is not a field of its root
+    pub id: NodeId,                // the page's parentless Root node
+    pub ground: peniko::Color,     // opaque; behind and around the page's frames
+    pub draft: bool,               // left out of everything gathered from every page
+}
 impl Document {
-    pub fn new(root_id: NodeId) -> Self;
+    pub fn new(root_id: NodeId) -> Self;          // one empty page, "Page 1"
     pub fn get(&self, id: NodeId) -> Option<&Node>;
-    pub fn root(&self) -> NodeId;
+    pub fn pages(&self) -> &[Page];
+    pub fn page(&self, id: NodeId) -> Option<&Page>;
+    pub fn is_page(&self, id: NodeId) -> bool;
+    pub fn page_index(&self, id: NodeId) -> Option<usize>;
+    pub fn first_page(&self) -> NodeId;
+    pub fn page_ids(&self) -> impl Iterator<Item = NodeId>;
+    pub fn gathered_pages(&self) -> impl Iterator<Item = NodeId>; // the non-draft pages, in order
+    pub fn page_of(&self, id: NodeId) -> Option<NodeId>;          // None in the vault
+    pub fn ground(&self, page: NodeId) -> peniko::Color;
     pub fn vault(&self) -> Option<NodeId>;
     pub fn in_vault(&self, id: NodeId) -> bool;   // the vault or under it — never resolved
     pub fn published(&self) -> Option<&kit::Published>;
-    pub fn canvas_background(&self) -> peniko::Color;
     pub fn guides(&self) -> &[Guide];
     pub fn guide(&self, id: GuideId) -> Option<&Guide>;
     pub fn guides_owned_by(&self, owner: NodeId) -> impl Iterator<Item = &Guide>;
@@ -187,19 +199,22 @@ impl Document {
 pub struct Guide {                 // guide.rs
     pub id: GuideId,
     pub axis: GuideAxis,           // Horizontal | Vertical — the direction of the line itself
-    pub position: f64,             // y for horizontal, x for vertical; owner-LOCAL if owned, else world
+    pub position: f64,             // y for horizontal, x for vertical; frame-LOCAL, or world for a page
     pub color: Option<peniko::Color>,   // None = follow DEFAULT_GUIDE_COLOR
-    pub owner: Option<NodeId>,     // the frame it is scoped to; None = the whole canvas
+    pub owner: NodeId,             // the frame it is scoped to, or the page it runs across
 }
 ```
 
-- **Two pieces of document state are not nodes:** `canvas_background` and `guides`. People set them for the artwork, not the sitting, so they are saved with the file; neither loosens the document/view-data line (§9.2, §9.3).
-- `canvas_background` is the opaque ground behind the frames (`DEFAULT_CANVAS_BACKGROUND`), changed only through `SetCanvasBackground` (invariant 2). It is per document, not an `EditorSession` preference. (§15 D28)
+- **A page is a parentless `NodeKind::Root` listed in `pages`.** Its layers are that root's subtree; its name is the root's name and its default mode the root's `Node::mode` (§5.3f); the ground and draft flag live in `Page`. Every page shares one origin, so a layer moved between pages keeps its coordinates. Components, styles, variables, images and the vault belong to the document and serve every page. Pages are roots in a table rather than nodes under one root so that the structural operations, the loader's tree rules and the clipboard's rules hold unchanged: Delete, Reparent and Reorder refuse a page as they refuse the vault (`CannotModifyRoot`), and `capture_subtree` answers `None` for one (it still captures the vault whole, which the kit verbs read).
+- `Document::new` makes a one-page document named `Page 1` (`page::PAGE_STEM`); new pages take the lowest free `Page N` (`page::free_name`). The vault is never a page.
+- A **draft** page is left out of everything that gathers from every page — kit publishing (§5.3e), *Export all* and *Export frames, all pages…* (§7), presenting past the current page, the library cover — and kept by everything aimed at it directly. `gathered_pages` is what those read.
+- **Document state that is not a node:** each page's `ground` and `draft`, and `guides`. People set them for the artwork, not the sitting, so they are saved with the file; neither loosens the document/view-data line (§9.2, §9.3). Which page is current is view state and never saved (`app-chrome.md`, *Pages*).
+- A page's `ground` is opaque (`DEFAULT_CANVAS_BACKGROUND` for a new document), changed only through `SetPageGround` (invariant 2). It is per page, not an `EditorSession` preference. (§15 D28)
 - `guides` are the lines pulled from the rulers (§9.4). `color: None` follows `DEFAULT_GUIDE_COLOR` (`#a3332d`), so retuning the default carries every never-recoloured guide.
 - **A guide is deliberately not a `Node`:** no parent, transform, paint or bounds; never rendered into the scene, never hit-tested as artwork, never in the layers tree or Select All. Making it a node would need all of that special-cased away.
 - The list is **unordered** (no z, no operation names one by position). `apply` appends; IO sorts by id on save so bytes are stable (invariant 9).
-- **Global or frame-scoped:** `owner: None` runs the full canvas with a world `position`; `Some(frame)` is drawn only within that frame and `position` is in the frame's local space. Chosen by where the pointer is when the drag ends (§9.4); a guide can move between modes. One flat list with an owner field (not per-node vectors) keeps `guides()`, `remove_all_guides` and the id-sorted save unchanged, and makes a scope change one undoable field edit (`SetGuideScope`).
-- **The owner must be a live `Artboard`** (`Document::check_guide_owner` on `AddGuide` and `SetGuideScope` → `OpError::BadGuideOwner`; also the loader). A scope is a box to clip to and measure from; shapes, groups and root have none. **Deleting a frame must take its guides in the same transaction** (`build::guides_of`, nested frames included). `apply` also re-checks every guide's owner once after the last op (invariant 8), so a caller that never heard of `guides_of` gets a refused edit instead of an unopenable file; `guides_of` remains what makes the Delete verb succeed.
+- **Page-wide or frame-scoped:** a guide owned by a page runs that page's whole canvas with a world `position`; one owned by a frame is drawn only within that frame and `position` is in the frame's local space. Chosen by where the pointer is when the drag ends (§9.4); a guide can move between modes. One flat list with an owner field (not per-node vectors) keeps `guides()`, `remove_all_guides` and the id-sorted save unchanged, and makes a scope change one undoable field edit (`SetGuideScope`).
+- **The owner must be a live `Artboard` or a page** (`Document::check_guide_owner` on `AddGuide` and `SetGuideScope` → `OpError::BadGuideOwner`; also the loader). A frame scope is a box to clip to and measure from; shapes and groups have none. **Deleting a frame must take its guides in the same transaction** (`build::guides_of`, nested frames included). `apply` also re-checks every guide's owner once after the last op (invariant 8), so a caller that never heard of `guides_of` gets a refused edit instead of an unopenable file; `guides_of` remains what makes the Delete verb succeed.
 - **A scoped guide is stored frame-local**, so it rotates with its frame and stays clipped to it (nothing is destroyed; only snapping degrades, since a leaning guide has no single world x or y). A frame resize leaves the offset; the Scale tool multiplies it (§5.6). An offset outgrowing a shrunk frame is kept, not clamped; `guide_span` lets the clip hide it.
 
 ## Traps
@@ -208,5 +223,5 @@ pub struct Guide {                 // guide.rs
 - The mask run rule exists in forward and backward spellings; change both or the paired tests fail.
 - A new `NodeKind` variant does not break any of the six `matches!` predicates at compile time; only `node::kind_fixture`'s `tag` does.
 - `NodeId::from_wire` accepts aliases of the canonical form; duplicate detection still works because they parse equal.
-- Guide owner must be a live `Artboard`; delete guides before the frame in a delete transaction or the undo (applied in reverse) fails.
+- Guide owner must be a live `Artboard` or a page; delete guides before the frame — or the page — in a delete transaction or the undo (applied in reverse) fails.
 - A bound stroke width stores `width = 0`; anything reading the literal needs `Document::resolved_paint`.

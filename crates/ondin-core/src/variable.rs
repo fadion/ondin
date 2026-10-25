@@ -1850,7 +1850,7 @@ pub enum VarRule {
     NonFinite(VarId),
     #[error("node {0:?} is bound to a variable that is not there or of another kind")]
     BadBinding(NodeId),
-    #[error("node {0:?} sets a mode that is not there, or is not a frame")]
+    #[error("node {0:?} sets a mode that is not there, or is not a frame or a page")]
     BadMode(NodeId),
     #[error("node {0:?} binds corners it does not have")]
     BadCorners(NodeId),
@@ -2073,8 +2073,12 @@ pub(crate) fn check<'a>(
         {
             return Err(VarRule::BadBinding(n.id));
         }
+        // A frame sets a mode of the document's or a kit's; a page's root only
+        // one of the document's own, since no kit's variables live on a page.
+        let page = matches!(n.kind, crate::NodeKind::Root) && !in_vault(n.id);
         if let Some(m) = n.mode
-            && (!t.has_mode(m) || !matches!(n.kind, crate::NodeKind::Artboard { .. }))
+            && !(matches!(n.kind, crate::NodeKind::Artboard { .. }) && t.has_mode(m)
+                || page && t.mode(m).is_some())
         {
             return Err(VarRule::BadMode(n.id));
         }

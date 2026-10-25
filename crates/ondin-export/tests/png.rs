@@ -71,6 +71,7 @@ fn color_boundary_produces_expected_pixel() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     assert_eq!((w, h), (100, 100));
     assert_eq!(rgba.len(), 100 * 100 * 4);
@@ -93,7 +94,7 @@ fn png_encodes_valid_signature_and_size() {
         view: f.res.world_bounds(f.artboard).unwrap(),
         pixel_size: (200, 150),
     };
-    let bytes = png(&f.doc, &f.res, &vp);
+    let bytes = png(&f.doc, &f.res, &vp, f.doc.first_page());
     // PNG magic number.
     assert_eq!(
         &bytes[..8],
@@ -169,6 +170,7 @@ fn text_rasterizes_ink_pixels() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
 
     let dark = rgba
@@ -188,8 +190,13 @@ fn empty_viewport_region_is_transparent() {
         view: Rect::new(1000.0, 1000.0, 1100.0, 1100.0),
         pixel_size: (16, 16),
     };
-    let (rgba, _, _) =
-        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ondin_render::ImageStore::new());
+    let (rgba, _, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &vp,
+        &ondin_render::ImageStore::new(),
+        doc.first_page(),
+    );
     assert!(
         rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0),
         "all pixels transparent"
@@ -283,6 +290,7 @@ fn stroke_alignment_puts_the_paint_on_the_right_side_of_the_outline() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     assert!(inked(&rgba, 27, y), "centre: paints outside the outline");
     assert!(inked(&rgba, 32, y), "centre: paints inside the outline");
@@ -295,6 +303,7 @@ fn stroke_alignment_puts_the_paint_on_the_right_side_of_the_outline() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     assert!(
         inked(&rgba, 32, y),
@@ -310,6 +319,7 @@ fn stroke_alignment_puts_the_paint_on_the_right_side_of_the_outline() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     assert!(
         inked(&rgba, 27, y),
@@ -325,7 +335,7 @@ fn stroke_alignment_puts_the_paint_on_the_right_side_of_the_outline() {
 #[test]
 fn an_aligned_stroke_does_not_clip_its_siblings() {
     let (mut doc, _) = stroked_rect_doc(StrokeAlign::Inside);
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     let mut ids = IdSource::new(99);
     let sibling = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -354,6 +364,7 @@ fn an_aligned_stroke_does_not_clip_its_siblings() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     assert!(
         inked(&rgba, 10, 10),
@@ -417,6 +428,7 @@ fn an_open_shape_ignores_alignment_rather_than_half_drawing_itself() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     // Centred on y=50 means ink both above and below the line's own y.
     assert!(inked(&rgba, 50, 47), "above the line");
@@ -447,7 +459,7 @@ fn a_per_side_stroke_inks_only_that_side() {
     let stroked = |sides: StrokeSides| {
         let (mut doc, _) = red_square_doc();
         // The one rect in the fixture — the artboard's only child.
-        let ab = doc.get(doc.root()).unwrap().children()[0];
+        let ab = doc.get(doc.first_page()).unwrap().children()[0];
         let rect = doc.get(ab).unwrap().children()[0];
         doc.apply(&Transaction(vec![Operation::SetStrokes {
             id: rect,
@@ -468,6 +480,7 @@ fn a_per_side_stroke_inks_only_that_side() {
             &res,
             &viewport(),
             &ondin_render::ImageStore::new(),
+            doc.first_page(),
         )
     };
 
@@ -540,7 +553,7 @@ fn a_dotted_stroke_rasterizes_as_dots_not_a_line() {
     use ondin_core::{Operation, Resolved, Stroke, Transaction};
 
     let (mut doc, _) = red_square_doc();
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     let rect = doc.get(ab).unwrap().children()[0];
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: rect,
@@ -562,6 +575,7 @@ fn a_dotted_stroke_rasterizes_as_dots_not_a_line() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     let w = w as usize;
 
@@ -635,6 +649,7 @@ fn dark_pixels(doc: &Document, res: &Resolved) -> usize {
         res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     rgba.as_chunks::<4>()
         .0
@@ -720,7 +735,7 @@ fn a_decoration_colour_overrides_the_text_ink() {
     let (mut doc, _) = decorated_doc("mmm", style);
     // Paint the glyphs blue, so red pixels can only be the decoration.
     let text = doc
-        .get(doc.root())
+        .get(doc.first_page())
         .unwrap()
         .children()
         .iter()
@@ -741,6 +756,7 @@ fn a_decoration_colour_overrides_the_text_ink() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     let red = rgba
         .as_chunks::<4>()
@@ -825,6 +841,7 @@ fn a_very_wide_stroke_buries_the_middle_of_the_shape() {
                 pixel_size: (N, N),
             },
             &ondin_render::ImageStore::new(),
+            doc.first_page(),
         );
         // The scanline through the shape's centre: the row the hole opens on.
         (0..w as usize)
@@ -989,7 +1006,8 @@ fn an_image_fill_is_framed_across_its_shape() {
     images.prepare(&doc);
     assert_eq!(images.len(), 1, "the store decoded the document's image");
 
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images, doc.first_page());
 
     let [r, g, b, a] = pixel(&rgba, w, 25, 25);
     assert!(
@@ -1041,7 +1059,8 @@ fn a_fitted_image_leaves_its_letterbox_empty() {
         view: Rect::new(0.0, 0.0, 200.0, 100.0),
         pixel_size: (200, 100),
     };
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &images);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &images, doc.first_page());
 
     // The picture is 100×100, centred at x ∈ 50..150. Its own quadrants first,
     // so the test is known to be looking at a drawing at all.
@@ -1090,7 +1109,8 @@ fn a_tiled_image_repeats_across_its_shape() {
     });
     let mut images = ondin_render::ImageStore::new();
     images.prepare(&doc);
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images, doc.first_page());
 
     for (x, y) in [(11, 11), (61, 11), (11, 61), (61, 61)] {
         let [r, g, b, _] = pixel(&rgba, w, x, y);
@@ -1120,7 +1140,7 @@ fn a_tiled_image_repeats_across_its_shape() {
 fn a_translucent_image_fill_rasterizes_at_its_alpha() {
     let id = ImageId("sha256:swatch".into());
     let (mut doc, _) = image_doc(&id);
-    let artboard = doc.get(doc.root()).unwrap().children()[0];
+    let artboard = doc.get(doc.first_page()).unwrap().children()[0];
     let rect = doc.get(artboard).unwrap().children()[0];
     let mut brush = image_brush(id);
     let ondin_core::peniko::Brush::Image(img) = &mut brush else {
@@ -1138,7 +1158,8 @@ fn a_translucent_image_fill_rasterizes_at_its_alpha() {
     let res = Resolved::rebuild(&doc);
     let mut images = ondin_render::ImageStore::new();
     images.prepare(&doc);
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images, doc.first_page());
 
     let [r, g, b, a] = pixel(&rgba, w, 25, 25);
     assert!(
@@ -1172,7 +1193,8 @@ fn an_unresolvable_image_fill_draws_the_placeholder_rather_than_a_hole() {
     let (doc, res) = image_doc(&id);
     // A store that never saw the document: every reference dangles.
     let empty = ondin_render::ImageStore::new();
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &empty);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &empty, doc.first_page());
 
     // A point in the left quadrant that is off *both* diagonals — (25,75) sits
     // exactly on the anti-diagonal, which is how the first spelling of this read
@@ -1231,7 +1253,8 @@ fn an_image_whose_bytes_do_not_decode_draws_the_placeholder_too() {
     images.prepare(&doc);
     assert!(images.is_empty(), "nothing decoded");
 
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images, doc.first_page());
     let px = pixel(&rgba, w, 25, 40);
     assert!(px[3] > 250, "the ground has to be opaque, got {px:?}");
     let want = ground_colour();
@@ -1323,7 +1346,8 @@ fn a_boolean_the_arithmetic_gave_up_on_paints_the_placeholder() {
     );
 
     let store = ondin_render::ImageStore::new();
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport, &store);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport, &store, doc.first_page());
     // World (100, 200), which is fifty units clear of **both** diagonals — the
     // centre of the box is where the cross is, and sampling there measured the ink
     // and called it a missing ground.
@@ -1359,7 +1383,8 @@ fn a_boolean_the_arithmetic_gave_up_on_paints_the_placeholder() {
     .expect("two circles far apart");
     let res = Resolved::rebuild(&doc);
     assert!(!res.boolean_failed(b), "nothing panicked here");
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport, &store);
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport, &store, doc.first_page());
     assert_eq!(
         pixel(&rgba, w, 10, 10)[3],
         0,
@@ -1424,7 +1449,13 @@ fn each_of_the_eight_orientations_permutes_the_pixels_on_screen() {
         });
         let mut images = ondin_render::ImageStore::new();
         images.prepare(&doc);
-        let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images);
+        let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(
+            &doc,
+            &res,
+            &viewport(),
+            &images,
+            doc.first_page(),
+        );
 
         for (i, (x, y)) in [(25, 25), (75, 25), (25, 75), (75, 75)]
             .into_iter()
@@ -1475,7 +1506,7 @@ fn an_adjusted_image_fill_exports_the_adjusted_pixels() {
     let (doc, res) = framed_doc(&id, Size::new(100.0, 100.0), |r| {
         r.adjust.exposure = -1.0;
     });
-    let (rgba, w) = decode_png(&png(&doc, &res, &viewport()));
+    let (rgba, w) = decode_png(&png(&doc, &res, &viewport(), doc.first_page()));
 
     let [r, g, b, a] = pixel(&rgba, w, 25, 25);
     assert!(
@@ -1517,7 +1548,7 @@ fn two_fills_of_one_picture_carry_their_own_adjustments() {
     // sample is a blend of two texels, which is how this test first read 190 for
     // a pure red.
     let ab = doc
-        .get(doc.root())
+        .get(doc.first_page())
         .and_then(|r| r.children().first().copied())
         .expect("the artboard");
     let mut ids = IdSource::new(400);
@@ -1549,7 +1580,7 @@ fn two_fills_of_one_picture_carry_their_own_adjustments() {
     ]))
     .expect("a second layer showing the same picture");
     let res = Resolved::rebuild(&doc);
-    let (rgba, w) = decode_png(&png(&doc, &res, &viewport()));
+    let (rgba, w) = decode_png(&png(&doc, &res, &viewport(), doc.first_page()));
 
     // Above: the dimmed copy's red quadrant. Below: the untouched copy's, which
     // covers the bottom half of the artboard at its own framing.
@@ -1707,7 +1738,7 @@ fn decode_png(bytes: &[u8]) -> (Vec<u8>, u32) {
 #[test]
 fn a_mask_keeps_the_ink_it_covers_and_removes_the_rest() {
     let (mut doc, _res) = red_square_doc();
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     let square = doc.get(ab).unwrap().children()[0];
 
     // A 40×40 mask in the top-left corner, *under* the square that fills the
@@ -1735,7 +1766,13 @@ fn a_mask_keeps_the_ink_it_covers_and_removes_the_rest() {
     let render = |doc: &Document| {
         let res = Resolved::rebuild(doc);
         VelloCpuRenderer::new()
-            .render_to_rgba(doc, &res, &viewport(), &ondin_render::ImageStore::new())
+            .render_to_rgba(
+                doc,
+                &res,
+                &viewport(),
+                &ondin_render::ImageStore::new(),
+                doc.first_page(),
+            )
             .0
     };
 
@@ -1786,7 +1823,7 @@ fn a_mask_keeps_the_ink_it_covers_and_removes_the_rest() {
 #[test]
 fn an_alpha_mask_fades_what_it_masks_and_reads_only_its_alpha() {
     let (mut doc, _res) = red_square_doc();
-    let ab = doc.get(doc.root()).unwrap().children()[0];
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
     let square = doc.get(ab).unwrap().children()[0];
 
     let mut ids = IdSource::new(0xA19A);
@@ -1833,6 +1870,7 @@ fn an_alpha_mask_fades_what_it_masks_and_reads_only_its_alpha() {
         &res,
         &viewport(),
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
 
     let inside = pixel(&rgba, 100, 20, 20);
@@ -1949,7 +1987,7 @@ fn a_gradient_on_railed_type_runs_across_the_whole_node() {
         view: Rect::new(0.0, 0.0, 200.0, 120.0),
         pixel_size: (400, 240),
     };
-    let (rgba, w) = decode_png(&png(&doc, &res, &vp));
+    let (rgba, w) = decode_png(&png(&doc, &res, &vp, doc.first_page()));
 
     // The reddest and the bluest pixel anywhere in the frame. Sampling extremes
     // rather than named coordinates keeps this from depending on where a
@@ -2054,7 +2092,7 @@ fn a_squashed_radial_gradient_paints_an_ellipse_rather_than_a_circle() {
     ]))
     .expect("a squashed radial gradient over the whole artboard");
     let res = Resolved::rebuild(&doc);
-    let (rgba, w) = decode_png(&png(&doc, &res, &viewport()));
+    let (rgba, w) = decode_png(&png(&doc, &res, &viewport(), doc.first_page()));
 
     // How far from the centre the ramp passes its half-way point, along each
     // axis. Walking out rather than sampling one texel keeps this off the exact
@@ -2178,6 +2216,7 @@ fn an_effect_on_a_boolean_does_not_take_the_rest_of_the_canvas_with_it() {
             &res,
             &vp,
             &ondin_render::ImageStore::new(),
+            doc.first_page(),
         );
         (ink(&rgba, 0, 120), ink(&rgba, 125, 200))
     };
@@ -2289,8 +2328,13 @@ fn text_whose_picture_is_missing_draws_nothing_rather_than_the_last_paint() {
         view: Rect::new(0.0, 0.0, 300.0, 200.0),
         pixel_size: (300, 200),
     };
-    let (rgba, _, _) =
-        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ondin_render::ImageStore::new());
+    let (rgba, _, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &vp,
+        &ondin_render::ImageStore::new(),
+        doc.first_page(),
+    );
     let at = |x: usize, y: usize| {
         let i = ((y * 300) + x) * 4;
         (rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3])
@@ -2409,6 +2453,7 @@ fn a_gradient_with_descending_stops_draws_the_ramp_svg_says_it_means() {
             &res,
             &vp,
             &ondin_render::ImageStore::new(),
+            doc.first_page(),
         );
         (0..100)
             .map(|x| {

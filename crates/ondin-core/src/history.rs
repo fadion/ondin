@@ -91,6 +91,25 @@ impl History {
         Ok(outcome.dirty)
     }
 
+    /// Apply `tx` and fold it into the step on top of the history, keeping that
+    /// step's inverse — for an edit the step's undo already takes away whole (a
+    /// page added, then named: removing the page removes its name). The caller
+    /// vouches for that; [`Self::commit_into_run`] checks shapes instead. A plain
+    /// [`Self::commit`] when there is no step to fold into.
+    pub fn fold_into_last(
+        &mut self,
+        doc: &mut Document,
+        tx: Transaction,
+    ) -> Result<DirtySet, OpError> {
+        if !self.can_undo() {
+            return self.commit(doc, tx);
+        }
+        let outcome = doc.apply(&tx)?;
+        self.redo.clear();
+        self.run = None;
+        Ok(outcome.dirty)
+    }
+
     /// End the current run, so the next [`Self::commit_into_run`] starts a step
     /// of its own. The caller's half of the policy.
     pub fn end_run(&mut self) {
@@ -139,6 +158,17 @@ impl History {
         };
         self.undo.push(outcome.inverse);
         Ok(Some(outcome.dirty))
+    }
+
+    /// The transaction [`Self::undo`] would apply next, for a caller that must
+    /// know what it touches before it runs (the app's page switch).
+    pub fn next_undo(&self) -> Option<&Transaction> {
+        self.undo.last()
+    }
+
+    /// The transaction [`Self::redo`] would apply next.
+    pub fn next_redo(&self) -> Option<&Transaction> {
+        self.redo.last()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -250,7 +280,7 @@ mod tests {
     fn a_structural_edit_is_never_folded_away() {
         let (mut doc, mut history, _rect) = doc_with_rect();
         let mut ids = IdSource::new(2);
-        let root = doc.root();
+        let root = doc.first_page();
         let depth = history.undo_depth();
         for i in 0..2 {
             let id = ids.mint();
@@ -481,6 +511,7 @@ mod tests {
         use crate::guide::{Guide, GuideAxis, GuideId};
         let (mut doc, mut history, _rect) = doc_with_rect();
         let guide = GuideId(IdSource::new(9000).mint());
+        let page = doc.first_page();
         history
             .commit(
                 &mut doc,
@@ -490,7 +521,7 @@ mod tests {
                         axis: GuideAxis::Horizontal,
                         position: 10.0,
                         color: None,
-                        owner: None,
+                        owner: page,
                     },
                 }]),
             )

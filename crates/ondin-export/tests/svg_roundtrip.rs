@@ -371,6 +371,7 @@ fn an_imported_clip_path_is_empty_outside_the_clip() {
         &res,
         &vp,
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     let px = |x: u32, y: u32| {
         let i = ((y * w + x) * 4) as usize;

@@ -1,11 +1,20 @@
 {
-  "snapshot_version": 11,
-  "root": "601d:1",
+  "snapshot_version": 12,
+  "pages": [
+    {
+      "id": "601d:1",
+      "name": "Page 1",
+      "ground": "#171718",
+      "draft": false,
+      "mode": null
+    }
+  ],
   "nodes": [
     {
       "id": "601d:1",
       "kind": "root",
-      "name": "Root",
+      "name": "Page 1",
+      "page": "601d:1",
       "parent": null,
       "children": [
         "601d:2"
@@ -50,6 +59,7 @@
       "id": "601d:10",
       "kind": "rect",
       "name": "Rectangle 1",
+      "page": "601d:1",
       "parent": "601d:9",
       "children": [],
       "artboard": "601d:2",
@@ -106,6 +116,7 @@
       "id": "601d:11",
       "kind": "boolean-subtract",
       "name": "Notched",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [
         "601d:12",
@@ -157,6 +168,7 @@
       "id": "601d:12",
       "kind": "rect",
       "name": "Rectangle 1",
+      "page": "601d:1",
       "parent": "601d:11",
       "children": [],
       "artboard": "601d:2",
@@ -213,6 +225,7 @@
       "id": "601d:13",
       "kind": "ellipse",
       "name": "Ellipse 1",
+      "page": "601d:1",
       "parent": "601d:11",
       "children": [],
       "artboard": "601d:2",
@@ -257,6 +270,7 @@
       "id": "601d:14",
       "kind": "text",
       "name": "Text 1",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -310,6 +324,7 @@
       "id": "601d:2",
       "kind": "artboard",
       "name": "Board",
+      "page": "601d:1",
       "parent": "601d:1",
       "children": [
         "601d:3",
@@ -370,6 +385,7 @@
       "id": "601d:3",
       "kind": "rect",
       "name": "Rounded",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -470,6 +486,7 @@
       "id": "601d:4",
       "kind": "ellipse",
       "name": "Ellipse 1",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -541,6 +558,7 @@
       "id": "601d:5",
       "kind": "polygon",
       "name": "Polygon 1",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -601,6 +619,7 @@
       "id": "601d:6",
       "kind": "star",
       "name": "Star 1",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -653,6 +672,7 @@
       "id": "601d:7",
       "kind": "line",
       "name": "Line 1",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -706,6 +726,7 @@
       "id": "601d:8",
       "kind": "path",
       "name": "Triangle",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [],
       "artboard": "601d:2",
@@ -755,6 +776,7 @@
       "id": "601d:9",
       "kind": "group",
       "name": "Pair",
+      "page": "601d:1",
       "parent": "601d:2",
       "children": [
         "601d:10"

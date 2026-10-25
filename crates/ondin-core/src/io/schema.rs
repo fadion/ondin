@@ -7,7 +7,7 @@
 //! as its six affine coefficients. The kind/paint value types reuse the model's
 //! serde representation (a change there is a schema-version bump).
 
-use crate::document::{DEFAULT_CANVAS_BACKGROUND, Document};
+use crate::document::Document;
 use crate::effect::Effect;
 use crate::export::ExportSpec;
 use crate::guide::{Guide, GuideAxis, GuideId};
@@ -37,18 +37,17 @@ pub(crate) struct DocumentDto {
     /// reading past the nodes and the image table.
     #[serde(default, skip_serializing_if = "DocumentMeta::is_empty")]
     pub meta: DocumentMeta,
-    pub root: String,
-    /// The vault's root — the second root holding vendored kit mains (§15 D1012)
-    /// — absent in a document that has used no kit. Its nodes are in `nodes` with
-    /// the rest, which is why the reachability check walks from both roots.
+    /// The pages in order (`crate::page`), each naming its root in `nodes`. New
+    /// in v10, replacing the one `root` and the document's `canvas_background`.
+    pub pages: Vec<PageDto>,
+    /// The vault's root — the parentless root holding vendored kit mains (§15
+    /// D1012) — absent in a document that has used no kit. Its nodes are in
+    /// `nodes` with the rest, which is why the reachability check walks from it
+    /// as well as from every page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vault: Option<String>,
     /// Sorted by node id on save for byte-stable output (invariant 9).
     pub nodes: Vec<NodeDto>,
-    /// The ground behind and around the frames (§15 D18). Defaulted rather than
-    /// versioned: a file written before it was saved was drawn on the default.
-    #[serde(default = "default_ground")]
-    pub canvas_background: Color,
     /// Ruler guides, sorted by id on save (invariant 9). A file without the key
     /// loads with none.
     #[serde(default)]
@@ -168,10 +167,14 @@ pub(crate) enum ImageSourceDto {
     },
 }
 
-/// What a file written before the ground was saved meant: the design's
-/// near-black.
-fn default_ground() -> Color {
-    DEFAULT_CANVAS_BACKGROUND
+/// A page on disk: its root's id, and the page-table fields its root node does
+/// not carry (its name and mode are the node's).
+#[derive(Serialize, Deserialize)]
+pub(crate) struct PageDto {
+    pub id: String,
+    pub ground: Color,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub draft: bool,
 }
 
 /// A guide on disk. The id is the same `"<actor-hex>:<seq>"` string a node uses
@@ -185,11 +188,9 @@ pub(crate) struct GuideDto {
     pub position: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Color>,
-    /// The frame this guide is scoped to, absent for a canvas-wide one (§5.5).
-    /// Additive: a missing key means canvas-wide, as in every earlier file, and
-    /// skipping it keeps unscoped documents byte-identical (invariant 9).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner: Option<String>,
+    /// The frame this guide is scoped to, or the page it runs across (§5.5).
+    /// Required from v10, where a canvas-wide guide names its page.
+    pub owner: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -602,7 +603,7 @@ impl DocumentDto {
                 axis: g.axis,
                 position: g.position,
                 color: g.color,
-                owner: g.owner.map(NodeId::to_wire),
+                owner: g.owner.to_wire(),
             })
             .collect();
         // The in-memory list is append-ordered, so it depends on the order the
@@ -616,10 +617,17 @@ impl DocumentDto {
         images.sort_by(|a, b| a.id.cmp(&b.id));
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
-            root: doc.root().to_wire(),
+            pages: doc
+                .pages()
+                .iter()
+                .map(|p| PageDto {
+                    id: p.id.to_wire(),
+                    ground: p.ground,
+                    draft: p.draft,
+                })
+                .collect(),
             vault: doc.vault().map(NodeId::to_wire),
             nodes,
-            canvas_background: doc.canvas_background(),
             guides,
             variables: VariablesDto::from_table(doc.variables()),
             styles: doc.styles().iter().cloned().collect(),
@@ -642,10 +650,26 @@ impl DocumentDto {
 
     /// Rebuild a document from a (migrated) DTO, verifying tree integrity.
     pub(crate) fn into_document(self) -> Result<Document, IoError> {
-        let root = parse_id(&self.root)?;
         let vault = self.vault.as_deref().map(parse_id).transpose()?;
-        // Opaque, always — the same rule the editor applies when setting it.
-        let ground = self.canvas_background.with_alpha(1.0);
+        let mut pages: Vec<crate::page::Page> = Vec::with_capacity(self.pages.len());
+        for dto in &self.pages {
+            let id = parse_id(&dto.id)?;
+            if pages.iter().any(|p| p.id == id) || Some(id) == vault {
+                return Err(IoError::Integrity(format!(
+                    "page {id:?} is listed twice, or is the vault"
+                )));
+            }
+            pages.push(crate::page::Page {
+                id,
+                // Opaque, always — the same rule the editor applies when setting it.
+                ground: dto.ground.with_alpha(1.0),
+                draft: dto.draft,
+            });
+        }
+        if pages.is_empty() {
+            return Err(IoError::Integrity("the document has no page".into()));
+        }
+        let page_ids: Vec<NodeId> = pages.iter().map(|p| p.id).collect();
 
         let mut nodes: FxHashMap<NodeId, Node> = FxHashMap::default();
         for dto in self.nodes {
@@ -673,19 +697,13 @@ impl DocumentDto {
                     "guide {id:?} has a non-finite position"
                 )));
             }
-            let owner = match dto.owner.as_deref() {
-                None => None,
-                Some(wire) => {
-                    let owner = parse_id(wire)?;
-                    let kind = nodes.get(&owner).map(Node::kind);
-                    if !matches!(kind, Some(NodeKind::Artboard { .. })) {
-                        return Err(IoError::Integrity(format!(
-                            "guide {id:?} is scoped to {owner:?}, which is not a frame in this document"
-                        )));
-                    }
-                    Some(owner)
-                }
-            };
+            let owner = parse_id(&dto.owner)?;
+            let kind = nodes.get(&owner).map(Node::kind);
+            if !page_ids.contains(&owner) && !matches!(kind, Some(NodeKind::Artboard { .. })) {
+                return Err(IoError::Integrity(format!(
+                    "guide {id:?} is scoped to {owner:?}, which is not a frame or a page in this document"
+                )));
+            }
             guides.push(Guide {
                 id,
                 axis: dto.axis,
@@ -706,7 +724,7 @@ impl DocumentDto {
             }
         }
 
-        verify_integrity(&nodes, root, vault)?;
+        verify_integrity(&nodes, &page_ids, vault)?;
 
         // The variables rules (§5.3f, §15 D1039), `apply`'s post-condition. Refused,
         // not repaired: dropping a dangling binding would hand the layer a literal
@@ -767,9 +785,8 @@ impl DocumentDto {
         Ok(Document::from_parts(
             CURRENT_SCHEMA_VERSION,
             nodes,
-            root,
+            pages,
             vault,
-            ground,
             guides,
             images,
             variables,
@@ -839,12 +856,12 @@ fn parse_id(s: &str) -> Result<NodeId, IoError> {
 /// the in-memory tree walks (`subtree_ids`, `paint_path`, `resolve`) misbehave,
 /// rather than letting a corrupt file surface as a hang or panic later:
 ///
-/// 1. the root exists, is of kind `Root`, and has no parent;
-/// 2. every non-root node has a parent that exists;
+/// 1. every page's root exists, is of kind `Root`, and has no parent;
+/// 2. every node but a page's root and the vault has a parent that exists;
 /// 3. every listed child exists and points back at its parent;
 /// 4. no node is listed as a child more than once (anywhere in the document) —
 ///    a duplicate entry would make one node appear twice in a tree walk;
-/// 5. every node is reachable from the root by exactly one path;
+/// 5. every node is reachable from a page or the vault by exactly one path;
 /// 6. no node is deeper than [`MAX_TREE_DEPTH`];
 /// 7. no frame sits anywhere under a boolean or a mask (§15 D876).
 ///
@@ -862,17 +879,23 @@ fn parse_id(s: &str) -> Result<NodeId, IoError> {
 /// document at launch.
 fn verify_integrity(
     nodes: &FxHashMap<NodeId, Node>,
-    root: NodeId,
+    pages: &[NodeId],
     vault: Option<NodeId>,
 ) -> Result<(), IoError> {
-    let root_node = nodes
-        .get(&root)
-        .ok_or_else(|| IoError::Integrity("root node not present".into()))?;
-    if !matches!(root_node.kind(), NodeKind::Root) {
-        return Err(IoError::Integrity("root node is not of kind Root".into()));
-    }
-    if root_node.parent().is_some() {
-        return Err(IoError::Integrity("root node has a parent".into()));
+    for page in pages {
+        let root_node = nodes
+            .get(page)
+            .ok_or_else(|| IoError::Integrity(format!("page {page:?}'s root is not present")))?;
+        if !matches!(root_node.kind(), NodeKind::Root) {
+            return Err(IoError::Integrity(format!(
+                "page {page:?}'s root is not of kind Root"
+            )));
+        }
+        if root_node.parent().is_some() {
+            return Err(IoError::Integrity(format!(
+                "page {page:?}'s root has a parent"
+            )));
+        }
     }
 
     // Which node claims each id as a child; also catches duplicate listings.
@@ -884,7 +907,7 @@ fn verify_integrity(
         node.check_item_ids()
             .map_err(|e| IoError::Integrity(e.to_string()))?;
         match node.parent() {
-            None if node.id() != root && Some(node.id()) != vault => {
+            None if !pages.contains(&node.id()) && Some(node.id()) != vault => {
                 return Err(IoError::Integrity(format!(
                     "non-root node {:?} has no parent",
                     node.id()
@@ -932,13 +955,13 @@ fn verify_integrity(
     //
     // Checks (6) and (7) ride along on this explicit-stack walk. (7) is an
     // ancestor rule the pairwise `check_child_kind` cannot see; each entry's flag
-    // is "something above here bars frames". The walk starts from both roots
-    // (§15 D1012); the vault's shape is `kit::check`'s, below.
+    // is "something above here bars frames". The walk starts from every page
+    // and the vault (§15 D1012); the vault's shape is `kit::check`'s, below.
     let mut visited: FxHashSet<NodeId> = FxHashSet::default();
-    let mut stack = vec![(root, 0usize, false)];
-    visited.insert(root);
+    let mut stack: Vec<(NodeId, usize, bool)> = pages.iter().map(|p| (*p, 0, false)).collect();
+    visited.extend(pages.iter().copied());
     if let Some(v) = vault {
-        if v == root || !nodes.contains_key(&v) {
+        if pages.contains(&v) || !nodes.contains_key(&v) {
             return Err(IoError::Integrity(format!(
                 "node {v:?} {}",
                 crate::kit::VaultRule::Shape
@@ -972,9 +995,9 @@ fn verify_integrity(
     if visited.len() != nodes.len() {
         let orphan = nodes.keys().find(|id| !visited.contains(id));
         return Err(IoError::Integrity(format!(
-            "{} node(s) are not reachable from the root (e.g. {:?})",
+            "{} node(s) are not reachable from a page (e.g. {:?})",
             nodes.len() - visited.len(),
-            orphan.copied().unwrap_or(root)
+            orphan.copied().unwrap_or(pages[0])
         )));
     }
 
@@ -984,7 +1007,7 @@ fn verify_integrity(
     crate::component::check(nodes)
         .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
     // And the vault's (§15 D1012), `Document::apply`'s post-condition at this door.
-    crate::kit::check(nodes, root, vault)
+    crate::kit::check(nodes, vault)
         .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
 
     Ok(())

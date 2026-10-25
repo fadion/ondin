@@ -28,6 +28,17 @@ use std::time::{Duration, Instant};
 /// ([`EditorSession::commit_run`]).
 const RUN_WINDOW: Duration = Duration::from_millis(600);
 
+/// How a commit joins the history ([`EditorSession::commit_inner`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fold {
+    /// A step of its own.
+    None,
+    /// Into the open run, when its shape matches (`History::commit_into_run`).
+    Run,
+    /// Into the step on top, unconditionally (`History::fold_into_last`).
+    Last,
+}
+
 /// What the status line is reporting. Errors are kept distinct so the chrome
 /// can colour them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -230,14 +241,19 @@ impl Selection {
         self.frame = None;
     }
 
-    /// Drop ids that are no longer in the document (after a delete or an undo) —
-    /// or that are in its vault, which is never selectable (§15 D1012).
-    pub fn retain_existing(&mut self, doc: &Document) {
+    /// Drop ids that are no longer on `page` (after a delete, an undo or a move
+    /// to another page) — the vault's among them, never selectable (§15 D1012).
+    pub fn retain_existing(&mut self, doc: &Document, page: NodeId) {
         let before = self.ids.len();
-        let gone = |id: NodeId| !doc.contains(id) || doc.in_vault(id);
+        // A layer moved to another page leaves the selection too: a selection
+        // never spans pages. The page's own root is never a layer.
+        let gone = |id: NodeId| id == page || doc.page_of(id) != Some(page);
         self.ids.retain(|id| !gone(*id));
         self.key.take_if(|id| gone(*id));
-        self.guides.retain(|id| doc.guide(*id).is_some());
+        self.guides.retain(|id| {
+            doc.guide(*id)
+                .is_some_and(|g| doc.page_of(g.owner) == Some(page))
+        });
         // Only when it dropped something: this runs after every commit, including
         // the one that just set the orientation.
         if self.ids.len() != before {
@@ -370,6 +386,17 @@ pub struct EditorSession {
     pub ids: IdSource,
     pub selection: Selection,
     pub camera: Camera,
+    /// The page being viewed and edited (`ondin_core::page`). Always one of
+    /// `doc`'s pages: [`Self::keep_page`] moves it when an edit takes it away.
+    pub page: NodeId,
+    /// The camera and selection each other page was left with, for this sitting
+    /// only: switching pages is a view change, never an edit and never saved
+    /// ([`Self::switch_page`]).
+    parked: std::collections::HashMap<NodeId, (Camera, Selection)>,
+    /// Set by a switch to a page with no parked view, until the app frames that
+    /// page's contents ([`Self::take_first_visit`]): only the app knows the
+    /// canvas's size.
+    first_visit: bool,
     /// The file backing this document, if it has been saved or opened.
     pub path: Option<PathBuf>,
 
@@ -486,6 +513,7 @@ impl EditorSession {
     fn from_parts(doc: Document, ids: IdSource, path: Option<PathBuf>) -> Self {
         let resolved = Resolved::rebuild(&doc);
         let saved_at = path.is_some().then(Instant::now);
+        let page = doc.first_page();
         Self {
             doc,
             history: History::new(),
@@ -493,6 +521,9 @@ impl EditorSession {
             ids,
             selection: Selection::default(),
             camera: Camera::default(),
+            page,
+            parked: Default::default(),
+            first_visit: false,
             path,
             overrides: RenderOverrides::default(),
             session_preview: None,
@@ -636,10 +667,95 @@ impl EditorSession {
     }
 
     /// The canvas ground, including a colour being dragged in the picker.
-    pub fn preview_canvas_background(&self) -> Color {
+    /// The current page's ground, including any live edit of it.
+    pub fn preview_ground(&self) -> Color {
         self.overrides
-            .canvas_background()
-            .unwrap_or_else(|| self.doc.canvas_background())
+            .ground(self.page)
+            .unwrap_or_else(|| self.doc.ground(self.page))
+    }
+
+    /// Make `page` current: this page's camera and selection are parked and the
+    /// ones `page` was left with come back. A page with none — a first visit this
+    /// sitting — raises [`Self::take_first_visit`]. Nothing happens for the
+    /// current page or a non-page.
+    ///
+    /// A view change: no history step, no dirty flag. Any preview is dropped,
+    /// since it was a gesture on the page being left.
+    pub fn switch_page(&mut self, page: NodeId) {
+        if page == self.page || !self.doc.is_page(page) {
+            return;
+        }
+        self.clear_preview();
+        let left = (self.camera, std::mem::take(&mut self.selection));
+        self.parked.insert(self.page, left);
+        self.page = page;
+        match self.parked.remove(&page) {
+            Some((camera, selection)) => {
+                self.camera = camera;
+                self.selection = selection;
+                self.selection.retain_existing(&self.doc, page);
+                self.first_visit = false;
+            }
+            None => self.first_visit = true,
+        }
+    }
+
+    /// Whether the page just switched to has never been shown this sitting —
+    /// once: the flag clears as it is read.
+    pub fn take_first_visit(&mut self) -> bool {
+        std::mem::take(&mut self.first_visit)
+    }
+
+    /// Keep [`Self::page`] a page after the document changed under it: an undo
+    /// that removes the current page lands on the first one. Parked views of
+    /// pages that are gone are dropped.
+    pub fn keep_page(&mut self) {
+        self.parked.retain(|p, _| self.doc.is_page(*p));
+        if !self.doc.is_page(self.page) {
+            self.page = self.doc.first_page();
+            self.selection.clear();
+            if let Some((camera, selection)) = self.parked.remove(&self.page) {
+                self.camera = camera;
+                self.selection = selection;
+            }
+        }
+        self.selection.retain_existing(&self.doc, self.page);
+    }
+
+    /// After an undo or redo of `subjects` (read off the step before it ran,
+    /// with `before` the pages they were on then): when none of them is on the
+    /// current page, go to the page the first of them is on now — else was on —
+    /// and select the ones there, so a step is never undone out of sight.
+    /// Answers the page's name when it switched.
+    fn follow_step(&mut self, subjects: &[NodeId], before: &[NodeId]) -> Option<String> {
+        // Where the subjects are now — a move undone is back on the page it left —
+        // else, when the step took them all away, where they were.
+        let now: Vec<NodeId> = subjects
+            .iter()
+            .filter_map(|s| self.doc.page_of(*s))
+            .collect();
+        let pages: Vec<NodeId> = match now.is_empty() {
+            false => now,
+            true => before
+                .iter()
+                .copied()
+                .filter(|p| self.doc.is_page(*p))
+                .collect(),
+        };
+        let page = *pages.first()?;
+        if pages.contains(&self.page) {
+            return None;
+        }
+        self.switch_page(page);
+        let layers: Vec<NodeId> = subjects
+            .iter()
+            .copied()
+            .filter(|s| *s != page && self.doc.page_of(*s) == Some(page))
+            .collect();
+        if !layers.is_empty() {
+            self.selection.set(layers);
+        }
+        self.doc.get(page).map(|n| n.name().to_string())
     }
 
     /// The shaped text layout including any live edit.
@@ -947,7 +1063,7 @@ impl EditorSession {
         if !open {
             self.history.end_run();
         }
-        let applied = match self.commit_inner(tx, true) {
+        let applied = match self.commit_inner(tx, Fold::Run) {
             Ok(()) => true,
             Err(e) => {
                 self.fail(format!("Edit failed: {e}"));
@@ -969,12 +1085,30 @@ impl EditorSession {
     /// no-op success — tools legitimately produce them (a click that turned out
     /// not to be a drag) and they must not create an undo step.
     pub fn try_commit(&mut self, tx: Transaction) -> Result<(), OpError> {
-        self.commit_inner(tx, false)
+        self.commit_inner(tx, Fold::None)
     }
 
-    /// [`Self::try_commit`], with `run` saying whether this edit may be folded into
+    /// Commit `tx` into the undo step on top of the history, which must still be
+    /// the one at `depth` with no commit since `commits` — else a plain commit.
+    /// For an edit that step's undo already takes away whole: naming the page the
+    /// step added (`History::fold_into_last`).
+    pub fn commit_into_last(&mut self, tx: Transaction, at: (usize, u64)) -> bool {
+        let fold = match at == (self.history.undo_depth(), self.commits) {
+            true => Fold::Last,
+            false => Fold::None,
+        };
+        match self.commit_inner(tx, fold) {
+            Ok(()) => true,
+            Err(e) => {
+                self.fail(format!("Edit failed: {e}"));
+                false
+            }
+        }
+    }
+
+    /// [`Self::try_commit`], with `fold` saying whether this edit may be folded into
     /// the step before it.
-    fn commit_inner(&mut self, tx: Transaction, run: bool) -> Result<(), OpError> {
+    fn commit_inner(&mut self, tx: Transaction, fold: Fold) -> Result<(), OpError> {
         // Cleared first, so a commit that empties, changes nothing or fails
         // never hands the caller the one before it's detaches.
         self.last_detached = Default::default();
@@ -1078,13 +1212,14 @@ impl EditorSession {
             self.clear_gesture_preview();
             return Ok(());
         }
-        if !run {
+        if fold != Fold::Run {
             // A plain commit is a new decision, so it closes any run.
             self.run = None;
         }
-        let dirty = match run {
-            true => self.history.commit_into_run(&mut self.doc, tx)?,
-            false => self.history.commit(&mut self.doc, tx)?,
+        let dirty = match fold {
+            Fold::Run => self.history.commit_into_run(&mut self.doc, tx)?,
+            Fold::Last => self.history.fold_into_last(&mut self.doc, tx)?,
+            Fold::None => self.history.commit(&mut self.doc, tx)?,
         };
         // **The one place a caught boolean panic becomes something the user sees.**
         // `evaluate` answers `None` for a panic and for a correct empty result alike,
@@ -1097,7 +1232,7 @@ impl EditorSession {
         if ondin_core::boolean::failures() != failures {
             self.fail("A boolean could not be computed and draws nothing — undo to bring its operands back");
         }
-        self.selection.retain_existing(&self.doc);
+        self.keep_page();
         self.dirty = true;
         // **A counter, not a hash of the document**: anything caching a *rendering*
         // needs only "something was committed since". Undo and redo do not come
@@ -1108,7 +1243,7 @@ impl EditorSession {
         self.commits = self.commits.wrapping_add(1);
         // Recorded after the bump, so the receipt names this commit; a run's
         // merged commit has no single step to undo and leaves none.
-        self.flex_receipt = (!held.is_empty() && !run).then(|| FlexReceipt {
+        self.flex_receipt = (!held.is_empty() && fold == Fold::None).then(|| FlexReceipt {
             held,
             commit: self.commits,
             depth: self.history.undo_depth(),
@@ -1170,15 +1305,28 @@ impl EditorSession {
     pub fn undo(&mut self) -> bool {
         // An undo is never part of a run; `History` says so too.
         self.run = None;
+        let subjects = self
+            .history
+            .next_undo()
+            .map(Transaction::subjects)
+            .unwrap_or_default();
+        let before: Vec<NodeId> = subjects
+            .iter()
+            .filter_map(|s| self.doc.page_of(*s))
+            .collect();
         match self.history.undo(&mut self.doc) {
             Ok(Some(dirty)) => {
                 self.resolved.update(&self.doc, &dirty);
-                self.selection.retain_existing(&self.doc);
+                self.keep_page();
+                let followed = self.follow_step(&subjects, &before);
                 self.dirty = true;
                 // `finish_save` above all must see it, or it marks the session
                 // clean over a save queued before the undo.
                 self.revision = self.revision.wrapping_add(1);
-                self.info("Undo");
+                match followed {
+                    Some(page) => self.info(format!("Undo · on {page}")),
+                    None => self.info("Undo"),
+                }
                 true
             }
             Ok(None) => {
@@ -1195,14 +1343,27 @@ impl EditorSession {
     /// Put back what [`Self::undo`] took, and answer the same question it does.
     pub fn redo(&mut self) -> bool {
         self.run = None;
+        let subjects = self
+            .history
+            .next_redo()
+            .map(Transaction::subjects)
+            .unwrap_or_default();
+        let before: Vec<NodeId> = subjects
+            .iter()
+            .filter_map(|s| self.doc.page_of(*s))
+            .collect();
         match self.history.redo(&mut self.doc) {
             Ok(Some(dirty)) => {
                 self.resolved.update(&self.doc, &dirty);
-                self.selection.retain_existing(&self.doc);
+                self.keep_page();
+                let followed = self.follow_step(&subjects, &before);
                 self.dirty = true;
                 // `commits` stays put, so a redo brings the step's receipt back.
                 self.revision = self.revision.wrapping_add(1);
-                self.info("Redo");
+                match followed {
+                    Some(page) => self.info(format!("Redo · on {page}")),
+                    None => self.info("Redo"),
+                }
                 true
             }
             Ok(None) => {
@@ -1221,6 +1382,9 @@ impl EditorSession {
     /// collide with ids the loaded file already uses.
     pub fn adopt_document(&mut self, doc: Document, path: Option<PathBuf>) {
         self.resolved = Resolved::rebuild(&doc);
+        self.page = doc.first_page();
+        self.parked.clear();
+        self.first_visit = false;
         self.doc = doc;
         self.ids = IdSource::new(random_actor());
         ondin_core::reserve_existing_ids(&self.doc, &mut self.ids);
@@ -1799,7 +1963,7 @@ mod tests {
     use super::*;
 
     fn first_artboard(s: &EditorSession) -> NodeId {
-        s.doc.get(s.doc.root()).unwrap().children()[0]
+        s.doc.get(s.doc.first_page()).unwrap().children()[0]
     }
 
     fn add_rect(s: &mut EditorSession) -> NodeId {
@@ -2151,7 +2315,7 @@ mod tests {
         insets: ondin_core::Insets,
     ) -> (EditorSession, NodeId, NodeId) {
         let mut s = EditorSession::new();
-        let root = s.doc.root();
+        let root = s.doc.first_page();
         let [m, a, b] = [(); 3].map(|_| s.ids.mint());
         let rect = |id, index, w| Operation::CreateNode {
             id,
@@ -2410,7 +2574,7 @@ mod tests {
             s.doc.get(a).unwrap().parent().unwrap(),
         );
         let host = s.ids.mint();
-        let doc_root = s.doc.root();
+        let doc_root = s.doc.first_page();
         assert!(s.commit(Transaction(vec![
             Operation::CreateNode {
                 id: host,
@@ -2658,7 +2822,7 @@ mod tests {
             axis: ondin_core::GuideAxis::Horizontal,
             position,
             color: None,
-            owner: None,
+            owner: s.page,
         };
         assert!(s.commit(Transaction(vec![Operation::AddGuide { guide }])));
         guide
@@ -2860,7 +3024,7 @@ mod tests {
         s.selection.set_key(b);
 
         assert!(s.commit(Transaction(vec![Operation::DeleteNode { id: b }])));
-        s.selection.retain_existing(&s.doc.clone());
+        s.selection.retain_existing(&s.doc.clone(), s.page);
         assert_eq!(s.selection.key(), None);
     }
 

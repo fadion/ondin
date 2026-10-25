@@ -60,8 +60,13 @@ fn render_kind(kind: NodeKind, effects: Vec<Effect>) -> (Vec<u8>, usize) {
         view: Rect::new(0.0, 0.0, 100.0, 100.0),
         pixel_size: (100, 100),
     };
-    let (px, w, _) =
-        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ImageStore::default());
+    let (px, w, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &vp,
+        &ImageStore::default(),
+        doc.first_page(),
+    );
     (px, w as usize)
 }
 
@@ -539,8 +544,13 @@ fn render_with(opacity: f32, clip: bool, effects: Vec<Effect>) -> (Vec<u8>, usiz
         view: Rect::new(0.0, 0.0, 100.0, 100.0),
         pixel_size: (100, 100),
     };
-    let (px, w, _) =
-        VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ImageStore::default());
+    let (px, w, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &vp,
+        &ImageStore::default(),
+        doc.first_page(),
+    );
     (px, w as usize)
 }
 
@@ -660,6 +670,6 @@ fn render_view(effects: &[Effect], view: Rect) -> Vec<u8> {
         pixel_size: (100, 100),
     };
     VelloCpuRenderer::new()
-        .render_to_rgba(&doc, &res, &vp, &ImageStore::default())
+        .render_to_rgba(&doc, &res, &vp, &ImageStore::default(), doc.first_page())
         .0
 }

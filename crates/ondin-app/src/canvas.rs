@@ -72,6 +72,8 @@ pub(crate) struct SampleKey {
     /// The hotspot, in canvas device pixels.
     pub at: (u32, u32),
     pub revision: u64,
+    /// The page drawn, which a switch changes without moving the revision.
+    pub page: NodeId,
     pub center: Point,
     pub zoom: f64,
     pub size: (u32, u32),
@@ -206,9 +208,10 @@ impl CanvasRenderer {
         &self.images
     }
 
-    /// Render `doc`/`res` through `camera` at `pixel_size` device pixels and
-    /// return the egui texture to draw. Recreates the target on size change.
+    /// Render `page` of `doc`/`res` through `camera` at `pixel_size` device pixels
+    /// and return the egui texture to draw. Recreates the target on size change.
     /// `backdrop` is the ground round the frames, set by the Appearance panel.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         doc: &Document,
@@ -217,6 +220,7 @@ impl CanvasRenderer {
         camera: &Camera,
         pixel_size: (u32, u32),
         backdrop: Color,
+        page: NodeId,
     ) -> Option<egui::TextureId> {
         if pixel_size.0 == 0 || pixel_size.1 == 0 {
             return None;
@@ -240,6 +244,7 @@ impl CanvasRenderer {
                 &target.view,
                 backdrop,
                 &self.images,
+                page,
             )
             .ok()?;
         Some(target.id)
@@ -397,7 +402,8 @@ fn cpu_region(
         ),
         pixel_size: extent,
     };
-    let (rgba, w, _) = ondin_render::VelloCpuRenderer::new().render_to_rgba(doc, res, &vp, images);
+    let (rgba, w, _) =
+        ondin_render::VelloCpuRenderer::new().render_to_rgba(doc, res, &vp, images, key.page);
     loupe_pixels(key.at, origin, extent, ground, |x, y| {
         let i = ((y * w + x) * 4) as usize;
         [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]]
@@ -2135,7 +2141,7 @@ impl OndinApp {
     /// frames. Shared with [`Self::draw_frame_drop_outline`].
     fn move_destination(&self, id: NodeId, delta: Vec2) -> Option<NodeId> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
-        let root = doc.root();
+        let root = self.session.page;
         let node = doc.get(id)?;
         let parent = node.parent();
 
@@ -2719,6 +2725,7 @@ impl OndinApp {
                 snap::targets(
                     &self.session.doc,
                     &self.session.resolved,
+                    self.session.page,
                     moving,
                     view,
                     SNAP_TARGET_LIMIT,
@@ -2808,7 +2815,7 @@ impl OndinApp {
     /// a drag. Rotated or skewed text is excluded: snapping is axis-aligned.
     fn baseline_lines(&self, moving: &[NodeId], view: KRect) -> Vec<f64> {
         let mut out = Vec::new();
-        for id in ondin_core::nodes_in_view(&self.session.resolved, view) {
+        for id in ondin_core::nodes_in_view(&self.session.resolved, self.session.page, view) {
             // As `snap::targets`: a group must not snap to its own text.
             if moving.contains(&id) || crate::snap::is_inside_any(&self.session.doc, id, moving) {
                 continue;
@@ -3219,10 +3226,10 @@ impl OndinApp {
     }
 
     /// Where a layer drawn at `world` belongs: the frame under the point, or the
-    /// document root; there is no fallback frame.
+    /// current page; there is no fallback frame.
     fn draw_target(&self, world: Point) -> (NodeId, Affine) {
         self.target_artboard(world)
-            .unwrap_or_else(|| (self.session.doc.root(), Affine::IDENTITY))
+            .unwrap_or((self.session.page, Affine::IDENTITY))
     }
 
     // --- pen --------------------------------------------------------------
@@ -3451,34 +3458,39 @@ impl OndinApp {
     /// [`Self::pen_resume_target`], restricted to one node when `only` names one.
     fn pen_resume_target_in(&self, world: Point, only: Option<NodeId>) -> Option<PenEdit> {
         let slop = f64::from(PEN_PICK_PX) / self.points_per_world();
-        hit_test(&self.session.resolved, &self.session.doc, world, slop)
-            .iter()
-            .filter(|id| only.is_none_or(|want| **id == want))
-            .find_map(|id| {
-                let NodeKind::Path { path, corner_radii } = self.session.doc.get(*id)?.kind()
-                else {
+        hit_test(
+            &self.session.resolved,
+            &self.session.doc,
+            self.session.page,
+            world,
+            slop,
+        )
+        .iter()
+        .filter(|id| only.is_none_or(|want| **id == want))
+        .find_map(|id| {
+            let NodeKind::Path { path, corner_radii } = self.session.doc.get(*id)?.kind() else {
+                return None;
+            };
+            let node_world = self.session.resolved.world_transform(*id)?;
+            let mut subpaths = tools::pen_anchors(path, corner_radii);
+            tools::map_subpaths(&mut subpaths, node_world);
+            let (active, from_start) = subpaths.iter().enumerate().find_map(|(i, sub)| {
+                if sub.closed || sub.anchors.len() < 2 {
                     return None;
-                };
-                let node_world = self.session.resolved.world_transform(*id)?;
-                let mut subpaths = tools::pen_anchors(path, corner_radii);
-                tools::map_subpaths(&mut subpaths, node_world);
-                let (active, from_start) = subpaths.iter().enumerate().find_map(|(i, sub)| {
-                    if sub.closed || sub.anchors.len() < 2 {
-                        return None;
-                    }
-                    let first = (sub.anchors[0].at - world).hypot();
-                    let last = (sub.anchors[sub.anchors.len() - 1].at - world).hypot();
-                    (first.min(last) <= slop).then_some((i, first <= last))
-                })?;
-                Some(PenEdit {
-                    id: *id,
-                    world: node_world,
-                    subpaths,
-                    active,
-                    from_start,
-                    minted: false,
-                })
+                }
+                let first = (sub.anchors[0].at - world).hypot();
+                let last = (sub.anchors[sub.anchors.len() - 1].at - world).hypot();
+                (first.min(last) <= slop).then_some((i, first <= last))
+            })?;
+            Some(PenEdit {
+                id: *id,
+                world: node_world,
+                subpaths,
+                active,
+                from_start,
+                minted: false,
             })
+        })
     }
 
     /// What a press at `world` means while the pen is armed inside an edit — see
@@ -3551,7 +3563,7 @@ impl OndinApp {
             .and_then(|p| self.session.resolved.world_transform(p))
             .unwrap_or(Affine::IDENTITY);
         self.pen = Some(PenState {
-            parent: parent.unwrap_or(self.session.doc.root()),
+            parent: parent.unwrap_or(self.session.page),
             parent_world,
             anchors: edit.working(),
             shaping: false,
@@ -5566,6 +5578,7 @@ impl OndinApp {
         ondin_core::query::outline_at(
             &self.session.resolved,
             &self.session.doc,
+            self.session.page,
             world,
             f64::from(PEN_PICK_PX) / self.points_per_world(),
         )
@@ -6570,14 +6583,20 @@ impl OndinApp {
     /// clickable. A frame inside a group or an instance is not skipped.
     pub(crate) fn pick_leaf(&self, world: Point) -> Option<NodeId> {
         let doc = &self.session.doc;
-        hit_test(&self.session.resolved, doc, world, self.pick_slop())
-            .iter()
-            .copied()
-            .find(|id| {
-                !self.is_occupied_frame(*id)
-                    || group_fence(doc, *id).is_some()
-                    || ondin_core::component::instance_root(doc, *id).is_some()
-            })
+        hit_test(
+            &self.session.resolved,
+            doc,
+            self.session.page,
+            world,
+            self.pick_slop(),
+        )
+        .iter()
+        .copied()
+        .find(|id| {
+            !self.is_occupied_frame(*id)
+                || group_fence(doc, *id).is_some()
+                || ondin_core::component::instance_root(doc, *id).is_some()
+        })
     }
 
     /// The picking allowance a hit test gets, in **world** units: [`PICK_SLOP_PX`]
@@ -6924,7 +6943,9 @@ impl OndinApp {
                 continue;
             }
             for inst in ondin_core::component::instances_of(doc, *main) {
-                if self.shown_visible(inst)
+                // Another page's are not on this canvas.
+                if doc.page_of(inst) == Some(self.session.page)
+                    && self.shown_visible(inst)
                     && let Some(q) = self.selection_quad(inst, rect, ppp)
                 {
                     outline(q);
@@ -7119,7 +7140,7 @@ impl OndinApp {
         let shift = ui.input(|i| i.modifiers.shift);
         let (delta, _) = self.snapped_move(world - anchor, shift);
 
-        let root = self.session.doc.root();
+        let root = self.session.page;
         let mut seen: Vec<NodeId> = Vec::new();
         for id in build::outermost(&self.session.doc, self.session.selection.ids()) {
             match self.move_destination(id, delta) {
@@ -7750,11 +7771,12 @@ impl OndinApp {
         // Split the borrow so the read-only inputs and the mutable renderer coexist.
         let camera = self.session.camera;
         let px = self.canvas_px;
-        let backdrop = self.session.preview_canvas_background();
+        let backdrop = self.session.preview_ground();
+        let page = self.session.page;
         let (doc, res, overrides) = self.session.render_inputs();
         if let Some(tex) = self
             .canvas
-            .render(doc, res, overrides, &camera, px, backdrop)
+            .render(doc, res, overrides, &camera, px, backdrop, page)
         {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(tex, rect, uv, egui::Color32::WHITE);
@@ -9327,7 +9349,7 @@ mod tests {
     /// A node of `kind` on the starter document's first artboard.
     fn add(s: &mut EditorSession, kind: NodeKind) -> NodeId {
         let id = s.ids.mint();
-        let parent = s.doc.get(s.doc.root()).unwrap().children()[0];
+        let parent = s.doc.get(s.doc.first_page()).unwrap().children()[0];
         let index = s.doc.get(parent).unwrap().children().len();
         assert!(s.commit(Transaction(vec![Operation::CreateNode {
             id,
@@ -10498,7 +10520,7 @@ mod layout_grid_tests {
 
         // A buffer naming a different frame is not this frame's.
         app.in_flight.grid_scrub = Some((
-            vec![app.session.doc.root()],
+            vec![app.session.doc.first_page()],
             0,
             LayoutGrid { count: 7, ..grid },
         ));
@@ -11518,7 +11540,7 @@ mod autopan_tests {
                 id: None,
                 axis: ondin_core::GuideAxis::Vertical,
                 position: 0.0,
-                owner: None,
+                owner: ondin_core::NodeId::from_wire("1:1").unwrap(),
                 grab: ondin_core::kurbo::Vec2::ZERO,
                 discarding: false,
                 left_ruler: false,
@@ -12738,7 +12760,7 @@ mod headless_app_tests {
             let kids = app
                 .session
                 .doc
-                .get(app.session.doc.root())
+                .get(app.session.doc.first_page())
                 .unwrap()
                 .children();
             assert_eq!(kids.len(), 4, "{label}: two originals and two copies");
@@ -12776,7 +12798,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: group,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: NodeKind::Group,
                 transform: None,
@@ -12831,7 +12853,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: line,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: NodeKind::Line {
                     end: Point::new(120.0, 60.0),
@@ -12876,7 +12898,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: line,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: NodeKind::Line {
                     end: Point::new(120.0, 60.0),
@@ -12933,7 +12955,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: NodeKind::Path {
                     path: p,
@@ -13120,7 +13142,7 @@ mod headless_app_tests {
         // `reshape_create` claims Space mid-draw, so nothing pans.
         app.drag = Drag::Create {
             id: a,
-            parent: app.session.doc.root(),
+            parent: app.session.doc.first_page(),
             parent_world: Affine::IDENTITY,
             start: Point::ZERO,
             shape: Tool::Rect,
@@ -13632,7 +13654,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: text,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: {
                     // The app's own authoring default.
@@ -13727,7 +13749,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: text,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: {
                     let parts = crate::fonts::FontService::default_text_parts();
@@ -13915,7 +13937,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: text,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: ondin_core::NodeKind::Text {
                     content: "hello".into(),
@@ -13964,7 +13986,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: second,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 2,
                 kind: ondin_core::NodeKind::Text {
                     content: "hello".into(),
@@ -14006,7 +14028,7 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: third,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 3,
                 kind: ondin_core::NodeKind::Text {
                     content: "hello".into(),
@@ -14602,7 +14624,7 @@ mod baseline_overlay_tests {
         let view = app.session.camera.viewport(app.canvas_px).view;
 
         let group = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         app.session
             .try_commit(Transaction(vec![
                 Operation::CreateNode {
@@ -14699,7 +14721,7 @@ mod baseline_overlay_tests {
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: rect,
-                parent: app.session.doc.root(),
+                parent: app.session.doc.first_page(),
                 index: 1,
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(50.0, 50.0),
@@ -15486,7 +15508,7 @@ mod frame_menu_door_tests {
             &mut app.session.ids,
             &[ondin_core::Placement {
                 nodes: doc.capture_subtree(main).expect("the main"),
-                parent: doc.root(),
+                parent: doc.first_page(),
                 index: None,
             }],
             ondin_core::kurbo::Vec2::new(300.0, 0.0),
@@ -15645,7 +15667,7 @@ mod frame_menu_door_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let (mut app, main) = app_with_an_occupied_frame(&ctx);
         let (inner, icon) = (app.session.ids.mint(), app.session.ids.mint());
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let frame = |id, parent, index, name: &str| Operation::CreateNode {
             id,
             parent,
@@ -15727,7 +15749,7 @@ mod frame_menu_door_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let (mut app, main) = app_with_an_occupied_frame(&ctx);
         let plain = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
             id: plain,
             parent: root,
@@ -17230,7 +17252,7 @@ mod select_drag_tests {
         let (mut app, a, b) = app_with_two_rects(&ctx);
         app.canvas_px = (800, 600);
         app.session.selection.set(vec![a]);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let press = app.to_screen(Point::new(50.0, 50.0), AREA, 1.0);
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -19465,6 +19487,7 @@ mod flex_canvas_tests {
         let targets = crate::snap::targets(
             doc,
             res,
+            app.session.page,
             &[b],
             ondin_core::kurbo::Rect::new(-100.0, -100.0, 600.0, 400.0),
             100,
@@ -19878,7 +19901,7 @@ mod flex_canvas_tests {
         let free = NodeId::from_wire("ae:99").expect("an id past the row's");
         app.session.commit(Transaction(vec![Operation::CreateNode {
             id: free,
-            parent: app.session.doc.root(),
+            parent: app.session.doc.first_page(),
             index: 1,
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
@@ -20722,7 +20745,7 @@ mod join_and_grid_snap_tests {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0x701);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let [a, b] = [(); 2].map(|_| ids.mint());
         let make = |id, kind, at: (f64, f64)| Operation::CreateNode {
             id,
@@ -20775,7 +20798,7 @@ mod join_and_grid_snap_tests {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0x702);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let frame = ids.mint();
         let mut grid = ondin_core::LayoutGrid::new(ondin_core::GridAxis::Columns);
         grid.count = 2;
@@ -20853,7 +20876,7 @@ mod join_and_grid_snap_tests {
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0x703);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (frame, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
         let mut grid = ondin_core::LayoutGrid::new(ondin_core::GridAxis::Columns);
         grid.count = 2;

@@ -56,7 +56,7 @@ fn a_set_of_layers_exports_without_its_neighbours_and_keeps_world_positions() {
 #[test]
 fn emits_every_node_kind() {
     let f = common::fixture();
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     // Each shape kind produced its semantic element.
     assert!(out.contains("<svg"));
@@ -71,7 +71,7 @@ fn emits_every_node_kind() {
 #[test]
 fn fill_and_stroke_are_emitted() {
     let f = common::fixture();
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
     // The rect's blue fill and black stroke.
     assert!(out.contains(r##"fill="#3c78dc""##), "solid fill as hex");
     assert!(out.contains(r##"stroke="#000000""##));
@@ -82,7 +82,7 @@ fn fill_and_stroke_are_emitted() {
 #[test]
 fn text_content_is_xml_escaped() {
     let f = common::fixture();
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(out.contains("Hi &lt;there&gt;"), "angle brackets escaped");
     assert!(!out.contains("Hi <there>"), "raw brackets must not leak");
 }
@@ -108,7 +108,7 @@ fn text_content_is_xml_escaped() {
 #[test]
 fn single_artboard_export_lands_inside_its_own_view_box() {
     let f = common::fixture();
-    let board = svg(&f.doc, &f.res, Some(f.artboard));
+    let board = svg(&f.doc, &f.res, f.doc.first_page(), Some(f.artboard));
     assert!(board.starts_with("<svg"));
     assert!(board.ends_with("</svg>\n"));
     // The artboard's contents are present — the fixture check the numeric
@@ -143,7 +143,7 @@ fn hidden_nodes_are_omitted() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &res, None);
+    let out = svg(&f.doc, &res, f.doc.first_page(), None);
     assert!(!out.contains("<text"), "hidden text must not be emitted");
 }
 
@@ -152,7 +152,7 @@ fn structure_is_nested_not_flattened() {
     // Groups and artboards become real `<g>` elements so the output stays
     // editable, and so group opacity composites the subtree as a unit.
     let f = common::fixture();
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(out.contains("<g"), "containers must produce groups");
     assert!(out.contains("</g>"));
     // Shapes sit inside the artboard group rather than carrying its transform.
@@ -164,7 +164,7 @@ fn structure_is_nested_not_flattened() {
 #[test]
 fn artboards_emit_a_clip_path() {
     let f = common::fixture();
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(out.contains("<clipPath"), "frames clip their contents");
     assert!(out.contains("clip-path=\"url(#"), "and reference it");
 }
@@ -218,7 +218,7 @@ fn a_nested_frame_clips_inside_its_parent() {
         .expect("a frame nests inside a frame");
     f.res = Resolved::rebuild(&f.doc);
 
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
     // Two frames, so two clips, and the inner one is referenced inside the outer
     // group rather than beside it.
     assert_eq!(
@@ -264,7 +264,7 @@ fn gradients_become_real_defs_not_a_flat_grey() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &res, None);
+    let out = svg(&f.doc, &res, f.doc.first_page(), None);
 
     assert!(out.contains("<defs>"), "gradient defs block");
     assert!(out.contains("<linearGradient"), "a real gradient element");
@@ -288,7 +288,7 @@ fn group_opacity_is_carried_by_the_group_not_each_child() {
     // Find the group in the fixture and make it semi-transparent.
     let group = {
         let mut found = None;
-        let mut stack = vec![f.doc.root()];
+        let mut stack = vec![f.doc.first_page()];
         while let Some(id) = stack.pop() {
             let node = f.doc.get(id).unwrap();
             if matches!(node.kind(), NodeKind::Group) {
@@ -306,7 +306,7 @@ fn group_opacity_is_carried_by_the_group_not_each_child() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &res, None);
+    let out = svg(&f.doc, &res, f.doc.first_page(), None);
 
     assert!(
         out.contains("<g") && out.contains("opacity=\"0.4\""),
@@ -335,7 +335,7 @@ fn a_bound_opacity_exports_at_its_percentage() {
     let mut f = common::fixture();
     let group = {
         let mut found = None;
-        let mut stack = vec![f.doc.root()];
+        let mut stack = vec![f.doc.first_page()];
         while let Some(id) = stack.pop() {
             let node = f.doc.get(id).unwrap();
             if matches!(node.kind(), NodeKind::Group) {
@@ -375,7 +375,7 @@ fn a_bound_opacity_exports_at_its_percentage() {
     f.doc.apply(&Transaction(ops)).unwrap();
     assert_eq!(f.doc.get(group).unwrap().opacity(), 0.0, "the literal 0");
     let res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &res, None);
+    let out = svg(&f.doc, &res, f.doc.first_page(), None);
     let g_line = out.lines().find(|l| l.contains("opacity=\"0.4\""));
     assert!(
         g_line.is_some_and(|l| l.trim_start().starts_with("<g")),
@@ -441,7 +441,7 @@ fn a_bound_stroke_width_exports_at_its_number() {
     let ops = ondin_core::bind_stroke_width_ops(&doc, rect, item, thick);
     doc.apply(&Transaction(ops)).unwrap();
     let res = Resolved::rebuild(&doc);
-    let out = svg(&doc, &res, None);
+    let out = svg(&doc, &res, doc.first_page(), None);
     assert!(
         out.contains("stroke-width=\"7\""),
         "exported at its variable's 7:\n{out}"
@@ -512,11 +512,11 @@ fn a_bound_fill_and_visibility_export_in_the_mode_in_force() {
     let tx =
         ondin_core::bind_brush_at_all(&f.doc, &[f.rect], ondin_core::PaintTarget::Fill, 0, colour);
     f.doc.apply(&tx).unwrap();
-    let out = svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    let out = svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None);
     assert!(out.contains("fill=\"#0000ff\""), "B's blue:\n{out}");
     let bind = ondin_core::bind_visible_ops(&f.doc, f.rect, shown);
     f.doc.apply(&Transaction(bind)).unwrap();
-    let out = svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    let out = svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None);
     assert!(!out.contains("#0000ff"), "hidden by its variable:\n{out}");
 }
 
@@ -530,7 +530,7 @@ fn an_aligned_stroke_exports_as_a_clipped_double_width_stroke() {
         (ondin_core::StrokeAlign::Outside, true),
     ] {
         let f = common::fixture_with_stroke_align(align);
-        let out = svg(&f.doc, &f.res, None);
+        let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
         assert!(
             out.contains("<clipPath id=\"sa-"),
             "{align:?}: no clip path"
@@ -556,7 +556,12 @@ fn an_aligned_stroke_exports_as_a_clipped_double_width_stroke() {
 /// semantic markup — no clip paths, no duplicated elements.
 #[test]
 fn a_centred_stroke_exports_as_one_plain_element() {
-    let out = svg(&common::fixture().doc, &common::fixture().res, None);
+    let out = svg(
+        &common::fixture().doc,
+        &common::fixture().res,
+        common::fixture().doc.first_page(),
+        None,
+    );
     assert!(!out.contains("sa-"), "centred strokes need no clip path");
 }
 
@@ -569,7 +574,7 @@ fn unequal_corners_are_exported_as_a_path_not_a_rounded_rect() {
     use ondin_core::{GeometryPatch, Operation, Resolved, Transaction};
 
     let mut f = common::fixture();
-    let uniform = svg(&f.doc, &f.res, None);
+    let uniform = svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(
         uniform.contains(r#"rx="6""#),
         "the fixture's rect starts with four equal corners:\n{uniform}"
@@ -583,7 +588,7 @@ fn unequal_corners_are_exported_as_a_path_not_a_rounded_rect() {
         .unwrap();
     f.res = Resolved::rebuild(&f.doc);
 
-    let mixed = svg(&f.doc, &f.res, None);
+    let mixed = svg(&f.doc, &f.res, f.doc.first_page(), None);
     // The ellipse keeps its own `rx`; what must be gone is a *rect* claiming a
     // single radius for four corners that no longer share one.
     for line in mixed.lines().filter(|l| l.contains("<rect")) {
@@ -663,7 +668,7 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
         ]))
         .expect("stack paints");
     f.res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     // Each paint reached the file...
     for hex in ["#110000", "#220000", "#330000", "#440000"] {
@@ -693,7 +698,12 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
     }
     // Gradient slots are indexed now that there can be more than one of each, so
     // an id has to name *which* paint.
-    let g = svg(&common::fixture().doc, &common::fixture().res, None);
+    let g = svg(
+        &common::fixture().doc,
+        &common::fixture().res,
+        common::fixture().doc.first_page(),
+        None,
+    );
     if g.contains("grad-") {
         assert!(
             g.contains("-fill-") || g.contains("-stroke-") || g.contains("-bg"),
@@ -707,7 +717,7 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
 #[test]
 fn an_ordinary_shape_still_exports_as_one_element() {
     let f = common::fixture();
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
     // The fixture's rect: fill and stroke on the same element, with its own
     // transform rather than one hoisted onto a wrapper.
     let rect = out
@@ -750,7 +760,7 @@ fn a_per_side_stroke_is_exported_as_one_path_per_edge() {
         }]))
         .expect("per-side stroke");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     // Three sides carry paint; the one set to 0 does not.
     for w in ["1", "2", "4"] {
@@ -798,7 +808,7 @@ fn a_dotted_stroke_exports_as_numbers_svg_can_draw() {
         }]))
         .expect("dotted stroke");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     assert!(
         out.contains(r#"stroke-dasharray="2,4""#),
@@ -818,7 +828,12 @@ fn a_dotted_stroke_exports_as_numbers_svg_can_draw() {
 fn the_mitre_limit_reaches_the_file_only_when_it_is_not_the_default() {
     use ondin_core::{Operation, Resolved, Stroke, Transaction};
 
-    let plain = ondin_export::svg::svg(&common::fixture().doc, &common::fixture().res, None);
+    let plain = ondin_export::svg::svg(
+        &common::fixture().doc,
+        &common::fixture().res,
+        common::fixture().doc.first_page(),
+        None,
+    );
     assert!(!plain.contains("stroke-miterlimit"), "{plain}");
 
     let mut f = common::fixture();
@@ -834,7 +849,7 @@ fn the_mitre_limit_reaches_the_file_only_when_it_is_not_the_default() {
         }]))
         .expect("mitre limit");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(out.contains(r#"stroke-miterlimit="1.5""#), "{out}");
 }
 
@@ -869,7 +884,7 @@ fn a_decorations_colour_thickness_and_style_are_exported() {
         }]))
         .expect("decorate the text");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     assert!(
         out.contains(r##"text-decoration-color="#ff0000""##),
@@ -931,7 +946,7 @@ fn a_decorations_colour_thickness_and_style_are_exported() {
         }]))
         .expect("a negative thickness is storable, it is just not drawable");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(
         !out.contains("thickness=\"-"),
         "no negative thickness may reach the file — the canvas draws none:\n{out}"
@@ -953,7 +968,7 @@ fn variations_features_shift_and_language_are_exported_and_reported() {
     };
 
     let plain = common::fixture();
-    let out = ondin_export::svg::svg_of_reported(&plain.doc, &plain.res, &[plain.doc.root()]);
+    let out = ondin_export::svg::svg_of_reported(&plain.doc, &plain.res, &[plain.doc.first_page()]);
     for absent in [
         "font-variation",
         "font-feature",
@@ -991,7 +1006,7 @@ fn variations_features_shift_and_language_are_exported_and_reported() {
         }]))
         .expect("style the text");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg_of_reported(&f.doc, &f.res, &[f.doc.root()]);
+    let out = ondin_export::svg::svg_of_reported(&f.doc, &f.res, &[f.doc.first_page()]);
     for want in [
         r#"style="font-variation-settings:'wdth' 80;font-feature-settings:'ss01' 1""#,
         r#"baseline-shift="4""#,
@@ -1056,7 +1071,7 @@ fn an_em_shift_under_a_bound_size_is_reported() {
     let bind = ondin_core::bind_text_ops(&f.doc, f.text, text_vars_at(TEXT_SIZE, var));
     f.doc.apply(&Transaction(bind)).expect("bound");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg_of_reported(&f.doc, &f.res, &[f.doc.root()]);
+    let out = ondin_export::svg::svg_of_reported(&f.doc, &f.res, &[f.doc.first_page()]);
     assert!(
         out.svg.contains(r#"baseline-shift="6""#),
         "the fixture draws the shift at the bound size:\n{}",
@@ -1092,7 +1107,7 @@ fn an_em_decoration_thickness_is_resolved_to_user_units() {
         }]))
         .expect("decorate the text");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(
         out.contains(r#"text-decoration-thickness="2px""#),
         "5% of 40:\n{out}"
@@ -1138,7 +1153,7 @@ fn an_underlines_offset_is_exported_negated_unless_a_strikethrough_shares_the_ru
             }]))
             .expect("decorate the text");
         f.res = Resolved::rebuild(&f.doc);
-        ondin_export::svg::svg(&f.doc, &f.res, None)
+        ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None)
     };
     let raised = Some(Decoration {
         offset: Some(Length::Px(2.0)),
@@ -1211,7 +1226,7 @@ fn decorations_that_disagree_export_no_property_rather_than_a_winner() {
         }]))
         .expect("decorate the text twice");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     assert!(
         out.contains(r#"text-decoration="underline line-through""#),
@@ -1256,7 +1271,7 @@ fn two_decorations_that_agree_export_the_shared_value() {
         }]))
         .expect("decorate the text twice");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(
         out.contains(r##"text-decoration-color="#008000""##),
         "{out}"
@@ -1288,7 +1303,7 @@ fn a_translucent_decoration_colour_carries_its_alpha_in_the_hex() {
         }]))
         .expect("decorate the text");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(
         out.contains(r##"text-decoration-color="#ff000080""##),
         "eight-digit hex, since there is no text-decoration-color-opacity:\n{out}"
@@ -1326,7 +1341,7 @@ fn a_frames_border_is_written_outside_the_group_that_clips_it() {
         ]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     let border = out
         .find(r##"stroke="#ff0000""##)
@@ -1382,7 +1397,7 @@ fn a_frame_without_a_border_is_still_one_group() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
     // Order-independent for the reason its sibling above gives.
     let outer = out
         .lines()
@@ -1418,7 +1433,7 @@ fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_clip() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
     let text_line = out
         .lines()
         .find(|l| l.contains("<text"))
@@ -1441,7 +1456,7 @@ fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_clip() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
     assert!(
         out.contains(r#"clip-rule="evenodd""#),
         "outlined type needs the complement clip:\n{out}"
@@ -1505,7 +1520,7 @@ fn a_fitted_dash_on_two_subpaths_is_two_paths_with_two_patterns() {
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
-    let out = ondin_export::svg::svg(&doc, &res, None);
+    let out = ondin_export::svg::svg(&doc, &res, doc.first_page(), None);
 
     let arrays: Vec<&str> = out
         .match_indices("stroke-dasharray=\"")
@@ -1551,7 +1566,7 @@ fn a_fitted_dash_on_two_subpaths_is_two_paths_with_two_patterns() {
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
-    let out = ondin_export::svg::svg(&doc, &res, None);
+    let out = ondin_export::svg::svg(&doc, &res, doc.first_page(), None);
     assert_eq!(
         out.matches("stroke-dasharray=\"").count(),
         1,
@@ -1568,7 +1583,7 @@ fn a_fitted_dash_on_two_subpaths_is_two_paths_with_two_patterns() {
 fn an_unpainted_text_node_exports_the_black_the_canvas_draws() {
     use ondin_core::{Operation, Resolved, Stroke, Transaction};
     let f = common::fixture();
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     let line = out
         .lines()
         .find(|l| l.contains("<text"))
@@ -1594,7 +1609,7 @@ fn an_unpainted_text_node_exports_the_black_the_canvas_draws() {
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
     let line = out
         .lines()
         .find(|l| l.contains("<text"))
@@ -1631,7 +1646,7 @@ fn a_wrapped_text_node_exports_one_text_element_per_line() {
         ]))
         .expect("a narrow fixed box wraps");
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     let texts: Vec<&str> = out.lines().filter(|l| l.contains("<text")).collect();
     assert!(
@@ -1717,7 +1732,7 @@ fn a_list_marker_exports_as_its_own_text_element() {
         ]))
         .expect("a list applies");
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     // `1.` `2.` on the first two items, then `1.` again after the gap — the third
     // paragraph is not an item, so the run restarts.
@@ -1792,7 +1807,7 @@ fn a_nested_item_exports_on_its_own_gutter() {
         ]))
         .expect("a nested list applies");
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     // The outer run counts through the nested one, so `1.` appears twice — once for
     // item "one" and once for the sublist — and "three" is `2.`.
@@ -1871,7 +1886,7 @@ fn a_styled_span_exports_as_its_own_tspan() {
         ]))
         .expect("style the first two characters");
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     assert!(
         out.contains(r#"<tspan font-family="Inter" font-size="40""#),
@@ -1926,7 +1941,7 @@ fn a_coloured_run_carries_its_own_fill_and_an_uncoloured_one_inherits() {
         ]))
         .expect("colour the first two characters");
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     assert!(
         out.contains(r##"fill="#9184d9""##),
@@ -1989,7 +2004,7 @@ fn a_per_paragraph_indent_reaches_each_lines_x() {
         ]))
         .expect("two paragraphs in a fixed box");
     let res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &res, None);
+    let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
 
     let xs: Vec<f64> = out
         .lines()
@@ -2087,7 +2102,7 @@ fn pattern_matrix(out: &str) -> [f64; 6] {
 #[test]
 fn an_image_fill_exports_as_a_pattern_over_the_encoded_original() {
     let f = image_fixture(ondin_core::ImageFit::Fill);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     let slot = format!("img-{}-fill-0", f.rect.to_wire().replace(':', "_"));
 
     assert!(out.contains(&format!(r#"<pattern id="{slot}""#)), "{out}");
@@ -2120,7 +2135,7 @@ fn an_image_fill_exports_as_a_pattern_over_the_encoded_original() {
 #[test]
 fn the_framing_mode_is_carried_by_the_pattern_transform() {
     let f = image_fixture(ondin_core::ImageFit::Fill);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     let m = pattern_matrix(&out);
     assert_eq!(m, [0.4, 0.0, 0.0, 0.4, 0.0, -20.0], "cover:\n{out}");
 }
@@ -2132,7 +2147,7 @@ fn the_framing_mode_is_carried_by_the_pattern_transform() {
 #[test]
 fn a_letterboxing_fit_clips_the_band_beside_the_picture() {
     let f = image_fixture(ondin_core::ImageFit::Fit);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     let wire = f.rect.to_wire().replace(':', "_");
 
     assert_eq!(
@@ -2172,7 +2187,7 @@ fn an_image_with_no_table_entry_exports_as_the_placeholder() {
         }]))
         .expect("a fill pointing at nothing");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     assert!(!out.contains("<pattern"), "nothing to define:\n{out}");
     assert!(!out.contains("url(#img-"), "no dangling reference:\n{out}");
@@ -2253,7 +2268,12 @@ fn an_image_filled_text_node_is_framed_by_its_layout_box() {
     let r = ImageRef::new(id);
     let want = r.framing(box_, 200, 200).transform.as_coeffs();
     let wrong = r.framing(ink, 200, 200).transform.as_coeffs();
-    let got = pattern_matrix(&ondin_export::svg::svg(&f.doc, &f.res, None));
+    let got = pattern_matrix(&ondin_export::svg::svg(
+        &f.doc,
+        &f.res,
+        f.doc.first_page(),
+        None,
+    ));
     for (i, (g, w)) in got.iter().zip(want).enumerate() {
         assert!(
             (g - w).abs() < 0.01,
@@ -2300,7 +2320,7 @@ fn a_picture_at_its_frames_own_size_writes_no_pattern_transform() {
         ]))
         .expect("a picture the size of its frame");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     assert!(
         out.contains("<pattern"),
@@ -2341,7 +2361,7 @@ fn a_frames_missing_background_exports_the_placeholder_too() {
         }]))
         .expect("a frame background pointing at nothing");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     assert!(
         out.contains(&format!(
@@ -2382,7 +2402,7 @@ fn numbers(out: &str, attr: &str) -> Vec<f32> {
 #[test]
 fn an_unadjusted_picture_exports_no_filter_at_all() {
     let f = image_fixture(ondin_core::ImageFit::Fill);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(!out.contains("<filter"), "{out}");
     assert!(!out.contains("filter=\"url("), "{out}");
 }
@@ -2405,7 +2425,7 @@ fn an_adjusted_picture_exports_a_filter_the_image_names() {
             ..ondin_core::ImageAdjust::NEUTRAL
         },
     );
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     let name = format!("adj-{}-fill-0", f.rect.to_wire().replace(':', "_"));
 
     assert!(out.contains(&format!(r#"<filter id="{name}""#)), "{out}");
@@ -2456,7 +2476,7 @@ fn a_filter_carries_only_the_stages_that_are_not_the_identity() {
             ..ondin_core::ImageAdjust::NEUTRAL
         },
     );
-    let matrix_only = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let matrix_only = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(matrix_only.contains("feColorMatrix"), "{matrix_only}");
     assert!(
         !matrix_only.contains("feComponentTransfer"),
@@ -2470,7 +2490,7 @@ fn a_filter_carries_only_the_stages_that_are_not_the_identity() {
             ..ondin_core::ImageAdjust::NEUTRAL
         },
     );
-    let curve_only = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let curve_only = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(curve_only.contains("feComponentTransfer"), "{curve_only}");
     assert!(
         !curve_only.contains("feColorMatrix"),
@@ -2504,7 +2524,7 @@ fn the_filters_numbers_paint_the_picture_the_canvas_paints() {
         shadows: 0.25,
     };
     let f = image_fixture_adjusted(ondin_core::ImageFit::Fill, adjust);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     let m = numbers(&out, r#"values=""#);
     assert_eq!(m.len(), 20, "a 4×5 colour matrix:\n{out}");
@@ -2605,7 +2625,7 @@ fn an_adjustment_reaches_a_stroke_and_a_frames_background_as_well_as_a_fill() {
         ]))
         .expect("a picture behind the frame and around the rect");
     f.res = Resolved::rebuild(&f.doc);
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     // `fill-0`, not `bg`: a frame's ground is fill 0 of its own list now (§15 D400),
     // and this string is the name `collect_defs` registers the filter under and
@@ -2682,7 +2702,7 @@ fn an_exported_underline_leaves_skip_ink_to_its_initial_value() {
             }]))
             .expect("decorate the text");
         f.res = Resolved::rebuild(&f.doc);
-        ondin_export::svg::svg(&f.doc, &f.res, None)
+        ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None)
     };
     let plain = Some(Decoration::default());
 
@@ -2768,7 +2788,7 @@ fn an_underline_that_switched_skipping_off_says_so() {
             }]))
             .expect("decorate the text");
         f.res = Resolved::rebuild(&f.doc);
-        ondin_export::svg::svg(&f.doc, &f.res, None)
+        ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None)
     };
     let unbroken = Some(Decoration {
         skip_ink: false,
@@ -2845,7 +2865,8 @@ fn a_mask_wraps_the_run_above_it_and_writes_no_shape_of_its_own() {
     // fixture's *other* ellipse is 50×50, so "is there an `<ellipse>`" would be
     // answered by the wrong node in both directions.
     let own = r#"rx="32" ry="24""#;
-    let plain = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    let plain =
+        ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None);
     assert!(
         plain.contains(own),
         "fixture: the layer draws itself until it is a mask:\n{plain}"
@@ -2857,7 +2878,7 @@ fn a_mask_wraps_the_run_above_it_and_writes_no_shape_of_its_own() {
             mask: true,
         }]))
         .unwrap();
-    let out = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    let out = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None);
 
     let wire = mask.to_wire().replace(':', "_");
     assert!(
@@ -2931,7 +2952,7 @@ fn a_mask_inside_a_clipping_stroked_frame_nests_and_closes() {
             },
         ]))
         .unwrap();
-    let out = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    let out = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None);
 
     // Every `<g>` and `</g>` in this writer is on a line of its own.
     let mut depth = 0i32;
@@ -2994,7 +3015,7 @@ fn an_alpha_mask_exports_as_a_mask_element_typed_alpha() {
             },
         ]))
         .unwrap();
-    let out = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    let out = ondin_export::svg::svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None);
 
     let wire = mask.to_wire().replace(':', "_");
     assert!(
@@ -3082,7 +3103,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
     .expect("a fill to write the rule beside");
 
     let res = Resolved::rebuild(&doc);
-    let out = svg(&doc, &res, None);
+    let out = svg(&doc, &res, doc.first_page(), None);
     assert!(
         out.contains(r#"fill-rule="evenodd""#),
         "an exclusion read non-zero is a union — the file must say which:\n{out}"
@@ -3106,7 +3127,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
     };
     let plain_res = Resolved::rebuild(&plain_doc);
     assert!(
-        !svg(&plain_doc, &plain_res, None).contains("fill-rule"),
+        !svg(&plain_doc, &plain_res, plain_doc.first_page(), None).contains("fill-rule"),
         "and a shape at the default adds no attribute"
     );
 
@@ -3135,7 +3156,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
         let mut d = doc.clone();
         d.apply(&extra).expect("the stacked arm's condition");
         let r = Resolved::rebuild(&d);
-        svg(&d, &r, None)
+        svg(&d, &r, d.first_page(), None)
     };
     let black = ondin_core::Fill {
         brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)).into(),
@@ -3228,7 +3249,7 @@ fn a_boolean_the_arithmetic_gave_up_on_exports_as_the_placeholder() {
         "the ring has to be in the failed state, or this test is about nothing"
     );
 
-    let out = svg(&doc, &res, None);
+    let out = svg(&doc, &res, doc.first_page(), None);
     let area = ondin_core::boolean_placeholder(&doc, &res, b).expect("a box to draw in");
     assert!(
         (area.x0 + 10.0).abs() < 1.0 && (area.x1 - 410.0).abs() < 1.0,
@@ -3278,7 +3299,7 @@ fn a_boolean_the_arithmetic_gave_up_on_exports_as_the_placeholder() {
         (d, r)
     };
     assert!(!res.boolean_failed(b), "the same ring unions cleanly");
-    let out = svg(&doc, &res, None);
+    let out = svg(&doc, &res, doc.first_page(), None);
     assert!(
         !out.contains(r#"<clipPath id="mb-"#),
         "a boolean that worked draws its shape and no placeholder:\n{out}"
@@ -3503,7 +3524,7 @@ fn a_clipping_frames_filter_wraps_its_clip_rather_than_sharing_an_element() {
         }]))
         .unwrap();
     f.res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &f.res, Some(f.artboard));
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), Some(f.artboard));
     let fx = out.find("<g filter=\"url(#fx-").expect("a filter group");
     let clip = out.find("clip-path=\"url(#clip-").expect("a clip");
     assert!(
@@ -3548,7 +3569,7 @@ fn a_frames_fill_stack_is_written_in_order_before_its_children() {
         }]))
         .expect("a frame with a fill stack");
     f.res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &f.res, None);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
 
     let at = |hex: &str| out.find(&format!(r##"fill="{hex}""##));
     let ground = at("#010203").unwrap_or_else(|| panic!("the bottom fill is missing:\n{out}"));
@@ -3606,7 +3627,7 @@ fn type_on_a_rail_exports_as_a_text_path() {
         }]))
         .expect("a text node takes a rail");
     let res = Resolved::rebuild(&f.doc);
-    let out = svg(&f.doc, &res, None);
+    let out = svg(&f.doc, &res, f.doc.first_page(), None);
 
     let rail_def = out
         .lines()
@@ -3737,7 +3758,7 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
             }]),
         }]))
         .unwrap();
-        let out = ondin_export::svg::svg(&doc, &Resolved::rebuild(&doc), None);
+        let out = ondin_export::svg::svg(&doc, &Resolved::rebuild(&doc), doc.first_page(), None);
         (out, doc, rect)
     }
 
@@ -3889,7 +3910,7 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
     ]))
     .unwrap();
 
-    let out = ondin_export::svg::svg(&doc, &Resolved::rebuild(&doc), None);
+    let out = ondin_export::svg::svg(&doc, &Resolved::rebuild(&doc), doc.first_page(), None);
     let wire = mask.to_wire().replace(':', "_");
     let open = out
         .find(&format!(r#"<mask id="mask-{wire}""#))
@@ -3978,7 +3999,7 @@ fn a_flattened_node_with_an_effect_exports_a_file_with_no_nan_in_it() {
         .expect("a flattened node is a legal document");
     f.res = Resolved::rebuild(&f.doc);
 
-    let out = ondin_export::svg::svg(&f.doc, &f.res, None);
+    let out = ondin_export::svg::svg(&f.doc, &f.res, f.doc.first_page(), None);
     assert!(
         !out.contains("NaN") && !out.contains("inf"),
         "no attribute may carry a non-number:\n{out}"
@@ -4056,7 +4077,7 @@ fn shared_image_export(n: usize) -> String {
     }
     doc.apply(&Transaction(ops)).expect("the fixture");
     let res = Resolved::rebuild(&doc);
-    svg(&doc, &res, None)
+    svg(&doc, &res, doc.first_page(), None)
 }
 
 /// **One picture on ten shapes is written once** (§15 D595, `[S9.1-L4-03]`).
@@ -4188,7 +4209,7 @@ fn a_sweep_gradients_radius_is_the_shapes_and_is_measured_from_its_centre() {
             ]))
             .unwrap();
         let res = Resolved::rebuild(&f.doc);
-        let out = svg(&f.doc, &res, None);
+        let out = svg(&f.doc, &res, f.doc.first_page(), None);
 
         // The fixture, before the number: a sweep really does reach the file as a
         // radial approximation, and exactly one of them.
@@ -4270,7 +4291,7 @@ fn a_hidden_mask_leaves_the_run_unwrapped_in_both_modes() {
                 Operation::SetVisible { id: mask, visible },
             ]))
             .unwrap();
-        svg(&f.doc, &Resolved::rebuild(&f.doc), None)
+        svg(&f.doc, &Resolved::rebuild(&f.doc), f.doc.first_page(), None)
     };
 
     for (mode, element) in [(MaskMode::Shape, "clip-path"), (MaskMode::Alpha, "mask")] {

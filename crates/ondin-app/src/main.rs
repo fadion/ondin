@@ -6,13 +6,17 @@
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
 //! ondin export <file> [--svg|--png|--json|--html|--react|--vue] [-o out]
-//!            [--scale <n> | --width <px> | --height <px>]
-//!                                render a document with no GPU and no window
+//!            [--scale <n> | --width <px> | --height <px>] [--page <name|n>]
+//!                                render a page with no GPU and no window, by
+//!                                default the first that is not a draft;
 //!                                the three sizes are --png only, and one at a time;
 //!                                --html writes a zip of HTML and CSS,
-//!                                --react and --vue a zip of components
-//! ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders] [-o dir]
-//!                                run the document's own export settings (§7),
+//!                                --react and --vue a zip of components;
+//!                                --json describes every page
+//! ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders]
+//!            [--page <name|n>] [-o dir]
+//!                                run the document's own export settings (§7) on
+//!                                every page that is not a draft, or on one page,
 //!                                optionally forcing every row to one size
 //! ondin serve <file>             headless: MCP endpoint over a document (§8.2)
 //! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
@@ -59,6 +63,7 @@ mod logging;
 mod machine_dir;
 mod measure;
 mod menu;
+mod pages;
 mod palette;
 mod panels;
 mod prefs;
@@ -98,6 +103,8 @@ enum Command {
         /// Not an `Option`: the parser refuses all three for the formats that cannot
         /// use one, so `Times(1.0)` here means "unscaled", never "unasked".
         scale: ExportScale,
+        /// `--page`: a page's number from 1, or its exact name.
+        page: Option<String>,
     },
     /// Run the document's own export settings (§7) — every layer that carries any,
     /// at the formats and sizes the file says, into a folder.
@@ -111,6 +118,8 @@ enum Command {
         /// `--scale-override`: force every spec in the file to this size. The
         /// document still decides which layers export and at what formats.
         scale_override: Option<ExportScale>,
+        /// `--page`: run only this page's settings, draft or not.
+        page: Option<String>,
     },
     McpProxy,
 }
@@ -210,11 +219,13 @@ fn parse(args: &[String]) -> Result<Command, String> {
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
     const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--png|--json|--html|--react|--vue] \
-         [--scale <n>|--width <px>|--height <px>] [-o <out>]\n       \
-         ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] [-o <dir>]";
+         [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
+         ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] \
+         [--page <name|n>] [-o <dir>]";
     let mut file = None;
     let mut format = None;
     let mut out = None;
+    let mut page = None;
     let mut all = false;
     let mut folders = false;
     let mut scale: Option<(&str, ExportScale)> = None;
@@ -270,6 +281,11 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
                     format!("--scale-override wants 2x, 512w or 512h, not {text:?}\n{USAGE}")
                 })?);
             }
+            "--page" => {
+                i += 1;
+                let name = args.get(i).ok_or_else(|| USAGE.to_string())?;
+                page = Some(name.clone());
+            }
             "-o" | "--out" => {
                 i += 1;
                 let name = args.get(i).ok_or_else(|| USAGE.to_string())?;
@@ -319,6 +335,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             out,
             folders,
             scale_override: over,
+            page,
         });
     }
     if folders {
@@ -340,11 +357,17 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "{had} is a raster size, so it applies only to --png\n{USAGE}"
         ));
     }
+    if page.is_some() && format == ExportFormat::Json {
+        return Err(format!(
+            "--json describes every page, so it takes no --page\n{USAGE}"
+        ));
+    }
     Ok(Command::Export {
         file: file.ok_or_else(|| USAGE.to_string())?,
         format,
         out,
         scale: scale.map_or(ExportScale::Times(1.0), |(_, s)| s),
+        page,
     })
 }
 
@@ -391,13 +414,21 @@ fn main() {
             format,
             out,
             scale,
-        }) => run_export(&file, format, out.as_deref(), scale),
+            page,
+        }) => run_export(&file, format, out.as_deref(), scale, page.as_deref()),
         Ok(Command::ExportAll {
             file,
             out,
             folders,
             scale_override,
-        }) => run_export_all(&file, out.as_deref(), folders, scale_override),
+            page,
+        }) => run_export_all(
+            &file,
+            out.as_deref(),
+            folders,
+            scale_override,
+            page.as_deref(),
+        ),
         Ok(Command::Serve { file }) => Err(format!("ondin serve {file}: not yet implemented (M6)")),
         Ok(Command::McpProxy) => Err("ondin mcp-proxy: not yet implemented (M6)".to_string()),
         Err(msg) => {
@@ -445,8 +476,36 @@ fn clamp_note(
     ))
 }
 
+/// The page `--page` names — its number from 1, or its exact name — or, unasked,
+/// the first page that is not a draft (the first page when every one is).
+fn chosen_page(
+    doc: &ondin_core::Document,
+    asked: Option<&str>,
+) -> Result<ondin_core::NodeId, String> {
+    let Some(asked) = asked else {
+        return Ok(doc.gathered_pages().next().unwrap_or(doc.first_page()));
+    };
+    let by_number = asked
+        .parse::<usize>()
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .and_then(|i| doc.pages().get(i))
+        .map(|p| p.id);
+    let by_name = || {
+        doc.page_ids()
+            .find(|id| doc.get(*id).is_some_and(|n| n.name() == asked))
+    };
+    by_number.or_else(by_name).ok_or_else(|| {
+        let names: Vec<&str> = doc
+            .page_ids()
+            .filter_map(|id| doc.get(id).map(|n| n.name()))
+            .collect();
+        format!("no page {asked:?}; the pages are {}", names.join(", "))
+    })
+}
+
 /// Headless export (§7). Loads the document, resolves it, and writes one of the
-/// four export formats — no window, no GPU, no font service (text uses the
+/// export formats of one page — no window, no GPU, no font service (text uses the
 /// bundled fallback, which keeps the output deterministic in CI).
 ///
 /// `scale` reaches only the PNG arm, and the output path is not decorated with it:
@@ -459,12 +518,14 @@ fn run_export(
     format: ExportFormat,
     out: Option<&str>,
     scale: ExportScale,
+    page: Option<&str>,
 ) -> Result<(), String> {
     use ondin_core::Resolved;
 
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
     let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
     let res = Resolved::rebuild(&doc);
+    let page = chosen_page(&doc, page)?;
 
     let out_path = out
         .map(std::path::PathBuf::from)
@@ -481,12 +542,12 @@ fn run_export(
     let replaced = out_path.exists();
 
     let data = match format {
-        ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, None).into_bytes(),
+        ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, page, None).into_bytes(),
         ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => {
             use ondin_export::code::Target;
             // The page holds the top-level layers, laid out as on the canvas.
             let origins = doc
-                .get(doc.root())
+                .get(page)
                 .map(|r| r.children().to_vec())
                 .unwrap_or_default();
             let target = match format {
@@ -517,10 +578,10 @@ fn run_export(
                 .map_err(|e| format!("cannot serialize snapshot: {e}"))?
         }
         ExportFormat::Png => {
-            // Frame the whole document at `scale` device pixels per world unit. The
-            // 512-square is this command's answer to an empty document (`extent`
+            // Frame the whole page at `scale` device pixels per world unit. The
+            // 512-square is this command's answer to an empty page (`extent`
             // returns `None`; the SVG writer wants a different fallback).
-            let view = ondin_export::extent(&res, &[doc.root()])
+            let view = ondin_export::extent(&res, &[page])
                 .unwrap_or_else(|| ondin_core::kurbo::Rect::new(0.0, 0.0, 512.0, 512.0));
             let vp = ondin_export::png::viewport_at(
                 view,
@@ -529,7 +590,7 @@ fn run_export(
             if let Some(note) = clamp_note(view, scale, vp.pixel_size) {
                 eprintln!("{note}");
             }
-            ondin_export::png::png(&doc, &res, &vp)
+            ondin_export::png::png(&doc, &res, &vp, page)
         }
     };
 
@@ -553,6 +614,7 @@ fn run_export_all(
     out: Option<&str>,
     folders: bool,
     scale_override: Option<ExportScale>,
+    page: Option<&str>,
 ) -> Result<(), String> {
     use ondin_core::Resolved;
 
@@ -561,9 +623,13 @@ fn run_export_all(
     let res = Resolved::rebuild(&doc);
 
     // Every layer carrying settings, in document order — the same set and the same
-    // order the panel's *Export all* collects, so the two produce the same files.
+    // order the panel's *Export all* collects (drafts left out), so the two produce
+    // the same files. `--page` names the one page instead.
     let mut subjects = Vec::new();
-    let mut stack = vec![doc.root()];
+    let mut stack: Vec<ondin_core::NodeId> = match page {
+        Some(_) => vec![chosen_page(&doc, page)?],
+        None => doc.gathered_pages().collect(),
+    };
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
         if !node.exports().is_empty() {
@@ -854,6 +920,7 @@ mod tests {
                 format: ExportFormat::Svg,
                 out: None,
                 scale: ExportScale::Times(1.0),
+                page: None,
             }
         );
     }
@@ -867,6 +934,7 @@ mod tests {
                 format: ExportFormat::Png,
                 out: Some("out.png".into()),
                 scale: ExportScale::Times(1.0),
+                page: None,
             }
         );
         assert_eq!(
@@ -876,6 +944,7 @@ mod tests {
                 format: ExportFormat::Json,
                 out: None,
                 scale: ExportScale::Times(1.0),
+                page: None,
             }
         );
         assert_eq!(
@@ -885,6 +954,7 @@ mod tests {
                 format: ExportFormat::Html,
                 out: None,
                 scale: ExportScale::Times(1.0),
+                page: None,
             }
         );
         for (flag, format) in [
@@ -898,6 +968,7 @@ mod tests {
                     format,
                     out: None,
                     scale: ExportScale::Times(1.0),
+                    page: None,
                 }
             );
         }
@@ -914,6 +985,7 @@ mod tests {
                 format: ExportFormat::Png,
                 out: None,
                 scale: ExportScale::Times(2.0),
+                page: None,
             }
         );
         // Fractional, because Figma's ladder starts at 0.5×.
@@ -924,6 +996,7 @@ mod tests {
                 format: ExportFormat::Png,
                 out: None,
                 scale: ExportScale::Times(0.5),
+                page: None,
             }
         );
 
@@ -973,6 +1046,7 @@ mod tests {
                     format: ExportFormat::Png,
                     out: None,
                     scale: want,
+                    page: None,
                 },
                 "{args:?}"
             );
@@ -1023,6 +1097,7 @@ mod tests {
                     out: None,
                     folders: false,
                     scale_override: want,
+                    page: None,
                 },
                 "{args:?}"
             );
@@ -1131,6 +1206,7 @@ mod tests {
                 format,
                 Some(&out.to_string_lossy()),
                 ExportScale::Times(1.0),
+                None,
             )
             .expect("export succeeds");
             let written = std::fs::read(&out).expect("output exists");
@@ -1196,8 +1272,14 @@ mod tests {
 
         let sides = |scale: ExportScale, name: &str| {
             let out = dir.join(name);
-            run_export(&src, ExportFormat::Png, Some(&out.to_string_lossy()), scale)
-                .expect("export succeeds");
+            run_export(
+                &src,
+                ExportFormat::Png,
+                Some(&out.to_string_lossy()),
+                scale,
+                None,
+            )
+            .expect("export succeeds");
             let png = std::fs::read(&out).unwrap();
             // IHDR's width and height, big-endian, at a fixed offset in every PNG.
             let n = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
@@ -1296,8 +1378,14 @@ mod tests {
         .unwrap();
         std::fs::write(&src, &saved).unwrap();
         let src = src.to_string_lossy().into_owned();
-        let err =
-            run_export(&src, ExportFormat::Vue, Some(&src), ExportScale::Times(1.0)).unwrap_err();
+        let err = run_export(
+            &src,
+            ExportFormat::Vue,
+            Some(&src),
+            ExportScale::Times(1.0),
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("refusing"), "{err}");
         assert_eq!(
             std::fs::read(&src).unwrap(),
@@ -1314,6 +1402,7 @@ mod tests {
             ExportFormat::Svg,
             None,
             ExportScale::Times(1.0),
+            None,
         )
         .unwrap_err();
         assert!(err.contains("cannot read"), "{err}");
@@ -1330,6 +1419,7 @@ mod tests {
                 out: None,
                 folders: false,
                 scale_override: None,
+                page: None,
             }
         );
         assert_eq!(
@@ -1339,6 +1429,7 @@ mod tests {
                 out: Some("assets".into()),
                 folders: true,
                 scale_override: None,
+                page: None,
             }
         );
         assert!(
@@ -1415,6 +1506,7 @@ mod tests {
             Some(&out.to_string_lossy()),
             false,
             None,
+            None,
         )
         .expect("export --all succeeds");
 
@@ -1440,6 +1532,7 @@ mod tests {
             Some(&flat.to_string_lossy()),
             false,
             Some(ExportScale::Times(1.0)),
+            None,
         )
         .expect("export --all --scale-override succeeds");
         let mut names: Vec<String> = std::fs::read_dir(&flat)
@@ -1467,6 +1560,7 @@ mod tests {
             Some(&wide.to_string_lossy()),
             false,
             Some(ExportScale::Width(96)),
+            None,
         )
         .expect("export --all --scale-override 96w succeeds");
         let big = std::fs::read(wide.join("Close@96w.png")).unwrap();
@@ -1480,7 +1574,7 @@ mod tests {
         // nothing must not exit 0.
         let bare = dir.join("bare.ondin");
         std::fs::write(&bare, ondin_core::io::save(&Document::new(root)).unwrap()).unwrap();
-        let err = run_export_all(&bare.to_string_lossy(), None, false, None).unwrap_err();
+        let err = run_export_all(&bare.to_string_lossy(), None, false, None, None).unwrap_err();
         assert!(err.contains("no layer has export settings"), "{err}");
     }
 
@@ -1533,6 +1627,7 @@ mod tests {
             &src.to_string_lossy(),
             Some(&out.to_string_lossy()),
             false,
+            None,
             None,
         )
         .expect_err("every file skipped is a failure");

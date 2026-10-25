@@ -358,24 +358,34 @@ impl OndinApp {
         self.guides_on() && !self.lock_guides
     }
 
-    /// A point in `owner`'s local space, from a world point. Identity when there
-    /// is no owner, since a global guide is already measured in world space.
+    /// A point in `owner`'s local space, from a world point. Identity for a page,
+    /// whose canvas-wide guides are measured in world space.
     ///
     /// `None` when the transform lookup answers nothing (mid-load); the model
     /// does not allow a gone owner (`Document::check_guide_owner`).
-    fn guide_local(&self, owner: Option<NodeId>, world: Point) -> Option<Point> {
-        match owner {
-            None => Some(world),
-            Some(id) => Some(self.session.preview_world_transform(id)?.inverse() * world),
+    fn guide_local(&self, owner: NodeId, world: Point) -> Option<Point> {
+        if self.session.doc.is_page(owner) {
+            return Some(world);
         }
+        Some(self.session.preview_world_transform(owner)?.inverse() * world)
     }
 
     /// The reverse of [`Self::guide_local`].
-    fn guide_world(&self, owner: Option<NodeId>, local: Point) -> Option<Point> {
-        match owner {
-            None => Some(local),
-            Some(id) => Some(self.session.preview_world_transform(id)? * local),
+    fn guide_world(&self, owner: NodeId, local: Point) -> Option<Point> {
+        if self.session.doc.is_page(owner) {
+            return Some(local);
         }
+        Some(self.session.preview_world_transform(owner)? * local)
+    }
+
+    /// The guides on the current page — its canvas-wide ones and its frames'. The
+    /// only list the canvas draws, picks and snaps to.
+    pub(crate) fn page_guides(&self) -> impl Iterator<Item = &Guide> {
+        let doc = &self.session.doc;
+        let page = self.session.page;
+        doc.guides()
+            .iter()
+            .filter(move |g| doc.page_of(g.owner) == Some(page))
     }
 
     /// The **world** coordinate a guide pins, or `None` when it does not pin one.
@@ -384,16 +394,11 @@ impl OndinApp {
     /// offset carried through its frame's transform, meaningful only while the
     /// frame is [`upright`]. In a rotated frame there is none, which is why such
     /// a guide draws but does not attract; `GuideLines` stays plain xs and ys.
-    fn guide_world_coord(
-        &self,
-        axis: GuideAxis,
-        owner: Option<NodeId>,
-        position: f64,
-    ) -> Option<f64> {
-        let Some(id) = owner else {
+    fn guide_world_coord(&self, axis: GuideAxis, owner: NodeId, position: f64) -> Option<f64> {
+        if self.session.doc.is_page(owner) {
             return Some(position);
-        };
-        let world = self.session.preview_world_transform(id)?;
+        }
+        let world = self.session.preview_world_transform(owner)?;
         if !upright(world) {
             return None;
         }
@@ -451,13 +456,14 @@ impl OndinApp {
     fn guide_line_of(
         &self,
         axis: GuideAxis,
-        owner: Option<NodeId>,
+        owner: NodeId,
         position: f64,
         rect: egui::Rect,
         inner: egui::Rect,
         ppp: f32,
     ) -> Option<GuideLine> {
-        let Some(id) = owner else {
+        let id = owner;
+        if self.session.doc.is_page(owner) {
             // Global: the full width or height of the visible canvas.
             let (a, b) = match axis {
                 GuideAxis::Horizontal => {
@@ -479,7 +485,7 @@ impl OndinApp {
                     extends: false,
                 },
             );
-        };
+        }
         // Scoped: the frame's box carried through its world transform, read
         // through the preview layer so it tracks a frame being dragged.
         let world = self.session.preview_world_transform(id)?;
@@ -524,7 +530,7 @@ impl OndinApp {
             return;
         }
 
-        for guide in self.session.doc.guides() {
+        for guide in self.page_guides() {
             // The one being dragged is drawn from the gesture below, unless the
             // drag is an Alt-copy, where the original stays put.
             if matches!(&self.drag, Drag::Guide(d) if d.id == Some(guide.id) && !d.copying) {
@@ -1165,7 +1171,7 @@ impl OndinApp {
         // The same `inner` as the paint, so the picked segment is the drawn one.
         let inner = self.canvas_inner(rect);
         let mut best: Option<(f32, GuideId)> = None;
-        for guide in self.session.doc.guides() {
+        for guide in self.page_guides() {
             let shown = self.shown_guide(guide);
             let Some(line) = self.guide_line(&shown, rect, inner, ppp) else {
                 continue;
@@ -1229,6 +1235,12 @@ impl OndinApp {
         )
     }
 
+    /// The scope a guide at a world point belongs to: [`Self::frame_at_world`]'s
+    /// frame, else the current page.
+    fn scope_at_world(&self, world: Point) -> NodeId {
+        self.frame_at_world(world).unwrap_or(self.session.page)
+    }
+
     /// The innermost frame whose **own** box contains a world point, or `None` for
     /// open canvas.
     ///
@@ -1261,7 +1273,7 @@ impl OndinApp {
         // takes what is under the press, corrected on the first move.
         let owner = match held {
             Some(g) => g.owner,
-            None => self.frame_at_world(self.to_world(p, rect, ppp)),
+            None => self.scope_at_world(self.to_world(p, rect, ppp)),
         };
         // The world offset from the pointer to the line (`GuideDrag::grab`).
         let grab = held
@@ -1312,7 +1324,7 @@ impl OndinApp {
         let copying = alt && d.id.is_some();
         // The scope follows the pointer; the held point is in world space, so
         // nothing jumps when the space the number is read in changes.
-        let owner = self.frame_at_world(self.to_world(p, rect, ppp) + grab);
+        let owner = self.scope_at_world(self.to_world(p, rect, ppp) + grab);
         let position = self.guide_coord(axis, owner, p, rect, ppp, grab, true);
         // Only the guide's own ruler discards it. Both this and `off_rulers` use
         // the latched `d.rulers_shown`, not `rulers_on()`: toggling the bars
@@ -1344,7 +1356,7 @@ impl OndinApp {
     fn guide_coord(
         &self,
         axis: GuideAxis,
-        owner: Option<NodeId>,
+        owner: NodeId,
         p: egui::Pos2,
         rect: egui::Rect,
         ppp: f32,
@@ -1513,13 +1525,10 @@ impl OndinApp {
         }
     }
 
-    /// Delete every guide, as one undo step.
+    /// Delete every guide on the current page, as one undo step.
     pub(crate) fn remove_all_guides(&mut self) {
         let ops: Vec<Operation> = self
-            .session
-            .doc
-            .guides()
-            .iter()
+            .page_guides()
             .map(|g| Operation::RemoveGuide { id: g.id })
             .collect();
         let n = ops.len();
@@ -1543,7 +1552,7 @@ impl OndinApp {
         if !self.guides_on() {
             return out;
         }
-        for guide in self.session.doc.guides() {
+        for guide in self.page_guides() {
             let shown = self.shown_guide(guide);
             let Some(at) = self.guide_world_coord(shown.axis, shown.owner, shown.position) else {
                 continue;
@@ -2210,7 +2219,7 @@ mod guide_grab_tests {
                     axis,
                     position,
                     color: None,
-                    owner: None,
+                    owner: app.session.page,
                 },
             }]))
             .expect("add the guide");
@@ -2329,8 +2338,8 @@ mod guide_grab_tests {
         );
 
         // 2 and 3 are one sequence: the headless app starts with an artboard and
-        // the guide has `owner: None`, so the first press is a scope change and
-        // the no-op press must come second.
+        // the guide is the page's, so the first press is a scope change and the
+        // no-op press must come second.
         let (mut app, id, rect, ppp) = app_with_guide(&ctx, GuideAxis::Vertical, 200.0);
         let depth = app.session.history.undo_depth();
         let on_line = app.to_screen(Point::new(200.0, 100.0), rect, ppp);
@@ -2341,7 +2350,7 @@ mod guide_grab_tests {
         app.finish_guide_drag();
         let scoped = app.session.doc.guide(id).copied().expect("still there");
         assert!(
-            scoped.owner.is_some(),
+            scoped.owner != app.session.page,
             "a guide dragged into a frame without shifting its line is still a \
              change — the position is read in the owner's space"
         );
@@ -2735,7 +2744,7 @@ mod origin_tests {
     ) -> (OndinApp, ondin_core::NodeId) {
         let mut app = OndinApp::headless(ctx);
         let id = app.session.ids.mint();
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id,
@@ -2839,7 +2848,7 @@ mod origin_tests {
         let at = Affine::translate((100.0, 60.0));
         let (mut app, frame) = app_with_a_frame(&ctx, Size::new(480.0, 320.0), Some(at));
         let rect = app.session.ids.mint();
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         app.session
             .try_commit(Transaction(vec![Operation::CreateNode {
                 id: rect,

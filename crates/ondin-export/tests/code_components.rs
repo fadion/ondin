@@ -277,7 +277,7 @@ fn a_use_keeps_the_mode_its_ancestors_set() {
     let mut f = fixture();
     let (light, dark) = (f.ids.mint_mode(), f.ids.mint_mode());
     let board = f.ids.mint();
-    let root = f.doc.root();
+    let root = f.doc.first_page();
     let index = f.doc.get(root).unwrap().children().len();
     f.doc
         .apply(&Transaction(vec![
@@ -1084,7 +1084,7 @@ fn kit_badge() -> (Document, NodeId) {
     let published = ondin_core::kit::freeze(&kit).unwrap();
     let mut dids = IdSource::new(0xC5);
     let mut d = Document::new(dids.mint());
-    let droot = d.root();
+    let droot = d.first_page();
     let (tx, inst) =
         ondin_core::kit::insert(&d, &mut dids, KIT, 1, &published, badge, droot).unwrap();
     d.apply(&tx).unwrap();

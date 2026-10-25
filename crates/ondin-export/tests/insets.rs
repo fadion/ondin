@@ -217,8 +217,8 @@ fn a_pinned_document_writes_the_same_svg_as_its_baked_twin() {
     let (doc, pinned) = pinned();
     assert_the_pins_moved_things(&doc, &pinned);
     let bake = baked(&doc, &pinned);
-    let a = ondin_export::svg::svg(&doc, &Resolved::rebuild(&doc), None);
-    let b = ondin_export::svg::svg(&bake, &Resolved::rebuild(&bake), None);
+    let a = ondin_export::svg::svg(&doc, &Resolved::rebuild(&doc), doc.first_page(), None);
+    let b = ondin_export::svg::svg(&bake, &Resolved::rebuild(&bake), bake.first_page(), None);
     assert_eq!(a, b);
 }
 
@@ -230,8 +230,8 @@ fn a_pinned_document_rasterizes_to_the_same_png_as_its_baked_twin() {
         view: ondin_core::kurbo::Rect::new(0.0, 0.0, 520.0, 260.0),
         pixel_size: (520, 260),
     };
-    let a = ondin_export::png::png(&doc, &Resolved::rebuild(&doc), &vp);
-    let b = ondin_export::png::png(&bake, &Resolved::rebuild(&bake), &vp);
+    let a = ondin_export::png::png(&doc, &Resolved::rebuild(&doc), &vp, doc.first_page());
+    let b = ondin_export::png::png(&bake, &Resolved::rebuild(&bake), &vp, bake.first_page());
     assert!(a == b, "the two rasters differ");
 }
 

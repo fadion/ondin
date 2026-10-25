@@ -56,7 +56,7 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 
 ### Parent of a new layer
 
-`canvas::draw_target`: the topmost frame that **contains** the press, else the document root. A new
+`canvas::draw_target`: the topmost frame that **contains** the press, else the current page's root. A new
 frame lands the same way (frames nest).
 
 ### An armed pan outranks every tool

@@ -2258,7 +2258,7 @@ mod tests {
             app.session.ids.mint_var(),
             app.session.ids.mint_var(),
         );
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::CreateNode {
                 id: rect,
@@ -2540,7 +2540,7 @@ mod tests {
             app.session.ids.mint_item(),
             app.session.ids.mint(),
         );
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::SetOpacity {
                 id: rect,
@@ -3044,7 +3044,7 @@ mod tests {
         crate::theme::install(&ctx);
         let mode = app.session.doc.variables().modes()[0].id;
         let (other, accent) = (app.session.ids.mint(), app.session.ids.mint_var());
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::CreateNode {
                 id: other,
@@ -3452,7 +3452,7 @@ mod tests {
         crate::theme::install(&ctx);
         let (frame, wide) = (app.session.ids.mint(), app.session.ids.mint_var());
         let mode = app.session.doc.variables().modes()[0].id;
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::CreateNode {
                 id: frame,
@@ -3975,7 +3975,7 @@ mod tests {
     fn the_weight_row_spares_a_binding_already_at_the_weight() {
         let (_ctx, mut app, rect, _, radius) = fixture();
         let other = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (a, b) = (app.session.ids.mint_item(), app.session.ids.mint_item());
         let stroke = |width| ondin_core::Stroke {
             width,
@@ -4182,7 +4182,7 @@ mod tests {
     fn a_computed_axis_takes_no_binding() {
         let (_ctx, mut app, rect, _, radius) = fixture();
         let frame = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::CreateNode {
                 id: frame,

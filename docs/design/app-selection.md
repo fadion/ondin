@@ -36,13 +36,14 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   applied to the selection held at the press (`Drag::Marquee::base`), so a toggle does not flip
   back and forth and a cancel restores that selection. The node tool's point marquee follows the
   same modes but resolves on release.
-- `Ctrl+A` (`OndinApp::select_all`): same candidates (locked excluded, hidden included). With the
-  candidate range empty it selects the frames themselves (`root_artboards`), filtered too. Emptiness is
+- `Ctrl+A` (`OndinApp::select_all`): same candidates (locked excluded, hidden included), all on the
+  current page. With the candidate range empty it selects the page's frames themselves
+  (`root_artboards`), filtered too. Emptiness is
   asked of the range **before** the lock filter (`marquee_range`).
 - `inspector::select_by_color` (Group Colors reticle, §9.2) excludes locked layers and reports
   *"Selected 2 of 3 layers with this colour — 1 locked"*.
 - *Select same fill / stroke / font / effects* (palette only, `OndinApp::select_same`) does the
-  same over the whole tree but the vault, the source included. The source is the key layer, else a
+  same over the current page's whole tree, the source included. The source is the key layer, else a
   lone selected layer; without one, or when it lacks the property, the row dims with the reason
   (`select_same_source`). Fills, strokes and effects match on the whole list by value; a font
   matches any text layer whose own family (through a bound one) or any run's equals one of the

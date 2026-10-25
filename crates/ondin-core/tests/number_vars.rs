@@ -339,6 +339,7 @@ fn a_bound_stroke_width_draws_and_measures_at_its_number() {
     let hit = ondin_core::hit_test(
         &res,
         &f.doc,
+        f.doc.first_page(),
         ondin_core::kurbo::Point::new(-15.0, 10.0),
         0.0,
     );

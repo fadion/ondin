@@ -2806,7 +2806,7 @@ mod tests {
     #[test]
     fn a_size_reset_leaves_a_growing_instance_growing() {
         let mut s = scene();
-        let root = s.app.session.doc.root();
+        let root = s.app.session.doc.first_page();
         let main = s.app.session.ids.mint();
         assert!(s.app.session.commit(Transaction(vec![
             Operation::CreateNode {
@@ -2890,7 +2890,7 @@ mod tests {
                 &mut s.app.session.ids,
                 &[ondin_core::Placement {
                     nodes: doc.capture_subtree(s.frame).unwrap(),
-                    parent: doc.root(),
+                    parent: doc.first_page(),
                     index: None,
                 }],
                 Default::default(),
@@ -3257,7 +3257,7 @@ mod tests {
         assert_eq!((drawn(&s.app, s.a), drawn(&s.app, s.b)), (a0, b0));
 
         // A group, moved to its children's corner through the app's commit.
-        let root = s.app.session.doc.root();
+        let root = s.app.session.doc.first_page();
         let (g, c, d) = (
             s.app.session.ids.mint(),
             s.app.session.ids.mint(),
@@ -3373,7 +3373,7 @@ mod tests {
     #[test]
     fn add_layout_wraps_a_loose_selection_in_a_laid_frame() {
         let mut s = scene();
-        let root = s.app.session.doc.root();
+        let root = s.app.session.doc.first_page();
         let (c, d) = (s.app.session.ids.mint(), s.app.session.ids.mint());
         let rect = |id, at: (f64, f64)| Operation::CreateNode {
             id,
@@ -3430,7 +3430,7 @@ mod tests {
     fn display_none_keeps_a_laid_groups_pinned_children_and_a_grown_groups_box() {
         let mut s = scene();
         let (g, c) = (s.app.session.ids.mint(), s.app.session.ids.mint());
-        let (frame, root) = (s.frame, s.app.session.doc.root());
+        let (frame, root) = (s.frame, s.app.session.doc.first_page());
         assert!(s.app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: g,
@@ -4246,7 +4246,7 @@ mod tests {
         s.app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: column,
-                parent: s.app.session.doc.root(),
+                parent: s.app.session.doc.first_page(),
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 200.0),
@@ -4473,7 +4473,7 @@ mod tests {
                 &mut s.app.session.ids,
                 &[ondin_core::Placement {
                     nodes: doc.capture_subtree(s.frame).unwrap(),
-                    parent: doc.root(),
+                    parent: doc.first_page(),
                     index: None,
                 }],
                 Default::default(),
@@ -4547,7 +4547,7 @@ mod tests {
             &mut s.app.session.ids,
             &[ondin_core::Placement {
                 nodes: doc.capture_subtree(s.frame).unwrap(),
-                parent: doc.root(),
+                parent: doc.first_page(),
                 index: None,
             }],
             Default::default(),
@@ -5102,7 +5102,7 @@ mod tests {
     fn a_click_through_a_mixed_template_line_writes_nothing() {
         let mut s = grid_scene();
         let other = s.app.session.ids.mint();
-        let root = s.app.session.doc.root();
+        let root = s.app.session.doc.first_page();
         assert!(s.app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: other,

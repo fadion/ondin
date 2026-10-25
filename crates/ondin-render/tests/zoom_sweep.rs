@@ -210,7 +210,7 @@ fn fixture() -> (Document, Rect) {
     };
     let res = Resolved::rebuild(&doc);
     let bounds = res
-        .ink_bounds(doc.root())
+        .ink_bounds(doc.first_page())
         .unwrap_or(Rect::new(0.0, 0.0, 1000.0, 1000.0));
     (doc, bounds)
 }
@@ -222,7 +222,7 @@ fn fixture() -> (Document, Rect) {
 fn visible(doc: &Document, res: &Resolved, view: Rect) -> (usize, usize) {
     let mut total = 0;
     let mut shown = 0;
-    for id in ondin_core::subtree_nodes(doc, &[doc.root()]) {
+    for id in ondin_core::subtree_nodes(doc, &[doc.first_page()]) {
         let Some(node) = doc.get(id) else { continue };
         if !matches!(node.kind(), NodeKind::Path { .. }) {
             continue;
@@ -276,6 +276,7 @@ fn cpu_dump_for_comparison() {
         &res,
         &vp,
         &ondin_render::ImageStore::new(),
+        doc.first_page(),
     );
     std::fs::write(&out, &rgba).expect("write dump");
     eprintln!("wrote {out}: {w}x{h}, {} bytes, zoom {zoom}", rgba.len());
@@ -302,7 +303,7 @@ fn zoom_sweep_frame_times() {
     // Ablation: the same drawing with no effect layer at all, which takes the
     // whole `fx` batch out of the frame and leaves the main scene alone.
     if std::env::var("ONDIN_SWEEP_NO_FX").is_ok() {
-        let strip: Vec<NodeId> = ondin_core::subtree_nodes(&doc, &[doc.root()])
+        let strip: Vec<NodeId> = ondin_core::subtree_nodes(&doc, &[doc.first_page()])
             .into_iter()
             .filter(|id| doc.get(*id).is_some_and(|n| !n.effects().is_empty()))
             .collect();
@@ -417,6 +418,7 @@ fn zoom_sweep_frame_times() {
                         &view,
                         Color::WHITE,
                         &images,
+                        doc.first_page(),
                     );
                     let _ = device.poll(wgpu::PollType::wait_indefinitely());
                     let ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -476,6 +478,7 @@ fn zoom_sweep_frame_times() {
                             &pv,
                             Color::WHITE,
                             &images,
+                            doc.first_page(),
                         );
                         let _ = device.poll(wgpu::PollType::wait_indefinitely());
                         eprintln!(

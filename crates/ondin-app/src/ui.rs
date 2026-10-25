@@ -392,6 +392,36 @@ pub fn dropdown_place(
     menu_place(ctx, egui::pos2(x, y), size)
 }
 
+/// Where a submenu `size` big, padded `pad`, opens beside the menu row `row`: its
+/// first row level with the row, to the right — or the left when the right has
+/// no room — then clamped by [`menu_place`].
+pub fn flyout_place(
+    ctx: &egui::Context,
+    row: egui::Rect,
+    size: egui::Vec2,
+    pad: f32,
+) -> egui::Pos2 {
+    let screen = ctx.content_rect();
+    // The card's padding and border, so its first row lines up with `row`.
+    let lift = pad + MENU_BORDER;
+    let x = match row.right() + 4.0 + size.x > screen.right() {
+        true => row.left() - 4.0 - size.x,
+        false => row.right() + 4.0,
+    };
+    menu_place(ctx, egui::pos2(x, row.top() - lift), size)
+}
+
+/// The `▸` at the right of a menu row that opens a list beside it.
+pub fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
+    ui.painter().text(
+        egui::pos2(row.right() - 10.0, row.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon::CARET_RIGHT,
+        theme::icon_font(11.0),
+        theme::text::DIM,
+    );
+}
+
 /// Height of a top-bar dropdown's head, and so of its hit target: the design's
 /// control height.
 const HEAD_H: f32 = 26.0;

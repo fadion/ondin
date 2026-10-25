@@ -30,12 +30,14 @@ use std::collections::BTreeMap;
 ///   from an opaque one.
 /// - **11** every platform-sensitive number (`geometry.svg`, `local_transform`,
 ///   `world_transform`, `world_bounds`) is written at the SVG writer's four places.
-pub const SNAPSHOT_VERSION: u32 = 11;
+/// - **12** pages: `root` became `pages`, and every node says which page it is on.
+pub const SNAPSHOT_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub snapshot_version: u32,
-    pub root: String,
+    /// The pages in order. Each page's root is also in `nodes`, kind `Root`.
+    pub pages: Vec<PageSnapshot>,
     pub nodes: Vec<NodeSnapshot>,
     /// Problems an agent should know about before reasoning over the document
     /// — currently font families the machine does not have, which are being
@@ -54,11 +56,26 @@ pub enum Warning {
     MissingFont { node: String, family: String },
 }
 
+/// One page: its root's id and name, and the page-level settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PageSnapshot {
+    pub id: String,
+    pub name: String,
+    /// `#rrggbb`; a ground is always opaque.
+    pub ground: String,
+    /// Left out of kit publishing, exporting all pages and presenting on past it.
+    pub draft: bool,
+    /// The mode the page's frames read in unless they set their own, by mode id.
+    pub mode: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeSnapshot {
     pub id: String,
     pub kind: String,
     pub name: String,
+    /// The page this node is on (its own id for a page's root).
+    pub page: String,
     pub parent: Option<String>,
     pub children: Vec<String>,
     /// The artboard this node belongs to (its nearest artboard ancestor), if any.
@@ -248,13 +265,28 @@ pub struct StrokeSummary {
 /// Project a document + resolved layer into the public snapshot schema.
 pub fn snapshot(doc: &Document, res: &Resolved) -> Snapshot {
     let mut nodes = Vec::new();
-    collect(doc, res, doc.root(), None, &mut nodes);
+    for page in doc.page_ids() {
+        collect(doc, res, page, page, None, &mut nodes);
+    }
     // Deterministic order by id.
     nodes.sort_by(|a, b| a.id.cmp(&b.id));
     let warnings = collect_warnings(&nodes);
+    let pages = doc
+        .pages()
+        .iter()
+        .map(|p| PageSnapshot {
+            id: p.id.to_wire(),
+            name: doc
+                .get(p.id)
+                .map_or_else(String::new, |n| n.name().to_string()),
+            ground: hex(p.ground).0,
+            draft: p.draft,
+            mode: doc.get(p.id).and_then(|n| n.mode()).map(|m| m.0.to_wire()),
+        })
+        .collect();
     Snapshot {
         snapshot_version: SNAPSHOT_VERSION,
-        root: doc.root().to_wire(),
+        pages,
         nodes,
         warnings,
     }
@@ -282,12 +314,13 @@ fn collect_warnings(nodes: &[NodeSnapshot]) -> Vec<Warning> {
 fn collect(
     doc: &Document,
     res: &Resolved,
+    page: NodeId,
     id: NodeId,
     artboard: Option<NodeId>,
     out: &mut Vec<NodeSnapshot>,
 ) {
     let Some(node) = doc.get(id) else { return };
-    out.push(node_snapshot(doc, node, res, artboard));
+    out.push(node_snapshot(doc, node, res, page, artboard));
 
     // A node under an artboard reports that artboard as its membership; the
     // artboard itself is the membership root for its descendants.
@@ -296,7 +329,7 @@ fn collect(
         _ => artboard,
     };
     for child in node.children() {
-        collect(doc, res, *child, child_artboard, out);
+        collect(doc, res, page, *child, child_artboard, out);
     }
 }
 
@@ -304,6 +337,7 @@ fn node_snapshot(
     doc: &Document,
     node: &Node,
     res: &Resolved,
+    page: NodeId,
     artboard: Option<NodeId>,
 ) -> NodeSnapshot {
     let id = node.id();
@@ -311,6 +345,7 @@ fn node_snapshot(
         id: id.to_wire(),
         kind: kind_name(node.kind()).to_string(),
         name: node.name().to_string(),
+        page: page.to_wire(),
         parent: node.parent().map(|p| p.to_wire()),
         children: node.children().iter().map(|c| c.to_wire()).collect(),
         artboard: artboard.map(|a| a.to_wire()),

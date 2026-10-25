@@ -407,16 +407,17 @@ pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
     }
 }
 
-/// Every layer whose name contains `needle`, case folded, top to bottom as the
-/// layers panel lists them (children reversed, parents before their children).
+/// Every layer on `page` whose name contains `needle`, case folded, top to bottom
+/// as the layers panel lists them (children reversed, parents before their
+/// children).
 ///
 /// The one name-match rule: the panel's filter keeps these plus their ancestors,
-/// and the command palette lists them. The root can match; callers that list
-/// layers drop it.
-pub(crate) fn name_hits(doc: &ondin_core::Document, needle: &str) -> Vec<NodeId> {
+/// and the command palette lists them. The page's root can match; callers that
+/// list layers drop it.
+pub(crate) fn name_hits(doc: &ondin_core::Document, page: NodeId, needle: &str) -> Vec<NodeId> {
     let needle = needle.to_lowercase();
     let mut out = Vec::new();
-    let mut stack = vec![doc.root()];
+    let mut stack = vec![page];
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else {
             continue;
@@ -941,7 +942,7 @@ fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f
 
 impl OndinApp {
     pub(crate) fn layers_tree(&mut self, ui: &mut egui::Ui) {
-        let root = self.session.doc.root();
+        let root = self.session.page;
         // Re-derive the drop target each frame so releasing off the tree drops
         // nothing. The container it named is kept one frame in `lit` for the walk's
         // ink (see [`LayerDrag::lit`]).
@@ -1032,7 +1033,7 @@ impl OndinApp {
     /// or a range would select rows the user cannot see.
     fn visible_rows(&self, shown: Option<&HashSet<NodeId>>) -> Vec<NodeId> {
         let mut out = Vec::new();
-        self.collect_visible_rows(self.session.doc.root(), 0, shown, &mut out);
+        self.collect_visible_rows(self.session.page, 0, shown, &mut out);
         out
     }
 
@@ -1187,7 +1188,7 @@ impl OndinApp {
     /// Every node in the tree that has children, root excluded — the things a
     /// caret can fold.
     fn tree_containers(&self) -> Vec<NodeId> {
-        let root = self.session.doc.root();
+        let root = self.session.page;
         ondin_core::subtree_nodes(&self.session.doc, &[root])
             .into_iter()
             .filter(|id| {
@@ -1217,7 +1218,7 @@ impl OndinApp {
     fn matching_rows(&self, needle: &str) -> HashSet<NodeId> {
         let doc = &self.session.doc;
         let mut keep = HashSet::new();
-        for id in name_hits(doc, needle) {
+        for id in name_hits(doc, self.session.page, needle) {
             keep.insert(id);
             let mut cursor = doc.get(id).and_then(|n| n.parent());
             // Stop at the first ancestor already recorded: whenever one was
@@ -1845,7 +1846,7 @@ impl OndinApp {
                     // The top of the whole list, the end of the root's; the depth test
                     // is belt and braces, as [`depth_range`] offers only level 1 here.
                     None if depth == 1 => {
-                        let root = self.session.doc.root();
+                        let root = self.session.page;
                         DropTarget {
                             parent: root,
                             index: self.child_count(root),
@@ -2076,7 +2077,7 @@ impl OndinApp {
         };
 
         // Document order, not click order.
-        let order = ondin_core::subtree_nodes(&self.session.doc, &[self.session.doc.root()]);
+        let order = ondin_core::subtree_nodes(&self.session.doc, &[self.session.page]);
         let mut moving: Vec<NodeId> = drag
             .ids
             .into_iter()
@@ -2216,7 +2217,7 @@ mod tests {
         doc.apply(&Transaction(vec![
             Operation::CreateNode {
                 id: other,
-                parent: doc.root(),
+                parent: doc.first_page(),
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
@@ -2272,7 +2273,7 @@ mod tests {
     fn a_reparented_row_does_not_move_on_screen() {
         let (mut doc, res, frame, k) = tree(1);
         let before = res.world_bounds(k[0]).unwrap();
-        let root = doc.root();
+        let root = doc.first_page();
         let plan = plan_layer_move(
             &doc,
             &res,
@@ -2748,7 +2749,7 @@ mod subtract_base_tests {
     #[test]
     fn a_loose_shape_and_the_root_are_never_a_base() {
         let (mut doc, _, _) = boolean_of_two(BoolOp::Subtract, None);
-        let root_id = doc.root();
+        let root_id = doc.first_page();
         assert!(
             !subtract_base(&doc, doc.get(root_id).unwrap()),
             "the root has no parent"
@@ -4693,7 +4694,7 @@ mod drag_start_sync_tests {
     fn children_of(app: &OndinApp) -> Vec<NodeId> {
         app.session
             .doc
-            .get(app.session.doc.root())
+            .get(app.session.doc.first_page())
             .map(|n| n.children().to_vec())
             .unwrap_or_default()
     }

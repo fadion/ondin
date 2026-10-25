@@ -267,6 +267,7 @@ impl OndinApp {
         SampleKey {
             at: (px(p.x - rect.min.x, w), px(p.y - rect.min.y, h)),
             revision: self.session.revision(),
+            page: self.session.page,
             center: self.session.camera.center,
             zoom: self.session.camera.zoom,
             size: self.canvas_px,
@@ -367,7 +368,7 @@ impl OndinApp {
             .filter(|_| resp.hovered())
             .filter(|p| rect.contains(*p));
         let camera = self.session.camera;
-        let backdrop = self.session.preview_canvas_background();
+        let backdrop = self.session.preview_ground();
         // Ask for frames until the capture lands, but not forever: a surface
         // format egui cannot capture never answers.
         let mut busy = matches!(self.dropper_frozen, Frozen::Asked(at, _) if pass < at + 30);
@@ -1422,11 +1423,7 @@ mod tests {
             egui::pos2(50.0, 50.0),
             egui::Modifiers::NONE,
         );
-        let [gr, gg, gb, _] = app
-            .session
-            .preview_canvas_background()
-            .to_rgba8()
-            .to_u8_array();
+        let [gr, gg, gb, _] = app.session.preview_ground().to_rgba8().to_u8_array();
         let over = |c: u32, bg: u8| ((c * 102 + bg as u32 * 153 + 127) / 255) as i32;
         let want = [over(255, gr), over(0, gg), over(0, gb)];
         let got = top_fill(&app, b).expect("a solid fill");

@@ -11,26 +11,27 @@ use crate::id::NodeId;
 use crate::resolve::Resolved;
 use kurbo::{Point, Rect, Shape};
 
-/// Indexed nodes whose world bounds intersect `view`, for culling. Unordered.
-pub fn nodes_in_view(res: &Resolved, view: Rect) -> Vec<NodeId> {
-    res.candidates_intersecting(view)
+/// Indexed nodes on `page` whose world bounds intersect `view`, for culling.
+/// Unordered.
+pub fn nodes_in_view(res: &Resolved, page: NodeId, view: Rect) -> Vec<NodeId> {
+    res.candidates_intersecting(page, view)
 }
 
-/// Topmost-first nodes whose painted area contains `p` (world space), skipping
-/// nodes that are hidden or locked (directly or via an ancestor).
+/// Topmost-first nodes on `page` whose painted area contains `p` (world space),
+/// skipping nodes that are hidden or locked (directly or via an ancestor).
 ///
 /// `slop` is a picking allowance in **world** units, and only the kinds with nothing but
 /// a stroke to aim at spend it (see [`geometry::contains_local`]). It is the caller's
 /// number because only the caller knows the zoom: the canvas passes a screen distance
 /// divided by it, so a line is equally grabbable at 25% and at 400%, which no constant in
 /// world units can be. Pass `0.0` for an exact test.
-pub fn hit_test(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Vec<NodeId> {
+pub fn hit_test(res: &Resolved, doc: &Document, page: NodeId, p: Point, slop: f64) -> Vec<NodeId> {
     // The allowance widens the candidate query too: a horizontal line's cached bounds
     // are zero-height, so a point slightly off it would never reach the exact filter.
     // Every added candidate still has to pass its own geometry.
     let point_area = Rect::new(p.x - slop, p.y - slop, p.x + slop, p.y + slop);
     let mut hits: Vec<NodeId> = res
-        .candidates_intersecting(point_area)
+        .candidates_intersecting(page, point_area)
         .into_iter()
         .filter(|id| is_effectively_interactable(doc, *id))
         .filter(|id| !masked_away(doc, res, *id, p))
@@ -335,8 +336,8 @@ fn masked_away(doc: &Document, res: &Resolved, id: NodeId, p: Point) -> bool {
     }
 }
 
-/// The node whose outline passes within `slop` of `p`, nearest first: the query
-/// behind the Text tool's *type along this path* affordance (§15 D408).
+/// The node on `page` whose outline passes within `slop` of `p`, nearest first:
+/// the query behind the Text tool's *type along this path* affordance (§15 D408).
 ///
 /// [`hit_test`]'s complement: that asks what the pointer is over, this asks what it
 /// is on the edge of, the only way a rail can be picked. At a shape's middle
@@ -344,7 +345,7 @@ fn masked_away(doc: &Document, res: &Resolved, id: NodeId, p: Point) -> bool {
 /// topmost, since two outlines can both be within tolerance and the one being
 /// traced is meant.
 ///
-/// Excluded: text (its outline must not shadow *edit that text*), frames (a page's
+/// Excluded: text (its outline must not shadow *edit that text*), frames (a frame's
 /// edge is a boundary, not a curve), booleans (a limitation: their outline lives in
 /// `Resolved`, not [`geometry::local_path`], which `build::text_on_new_path` also
 /// reads; this is the only door onto a rail, §15 D409), and a boolean's operands
@@ -355,7 +356,13 @@ fn masked_away(doc: &Document, res: &Resolved, id: NodeId, p: Point) -> bool {
 /// differ on a boolean's operands, which `hit_test` resolves through `group_chain`.
 ///
 /// `slop` is in world units, the caller's number for [`hit_test`]'s reason.
-pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option<NodeId> {
+pub fn outline_at(
+    res: &Resolved,
+    doc: &Document,
+    page: NodeId,
+    p: Point,
+    slop: f64,
+) -> Option<NodeId> {
     use crate::node::NodeKind;
     use kurbo::ParamCurveNearest;
 
@@ -366,7 +373,7 @@ pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option
 
     let area = Rect::new(p.x - slop, p.y - slop, p.x + slop, p.y + slop);
     let mut best: Option<(NodeId, f64)> = None;
-    for id in res.candidates_intersecting(area) {
+    for id in res.candidates_intersecting(page, area) {
         if !is_effectively_interactable(doc, id) {
             continue;
         }

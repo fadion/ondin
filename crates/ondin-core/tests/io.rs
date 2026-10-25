@@ -307,7 +307,7 @@ fn a_v1_file_carrying_all_three_old_shapes_migrates_through_every_step() {
     assert_eq!(loaded.schema_version(), io::CURRENT_SCHEMA_VERSION);
 
     // Step 2's outcome.
-    let board = loaded.get(loaded.root()).unwrap().children()[0];
+    let board = loaded.get(loaded.first_page()).unwrap().children()[0];
     let all = loaded.capture_subtree(board).unwrap();
     let rect = all
         .iter()
@@ -386,7 +386,7 @@ fn migration_spreads_a_v1_corner_radius_over_four_corners() {
     let loaded = io::load(&serde_json::to_vec(&value).unwrap()).unwrap();
     assert_eq!(loaded.schema_version(), io::CURRENT_SCHEMA_VERSION);
     // `capture_subtree` refuses the root, so walk from the artboard under it.
-    let board = loaded.get(loaded.root()).unwrap().children()[0];
+    let board = loaded.get(loaded.first_page()).unwrap().children()[0];
     let all = loaded.capture_subtree(board).unwrap();
     let rect = all
         .iter()
@@ -447,7 +447,7 @@ fn migration_moves_a_v3_frame_background_into_its_fill_list() {
 
     let loaded = io::load(&serde_json::to_vec(&value).unwrap()).unwrap();
     assert_eq!(loaded.schema_version(), io::CURRENT_SCHEMA_VERSION);
-    let board = loaded.get(loaded.root()).unwrap().children()[0];
+    let board = loaded.get(loaded.first_page()).unwrap().children()[0];
     let frame = loaded.get(board).unwrap();
     assert_eq!(
         frame.kind(),
@@ -492,7 +492,7 @@ fn migration_leaves_a_v3_frame_with_no_background_unfilled() {
     }
 
     let loaded = io::load(&serde_json::to_vec(&value).unwrap()).unwrap();
-    let board = loaded.get(loaded.root()).unwrap().children()[0];
+    let board = loaded.get(loaded.first_page()).unwrap().children()[0];
     assert!(loaded.get(board).unwrap().paint().fills.is_empty());
 }
 
@@ -740,9 +740,9 @@ fn a_saved_file_without_clip_loads_with_frames_clipping_and_nothing_else() {
     // Spelled out, because "equal" only means the default matched what the
     // fixture happened to hold: frames clip, everything else does not.
     let mut frames = 0;
-    for id in [loaded.root()].into_iter().chain(
+    for id in [loaded.first_page()].into_iter().chain(
         loaded
-            .get(loaded.root())
+            .get(loaded.first_page())
             .unwrap()
             .children()
             .iter()
@@ -756,27 +756,25 @@ fn a_saved_file_without_clip_loads_with_frames_clipping_and_nothing_else() {
     assert!(frames > 0, "fixture must contain a frame");
 }
 
-/// The canvas ground is additive in exactly the same way: a file written while
-/// the ground was still session state was drawn on the default, so that is what
-/// it has to load as.
+/// A pre-v10 file without a `canvas_background` was written while the ground was
+/// still session state, so it was drawn on the default — what its one page has
+/// to load with (`migrate_9_to_10`).
 #[test]
 fn a_saved_file_without_a_canvas_ground_loads_with_the_default() {
     let (doc, _root) = rich_document();
     let bytes = io::save(&doc).unwrap();
 
+    // The v9 shape: one `root`, and here no ground at all.
     let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert!(
-        value
-            .as_object_mut()
-            .and_then(|o| o.remove("canvas_background"))
-            .is_some(),
-        "the field is written at the top level, not per node"
-    );
+    let o = value.as_object_mut().unwrap();
+    let pages = o.remove("pages").expect("a v10 save lists its pages");
+    o.insert("root".into(), pages[0]["id"].clone());
+    o.insert("schema_version".into(), 9.into());
 
     let old = serde_json::to_vec(&value).unwrap();
     let loaded = io::load(&old).expect("a file without a ground must still load");
     assert_eq!(
-        loaded.canvas_background(),
+        loaded.ground(loaded.first_page()),
         ondin_core::DEFAULT_CANVAS_BACKGROUND
     );
     assert_eq!(doc, loaded, "and reconstruct the same document");
@@ -786,24 +784,27 @@ fn a_saved_file_without_a_canvas_ground_loads_with_the_default() {
 /// back — it is a document edit like any other now, not a view preference.
 #[test]
 fn the_canvas_ground_round_trips_and_undoes() {
-    let (mut doc, _root) = rich_document();
+    let (mut doc, root) = rich_document();
     let mut hist = History::new();
     let chosen = Color::from_rgba8(90, 20, 40, 255);
 
     hist.commit(
         &mut doc,
-        Transaction(vec![Operation::SetCanvasBackground { background: chosen }]),
+        Transaction(vec![Operation::SetPageGround {
+            id: root,
+            ground: chosen,
+        }]),
     )
     .unwrap();
-    assert_eq!(doc.canvas_background(), chosen);
+    assert_eq!(doc.ground(doc.first_page()), chosen);
 
     let loaded = io::load(&io::save(&doc).unwrap()).unwrap();
-    assert_eq!(loaded.canvas_background(), chosen);
+    assert_eq!(loaded.ground(loaded.first_page()), chosen);
     assert_eq!(doc, loaded);
 
     hist.undo(&mut doc).unwrap();
     assert_eq!(
-        doc.canvas_background(),
+        doc.ground(doc.first_page()),
         ondin_core::DEFAULT_CANVAS_BACKGROUND
     );
 }
@@ -851,7 +852,7 @@ fn a_saved_file_without_the_proportion_lock_loads_with_nothing_locked() {
     assert_eq!(doc, loaded, "and reconstruct the same document");
     // Equality only says the default matched the fixture; say what it matched.
     // Every kind, not just the resizable ones — there is no kind gate.
-    let mut stack = vec![loaded.root()];
+    let mut stack = vec![loaded.first_page()];
     let mut seen = 0;
     while let Some(id) = stack.pop() {
         let node = loaded.get(id).unwrap();
@@ -920,14 +921,14 @@ fn guides_round_trip_and_reserve_their_ids() {
         axis: GuideAxis::Horizontal,
         position: 332.0,
         color: None,
-        owner: None,
+        owner: doc.first_page(),
     };
     let vertical = Guide {
         id: GuideId(ids.mint()),
         axis: GuideAxis::Vertical,
         position: -48.25,
         color: Some(recoloured),
-        owner: None,
+        owner: doc.first_page(),
     };
     doc.apply(&Transaction(vec![
         Operation::AddGuide { guide: horizontal },
@@ -961,14 +962,14 @@ fn guide_order_does_not_change_the_bytes() {
         axis: GuideAxis::Horizontal,
         position: 10.0,
         color: None,
-        owner: None,
+        owner: base.first_page(),
     };
     let b = Guide {
         id: GuideId(ids.mint()),
         axis: GuideAxis::Vertical,
         position: 20.0,
         color: None,
-        owner: None,
+        owner: base.first_page(),
     };
 
     let saved = |first: Guide, second: Guide| {
@@ -1176,7 +1177,7 @@ fn per_side_widths_and_a_mitre_limit_round_trip() {
 
 /// Find the one text node in a loaded fixture.
 fn text_node(doc: &Document) -> &ondin_core::Node {
-    let board = doc.get(doc.root()).unwrap().children()[0];
+    let board = doc.get(doc.first_page()).unwrap().children()[0];
     doc.get(board)
         .unwrap()
         .children()
@@ -1588,31 +1589,6 @@ fn path_corner_radii_survive_a_save_and_an_old_file_still_loads() {
     );
 }
 
-/// A guide's `owner` is additive in the strongest sense — `skip_serializing_if`,
-/// like the pivot — so a document with only canvas-wide guides writes the bytes
-/// it always did and the field reaches no existing file (invariant 9).
-#[test]
-fn a_document_with_no_scoped_guide_writes_no_owner_field() {
-    let (mut doc, _root) = rich_document();
-    let mut ids = IdSource::new(0xABCDEF);
-    ondin_core::reserve_existing_ids(&doc, &mut ids);
-    doc.apply(&Transaction(vec![Operation::AddGuide {
-        guide: Guide {
-            id: GuideId(ids.mint()),
-            axis: GuideAxis::Horizontal,
-            position: 12.0,
-            color: None,
-            owner: None,
-        },
-    }]))
-    .unwrap();
-    let text = String::from_utf8(io::save(&doc).unwrap()).unwrap();
-    assert!(
-        !text.contains("owner"),
-        "a canvas-wide guide must not carry an owner key:\n{text}"
-    );
-}
-
 /// A frame-scoped guide round-trips with its owner, and the owner is written as
 /// the same wire id a node reference uses.
 #[test]
@@ -1640,7 +1616,7 @@ fn a_frame_scoped_guide_round_trips_with_its_owner() {
         // exists to make.
         position: 120.0,
         color: None,
-        owner: Some(frame),
+        owner: frame,
     };
     doc.apply(&Transaction(vec![Operation::AddGuide { guide: scoped }]))
         .unwrap();
@@ -1695,7 +1671,7 @@ fn a_guide_scoped_to_a_missing_or_non_frame_owner_is_rejected() {
     }]);
     let bytes = serde_json::to_vec(&value).unwrap();
     let loaded = io::load(&bytes).expect("a guide on a real frame must load");
-    assert_eq!(loaded.guides()[0].owner, Some(frame));
+    assert_eq!(loaded.guides()[0].owner, frame);
 }
 
 // --- the image table on disk (§5.5a) ----------------------------------------
@@ -2822,7 +2798,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                 axis: GuideAxis::Vertical,
                 position: 10.0,
                 color: None,
-                owner: None,
+                owner: root,
             },
         }]),
     )
@@ -2985,7 +2961,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             "SetGuideScope",
             Operation::SetGuideScope {
                 id: guide,
-                owner: None,
+                owner: root,
                 position: f64::INFINITY,
             },
         ),
@@ -2997,7 +2973,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                     axis: GuideAxis::Vertical,
                     position: f64::NAN,
                     color: None,
-                    owner: None,
+                    owner: root,
                 },
             },
         ),

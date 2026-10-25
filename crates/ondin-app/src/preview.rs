@@ -374,12 +374,12 @@ pub struct GuideDrag {
     /// guide's live position is a frame-local offset, exactly as the committed
     /// `Guide::position` is.
     pub position: f64,
-    /// The frame the guide would belong to if the drag ended now, or `None` for
-    /// the canvas.
+    /// The frame the guide would belong to if the drag ended now, or the current
+    /// page for the open canvas.
     ///
     /// Tracked live rather than resolved on release, so the gesture says what
     /// letting go will do: dragging over a frame clips the line to it.
-    pub owner: Option<NodeId>,
+    pub owner: NodeId,
     /// The **world** offset from the pointer to the guide's line, fixed at the
     /// press.
     ///
@@ -1402,7 +1402,7 @@ mod guide_drag_tests {
         GuideDrag {
             id: Some(GuideId(ids.mint())),
             axis: GuideAxis::Horizontal,
-            owner: None,
+            owner: ids.mint(),
             position: 100.0,
             grab: Vec2::ZERO,
             discarding,

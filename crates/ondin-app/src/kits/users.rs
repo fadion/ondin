@@ -176,7 +176,7 @@ mod tests {
             4,
             &second_published,
             second_badge,
-            other.root(),
+            other.first_page(),
         )
         .unwrap();
         other.apply(&tx).unwrap();
@@ -189,7 +189,7 @@ mod tests {
         app.kit_shelf.ask(&k);
         app.kit_shelf.settle();
         let p = app.kit_shelf.current(&k).unwrap();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let (tx, _) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,

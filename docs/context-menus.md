@@ -1,8 +1,8 @@
 # Ondin — right-click context menus
 
 The menus as built, with the conditions that shape them. A peer of `shortcuts.md`. The code is
-`crates/ondin-app/src/menu.rs` (registry, builders), `canvas::canvas_context_menu` and
-`panels/layers.rs` (the doors), and `panels/binding.rs` (the inspector field menu, §6.7).
+`crates/ondin-app/src/menu.rs` (registry, builders), `canvas::canvas_context_menu`,
+`panels/layers.rs` and `pages.rs` (the doors), and `panels/binding.rs` (the inspector field menu, §6.7).
 
 **One registry, two doors.** Every row is an `Item` whose label, glyph, accelerator and group live
 once in `Item::spec`; a menu only chooses *which* rows, and `menu::build` buckets them into the
@@ -23,7 +23,7 @@ variable*).
   press that cancelled spends the click, so no menu opens. An armed eyedropper counts as a gesture:
   the click disarms it and opens no menu, on the canvas or off it. The menu opens at the press position.
 - **R2** — A menu is claimed per region: the canvas, a layers row, the layers panel's background,
-  and an inspector field (§6.7). Widgets that already use the secondary button keep it (gradient
+  a row of the Pages section (§6.8), and an inspector field (§6.7). Widgets that already use the secondary button keep it (gradient
   stop bar and the edited gradient's canvas handles, ruler).
 - **R3** — An open menu is `Escape`'s first rung, above focus mode: one press closes only the
   menu. While open the menu holds the keyboard (`input::resolve` does not run). The same
@@ -78,13 +78,13 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | 1 | Head | the kind's own verbs (§5) |
 | 2 | Clipboard | Cut · Copy · Paste here · Paste to replace · Duplicate · Delete |
 | 3 | Properties | Copy properties · Paste properties |
-| 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions · Join paths |
+| 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions · Join paths · Move to page ▸ |
 | 5 | Order | four restack rows |
 | 6 | Transform | Flip H · Flip V · Reset origin |
 | 7 | State | Hide/Show · Lock/Unlock · Rename |
 | 8 | Navigate | Zoom to selection |
 | 9 | Export | Copy as SVG · Copy as CSS · Copy as PNG · Copy as PNG 2× |
-| 10 | View | the page's view switches (§6.1, §6.3 only) |
+| 10 | View | the canvas menu's view switches (§6.1, §6.3 only) |
 
 - **Head at the top**: it holds the "one level in" verbs that are otherwise double-click only.
 - **Promoted, not duplicated**: *Ungroup* on a group and *Flatten*/*Ungroup* on a boolean move into
@@ -93,8 +93,8 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 28 rows, text 31, a boolean 34, railed text 33; component roles reach
-  36, a linked boolean in an instance (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
+- **Length**: a primitive is 29 rows, text 32, a boolean 35, railed text 34; component roles reach
+  37, a linked boolean in an instance (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
   Navigate goes first, then Export.
 
 ---
@@ -140,6 +140,7 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Outline shape | — | one primitive or `Path`; on a path dims *"This path is already an outline"* when it has no radii to bake; dims on lock |
 | Outline stroke | — | one primitive, `Path` or boolean; dims *"This layer has no stroke"* without a visible stroke (`build::can_outline_stroke`); dims on lock. Each visible stroke becomes a filled path (`app-booleans.md`) |
 | Join paths | — | exactly two `Path` layers (not line-tool lines); dims *"Both paths need an open end"* unless each has an open subpath of two or more anchors, and *"One of these paths is locked"* when either is (`join_layers_subject`); the target's own lock dims with the lock sentence. The nearest pair of open ends splices into one layer (`app-pen-and-nodes.md`) |
+| Move to page ▸ | — | always, last of the group; opens a list of the other pages beside it, hovered or clicked (the menu's one flyout). A page there moves the selection to the top of that page, same place on the canvas, and clears it (`move_selection_to_page`). Dims *"This document has one page"*; dims on lock |
 
 *Outline shape* and *Convert to path* never share a menu; neither appears beside *Flatten*.
 
@@ -195,7 +196,7 @@ and *Duplicate as component* draw the filled hexagon.
 | Copy as SVG | — | always live; the committed document, in document order |
 | Copy as CSS | — | always live; under a `/* name */` comment, a leaf's own declarations, a container's rules for its whole subtree (`export.md`) |
 | Copy as PNG | — | always live; 1×, transparent, raw RGBA; the status line gives the pixel size |
-| Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`); a flat row, since the menu has no submenus |
+| Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`); a flat row (§7, *Submenus*) |
 
 ---
 
@@ -239,7 +240,7 @@ The four operations stay in Structure as checkable rows (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-No head. The baseline menu, 28 rows.
+No head. The baseline menu, 29 rows.
 
 ### 5.6 Text
 
@@ -286,12 +287,13 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 |---|---|---|
 | Paste here | `Ctrl+V` | at the pointer; dims when nothing to paste |
 | Paste in place | `Ctrl+Shift+V` | dims when nothing to paste |
-| Select all | `Ctrl+A` | |
+| Select all | `Ctrl+A` | the current page's layers |
 | *—* | | |
-| Zoom to fit | `Ctrl+1` | everything, not the selection |
+| Zoom to fit | `Ctrl+1` | everything on the current page, not the selection |
 | *—* | | |
-| Export all | `Ctrl+Alt+E` | re-runs every saved export spec; dims *"No layer in this document has export settings"* |
-| Export all frames… | — | every visible top-level frame: its own export rows, else a 1× PNG (`export.md`); dims *"No frames on the canvas"* |
+| Export all | `Ctrl+Alt+E` | re-runs every saved export spec on the pages that are not drafts; dims *"No layer in this document has export settings"* |
+| Export all frames… | — | every visible top-level frame of the current page: its own export rows, else a 1× PNG (`export.md`); dims *"No frames on the canvas"* |
+| Export frames, all pages… | — | only with more than one page: *Export all frames…* for each page that is not a draft, a folder per page; the status line counts the drafts left out |
 | *—* | | |
 | Show rulers ✓ | `Shift+R` | |
 | Show guides ✓ | `Ctrl+;` | |
@@ -307,7 +309,7 @@ row is live in focus mode, which hides none of what they switch.
 
 | Row | Chord | Shown / enabled |
 |---|---|---|
-| Paste | `Ctrl+V` | at the root; dims when nothing to paste |
+| Paste | `Ctrl+V` | at the current page's root; dims when nothing to paste |
 | Select all | `Ctrl+A` | |
 
 ### 6.3 A guide
@@ -365,6 +367,19 @@ the Paragraph tab's spacing. X, Y and rotation are not bindable.
 
 No variable is offered on a field's label badge (it scrubs).
 
+### 6.8 A page row (the page menu)
+
+Opened on a row of the layers pane's Pages section, without switching to that page
+(`menu::page_menu`, `Target::Page`).
+
+| Row | Chord | Shown / enabled |
+|---|---|---|
+| Rename | — | opens the row's name field, as a double-click does |
+| Duplicate page | — | a copy directly below, named *‹name› copy* (then *‹name› copy 2*, …), its layers copied as *Duplicate* copies them and its guides with them; becomes current |
+| Draft ✓ | — | ticked on a draft page |
+| *—* | | |
+| Delete page | — | destructive styling; dims *"A document keeps at least one page"* on the last page. Deletes its guides and layers, detaching instances elsewhere of a main on it, then the page; one undo step |
+
 ---
 
 ## 7. Deliberately not in these menus
@@ -389,7 +404,8 @@ No variable is offered on a field's label badge (it scrubs).
   chrome-wide switches, one click away in the View menu.
 - **Collapse all / Expand all** — the layers panel header has the button.
 - **Guide colour and position** — the inspector, for a selected guide.
-- **Submenus**, including *Copy as ▸* (the PNG scales are flat rows); **type-ahead** in menus.
+- **Submenus** other than *Move to page ▸*'s list of pages, including *Copy as ▸* (the PNG scales
+  are flat rows); **type-ahead** in menus.
 - **A ruler menu** (units are px only).
 
 ---
@@ -420,6 +436,6 @@ The inspector field menu (§6.7) is drawn with the same row and frame functions 
 
 ## Open
 
-- Whether a 36-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
+- Whether a 37-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
 - Whether the canvas menu should carry *Canvas background…* (a second door to the inspector's
   no-selection field).

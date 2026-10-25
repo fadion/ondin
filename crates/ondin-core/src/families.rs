@@ -183,10 +183,10 @@ fn replaced_spans(
     hit.then(|| CharSpans::from_parts(parts, style))
 }
 
-/// Every text layer outside the vault, in no particular order.
+/// Every text layer on every page, in no particular order.
 fn text_layers(doc: &Document) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let mut stack = vec![doc.root()];
+    let mut stack: Vec<NodeId> = doc.page_ids().collect();
     while let Some(id) = stack.pop() {
         if doc.in_vault(id) {
             continue;

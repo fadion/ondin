@@ -1728,12 +1728,12 @@ impl OndinApp {
     }
 
     /// Whether anything in the document is set up to export — what dims *Export
-    /// all* on the page menu.
+    /// all* on the canvas menu.
     ///
     /// Stops at the first one, unlike [`Self::exportable_layers`]: the menu asks
     /// every frame it is open.
     pub(crate) fn document_exports_anything(&self) -> bool {
-        let mut stack = vec![self.session.doc.root()];
+        let mut stack: Vec<NodeId> = self.session.doc.gathered_pages().collect();
         while let Some(id) = stack.pop() {
             let Some(node) = self.session.doc.get(id) else {
                 continue;
@@ -1749,10 +1749,10 @@ impl OndinApp {
     /// Every layer in the document that is set up to export, in document order.
     ///
     /// The whole document, not the selection: the export settings on the layers
-    /// already say which they are.
+    /// already say which they are. A draft page's layers are left out.
     pub(crate) fn exportable_layers(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
-        let mut stack = vec![self.session.doc.root()];
+        let mut stack: Vec<NodeId> = self.session.doc.gathered_pages().collect();
         while let Some(id) = stack.pop() {
             let Some(node) = self.session.doc.get(id) else {
                 continue;
@@ -1810,28 +1810,85 @@ impl OndinApp {
         self.run_export(files, false);
     }
 
-    /// The frames *Export all frames…* writes: the top-level ones, less the hidden
-    /// ones, which draw nothing.
+    /// The frames *Export all frames…* writes: the current page's top-level ones,
+    /// less the hidden ones, which draw nothing.
     pub(crate) fn exported_frames(&self) -> Vec<NodeId> {
+        self.frames_on(self.session.page)
+    }
+
+    /// `page`'s visible top-level frames, in paint order.
+    fn frames_on(&self, page: NodeId) -> Vec<NodeId> {
         let doc = &self.session.doc;
-        self.root_artboards()
+        doc.get(page)
+            .map(|n| n.children().to_vec())
+            .unwrap_or_default()
             .into_iter()
-            .filter(|id| doc.get(*id).is_some_and(|n| n.visible()))
+            .filter(|id| {
+                doc.get(*id).is_some_and(|n| {
+                    n.visible() && matches!(n.kind(), ondin_core::NodeKind::Artboard { .. })
+                })
+            })
             .collect()
     }
 
     /// What *Export all frames…* writes.
     pub(crate) fn frames_plan(&self) -> Vec<PlannedFile> {
+        self.plan_frames(&self.exported_frames())
+    }
+
+    fn plan_frames(&self, frames: &[NodeId]) -> Vec<PlannedFile> {
         ondin_export::plan(
             &self.session.doc,
             &self.session.resolved,
-            &self.exported_frames(),
+            frames,
             PlanOptions {
                 folders_from_names: self.prefs.export_folders_from_names,
                 scale_override: None,
                 unset: Some(ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))),
             },
         )
+    }
+
+    /// What *Export frames, all pages…* writes: each page that is not a
+    /// draft planned as *Export all frames…* plans one, into a folder named after
+    /// the page — numbered when two pages share a name — and how many drafts were
+    /// left out.
+    pub(crate) fn all_pages_frames_plan(&self) -> (Vec<PlannedFile>, usize) {
+        let doc = &self.session.doc;
+        let mut folders: Vec<String> = Vec::new();
+        let mut out = Vec::new();
+        for page in doc.gathered_pages() {
+            // A slash in a page's name would make a folder of its own.
+            let base = self.page_name(page).replace(['/', '\\'], "-");
+            let folder = std::iter::once(base.clone())
+                .chain((2..).map(|n| format!("{base} {n}")))
+                .find(|f| !folders.contains(f))
+                .expect("an unbounded range finds a free name");
+            for mut file in self.plan_frames(&self.frames_on(page)) {
+                file.path = format!("{folder}/{}", file.path);
+                out.push(file);
+            }
+            folders.push(folder);
+        }
+        let drafts = doc.pages().iter().filter(|p| p.draft).count();
+        (out, drafts)
+    }
+
+    /// *Export frames, all pages…* — [`Self::export_frames`] for every page
+    /// that is not a draft, one folder per page.
+    pub(crate) fn export_frames_all_pages(&mut self) {
+        let (files, drafts) = self.all_pages_frames_plan();
+        if files.is_empty() {
+            self.session.info("No frames to export");
+            return;
+        }
+        if drafts > 0 {
+            self.session.info(match drafts {
+                1 => "1 draft page is left out".to_string(),
+                n => format!("{n} draft pages are left out"),
+            });
+        }
+        self.run_export(files, false);
     }
 
     /// Where a dialog opens: the last export's folder, else the document's own,
@@ -2354,7 +2411,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let white = ondin_core::peniko::Color::WHITE;
         let black = ondin_core::peniko::Color::BLACK;
         let mut ops = Vec::new();
@@ -2569,7 +2626,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let rect = app.session.ids.mint();
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {
@@ -2714,7 +2771,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         // Sized off the device's own limit so the pad guard alone decides: a
         // `side × 10` strip is inside the texture limit, and its square is over the
         // area cap. The banner below trips both guards.
@@ -2799,7 +2856,7 @@ mod export_all_scope_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let (group, inner) = (app.session.ids.mint(), app.session.ids.mint());
         let png = ondin_core::keyed_by_position([ExportSpec::new(
             ExportFormat::Png,
@@ -2865,7 +2922,7 @@ mod export_all_scope_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let png = ondin_core::keyed_by_position([ExportSpec::new(
             ExportFormat::Png,
             ExportScale::Times(1.0),
@@ -2907,7 +2964,7 @@ mod export_all_scope_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let ids: Vec<_> = (0..4).map(|_| app.session.ids.mint()).collect();
         let frame = |id, parent, index, name: &str| ondin_core::Operation::CreateNode {
             id,
@@ -3006,7 +3063,7 @@ mod export_all_scope_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let (rect, empty) = (app.session.ids.mint(), app.session.ids.mint());
         let png = ondin_core::keyed_by_position([ExportSpec::new(
             ExportFormat::Png,
@@ -3092,7 +3149,7 @@ mod export_all_scope_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let rect = app.session.ids.mint();
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {
@@ -3175,7 +3232,7 @@ mod code_export_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let frame = app.session.ids.mint();
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {

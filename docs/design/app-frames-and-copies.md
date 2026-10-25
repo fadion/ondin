@@ -47,7 +47,7 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
   container covering most of the moved box takes it. After it: an item pressed on its overflowing part
   stays while its moved box still meets the container's box (`OndinApp::box_meets`).
 - Creation: `canvas::draw_target` gives a new layer (or frame) the topmost frame containing the press,
-  else the root.
+  else the current page's root.
 
 ## Reorder inside a layout
 
@@ -100,8 +100,8 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
 - **Across `ondin` windows**: `copy_selection` writes the system clipboard as text — layer names, then
   `io::clip::FENCE`, then the JSON payload. Every paste door asks `OndinApp::take_clipboard`:
   `Layers` (ours, or an adopted foreign payload), `Foreign`, or `Unreadable` (an Ondin copy this build
-  cannot read — never pasted as a text layer). A foreign parent id fails `Document::contains`, so the
-  paste lands at the root.
+  cannot read — never pasted as a text layer). A foreign parent id fails `Document::contains`, and a
+  parent on another page is not taken either, so the paste lands at the current page's root.
 - **Kit instances carry their main** (§5.3e): `kit::carried` vault mains go in `Clip::kits`;
   `insert_all` and `paste_is_held` build through `kit::insert_carrying`. Refusals (`NeedsUpdate`,
   `Circular`) are said by `insert_all` via `OndinApp::carry_refused`. Instances landing cut loose are

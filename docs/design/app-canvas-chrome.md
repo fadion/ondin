@@ -63,7 +63,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   value; Enter applies `OndinApp::apply_typed_zoom` (`150`, `150%`, `37.5 %`; about the canvas
   centre, clamped like every zoom; anything else says *"Type a zoom percentage, like 150"*) and
   closes the menu — an untouched value applies nothing, since it reads the rounded zoom. Below it
-  *Zoom in*, *Zoom out*, *Actual size*, *Fit to page*, *Fit selection*. `OndinApp::zoom_entry`
+  *Zoom in*, *Zoom out*, *Actual size*, *Zoom to fit*, *Fit selection*. `OndinApp::zoom_entry`
   holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
@@ -118,7 +118,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   `Target::Layer { id, door: Panel }`, `id` the key layer, else the topmost selected in
   layers-panel order; only a guide selected → `Target::Guide`; else `Target::Canvas`. The rows are
   that target's menu built with no pointer (`menu_snapshot`), then in a text session the text
-  chords, then always the page's (canvas menu's) rows. *Add point here* and *Make this the key
+  chords, then always the canvas menu's rows. *Add point here* and *Make this the key
   layer* are never listed: the keyboard supplies no point and no pointer names "this". The footer
   names the target (*Card and 2 more*, *Editing text*, *Nothing selected*).
 - **Paste.** `PasteHere` is labelled *Paste* and runs `Action::Paste` outside a text session
@@ -162,7 +162,9 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   sets `reveal_card`, and `panel_full` opens that card, scrolls it to the top and focuses its first
   field: the first widget drawn in it that senses click, drag and focus (`first_field`), which a
   value or text field does and a button or a reorder grip does not. Tool rows (*Tool:
-  Pen*, `P`). The View and Snap switches show their tick, which gives the unbound ones (*Snap to
+  Pen*, `P`). The pages, the one way to another page with the layers pane hidden: *New page*,
+  *Next page* and *Previous page* (dim at either end), and per page *Go to page: ‹name›* (dim on the
+  current one) and, for every other page, *Move to page: ‹name›* (dim with nothing selected). The View and Snap switches show their tick, which gives the unbound ones (*Snap to
   baselines*, *Show status messages*, *Show layout grid*) a keyboard route.
 - **In a text session** the chord opens the palette too, with the text session's menu rows and
   styling chords first. The session stays open under it; the palette's field holds focus, so the
@@ -191,7 +193,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **Rows** are the registry's items with an accel: label and spelling from `Item::spec` (*Hide /
   Show*, *Lock / Unlock* and *Paste* name the verb rather than one state), alternatives from
   `Item::alt_accel` joined by "or". A row is never dimmed for availability and never runs.
-- **Sections** (`sections`): Tools, Zoom, Edit, Structure, Arrange, Layer, View, Components and
+- **Sections** (`sections`): Tools, Zoom, Pages, Edit, Structure, Arrange, Layer, View, Components and
   kits, File, Text editing, Mouse, Library, dealt in order into three columns, each filled to about
   its share; a section is never split. A narrow window deals into two or one, so no column is under
   220 wide (`column_count`). Opened from the library, its section leads, followed by an *In a
@@ -242,18 +244,21 @@ none of the rules below are its.
 
 ## Present mode (`present.rs`)
 
-The document's top-level frames shown one at a time, fitted to a fullscreen window, with nothing of
-the editor around them and nothing to edit with. `OndinApp::presenting` holds a `Presenting {
-frames, at, was_fullscreen, stepped_at, view, to_top }` while it runs.
+The document's top-level frames shown one at a time, page by page, fitted to a fullscreen window,
+with nothing of the editor around them and nothing to edit with. `OndinApp::presenting` holds a
+`Presenting { frames, pages, entered_at, at, was_fullscreen, stepped_at, view, to_top }` while it
+runs (`pages` names each frame's page, index for index).
 
 - **Doors.** `Action::Present`: `Ctrl+Alt+Enter` in normal mode, `menu::Item::Present` (*Present*,
   `PLAY`, `Group::View`) in the palette and the cheatsheet's File section, and the View menu's last
   row. The palette row dims *"No frames to present"* on the same test `start_presenting` makes
-  (`presentable`: visible top-level frames with bounds).
-- **Starting** (`start_presenting`). The frames are the visible `root_artboards` with world bounds,
-  in `reading_order`: rows top to bottom, each left to right, a frame joining the row above while
+  (`presentable`: the current page's visible top-level frames with bounds).
+- **Starting** (`start_presenting`). The frames are every page's that is not a draft, in page
+  order — and the current page's even when it is a draft, since presenting from it asked for it.
+  Each page gives its visible top-level frames with world bounds (`presentable_on`) in
+  `reading_order`: rows top to bottom, each left to right, a frame joining the row above while
   its top is above that row's first frame's middle. It opens on the frame holding the selection,
-  else the one with most area in the current view, else the first. It finishes a live text session,
+  else the one with most area in the current view, else the current page's first. It finishes a live text session,
   closes the context menu and palette, and sends `ViewportCommand::Fullscreen(true)`, remembering
   whether the window already was. With nothing to show, the status line says *"No frames to
   present"* and nothing changes.
@@ -264,7 +269,9 @@ frames, at, was_fullscreen, stepped_at, view, to_top }` while it runs.
   asks one, which is how a close gets out of fullscreen); so does the dashboard's branch, which
   comes earlier.
 - **Keys** (`present_ui`). → ↓ Space Page Down Enter and a click step on; ← ↑ Page Up Backspace
-  and a right-click step back, stopping at either end; Home and End jump; Escape leaves.
+  and a right-click step back, stopping at either end; Home and End jump; `Ctrl+PageDown` and
+  `Ctrl+PageUp` jump to the first frame of the next or previous page (`Presenting::jump_page`);
+  Escape leaves.
   `stop_presenting` leaves fullscreen unless the window was fullscreen before. A shown frame that no
   longer resolves ends it.
 - **Zoom**, because a tall frame fitted to the screen's height is too small to read. `Ctrl`+wheel
@@ -278,11 +285,14 @@ frames, at, was_fullscreen, stepped_at, view, to_top }` while it runs.
   centred across. A frame the kept zoom no longer magnifies opens fitted, and the zoom is dropped.
 - **Drawing.** The scene goes through `canvas.render` with present mode's own camera: `view`, else
   centred on the frame at `fit_zoom` (the tighter axis, no margin, clamped to `MIN_ZOOM..MAX_ZOOM`).
-  The editing camera and selection are untouched, so leaving restores the view. A matte in the canvas
-  background colour then covers everything outside the frame: its neighbours, and a child
+  The editing camera and selection are untouched, so leaving restores the view. A matte in the
+  ground of the frame's page then covers everything outside the frame: its neighbours, and a child
   overflowing an unclipped frame. No selection, guides, grids, frame tags, rulers or status bar.
 - **The counter**, a pill at the bottom with the frame's name and *n / total*, shows for
   `COUNTER_HOLD` (1.5 s) after a step and fades over `COUNTER_FADE` (0.4 s).
+- **The page chip** (`page_chip`), top left, reads *‹name› · page n of m*, counting the pages
+  presented. It shows on entering a page (from `entered_at`) and fades as the counter does; with
+  one page presented there is none.
 
 ## Traps
 

@@ -7,19 +7,19 @@
 //! node in it carries an [`Origin`] — which kit, which node of that kit's
 //! published state, which version — and no node outside it carries one.
 //!
-//! ⚠️ **A second root, not a container under the first, and that is the whole of
+//! ⚠️ **A root of its own, not a container on a page, and that is the whole of
 //! §15 D1012.** D1011 (9) put the vendored mains in a hidden container *in* the
 //! tree and named the cost — a closed list of tree readers that must each skip
 //! it, none of which fails to compile when it forgets, so a reader that forgets
-//! draws, exports or selects a hidden main. Beside the root, every walk that
-//! starts at [`Document::root`] — the render, the resolve, the exports, the
-//! layers panel, the dashboard cover, zoom-to-fit — skips the vault without being
-//! told, and a reader that forgets fails *safe*. What D1011 (9) chose it for
+//! draws, exports or selects a hidden main. Beside the pages, every walk that
+//! starts at a page ([`Document::pages`]) — the render, the resolve, the exports,
+//! the layers panel, the dashboard cover, zoom-to-fit — skips the vault without
+//! being told, and a reader that forgets fails *safe*. What D1011 (9) chose it for
 //! holds unchanged: the component passes ask by id across the whole node map
 //! (`crate::component`), so they see a vendored main as they see any other.
 //!
 //! The cost moved to a short list. In this crate: the loader's reachability
-//! check walks from both roots; [`check`] holds the vault's rules after every
+//! check walks from every root; [`check`] holds the vault's rules after every
 //! transaction and on load; and `Resolved::update` drops a vault node a
 //! transaction dirtied rather than resolving it, since nothing resolves the vault
 //! in the first place (`Resolved::rebuild` walks from the root). Outside it: the
@@ -99,7 +99,7 @@ pub enum VaultRule {
 impl std::fmt::Display for VaultRule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Shape => "is not a parentless Root beside the document's root",
+            Self::Shape => "is not a parentless Root beside the document's pages",
             Self::OutsideVault => "carries a kit origin outside the vault",
             Self::NoOrigin => "is in the vault without a kit origin",
             Self::NotAMain => "is in the vault and is neither a main nor a component set",
@@ -113,7 +113,8 @@ impl std::fmt::Display for VaultRule {
 /// The vault's rules (§15 D1012), over the whole node map — run after the last op
 /// of every transaction and on load, beside `crate::component::check`:
 ///
-/// - the vault, when there is one, is a parentless `Root` that is not `root`;
+/// - the vault, when there is one, is a parentless `Root` (that it is not also a
+///   page is the page table's rule, held by the loader and `OpenVault`);
 /// - every node under it carries an [`Origin`] whose kit is a well-formed id, and
 ///   no other node carries one;
 /// - each of its children is a main or a component set — what a kit publishes;
@@ -128,7 +129,6 @@ impl std::fmt::Display for VaultRule {
 /// selected, and no edit reaches it except the ones a kit verb builds.
 pub fn check(
     nodes: &FxHashMap<NodeId, Node>,
-    root: NodeId,
     vault: Option<NodeId>,
 ) -> Result<(), (NodeId, VaultRule)> {
     let Some(v) = vault else {
@@ -140,7 +140,7 @@ pub fn check(
     let Some(vn) = nodes.get(&v) else {
         return Err((v, VaultRule::Shape));
     };
-    if v == root || vn.parent.is_some() || !matches!(vn.kind, NodeKind::Root) {
+    if vn.parent.is_some() || !matches!(vn.kind, NodeKind::Root) {
         return Err((v, VaultRule::Shape));
     }
     if vn.origin.is_some() {
@@ -226,7 +226,7 @@ impl Published {
         name: Option<String>,
     ) -> Self {
         let tops: FxHashSet<NodeId> = doc
-            .get(doc.root())
+            .get(doc.first_page())
             .map(|r| r.children.iter().copied().collect())
             .unwrap_or_default();
         let groups = groups
@@ -241,7 +241,7 @@ impl Published {
         self.name.as_deref()
     }
 
-    /// The frozen document: published mains and sets under its root, their kit
+    /// The frozen document: published mains and sets on its one page, their kit
     /// dependencies in its vault.
     pub fn document(&self) -> &Document {
         &self.doc
@@ -250,7 +250,7 @@ impl Published {
     /// The published mains and component sets, in the kit's document order.
     pub fn tops(&self) -> &[NodeId] {
         self.doc
-            .get(self.doc.root())
+            .get(self.doc.first_page())
             .map(|r| r.children.as_slice())
             .unwrap_or(&[])
     }
@@ -270,29 +270,75 @@ impl Published {
 }
 
 /// The mains and sets a publish freezes, in document order: every set, and every
-/// main that is not a set's variant, anywhere in the tree under the root.
+/// main that is not a set's variant, on every page that is not a draft — and
+/// the ones on draft pages those reach ([`draft_tops`]).
 fn published_tops(doc: &Document) -> Vec<NodeId> {
+    let mut tops = tops_on(doc, doc.gathered_pages());
+    tops.extend(draft_tops(doc, &tops));
+    crate::build::all_in_document_order(doc, &tops)
+}
+
+/// The outermost sets and mains under each of `roots`, in document order.
+fn tops_on(doc: &Document, roots: impl Iterator<Item = NodeId>) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let mut stack = vec![doc.root()];
-    while let Some(id) = stack.pop() {
-        let Some(n) = doc.get(id) else { continue };
-        if id != doc.root() && (n.set.is_some() || n.component) {
-            out.push(id);
-            // A set's variants are published with it; a main holds no main.
+    for root in roots {
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = doc.get(id) else { continue };
+            if id != root && (n.set.is_some() || n.component) {
+                out.push(id);
+                // A set's variants are published with it; a main holds no main.
+                continue;
+            }
+            stack.extend(n.children.iter().rev().copied());
+        }
+    }
+    out
+}
+
+/// The sets and mains on draft pages that a publish carries anyway, because a
+/// published one uses them ([`draft_tops`]) — what the publish message names.
+pub fn carried_from_drafts(doc: &Document) -> Vec<NodeId> {
+    let tops = tops_on(doc, doc.gathered_pages());
+    draft_tops(doc, &tops)
+}
+
+/// The sets and mains on draft pages that `tops` reach — by a link, a swap or a
+/// bound property, transitively — and so are published with them: a draft keeps
+/// its own components out of a kit, never a piece the kit's components use.
+fn draft_tops(doc: &Document, tops: &[NodeId]) -> Vec<NodeId> {
+    let drafts: FxHashSet<NodeId> =
+        tops_on(doc, doc.pages().iter().filter(|p| p.draft).map(|p| p.id))
+            .into_iter()
+            .collect();
+    if drafts.is_empty() {
+        return Vec::new();
+    }
+    let reach = |t: NodeId| refs_out(&doc.capture_subtree(t).unwrap_or_default());
+    let mut pending: Vec<NodeId> = tops.iter().flat_map(|t| reach(*t)).collect();
+    let mut out = Vec::new();
+    while let Some(r) = pending.pop() {
+        let mut at = Some(r);
+        while let Some(a) = at.filter(|a| !drafts.contains(a)) {
+            at = doc.get(a).and_then(|n| n.parent);
+        }
+        let Some(t) = at else { continue };
+        if out.contains(&t) {
             continue;
         }
-        stack.extend(n.children.iter().rev().copied());
+        pending.extend(reach(t));
+        out.push(t);
     }
     out
 }
 
 /// The top-level frame a published main or set sits in, when it is not itself
-/// one — the root's child above it.
+/// one — the page's child above it.
 fn top_frame_name(doc: &Document, id: NodeId) -> Option<String> {
     let mut at = id;
     let mut above = doc.get(id)?.parent;
     while let Some(p) = above {
-        if p == doc.root() {
+        if doc.is_page(p) {
             let n = doc.get(at)?;
             return (at != id && matches!(n.kind, NodeKind::Artboard { .. }))
                 .then(|| n.name.clone());
@@ -320,12 +366,12 @@ fn refs_out<'a>(nodes: impl IntoIterator<Item = &'a Node>) -> Vec<NodeId> {
     out
 }
 
-/// The child of a root — the document's or the vault — that `id` sits under.
+/// The child of a root — a page or the vault — that `id` sits under.
 fn top_of(doc: &Document, id: NodeId) -> Option<NodeId> {
     let mut at = id;
     for _ in 0..=doc.node_map().len() {
         let p = doc.get(at)?.parent?;
-        if p == doc.root() || Some(p) == doc.vault() {
+        if doc.is_page(p) || Some(p) == doc.vault() {
             return Some(at);
         }
         at = p;
@@ -336,8 +382,8 @@ fn top_of(doc: &Document, id: NodeId) -> Option<NodeId> {
 /// Freeze `doc`'s mains and sets as its published state (§5.3e) — what *Publish*
 /// stores beside the working document. `None` when the document holds no main.
 ///
-/// Each published main or set is copied whole, ids kept, under the frozen
-/// document's root; every main of `doc`'s own vault one of them reaches —
+/// Each published main or set is copied whole, ids kept, onto the frozen
+/// document's one page; every main of `doc`'s own vault one of them reaches —
 /// through a link, a swap, or a nested instance of a nested instance — is
 /// copied whole under the frozen vault with its origin, so a consumer vendors a
 /// transitive main from the kit it came from rather than from this one.
@@ -346,16 +392,12 @@ pub fn freeze(doc: &Document) -> Option<Published> {
     if tops.is_empty() {
         return None;
     }
-    let mut root = Document::new(doc.root())
-        .node_map()
-        .get(&doc.root())
-        .cloned()
-        .expect("a new document holds its root");
+    let (mut root, page) = frozen_page(doc);
     let mut nodes: FxHashMap<NodeId, Node> = FxHashMap::default();
     let mut groups = Vec::new();
     for t in &tops {
         let mut captured = doc.capture_subtree(*t)?;
-        captured[0].parent = Some(doc.root());
+        captured[0].parent = Some(root.id);
         root.children.push(*t);
         if let Some(g) = top_frame_name(doc, *t) {
             groups.push((*t, g));
@@ -410,9 +452,8 @@ pub fn freeze(doc: &Document) -> Option<Published> {
     let frozen = Document::from_parts(
         doc.schema_version(),
         nodes,
-        doc.root(),
+        vec![page],
         vault,
-        doc.canvas_background(),
         Vec::new(),
         images,
         variables,
@@ -422,7 +463,7 @@ pub fn freeze(doc: &Document) -> Option<Published> {
     );
     debug_assert!(
         crate::component::check(frozen.node_map()).is_ok()
-            && check(frozen.node_map(), frozen.root(), frozen.vault()).is_ok(),
+            && check(frozen.node_map(), frozen.vault()).is_ok(),
         "a frozen kit breaks a rule its working document keeps"
     );
     Some(Published {
@@ -691,23 +732,31 @@ pub fn publish(doc: &mut Document, note: Option<String>, date: u64) -> Option<u3
     Some(version)
 }
 
-/// A published state holding nothing: the kit's root and no main — what a kit
+/// The frozen document's one page: an empty root under the id of `doc`'s first
+/// page, on its ground.
+fn frozen_page(doc: &Document) -> (Node, crate::page::Page) {
+    let id = doc.first_page();
+    let root = crate::document::root_node(id, format!("{} 1", crate::page::PAGE_STEM));
+    let page = crate::page::Page {
+        id,
+        ground: doc.ground(id),
+        draft: false,
+    };
+    (root, page)
+}
+
+/// A published state holding nothing: the kit's page and no main — what a kit
 /// that removed its last component publishes.
 fn empty_published(doc: &Document) -> Published {
     let mut nodes = FxHashMap::default();
-    let root = Document::new(doc.root())
-        .node_map()
-        .get(&doc.root())
-        .cloned()
-        .expect("a new document holds its root");
+    let (root, page) = frozen_page(doc);
     nodes.insert(root.id, root);
     Published {
         doc: Document::from_parts(
             doc.schema_version(),
             nodes,
-            doc.root(),
+            vec![page],
             None,
-            doc.canvas_background(),
             Vec::new(),
             FxHashMap::default(),
             Default::default(),
@@ -1219,18 +1268,18 @@ pub fn insert_carrying(
     Ok((Transaction(ops), created))
 }
 
-/// **A document for drawing only**: `doc` with each of `nodes` moved to the
-/// root, last, with its own transform — where an insert of it lands, with no
-/// ancestor's transform or layout, and a vault main among them resolved like
-/// any other (the picker's tiles and drag picture, and code export writing a
-/// kit's mains as components). A node already at the root stays put.
+/// **A document for drawing only**: `doc` with each of `nodes` moved to the top
+/// of the first page, last, with its own transform — where an insert of it
+/// lands, with no ancestor's transform or layout, and a vault main among them
+/// resolved like any other (the picker's tiles and drag picture, and code export
+/// writing a kit's mains as components). A node already there stays put.
 ///
 /// 🚨 **Not a document anything may keep**: the move is applied unchecked, and
-/// a vault node at the root breaks the vault's rules. That is nothing to a
+/// a vault node on a page breaks the vault's rules. That is nothing to a
 /// reader that only draws, which is all this is for.
 pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
     let mut scratch = doc.clone();
-    let root = doc.root();
+    let root = doc.first_page();
     let end = doc.get(root).map_or(0, |r| r.children.len());
     let ops: Vec<Operation> = nodes
         .iter()
@@ -1319,14 +1368,17 @@ pub struct Update {
 /// Built against a scratch document that each op is applied to as it is made,
 /// so every op is read against the state the ones before it leave, and an op
 /// that would change nothing is dropped.
+///
+/// A main made local lands on `page`, the one the update was accepted from.
 pub fn update(
     doc: &Document,
     ids: &mut IdSource,
+    page: NodeId,
     kit: &str,
     version: u32,
     published: &Published,
 ) -> Result<Update, KitError> {
-    update_all(doc, ids, &[(kit, version, published)])
+    update_all(doc, ids, page, &[(kit, version, published)])
 }
 
 /// [`update`] for several kits as **one** transaction — *Accept all* (5B), one
@@ -1335,6 +1387,7 @@ pub fn update(
 pub fn update_all(
     doc: &Document,
     ids: &mut IdSource,
+    page: NodeId,
     kits: &[(&str, u32, &Published)],
 ) -> Result<Update, KitError> {
     // 🚨 **A kit carrying a third kit's newer modes waits for that kit's
@@ -1345,7 +1398,7 @@ pub fn update_all(
     // again — the failed attempts spend ids and leave gaps, nothing else.
     let mut order: Vec<(&str, u32, &Published)> = kits.to_vec();
     for _ in 0..kits.len() {
-        match update_in_order(doc, ids, &order) {
+        match update_in_order(doc, ids, page, &order) {
             Err(KitError::Modes(k)) => match order.iter().position(|(id, _, _)| *id == k) {
                 Some(at) if at > 0 => {
                     let moved = order.remove(at);
@@ -1356,7 +1409,7 @@ pub fn update_all(
             other => return other,
         }
     }
-    update_in_order(doc, ids, &order)
+    update_in_order(doc, ids, page, &order)
 }
 
 /// `from`'s entries appended to `to`, each once, in the order first met.
@@ -1372,6 +1425,7 @@ fn push_new<T: PartialEq + Copy>(to: &mut Vec<T>, from: &[T]) {
 fn update_in_order(
     doc: &Document,
     ids: &mut IdSource,
+    page: NodeId,
     kits: &[(&str, u32, &Published)],
 ) -> Result<Update, KitError> {
     let Some(&(kit0, version0, published0)) = kits.first() else {
@@ -1650,7 +1704,7 @@ fn update_in_order(
             changed.push(t);
         }
     }
-    for op in make_local(&b.scratch, ids, &made_local).0 {
+    for op in make_local(&b.scratch, ids, page, &made_local).0 {
         b.push(op)?;
     }
     // 🚨 **The pictures the update brings, first in the transaction** (the
@@ -1689,7 +1743,7 @@ fn update_in_order(
 
 /// ***Make local*** (§5.3e, 4D/4E, 6B; §15 D1011 (3), D1016): reveal each of
 /// `mains` — children of the vault — as an ordinary main of the document, last
-/// under its root, every origin in it cleared. It no longer follows its kit.
+/// on `page`, every origin in it cleared. It no longer follows its kit.
 ///
 /// 🚨 **No instance is promoted**, which is the whole of D1011 (3): promoting one
 /// would make its overrides the main's values and re-base every other instance
@@ -1717,8 +1771,13 @@ fn update_in_order(
 /// The document gains its own copies (`crate::tokens::fork`), every mode's
 /// value kept, and the revealed nodes' own bindings point at them; a nested
 /// kit instance's bindings stay the kit's.
-pub fn make_local(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> Transaction {
-    make_local_report(doc, ids, mains).tx
+pub fn make_local(
+    doc: &Document,
+    ids: &mut IdSource,
+    page: NodeId,
+    mains: &[NodeId],
+) -> Transaction {
+    make_local_report(doc, ids, page, mains).tx
 }
 
 /// What [`make_local`] did beyond its transaction — for the app's status line.
@@ -1732,12 +1791,17 @@ pub struct MadeLocal {
 }
 
 /// [`make_local`], with what it forked.
-pub fn make_local_report(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> MadeLocal {
+pub fn make_local_report(
+    doc: &Document,
+    ids: &mut IdSource,
+    page: NodeId,
+    mains: &[NodeId],
+) -> MadeLocal {
     let mut ops = Vec::new();
     let Some(vault) = doc.vault() else {
         return MadeLocal::default();
     };
-    let root = doc.root();
+    let root = page;
     let mains: Vec<NodeId> = mains
         .iter()
         .copied()
@@ -1998,7 +2062,7 @@ impl Builder<'_> {
         if op.changes_nothing(&self.scratch) {
             return Ok(());
         }
-        let at = op.overwrites().unwrap_or_else(|| self.scratch.root());
+        let at = op.overwrites().unwrap_or_else(|| self.scratch.first_page());
         self.scratch
             .apply_unchecked(&Transaction(vec![op.clone()]))
             .map_err(|_| KitError::Incomplete(at))?;

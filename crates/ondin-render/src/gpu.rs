@@ -402,8 +402,9 @@ impl ScenePainter for GpuScenePainter<'_> {
     }
 }
 
-/// Build a `vello::Scene` for `vp` (world → pixel base transform applied), and
-/// the effect layers it needs resolved first. Pure; no GPU device required.
+/// Build a `vello::Scene` of `page` for `vp` (world → pixel base transform
+/// applied), and the effect layers it needs resolved first. Pure; no GPU device
+/// required.
 ///
 /// **The jobs come back rather than being drawn**: [`VelloGpuRenderer::render`]
 /// rasterizes each, runs `fx_gpu` over it and points its atlas slot at the result.
@@ -413,6 +414,7 @@ pub fn build_scene(
     vp: &Viewport,
     overrides: &RenderOverrides,
     images: &ImageStore,
+    page: ondin_core::NodeId,
 ) -> (Scene, Vec<EffectJob>) {
     let base = scene::device_base(vp);
     let mut painter = GpuScenePainter {
@@ -424,7 +426,7 @@ pub fn build_scene(
         budget: f64::from(vp.pixel_size.0) * f64::from(vp.pixel_size.1),
         images,
     };
-    scene::build(doc, res, vp, overrides, &mut painter);
+    scene::build(doc, res, vp, overrides, page, &mut painter);
     (painter.root, painter.jobs)
 }
 
@@ -744,8 +746,8 @@ impl VelloGpuRenderer {
         Ok(())
     }
 
-    /// Build the scene for `vp` and rasterize it into `target` (an RGBA texture
-    /// view sized `vp.pixel_size`). `base_color` clears the target first.
+    /// Build the scene of `page` for `vp` and rasterize it into `target` (an RGBA
+    /// texture view sized `vp.pixel_size`). `base_color` clears the target first.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
@@ -758,8 +760,9 @@ impl VelloGpuRenderer {
         target: &TextureView,
         base_color: Color,
         images: &ImageStore,
+        page: ondin_core::NodeId,
     ) -> Result<(), vello::Error> {
-        let (scene, jobs) = build_scene(doc, res, vp, overrides, images);
+        let (scene, jobs) = build_scene(doc, res, vp, overrides, images, page);
         // The page's pixel count is the budget every effect pass is held to (`pack`).
         let budget = u64::from(vp.pixel_size.0) * u64::from(vp.pixel_size.1);
         let mut registered = Vec::new();

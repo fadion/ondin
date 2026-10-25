@@ -31,7 +31,7 @@ impl Default for Camera {
 ///
 /// ⚠️ **`pub(crate)` because they were private and the range was therefore
 /// spelled twice.** `Camera::zoom` is a `pub` field, so [`Camera::zoom_by`] was
-/// never the only writer: `OndinApp::zoom_to` — *Fit to page* and *Fit
+/// never the only writer: `OndinApp::zoom_to` — *Zoom to fit* and *Fit
 /// selection* — wrote `zoom.clamp(0.02, 256.0)` with the same two numbers as
 /// bare literals, because there was nothing to name. Changing a bound here moved
 /// every wheel, chord and menu zoom and left the fit paths on the old one, with

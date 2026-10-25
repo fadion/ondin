@@ -629,8 +629,8 @@ fn nearest_of(moving: [f64; 3], target: [f64; 3]) -> f64 {
     best.1
 }
 
-/// World bounds worth snapping to: everything visible that the gesture is not
-/// itself carrying.
+/// World bounds on `page` worth snapping to: everything visible that the gesture
+/// is not itself carrying.
 ///
 /// Only the gesture's own subtree is excluded: its bounds move with the pointer,
 /// so a match is guaranteed and means nothing. The container chain stays, so a
@@ -639,12 +639,13 @@ fn nearest_of(moving: [f64; 3], target: [f64; 3]) -> f64 {
 pub fn targets(
     doc: &Document,
     res: &Resolved,
+    page: NodeId,
     moving: &[NodeId],
     view: Rect,
     limit: usize,
 ) -> Vec<Rect> {
     let mut out = Vec::new();
-    for id in ondin_core::nodes_in_view(res, view) {
+    for id in ondin_core::nodes_in_view(res, page, view) {
         if moving.contains(&id) || is_inside_any(doc, id, moving) {
             continue;
         }
@@ -1388,7 +1389,7 @@ mod tests {
     fn a_shape_snaps_to_the_frame_it_lives_in() {
         let (doc, res, frame, inside, _) = frame_and_shapes();
         let view = r(-1000.0, -1000.0, 1000.0, 1000.0);
-        let targets = targets(&doc, &res, &[inside], view, 200);
+        let targets = targets(&doc, &res, doc.first_page(), &[inside], view, 200);
         let frame_box = res.world_bounds(frame).unwrap();
         assert!(
             targets.contains(&frame_box),
@@ -1408,7 +1409,7 @@ mod tests {
         let view = r(-1000.0, -1000.0, 1000.0, 1000.0);
 
         // Dragging the frame: neither it nor its shape may appear.
-        let targets = targets(&doc, &res, &[frame], view, 200);
+        let targets = targets(&doc, &res, doc.first_page(), &[frame], view, 200);
         for id in [frame, inside] {
             let b = res.world_bounds(id).unwrap();
             assert!(!targets.contains(&b), "{id:?} {b:?} is in {targets:?}");

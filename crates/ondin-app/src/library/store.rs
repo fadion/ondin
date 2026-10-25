@@ -526,7 +526,7 @@ mod tests {
         let root = temp_root("dup-kit");
         let mut doc = blank();
         let main = ondin_core::IdSource::new(0xC1).mint();
-        let parent = doc.root();
+        let parent = doc.first_page();
         doc.apply(&Transaction(vec![
             Operation::CreateNode {
                 id: main,

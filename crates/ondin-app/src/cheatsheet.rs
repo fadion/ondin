@@ -197,6 +197,7 @@ fn sections(lead: Lead) -> Vec<Section> {
                 Item::ZoomSelection,
             ],
         ),
+        items_section("Pages", &[Item::StepPage(true), Item::StepPage(false)]),
         items_section(
             "Edit",
             &[
@@ -1118,7 +1119,7 @@ mod tests {
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
         let id = app.session.ids.mint();
-        let parent = app.session.doc.root();
+        let parent = app.session.doc.first_page();
         let parts = crate::fonts::FontService::default_text_parts();
         app.session
             .try_commit(ondin_core::Transaction(vec![

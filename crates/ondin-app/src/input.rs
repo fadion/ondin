@@ -228,6 +228,10 @@ pub enum Action {
     ///
     /// A no-op with nothing selected, so the two bindings stay distinct actions.
     ZoomSelection,
+    /// `Ctrl+PageDown` (`true`) / `Ctrl+PageUp` — the next or previous page
+    /// (`crate::pages`), stopping at either end. Plain `PageDown`/`PageUp` stay
+    /// present mode's.
+    StepPage(bool),
     /// Flip one workspace switch — the same set the View and Snap menus show,
     /// so a row and its chord cannot come to mean different things
     /// (`docs/shortcuts.md` §6).
@@ -766,6 +770,17 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Enter),
             Action::Present,
+            &mut out,
+        );
+        // `Ctrl+PageDown` / `Ctrl+PageUp` — step pages, as a browser steps tabs.
+        on(
+            cmd_only && !m.shift && i.key_pressed(egui::Key::PageDown),
+            Action::StepPage(true),
+            &mut out,
+        );
+        on(
+            cmd_only && !m.shift && i.key_pressed(egui::Key::PageUp),
+            Action::StepPage(false),
             &mut out,
         );
 

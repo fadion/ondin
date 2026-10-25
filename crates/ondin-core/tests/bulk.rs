@@ -654,7 +654,7 @@ fn paint_reaches_through_a_group_and_stops_at_a_frame() {
 fn a_fill_over_a_frame_and_a_shape_colours_both() {
     let mut f = Fixture::new();
     let shape = f.add(f.artboard, rect());
-    let root = f.doc.root();
+    let root = f.doc.first_page();
     // The frame and a loose shape, selected together.
     let loose = f.add(root, rect());
 
@@ -763,7 +763,7 @@ fn a_frames_fill_list_reorders_hides_and_removes_like_any_other() {
 #[test]
 fn a_frame_is_counted_in_a_shared_stroke() {
     let mut f = Fixture::new();
-    let root = f.doc.root();
+    let root = f.doc.first_page();
     let loose = f.add(root, rect());
     f.paint(loose, vec![], vec![solid_stroke(BLUE)]);
 

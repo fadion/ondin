@@ -37,6 +37,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             6 => migrate_6_to_7(&mut value),
             7 => migrate_7_to_8(&mut value),
             8 => migrate_8_to_9(&mut value),
+            9 => migrate_9_to_10(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -261,4 +262,56 @@ fn migrate_8_to_9(value: &mut Value) {
     {
         inner["schema_version"] = Value::from(9u32);
     }
+}
+
+/// v9 → v10: pages (`crate::page`). The one `root` becomes the only page, its
+/// ground the document's `canvas_background` (or the default a file without one
+/// was drawn on); a guide with no owner ran the whole canvas, so it names that
+/// page; a root still called `Root` becomes `Page 1`. The published document is
+/// reshaped the same way, since the ladder does not descend into it.
+///
+/// A file whose `root` is missing is left for the `DocumentDto` parse to refuse
+/// with its own message.
+fn migrate_9_to_10(value: &mut Value) {
+    one_page(value);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        one_page(inner);
+    }
+}
+
+/// [`migrate_9_to_10`] for one document value.
+fn one_page(doc: &mut Value) {
+    doc["schema_version"] = Value::from(10u32);
+    let Some(obj) = doc.as_object_mut() else {
+        return;
+    };
+    let Some(root) = obj.remove("root") else {
+        return;
+    };
+    let ground = obj.remove("canvas_background").unwrap_or_else(|| {
+        serde_json::to_value(crate::document::DEFAULT_CANVAS_BACKGROUND)
+            .expect("a colour serializes")
+    });
+    if let Some(guides) = obj.get_mut("guides").and_then(Value::as_array_mut) {
+        for guide in guides {
+            if guide.get("owner").is_none_or(Value::is_null) {
+                guide["owner"] = root.clone();
+            }
+        }
+    }
+    if let Some(nodes) = obj.get_mut("nodes").and_then(Value::as_array_mut) {
+        for node in nodes {
+            if node.get("id") == Some(&root) && node.get("name") == Some(&Value::from("Root")) {
+                node["name"] = Value::from(format!("{} 1", crate::page::PAGE_STEM));
+            }
+        }
+    }
+    obj.insert(
+        "pages".into(),
+        serde_json::json!([{ "id": root, "ground": ground }]),
+    );
 }

@@ -71,7 +71,7 @@ fn consumer() -> (Document, Vec<String>) {
 
     let mut dids = IdSource::new(0xE2);
     let mut d = Document::new(dids.mint());
-    let droot = d.root();
+    let droot = d.first_page();
     let (tx, inst) =
         ondin_core::kit::insert(&d, &mut dids, KIT, 1, &published, badge, droot).unwrap();
     d.apply(&tx).unwrap();
@@ -99,7 +99,7 @@ fn a_vault_is_in_no_export() {
     let (d, in_vault) = consumer();
     let res = Resolved::rebuild(&d);
 
-    let svg = ondin_export::svg::svg(&d, &res, None);
+    let svg = ondin_export::svg::svg(&d, &res, d.first_page(), None);
     assert!(svg.contains("<rect"), "fixture: the instance draws: {svg}");
     assert!(!svg.contains("#010203"), "the vault's Secret is not drawn");
 

@@ -9,8 +9,8 @@
 //! appear in the layers tree or be swept up by Select All. As a `Node` each of
 //! those would need special-casing away.
 //!
-//! A guide references a node through [`Guide::owner`], the frame it is scoped to;
-//! that is a reference, not membership in the tree.
+//! A guide references a node through [`Guide::owner`], the frame it is scoped to
+//! or the page it runs across; that is a reference, not membership in the tree.
 
 use crate::id::NodeId;
 use peniko::Color;
@@ -80,15 +80,15 @@ pub struct Guide {
     pub id: GuideId,
     pub axis: GuideAxis,
     /// Where the line sits — `y` for a horizontal guide, `x` for a vertical one —
-    /// in [`Self::owner`]'s local space when it has one, else in world space.
+    /// in [`Self::owner`]'s local space: a frame's, or world space for a page.
     /// Never view space: panning and zooming change nothing about a guide.
     pub position: f64,
     /// An override for [`DEFAULT_GUIDE_COLOR`]. `None` means "the default", not a
     /// copy of today's, so retuning the default carries every guide never
     /// recoloured and the inspector's reset has something to reset to.
     pub color: Option<Color>,
-    /// The frame this guide is scoped to, or `None` for a guide that runs the
-    /// whole canvas.
+    /// The frame this guide is scoped to, or the page whose whole canvas it runs
+    /// across.
     ///
     /// Kept as an owner on a flat list rather than a `Vec<Guide>` per node, so
     /// [`Document::guides`] stays one id-sorted list (a one-guide edit is a
@@ -102,7 +102,7 @@ pub struct Guide {
     /// [`Document::guides`]: crate::document::Document::guides
     /// [`Document::apply`]: crate::document::Document::apply
     /// [`Operation::SetGuideScope`]: crate::op::Operation::SetGuideScope
-    pub owner: Option<NodeId>,
+    pub owner: NodeId,
 }
 
 impl Guide {

@@ -22,6 +22,11 @@ impl std::fmt::Debug for NodeId {
 }
 
 impl NodeId {
+    /// An id no document holds — `seq` 0 is never minted ([`IdSource::new`]).
+    /// Asked as a place, it sits under no frame and on no page, so it reads every
+    /// variable in the document's default mode.
+    pub const NOWHERE: NodeId = NodeId { actor: 0, seq: 0 };
+
     /// Compact, diff-friendly on-disk form: `"<actor-hex>:<seq>"` (§5.2).
     pub fn to_wire(self) -> String {
         format!("{:x}:{}", self.actor, self.seq)

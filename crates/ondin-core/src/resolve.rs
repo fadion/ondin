@@ -583,7 +583,9 @@ pub struct Resolved {
     /// `boolean::evaluate`'s guard) rather than merely empty. A separate set
     /// because both read as "no entry" in `boolean`.
     failed: FxHashSet<NodeId>,
-    index: RTree<BoundsEntry>,
+    /// One tree per page, keyed by the page's root: a query is always about
+    /// one canvas.
+    index: FxHashMap<NodeId, RTree<BoundsEntry>>,
     /// Used geometry, sparse — see [`Used`].
     ///
     /// `update` must keep it equal to `rebuild`
@@ -604,7 +606,8 @@ impl Resolved {
         let mut used: FxHashMap<NodeId, Used> = FxHashMap::default();
         let mut laid = FxHashMap::default();
         let memo = std::cell::RefCell::new(FxHashMap::default());
-        for id in crate::subtree_nodes(doc, &[doc.root()]) {
+        let pages: Vec<NodeId> = doc.page_ids().collect();
+        for id in crate::subtree_nodes(doc, &pages) {
             let view = UsedView {
                 doc,
                 used: &used,
@@ -619,19 +622,21 @@ impl Resolved {
         let mut ink_bounds = FxHashMap::default();
         let mut inner_ink = FxHashMap::default();
         let mut text = FxHashMap::default();
-        resolve_subtree(
-            doc,
-            doc.root(),
-            Affine::IDENTITY,
-            &used,
-            &mut Caches {
-                world: &mut world,
-                world_bounds: &mut world_bounds,
-                ink_bounds: &mut ink_bounds,
-                inner_ink: &mut inner_ink,
-                text: &mut text,
-            },
-        );
+        for page in &pages {
+            resolve_subtree(
+                doc,
+                *page,
+                Affine::IDENTITY,
+                &used,
+                &mut Caches {
+                    world: &mut world,
+                    world_bounds: &mut world_bounds,
+                    ink_bounds: &mut ink_bounds,
+                    inner_ink: &mut inner_ink,
+                    text: &mut text,
+                },
+            );
+        }
         let index = build_index(doc, &world_bounds);
         let mut resolved = Self {
             world,
@@ -648,7 +653,7 @@ impl Resolved {
         // Booleans in a second pass, through `update`, which already owns the
         // children-first ordering; the walk above cannot do them because a nested
         // boolean needs the cache it is itself filling.
-        let booleans: FxHashSet<NodeId> = crate::subtree_nodes(doc, &[doc.root()])
+        let booleans: FxHashSet<NodeId> = crate::subtree_nodes(doc, &pages)
             .into_iter()
             .filter(|id| {
                 matches!(
@@ -1063,14 +1068,15 @@ impl Resolved {
         }
     }
 
-    /// Ids of indexed nodes whose world bounds intersect `area` (unordered).
-    /// Used by culling and as hit-test candidates.
-    pub(crate) fn candidates_intersecting(&self, area: Rect) -> Vec<NodeId> {
+    /// Ids of indexed nodes on `page` whose world bounds intersect `area`
+    /// (unordered). Used by culling and as hit-test candidates.
+    pub(crate) fn candidates_intersecting(&self, page: NodeId, area: Rect) -> Vec<NodeId> {
         let env = AABB::from_corners([area.min_x(), area.min_y()], [area.max_x(), area.max_y()]);
-        self.index
-            .locate_in_envelope_intersecting(env)
-            .map(|e| e.id)
-            .collect()
+        self.index.get(&page).map_or_else(Vec::new, |tree| {
+            tree.locate_in_envelope_intersecting(env)
+                .map(|e| e.id)
+                .collect()
+        })
     }
 
     /// Recompute the combined outline for `id` if it is a `Boolean`; clear any
@@ -1404,13 +1410,23 @@ fn resolve_subtree(
 /// answers for a `NaN` transform) becomes the maximal box and a candidate for
 /// every query. Deliberately a second statement of the rule `recompute_bounds`
 /// keeps, since the doors onto a non-finite box are not enumerable.
-fn build_index(doc: &Document, world_bounds: &FxHashMap<NodeId, Rect>) -> RTree<BoundsEntry> {
-    let entries: Vec<BoundsEntry> = world_bounds
-        .iter()
-        .filter(|(id, _)| doc.get(**id).is_some_and(|n| is_indexed(n.kind())))
-        .filter_map(|(id, r)| geometry::measurable(*r).map(|r| entry(*id, r)))
-        .collect();
-    RTree::bulk_load(entries)
+fn build_index(
+    doc: &Document,
+    world_bounds: &FxHashMap<NodeId, Rect>,
+) -> FxHashMap<NodeId, RTree<BoundsEntry>> {
+    doc.page_ids()
+        .map(|page| {
+            let entries: Vec<BoundsEntry> = crate::subtree_nodes(doc, &[page])
+                .into_iter()
+                .filter(|id| doc.get(*id).is_some_and(|n| is_indexed(n.kind())))
+                .filter_map(|id| {
+                    let r = geometry::measurable(*world_bounds.get(&id)?)?;
+                    Some(entry(id, r))
+                })
+                .collect();
+            (page, RTree::bulk_load(entries))
+        })
+        .collect()
 }
 
 /// Every node in `id`'s subtree, with its depth, into `out`.
@@ -1559,6 +1575,7 @@ mod measurable_bounds_tests {
             bounds.insert(good, Rect::new(0.0, 0.0, 10.0, 10.0));
             bounds.insert(bad, r);
             let index = build_index(&doc, &bounds);
+            let index = &index[&root];
             let hits: Vec<NodeId> = index
                 .locate_in_envelope_intersecting(AABB::from_corners(
                     [far.x0, far.y0],
@@ -1962,15 +1979,17 @@ mod used_geometry_tests {
         );
 
         assert!(
-            crate::hit_test(&res, doc, Point::new(250.0, 30.0), 0.0).contains(&f.rect),
+            crate::hit_test(&res, doc, doc.first_page(), Point::new(250.0, 30.0), 0.0)
+                .contains(&f.rect),
             "a click at x 250 lands on the stretched rect"
         );
         assert!(
-            crate::hit_test(&res, doc, Point::new(7.0, 7.0), 0.0).contains(&f.rect),
+            crate::hit_test(&res, doc, doc.first_page(), Point::new(7.0, 7.0), 0.0)
+                .contains(&f.rect),
             "and at (7, 7), which is outside the rect the document holds"
         );
         assert_eq!(
-            crate::outline_at(&res, doc, Point::new(295.0, 30.0), 1.0),
+            crate::outline_at(&res, doc, doc.first_page(), Point::new(295.0, 30.0), 1.0),
             Some(f.rect),
             "the outline a rail can be picked from is the used one"
         );
@@ -2011,7 +2030,8 @@ mod used_geometry_tests {
     /// Every map `Resolved` keeps, used geometry included, compared node by node.
     fn assert_equal_to_rebuild(doc: &Document, live: &Resolved, when: &str) {
         let fresh = Resolved::rebuild(doc);
-        for id in crate::subtree_nodes(doc, &[doc.root()]) {
+        let pages: Vec<NodeId> = doc.page_ids().collect();
+        for id in crate::subtree_nodes(doc, &pages) {
             assert_eq!(
                 live.used_local(doc, id),
                 fresh.used_local(doc, id),

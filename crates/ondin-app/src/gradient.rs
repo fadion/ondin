@@ -1089,7 +1089,7 @@ mod canvas_tests {
     fn a_handle_on_a_stretched_layer_stores_the_end_on_its_paint_box() {
         let ctx = egui::Context::default();
         let (mut app, id) = app_with_a_ramp(&ctx);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let mut ids = IdSource::new(0x5A7);
         let board = ids.mint();
         let (light, dark) = (ids.mint_mode(), ids.mint_mode());

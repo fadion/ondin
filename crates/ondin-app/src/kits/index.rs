@@ -508,7 +508,7 @@ fn read(path: &std::path::Path) -> (Load, Option<u32>) {
 fn families_of(doc: &ondin_core::Document) -> std::collections::HashSet<String> {
     let mut families = std::collections::HashSet::new();
     // The vault too: a third kit's main the kit nests is drawn in its tiles.
-    let mut stack: Vec<NodeId> = std::iter::once(doc.root()).chain(doc.vault()).collect();
+    let mut stack: Vec<NodeId> = doc.page_ids().chain(doc.vault()).collect();
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
         if let ondin_core::NodeKind::Text { style, spans, .. } = node.kind() {

@@ -119,6 +119,7 @@ fn gpu_renders_fixture_on_device() {
             &view,
             Color::WHITE,
             &ondin_render::ImageStore::new(),
+            doc.first_page(),
         )
         .expect("gpu render should succeed");
     let _ = device.poll(wgpu::PollType::wait_indefinitely());

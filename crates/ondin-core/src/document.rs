@@ -34,21 +34,17 @@ pub const DEFAULT_CANVAS_BACKGROUND: Color = Color::from_rgba8(23, 23, 24, 255);
 pub struct Document {
     schema_version: u32,
     nodes: FxHashMap<NodeId, Node>,
-    root: NodeId,
-    /// The **vault** — a second, parentless `Root` holding the kit mains this
-    /// document has vendored (§5.3e, `crate::kit`).
+    /// The pages in order, never empty (`crate::page`). Each is a parentless
+    /// `Root` in [`Self::nodes`].
+    pages: Vec<crate::page::Page>,
+    /// The **vault** — another parentless `Root`, never a page, holding the kit
+    /// mains this document has vendored (§5.3e, `crate::kit`).
     ///
     /// Its nodes are in [`Self::nodes`], so passes that ask by id see them, but
-    /// outside the tree under [`Self::root`], so every walk from the root skips
-    /// them. Opened and closed by [`Operation::OpenVault`] and
-    /// [`Operation::CloseVault`], so undo takes it away with the first kit insert.
+    /// outside every page's tree, so every walk from a page skips them. Opened
+    /// and closed by [`Operation::OpenVault`] and [`Operation::CloseVault`], so
+    /// undo takes it away with the first kit insert.
     vault: Option<NodeId>,
-    /// The ground behind and around the frames.
-    ///
-    /// The one piece of document state that is not a node: it is set for the
-    /// artwork, not the sitting, so it survives reopening the file. Opaque by
-    /// construction — nothing behind the canvas could show through.
-    canvas_background: Color,
     /// The ruler guides placed on this document (`crate::guide`).
     ///
     /// Unordered — guides have no z and no operation refers to one by position —
@@ -97,56 +93,22 @@ pub struct Document {
 }
 
 impl Document {
-    /// Create a document with a single `Root` node using the given id.
+    /// Create a document with one empty page, `Page 1`, whose root is `root_id`.
     pub fn new(root_id: NodeId) -> Self {
-        let root = Node {
-            id: root_id,
-            parent: None,
-            children: Vec::new(),
-            kind: NodeKind::Root,
-            transform: Affine::IDENTITY,
-            name: "Root".to_string(),
-            visible: true,
-            locked: false,
-            proportions_locked: false,
-            opacity: 1.0,
-            clip: false,
-            mask: false,
-            mask_mode: MaskMode::default(),
-            fill_rule: FillRule::default(),
-            paint: Paint::default(),
-            pivot: None,
-            exports: Vec::new(),
-            effects: Vec::new(),
-            grids: Vec::new(),
-            insets: Default::default(),
-            display: None,
-            item: Default::default(),
-            component: false,
-            link: None,
-            swap: None,
-            set: None,
-            variant: Vec::new(),
-            props: Vec::new(),
-            description: String::new(),
-            origin: None,
-            mode: None,
-            corner_vars: Default::default(),
-            spacing_vars: Default::default(),
-            visible_var: None,
-            size_vars: Default::default(),
-            text_vars: Default::default(),
-            opacity_var: None,
-            styles: Default::default(),
-        };
         let mut nodes = FxHashMap::default();
-        nodes.insert(root_id, root);
+        nodes.insert(
+            root_id,
+            root_node(root_id, format!("{} 1", crate::page::PAGE_STEM)),
+        );
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
             nodes,
-            root: root_id,
+            pages: vec![crate::page::Page {
+                id: root_id,
+                ground: DEFAULT_CANVAS_BACKGROUND,
+                draft: false,
+            }],
             vault: None,
-            canvas_background: DEFAULT_CANVAS_BACKGROUND,
             guides: Vec::new(),
             images: FxHashMap::default(),
             variables: Default::default(),
@@ -164,7 +126,53 @@ impl Document {
     pub fn get(&self, id: NodeId) -> Option<&Node> {
         self.nodes.get(&id)
     }
+}
 
+/// An empty, parentless `Root` — a page's or the vault's.
+pub(crate) fn root_node(id: NodeId, name: String) -> Node {
+    Node {
+        id,
+        parent: None,
+        children: Vec::new(),
+        kind: NodeKind::Root,
+        transform: Affine::IDENTITY,
+        name,
+        visible: true,
+        locked: false,
+        proportions_locked: false,
+        opacity: 1.0,
+        clip: false,
+        mask: false,
+        mask_mode: MaskMode::default(),
+        fill_rule: FillRule::default(),
+        paint: Paint::default(),
+        pivot: None,
+        exports: Vec::new(),
+        effects: Vec::new(),
+        grids: Vec::new(),
+        insets: Default::default(),
+        display: None,
+        item: Default::default(),
+        component: false,
+        link: None,
+        swap: None,
+        set: None,
+        variant: Vec::new(),
+        props: Vec::new(),
+        description: String::new(),
+        origin: None,
+        mode: None,
+        corner_vars: Default::default(),
+        spacing_vars: Default::default(),
+        visible_var: None,
+        size_vars: Default::default(),
+        text_vars: Default::default(),
+        opacity_var: None,
+        styles: Default::default(),
+    }
+}
+
+impl Document {
     /// The mask `id` is clipped by, if any: the **nearest preceding sibling**
     /// carrying [`Node::mask`] (§5.3).
     ///
@@ -225,9 +233,63 @@ impl Document {
             .collect()
     }
 
-    /// The ground behind and around the frames.
-    pub fn canvas_background(&self) -> Color {
-        self.canvas_background
+    /// The pages in order. Never empty.
+    pub fn pages(&self) -> &[crate::page::Page] {
+        &self.pages
+    }
+
+    /// The page whose root is `id`, if `id` is a page.
+    pub fn page(&self, id: NodeId) -> Option<&crate::page::Page> {
+        self.pages.iter().find(|p| p.id == id)
+    }
+
+    /// Whether `id` is a page's root.
+    pub fn is_page(&self, id: NodeId) -> bool {
+        self.page(id).is_some()
+    }
+
+    /// Where `id` sits in the page order, if it is a page.
+    pub fn page_index(&self, id: NodeId) -> Option<usize> {
+        self.pages.iter().position(|p| p.id == id)
+    }
+
+    /// The first page's root — the page a library thumbnail draws when none is
+    /// a draft, and the one a fresh document and every one-page fixture works on.
+    pub fn first_page(&self) -> NodeId {
+        self.pages[0].id
+    }
+
+    /// The pages' roots in order.
+    pub fn page_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.pages.iter().map(|p| p.id)
+    }
+
+    /// The roots, in order, of the pages that are not drafts — what everything
+    /// gathering from every page reads (`crate::page::Page::draft`).
+    pub fn gathered_pages(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.pages.iter().filter(|p| !p.draft).map(|p| p.id)
+    }
+
+    /// The page `id` is on — its own id for a page — or `None` for a node in the
+    /// vault or not in the document.
+    pub fn page_of(&self, id: NodeId) -> Option<NodeId> {
+        let mut cursor = id;
+        // Bounded by the node count, as every ancestor walk over stored parents
+        // must be against a file the loader has not yet certified.
+        for _ in 0..=self.nodes.len() {
+            match self.nodes.get(&cursor)?.parent {
+                Some(p) => cursor = p,
+                None => return self.is_page(cursor).then_some(cursor),
+            }
+        }
+        None
+    }
+
+    /// The ground behind and around `page`'s frames; the default for an id that
+    /// is not a page.
+    pub fn ground(&self, page: NodeId) -> Color {
+        self.page(page)
+            .map_or(DEFAULT_CANVAS_BACKGROUND, |p| p.ground)
     }
 
     /// The document's library identity (`crate::meta`).
@@ -276,7 +338,7 @@ impl Document {
     ///
     /// [`Guide::owner`]: crate::guide::Guide::owner
     pub fn guides_owned_by(&self, owner: NodeId) -> impl Iterator<Item = &Guide> {
-        self.guides.iter().filter(move |g| g.owner == Some(owner))
+        self.guides.iter().filter(move |g| g.owner == owner)
     }
 
     /// One image's entry, or `None` for a reference to something this document
@@ -313,8 +375,9 @@ impl Document {
     }
 
     /// The mode in force at `id` (§5.3f): the mode the nearest frame at or above
-    /// it sets, else the document's default. `None` only in a document with no
-    /// modes.
+    /// it sets, else its page's, else the document's default. `None` only in a
+    /// document with no modes. The page needs no case of its own: its root is
+    /// the last ancestor the walk meets.
     ///
     /// **The node itself counts**: a frame's own fill reads in the mode it sets.
     ///
@@ -849,8 +912,10 @@ impl Document {
             .map(|n| n.id)
     }
 
-    pub fn root(&self) -> NodeId {
-        self.root
+    /// Whether `id` is a parentless root — a page or the vault — which no
+    /// structural operation may delete, move or copy.
+    fn is_root(&self, id: NodeId) -> bool {
+        self.is_page(id) || self.vault == Some(id)
     }
 
     /// The vault's root, when this document has vendored a kit main (§15 D1012).
@@ -897,15 +962,14 @@ impl Document {
     /// Build a document from already-validated parts (used by IO on load).
     /// Performs no validation itself — the caller (io::schema) checks integrity.
     ///
-    /// One argument per field a file stores, which is why there are eleven: a
-    /// struct of the same eleven fields would be this signature with a name.
+    /// One argument per field a file stores, which is why there are ten: a
+    /// struct of the same ten fields would be this signature with a name.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
         schema_version: u32,
         nodes: FxHashMap<NodeId, Node>,
-        root: NodeId,
+        pages: Vec<crate::page::Page>,
         vault: Option<NodeId>,
-        canvas_background: Color,
         guides: Vec<Guide>,
         images: FxHashMap<ImageId, ImageEntry>,
         variables: crate::variable::Variables,
@@ -916,9 +980,8 @@ impl Document {
         Self {
             schema_version,
             nodes,
-            root,
+            pages,
             vault,
-            canvas_background,
             guides,
             images,
             variables,
@@ -1013,7 +1076,7 @@ impl Document {
         // The vault's rules (§15 D1012): an origin on every vault node and on
         // nothing else, a main or a set at each of its children. After the last op
         // for the guide owners' reason — vendoring opens the vault, then inserts.
-        crate::kit::check(&working.nodes, working.root, working.vault)
+        crate::kit::check(&working.nodes, working.vault)
             .map_err(|(id, rule)| OpError::Vault(id, rule))?;
 
         // The variables rules (§5.3f): every binding resolves to a variable of its
@@ -1067,7 +1130,7 @@ impl Document {
     ///
     /// **Applied to a scratch document holding the one node `op` names**, because
     /// every operation `overwrites` writes that node alone. The scratch carries
-    /// `root`, `schema_version` and `restoring` across — the last read by the
+    /// the pages, `schema_version` and `restoring` across — the last read by the
     /// history exemption of `op_set_display` and `op_set_layout_item`.
     /// **`op_set_mask` reads past its node** (`holds_a_frame`, §15 D876), so its
     /// scratch holds the subtree; with the node alone a peek would answer `Some`
@@ -1090,9 +1153,8 @@ impl Document {
         let mut one = Document {
             schema_version: self.schema_version,
             nodes,
-            root: self.root,
+            pages: self.pages.clone(),
             vault: self.vault,
-            canvas_background: self.canvas_background,
             guides: Vec::new(),
             images: FxHashMap::default(),
             variables: Default::default(),
@@ -1216,9 +1278,18 @@ impl Document {
                     props: old,
                 })
             }
-            Operation::SetCanvasBackground { background } => {
-                Ok(self.op_set_canvas_background(*background))
-            }
+            Operation::SetPageGround { id, ground } => self.op_set_page_ground(*id, *ground),
+            Operation::SetPageDraft { id, draft } => self.op_set_page_draft(*id, *draft),
+            Operation::AddPage {
+                id,
+                index,
+                name,
+                ground,
+                draft,
+                mode,
+            } => self.op_add_page(*id, *index, name, *ground, *draft, *mode, dirty),
+            Operation::RemovePage { id } => self.op_remove_page(*id, dirty),
+            Operation::MovePage { id, index } => self.op_move_page(*id, *index),
             Operation::AddGuide { guide } => self.op_add_guide(*guide),
             Operation::RemoveGuide { id } => self.op_remove_guide(*id),
             Operation::SetGuidePosition { id, position } => {
@@ -1732,7 +1803,7 @@ impl Document {
     }
 
     fn op_delete(&mut self, id: NodeId, dirty: &mut DirtySet) -> Result<Operation, OpError> {
-        if id == self.root {
+        if self.is_root(id) {
             return Err(OpError::CannotModifyRoot);
         }
         let node = self.nodes.get(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -1975,7 +2046,7 @@ impl Document {
         index: usize,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        if id == self.root {
+        if self.is_root(id) {
             return Err(OpError::CannotModifyRoot);
         }
         let old_parent = self
@@ -2047,7 +2118,7 @@ impl Document {
         index: usize,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        if id == self.root {
+        if self.is_root(id) {
             return Err(OpError::CannotModifyRoot);
         }
         let parent = self
@@ -2478,13 +2549,84 @@ impl Document {
         Ok(Operation::SetLayoutItem { id, item: old })
     }
 
+    // --- pages --------------------------------------------------------------
+
+    fn page_mut(&mut self, id: NodeId) -> Result<&mut crate::page::Page, OpError> {
+        self.pages
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or(OpError::NoSuchPage(id))
+    }
+
     /// The ground is not a node, so this dirties nothing: `Resolved` holds
     /// transforms and bounds, and neither depends on what colour is behind the
-    /// frames. Infallible for the same reason — there is no id to miss and no
-    /// kind to be wrong.
-    fn op_set_canvas_background(&mut self, background: Color) -> Operation {
-        let old = std::mem::replace(&mut self.canvas_background, background);
-        Operation::SetCanvasBackground { background: old }
+    /// frames.
+    fn op_set_page_ground(&mut self, id: NodeId, ground: Color) -> Result<Operation, OpError> {
+        let old = std::mem::replace(&mut self.page_mut(id)?.ground, ground);
+        Ok(Operation::SetPageGround { id, ground: old })
+    }
+
+    fn op_set_page_draft(&mut self, id: NodeId, draft: bool) -> Result<Operation, OpError> {
+        let old = std::mem::replace(&mut self.page_mut(id)?.draft, draft);
+        Ok(Operation::SetPageDraft { id, draft: old })
+    }
+
+    /// Dirties the new root so `Resolved::update` places it as `rebuild` would.
+    #[allow(clippy::too_many_arguments)]
+    fn op_add_page(
+        &mut self,
+        id: NodeId,
+        index: usize,
+        name: &str,
+        ground: Color,
+        draft: bool,
+        mode: Option<crate::variable::ModeId>,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if self.nodes.contains_key(&id) {
+            return Err(OpError::DuplicateId(id));
+        }
+        if index > self.pages.len() {
+            return Err(OpError::IndexOutOfRange);
+        }
+        let mut root = root_node(id, name.to_string());
+        root.mode = mode;
+        self.nodes.insert(id, root);
+        self.pages
+            .insert(index, crate::page::Page { id, ground, draft });
+        dirty.0.insert(id);
+        Ok(Operation::RemovePage { id })
+    }
+
+    /// Dirties the root so `Resolved::update` drops its entries.
+    fn op_remove_page(&mut self, id: NodeId, dirty: &mut DirtySet) -> Result<Operation, OpError> {
+        let index = self.page_index(id).ok_or(OpError::NoSuchPage(id))?;
+        let empty = self.nodes.get(&id).is_some_and(|n| n.children.is_empty());
+        let guided = self.guides.iter().any(|g| g.owner == id);
+        if self.pages.len() == 1 || !empty || guided {
+            return Err(OpError::PageNotRemovable(id));
+        }
+        let page = self.pages.remove(index);
+        let root = self.nodes.remove(&id).expect("a page's root is a node");
+        dirty.0.insert(id);
+        Ok(Operation::AddPage {
+            id,
+            index,
+            name: root.name,
+            ground: page.ground,
+            draft: page.draft,
+            mode: root.mode,
+        })
+    }
+
+    fn op_move_page(&mut self, id: NodeId, index: usize) -> Result<Operation, OpError> {
+        let old = self.page_index(id).ok_or(OpError::NoSuchPage(id))?;
+        if index >= self.pages.len() {
+            return Err(OpError::IndexOutOfRange);
+        }
+        let page = self.pages.remove(old);
+        self.pages.insert(index, page);
+        Ok(Operation::MovePage { id, index: old })
     }
 
     // --- guides -----------------------------------------------------------
@@ -2508,7 +2650,7 @@ impl Document {
         Ok(Operation::RemoveGuide { id: guide.id })
     }
 
-    /// A guide may only be scoped to a frame that is in the document.
+    /// A guide may only be scoped to a frame or a page that is in the document.
     ///
     /// **The check makes op order inside a delete transaction load-bearing.**
     /// `apply` inverts `[a, b]` to `[b⁻¹, a⁻¹]`, so deleting a frame *before*
@@ -2516,15 +2658,16 @@ impl Document {
     /// refuses and takes the whole undo with it. [`crate::build::guides_of`]
     /// establishes the order, and `undoing_a_frame_delete_restores_its_guides`
     /// holds it.
-    fn check_guide_owner(&self, owner: Option<NodeId>) -> Result<(), OpError> {
-        let Some(owner) = owner else { return Ok(()) };
+    fn check_guide_owner(&self, owner: NodeId) -> Result<(), OpError> {
+        if self.is_page(owner) {
+            return Ok(());
+        }
         let node = self
             .nodes
             .get(&owner)
             .ok_or(OpError::BadGuideOwner(owner))?;
         // A frame, not any container: the scope is a box to clip the line to and
-        // measure the offset from, and a group has neither. A guide on the canvas
-        // is spelled `None`, so the root is excluded too.
+        // measure the offset from, and a group has neither.
         match node.kind() {
             NodeKind::Artboard { .. } => Ok(()),
             _ => Err(OpError::BadGuideOwner(owner)),
@@ -2599,7 +2742,7 @@ impl Document {
     fn op_set_guide_scope(
         &mut self,
         id: GuideId,
-        owner: Option<NodeId>,
+        owner: NodeId,
         position: f64,
     ) -> Result<Operation, OpError> {
         // Validated before the guide is looked up mutably, so a rejected scope
@@ -2810,11 +2953,12 @@ impl Document {
     // --- helpers ---
 
     /// Deep-clone the subtree rooted at `id` (root first), for copy/duplicate.
-    /// Returns `None` for the document root or an absent id. The captured nodes
+    /// Returns `None` for a page or an absent id; the vault is captured whole,
+    /// which the kit verbs read. The captured nodes
     /// still carry their original ids/parent; feed them through [`remap_subtree`]
     /// before re-inserting so ids don't collide.
     pub fn capture_subtree(&self, id: NodeId) -> Option<Vec<Node>> {
-        if id == self.root || !self.nodes.contains_key(&id) {
+        if self.is_page(id) || !self.nodes.contains_key(&id) {
             return None;
         }
         Some(

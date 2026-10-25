@@ -8341,7 +8341,7 @@ mod guide_scale_tests {
                     axis: GuideAxis::Vertical,
                     position: 200.0,
                     color: None,
-                    owner: Some(frame),
+                    owner: frame,
                 },
             },
             Operation::AddGuide {
@@ -8350,7 +8350,7 @@ mod guide_scale_tests {
                     axis: GuideAxis::Horizontal,
                     position: 100.0,
                     color: None,
-                    owner: Some(frame),
+                    owner: frame,
                 },
             },
         ]))
@@ -8470,7 +8470,7 @@ mod guide_scale_tests {
                 axis: GuideAxis::Vertical,
                 position: 0.0,
                 color: None,
-                owner: Some(frame),
+                owner: frame,
             },
         }]))
         .unwrap();
@@ -8524,8 +8524,8 @@ mod guide_scale_tests {
             },
         };
         doc.apply(&Transaction(vec![
-            guide(elsewhere, Some(other)),
-            guide(global, None),
+            guide(elsewhere, other),
+            guide(global, root),
         ]))
         .unwrap();
         let res = Resolved::rebuild(&doc);

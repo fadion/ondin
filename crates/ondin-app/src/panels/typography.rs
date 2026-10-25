@@ -8976,7 +8976,7 @@ mod skip_ink_tests {
     fn the_type_card_marks_an_instances_own_fields_and_no_others() {
         let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
         let group = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: group,
@@ -9063,7 +9063,7 @@ mod skip_ink_tests {
         use ondin_core::variable::{Cell, Mode, VarKind, Variable};
         let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
         let group = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: group,
@@ -9156,7 +9156,7 @@ mod skip_ink_tests {
     fn a_text_styled_copys_style_fields_carry_no_mark() {
         let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
         let group = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: group,
@@ -10908,7 +10908,7 @@ mod instance_mark_tests {
     fn instance() -> (egui::Context, OndinApp, NodeId, NodeId) {
         let (ctx, mut app, text) = super::app_with_text();
         let group = app.session.ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
                 id: group,

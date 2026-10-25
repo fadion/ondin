@@ -9,8 +9,6 @@ reads true.
 
 ## Later · First
 
-- **Pages.** `Document` has one root (and the kit vault). Settle it before MCP fixes the snapshot and
-  tool surface around a single page.
 - **Blend modes**, per layer and per effect. `shortcuts.md` §2 reserves `Shift+3`…`Shift+9`.
 - **Background blur.** Canvas and raster draw the backdrop; SVG cannot express it and the code export
   has `backdrop-filter`, so the SVG writer owes an answer (a reported approximation, at least).
@@ -179,7 +177,8 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   the commit pass sequence out of `EditorSession::commit_inner`; kits and library code out of the app
   for Phase 4 (§15 D1096). The snapshot owes: per-run colour, list markers and level (§15 D169, D172),
   12 of 13 paragraph fields and `BlockStyle`, the missing-font warning, fill item ids (§15 D980), and
-  specified beside used values (§15 D868).
+  specified beside used values (§15 D868). The tools owe pages: the snapshot lists them, but no tool
+  takes a page (`export_svg`/`export_png`, `create_node`'s parent, page add/rename/move).
 - **Command Mode** — `architecture.md` §13, `vm.md`. Scripts stored inert, never run by the document
   (§15 D1100). Open in `vm.md` §13: the editor's UI, the parameter header, `mlua` exposing Luau's
   analysis, files outside the document (parked), first-run disclosure, schema place, kit scripts.

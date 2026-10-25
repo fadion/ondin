@@ -42,7 +42,7 @@ fn doc_with_artboard() -> (Document, IdSource, NodeId) {
 #[test]
 fn create_builds_expected_tree() {
     let (mut doc, mut ids, ab) = doc_with_artboard();
-    let root = doc.root();
+    let root = doc.first_page();
 
     let r = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -229,7 +229,7 @@ fn delete_then_undo_restores_identical_subtree() {
 #[test]
 fn validation_rejects_structural_violations() {
     let (mut doc, mut ids, ab) = doc_with_artboard();
-    let root = doc.root();
+    let root = doc.first_page();
 
     // An artboard inside an artboard is *allowed* (§5.3, relaxed): a frame is a
     // page, and a page inside a page is a card, a component, a state. It used to be

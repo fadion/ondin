@@ -113,7 +113,11 @@ fn mode(op: &Operation) -> Mode {
         | Operation::InsertSubtree { .. }
         | Operation::Reparent { .. }
         | Operation::Reorder { .. }
-        | Operation::SetCanvasBackground { .. }
+        | Operation::SetPageGround { .. }
+        | Operation::SetPageDraft { .. }
+        | Operation::AddPage { .. }
+        | Operation::RemovePage { .. }
+        | Operation::MovePage { .. }
         | Operation::AddGuide { .. }
         | Operation::RemoveGuide { .. }
         | Operation::SetGuidePosition { .. }

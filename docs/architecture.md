@@ -29,7 +29,7 @@ Read the file for the exact wording before relying on one.
 | `invariants.md` | 4 | The twelve invariants |
 | `testing.md` | 11 | Testing strategy, goldens |
 | **Core** | | |
-| `core-model.md` | 5–5.3, 5.5 | Module layout, identity, the node model, the document and guides |
+| `core-model.md` | 5–5.3, 5.5 | Module layout, identity, the node model, the document, pages and guides |
 | `core-ops.md` | 5.6–5.10 | Transform and resize semantics, operations, builders (`build.rs`), layer names, history, `Resolved`, queries |
 | `effects.md` | 5.3a, 6.4 | Layer effects: model and render passes |
 | `layout.md` | 5.3b, 5.3c | Layout grids; container layout (flexbox, grid, insets) |
@@ -44,7 +44,7 @@ Read the file for the exact wording before relying on one.
 | `export.md` | 7 | SVG, PNG, code export (HTML/CSS, React, Vue), JSON snapshot, the CLI, export doors |
 | `mcp.md` | 8 | MCP topology, headless mode, concurrency, the tool list (a test parses §8.4) |
 | **App** | | |
-| `app-chrome.md` | 9.1, 9.2 | UI chrome and panel layout |
+| `app-chrome.md` | 9.1, 9.2 | UI chrome and panel layout, the layers tree, the Pages section and the current page |
 | `app-dataflow.md` | 9.3 | The one-way valve: gestures, previews, the commit door |
 | `tools.md` | 9.4 | The v1 tools and canvas interaction |
 | `app-selection.md` | 9.4 | Selection on the canvas and in the layers panel |

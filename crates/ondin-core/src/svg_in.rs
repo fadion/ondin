@@ -5936,7 +5936,7 @@ mod tests {
             }
         }
         let mut out = Vec::new();
-        walk(doc, doc.root(), &mut out);
+        walk(doc, doc.first_page(), &mut out);
         out.into_iter()
             .next()
             .expect("a gradient fill was imported")
@@ -5959,7 +5959,7 @@ mod tests {
             }
         }
         let mut out = Vec::new();
-        walk(doc, doc.root(), &mut out);
+        walk(doc, doc.first_page(), &mut out);
         *out.first().expect("a gradient fill was imported")
     }
 

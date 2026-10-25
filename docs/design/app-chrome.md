@@ -59,7 +59,8 @@ ondin-app/src/
 ├─ machine_dir.rs   cache_dir()/ondin (OndinData on Windows)
 ├─ instances.rs     lock file per running Ondin
 ├─ app.rs           OndinApp: window layout, top bar, tool rail, Action dispatch, file IO
-├─ session.rs       EditorSession: Document, History, Resolved, IdSource, Selection, Camera, save state, status. NO GPU
+├─ session.rs       EditorSession: Document, History, Resolved, IdSource, Selection, Camera, current page, save state, status. NO GPU
+├─ pages.rs         the Pages section and the page verbs (below)
 ├─ atomic.rs        write(): temp, sync_all, rename (every record the app keeps)
 ├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback) + canvas interaction and overlays
 ├─ cursor.rs        canvas cursor bitmaps
@@ -71,7 +72,7 @@ ondin-app/src/
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
-├─ present.rs       present mode: top-level frames one at a time, fullscreen (app-canvas-chrome.md)
+├─ present.rs       present mode: top-level frames one at a time, page by page, fullscreen (app-canvas-chrome.md)
 ├─ preview.rs       in-flight gesture state (Drag, Handle, Pen*, TextSession) + PointSet
 ├─ prefs.rs         Prefs in config_dir()/ondin/prefs.json (the window's geometry is eframe's, in window.ron beside it)
 ├─ rulers.rs        ruler bars + ruler guides
@@ -113,6 +114,18 @@ ondin-app/src/
 - **`layers::resolve_drop`:** one level in from the row above means inside it at the end of its list; otherwise `ancestor_at_depth` gives the node whose slot is the answer. The no-cycle check (`build::can_parent`) is on the destination parent. `drop_spot` bounds the pointer on the right only, and picks the first row the pointer has not passed the bottom of.
 - **Structure guides** (`layers::tree_guide_segments`, `Prefs::tree_guides`, on by default): dashed trunks per open ancestor branch, a connector, and an elbow, 1.5 on / 2.5 off at 8.5% text. Every run starts with a dash; `ELBOW_CLEAR` and `layers::elbow_y` (snapped) keep junctions closed. Runs are computed after the walk from `TreeRow`s (the drop hint reads the same list); a trunk whose branch has closed is not drawn. Hover lights the parent's trunk down to the hovered row's elbow; a selected row lights the same path in `color::SELECT` (main/instance hexagons stay `text::STRONG`). Precedence is `layers::GuideInk`: hover beats selection run by run; a selected row under the pointer keeps blue. `layers::caret_column` is the one function for column x.
 - **Fold button** reads the room (`tree_is_all_collapsed` / `toggle_collapse_all`, both via `tree_containers`). A top-level row reserves caret room whether or not it has one (`caret_room = has_children || depth == 1`).
+
+### Pages (`pages.rs`)
+
+- **The current page** is `EditorSession::page`, always one of the document's pages (§5.5). Switching is a view change, never an edit and never saved in the file: no history step, no dirty flag. Every door goes through `OndinApp::go_to_page`, which finishes a live text edit, then `switch_page` parks this page's camera and selection for the sitting and brings back the ones the other page was left with; `page_changed` drops gesture and panel state naming the other page's layers, and frames a page shown for the first time this sitting (`take_first_visit`). `keep_page` moves off a page an edit took away, to the first page. The library remembers per machine the page each document was left on (`library::cache::LocalIndex::last_page`), and reopening goes there (`reopen_last_page`).
+- **A selection never spans pages** (`Selection::retain_existing(doc, page)` drops layers not on the page). The canvas, the layers tree, *Select all*, layer search, the rulers and guides and snapping all act on the current page. A paste lands on it; a copied layer's parent, or a guide's frame, on another page falls back to the current page's root.
+- **Undo and redo follow their step**: when none of the step's subjects (`Transaction::subjects`, read off `History::next_undo`/`next_redo` before it runs) is on the current page, the app goes to the page the first of them is on now, else was on, selects those there, and the status reads *Undo · on ‹page›*.
+- **The Pages section** heads the layers pane, shown even with one page: a header with a fold caret, *PAGES*, the current page's name while folded, and `+` (*New page*); then one row per page, the current one checked, a draft tagged *Draft*. A click switches; a double-click renames in place (Enter or a press elsewhere keeps the name, Escape the old one); a drag reorders, drawing the layer tree's insertion line (`MovePage`); a right-click opens the page menu (`context-menus.md` §6.8) without switching; layer rows dropped on another page's row move the selection there. The list fits six rows, then scrolls; its divider drags the height. Fold and height are preferences (`pages_folded`, `pages_height`).
+- **The verbs**, shared by the section, the page menu, the keyboard and the palette:
+  - *New page*: the lowest free `Page N`, at the end, on the current page's ground, made current with its name open. Adding and naming are one undo step (`commit_into_last`, over `History::fold_into_last`).
+  - *Next page* / *Previous page* (`Ctrl+PageDown` / `Ctrl+PageUp`, `Action::StepPage`) stop at either end.
+  - *Duplicate page*, *Draft* and *Delete page* as `context-menus.md` §6.8 gives them. Deleting the current page lands on the one above it (below it, for the first); the status line counts the instances detached.
+  - *Move to page* (`move_selection_to_page`): the selection to the top of the other page, in order, at the same place on the canvas (every page shares one origin); it leaves the selection and the view stays. One undo step.
 
 ## Traps
 

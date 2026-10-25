@@ -3,6 +3,10 @@
 //! edit with. Its own branch of `OndinApp::ui` draws and reads the keyboard, so no
 //! overlay or command needs to know it exists. Focus mode, which hides the panels
 //! while editing goes on, is a different thing.
+//!
+//! It runs across pages (`crate::pages`): every page that is not a draft, in
+//! order, each page's frames in reading order — and the current page even when
+//! it is a draft, since presenting from it asked for it.
 
 use crate::view::Camera;
 use ondin_core::NodeId;
@@ -11,8 +15,14 @@ use ondin_core::kurbo::{Point, Rect, Vec2};
 /// A presentation in progress.
 #[derive(Clone, Debug)]
 pub(crate) struct Presenting {
-    /// The frames shown, in reading order ([`reading_order`]).
+    /// The frames shown: page by page, each page's in reading order
+    /// ([`reading_order`]).
     pub frames: Vec<NodeId>,
+    /// The page each of [`Self::frames`] is on, index for index.
+    pub pages: Vec<NodeId>,
+    /// When the presentation last entered a page, in egui's clock — what times the
+    /// page chip's fade.
+    pub entered_at: f64,
     /// Which of them is on screen.
     pub at: usize,
     /// Whether the window was fullscreen before, so leaving puts it back.
@@ -46,8 +56,39 @@ impl Presenting {
         self.go(to, now);
     }
 
+    /// Go to the first frame of the next (`true`) or previous page presented,
+    /// staying put at either end. `Ctrl+PageDown` / `Ctrl+PageUp`.
+    pub fn jump_page(&mut self, forward: bool, now: f64) {
+        let here = self.pages[self.at];
+        let to = if forward {
+            self.pages[self.at..]
+                .iter()
+                .position(|p| *p != here)
+                .map(|i| self.at + i)
+        } else {
+            // The start of the page before this page's first frame.
+            let start = self.pages[..self.at]
+                .iter()
+                .rposition(|p| *p != here)
+                .map_or(0, |i| i + 1);
+            start.checked_sub(1).map(|before| {
+                let page = self.pages[before];
+                self.pages[..=before]
+                    .iter()
+                    .rposition(|p| *p != page)
+                    .map_or(0, |i| i + 1)
+            })
+        };
+        if let Some(to) = to {
+            self.go(to, now);
+        }
+    }
+
     fn go(&mut self, to: usize, now: f64) -> bool {
         let moved = to != self.at;
+        if self.pages.get(to) != self.pages.get(self.at) {
+            self.entered_at = now;
+        }
         self.to_top |= moved;
         self.at = to;
         self.stepped_at = now;
@@ -126,18 +167,31 @@ pub(crate) fn counter_alpha(since: f64) -> f32 {
 }
 
 impl crate::app::OndinApp {
-    /// The visible top-level frames with their world boxes, in no order.
-    pub(crate) fn presentable(&self) -> Vec<(NodeId, Rect)> {
+    /// The visible frames straight on `page`, with their world boxes, in no order.
+    pub(crate) fn presentable_on(&self, page: NodeId) -> Vec<(NodeId, Rect)> {
         let doc = &self.session.doc;
-        self.root_artboards()
+        doc.get(page)
+            .map(|n| n.children().to_vec())
+            .unwrap_or_default()
             .into_iter()
-            .filter(|id| doc.get(*id).is_some_and(|n| n.visible()))
+            .filter(|id| {
+                doc.get(*id).is_some_and(|n| {
+                    n.visible() && matches!(n.kind(), ondin_core::NodeKind::Artboard { .. })
+                })
+            })
             .filter_map(|id| Some((id, self.session.resolved.world_bounds(id)?)))
             .collect()
     }
 
+    /// The current page's presentable frames, what the palette's *Present* row
+    /// dims on.
+    pub(crate) fn presentable(&self) -> Vec<(NodeId, Rect)> {
+        self.presentable_on(self.session.page)
+    }
+
     /// Start presenting (`Ctrl+Alt+Enter`, the View menu, the palette): from the
-    /// frame holding the selection, else the one most in view, else the first.
+    /// frame holding the selection, else the one most in view, else the current
+    /// page's first, and on across the pages after it.
     pub(crate) fn start_presenting(&mut self, ctx: &egui::Context) {
         let found = self.presentable();
         if found.is_empty() {
@@ -146,7 +200,14 @@ impl crate::app::OndinApp {
         }
         self.finish_text_first();
         let doc = &self.session.doc;
-        let frames = reading_order(found.clone());
+        let here = self.session.page;
+        let mut frames = Vec::new();
+        let mut pages = Vec::new();
+        for p in doc.pages().iter().filter(|p| !p.draft || p.id == here) {
+            let order = reading_order(self.presentable_on(p.id));
+            pages.extend(std::iter::repeat_n(p.id, order.len()));
+            frames.extend(order);
+        }
         let holding = self.session.selection.ids().iter().find_map(|&id| {
             let mut at = id;
             loop {
@@ -163,17 +224,21 @@ impl crate::app::OndinApp {
             .filter(|(_, a)| *a > 0.0)
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(id, _)| id);
-        let start = holding.or(most_in_view).unwrap_or(frames[0]);
+        let first_here = frames[pages.iter().position(|p| *p == here).unwrap_or(0)];
+        let start = holding.or(most_in_view).unwrap_or(first_here);
         let at = frames.iter().position(|f| *f == start).unwrap_or(0);
+        let now = ctx.input(|i| i.time);
         self.context_menu = None;
         self.palette = None;
         let was_fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
         self.presenting = Some(Presenting {
             frames,
+            pages,
+            entered_at: now,
             at,
             was_fullscreen,
-            stepped_at: ctx.input(|i| i.time),
+            stepped_at: now,
             view: None,
             to_top: false,
         });
@@ -200,15 +265,23 @@ impl crate::app::OndinApp {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         let (rect, resp) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click());
-        let (next, back, home, end, leave) = ctx.input(|i| {
+        let (next, back, home, end, leave, page_jump) = ctx.input(|i| {
             let any = |keys: &[egui::Key]| keys.iter().any(|k| i.key_pressed(*k));
             use egui::Key::*;
+            // `Ctrl+PageDown` / `Ctrl+PageUp` jump a whole page; plain, a frame.
+            let ctrl = i.modifiers.command;
+            let jump = match (i.key_pressed(PageDown), i.key_pressed(PageUp)) {
+                (true, _) if ctrl => Some(true),
+                (_, true) if ctrl => Some(false),
+                _ => None,
+            };
             (
-                any(&[ArrowRight, ArrowDown, Space, PageDown, Enter]),
-                any(&[ArrowLeft, ArrowUp, PageUp, Backspace]),
+                !ctrl && any(&[ArrowRight, ArrowDown, Space, PageDown, Enter]),
+                !ctrl && any(&[ArrowLeft, ArrowUp, PageUp, Backspace]),
                 i.key_pressed(Home),
                 i.key_pressed(End),
                 i.key_pressed(Escape),
+                jump,
             )
         });
         if leave {
@@ -227,14 +300,26 @@ impl crate::app::OndinApp {
         if home || end {
             p.jump(end, now);
         }
+        if let Some(forward) = page_jump {
+            p.jump_page(forward, now);
+        }
         let (frame, at, total, since) = (p.frames[p.at], p.at, p.frames.len(), now - p.stepped_at);
+        let page = p.pages[p.at];
+        // Which of the presented pages this is, for the chip.
+        let mut shown_pages: Vec<NodeId> = p.pages.clone();
+        shown_pages.dedup();
+        let page_place = (
+            shown_pages.iter().position(|q| *q == page).unwrap_or(0) + 1,
+            shown_pages.len(),
+        );
+        let since_page = now - p.entered_at;
 
         let ppp = ctx.pixels_per_point();
         let px = (
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
         );
-        let ground = self.session.preview_canvas_background();
+        let ground = self.session.doc.ground(page);
         let matte = egui::Color32::from_rgba_unmultiplied(
             (ground.components[0] * 255.0) as u8,
             (ground.components[1] * 255.0) as u8,
@@ -280,7 +365,10 @@ impl crate::app::OndinApp {
         let camera = p.view.unwrap_or(fitted);
         self.session.set_chrome_ghost(None);
         let (doc, res, overrides) = self.session.render_inputs();
-        if let Some(tex) = self.canvas.render(doc, res, overrides, &camera, px, ground) {
+        if let Some(tex) = self
+            .canvas
+            .render(doc, res, overrides, &camera, px, ground, page)
+        {
             painter.image(
                 tex,
                 rect,
@@ -318,6 +406,19 @@ impl crate::app::OndinApp {
             painter.rect_filled(r, 0.0, matte);
         }
 
+        // On entering a page — and at the start, when there is more than one — its
+        // name in the corner, fading as the counter does. No title slide is made.
+        let page_alpha = counter_alpha(since_page);
+        if page_place.1 > 1 && page_alpha > 0.0 {
+            let name = self.page_name(page);
+            page_chip(
+                &painter,
+                rect,
+                &format!("{name}  ·  page {} of {}", page_place.0, page_place.1),
+                page_alpha,
+            );
+            ctx.request_repaint();
+        }
         let alpha = counter_alpha(since);
         if alpha > 0.0 {
             let name = self
@@ -368,6 +469,32 @@ fn counter(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32) 
 const COUNTER_PAD_X: f32 = 12.0;
 const COUNTER_PAD_Y: f32 = 6.0;
 const COUNTER_BOTTOM: f32 = 24.0;
+/// The page chip's distance from the screen's top-left corner.
+const PAGE_CHIP_INSET: f32 = 20.0;
+
+/// The page chip in the top-left corner: the counter's pill, on a squarer card.
+fn page_chip(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32) {
+    let galley = painter.layout_no_wrap(
+        text.to_string(),
+        egui::FontId::proportional(12.0),
+        crate::theme::text::STRONG.gamma_multiply(alpha),
+    );
+    let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);
+    let chip = egui::Rect::from_min_size(
+        screen.min + egui::vec2(PAGE_CHIP_INSET, PAGE_CHIP_INSET),
+        size,
+    );
+    painter.rect_filled(
+        chip,
+        egui::CornerRadius::same(6),
+        egui::Color32::from_black_alpha((180.0 * alpha) as u8),
+    );
+    painter.galley(
+        chip.min + egui::vec2(COUNTER_PAD_X, COUNTER_PAD_Y),
+        galley,
+        egui::Color32::WHITE,
+    );
+}
 
 #[cfg(test)]
 mod tests {
@@ -399,8 +526,11 @@ mod tests {
     #[test]
     fn stepping_stops_at_the_ends() {
         let mut ids = IdSource::new(0x9B);
+        let page = ids.mint();
         let mut p = Presenting {
             frames: vec![ids.mint(), ids.mint()],
+            pages: vec![page, page],
+            entered_at: 0.0,
             at: 0,
             was_fullscreen: false,
             stepped_at: 0.0,

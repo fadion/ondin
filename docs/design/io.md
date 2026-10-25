@@ -6,7 +6,7 @@ The native `.ondin` file format (JSON, versioned DTO), its integrity checks, the
 
 ### Format and the two readers
 
-- Native format is JSON, currently **v9** (`io::CURRENT_SCHEMA_VERSION`). `schema.rs` defines a versioned DTO decoupled from the in-memory types.
+- Native format is JSON, currently **v10** (`io::CURRENT_SCHEMA_VERSION`). `schema.rs` defines a versioned DTO decoupled from the in-memory types.
 - `io::clip` writes a copied subtree for the system clipboard through the same `NodeDto` and `ImageDto` a file uses (`from_node`/`into_node`, `from_entry`/`into_entry` are lifted out of `DocumentDto` for this), so every normalization applies to a pasted layer too. Refuse a second projection beside `NodeDto`: a field added to one and not the other compiles, saves and loads.
 - The clipboard deliberately does **not** share the migration ladder. `io::clip::read` compares `schema_version` for equality and refuses anything else: a file is an archive and must open in a build written years later; a clipboard is a handoff between two processes running now. Do not route `clip` through `migrate.rs`.
 - `io::clip::read` carries envelope checks of its own (§15 D833–D836, D852):
@@ -27,9 +27,9 @@ The native `.ondin` file format (JSON, versioned DTO), its integrity checks, the
 
 The in-memory walks (`subtree_ids`, `paint_path`, `resolve`) carry no visited set because `apply` cannot produce a cycle. The loader is where that guarantee is established, and it checks all of:
 
-- root exists, is `Root`, has no parent;
-- every non-root parent resolves; every listed child points back; no node is listed as a child twice;
-- every node is reachable from the root, or from the vault (the one other parentless node a file may hold, §5.3e). `kit::check` holds the vault's shape and origins at the end, beside `component::check`;
+- there is at least one page; no page is listed twice or is the vault; every page's root exists, is `Root`, has no parent. A page's ground is made opaque on load;
+- every parent of a node that is not a page's root or the vault resolves; every listed child points back; no node is listed as a child twice;
+- every node is reachable from a page, or from the vault (the one other parentless node a file may hold, §5.3e). `kit::check` holds the vault's shape and origins at the end, beside `component::check`;
 - no node deeper than `io::MAX_TREE_DEPTH` (256);
 - every parent/child pair obeys the same kind rules operations do;
 - no frame under a boolean or a mask (§5.3, §15 D876), checked as a flag per stack entry on the reachability walk;
@@ -38,7 +38,7 @@ The in-memory walks (`subtree_ids`, `paint_path`, `resolve`) carry no visited se
 
 Reachability and the duplicate check are what make cycles and orphan components impossible; without them a hand-edited file could hang the app.
 
-**Guides** are verified without a tree: malformed id, duplicate id and non-finite position are refused. A guide far off the artwork is legal. Ids come from the same reservation as nodes (§5.2). An `owner` that is dangling or not a frame is refused rather than promoted to global, since a scoped guide's position is in its owner's space. This also keeps drawing and snapping free of a fallback `check_guide_owner` will not let `apply` produce.
+**Guides** are verified without a tree: malformed id, duplicate id and non-finite position are refused. A guide far off the artwork is legal. Ids come from the same reservation as nodes (§5.2). An `owner` is required; one that is dangling or neither a frame nor a page is refused rather than promoted to page-wide, since a scoped guide's position is in its owner's space. This also keeps drawing and snapping free of a fallback `check_guide_owner` will not let `apply` produce.
 
 **There is deliberately no finiteness check in the loader**: `serde_json` writes non-finite `f64` as `null` and refuses `null`/overflowing literals at `from_value`, above the integrity walk. Protection is at the operation (`OpError::NonFinite`, invariant 8), which covers every number the model carries including paint.
 
@@ -71,14 +71,12 @@ Fields in that form, and the particular rule each adds:
 | --- | --- |
 | `Stroke::align` | Missing means `Center`, how v1 files were drawn. |
 | `Node::clip` | Named default says "yes", so it is re-checked against the kind on load (`dto.clip && dto.kind.clips_children()`). It is also normalized on the way **out** (`DocumentDto::from_document`), because `op_set_clip` accepts an inert flag on purpose. The loader's copy stays to guard hand-edited files. |
-| `DocumentDto::canvas_background` | First top-level additive field; absence reproduces the default ground. |
 | `DocumentDto::guides` | Absent means none. |
 | `Node::proportions_locked` | Bare default; no normalization (inert on every kind). |
 | `Node::pivot` | `skip_serializing_if = "Option::is_none"`; the loader must not re-decide which `Pivot` variant a kind gets (§5.3). |
 | `Stroke::sides`, `Stroke::dash_fit` | Skipped when whole-outline / unfitted. |
 | `Node::mask` | Skipped when false; normalized on load (`dto.mask && dto.kind.can_mask()`) to guard hand-edited files. |
 | `Node::mask_mode` | `skip_serializing_if = "is_shape_mask"`; loaded **without** gating on `mask`, since the mode is remembered while the mask is off. |
-| `GuideDto::owner` | Missing means whole-canvas. |
 | `ImageRef::fit`, `crop`, `tile_scale`, `orient`, `adjust` | Three predicates for framing (parameters live beside the mode, so a cropped image set back to Fill still writes its rectangle); `adjust` has one predicate plus one per slider, so a neutral adjustment is no bytes. The chosen value going *in* must be tested as well as the default staying out. |
 | `NodeDto::exports` | Skipped when empty, and every `ExportSpec` field but `format` skipped at its default (a plain 1x PNG writes `{"format":"Png"}`). A spec whose scale or quality cannot be valid is **dropped** on load (the operation refuses it, §5.7), since refusing the document over an export preset would lose the artwork to save the recipe. |
 | `NodeDto::effects` | Skipped when empty. Its test fixture is two same-kind entries on an artboard, to catch dedupe-by-kind. |
@@ -101,6 +99,7 @@ A bump **is** required when a field's meaning changes or its default would silen
 | v6 to v7 | Variables and modes (§5.3f) | Number only, moving `published.document`'s with it. Keys: `DocumentDto::variables` (modes in order, variables by id, above `images`), `NodeDto::mode`, `NodeDto::corner_vars`, each skipped when unset. A literal brush saves as before; a bound one as `{"var": <id>, "alpha": a}` (`alpha` omitted at 1). A v6 reader would drop `variables` and then refuse a bound fill as a malformed brush. |
 | v7 to v8 | Bindings, styles and kit tokens | Number only, published document moving with it. A v7 reader would silently lay bound gaps and padding out at 0. Keys, all skipped when unset or empty: `NodeDto::spacing_vars` (gap and padding); `visible_var` (a boolean cell saves as `{"boolean": true}`); `size_vars` (W/H); `text_vars` (content and family; a string cell saves as `{"string": "..."}`); `opacity_var`; `Stroke::width_var` and `Effect::vars`, saved **in the item** (the stroke or effect serializes as itself); `DocumentDto::styles` (above `images`, sorted by id) and `NodeDto::styles`, the loader refusing a repeated style id; a `"layout"` style value and `StyleRefs::layout`; `VariablesDto::kits` (each kit's modes and mapping by kit id); a variable's and a style's `origin` and `forked`. A layer whose list differs from its style's loads as written; the next commit running `style::settle` puts it back. |
 | v8 to v9 | Bound limits and type numbers, descriptions, preferred mains | Number only, published document moving with it. A v8 reader would lay a bound limit out at its literal 0 and lose the binding on save, refuse a widened `text_vars` with a parse error, and drop the rest. Keys, all skipped when unset or empty: `LayoutItem::limit_vars`, saved in the item; `text_vars`' number slots (written up to the last bound slot and never fewer than two, so a file binding only content or family saves as v8 wrote it and a two-slot file loads, `variable::text_vars_serde`); `NodeDto::description`, `Style::description` and `Variable::description`; `Property::preferred` (wire ids). |
+| v9 to v10 | Pages (§5.5) | `migrate_9_to_10`: `pages: [{id, ground, draft?}]` replaces `root` and the top-level `canvas_background`. The old root becomes the one page, its ground the old `canvas_background` or, absent, the default the file was drawn on; a guide with no `owner` ran the whole canvas, so it names that page (`GuideDto::owner` is required from v10); a root still named `Root` becomes `Page 1`. `draft` is skipped when false. The published document is reshaped the same way. A file with no `root` is left for the parse to refuse. |
 
 ## 5.11a The library block
 
@@ -116,8 +115,8 @@ A bump **is** required when a field's meaning changes or its default would silen
 - **`io::probe::meta_in_prefix`** reads the block from the first 4 KB and answers `Found`, `Absent` or `Inconclusive`. Hand-rolled, because serde needs a complete value and a prefix is incomplete. A zero-byte read from an unhydrated cloud placeholder must never be cached as "no name".
   - `library::scan::read_meta` maps `Found` to the block; `Absent` to a healthy pre-library document with default metadata and `Entry::unread = false` *without opening the file*; `Inconclusive` to a full read + `io::load`, the one path that can report a file unreadable.
   - `Absent` is a positive claim ("one of ours, no block"). Anything the prefix cannot definitely account for (not an object, a stray byte where a key belongs, a duplicate `meta`, a block that will not deserialize, a prefix that ran out) is `Inconclusive`. A wrong `Inconclusive` costs a slow scan; a wrong `Absent` asserts a renamed PNG is a healthy document.
-  - A duplicate `meta` key is refused, not resolved: serde keeps the last, the probe would return on the first, and the probe's value feeds `Entry::meta`/`cover::key` while recovery and version history use the loaded document's. The walk defers its return to `root` to see a second key, the writer putting `root` immediately after `meta`.
-  - `Absent` is the one place key order is trusted (`schema.rs` emits `meta` before `root`). A hand-reordered file costs the dashboard a filename instead of a typed name and heals on the next save; that is the only wrong answer allowed.
+  - A duplicate `meta` key is refused, not resolved: serde keeps the last, the probe would return on the first, and the probe's value feeds `Entry::meta`/`cover::key` while recovery and version history use the loaded document's. The walk defers its return to `pages` (`root` in a file before v10) to see a second key, the writer putting `pages` immediately after `meta`.
+  - `Absent` is the one place key order is trusted (`schema.rs` emits `meta` before `pages`). A hand-reordered file costs the dashboard a filename instead of a typed name and heals on the next save; that is the only wrong answer allowed.
 
 ## Traps
 

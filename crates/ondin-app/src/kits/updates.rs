@@ -429,7 +429,8 @@ impl OndinApp {
             .collect();
         // The dry run mints from the session's ids: ids are never reused, so
         // the ones it spends are only skipped.
-        let s = ondin_core::kit::update_all(&self.session.doc, &mut self.session.ids, &args)
+        let page = self.session.page;
+        let s = ondin_core::kit::update_all(&self.session.doc, &mut self.session.ids, page, &args)
             .ok()
             .map(|u| super::summary::summary(&self.session.doc, &u));
         self.kit_summary = Some((key, s.clone()));
@@ -503,8 +504,9 @@ impl OndinApp {
             .map(|(k, v, p)| (k.as_str(), *v, p.as_ref()))
             .collect();
         let doc = &self.session.doc;
-        let content = self.session.preview_world_bounds(doc.root());
-        let update = match ondin_core::kit::update_all(doc, &mut self.session.ids, &args) {
+        let page = self.session.page;
+        let content = self.session.preview_world_bounds(page);
+        let update = match ondin_core::kit::update_all(doc, &mut self.session.ids, page, &args) {
             Ok(u) => u,
             // **This kit's publish reaches a newer version of a third kit's
             // main than the document holds** (§15 D1024, the kits QA review's
@@ -819,7 +821,7 @@ mod tests {
         let Some(super::Load::Ready(Some(p))) = app.kit_shelf.load(kit) else {
             panic!("the kit loads")
         };
-        let root_id = app.session.doc.root();
+        let root_id = app.session.doc.first_page();
         let (tx, inst) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,
@@ -1066,7 +1068,7 @@ mod tests {
         let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
         let content = app
             .session
-            .preview_world_bounds(app.session.doc.root())
+            .preview_world_bounds(app.session.doc.first_page())
             .unwrap();
         republish(
             &path,
@@ -1081,7 +1083,7 @@ mod tests {
         let doc = &app.session.doc;
         assert_eq!(
             doc.get(main).unwrap().parent(),
-            Some(doc.root()),
+            Some(doc.first_page()),
             "out of the vault"
         );
         assert!(doc.get(main).unwrap().origin().is_none());
@@ -1185,7 +1187,7 @@ mod tests {
         let before = app.session.doc.clone();
         app.make_local_now(&[main]);
         let doc = &app.session.doc;
-        assert_eq!(doc.get(main).unwrap().parent(), Some(doc.root()));
+        assert_eq!(doc.get(main).unwrap().parent(), Some(doc.first_page()));
         assert_eq!(doc.get(inst).unwrap().link(), Some(main));
         assert!(
             app.session
@@ -1476,7 +1478,7 @@ mod tests {
         let kit_id = "5eed00000000000000000000000000a1";
 
         let mut app = OndinApp::headless(&ctx);
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         let mut placed = Vec::new();
         for main in [icon, card] {
             let (tx, inst) = ondin_core::kit::insert(
@@ -1588,7 +1590,7 @@ mod tests {
         let mut ids = IdSource::new(0xB1);
         let mut icons = Document::new(ids.mint());
         let [icon, dot] = [(); 2].map(|_| ids.mint());
-        let r = icons.root();
+        let r = icons.first_page();
         icons
             .apply(&Transaction(vec![
                 frame(icon, r, 0, "Icon"),
@@ -1605,7 +1607,7 @@ mod tests {
         let mut aids = IdSource::new(0xA2);
         let mut cards = Document::new(aids.mint());
         let card = aids.mint();
-        let r = cards.root();
+        let r = cards.first_page();
         cards
             .apply(&Transaction(vec![
                 frame(card, r, 0, "Card"),
@@ -1623,7 +1625,7 @@ mod tests {
         let cards_v1 = cards.published().unwrap().clone();
 
         let mut app = crate::kits::picker::tests::app_on(&ctx, root.clone());
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         let (tx, inst) = ondin_core::kit::insert(
             &app.session.doc,
             &mut app.session.ids,
@@ -1677,6 +1679,7 @@ mod tests {
                 ondin_core::kit::update_all(
                     &app.session.doc,
                     &mut scratch_ids,
+                    app.session.page,
                     &[(&cards_id, 2, &cards_v2)]
                 ),
                 Err(ondin_core::kit::KitError::NeedsUpdate(_))
@@ -1742,7 +1745,7 @@ mod tests {
             .published()
             .unwrap()
             .clone();
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         for top in [set, badge] {
             let (tx, _) = ondin_core::kit::insert(
                 &app.session.doc,
@@ -1799,7 +1802,7 @@ mod tests {
         for t in &tops {
             assert_eq!(
                 doc.get(*t).unwrap().parent(),
-                Some(doc.root()),
+                Some(doc.first_page()),
                 "both revealed"
             );
         }
@@ -1917,7 +1920,7 @@ mod tests {
         let root = temp_root("text-accept");
         let (path, kit, badge, dot) = file_kit(&root);
         let (mut app, _) = consumer(&ctx, &root, &kit, badge);
-        let page = app.session.doc.root();
+        let page = app.session.doc.first_page();
         let label = typing_into(&mut app, page);
         republish(
             &path,

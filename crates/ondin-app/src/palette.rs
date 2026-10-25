@@ -432,7 +432,7 @@ impl OndinApp {
             return sel.first().copied();
         }
         let doc = &self.session.doc;
-        let mut stack = vec![doc.root()];
+        let mut stack = vec![self.session.page];
         while let Some(id) = stack.pop() {
             if sel.contains(&id) {
                 return Some(id);
@@ -504,6 +504,38 @@ impl OndinApp {
             push(&mut out, Cmd::verb(Item::Tool(tool), None));
         }
         push(&mut out, Cmd::verb(Item::PlaceImage, None));
+        // Pages: the one way to reach another page with the layers pane hidden.
+        push(&mut out, Cmd::verb(Item::NewPage, None));
+        let at = doc.page_index(self.session.page).unwrap_or(0);
+        let last = doc.pages().len() - 1;
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::StepPage(true),
+                (at == last).then_some("This is the last page"),
+            ),
+        );
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::StepPage(false),
+                (at == 0).then_some("This is the first page"),
+            ),
+        );
+        for page in doc.page_ids() {
+            let name = self.page_name(page);
+            let mut go = Cmd::verb(
+                Item::GoToPage(page),
+                (page == self.session.page).then_some("This is the current page"),
+            );
+            go.label = format!("Go to page: {name}");
+            push(&mut out, go);
+            if page != self.session.page {
+                let mut send = Cmd::verb(Item::MoveTo(page), need_sel);
+                send.label = format!("Move to page: {name}");
+                push(&mut out, send);
+            }
+        }
         for item in [Item::ZoomIn, Item::ZoomOut, Item::ZoomReset] {
             push(&mut out, Cmd::verb(item, None));
         }
@@ -630,8 +662,8 @@ impl OndinApp {
     /// The layers whose names match, as the palette lists them.
     fn palette_layers(&self, needle: &str, cap: usize) -> (Vec<LayerHit>, usize) {
         let doc = &self.session.doc;
-        let root = doc.root();
-        let ids: Vec<NodeId> = crate::panels::layers::name_hits(doc, needle)
+        let root = self.session.page;
+        let ids: Vec<NodeId> = crate::panels::layers::name_hits(doc, root, needle)
             .into_iter()
             .filter(|id| *id != root)
             .collect();
@@ -773,6 +805,7 @@ impl OndinApp {
             Target::TextSession => "Editing text".into(),
             Target::Points => "Points on the path".into(),
             Target::Guide(_) => "A guide".into(),
+            Target::Page(p) => self.page_name(p),
             Target::Canvas | Target::PanelBackground => "Nothing selected".into(),
             Target::Layer { id, .. } => {
                 let name = self
@@ -1454,7 +1487,7 @@ mod tests {
         use ondin_core::{NodeKind, Operation, Transaction};
         let s = &mut app.session;
         let id = s.ids.mint();
-        let parent = s.doc.root();
+        let parent = s.doc.first_page();
         let index = s.doc.get(parent).map_or(0, |n| n.children().len());
         assert!(s.commit(Transaction(vec![Operation::CreateNode {
             id,
@@ -1762,7 +1795,7 @@ mod tests {
         let low = add_named(&mut app, "card low");
         let s = &mut app.session;
         let (group, inner) = (s.ids.mint(), s.ids.mint());
-        let root = s.doc.root();
+        let root = s.doc.first_page();
         let top = s.doc.get(root).map_or(0, |n| n.children().len());
         assert!(s.commit(Transaction(vec![
             Operation::CreateNode {
@@ -1785,7 +1818,7 @@ mod tests {
                 name: Some("CARD inner".into()),
             },
         ])));
-        let hits = crate::panels::layers::name_hits(&app.session.doc, "Card");
+        let hits = crate::panels::layers::name_hits(&app.session.doc, app.session.page, "Card");
         assert_eq!(hits, vec![group, inner, low]);
     }
 
@@ -1860,7 +1893,7 @@ mod tests {
 
         let mut ids = IdSource::new(0x9A1);
         let id = ids.mint();
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
             id,
             parent: root,

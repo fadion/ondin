@@ -266,11 +266,41 @@ pub enum Operation {
         of: Described,
         text: String,
     },
-    /// The ground behind and around the frames — the one operation with no node
-    /// to name (§15 D18). A solid colour, not a `Brush`: nothing lies behind it
-    /// for a gradient or an alpha to act on.
-    SetCanvasBackground {
-        background: Color,
+    /// The ground behind and around a page's frames (`crate::page`). A solid
+    /// colour, not a `Brush`: nothing lies behind it for a gradient or an alpha
+    /// to act on.
+    SetPageGround {
+        id: NodeId,
+        ground: Color,
+    },
+    /// Add an empty page at `index` of the page order. Inverts to
+    /// [`Self::RemovePage`]. The caller mints the id, as for a node.
+    ///
+    /// **Carries everything a page has besides its layers**, so the inverse of a
+    /// removal brings back the page that was there, not a default one.
+    AddPage {
+        id: NodeId,
+        index: usize,
+        name: String,
+        ground: Color,
+        draft: bool,
+        mode: Option<crate::variable::ModeId>,
+    },
+    /// Remove a page. Refused for the last page and for one still holding layers
+    /// or guides: deleting a page is those deletes first, then this, so undo
+    /// re-adds the page before anything goes back on it.
+    RemovePage {
+        id: NodeId,
+    },
+    /// Move a page to `index` of the page order.
+    MovePage {
+        id: NodeId,
+        index: usize,
+    },
+    /// Mark a page as a draft or clear it (`crate::page::Page::draft`).
+    SetPageDraft {
+        id: NodeId,
+        draft: bool,
     },
     /// Place a ruler guide. The caller mints the id, as for a node (§5.2,
     /// invariant 3).
@@ -290,8 +320,8 @@ pub enum Operation {
         id: GuideId,
         color: Option<Color>,
     },
-    /// Rescope a guide: which frame owns it, and where it sits in that owner's
-    /// space (`None` owner meaning the canvas, in world space).
+    /// Rescope a guide: which frame or page owns it, and where it sits in that
+    /// owner's space (a page's is world space).
     ///
     /// **The two fields move together or not at all.** `position` is read in the
     /// owner's space (`Guide::position`), so changing the owner alone would
@@ -302,7 +332,7 @@ pub enum Operation {
     /// itself carrying the old pair.
     SetGuideScope {
         id: GuideId,
-        owner: Option<NodeId>,
+        owner: NodeId,
         position: f64,
     },
     /// Put an image's bytes in the document's table (`crate::image`).
@@ -562,7 +592,13 @@ impl Operation {
             | Operation::InsertSubtree { .. }
             | Operation::Reparent { .. }
             | Operation::Reorder { .. }
-            | Operation::SetCanvasBackground { .. }
+            // The page table: a page's ground and draft flag are not node fields,
+            // and adding, removing and moving pages is structural.
+            | Operation::SetPageGround { .. }
+            | Operation::SetPageDraft { .. }
+            | Operation::AddPage { .. }
+            | Operation::RemovePage { .. }
+            | Operation::MovePage { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }
@@ -748,6 +784,12 @@ impl Operation {
             // The vault is never drawn (§15 D1012).
             | Operation::OpenVault { .. }
             | Operation::CloseVault { .. }
+            // A page comes and goes empty, and its place in the order and its
+            // draft flag are read by the chrome, never drawn.
+            | Operation::AddPage { .. }
+            | Operation::RemovePage { .. }
+            | Operation::MovePage { .. }
+            | Operation::SetPageDraft { .. }
             // Provenance is a label on a node, never ink (§15 D1016).
             | Operation::SetOrigin { .. }
             // A variable's name is a row in the browser; a new or removed variable
@@ -810,7 +852,7 @@ impl Operation {
             // its layer**: a drop shadow reaches past the node's box, which is why
             // `effect::stack_escape` exists and the bounds cache reads it.
             | Operation::SetEffects { .. }
-            | Operation::SetCanvasBackground { .. }
+            | Operation::SetPageGround { .. }
             // **True, though neither touches a node**: a fill referring to an id
             // the table lacks draws the placeholder (§15 D179), so the entry going
             // back changes the picture.
@@ -872,12 +914,18 @@ impl Operation {
             | Operation::RemoveImage { .. }
             | Operation::OpenVault { .. }
             | Operation::CloseVault { .. }
+            | Operation::AddPage { .. }
+            | Operation::RemovePage { .. }
             | Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. } => false,
+            Operation::MovePage { id, index } => doc.page_index(*id) == Some(*index),
+            Operation::SetPageDraft { id, draft } => {
+                doc.page(*id).is_some_and(|p| p.draft == *draft)
+            }
 
             Operation::SetStyleName { id, name } => {
                 doc.styles().get(*id).is_some_and(|s| s.name == *name)
@@ -1105,7 +1153,9 @@ impl Operation {
                 node(id).is_some_and(|n| n.props() == props.as_slice())
             }
 
-            Operation::SetCanvasBackground { background } => doc.canvas_background() == *background,
+            Operation::SetPageGround { id, ground } => {
+                doc.page(*id).is_some_and(|p| p.ground == *ground)
+            }
             Operation::SetGuidePosition { id, position } => {
                 doc.guide(*id).is_some_and(|g| g.position == *position)
             }
@@ -1134,6 +1184,40 @@ fn child_index(doc: &crate::Document, id: NodeId) -> Option<usize> {
 }
 
 impl Transaction {
+    /// The nodes this transaction's operations name, in order, each once: what
+    /// it is *about* — the layer recoloured, moved, created or deleted, the page
+    /// added or regrounded — rather than every node it dirties (a moved layer's
+    /// old and new parents). Table-only operations name none.
+    pub fn subjects(&self) -> Vec<NodeId> {
+        let mut out: Vec<NodeId> = Vec::new();
+        for op in &self.0 {
+            let named = match op {
+                Operation::CreateNode { id, .. }
+                | Operation::DeleteNode { id }
+                | Operation::Reparent { id, .. }
+                | Operation::Reorder { id, .. }
+                | Operation::SetPageGround { id, .. }
+                | Operation::SetPageDraft { id, .. }
+                | Operation::AddPage { id, .. }
+                | Operation::RemovePage { id }
+                | Operation::MovePage { id, .. } => Some(*id),
+                // The subtree's root: the one node whose parent is not in it.
+                Operation::InsertSubtree { nodes, .. } => nodes
+                    .iter()
+                    .find(|n| {
+                        n.parent()
+                            .is_none_or(|p| !nodes.iter().any(|m| m.id() == p))
+                    })
+                    .map(Node::id),
+                other => other.overwrites(),
+            };
+            if let Some(id) = named.filter(|id| !out.contains(id)) {
+                out.push(id);
+            }
+        }
+        out
+    }
+
     /// Whether any operation in this changes what is drawn
     /// ([`Operation::changes_ink`]).
     ///
@@ -1361,8 +1445,13 @@ pub enum OpError {
     /// (§15 D736).
     #[error("a boolean could not be computed, so there is nothing to flatten")]
     BooleanAbandoned,
-    #[error("the root node cannot be deleted, reparented, or reordered")]
+    #[error("a page or the vault cannot be deleted, reparented, or reordered as a node")]
     CannotModifyRoot,
+    #[error("no such page: {0:?}")]
+    NoSuchPage(NodeId),
+    /// A page removed while it holds layers or guides, or the last one.
+    #[error("page {0:?} cannot be removed: it is the last page or is not empty")]
+    PageNotRemovable(NodeId),
     #[error("no such guide: {0:?}")]
     NoSuchGuide(GuideId),
     #[error("no such variable: {0:?}")]
@@ -1402,7 +1491,7 @@ pub enum OpError {
     /// Validated because a guide's `position` is read in its owner's space; it
     /// also makes the ordering inside a delete transaction matter — see
     /// [`crate::build::guides_of`].
-    #[error("a guide may only be scoped to a live frame, not {0:?}")]
+    #[error("a guide may only be scoped to a live frame or a page, not {0:?}")]
     BadGuideOwner(NodeId),
     /// One of a node's item lists repeats an item id (§15 D980); item ids match an
     /// instance's items to its main's. Checked after the last op.
@@ -1485,7 +1574,7 @@ mod changes_ink_tests {
                     axis: crate::guide::GuideAxis::Vertical,
                     position: 0.0,
                     color: None,
-                    owner: None,
+                    owner: id,
                 },
             },
             Operation::RemoveGuide { id: guide },
@@ -1499,7 +1588,7 @@ mod changes_ink_tests {
             },
             Operation::SetGuideScope {
                 id: guide,
-                owner: None,
+                owner: id,
                 position: 1.0,
             },
             // The style table and bindings draw nothing; the lists
@@ -1535,6 +1624,17 @@ mod changes_ink_tests {
             },
             Operation::OpenVault { id },
             Operation::CloseVault { id },
+            Operation::AddPage {
+                id,
+                index: 0,
+                name: "p".into(),
+                ground: peniko::Color::BLACK,
+                draft: false,
+                mode: None,
+            },
+            Operation::RemovePage { id },
+            Operation::MovePage { id, index: 0 },
+            Operation::SetPageDraft { id, draft: true },
             Operation::SetOrigin { id, origin: None },
             Operation::AddVariable {
                 var: crate::variable::Variable {
@@ -1559,7 +1659,7 @@ mod changes_ink_tests {
                 text: "d".into(),
             },
         ];
-        assert_eq!(invisible.len(), 34, "the whole false arm");
+        assert_eq!(invisible.len(), 38, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),
@@ -1567,12 +1667,13 @@ mod changes_ink_tests {
             );
         }
 
-        // The ones that draw, including `SetVisible` and `SetCanvasBackground`,
+        // The ones that draw, including `SetVisible` and `SetPageGround`,
         // which are easy to file with the bookkeeping above.
         let visible = [
             Operation::SetVisible { id, visible: false },
-            Operation::SetCanvasBackground {
-                background: peniko::Color::BLACK,
+            Operation::SetPageGround {
+                id,
+                ground: peniko::Color::BLACK,
             },
             Operation::SetOpacity { id, opacity: 0.5 },
             Operation::SetClip { id, clip: true },
@@ -1853,15 +1954,37 @@ mod changes_nothing_tests {
                 },
             ),
             (
-                Operation::SetCanvasBackground {
-                    background: doc.canvas_background(),
+                Operation::SetPageGround {
+                    id: doc.first_page(),
+                    ground: doc.ground(doc.first_page()),
                 },
-                Operation::SetCanvasBackground {
-                    background: peniko::Color::from_rgb8(1, 2, 3),
+                Operation::SetPageGround {
+                    id: doc.first_page(),
+                    ground: peniko::Color::from_rgb8(1, 2, 3),
+                },
+            ),
+            (
+                Operation::MovePage {
+                    id: doc.first_page(),
+                    index: 0,
+                },
+                Operation::MovePage {
+                    id: doc.first_page(),
+                    index: 1,
+                },
+            ),
+            (
+                Operation::SetPageDraft {
+                    id: doc.first_page(),
+                    draft: false,
+                },
+                Operation::SetPageDraft {
+                    id: doc.first_page(),
+                    draft: true,
                 },
             ),
         ];
-        assert_eq!(pairs.len(), 16, "one pair per shape of arm");
+        assert_eq!(pairs.len(), 18, "one pair per shape of arm");
         for (still, moved) in &pairs {
             assert!(
                 still.changes_nothing(&doc),

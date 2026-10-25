@@ -832,7 +832,7 @@ fn capture_remap_insert_duplicates_a_subtree_with_fresh_ids() {
 fn template_node_count(doc: &Document) -> usize {
     // Count reachable nodes from the root.
     let mut count = 0;
-    let mut stack = vec![doc.root()];
+    let mut stack = vec![doc.first_page()];
     while let Some(id) = stack.pop() {
         if let Some(n) = doc.get(id) {
             count += 1;
@@ -844,13 +844,13 @@ fn template_node_count(doc: &Document) -> usize {
 
 // --- guides ---------------------------------------------------------------
 
-fn guide_at(ids: &mut IdSource, axis: GuideAxis, position: f64) -> Guide {
+fn guide_at(ids: &mut IdSource, owner: NodeId, axis: GuideAxis, position: f64) -> Guide {
     Guide {
         id: GuideId(ids.mint()),
         axis,
         position,
         color: None,
-        owner: None,
+        owner,
     }
 }
 
@@ -864,7 +864,7 @@ fn guide_operations_round_trip_through_undo() {
     let mut hist = History::new();
     let red = Color::from_rgba8(200, 30, 60, 255);
 
-    let guide = guide_at(&mut ids, GuideAxis::Horizontal, 332.0);
+    let guide = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 332.0);
     hist.commit(&mut doc, Transaction(vec![Operation::AddGuide { guide }]))
         .unwrap();
     assert_eq!(doc.guides(), [guide]);
@@ -915,7 +915,14 @@ fn removing_all_guides_is_a_single_undo_step() {
     let mut hist = History::new();
 
     let placed: Vec<Guide> = (0..4)
-        .map(|i| guide_at(&mut ids, GuideAxis::Vertical, i as f64 * 100.0))
+        .map(|i| {
+            guide_at(
+                &mut ids,
+                doc.first_page(),
+                GuideAxis::Vertical,
+                i as f64 * 100.0,
+            )
+        })
         .collect();
     hist.commit(
         &mut doc,
@@ -950,7 +957,7 @@ fn removing_all_guides_is_a_single_undo_step() {
 fn a_guide_op_on_a_missing_guide_fails_atomically() {
     let mut ids = IdSource::new(0x6D1DE);
     let mut doc = Document::new(ids.mint());
-    let good = guide_at(&mut ids, GuideAxis::Horizontal, 10.0);
+    let good = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 10.0);
     let ghost = GuideId(ids.mint());
 
     let err = doc
@@ -1013,7 +1020,7 @@ fn rescoping_a_guide_moves_its_owner_and_position_as_one_step() {
     let mut hist = History::new();
 
     // A global guide at world y = 340.
-    let guide = guide_at(&mut ids, GuideAxis::Horizontal, 340.0);
+    let guide = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 340.0);
     hist.commit(&mut doc, Transaction(vec![Operation::AddGuide { guide }]))
         .unwrap();
 
@@ -1023,13 +1030,13 @@ fn rescoping_a_guide_moves_its_owner_and_position_as_one_step() {
         &mut doc,
         Transaction(vec![Operation::SetGuideScope {
             id: guide.id,
-            owner: Some(frame),
+            owner: frame,
             position: 40.0,
         }]),
     )
     .unwrap();
     let scoped = *doc.guide(guide.id).unwrap();
-    assert_eq!((scoped.owner, scoped.position), (Some(frame), 40.0));
+    assert_eq!((scoped.owner, scoped.position), (frame, 40.0));
 
     // One undo, and both halves come back. A `SetGuidePosition` beside a
     // scope-only setter would have needed two.
@@ -1037,7 +1044,7 @@ fn rescoping_a_guide_moves_its_owner_and_position_as_one_step() {
     let back = *doc.guide(guide.id).unwrap();
     assert_eq!(
         (back.owner, back.position),
-        (None, 340.0),
+        (doc.first_page(), 340.0),
         "the guide must return to the space it came from, not keep the local number"
     );
 
@@ -1045,12 +1052,11 @@ fn rescoping_a_guide_moves_its_owner_and_position_as_one_step() {
     assert_eq!(*doc.guide(guide.id).unwrap(), scoped);
 }
 
-/// A guide may only be scoped to a live **frame**. Neither a shape, nor a group,
-/// nor the root, nor a node that is not there at all — a scoped guide's position
-/// is read in its owner's space, so an owner with no box is a guide with no
-/// place.
+/// A guide may only be scoped to a live **frame** or a page. Neither a shape, nor
+/// a group, nor a node that is not there at all — a scoped guide's position is
+/// read in its owner's space, so an owner with no box is a guide with no place.
 #[test]
-fn a_guide_may_only_be_scoped_to_a_frame() {
+fn a_guide_may_only_be_scoped_to_a_frame_or_a_page() {
     let (mut doc, mut ids, frame, _) = framed();
     let shape = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -1062,16 +1068,12 @@ fn a_guide_may_only_be_scoped_to_a_frame() {
         name: None,
     }]))
     .unwrap();
-    let root = doc.root();
+    let root = doc.first_page();
     let ghost = ids.mint();
 
-    for (name, owner) in [
-        ("a shape", shape),
-        ("the root", root),
-        ("a node that is not there", ghost),
-    ] {
-        let mut guide = guide_at(&mut ids, GuideAxis::Vertical, 10.0);
-        guide.owner = Some(owner);
+    for (name, owner) in [("a shape", shape), ("a node that is not there", ghost)] {
+        let mut guide = guide_at(&mut ids, doc.first_page(), GuideAxis::Vertical, 10.0);
+        guide.owner = owner;
         let err = doc
             .apply(&Transaction(vec![Operation::AddGuide { guide }]))
             .unwrap_err();
@@ -1082,23 +1084,32 @@ fn a_guide_may_only_be_scoped_to_a_frame() {
         assert!(doc.guides().is_empty(), "{name} left a guide behind");
     }
 
+    // The page is fine: a canvas-wide guide.
+    let on_page = guide_at(&mut ids, root, GuideAxis::Vertical, 10.0);
+    doc.apply(&Transaction(vec![Operation::AddGuide { guide: on_page }]))
+        .unwrap();
+    doc.apply(&Transaction(vec![Operation::RemoveGuide {
+        id: on_page.id,
+    }]))
+    .unwrap();
+
     // And the frame itself is fine, nested one included.
-    let mut guide = guide_at(&mut ids, GuideAxis::Vertical, 10.0);
-    guide.owner = Some(frame);
+    let mut guide = guide_at(&mut ids, doc.first_page(), GuideAxis::Vertical, 10.0);
+    guide.owner = frame;
     doc.apply(&Transaction(vec![Operation::AddGuide { guide }]))
         .unwrap();
-    assert_eq!(doc.guide(guide.id).unwrap().owner, Some(frame));
+    assert_eq!(doc.guide(guide.id).unwrap().owner, frame);
 
     // A rescope onto an illegal owner is refused too, and leaves the guide alone.
     let err = doc
         .apply(&Transaction(vec![Operation::SetGuideScope {
             id: guide.id,
-            owner: Some(shape),
+            owner: shape,
             position: 0.0,
         }]))
         .unwrap_err();
     assert!(matches!(err, OpError::BadGuideOwner(id) if id == shape));
-    assert_eq!(doc.guide(guide.id).unwrap().owner, Some(frame));
+    assert_eq!(doc.guide(guide.id).unwrap().owner, frame);
 }
 
 /// `guides_of` collects the guides a delete must take with it — including those
@@ -1110,7 +1121,7 @@ fn deleting_a_frame_collects_the_guides_of_every_frame_inside_it() {
     let elsewhere = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
         id: elsewhere,
-        parent: doc.root(),
+        parent: doc.first_page(),
         index: 1,
         kind: artboard(),
         transform: None,
@@ -1118,13 +1129,13 @@ fn deleting_a_frame_collects_the_guides_of_every_frame_inside_it() {
     }]))
     .unwrap();
 
-    let mut on_outer = guide_at(&mut ids, GuideAxis::Horizontal, 10.0);
-    on_outer.owner = Some(outer);
-    let mut on_inner = guide_at(&mut ids, GuideAxis::Vertical, 20.0);
-    on_inner.owner = Some(inner);
-    let mut on_other = guide_at(&mut ids, GuideAxis::Vertical, 30.0);
-    on_other.owner = Some(elsewhere);
-    let global = guide_at(&mut ids, GuideAxis::Horizontal, 40.0);
+    let mut on_outer = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 10.0);
+    on_outer.owner = outer;
+    let mut on_inner = guide_at(&mut ids, doc.first_page(), GuideAxis::Vertical, 20.0);
+    on_inner.owner = inner;
+    let mut on_other = guide_at(&mut ids, doc.first_page(), GuideAxis::Vertical, 30.0);
+    on_other.owner = elsewhere;
+    let global = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 40.0);
     doc.apply(&Transaction(
         [on_outer, on_inner, on_other, global]
             .into_iter()
@@ -1279,8 +1290,8 @@ fn an_export_scale_that_cannot_be_a_size_is_refused() {
 #[test]
 fn deleting_a_frame_that_owns_a_guide_is_refused_or_still_loads() {
     let (mut doc, mut ids, frame, _) = framed();
-    let mut guide = guide_at(&mut ids, GuideAxis::Horizontal, 40.0);
-    guide.owner = Some(frame);
+    let mut guide = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 40.0);
+    guide.owner = frame;
     doc.apply(&Transaction(vec![Operation::AddGuide { guide }]))
         .unwrap();
 
@@ -1316,8 +1327,8 @@ fn deleting_a_frame_that_owns_a_guide_is_refused_or_still_loads() {
 #[test]
 fn undoing_a_frame_delete_restores_its_guides() {
     let (mut doc, mut ids, frame, _) = framed();
-    let mut guide = guide_at(&mut ids, GuideAxis::Horizontal, 40.0);
-    guide.owner = Some(frame);
+    let mut guide = guide_at(&mut ids, doc.first_page(), GuideAxis::Horizontal, 40.0);
+    guide.owner = frame;
     doc.apply(&Transaction(vec![Operation::AddGuide { guide }]))
         .unwrap();
 
@@ -1430,8 +1441,10 @@ fn cloning_a_document_shares_its_image_bytes_rather_than_copying_them() {
     // And through `apply` itself, which is where the clone actually happens and
     // the only reason any of this matters.
     let mut doc2 = doc.clone();
-    doc2.apply(&Transaction(vec![Operation::SetCanvasBackground {
-        background: Color::WHITE,
+    let page = doc2.first_page();
+    doc2.apply(&Transaction(vec![Operation::SetPageGround {
+        id: page,
+        ground: Color::WHITE,
     }]))
     .expect("any committed edit");
     assert_eq!(
@@ -1536,7 +1549,7 @@ fn an_image_id_cannot_be_claimed_twice_and_an_absent_one_cannot_be_removed() {
 fn deleting_the_last_layer_showing_an_image_leaves_the_table_alone() {
     let mut ids = IdSource::new(1);
     let mut doc = Document::new(ids.mint());
-    let root = doc.root();
+    let root = doc.first_page();
     let mut hist = History::new();
     let (id, entry) = photo();
     let rect = ids.mint();
@@ -1644,7 +1657,7 @@ fn a_mask_governs_up_to_the_next_one_and_is_never_masked_itself() {
 fn a_mask_is_refused_on_the_kinds_that_cannot_be_one() {
     let (mut doc, mut ids, ab) = base();
     let mut hist = History::new();
-    let root = doc.root();
+    let root = doc.first_page();
     let shapes = [rect(), text(), NodeKind::Group];
     for kind in shapes {
         let id = ids.mint();
@@ -1776,7 +1789,7 @@ fn effects_go_on_a_container_but_never_on_the_root() {
 
     let err = doc
         .apply(&Transaction(vec![Operation::SetEffects {
-            id: doc.root(),
+            id: doc.first_page(),
             effects: stack,
         }]))
         .unwrap_err();

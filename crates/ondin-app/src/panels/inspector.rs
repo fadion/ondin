@@ -617,12 +617,12 @@ enum PaintScope {
     Selection,
 }
 impl PaintScope {
-    /// The node a slot hangs off. A selection has none, so it borrows the root as
+    /// The node a slot hangs off. A selection has none, so it borrows the page as
     /// a placeholder; the slot carries the meaning.
     fn anchor(self, app: &OndinApp) -> NodeId {
         match self {
             PaintScope::Node(id) => id,
-            PaintScope::Selection => app.session.doc.root(),
+            PaintScope::Selection => app.session.page,
         }
     }
     /// The one node the scope is, or `None` for a selection.
@@ -739,32 +739,76 @@ fn mask_card_targets(doc: &ondin_core::Document, id: NodeId) -> Vec<NodeId> {
 /// The inspector's **first** card — the identity or summary of whatever is
 /// selected.
 ///
-/// All five headers ([`canvas_header`], [`OndinApp::inspector_header`],
+/// All five headers ([`OndinApp::page_header`], [`OndinApp::inspector_header`],
 /// [`OndinApp::guide_header`], [`OndinApp::points_header`],
 /// [`OndinApp::inspector_multi`]) share one id salt so the ids stay stable across
 /// a change of subject.
 fn identity_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.push_id("identity", |ui| card(ui, add)).inner
 }
-/// The heading card the canvas gets, in place of a layer's identity card.
-///
-/// Same shape as [`OndinApp::inspector_header`], without eye, lock or rename:
-/// the canvas is not a layer.
-fn canvas_header(ui: &mut egui::Ui) {
-    let (glyph, _) = super::layers_icon(&NodeKind::Root);
-    identity_card(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 9.0;
-            identity_glyph(ui, glyph, color::ACCENT_300);
-            ui.label(
-                egui::RichText::new("Canvas")
-                    .size(13.0)
-                    .color(theme::text::STRONG),
-            );
-        });
-    });
-}
 impl OndinApp {
+    /// The heading card the current page gets with nothing selected, in place of a
+    /// layer's identity card (`crate::pages`): its name, renamed here as in the
+    /// Pages section, where it sits in the order, its *Mode* and its *Draft*
+    /// switch. No eye or lock: a page is not a layer.
+    fn page_header(&mut self, ui: &mut egui::Ui) {
+        let id = self.session.page;
+        let name0 = self.page_name(id);
+        let doc = &self.session.doc;
+        let place = format!(
+            "Page {} of {}",
+            doc.page_index(id).map_or(1, |i| i + 1),
+            doc.pages().len()
+        );
+        let draft = doc.page(id).is_some_and(|p| p.draft);
+        identity_card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 9.0;
+                identity_glyph(ui, icon::FILE, color::ACCENT_300);
+                // Buffered, committed once on defocus, as a layer's name is.
+                let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
+                let mut name = match &self.name_edit {
+                    Some((_, buf)) if editing => buf.clone(),
+                    _ => name0.clone(),
+                };
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut name)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(140.0)
+                        .font(egui::FontId::proportional(13.0)),
+                );
+                // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() commits the typed name once.
+                if resp.gained_focus() || resp.changed() {
+                    self.name_edit = Some((id, name.clone()));
+                }
+                if resp.lost_focus()
+                    && let Some((nid, val)) = self.name_edit.take()
+                    && nid == id
+                    && ui::defocus_commits(&resp)
+                {
+                    let name = val.trim().to_string();
+                    if !name.is_empty() && name != name0 {
+                        self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(place)
+                            .size(10.5)
+                            .color(theme::text::FAINT),
+                    );
+                });
+            });
+            self.frame_mode_row(ui, id);
+            if ui::switch_row(ui, "Draft", draft, 28.0)
+                .on_hover_text("Left out of kit publishing, Export all, exporting frames from all pages, the library thumbnail and presenting on past it")
+                .clicked()
+            {
+                self.toggle_page_draft(id);
+            }
+        });
+    }
+
     pub(crate) fn inspector_ui(&mut self, ui: &mut egui::Ui) {
         // A parked request only survives while its layer is still on show, or it
         // would ambush whoever selected that layer next.
@@ -976,19 +1020,21 @@ impl OndinApp {
             }
             // A real brush while it says `Mixed`, so the picker has somewhere to start.
             let brush = Brush::Solid(base);
-            self.paint_hex_field(ui, self.session.doc.root(), slot, &brush, mixed);
+            self.paint_hex_field(ui, self.session.page, slot, &brush, mixed);
         });
         open
     }
-    /// With nothing selected, the inspector describes the canvas: its ground
-    /// colour, and a reset to the default that is dead while already there.
+    /// With nothing selected, the inspector describes the current page: its card,
+    /// then its ground colour, and a reset to the default that is dead while
+    /// already there.
     fn inspector_empty(&mut self, ui: &mut egui::Ui) {
-        let ground = self.session.preview_canvas_background();
+        let ground = self.session.preview_ground();
+        let page = self.session.page;
         let is_default = ground.to_rgba8().to_u8_array()
             == crate::session::DEFAULT_CANVAS_BACKGROUND
                 .to_rgba8()
                 .to_u8_array();
-        canvas_header(ui);
+        self.page_header(ui);
         self.colour_panel(
             ui,
             ColourCard {
@@ -1003,8 +1049,9 @@ impl OndinApp {
                 resettable: !is_default,
             },
             || {
-                Transaction(vec![Operation::SetCanvasBackground {
-                    background: crate::session::DEFAULT_CANVAS_BACKGROUND,
+                Transaction(vec![Operation::SetPageGround {
+                    id: page,
+                    ground: crate::session::DEFAULT_CANVAS_BACKGROUND,
                 }])
             },
         );
@@ -1165,7 +1212,7 @@ impl OndinApp {
                     app.commit_edit(reset());
                 }
                 if opened {
-                    app.open_picker(ui, app.session.doc.root(), card.slot, anchor);
+                    app.open_picker(ui, app.session.page, card.slot, anchor);
                 }
             });
         });
@@ -2669,7 +2716,7 @@ impl OndinApp {
         if colors.is_empty() && gradients.is_empty() {
             return;
         }
-        let root = self.session.doc.root();
+        let root = self.session.page;
         let mut select: Option<Vec<NodeId>> = None;
         self.panel(ui, "Group Colors", None, |app, ui| {
             for use_ in &colors {
@@ -4806,7 +4853,7 @@ impl OndinApp {
         let target = list.target();
         let (brush, mixed) = self.mixed_row(target);
         let visible = self.mixed_visible(target);
-        let anchor = self.session.doc.root();
+        let anchor = self.session.page;
         let out = self.paint_row(
             ui,
             RowCtx {
@@ -8847,7 +8894,7 @@ impl OndinApp {
         }
         match slot {
             PaintSlot::Canvas => {
-                return Some(Brush::Solid(self.session.preview_canvas_background()));
+                return Some(Brush::Solid(self.session.preview_ground()));
             }
             PaintSlot::VarCell(var, mode) => {
                 if let Some((v, m, c)) = self.var_cell_preview
@@ -9092,8 +9139,9 @@ impl OndinApp {
             }
             // Opaque: there is nothing behind the canvas to show through.
             PaintSlot::Canvas => match paint::stops_of(&brush).first() {
-                Some((_, colour)) => Transaction(vec![Operation::SetCanvasBackground {
-                    background: colour.with_alpha(1.0),
+                Some((_, colour)) => Transaction(vec![Operation::SetPageGround {
+                    id: self.session.page,
+                    ground: colour.with_alpha(1.0),
                 }]),
                 None => Transaction(Vec::new()),
             },
@@ -9666,7 +9714,7 @@ impl OndinApp {
             0 => None,
             1 => {
                 let parent = self.session.doc.get(ids[0]).and_then(|n| n.parent())?;
-                if parent == self.session.doc.root() {
+                if parent == self.session.page {
                     return None;
                 }
                 res.world_bounds(parent)
@@ -13312,7 +13360,7 @@ mod spacing_readout_tests {
     /// selected — two gaps of 20.
     fn three_selected() -> (EditorSession, Vec<NodeId>) {
         let mut s = EditorSession::new();
-        let parent = s.doc.get(s.doc.root()).unwrap().children()[0];
+        let parent = s.doc.get(s.doc.first_page()).unwrap().children()[0];
         let mut made = Vec::new();
         for (i, x) in [0.0, 30.0, 60.0].into_iter().enumerate() {
             let id = s.ids.mint();
@@ -14257,7 +14305,7 @@ mod several_layer_binding_tests {
         let (mut app, ids, var) = bound_pair(&ctx);
         let (frame, other) = (app.session.ids.mint(), app.session.ids.mint_var());
         let mode = app.session.doc.variables().modes()[0].id;
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::AddVariable {
                 var: Variable {
@@ -14321,7 +14369,7 @@ mod several_layer_binding_tests {
         let ctx = egui::Context::default();
         let (mut app, ids, var) = bound_pair(&ctx);
         let (dusk, frame_id) = (app.session.ids.mint_mode(), app.session.ids.mint());
-        let root = app.session.doc.root();
+        let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
                 mode: Mode {
@@ -17850,7 +17898,7 @@ mod mixed_opacity_tests {
         let ctx = egui::Context::default();
         let (mut app, a, b) = two_rects(&ctx, (1.0, 0.4));
         app.picker = Some(super::Picker::new(
-            app.session.doc.root(),
+            app.session.doc.first_page(),
             super::PaintSlot::SelectionAll(ondin_core::PaintTarget::Fill),
             egui::Pos2::ZERO,
         ));
@@ -18619,7 +18667,7 @@ mod subject_tests {
                 axis,
                 position,
                 color: None,
-                owner: None,
+                owner: root,
             },
         };
         doc.apply(&Transaction(vec![
@@ -18732,7 +18780,7 @@ mod subject_tests {
                     axis: GuideAxis::Vertical,
                     position: 40.0,
                     color: None,
-                    owner: None,
+                    owner: app.session.page,
                 },
             }]))
             .expect("a second vertical guide, in the same place");
@@ -18778,7 +18826,7 @@ mod subject_tests {
             axis: GuideAxis::Vertical,
             position: 0.0,
             color,
-            owner: None,
+            owner: ondin_core::NodeId::from_wire("1:1").unwrap(),
         };
 
         assert_eq!(
@@ -18831,9 +18879,9 @@ mod subject_tests {
         let _ = h;
     }
 
-    /// An empty selection draws the canvas card, not an empty panel.
+    /// An empty selection draws the current page's card, not an empty panel.
     ///
-    /// flip: pointing the `0 =>` arm at `inspector_multi` → fails at the "Canvas" assertion.
+    /// flip: pointing the `0 =>` arm at `inspector_multi` → fails at the page card assertion.
     #[test]
     fn an_empty_selection_draws_the_canvas_and_its_ground() {
         let ctx = egui::Context::default();
@@ -18841,8 +18889,8 @@ mod subject_tests {
         app.session.selection.clear();
         let empty = drawn(&ctx, &mut app);
         assert!(
-            empty.iter().any(|t| t == "Canvas"),
-            "the canvas identity card, in {empty:?}"
+            empty.iter().any(|t| t == "Page 1 of 1"),
+            "the page's identity card, in {empty:?}"
         );
         assert!(
             !empty.iter().any(|t| t == "FILL"),
@@ -19915,7 +19963,7 @@ mod paint_write_tests {
             app.session.adopt_document(doc, None);
             app.session.selection.set(vec![a, b]);
             app.picker = Some(super::Picker::new(
-                app.session.doc.root(),
+                app.session.doc.first_page(),
                 PaintSlot::SelectionAll(ondin_core::PaintTarget::Fill),
                 egui::Pos2::ZERO,
             ));
@@ -20858,12 +20906,7 @@ mod colour_panel_tests {
     fn the_canvas_reset_is_dead_on_the_default_and_puts_the_ground_back_otherwise() {
         let ctx = egui::Context::default();
         let mut app = canvas_app(&ctx);
-        let ground = |app: &OndinApp| {
-            app.session
-                .preview_canvas_background()
-                .to_rgba8()
-                .to_u8_array()
-        };
+        let ground = |app: &OndinApp| app.session.preview_ground().to_rgba8().to_u8_array();
         let default = crate::session::DEFAULT_CANVAS_BACKGROUND
             .to_rgba8()
             .to_u8_array();
@@ -20891,8 +20934,9 @@ mod colour_panel_tests {
 
         let moved = ondin_core::peniko::Color::from_rgba8(90, 20, 20, 255);
         app.session
-            .try_commit(Transaction(vec![Operation::SetCanvasBackground {
-                background: moved,
+            .try_commit(Transaction(vec![Operation::SetPageGround {
+                id: app.session.page,
+                ground: moved,
             }]))
             .expect("a ground the user picked");
         assert_ne!(ground(&app), default, "the fixture: the ground has moved");

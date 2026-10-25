@@ -548,7 +548,7 @@ fn the_fixture_holds_one_node_of_every_kind() {
         }
     }
     let mut present = BTreeSet::new();
-    walk(&doc, doc.root(), &mut present);
+    walk(&doc, doc.first_page(), &mut present);
     let expected = every_kind();
     // At least, not exactly: an exact count would be hand-kept.
     assert!(
@@ -595,7 +595,7 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
         }
     }
     let mut present = BTreeSet::new();
-    walk(&doc, doc.root(), &mut present);
+    walk(&doc, doc.first_page(), &mut present);
     let expected = every_effect();
     // At least, not exactly: an exact count would be hand-kept.
     assert!(
@@ -619,7 +619,7 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
         node.pivot().is_some() || node.children().iter().any(|c| any_pivot(doc, *c))
     }
     assert!(
-        any_pivot(&doc, doc.root()),
+        any_pivot(&doc, doc.first_page()),
         "no node carries a pivot, so `NodeSnapshot::pivot` is unwatched: {}",
         regenerate_hint()
     );
@@ -629,7 +629,7 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
 #[test]
 fn svg_matches_its_golden() {
     let (doc, res) = golden_document();
-    check_golden("every-kind.svg", &svg(&doc, &res, None));
+    check_golden("every-kind.svg", &svg(&doc, &res, doc.first_page(), None));
 }
 
 /// The JSON snapshot, byte for byte, produced the way `ondin export --json` does.
@@ -650,8 +650,8 @@ fn json_snapshot_matches_its_golden() {
 fn exporting_the_same_document_twice_gives_the_same_bytes() {
     let (doc, res) = golden_document();
     assert_eq!(
-        svg(&doc, &res, None),
-        svg(&doc, &res, None),
+        svg(&doc, &res, doc.first_page(), None),
+        svg(&doc, &res, doc.first_page(), None),
         "SVG is stable"
     );
 
@@ -662,8 +662,8 @@ fn exporting_the_same_document_twice_gives_the_same_bytes() {
     // A second resolve, where an iteration order could leak in.
     let again = Resolved::rebuild(&doc);
     assert_eq!(
-        svg(&doc, &res, None),
-        svg(&doc, &again, None),
+        svg(&doc, &res, doc.first_page(), None),
+        svg(&doc, &again, doc.first_page(), None),
         "SVG does not depend on which rebuild produced the layout"
     );
 }

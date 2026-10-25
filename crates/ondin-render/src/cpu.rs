@@ -75,17 +75,18 @@ impl VelloCpuRenderer {
         Self
     }
 
-    /// Render `vp` to a straight-alpha RGBA8 buffer, returning `(rgba, w, h)`.
-    /// No GPU; used by `ondin-export` PNG. The base transform maps the world-space
-    /// `vp.view` onto the pixel grid.
+    /// Render `page` in `vp` to a straight-alpha RGBA8 buffer, returning
+    /// `(rgba, w, h)`. No GPU; used by `ondin-export` PNG. The base transform maps
+    /// the world-space `vp.view` onto the pixel grid.
     pub fn render_to_rgba(
         &mut self,
         doc: &Document,
         res: &Resolved,
         vp: &Viewport,
         images: &ImageStore,
+        page: ondin_core::NodeId,
     ) -> (Vec<u8>, u32, u32) {
-        self.render_subtrees_to_rgba(doc, res, vp, images, &[doc.root()])
+        self.render_subtrees_to_rgba(doc, res, vp, images, &[page])
     }
 
     /// [`Self::render_to_rgba`] restricted to these subtrees: the raster half of

@@ -139,7 +139,7 @@ pub trait ScenePainter {
     fn pop_layer(&mut self);
 }
 
-/// Walk the document and drive `painter`.
+/// Walk `page` and drive `painter`.
 ///
 /// `overrides` carries uncommitted gesture state (§6.2, invariant 5). When empty,
 /// the walk reduces to the committed document, bit-identical to `Resolved`'s world
@@ -149,9 +149,10 @@ pub fn build<P: ScenePainter>(
     res: &Resolved,
     vp: &Viewport,
     overrides: &RenderOverrides,
+    page: NodeId,
     painter: &mut P,
 ) {
-    build_of(doc, res, vp, overrides, &[doc.root()], painter);
+    build_of(doc, res, vp, overrides, &[page], painter);
 }
 
 /// Walk **these subtrees** and drive `painter`, in the order given.

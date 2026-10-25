@@ -62,9 +62,9 @@ impl Report {
     }
 }
 
-/// Render the whole document, or a single artboard subtree, to an SVG string.
-pub fn svg(doc: &Document, res: &Resolved, artboard: Option<NodeId>) -> String {
-    svg_of(doc, res, &[artboard.unwrap_or_else(|| doc.root())])
+/// Render a whole page, or a single artboard subtree, to an SVG string.
+pub fn svg(doc: &Document, res: &Resolved, page: NodeId, artboard: Option<NodeId>) -> String {
+    svg_of(doc, res, &[artboard.unwrap_or(page)])
 }
 
 /// Render **these subtrees** to one SVG, in the order given.
@@ -2259,7 +2259,7 @@ mod def_count_tests {
         const N: usize = 2_000;
         let (doc, res) = gradients(N);
         DEF_KEY_COMPARISONS.with(|c| c.set(0));
-        let out = svg(&doc, &res, None);
+        let out = svg(&doc, &res, doc.first_page(), None);
         let compared = DEF_KEY_COMPARISONS.with(std::cell::Cell::get);
         assert_eq!(
             out.matches("<linearGradient").count(),

@@ -527,7 +527,7 @@ fn a_paste_keeps_rebinds_or_detaches_a_style() {
         .unwrap();
     let landed = ondin_core::variable::land(&other, &carried, copy[0].clone());
     assert_eq!(landed[0].styles().fills, Some(theirs));
-    let root = other.root();
+    let root = other.first_page();
     let (tx, made) = ondin_core::insert_subtrees(
         &other,
         &mut ids,

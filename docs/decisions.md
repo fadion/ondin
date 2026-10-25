@@ -14,7 +14,8 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D21** The model type is `Artboard`; every user-facing word is "frame". Frames nest.
 - **D12** Polygon and Star are their own `NodeKind`s, not `Path`s.
 - **D400** A frame's fill is its fill list, the same as every painted layer; there is no separate background field.
-- **D28** The canvas ground is document state, saved with the file.
+- **D28** Each page's ground is document state, saved with the file.
+- **A page is a parentless root listed in a page table**, not a node under one root: the structural operations, the loader's tree rules and the clipboard's rules hold unchanged (Delete, Reparent and Reorder refuse a page as a node), and `Document::new` stays a one-page document. Name and default mode are the root's; ground and draft flag are the table's.
 - **D119** A path's corner radius lives in the model, not in the geometry.
 - **D114** A pen anchor carries two independent handles, not one mirrored vector.
 - **D68** A rectangle's stroke can sit on one side; a side is an open path. **D69** Dash mode is classified from the stored pattern, never stored beside it.
@@ -65,7 +66,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D980** The five item lists (fills, strokes, effects, exports, layout grids) carry ids in a `Keyed<T>` wrapper, so an instance follows its main item by item. A list reset restores the main's list exactly.
 - **D982** A set is a frame around mains; a variant is a main inside it with a derived name (`variant::settle` runs before `propagate`). A component property is a view over fields, never a stored value. A variant switch happens in place, matching by name path.
 - **D983** Instance swap is a `swap` field beside `link`, rewritten in place by `swap::settle`, only to a main of the same kind.
-- **D1010/D1012** A kit is a document marked as one. Its mains are vendored read-only into each consumer's vault (a second parentless root) with provenance, so a consumer works with the kit absent. Changes arrive only when the kit publishes and the consumer accepts.
+- **D1010/D1012** A kit is a document marked as one. Its mains are vendored read-only into each consumer's vault (a parentless root beside the pages, never one of them) with provenance, so a consumer works with the kit absent. Changes arrive only when the kit publishes and the consumer accepts.
 - **D1016** A kit update rewrites a vendored main in place as one transaction. *Make local* forks the variables and styles the main reads.
 - **D1037** A variable is typed (colour, number, string, boolean) with one value per mode, and can alias another. Modes are set per frame and inherited. A style is one slot's values, applied whole and never stacked; any edit detaches it.
 - **D1039** Bindings are sidecars beside the literal, not a `Literal | Bound` enum. A write over a bound field detaches it at the commit; deleting a used variable detaches its users to the resolved value.
@@ -148,6 +149,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Focus mode and present mode are separate modes**: focus mode is for editing with the chrome hidden; present mode is view-only.
 - **Present mode is its own branch of `OndinApp::ui`**, which reads only its own keys and returns, not a flag the overlays and commands check.
 - **D749** The dashboard's default page is set only in Settings.
+- **Which page is current is view state, never saved in the file**: switching pages is no edit and no undo step, each page's camera and selection are kept for the sitting only, and the library remembers per machine the page a document was left on.
 - **D768** Open and Recover ask or save before replacing the open document.
 - **The colour picker's tabs are Solid · Gradient · Variables**; the gradient kind (Linear, Radial, Angular) is a menu on the geometry row's preview chip. A tab per kind does not fit beside *Variables* at 10pt, and a menu adds no row, so every face keeps one height and another kind costs one menu row.
 - **The open picker is the gradient editing mode**: no tool of its own. While it shows a gradient fill or stroke of the one selected layer, the canvas draws that gradient's handles in place of the selection box.

@@ -136,7 +136,7 @@ fn hit_test_is_topmost_first_and_respects_visibility() {
 
     let res = Resolved::rebuild(&doc);
     // Both rects (and the artboard) cover (10,10); topmost first.
-    let hits = hit_test(&res, &doc, Point::new(10.0, 10.0), 0.0);
+    let hits = hit_test(&res, &doc, doc.first_page(), Point::new(10.0, 10.0), 0.0);
     assert_eq!(hits.first(), Some(&top));
     assert_eq!(hits[1], bottom);
     assert!(hits.contains(&ab));
@@ -148,7 +148,7 @@ fn hit_test_is_topmost_first_and_respects_visibility() {
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
-    let hits = hit_test(&res, &doc, Point::new(10.0, 10.0), 0.0);
+    let hits = hit_test(&res, &doc, doc.first_page(), Point::new(10.0, 10.0), 0.0);
     assert!(!hits.contains(&top));
     assert_eq!(hits.first(), Some(&bottom));
 
@@ -159,7 +159,7 @@ fn hit_test_is_topmost_first_and_respects_visibility() {
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
-    let hits = hit_test(&res, &doc, Point::new(10.0, 10.0), 0.0);
+    let hits = hit_test(&res, &doc, doc.first_page(), Point::new(10.0, 10.0), 0.0);
     assert!(!hits.contains(&bottom));
 }
 
@@ -184,9 +184,9 @@ fn hit_test_uses_exact_geometry_not_bounds() {
     let res = Resolved::rebuild(&doc);
 
     // Center is inside the ellipse.
-    assert!(hit_test(&res, &doc, Point::new(50.0, 50.0), 0.0).contains(&ellipse));
+    assert!(hit_test(&res, &doc, doc.first_page(), Point::new(50.0, 50.0), 0.0).contains(&ellipse));
     // Corner (5,5) is inside the bounding box but OUTSIDE the ellipse.
-    assert!(!hit_test(&res, &doc, Point::new(5.0, 5.0), 0.0).contains(&ellipse));
+    assert!(!hit_test(&res, &doc, doc.first_page(), Point::new(5.0, 5.0), 0.0).contains(&ellipse));
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn nodes_in_view_matches_brute_force() {
     let res = Resolved::rebuild(&doc);
 
     let view = Rect::new(100.0, -10.0, 250.0, 50.0);
-    let mut got = nodes_in_view(&res, view);
+    let mut got = nodes_in_view(&res, doc.first_page(), view);
     got.sort();
 
     // Brute force over every node with known world bounds.
@@ -571,7 +571,7 @@ fn container_targets(doc: &Document, containers: &[NodeId], movable: &[NodeId]) 
 fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
     let fresh = Resolved::rebuild(doc);
     // Walk the whole tree from the root via the public API.
-    let mut stack = vec![doc.root()];
+    let mut stack = vec![doc.first_page()];
     while let Some(id) = stack.pop() {
         // The used geometry first, because everything below is composed from it
         // (§15 D868) — a divergence there shows up as a wrong world transform one
@@ -1863,7 +1863,7 @@ fn a_booleans_bounds_come_from_its_result_not_its_operands() {
         "and the outline itself is cached"
     );
     assert!(
-        res.boolean_path(doc.root()).is_none(),
+        res.boolean_path(doc.first_page()).is_none(),
         "nothing else gets an entry"
     );
 }
@@ -1904,7 +1904,7 @@ fn update_equals_rebuild_for_a_nested_boolean() {
     doc.apply(&Transaction(vec![
         Operation::CreateNode {
             id: outer,
-            parent: doc.root(),
+            parent: doc.first_page(),
             index: 1,
             kind: NodeKind::Boolean {
                 op: ondin_core::BoolOp::Subtract,
@@ -2026,20 +2026,20 @@ fn a_picking_allowance_widens_every_kind_by_a_bounded_band() {
     // 3 units off a line with no stroke at all: missed exactly, hit with an allowance.
     let off = Point::new(50.0, 3.0);
     assert!(
-        !hit_test(&res, &doc, off, 0.0).contains(&line),
+        !hit_test(&res, &doc, doc.first_page(), off, 0.0).contains(&line),
         "the exact test still means exact"
     );
     assert!(
-        hit_test(&res, &doc, off, 4.0).contains(&line),
+        hit_test(&res, &doc, doc.first_page(), off, 4.0).contains(&line),
         "an allowance of 4 reaches 3 units off the segment"
     );
     assert!(
-        !hit_test(&res, &doc, Point::new(50.0, 9.0), 4.0).contains(&line),
+        !hit_test(&res, &doc, doc.first_page(), Point::new(50.0, 9.0), 4.0).contains(&line),
         "…and not 9, so the band is bounded rather than a whole-bbox test"
     );
     // Off the end, not just off the side: the distance is to the *segment*.
     assert!(
-        !hit_test(&res, &doc, Point::new(130.0, 0.0), 4.0).contains(&line),
+        !hit_test(&res, &doc, doc.first_page(), Point::new(130.0, 0.0), 4.0).contains(&line),
         "past the endpoint is a miss"
     );
 
@@ -2051,19 +2051,19 @@ fn a_picking_allowance_widens_every_kind_by_a_bounded_band() {
     // superset of the old test, so what has to stay pinned is that it is a *band*
     // and not a halo — the far assertion below is the one carrying that now.
     assert!(
-        hit_test(&res, &doc, Point::new(210.0, 10.0), 4.0).contains(&box_),
+        hit_test(&res, &doc, doc.first_page(), Point::new(210.0, 10.0), 4.0).contains(&box_),
         "inside is inside"
     );
     assert!(
-        hit_test(&res, &doc, Point::new(197.0, 10.0), 4.0).contains(&box_),
+        hit_test(&res, &doc, doc.first_page(), Point::new(197.0, 10.0), 4.0).contains(&box_),
         "3 units outside the edge is within a 4-unit allowance"
     );
     assert!(
-        !hit_test(&res, &doc, Point::new(191.0, 10.0), 4.0).contains(&box_),
+        !hit_test(&res, &doc, doc.first_page(), Point::new(191.0, 10.0), 4.0).contains(&box_),
         "9 units outside is not: a few units of comfort, not a halo"
     );
     assert!(
-        !hit_test(&res, &doc, Point::new(197.0, 10.0), 0.0).contains(&box_),
+        !hit_test(&res, &doc, doc.first_page(), Point::new(197.0, 10.0), 0.0).contains(&box_),
         "and asking for no allowance still means the exact interior"
     );
 
@@ -2088,15 +2088,15 @@ fn a_picking_allowance_widens_every_kind_by_a_bounded_band() {
     let just_outside = Point::new(b.x1 + 3.0, b.y0 + 200.0 + b.height() / 2.0);
     let well_outside = Point::new(b.x1 + 9.0, b.y0 + 200.0 + b.height() / 2.0);
     assert!(
-        hit_test(&res, &doc, just_outside, 4.0).contains(&words),
+        hit_test(&res, &doc, doc.first_page(), just_outside, 4.0).contains(&words),
         "3 units past a text node's box is within a 4-unit allowance: {b:?}"
     );
     assert!(
-        !hit_test(&res, &doc, well_outside, 4.0).contains(&words),
+        !hit_test(&res, &doc, doc.first_page(), well_outside, 4.0).contains(&words),
         "…and 9 is not, so text gets the same bounded band as everything else"
     );
     assert!(
-        !hit_test(&res, &doc, just_outside, 0.0).contains(&words),
+        !hit_test(&res, &doc, doc.first_page(), just_outside, 0.0).contains(&words),
         "and no allowance still means the box"
     );
 }
@@ -2657,7 +2657,7 @@ fn a_layer_whose_box_overflows_is_left_out_rather_than_spread_up_the_tree() {
     // the artwork used to answer with the overflowing layer in it.
     let far = Rect::new(5000.0, 5000.0, 5100.0, 5100.0);
     assert!(
-        !nodes_in_view(&res, far).contains(&big),
+        !nodes_in_view(&res, doc.first_page(), far).contains(&big),
         "and the spatial index does not answer with it 5,000 units from anything"
     );
 
@@ -2839,7 +2839,7 @@ fn a_mask_is_unclickable_and_what_it_masks_is_clickable_only_inside_it() {
     .unwrap();
     let res = Resolved::rebuild(&doc);
 
-    let inside = hit_test(&res, &doc, Point::new(25.0, 25.0), 0.0);
+    let inside = hit_test(&res, &doc, doc.first_page(), Point::new(25.0, 25.0), 0.0);
     assert!(
         inside.contains(&masked),
         "inside the mask the layer is there to be picked: {inside:?}"
@@ -2849,7 +2849,7 @@ fn a_mask_is_unclickable_and_what_it_masks_is_clickable_only_inside_it() {
         "and the mask is not, having drawn nothing to aim at"
     );
 
-    let outside = hit_test(&res, &doc, Point::new(300.0, 200.0), 0.0);
+    let outside = hit_test(&res, &doc, doc.first_page(), Point::new(300.0, 200.0), 0.0);
     assert!(
         !outside.contains(&masked),
         "outside it the ink is gone, so the click passes through: {outside:?}"
@@ -2947,7 +2947,7 @@ fn a_mask_among_a_booleans_operands_does_not_clip_them() {
         None,
         "an operand is not in a run, so nothing there governs it"
     );
-    let hits = hit_test(&res, &doc, Point::new(220.0, 20.0), 0.0);
+    let hits = hit_test(&res, &doc, doc.first_page(), Point::new(220.0, 20.0), 0.0);
     assert!(
         hits.contains(&boolean),
         "and the boolean is still clickable over the far half of itself: {hits:?}"
@@ -3177,11 +3177,18 @@ fn a_failed_boolean_has_a_box_and_a_click_target_and_an_empty_one_has_neither() 
         "the box is the operands' union, not something smaller: {bounds:?}"
     );
     assert!(
-        hit_test(&res, &doc, Point::new(200.0, 200.0), 0.0).contains(&b),
+        hit_test(&res, &doc, doc.first_page(), Point::new(200.0, 200.0), 0.0).contains(&b),
         "the placeholder can be seen, so it has to be selectable"
     );
     assert!(
-        !hit_test(&res, &doc, Point::new(1000.0, 1000.0), 0.0).contains(&b),
+        !hit_test(
+            &res,
+            &doc,
+            doc.first_page(),
+            Point::new(1000.0, 1000.0),
+            0.0
+        )
+        .contains(&b),
         "and only where it is drawn"
     );
 
@@ -3192,7 +3199,7 @@ fn a_failed_boolean_has_a_box_and_a_click_target_and_an_empty_one_has_neither() 
         "a boolean that is correctly empty draws nothing and measures nothing"
     );
     assert!(
-        !hit_test(&res, &doc, Point::new(10.0, 10.0), 0.0).contains(&b),
+        !hit_test(&res, &doc, doc.first_page(), Point::new(10.0, 10.0), 0.0).contains(&b),
         "and cannot be clicked in the middle of an operand it consumed"
     );
 }
@@ -3236,7 +3243,7 @@ fn a_locked_group_locks_its_contents_for_the_query_and_for_a_click() {
     let res = Resolved::rebuild(&doc);
     assert!(!is_effectively_locked(&doc, child), "nothing is locked yet");
     assert!(
-        hit_test(&res, &doc, Point::new(10.0, 10.0), 0.0).contains(&child),
+        hit_test(&res, &doc, doc.first_page(), Point::new(10.0, 10.0), 0.0).contains(&child),
         "the child covers the point, or this test is about a miss rather than a lock"
     );
 
@@ -3259,7 +3266,7 @@ fn a_locked_group_locks_its_contents_for_the_query_and_for_a_click() {
          that locked it"
     );
     assert!(
-        !hit_test(&res, &doc, Point::new(10.0, 10.0), 0.0).contains(&child),
+        !hit_test(&res, &doc, doc.first_page(), Point::new(10.0, 10.0), 0.0).contains(&child),
         "and the canvas cannot deliver a click to it either"
     );
     assert!(
@@ -3406,7 +3413,7 @@ fn outline_at_finds_an_edge_where_hit_test_finds_an_interior() {
     // (300, 300), so its leftmost point is (100, 200).
     let on_edge = Point::new(100.0, 200.0);
     assert_eq!(
-        outline_at(&res, &doc, on_edge, 4.0),
+        outline_at(&res, &doc, doc.first_page(), on_edge, 4.0),
         Some(ring),
         "the edge of an unfilled shape is what this is for"
     );
@@ -3415,18 +3422,18 @@ fn outline_at_finds_an_edge_where_hit_test_finds_an_interior() {
     // assertions that separates the two questions — see the note above.
     let inside = Point::new(200.0, 200.0);
     assert_eq!(
-        outline_at(&res, &doc, inside, 4.0),
+        outline_at(&res, &doc, doc.first_page(), inside, 4.0),
         None,
         "an interior is not an edge"
     );
     assert!(
-        hit_test(&res, &doc, inside, 0.0).contains(&ring),
+        hit_test(&res, &doc, doc.first_page(), inside, 0.0).contains(&ring),
         "while `hit_test` does report it — the fixture must actually separate the \
          two questions"
     );
     // And just outside the tolerance is a miss, or the band means nothing.
     assert_eq!(
-        outline_at(&res, &doc, Point::new(80.0, 200.0), 4.0),
+        outline_at(&res, &doc, doc.first_page(), Point::new(80.0, 200.0), 4.0),
         None,
         "20 units away with a 4-unit allowance"
     );
@@ -3434,7 +3441,7 @@ fn outline_at_finds_an_edge_where_hit_test_finds_an_interior() {
     // A frame is a page and a text node is something to edit — neither is offered
     // as a rail, however close the pointer is to its edge.
     assert_eq!(
-        outline_at(&res, &doc, Point::new(0.0, 300.0), 4.0),
+        outline_at(&res, &doc, doc.first_page(), Point::new(0.0, 300.0), 4.0),
         None,
         "the artboard's own left edge is not a rail"
     );
@@ -3529,7 +3536,7 @@ fn a_many_segment_outline_answers_the_same_with_the_segment_reject() {
     let res = Resolved::rebuild(&doc);
 
     assert_eq!(
-        outline_at(&res, &doc, Point::new(cx, cy), 4.0),
+        outline_at(&res, &doc, doc.first_page(), Point::new(cx, cy), 4.0),
         None,
         "the centre is 100 units from every segment and is not an edge"
     );
@@ -3541,13 +3548,19 @@ fn a_many_segment_outline_answers_the_same_with_the_segment_reject() {
     for (dx, dy) in [(1.0, 0.0), (0.0, 1.0), (diag, diag)] {
         let near = Point::new(cx + (r + 2.0) * dx, cy + (r + 2.0) * dy);
         assert_eq!(
-            outline_at(&res, &doc, near, 4.0),
+            outline_at(&res, &doc, doc.first_page(), near, 4.0),
             Some(ring),
             "2 units off the outline at {dx},{dy} is inside a 4-unit allowance"
         );
     }
     assert_eq!(
-        outline_at(&res, &doc, Point::new(cx + r + 20.0, cy), 4.0),
+        outline_at(
+            &res,
+            &doc,
+            doc.first_page(),
+            Point::new(cx + r + 20.0, cy),
+            4.0
+        ),
         None,
         "20 units outside with a 4-unit allowance is still a miss"
     );
@@ -3614,7 +3627,7 @@ fn a_mask_is_not_a_rail_and_neither_is_ink_it_has_clipped_away() {
     // Every edge of the 500×400 rect is at least 25 units from here.
     let on_mask = Point::new(50.0, 25.0);
     assert_eq!(
-        outline_at(&res, &doc, on_mask, 4.0),
+        outline_at(&res, &doc, doc.first_page(), on_mask, 4.0),
         None,
         "a mask paints nothing, so there is no edge on the canvas to aim at"
     );
@@ -3623,7 +3636,7 @@ fn a_mask_is_not_a_rail_and_neither_is_ink_it_has_clipped_away() {
     // where the canvas shows nothing.
     let clipped_away = Point::new(500.0, 200.0);
     assert_eq!(
-        outline_at(&res, &doc, clipped_away, 4.0),
+        outline_at(&res, &doc, doc.first_page(), clipped_away, 4.0),
         None,
         "and clipped-away ink is not an edge either"
     );
@@ -3645,7 +3658,7 @@ fn a_mask_is_not_a_rail_and_neither_is_ink_it_has_clipped_away() {
     // so the 4-unit band reaches the edge without the point sitting on the mask's
     // own boundary, where `contains` is a coin toss.
     assert_eq!(
-        outline_at(&res, &doc, Point::new(2.0, 25.0), 4.0),
+        outline_at(&res, &doc, doc.first_page(), Point::new(2.0, 25.0), 4.0),
         Some(masked),
         "the masked layer's own edge, inside the mask, is still offered"
     );
@@ -3656,7 +3669,7 @@ fn a_mask_is_not_a_rail_and_neither_is_ink_it_has_clipped_away() {
     .unwrap();
     let res = Resolved::rebuild(&doc);
     assert_eq!(
-        outline_at(&res, &doc, on_mask, 4.0),
+        outline_at(&res, &doc, doc.first_page(), on_mask, 4.0),
         Some(mask),
         "with the flag off it is an ordinary rect and an ordinary rail"
     );
@@ -3743,7 +3756,8 @@ fn an_incremental_update_is_not_slower_than_the_rebuild_it_replaces() {
 
     // The fixture: deep, and the subtree really does reach every node.
     assert!(
-        doc.get(top).is_some_and(|n| n.parent() == Some(doc.root())),
+        doc.get(top)
+            .is_some_and(|n| n.parent() == Some(doc.first_page())),
         "the fixture: the chain hangs off the root"
     );
 

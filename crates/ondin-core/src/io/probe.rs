@@ -24,7 +24,8 @@ pub enum MetaProbe {
     /// The document definitively carries no metadata.
     ///
     /// The one place this module trusts key order: `schema.rs` emits `meta` before
-    /// `root`, so reaching `root` first means there was none. A hand-edited file
+    /// `pages` (before `root` until v10), so reaching either first means there was
+    /// none. A hand-edited file
     /// that moved the block lower is wrongly `Absent`; the cost is the filename
     /// shown instead of the typed name until the next save. That is the only
     /// wrong answer allowed (§15 D485): a non-object file, a stray byte where a
@@ -61,7 +62,7 @@ pub fn meta_in_prefix(prefix: &[u8]) -> MetaProbe {
     // The `meta` seen so far. A duplicate key is refused rather than resolved the
     // way `serde_json` does (last wins): the probe and the loaded document would
     // otherwise name and cover-cache a file as different documents, and "keep the
-    // last" would still diverge for a second block past `root` or the prefix
+    // last" would still diverge for a second block past `pages` or the prefix
     // (§15 D485).
     let mut found: Option<MetaProbe> = None;
     loop {
@@ -117,7 +118,7 @@ pub fn meta_in_prefix(prefix: &[u8]) -> MetaProbe {
             }
             // Past where the writer puts it (see `MetaProbe::Absent`); a block seen
             // earlier is returned here, the scan having only ruled out a second.
-            "root" => return found.unwrap_or(MetaProbe::Absent),
+            "pages" | "root" => return found.unwrap_or(MetaProbe::Absent),
             _ => i = value_end,
         }
     }

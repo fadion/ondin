@@ -761,10 +761,12 @@ impl OndinApp {
     fn local_items(&self) -> Vec<Item> {
         let doc = &self.session.doc;
         let mut out = Vec::new();
-        let mut stack = vec![doc.root()];
+        // Every page's, in page order: a main is the document's, wherever it sits.
+        let mut stack: Vec<NodeId> = doc.page_ids().collect();
+        stack.reverse();
         while let Some(id) = stack.pop() {
             let Some(n) = doc.get(id) else { continue };
-            if id != doc.root() && (n.set().is_some() || n.component()) {
+            if !doc.is_page(id) && (n.set().is_some() || n.component()) {
                 out.push(Item {
                     source: Source::Local(id),
                     name: n.name().to_string(),
@@ -818,14 +820,15 @@ impl OndinApp {
         // A hidden layer's subtree is not descended, nor a clipping one's when
         // the point is outside it: nothing in there shows at the point.
         let mut hit = None;
-        let mut stack = vec![doc.root()];
+        let page = self.session.page;
+        let mut stack = vec![page];
         while let Some(id) = stack.pop() {
             let Some(node) = doc.get(id) else { continue };
             let under = res.world_bounds(id).is_some_and(|b| b.contains(world));
-            if id != doc.root() && !self.shown_visible(id) {
+            if id != page && !self.shown_visible(id) {
                 continue;
             }
-            if id != doc.root()
+            if id != page
                 && takes(node)
                 && under
                 && !ondin_core::is_effectively_locked(doc, id)
@@ -833,7 +836,7 @@ impl OndinApp {
             {
                 hit = Some(id);
             }
-            if id == doc.root() || under || !node.clip() {
+            if id == page || under || !node.clip() {
                 stack.extend(node.children().iter().rev().copied());
             }
         }
@@ -865,7 +868,7 @@ impl OndinApp {
         let parent = dropped
             .then(|| self.drop_container_at(centre))
             .flatten()
-            .unwrap_or(self.session.doc.root());
+            .unwrap_or(self.session.page);
         let built = match &source {
             Source::Kit {
                 id,
@@ -1024,10 +1027,10 @@ fn centred(
     })
 }
 
-/// The kits an instance on the page comes from (§15 D1028): every node under
-/// the root whose link — or nested swap — names a vendored main, by the kit its
-/// vault copy records. The vault is a second root, so the walk never enters it
-/// and a vendored main's own nested copies are not counted.
+/// The kits an instance in the document comes from (§15 D1028): every node on a
+/// page whose link — or nested swap — names a vendored main, by the kit its
+/// vault copy records. The vault is a root of its own, so the walk never enters
+/// it and a vendored main's own nested copies are not counted.
 fn kits_on_the_page(doc: &Document) -> HashSet<String> {
     let mut out = HashSet::new();
     let Some(vault) = doc.vault() else {
@@ -1044,7 +1047,7 @@ fn kits_on_the_page(doc: &Document) -> HashSet<String> {
         }
         None
     };
-    let mut stack = vec![doc.root()];
+    let mut stack: Vec<NodeId> = doc.page_ids().collect();
     let mut seen = 0usize;
     while let Some(id) = stack.pop() {
         seen += 1;
@@ -1934,7 +1937,7 @@ pub(crate) mod tests {
         let (id, _set, badge) = file_kit(&root);
         let mut app = app_on(&ctx, root.clone());
         let frame = app.session.ids.mint();
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
             id: frame,
             parent: doc_root,
@@ -2033,7 +2036,7 @@ pub(crate) mod tests {
         let root = temp_root("drop-unseen");
         let (id, _set, badge) = file_kit(&root);
         let mut app = app_on(&ctx, root.clone());
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         let frame = |id, parent, at: (f64, f64), side: f64| Operation::CreateNode {
             id,
             parent,
@@ -2305,7 +2308,7 @@ pub(crate) mod tests {
         let root = temp_root("drag");
         let mut app = app_on(&ctx, root.clone());
         let main = app.session.ids.mint();
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             frame(main, doc_root, 0, 80.0, "Button"),
             Operation::SetComponent {
@@ -2634,7 +2637,7 @@ pub(crate) mod tests {
         let root = temp_root("drag-cancel");
         let mut app = app_on(&ctx, root.clone());
         let main = app.session.ids.mint();
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             frame(main, doc_root, 0, 80.0, "Button"),
             Operation::SetComponent {
@@ -2813,7 +2816,7 @@ pub(crate) mod tests {
         let (id, _, badge) = file_kit(&root);
         let mut app = app_on(&ctx, root.clone());
         let mine = app.session.ids.mint();
-        let doc_root = app.session.doc.root();
+        let doc_root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             frame(mine, doc_root, 0, 50.0, "Mine"),
             Operation::SetComponent {
@@ -3170,7 +3173,7 @@ pub(crate) mod tests {
             ..Default::default()
         });
         let published = ondin_core::kit::freeze(&kdoc).unwrap();
-        let droot = d.root();
+        let droot = d.first_page();
         let (tx, inst) = ondin_core::kit::insert(
             &d,
             &mut dids,
@@ -3566,7 +3569,7 @@ pub(crate) mod tests {
             let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
         }
         let doc = &app.session.doc;
-        let page: Vec<NodeId> = doc.get(doc.root()).unwrap().children().to_vec();
+        let page: Vec<NodeId> = doc.get(doc.first_page()).unwrap().children().to_vec();
         assert_eq!(page.len(), 1, "one placement: {page:?}");
         let main = doc.get(page[0]).unwrap().link().unwrap();
         assert_eq!(

@@ -41,6 +41,10 @@ pub struct LocalIndex {
     /// For each document, the kit versions its update notice was told *Later*
     /// for; a newer publish brings the notice back (§5.3e, 5C; §15 D1016).
     pub kit_later: HashMap<String, HashMap<String, u32>>,
+    /// For each document, the page it was last left on here (a page root's wire
+    /// id), so it reopens there (`crate::pages`). Local for `opened`'s reason:
+    /// switching pages is a view change, never written into the file.
+    pub last_page: HashMap<String, String>,
     /// Set when `library.json` exists but could not be read (§15 D418).
     ///
     /// A latch on writing, like [`super::state::Library::projects_unreadable`]:
@@ -180,6 +184,7 @@ impl LocalIndex {
         // ignores it), so only the documents are swept.
         self.kit_use.retain(|id, _| live.contains(id));
         self.kit_later.retain(|id, _| live.contains(id));
+        self.last_page.retain(|id, _| live.contains(id));
     }
 }
 

@@ -255,8 +255,9 @@ impl OndinApp {
         // A commit under a live text session (`[X3.2-L5-01]`).
         self.finish_text_first();
         let doc = &self.session.doc;
-        let content = self.session.preview_world_bounds(doc.root());
-        let made = ondin_core::kit::make_local_report(doc, &mut self.session.ids, tops);
+        let page = self.session.page;
+        let content = self.session.preview_world_bounds(page);
+        let made = ondin_core::kit::make_local_report(doc, &mut self.session.ids, page, tops);
         let mut tx = made.tx;
         if tx.0.is_empty() {
             return;

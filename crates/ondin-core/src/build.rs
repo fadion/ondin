@@ -963,7 +963,7 @@ pub fn set_boolean_op(
             if crate::naming::is_boolean_label(node.name()) {
                 // The number comes across so flipping back and forth does not walk
                 // it; the container is excluded from `taken` for the same reason.
-                let parent = node.parent().unwrap_or(doc.root());
+                let parent = node.parent().unwrap_or(id);
                 let taken = doc.child_names(parent, &[id]);
                 let from = crate::naming::numbered(node.name()).map_or(1, |(_, n)| n);
                 ops.push(Operation::SetName {
@@ -1926,7 +1926,9 @@ pub fn in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
 pub fn all_in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     let want: FxHashSet<NodeId> = ids.iter().copied().collect();
     let mut out = Vec::with_capacity(want.len());
-    let mut stack = vec![doc.root()];
+    // Pages in their order, each one's tree before the next.
+    let mut stack: Vec<NodeId> = doc.page_ids().collect();
+    stack.reverse();
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
         if want.contains(&id) {
@@ -1948,7 +1950,7 @@ pub fn guides_of(doc: &Document, ids: &[NodeId]) -> Vec<Operation> {
     let mut guides: Vec<_> = doc
         .guides()
         .iter()
-        .filter(|g| g.owner.is_some_and(|o| doomed.contains(&o)))
+        .filter(|g| doomed.contains(&g.owner))
         .map(|g| g.id)
         .collect();
     guides.sort();

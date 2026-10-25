@@ -127,7 +127,7 @@ fn viewport() -> Viewport {
 
 fn record(doc: &Document, res: &Resolved, ov: &RenderOverrides) -> Vec<Call> {
     let mut painter = Recorder::default();
-    scene::build(doc, res, &viewport(), ov, &mut painter);
+    scene::build(doc, res, &viewport(), ov, doc.first_page(), &mut painter);
     painter.0
 }
 
@@ -1361,7 +1361,7 @@ fn resizing_a_boolean_grows_its_previewed_outline() {
 fn a_ghost_boolean_previews_its_own_result_and_not_its_operands() {
     let (doc, _, _, _) = boolean_fixture(ondin_core::BoolOp::Subtract);
     let mut ids = IdSource::new(0xC0FE);
-    let root = doc.root();
+    let root = doc.first_page();
     let original = doc.get(root).unwrap().children()[0];
 
     // Exactly what Alt-drag emits: the subtree captured, remapped, appended to the
@@ -1421,7 +1421,7 @@ fn a_ghost_boolean_previews_its_own_result_and_not_its_operands() {
 fn a_ghost_evaluates_a_boolean_inside_a_boolean() {
     let (mut doc, inner, _, _) = boolean_fixture(ondin_core::BoolOp::Union);
     let mut ids = IdSource::new(0xC0FD);
-    let root = doc.root();
+    let root = doc.first_page();
     // Wrap the existing boolean and a third rect in an outer Subtract.
     let extra = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -1497,7 +1497,7 @@ fn a_ghost_evaluates_a_boolean_inside_a_boolean() {
 fn dragging_an_operand_of_a_nested_boolean_previews_the_outer_one_too() {
     let (mut doc, inner, _r1, r2) = boolean_fixture(ondin_core::BoolOp::Union);
     let mut ids = IdSource::new(0xC0FE);
-    let root = doc.root();
+    let root = doc.first_page();
     let r3 = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
         id: r3,
@@ -2083,7 +2083,7 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
             pixel_size: (400, 400),
         };
         let mut painter = Framings::default();
-        scene::build(&doc, &res, &vp, &ov, &mut painter);
+        scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut painter);
         assert_eq!(
             painter.0.len(),
             2,
@@ -2489,13 +2489,21 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         Operation::SetVariantSet { id, set: None },
         Operation::SetVariant { id, values: vec![] },
         Operation::SetProperties { id, props: vec![] },
+        Operation::MovePage {
+            id: f.doc.first_page(),
+            index: 0,
+        },
+        Operation::SetPageDraft {
+            id: f.doc.first_page(),
+            draft: true,
+        },
         Operation::AddGuide {
             guide: ondin_core::guide::Guide {
                 id: guide,
                 axis: ondin_core::guide::GuideAxis::Vertical,
                 position: 0.0,
                 color: None,
-                owner: None,
+                owner: f.doc.first_page(),
             },
         },
         Operation::RemoveGuide { id: guide },
@@ -2509,7 +2517,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         },
         Operation::SetGuideScope {
             id: guide,
-            owner: None,
+            owner: f.doc.first_page(),
             position: 1.0,
         },
     ];
@@ -2622,7 +2630,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     ];
 
     assert_eq!(styles.len(), 10, "and the styles' ten");
-    assert_eq!(chrome.len(), 17, "the chrome list is seventeen operations");
+    assert_eq!(chrome.len(), 19, "the chrome list is nineteen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
     assert_eq!(
         table_chrome.len() + table_ink.len(),

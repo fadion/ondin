@@ -67,7 +67,7 @@ fn notched(op: BoolOp) -> (Document, Resolved, NodeId) {
 #[test]
 fn the_svg_carries_the_result_and_not_the_operands() {
     let (doc, res, _) = notched(BoolOp::Subtract);
-    let svg = ondin_export::svg::svg(&doc, &res, None);
+    let svg = ondin_export::svg::svg(&doc, &res, doc.first_page(), None);
 
     assert_eq!(svg.matches("<path").count(), 1, "one element:\n{svg}");
     assert!(
@@ -135,7 +135,7 @@ fn a_boolean_with_no_result_exports_nothing() {
 
     assert!(res.boolean_path(b).is_none(), "nothing to draw");
     assert!(res.world_bounds(b).is_none(), "and nothing to measure");
-    let svg = ondin_export::svg::svg(&doc, &res, None);
+    let svg = ondin_export::svg::svg(&doc, &res, doc.first_page(), None);
     assert!(
         !svg.contains("<path"),
         "no element for an empty result:\n{svg}"
@@ -162,7 +162,7 @@ fn an_aligned_stroke_on_a_boolean_exports_with_its_clip() {
     }]))
     .expect("a stroke on the boolean");
     let res = Resolved::rebuild(&doc);
-    let svg = ondin_export::svg::svg(&doc, &res, None);
+    let svg = ondin_export::svg::svg(&doc, &res, doc.first_page(), None);
 
     assert!(
         svg.contains("<clipPath"),
@@ -193,7 +193,7 @@ fn an_aligned_stroke_on_a_boolean_exports_with_its_clip() {
     }]))
     .expect("centre it");
     let res = Resolved::rebuild(&doc);
-    let svg = ondin_export::svg::svg(&doc, &res, None);
+    let svg = ondin_export::svg::svg(&doc, &res, doc.first_page(), None);
     assert!(!svg.contains("<clipPath"), "centred needs no clip:\n{svg}");
     assert!(
         svg.contains("stroke-width=\"4\""),
@@ -264,7 +264,8 @@ fn px(doc: &Document, res: &Resolved, x: u32, y: u32) -> [u8; 4] {
         view: Rect::new(0.0, 0.0, 100.0, 100.0),
         pixel_size: (100, 100),
     };
-    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(doc, res, &vp, &ImageStore::new());
+    let (rgba, w, _) =
+        VelloCpuRenderer::new().render_to_rgba(doc, res, &vp, &ImageStore::new(), doc.first_page());
     let i = ((y * w + x) * 4) as usize;
     [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]]
 }

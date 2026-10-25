@@ -9,15 +9,15 @@
 use ondin_core::{Document, Resolved};
 use ondin_render::{ImageStore, VelloCpuRenderer, Viewport};
 
-/// Rasterize `vp` and encode a PNG. Returns the encoded bytes.
+/// Rasterize `page` in `vp` and encode a PNG. Returns the encoded bytes.
 ///
 /// The image store is built here and thrown away, fine for a one-shot export.
 /// It is `ImageStore::new`, never `interactive`: the interactive store may answer
 /// a moving picture with a reduced one, and an export would write it soft.
-pub fn png(doc: &Document, res: &Resolved, vp: &Viewport) -> Vec<u8> {
+pub fn png(doc: &Document, res: &Resolved, vp: &Viewport, page: ondin_core::NodeId) -> Vec<u8> {
     let mut images = ImageStore::new();
     images.prepare(doc);
-    let (rgba, width, height) = VelloCpuRenderer::new().render_to_rgba(doc, res, vp, &images);
+    let (rgba, width, height) = VelloCpuRenderer::new().render_to_rgba(doc, res, vp, &images, page);
     encode_rgba8(&rgba, width, height)
 }
 

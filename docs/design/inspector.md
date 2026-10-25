@@ -8,7 +8,7 @@ Colors and Missing fonts. The Type card is in `type-panel.md`.
 
 ### Card order and composition
 
-- **Nothing selected:** the canvas — its Appearance card (ground colour and reset), then *Missing fonts* while the document has any.
+- **Nothing selected:** the current page — a page card in the identity card's place (`page_header`: the page's name, renamed here as in the Pages section; *Page n of m*; its *Mode* row; the *Draft* switch; no eye or lock, a page not being a layer), then its Appearance card (the page's ground colour and reset, `SetPageGround`), then *Missing fonts* while the document has any.
 - **Single layer:** identity, *Frame templates* (frames only), Align, Transform, Position, Item, Container, *Layout grid*, Appearance, Type (text), Fill, Stroke, Effects, Export.
 - **Multi-selection:** the whole inspector, not a count. Transform, Appearance, Fill, Stroke, Group Colors and Export, all on §5.7a's bulk builders, so the app, MCP and CLI agree on what "set the fill of these" means.
   - Text layers add the Type card (the several-layer card writes per layer, §15 D1077). Frames add *Frame templates* and *Layout grid*. Pinnable layers add Position; frames, groups or children of laid containers add Container and Item.

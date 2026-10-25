@@ -67,8 +67,12 @@ pub fn brush_to_backend(
             // The ramp's opacity is multiplied into the stops here (§15 D767), since
             // `peniko::Gradient` has no alpha field; stored as a multiplier, it
             // stays reversible.
-            let ramp = ramp.multiply_alpha(g.opacity);
-            Some((Brush::Gradient(ramp), g.transform))
+            let mut ramp = ramp.multiply_alpha(g.opacity);
+            let transform = match &mut ramp.kind {
+                peniko::GradientKind::Sweep(pos) => sweep_from_zero(pos, g.transform),
+                _ => g.transform,
+            };
+            Some((Brush::Gradient(ramp), transform))
         }
         ondin_core::Brush::Image(img) => match at {
             Resolution::Source => images.pixels(&img.image),
@@ -85,6 +89,25 @@ pub fn brush_to_backend(
             )
         }),
     }
+}
+
+/// `pos` turned to start at angle 0, and the brush transform that turns it back.
+///
+/// Both backends measure a sweep's angle in `0..2π` and never wrap it, so a sweep
+/// starting anywhere else pads its first colour over the turn before the start
+/// instead of going round. Rotating the start into the transform is what CSS's
+/// `conic-gradient(from …)` means, which the code export writes.
+fn sweep_from_zero(
+    pos: &mut peniko::SweepGradientPosition,
+    transform: kurbo::Affine,
+) -> kurbo::Affine {
+    let start = f64::from(pos.start_angle);
+    if start == 0.0 || !start.is_finite() {
+        return transform;
+    }
+    pos.end_angle -= pos.start_angle;
+    pos.start_angle = 0.0;
+    transform * kurbo::Affine::rotate_about(start, pos.center)
 }
 
 /// The brush transform an image draws under: the framing, with the correction

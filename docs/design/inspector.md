@@ -101,7 +101,7 @@ Labels use CSS names in sentence case (*Justify content*, *Flex start*), with lo
 - Switching between flex and grid keeps padding and gaps. Grid on a container with none starts at CSS's defaults.
 - **Flex on a container with none reads the layout from where the in-flow children sit** (`build::flex_from_placement`). Each child's slot is its unrotated box where the layout would place it (`container::slot_of`).
   - Direction: row unless the slots' centres spread further in y than in x.
-  - Gap: the mean gap between consecutive slots, on the main axis's gap only. Padding (a frame): the distances from its edges to the slots' union. Both clamped at 0 and rounded to whole px.
+  - Gap: the mean gap between consecutive slots, on the main axis's gap only. Padding (a frame): the distances from the edges of the box it is laid out at (a parent's stretch included) to the slots' union. Both clamped at 0 and rounded to whole px. A flow holds one gap, so only evenly spaced children stay put: uneven ones are re-spaced at the mean, and overlapping ones are laid end to end.
   - `align-items`: the cross start the slots share, else the centre, else the end, else start. Never `stretch`, which would resize the children.
   - The in-flow children are reordered into main-axis order (ties by cross start) within the places in-flow children held; out-of-flow ones keep theirs. No reorder when a child is a mask, since a mask masks what is above it.
   - A group gets no padding. A laid group's box starts at its origin, so the group moves to the slots' union corner and every child back by it; without that the content jumps to the group's origin (`flex_from_placement_reads_a_column_in_a_group`). A group in its parent's flow is placed there and is not moved.

@@ -726,6 +726,9 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
 /// they share, with the in-flow children reordered left to right or top to bottom.
 /// `None` when `id` is not a container or already has a layout.
 ///
+/// A flow holds one gap, so only evenly spaced children stay where they are:
+/// uneven ones are re-spaced at the mean, overlapping ones laid end to end.
+///
 /// A group's box starts at its origin, so a group is moved to its children's
 /// corner and every child back by it. No reorder when a child is a mask, which
 /// masks what is above it.
@@ -785,7 +788,9 @@ pub fn flex_from_placement(doc: &Document, res: &Resolved, id: NodeId) -> Option
         AlignItems::Start
     };
     let mut ops = Vec::new();
-    let padding = match (node.kind(), union) {
+    // A frame's padding against the box it is laid out at, which its parent's
+    // layout may have stretched past the size it stores.
+    let padding = match (res.used_kind(doc, id).unwrap_or(node.kind()), union) {
         (NodeKind::Artboard { size }, Some(u)) => {
             [u.y0, size.width - u.x1, size.height - u.y1, u.x0].map(|p| p.max(0.0).round())
         }

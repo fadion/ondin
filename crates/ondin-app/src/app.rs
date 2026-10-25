@@ -2715,12 +2715,14 @@ impl OndinApp {
             Ok(framed) => framed,
             Err(e) => return self.session.fail(format!("Cannot frame: {e}")),
         };
-        // The layout is read from the framed document, the frame's children in it.
+        // The layout is read from the framed document, the frame's children in it,
+        // laid out by updating a copy rather than rebuilding every node.
         let mut after = doc.clone();
-        if after.apply(&tx).is_err() {
+        let Ok(outcome) = after.apply(&tx) else {
             return self.session.fail("Cannot frame the selection");
-        }
-        let laid = ondin_core::Resolved::rebuild(&after);
+        };
+        let mut laid = res.clone();
+        laid.update(&after, &outcome.dirty);
         tx.0.extend(build::flex_from_placement(&after, &laid, frame).unwrap_or_default());
         if self.commit_edit(tx) {
             self.session.selection.set_one(frame);

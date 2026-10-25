@@ -2025,3 +2025,31 @@ fn flex_from_placement_reads_a_column_in_a_group() {
         "a container with a layout is left to its card"
     );
 }
+
+/// A frame grown by its parent's row reads its padding against the width it is
+/// laid out at, not the width it stores.
+///
+/// **Flip:** `flex_from_placement`'s padding read from `node.kind()` fails at
+/// *"the right padding"*, 140 against the stored 200.
+#[test]
+fn flex_from_placement_pads_against_the_box_a_parent_grew() {
+    let mut s = Scene::new();
+    let outer = s.add(s.root, frame(400.0, 100.0), (0.0, 0.0));
+    s.display(
+        outer,
+        Some(Display::Flex(Flex {
+            align_items: AlignItems::Start,
+            ..Default::default()
+        })),
+    );
+    let inner = s.add(outer, frame(200.0, 100.0), (0.0, 0.0));
+    s.item(inner, |i| i.grow = 1.0);
+    let _ = s.add(inner, rect(40.0, 30.0), (20.0, 20.0));
+    assert_eq!(s.bounds(inner).width(), 400.0, "grown past its stored 200");
+    let ops = ondin_core::build::flex_from_placement(&s.doc, &s.res, inner).expect("a container");
+    s.commit(ops);
+    let Some(Display::Flex(flex)) = s.doc.get(inner).unwrap().display().cloned() else {
+        panic!("a flex layout");
+    };
+    assert_eq!(flex.padding[1], 340.0, "the right padding");
+}

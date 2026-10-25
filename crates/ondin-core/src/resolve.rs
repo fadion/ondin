@@ -325,7 +325,7 @@ impl crate::container::LayoutView for CommittedView<'_> {
 /// own node and every change dirties it, so a node's entries are dropped when it is
 /// dirty and kept otherwise. Fonts arriving (`Resolved::invalidate_text`) are the
 /// one outside input and dirty every text node.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct TextMemo {
     boxes: Vec<(SizingKey, Option<Rect>)>,
     widths: Option<Option<(f64, f64)>>,
@@ -550,6 +550,10 @@ pub(crate) fn is_indexed(kind: &NodeKind) -> bool {
     )
 }
 
+/// The document's derived state, kept equal to [`Self::rebuild`] by
+/// [`Self::update`]. `Clone` so an edit not yet committed is laid out by updating
+/// a copy, which reshapes only the text it dirties.
+#[derive(Clone)]
 pub struct Resolved {
     world: FxHashMap<NodeId, Affine>,
     world_bounds: FxHashMap<NodeId, Rect>,

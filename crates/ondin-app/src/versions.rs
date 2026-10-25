@@ -38,9 +38,22 @@ pub(crate) fn when_label(secs: u64) -> String {
 }
 
 impl OndinApp {
-    /// The open document's pinned versions, newest first; empty when it has no
-    /// library id to keep them under.
+    /// Whether the open document is a file the library lists, the one place
+    /// `Ctrl+S` pins versions. A file elsewhere may carry a minted id, a library
+    /// document's copy even, and is still not.
+    pub(crate) fn in_library(&self) -> bool {
+        self.session
+            .path
+            .as_deref()
+            .is_some_and(|p| self.library.entry_at(p).is_some())
+    }
+
+    /// The open document's pinned versions, newest first; empty when it is not in
+    /// the library or has no id to keep them under.
     pub(crate) fn document_versions(&self) -> Vec<Version> {
+        if !self.in_library() {
+            return Vec::new();
+        }
         let Some(id) = self
             .session
             .doc
@@ -66,7 +79,7 @@ impl OndinApp {
             return;
         }
         let versions = self.document_versions();
-        let filed = self.session.path.is_some() && self.session.doc.meta().id.is_some();
+        let filed = self.in_library();
         let title = format!("Version history of {}", self.session.document_title());
         let mut close = false;
         let mut restore: Option<PathBuf> = None;
@@ -253,5 +266,35 @@ mod tests {
         app.restore_version(&now[0].path);
         assert_eq!(name(&app).as_deref(), Some("Second"), "and comes back");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A copy of a library document opened from outside the library, its id and
+    /// all, is not in the library: no versions are listed for it, since `Ctrl+S`
+    /// there pins none.
+    ///
+    /// flip: `in_library` answering for any saved document with an id → fails at
+    /// "not in the library".
+    #[test]
+    fn a_document_outside_the_library_has_no_versions() {
+        let ctx = egui::Context::default();
+        let base = std::env::temp_dir().join(format!("ondin-versions-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (root, outside) = (base.join("library"), base.join("downloads"));
+        std::fs::create_dir_all(&outside).unwrap();
+        let mut app = OndinApp::headless(&ctx);
+        app.prefs.base_folder = Some(root.clone());
+        app.library = crate::library::state::Library::open(root.clone());
+        assert!(app.save_file(true), "filed and pinned");
+        assert!(app.in_library(), "fixture: the original is in the library");
+        assert_eq!(app.document_versions().len(), 1, "fixture: one pin");
+
+        let copy = outside.join("brief.ondin");
+        std::fs::copy(app.session.path.as_ref().unwrap(), &copy).unwrap();
+        let doc = ondin_core::io::load(&std::fs::read(&copy).unwrap()).unwrap();
+        assert!(doc.meta().id.is_some(), "fixture: the copy keeps the id");
+        app.adopt_opened(&copy, doc);
+        assert!(!app.in_library(), "not in the library");
+        assert!(app.document_versions().is_empty(), "so no versions");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

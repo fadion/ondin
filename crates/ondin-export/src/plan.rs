@@ -126,7 +126,7 @@ pub fn raster_size(res: &Resolved, node: NodeId, spec: &ExportSpec) -> (Option<(
     let (w, h) = (b.width().max(1.0), b.height().max(1.0));
     let f = spec.scale.factor(w, h);
     let (want_w, want_h) = ((w * f).ceil(), (h * f).ceil());
-    let vp = crate::png::viewport_at(b, f);
+    let vp = crate::png::viewport_at(b, format_capped(f, w, h, spec.format));
     let clamped = want_w > vp.pixel_size.0 as f64 || want_h > vp.pixel_size.1 as f64;
     (Some(vp.pixel_size), clamped)
 }
@@ -178,10 +178,21 @@ pub fn raster_opts(
     let b = res.ink_bounds(node);
     let (w, h) = b.map_or((1.0, 1.0), |b| (b.width().max(1.0), b.height().max(1.0)));
     crate::png::RasterOpts {
-        scale: spec.scale.factor(w, h),
+        scale: format_capped(spec.scale.factor(w, h), w, h, spec.format),
         background: background_color(doc, node, spec),
         trim: spec.trim,
         pad_square: spec.pad_square,
+    }
+}
+
+/// `scale` capped so a `w`×`h` box fits the format's own side limit, which for
+/// WebP is below the rasterizer's. Half a pixel short of the cap, so `ceil` of
+/// the product cannot land one past it; trim and square padding only shrink or
+/// reach the longer side.
+fn format_capped(scale: f64, w: f64, h: f64, format: ExportFormat) -> f64 {
+    match format {
+        ExportFormat::Webp => scale.min((f64::from(crate::webp::MAX_SIDE) - 0.5) / w.max(h)),
+        _ => scale,
     }
 }
 
@@ -439,6 +450,33 @@ mod tests {
             image::guess_format(&bytes).ok(),
             Some(image::ImageFormat::WebP)
         );
+        let img = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(Some((img.width(), img.height())), file.pixels);
+    }
+
+    /// A WebP past the format's side limit is planned clamped to it and renders
+    /// at the planned size, where PNG's cap would let it through.
+    ///
+    /// flip: `format_capped` passing WebP's scale through → fails at "the long
+    /// side lands on the cap" (and `render` would panic in the encoder).
+    #[test]
+    fn a_webp_past_its_side_limit_is_clamped_not_a_panic() {
+        let (mut doc, _, _, rect) = doc_with_rect(vec![ExportSpec::new(
+            ExportFormat::Webp,
+            ExportScale::Times(2.0),
+        )]);
+        doc.apply(&Transaction(vec![Operation::SetGeometry {
+            id: rect,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(4.0, 9000.0)),
+        }]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        let file = &plan(&doc, &res, &[rect], PlanOptions::default())[0];
+        let (w, h) = file.pixels.expect("a rect has bounds");
+        assert_eq!(h, crate::webp::MAX_SIDE, "the long side lands on the cap");
+        assert!(w <= 8, "and the short side scales with it: {w}");
+        assert!(file.clamped, "the panel is told the request was cut");
+        let bytes = render(&doc, &res, file).expect("a rect has bounds");
         let img = image::load_from_memory(&bytes).unwrap();
         assert_eq!(Some((img.width(), img.height())), file.pixels);
     }

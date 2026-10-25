@@ -7,7 +7,15 @@
 use image::ImageEncoder;
 use image::codecs::webp::WebPEncoder;
 
+/// The longest side a WebP can hold (libwebp's `WEBP_MAX_DIMENSION`), well under
+/// the rasterizer's [`crate::png::MAX_RASTER_SIDE`]; `plan::raster_opts` caps a
+/// WebP scale to it. Not 16384: the encoder accepts that and writes a file
+/// `image` itself refuses to decode.
+pub const MAX_SIDE: u32 = 16383;
+
 /// Encode a straight-alpha RGBA8 buffer as lossless WebP, alpha kept.
+///
+/// Panics past 16384 on either side; `plan` never hands it such a raster.
 pub fn encode_rgba8(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut out = Vec::new();
     WebPEncoder::new_lossless(&mut out)

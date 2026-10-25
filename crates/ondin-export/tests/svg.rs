@@ -1008,6 +1008,67 @@ fn variations_features_shift_and_language_are_exported_and_reported() {
     }
 }
 
+/// An em baseline shift on a text whose size is bound is reported against the
+/// size drawn, not the bound literal 0.
+///
+/// flip: `report_node` reading the stored kind → fails at "baseline shift".
+#[test]
+fn an_em_shift_under_a_bound_size_is_reported() {
+    use ondin_core::variable::{Cell, Mode, TEXT_SIZE, VarKind, Variable, text_vars_at};
+    use ondin_core::{IdSource, Length, Operation, Resolved, TextStyle, Transaction};
+
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xE5);
+    let (mode, var) = (ids.mint_mode(), ids.mint_var());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Base".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "type/size".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(20.0))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetTextStyle {
+                id: f.text,
+                spans: None,
+                style: TextStyle {
+                    font_family: "Inter".into(),
+                    font_size: 16.0,
+                    baseline_shift: Length::Em(0.3),
+                    ..Default::default()
+                },
+            },
+        ]))
+        .expect("a size variable and a shifted text");
+    let bind = ondin_core::bind_text_ops(&f.doc, f.text, text_vars_at(TEXT_SIZE, var));
+    f.doc.apply(&Transaction(bind)).expect("bound");
+    f.res = Resolved::rebuild(&f.doc);
+    let out = ondin_export::svg::svg_of_reported(&f.doc, &f.res, &[f.doc.root()]);
+    assert!(
+        out.svg.contains(r#"baseline-shift="6""#),
+        "the fixture draws the shift at the bound size:\n{}",
+        out.svg
+    );
+    assert!(
+        out.round_trip.iter().any(|s| s.contains("baseline shift")),
+        "baseline shift not reported: {:?}",
+        out.round_trip
+    );
+}
+
 /// An em thickness resolves against the font size, the way `letter-spacing`
 /// already does — SVG has no em for the value to stay in.
 #[test]

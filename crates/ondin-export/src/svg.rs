@@ -992,6 +992,7 @@ fn gradient_def(name: &str, brush: &ondin_core::GradientBrush, frame: Option<Rec
 /// `tests/fidelity.rs` checks the report against the markup. `effects` is the
 /// stack as drawn (`Document::resolved_effects`).
 fn report_node(
+    res: &Resolved,
     node: &Node,
     effects: &[ondin_core::Keyed<Effect>],
     filter_written: bool,
@@ -1048,8 +1049,9 @@ fn report_node(
             report.round_trip("flipped type on a path, written as a reversed rail");
         }
     }
-    // `run_attrs` writes these four; the reader takes none of them back.
-    if let Some(parts) = ondin_core::TextRef::of(node.kind()) {
+    // `run_attrs` writes these four; the reader takes none of them back. The used
+    // kind, as `run_attrs` reads: a bound size's stored literal is 0.
+    if let Some(parts) = ondin_core::TextRef::of(res.used_kind_of(node)) {
         let runs = parts.spans.runs(parts.style, parts.content.len());
         let any = |f: &dyn Fn(&ondin_core::TextStyle) -> bool| runs.iter().any(|(_, s)| f(s));
         if any(&|s| !s.variations.is_empty()) {
@@ -1095,7 +1097,7 @@ fn emit_node(
     let drawn_fx = doc.resolved_effects(id, node.effects());
     let fx = ondin_render::effects::any_ink(&drawn_fx) && defs.has(&effect_id(id));
     // Under the visibility guard: the report is a claim about the file.
-    report_node(node, &drawn_fx, fx, report);
+    report_node(res, node, &drawn_fx, fx, report);
     let paint = doc.resolved_paint(id, node.paint());
     if visible_fills(&paint).any(|(_, f)| crops_past_picture(doc, node, res, id, f.brush.drawn())) {
         report

@@ -1041,7 +1041,8 @@ impl EditorSession {
         // has detached the binding it replaces.
         let tx = ondin_core::build::keep_text_bindings(&self.doc, tx);
         // A box-sized layer's gradients follow its stored size — after the passes
-        // that write sizes of their own (a detached binding's literal).
+        // that write sizes of their own (a detached binding's literal). `owed` runs
+        // it again for the sizes copies follow.
         let tx = ondin_core::paint_box::keep_gradients(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure

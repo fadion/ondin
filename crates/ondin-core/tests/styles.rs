@@ -669,3 +669,30 @@ fn an_effects_style_binding_a_number_its_kind_lacks_is_refused() {
         "{r:?}"
     );
 }
+
+/// **A resize keeps a layer bound to a gradient fill style**: the gradient pass
+/// leaves a styled list to its style, so the resize writes no fill to detach.
+///
+/// flip: `keep_gradients` carrying a styled list (`slots` all true) → fails at
+/// *"still bound"*.
+#[test]
+fn a_resize_keeps_a_gradient_fill_style() {
+    let mut f = fixture();
+    let ramp = ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (40.0, 0.0));
+    let mut fills = f.doc.get(f.a).unwrap().paint().fills.clone();
+    fills[0].brush = Brush::Gradient(ramp.into()).into();
+    let a = f.a;
+    commit(&mut f, vec![Operation::SetFills { id: a, fills }]).unwrap();
+    let s = styled(&mut f);
+    let before = fill(&f.doc, f.a);
+    let tx = ondin_core::paint_box::keep_gradients(
+        &f.doc,
+        Transaction(vec![Operation::SetGeometry {
+            id: a,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(80.0, 20.0)),
+        }]),
+    );
+    commit(&mut f, tx.0).unwrap();
+    assert_eq!(fill_style(&f.doc, f.a), Some(s), "still bound");
+    assert_eq!(fill(&f.doc, f.a), before, "drawn as its style");
+}

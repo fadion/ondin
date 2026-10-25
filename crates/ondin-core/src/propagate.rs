@@ -443,6 +443,9 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // follow: the binding is inert there, and cleared as the main's was.
     let inert = inert_spacing(doc, tx);
     tx.0.extend(inert);
+    // And the gradients of a copy a follow resized: the commit door carried only
+    // the edit's own size writes, and a copy keeps a gradient of its own.
+    *tx = crate::paint_box::keep_gradients(doc, std::mem::take(tx));
 }
 
 /// A `SetSpacingVars` clearing every node `tx` takes the layout from while it

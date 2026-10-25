@@ -2226,3 +2226,93 @@ fn deleting_a_variable_clears_an_inert_spacing_binding() {
         .expect("the variable deletes");
     assert_eq!(f.doc.get(f.frame).unwrap().spacing_vars(), [None; 6]);
 }
+
+/// Give `f.rect` (40 × 20) a linear gradient across its width.
+fn gradient_rect(f: &mut F) {
+    let ramp = ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (40.0, 0.0));
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: f.rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Gradient(ramp.into()).into(),
+                visible: true,
+            }]),
+        }]))
+        .unwrap();
+}
+
+/// The transform of `paint`'s first fill, a literal gradient.
+fn gradient_transform(paint: &ondin_core::Paint) -> ondin_core::kurbo::Affine {
+    match paint.fills[0].brush.literal() {
+        Some(Brush::Gradient(g)) => g.transform,
+        other => panic!("a gradient: {other:?}"),
+    }
+}
+
+/// `ops` with the commit door's gradient pass, applied.
+fn commit_carried(f: &mut F, ops: Vec<Operation>) {
+    let tx = ondin_core::paint_box::keep_gradients(&f.doc, Transaction(ops));
+    f.doc.apply(&tx).unwrap();
+}
+
+/// **Binding a width carries its gradient by the box drawn, never onto the
+/// placeholder 0**: bound to a variable reading 60 in the default mode, the
+/// gradient goes 40 → 60; detached in the default mode, it stays.
+///
+/// flip: `keep_gradients` measuring the stored literal (`node.kind().box_size()`
+/// for both boxes) → fails at *"never collapsed onto the 0"*.
+#[test]
+fn binding_a_width_carries_its_gradient_by_the_drawn_box() {
+    let mut f = fixture();
+    gradient_rect(&mut f);
+    let w = width_var(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    commit_carried(&mut f, ops);
+    assert_eq!(stored_size(&f.doc, f.rect).width, 0.0, "fixture: bound");
+    let carried = ondin_core::kurbo::Affine::scale_non_uniform(1.5, 1.0);
+    assert_eq!(
+        gradient_transform(f.doc.get(f.rect).unwrap().paint()),
+        carried,
+        "never collapsed onto the 0"
+    );
+    let ops = ondin_core::detach_size_ops(&f.doc, f.rect, [true, false]);
+    commit_carried(&mut f, ops);
+    assert_eq!(
+        stored_size(&f.doc, f.rect),
+        Size::new(60.0, 20.0),
+        "fixture: detached"
+    );
+    assert_eq!(
+        gradient_transform(f.doc.get(f.rect).unwrap().paint()),
+        carried,
+        "a detach in the default mode moves nothing"
+    );
+}
+
+/// **A bound width read in another mode draws its gradient stretched with it**:
+/// stored against Light's 60, drawn in Dark's 80.
+///
+/// flip: `node_paint` handing `drawn_paint` the stored literal's box → fails at
+/// *"stretched to Dark's 80"* (the 0 box maps nothing).
+#[test]
+fn a_bound_width_in_another_mode_stretches_its_gradient() {
+    let mut f = fixture();
+    gradient_rect(&mut f);
+    let w = width_var(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    commit_carried(&mut f, ops);
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let paint = ondin_core::paint_box::node_paint(&f.doc, &res, f.rect).unwrap();
+    let got = gradient_transform(&paint).as_coeffs();
+    let want = ondin_core::kurbo::Affine::scale_non_uniform(2.0, 1.0).as_coeffs();
+    assert!(
+        got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-9),
+        "stretched to Dark's 80: {got:?}"
+    );
+}

@@ -591,7 +591,7 @@ fn paint_node<P: ScenePainter>(
                 id,
                 over.and_then(|o| o.paint.as_ref()).unwrap_or(node.paint()),
             ),
-            stored,
+            ondin_core::paint_box::paint_box(doc, node.size_vars(), stored),
             kind,
         ),
         // Committed only: a preview cannot change the rule (`absorb` refuses

@@ -9613,12 +9613,14 @@ impl OndinApp {
         Some((frame, e.width, e.height))
     }
 
-    /// The map from the box `id`'s paint is stored against to the one layout draws
-    /// it on, as the scene walk draws it (`paint_box::drawn_paint`); `None` when they
-    /// agree, which includes while a preview owns the kind.
+    /// The map from the box `id`'s paint is stored against (`paint_box::paint_box`)
+    /// to the one it draws on, as the scene walk draws it (`paint_box::drawn_paint`);
+    /// `None` when they agree.
     pub(crate) fn paint_box_map(&self, id: NodeId) -> Option<ondin_core::kurbo::Affine> {
         let node = self.session.display_node(id)?;
-        ondin_core::paint_box::box_map(node.stored_kind().box_size()?, node.kind().box_size()?)
+        let vars = self.session.doc.get(id)?.size_vars();
+        let stored = ondin_core::paint_box::paint_box(&self.session.doc, vars, node.stored_kind())?;
+        ondin_core::paint_box::box_map(stored, node.kind().box_size()?)
             .filter(|m| ondin_core::build::affine_is_invertible(*m))
     }
 

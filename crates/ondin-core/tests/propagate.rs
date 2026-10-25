@@ -1382,3 +1382,43 @@ fn a_mask_does_not_follow_onto_a_copy_holding_a_frame_of_its_own() {
     assert!(f.doc.get(g).unwrap().mask(), "the main's group masks");
     assert!(!f.doc.get(gc).unwrap().mask(), "the copy keeps its value");
 }
+
+/// **A copy's own gradient follows the size its main's resize gives it**: the
+/// commit door carries the edit's own size writes, and `owed` the followed ones.
+///
+/// flip: dropping `keep_gradients` from the end of `propagate::owed` → fails at
+/// *"the copy's own gradient is carried"*.
+#[test]
+fn a_copys_own_gradient_follows_its_mains_resize() {
+    let mut f = fixture();
+    let mut mine = fills(&f.doc, f.ia);
+    let ramp = ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (10.0, 0.0));
+    mine[0].brush = Brush::Gradient(ramp.into()).into();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: f.ia,
+            fills: mine,
+        }]))
+        .unwrap();
+    let tx = ondin_core::paint_box::keep_gradients(
+        &f.doc,
+        Transaction(vec![Operation::SetGeometry {
+            id: f.a,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(20.0, 10.0)),
+        }]),
+    );
+    commit_all(&mut f, tx.0);
+    assert_eq!(
+        f.doc.get(f.ia).unwrap().kind().box_size(),
+        Some(Size::new(20.0, 10.0)),
+        "fixture: the copy follows the size"
+    );
+    match fills(&f.doc, f.ia)[0].brush.literal() {
+        Some(Brush::Gradient(g)) => assert_eq!(
+            g.transform,
+            Affine::scale_non_uniform(2.0, 1.0),
+            "the copy's own gradient is carried"
+        ),
+        other => panic!("a gradient: {other:?}"),
+    }
+}

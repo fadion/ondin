@@ -1,11 +1,11 @@
 //! Gradients follow their layer's box.
 //!
 //! A gradient's points are stored in the layer's own pixels, so a box that changes
-//! size would leave them where they were drawn. Two doors keep them on the shape:
-//! a write that changes a box-sized layer's stored size carries its gradients with
-//! it ([`keep_gradients`], run where commits and previews enter), and a box that
-//! layout or a bound size draws at another size than the stored one draws its
-//! gradients mapped onto it ([`drawn_paint`]). Both compose the map into
+//! size would leave them where they were drawn. They are stored against the
+//! layer's [`paint_box`], and two doors keep them on the shape: a write that
+//! changes it carries its gradients with it ([`keep_gradients`], run where commits
+//! and previews enter), and a box that layout or a bound size draws at another
+//! size draws its gradients mapped onto it ([`drawn_paint`]). Both compose the map into
 //! `GradientBrush::transform`, which is exact for every kind.
 
 use crate::document::Document;
@@ -14,7 +14,8 @@ use crate::image::Brush;
 use crate::item::Keyed;
 use crate::node::{NodeKind, Paint};
 use crate::op::{GeometryPatch, Operation, Transaction};
-use crate::variable::BrushSource;
+use crate::style::StyleSlot;
+use crate::variable::{BrushSource, SizeVars};
 use kurbo::{Affine, Size};
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
@@ -44,24 +45,49 @@ fn carry_source(src: &BrushSource, by: Affine) -> Option<BrushSource> {
 
 /// The map a box-sized layer's gradients ride when its box goes from `from` to
 /// `to`: a scale about the box's origin, where every box-sized kind sits. `None`
-/// for no change, or a box too small to scale from.
+/// for no change, or a box too small to scale from or to — a zero side would
+/// write a singular transform no handle can repair.
 pub fn box_map(from: Size, to: Size) -> Option<Affine> {
-    if from == to || from.width <= 0.0 || from.height <= 0.0 {
+    if from == to
+        || [from.width, from.height, to.width, to.height]
+            .iter()
+            .any(|s| *s <= 0.0)
+    {
         return None;
     }
     let by = Affine::scale_non_uniform(to.width / from.width, to.height / from.height);
     by.as_coeffs().iter().all(|c| c.is_finite()).then_some(by)
 }
 
-/// `paint` with its gradients mapped from the box `stored` describes onto the one
-/// `drawn` does: what layout or a bound size stretching a layer does to its paint.
-/// Borrowed when the boxes agree, a kind has no box, or nothing is a gradient.
+/// The box a layer's gradients are stored against: `kind`'s, with each axis
+/// `vars` binds read as its variable's number in the default mode. A bound axis's
+/// literal is a placeholder 0, and reading every mode against the default one
+/// lets a mode that draws the variable larger stretch the gradient with it.
+pub fn paint_box(doc: &Document, vars: SizeVars, kind: &NodeKind) -> Option<Size> {
+    kind.box_size().map(|s| bound_axes(doc, vars, s))
+}
+
+/// `size` with each axis `vars` binds read as its variable's default-mode number.
+fn bound_axes(doc: &Document, vars: SizeVars, size: Size) -> Size {
+    let read = |var: Option<crate::variable::VarId>, literal: f64| match var
+        .and_then(|v| doc.variables().resolve_opt(v, None))
+    {
+        Some(crate::variable::Value::Number(x)) => x.max(0.0),
+        _ => literal,
+    };
+    Size::new(read(vars[0], size.width), read(vars[1], size.height))
+}
+
+/// `paint` with its gradients mapped from the box `stored` (a [`paint_box`]) onto
+/// the one `drawn` describes: what layout, or a bound size reading another mode,
+/// does to its paint. Borrowed when the boxes agree, a kind has no box, or
+/// nothing is a gradient.
 pub fn drawn_paint<'a>(
     paint: Cow<'a, Paint>,
-    stored: &NodeKind,
+    stored: Option<Size>,
     drawn: &NodeKind,
 ) -> Cow<'a, Paint> {
-    let (Some(from), Some(to)) = (stored.box_size(), drawn.box_size()) else {
+    let (Some(from), Some(to)) = (stored, drawn.box_size()) else {
         return paint;
     };
     let Some(by) = box_map(from, to) else {
@@ -99,7 +125,7 @@ pub fn node_paint<'a>(
     let drawn = res.used_kind(doc, id).unwrap_or(node.kind());
     Some(drawn_paint(
         doc.resolved_paint(id, node.paint()),
-        node.kind(),
+        paint_box(doc, node.size_vars(), node.kind()),
         drawn,
     ))
 }
@@ -112,6 +138,11 @@ pub fn node_paint<'a>(
 /// written for the result. A list the ops leave alone is set with its gradients
 /// carried, if it has any.
 pub fn carry_into(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operation>) {
+    carry_slots(doc, id, by, ops, [true, true]);
+}
+
+/// [`carry_into`] on the fill list, the stroke list, or both, as `slots` says.
+fn carry_slots(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operation>, slots: [bool; 2]) {
     let Some(node) = doc.get(id) else { return };
     let paint = node.paint();
     let held = |list: &[Keyed<crate::node::Fill>], item: &Keyed<crate::node::Fill>| {
@@ -125,7 +156,7 @@ pub fn carry_into(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operatio
     let (mut fills_set, mut strokes_set) = (false, false);
     for op in ops.iter_mut() {
         match op {
-            Operation::SetFills { id: i, fills } if *i == id => {
+            Operation::SetFills { id: i, fills } if *i == id && slots[0] => {
                 fills_set = true;
                 for f in fills.iter_mut() {
                     if held(&paint.fills, f)
@@ -135,7 +166,7 @@ pub fn carry_into(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operatio
                     }
                 }
             }
-            Operation::SetStrokes { id: i, strokes } if *i == id => {
+            Operation::SetStrokes { id: i, strokes } if *i == id && slots[1] => {
                 strokes_set = true;
                 for s in strokes.iter_mut() {
                     if held_stroke(&paint.strokes, s)
@@ -148,7 +179,8 @@ pub fn carry_into(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operatio
             _ => {}
         }
     }
-    if !fills_set
+    if slots[0]
+        && !fills_set
         && paint
             .fills
             .iter()
@@ -166,7 +198,8 @@ pub fn carry_into(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operatio
             .collect();
         ops.push(Operation::SetFills { id, fills });
     }
-    if !strokes_set
+    if slots[1]
+        && !strokes_set
         && paint
             .strokes
             .iter()
@@ -186,27 +219,43 @@ pub fn carry_into(doc: &Document, id: NodeId, by: Affine, ops: &mut Vec<Operatio
     }
 }
 
-/// `tx` with the gradients of every box-sized layer whose stored size it changes
-/// carried onto the new size ([`carry_into`]).
+/// `tx` with the gradients of every box-sized layer whose [`paint_box`] it changes
+/// carried onto the new box ([`carry_into`]).
 ///
-/// A layer the transaction creates is left alone, and so is a path or a line: a
-/// path's box also changes when a point is edited, which is no resize, so the
-/// resize tools carry those themselves. Several size writes to one layer compose.
+/// Both boxes read the layer's size bindings, the new one as the transaction
+/// leaves them, so binding or detaching an axis carries only by what the box
+/// draws. A layer the transaction creates is left alone, and so is a path or a
+/// line: a path's box also changes when a point is edited, which is no resize, so
+/// the resize tools carry those themselves. A list bound to a style is left to its
+/// style. Several size writes to one layer compose.
+///
+/// Running it again over its own output carries nothing twice: a list it wrote
+/// no longer holds the layer's brush, which is what [`carry_into`] edits.
 pub fn keep_gradients(doc: &Document, tx: Transaction) -> Transaction {
-    let mut sizes: FxHashMap<NodeId, (Size, Size)> = FxHashMap::default();
+    let mut sizes: FxHashMap<NodeId, Size> = FxHashMap::default();
+    let mut vars: FxHashMap<NodeId, SizeVars> = FxHashMap::default();
     for op in &tx.0 {
-        if let Operation::SetGeometry {
-            id,
-            geometry: GeometryPatch::Size(to),
-        } = op
-            && let Some(from) = doc.get(*id).and_then(|n| n.kind().box_size())
-        {
-            sizes.entry(*id).or_insert((from, *to)).1 = *to;
+        match op {
+            Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::Size(to),
+            } => {
+                sizes.insert(*id, *to);
+            }
+            Operation::SetSizeVars { id, vars: v } => {
+                vars.insert(*id, *v);
+            }
+            _ => {}
         }
     }
     let mut ids: Vec<(NodeId, Affine)> = sizes
         .into_iter()
-        .filter_map(|(id, (from, to))| box_map(from, to).map(|by| (id, by)))
+        .filter_map(|(id, to)| {
+            let node = doc.get(id)?;
+            let from = paint_box(doc, node.size_vars(), node.kind())?;
+            let after = vars.get(&id).copied().unwrap_or(node.size_vars());
+            box_map(from, bound_axes(doc, after, to)).map(|by| (id, by))
+        })
         .collect();
     if ids.is_empty() {
         return tx;
@@ -214,7 +263,12 @@ pub fn keep_gradients(doc: &Document, tx: Transaction) -> Transaction {
     ids.sort_by_key(|(id, _)| *id);
     let mut ops = tx.0;
     for (id, by) in ids {
-        carry_into(doc, id, by, &mut ops);
+        let styles = doc.get(id).map(|n| n.styles()).unwrap_or_default();
+        let slots = [
+            styles.get(StyleSlot::Fills).is_none(),
+            styles.get(StyleSlot::Strokes).is_none(),
+        ];
+        carry_slots(doc, id, by, &mut ops, slots);
     }
     Transaction(ops)
 }
@@ -292,6 +346,19 @@ mod tests {
         assert_eq!(g.transform, Affine::scale_non_uniform(2.0, 0.5));
     }
 
+    /// A box sized to nothing on either side maps nothing: a zero scale would be
+    /// a singular transform.
+    #[test]
+    fn a_zero_box_maps_nothing() {
+        let wide = Size::new(100.0, 50.0);
+        assert_eq!(box_map(wide, Size::new(0.0, 50.0)), None);
+        assert_eq!(box_map(Size::new(100.0, 0.0), wide), None);
+        assert!(
+            box_map(wide, Size::new(50.0, 50.0)).is_some(),
+            "the control"
+        );
+    }
+
     /// A solid has nothing to carry, so the transaction stays as it came.
     #[test]
     fn a_solid_layer_gains_no_paint_write() {
@@ -355,13 +422,17 @@ mod tests {
             size: Size::new(300.0, 50.0),
             corner_radii: Default::default(),
         };
-        let drawn = drawn_paint(Cow::Borrowed(node.paint()), node.kind(), &wide);
+        let drawn = drawn_paint(Cow::Borrowed(node.paint()), node.kind().box_size(), &wide);
         let Some(Brush::Gradient(g)) = drawn.fills[0].brush.literal() else {
             panic!("gradient")
         };
         assert_eq!(g.transform, Affine::scale_non_uniform(3.0, 1.0));
         assert!(matches!(
-            drawn_paint(Cow::Borrowed(node.paint()), node.kind(), node.kind()),
+            drawn_paint(
+                Cow::Borrowed(node.paint()),
+                node.kind().box_size(),
+                node.kind()
+            ),
             Cow::Borrowed(_)
         ));
     }

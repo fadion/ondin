@@ -1079,6 +1079,106 @@ mod canvas_tests {
         assert!((deg - 90.0).abs() < 1e-3, "straight down: {deg}");
     }
 
+    /// **A handle dragged on a layer drawn wider than its paint box stores the end
+    /// back on that box**: a rect bound to a width reading 200 in Light and 400 in
+    /// Dark, in a Dark frame, its ramp stored across 200 and drawn across 400. The
+    /// end dragged to 300 drawn is 150 stored.
+    ///
+    /// flip: `stored_on_box` returning `drawn` → fails at the stored end (300).
+    #[test]
+    fn a_handle_on_a_stretched_layer_stores_the_end_on_its_paint_box() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ramp(&ctx);
+        let root = app.session.doc.root();
+        let mut ids = IdSource::new(0x5A7);
+        let board = ids.mint();
+        let (light, dark) = (ids.mint_mode(), ids.mint_mode());
+        let w = ids.mint_var();
+        let mode = |id, name: &str| ondin_core::Mode {
+            id,
+            name: name.into(),
+        };
+        let mut doc = app.session.doc.clone();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: board,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(600.0, 100.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::Reparent {
+                id,
+                new_parent: board,
+                index: 0,
+            },
+            Operation::AddMode {
+                mode: mode(light, "Light"),
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddMode {
+                mode: mode(dark, "Dark"),
+                index: 1,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: ondin_core::Variable {
+                    id: w,
+                    name: "w".into(),
+                    kind: ondin_core::VarKind::Number,
+                    cells: [
+                        (light, ondin_core::Cell::Number(200.0)),
+                        (dark, ondin_core::Cell::Number(400.0)),
+                    ]
+                    .into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetMode {
+                id: board,
+                mode: Some(dark),
+            },
+        ]))
+        .expect("a Dark frame and a width variable");
+        doc.apply(&Transaction(ondin_core::bind_size_ops(
+            &doc,
+            id,
+            [Some(w), None],
+        )))
+        .expect("the bound width");
+        app.session.adopt_document(doc, None);
+        app.session.camera.center = Point::new(200.0, 50.0);
+        app.session.camera.zoom = 1.0;
+        app.session.selection.set_one(id);
+        app.picker = Some(Picker::new(id, PaintSlot::Fill(0), egui::pos2(0.0, 0.0)));
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new(), Default::default());
+        }
+        assert_eq!(
+            app.session.resolved.world_bounds(id).map(|r| r.width()),
+            Some(400.0),
+            "fixture: drawn at Dark's 400"
+        );
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(400.0, 50.0),
+            Point::new(300.0, 50.0),
+            Default::default(),
+        );
+        let (a, b) = paint::linear_ends(&fill(&app, id)).expect("linear");
+        assert!(
+            near(a, Point::new(0.0, 50.0)) && near(b, Point::new(150.0, 50.0)),
+            "the stored end: {a:?} {b:?}"
+        );
+    }
+
     /// Resizing the layer carries its gradient with the box.
     ///
     /// flip: dropping `keep_gradients` from `commit_inner` → fails at the ends.

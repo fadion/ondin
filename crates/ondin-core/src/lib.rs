@@ -41,6 +41,7 @@ pub mod meta;
 pub mod naming;
 pub mod node;
 pub mod op;
+pub mod paint_box;
 pub mod propagate;
 pub mod query;
 pub mod reset;

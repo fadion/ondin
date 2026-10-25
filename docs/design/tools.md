@@ -17,7 +17,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
-- **Paint editing**: stacked fills and strokes (§6.3), solid or linear/radial gradient, in a detached picker; stroke options, per-corner radius, polygon sides, star points and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
+- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius, polygon sides, star points and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
 
 ### The wheel
@@ -72,6 +72,10 @@ for removing a gradient stop). The canvas resolves five of the six targets, in o
 3. a guide (`guide_at` answers `None` while guides are locked, so the canvas menu carries *Lock guides* itself);
 4. `pick_at_pointer` → `pick_for_click`, the query a left-click runs, including `Ctrl` deep-select and a frame's name tag;
 5. the page.
+
+Between the second and the third, the edited gradient's handles keep the button and open no menu
+(`gradient_secondary`, the stop bar's twin): a right-click on a stop's dot removes it, and one on any
+handle or dot is spent either way.
 
 A hit inside the selection leaves it whole (right-click one of five layers and still reach
 *Union*); a hit outside replaces it. Empty canvas does not deselect, because *Paste here* is why
@@ -132,7 +136,7 @@ different verb (`Ctrl` on a side).
 - The `W × H` badge quotes that box: the inspector's numbers for one layer, the oriented box in its own axes for several. It hangs off the edge whose outward normal points most steeply down the screen, so on a rotated rectangle the text is never more than 45° off horizontal.
 - **Hover** outlines exactly what a click would select, `Ctrl` and `Ctrl`+`Alt` included; a container lends the outline to every leaf it holds. The ring is 3px, against the selection box's 1.2px.
 - `canvas::stroke_outlines` takes a `view` (`canvas::outline_view`, the viewport inflated by the ring width) and rejects subtrees missing it, copying `scene.rs`'s `bounds_cover_subtree`: a group or clipping frame can be rejected whole, a non-clipping frame cannot. Visibility is read through `display_node`, so a layers-panel eye preview counts.
-- **Inspector edits hide the chrome** (box, handles, badge, pivot, hover outline, key-layer trace). `canvas::chrome_hidden` holds the list: `app::ChromeHold` is one term, beside `editing_in_place` (pen, path editing, image editing). A scrub's 1.5s count starts when the button comes up and each keystroke restarts it; the chrome returns on the timeout, on pointer movement over the canvas, or at once on `cancel_gesture`. An edit arms the hide if its transaction `changes_ink` (§5.7): a 90° turn does; the proportion lock and opening the per-corner dialog do not. Box trim moves the box without moving ink, so it commits through `commit_chrome_edit` and keeps its chrome. `app::edit_note` also requires that the control did something.
+- **Inspector edits hide the chrome** (box, handles, badge, pivot, hover outline, key-layer trace). `canvas::chrome_hidden` holds the list: `app::ChromeHold` is one term, beside `editing_in_place` (pen, path editing, image editing, gradient handles). A scrub's 1.5s count starts when the button comes up and each keystroke restarts it; the chrome returns on the timeout, on pointer movement over the canvas, or at once on `cancel_gesture`. An edit arms the hide if its transaction `changes_ink` (§5.7): a 90° turn does; the proportion lock and opening the per-corner dialog do not. Box trim moves the box without moving ink, so it commits through `commit_chrome_edit` and keeps its chrome. `app::edit_note` also requires that the control did something.
 - Every inspector control commits through `commit_edit` or `edit_valve` (§9.3). `only_the_layers_panel_commits_without_the_committer` requires `self.session.commit` only in `panels/layers.rs`; the identity row's *Group*/*Ungroup* call the keyboard verbs declared in `app.rs`.
 
 **A lone `Line` gets two end handles instead of a box.** `canvas::lone_line` is `Some` only when the
@@ -170,12 +174,49 @@ it keeps and the scale its geometry takes. Shared pieces: `resize_factors` (fact
 including the `symmetric` and `keep_ratio` rules) and `scale_geometry` (a leaf's size, a line's end,
 a path's points, or recursion into a container); `resize_group`, `scale_subtree` and
 `resize_geometry` (§5.6) are built from these. An off-axis root under a non-uniform drag gets a skew
-so it lands exactly. Options travel as `tools::Resize { keep_ratio, symmetric, scaling }`.
+so it lands exactly. Options travel as `tools::Resize { keep_ratio, symmetric, scaling }`. A line's
+or path's gradients ride the same scale in `scale_geometry` (`carry_gradients`); box-sized kinds are
+carried at the commit door (§6.2).
 
 **Overflow guards** refuse per node: the member stays put and the rest move.
 
 - `scaled_about` returns `Option<Affine>`; a product that overflows to `inf` is skipped.
 - `split_geometry_scale` returns `Option<(Affine, f64, f64)>`, refusing a finite basis that cannot be written as `orientation × scale`, such as a rank-1 matrix (`build::Basis::exact`, §5.7a). All six call sites refuse per node: a missing edit is recoverable, a wrong one is not.
+
+### Gradient handles (`gradient.rs`)
+
+**The open picker is the mode**; there is no gradient tool. `OndinApp::edited_gradient` answers while
+a selecting tool is up, the picker shows a gradient face (not *Variables*) for a `Fill(i)` or
+`Stroke(i)`, and that layer is the whole selection. Then `editing_in_place` is true, so the selection
+chrome hides, and the box handles, a lone line's ends and the rail handle do not arm
+(`selection_handles`, `line_ends`, `grab_rail_handle` answer `None`).
+
+| Kind | Handles | Guide |
+| --- | --- | --- |
+| Linear | the two ends | the line |
+| Radial | centre; first axis (sets the radius and turns the ellipse; Shift keeps it round); second axis (sets only the other radius) | the first axis, and the outline traced |
+| Angular | centre; start, on a ring of `RING_PX` (50) screen px | the ring |
+
+- **Stops between the ends are dots on the guide**, the stop bar's stops (`Picker::stop` is shared).
+  A click on a handle or dot selects its stop; a click on the bare guide adds a sampled stop there and
+  selects it (`gradient_click`, ahead of the set's `+` and the pick). A right-click on a dot removes
+  it while more than two remain (`gradient_secondary`, after the point-edit claimant in
+  `canvas_context_menu`).
+- **The press** is the rung after the pivot in `begin_select_drag` (`begin_gradient_drag`), and
+  `chrome_claims` asks `gradient_claims`. `Drag::Gradient { id, slot, grab, from }` re-derives from
+  the brush at the press each frame, previews through `preview_slot` and commits once through
+  `write_slot`: one undo step.
+- **Snapping**: ends and centres snap to the box's nine points within `SNAP_PX` (6 screen px). Shift
+  drops the snap and instead holds a linear end to eighths of a turn about the other end, and a sweep's
+  start to 45°.
+- Edits go through the picker's slot verbs on the brush as drawn (§9.3), so a gradient layout stretches
+  is edited on the box it is drawn on. The geometry is `paint::linear_ends`/`with_linear_ends`,
+  `radial_axes`/`with_radial_axes`, `sweep_geom`/`with_sweep_geom`/`sweep_dir`, `guide_point` and
+  `offset_at`, all in the shape's space.
+- A readout pill (the spacing handles' `paint_label`) shows angle and length, the radii (and turn), or
+  the start angle. Cursor: `Grab` over a handle or dot, `Grabbing` while dragging, the plain arrow over
+  the bare guide, where the ghost dot is the affordance. A locked layer draws the handles and arms none
+  of them.
 
 ### The Scale tool
 
@@ -314,6 +355,7 @@ Canvas skew and Alt-resize deliberately do not, each having its own fixed point 
 
 ## Traps
 
+- **Hidden is not disarmed.** `editing_in_place` hides the selection chrome but arms nothing off; `selection_handles`, `line_ends`, `grab_rail_handle` and `on_pivot` each refuse under `edited_gradient`, or a hidden handle takes the press from the gradient's (the pivot sits on a new radial's centre). `the_box_handles_step_aside` and `a_hidden_pivot_does_not_take_a_centre_s_press` pin the box handles and the pivot.
 - **Same press, two consumers.** The cancel and the context menu share one press: `gesture_cancelled` must be read at the top of `canvas_context_menu`, before any branch selects.
 - **Dropdown keyboard focus.** A dropdown opened by clicking its head leaves `focused() == None`, so `egui_wants_keyboard_input` does not cover it.
 - **Popover flags outlive popovers.** Gate on `popover_heard`, not on the flags, or Escape is swallowed behind a popover nobody is drawing.

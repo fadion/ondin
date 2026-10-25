@@ -125,6 +125,15 @@ pub enum Drag {
     RailOffset {
         id: NodeId,
     },
+    /// Dragging a handle or a stop of the gradient the picker is editing
+    /// (`crate::gradient`). Each frame re-derives from `from`, the brush as drawn at
+    /// the press, so the preview cannot compound.
+    Gradient {
+        id: NodeId,
+        slot: crate::panels::paint::PaintSlot,
+        grab: crate::gradient::Grab,
+        from: Box<ondin_core::Brush>,
+    },
     /// Dragging a laid container's gap or padding band: `band` is what was
     /// grabbed, `anchor` the press in the container's local space, and `base` the
     /// value the band drew there — the delta along the band's axis is added to it.

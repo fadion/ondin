@@ -8905,9 +8905,15 @@ impl OndinApp {
         let node = self.session.display_node(id)?;
         let drawn =
             |b: &ondin_core::BrushSource| self.session.doc.resolve_brush(id, b).into_owned();
+        // A layer's gradients as drawn on the box layout gives it, which is the box
+        // `local_box` reports and the picker and the canvas handles edit against.
+        let on_box = |b: Brush| match self.paint_box_map(id) {
+            Some(m) => ondin_core::paint_box::carry_brush(&b, m),
+            None => b,
+        };
         match slot {
-            PaintSlot::Fill(i) => node.paint().fills.get(i).map(|f| drawn(&f.brush)),
-            PaintSlot::Stroke(i) => node.paint().strokes.get(i).map(|s| drawn(&s.brush)),
+            PaintSlot::Fill(i) => node.paint().fills.get(i).map(|f| on_box(drawn(&f.brush))),
+            PaintSlot::Stroke(i) => node.paint().strokes.get(i).map(|s| on_box(drawn(&s.brush))),
             // `None` for a colourless kind closes a picker whose row was retyped.
             PaintSlot::Effect(i) => match node.effects().get(i).map(|e| &e.kind) {
                 Some(EffectKind::DropShadow(s) | EffectKind::InnerShadow(s)) => {
@@ -9061,10 +9067,12 @@ impl OndinApp {
         // only its `%` moved and detaches it otherwise.
         let doc = &self.session.doc;
         match slot {
+            // `brush` is on the drawn box (`slot_brush`), stored back on the stored one.
             PaintSlot::Fill(i) => {
                 let mut fills = node.paint().fills.clone();
                 match fills.get_mut(i) {
                     Some(f) => {
+                        let brush = self.stored_on_box(id, &f.brush, brush);
                         f.brush = ondin_core::edited_brush(doc, id, &f.brush, |_| brush.clone())
                     }
                     None => return Transaction(Vec::new()),
@@ -9075,6 +9083,7 @@ impl OndinApp {
                 let mut strokes = node.paint().strokes.clone();
                 match strokes.get_mut(i) {
                     Some(s) => {
+                        let brush = self.stored_on_box(id, &s.brush, brush);
                         s.brush = ondin_core::edited_brush(doc, id, &s.brush, |_| brush.clone())
                     }
                     None => return Transaction(Vec::new()),
@@ -9602,6 +9611,32 @@ impl OndinApp {
         let frame =
             ondin_core::geometry::local_bounds(node.kind(), self.session.preview_text_layout(id))?;
         Some((frame, e.width, e.height))
+    }
+
+    /// The map from the box `id`'s paint is stored against to the one layout draws
+    /// it on, as the scene walk draws it (`paint_box::drawn_paint`); `None` when they
+    /// agree, which includes while a preview owns the kind.
+    pub(crate) fn paint_box_map(&self, id: NodeId) -> Option<ondin_core::kurbo::Affine> {
+        let node = self.session.display_node(id)?;
+        ondin_core::paint_box::box_map(node.stored_kind().box_size()?, node.kind().box_size()?)
+            .filter(|m| ondin_core::build::affine_is_invertible(*m))
+    }
+
+    /// `drawn`, a brush on the drawn box, as `id` stores it: mapped back through
+    /// [`Self::paint_box_map`]. A transform the edit left alone is `held`'s own,
+    /// exactly, so a colour edit leaves no rounding behind in it.
+    fn stored_on_box(&self, id: NodeId, held: &ondin_core::BrushSource, drawn: Brush) -> Brush {
+        let (Some(m), Brush::Gradient(g)) = (self.paint_box_map(id), &drawn) else {
+            return drawn;
+        };
+        if let Some(Brush::Gradient(h)) = held.literal()
+            && m * h.transform == g.transform
+        {
+            let mut g = g.clone();
+            g.transform = h.transform;
+            return Brush::Gradient(g);
+        }
+        ondin_core::paint_box::carry_brush(&drawn, m.inverse())
     }
 
     /// The node's local geometry box, used to place gradient coordinates.

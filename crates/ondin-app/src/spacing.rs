@@ -966,8 +966,9 @@ fn paint_pill(painter: &egui::Painter, quad: [egui::Pos2; 4], kind: BandKind, hu
 }
 
 /// The value label beside the pointer (7), drawn as the size badge's pill;
-/// `var` a bound slot's variable, as a capsule after the word (B1).
-fn paint_label(
+/// `var` a bound slot's variable, as a capsule after the word (B1). The gradient
+/// handles' readout too.
+pub(crate) fn paint_label(
     painter: &egui::Painter,
     at: egui::Pos2,
     text: &str,

@@ -20,7 +20,7 @@
 
 use ondin_core::Brush;
 use ondin_core::NodeId;
-use ondin_core::kurbo::{Point, Size, Vec2};
+use ondin_core::kurbo::{Affine, Point, Size, Vec2};
 use ondin_core::peniko::{Color, Gradient, GradientKind};
 
 /// Which of a node's two paint lists a row belongs to.
@@ -202,19 +202,22 @@ pub enum PaintKind {
     Solid,
     Linear,
     Radial,
-    /// A sweep (conic) gradient, which imported SVGs carry. Not in
-    /// [`PaintKind::ALL`]: the picker has no tab that makes one, so it edits a sweep
-    /// it is given and converts it only on an explicit tab click.
+    /// A sweep (conic) gradient, labelled *Angular*.
     Sweep,
-    /// A picture. Deliberately not in [`PaintKind::ALL`] (the picker's tab strip):
-    /// the other three convert into one another, an image is picked from a file
-    /// dialog, and a fourth tab would turn a photograph into a gradient on click.
+    /// A picture. Deliberately not a picker kind: the others convert into one
+    /// another, an image is picked from a file dialog, and offering it would turn a
+    /// photograph into a gradient on click.
     Image,
 }
 
 impl PaintKind {
-    /// The kinds the picker offers as tabs: every kind that converts to every other.
-    pub const ALL: [PaintKind; 3] = [PaintKind::Solid, PaintKind::Linear, PaintKind::Radial];
+    /// The gradient kinds, in the order the picker's kind menu lists them. Each
+    /// converts to every other and to Solid.
+    pub const GRADIENTS: [PaintKind; 3] = [PaintKind::Linear, PaintKind::Radial, PaintKind::Sweep];
+
+    pub fn is_gradient(self) -> bool {
+        Self::GRADIENTS.contains(&self)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -607,7 +610,7 @@ pub fn convert(brush: &Brush, kind: PaintKind, box_size: Size) -> Brush {
 /// A brush of `kind` with `stops`, framed on `box_size`.
 ///
 /// Every gradient made here is authored in the shape's own space, so its transform
-/// is the identity (`From<Gradient>`) and nothing in this panel writes that field.
+/// is the identity (`From<Gradient>`).
 /// Changing the kind is how a user turns an imported ellipse back into a circle.
 pub fn default_brush(kind: PaintKind, stops: Vec<(f32, Color)>, box_size: Size) -> Brush {
     let (w, h) = (box_size.width.max(1.0), box_size.height.max(1.0));
@@ -693,20 +696,20 @@ pub fn new_solid() -> Brush {
 
 // --- linear geometry -------------------------------------------------------
 
-/// The four geometry accessors below speak the shape's space, while a
-/// `GradientBrush` carries an affine from its authoring space onto it: the identity
-/// for everything this panel makes ([`default_brush`]), a squash for an imported
-/// radial gradient.
+/// The geometry accessors below speak the shape's space, while a `GradientBrush`
+/// carries an affine from its authoring space onto it: the identity for a new
+/// gradient ([`default_brush`]), a squash for an ellipse, a box's scale after a
+/// resize (`paint_box`).
 ///
 /// A reader maps forward and a writer maps back, so the panel shows what the canvas
 /// shows and a typed value lands where asked. Clearing the transform instead would
-/// turn an imported ellipse round on the first nudge.
+/// turn an ellipse round on the first nudge; [`with_radial_axes`] alone replaces it.
 ///
 /// The inverse is guarded: the loader validates nothing about the `#[serde(default)]`
 /// transform, and a singular one is finite (`build::brush_is_finite` accepts it) but
-/// inverts to `NaN`, writing a document that never opens again. Both writers ask
-/// `build::affine_is_invertible` first and return the brush untouched, which
-/// `Transaction::changes_nothing` keeps off the undo stack.
+/// inverts to `NaN`, writing a document that never opens again. Every writer that
+/// inverts asks `build::affine_is_invertible` first and returns the brush untouched,
+/// which `Transaction::changes_nothing` keeps off the undo stack.
 const _GRADIENT_GEOMETRY_IS_IN_SHAPE_SPACE: () = ();
 
 /// A linear gradient's direction in degrees, clockwise from "left to right"
@@ -725,34 +728,29 @@ pub fn linear_angle(brush: &Brush) -> Option<f64> {
     Some(d.y.atan2(d.x).to_degrees().rem_euclid(360.0))
 }
 
-/// Re-aim a linear gradient at `degrees`, spanning `box_size` through its
-/// centre — the CSS `linear-gradient(<angle>)` framing, so the ramp always
-/// covers the shape whatever the angle. Any other brush comes back unchanged:
-/// re-aiming a radial or a sweep would rewrite it as linear.
+/// Re-aim a linear gradient at `degrees`, turning its line about its middle and
+/// keeping its length, so the ends the canvas handles placed stay that far apart.
+///
+/// A line of no length has no middle to keep a length about; it is reframed on
+/// `box_size` through the box's centre, the CSS `linear-gradient(<angle>)` framing.
+/// Any other brush comes back unchanged: re-aiming a radial or a sweep would
+/// rewrite it as linear.
 pub fn with_linear_angle(brush: &Brush, degrees: f64, box_size: Size) -> Brush {
-    let Brush::Gradient(g) = brush else {
+    let Some((a, b)) = linear_ends(brush) else {
         return brush.clone();
     };
-    if !matches!(g.gradient.kind, GradientKind::Linear(_)) {
-        return brush.clone();
-    }
-    let (w, h) = (box_size.width.max(1.0), box_size.height.max(1.0));
-    let (sin, cos) = degrees.to_radians().sin_cos();
-    let half = (w * cos.abs() + h * sin.abs()) * 0.5;
-    let centre = Point::new(w * 0.5, h * 0.5);
-    let d = Vec2::new(cos, sin) * half;
-    // A singular transform is left alone: its inverse would write `NaN`.
-    if !ondin_core::build::affine_is_invertible(g.transform) {
-        return brush.clone();
-    }
-    let mut g = g.clone();
-    // Authored in the shape's space, stored in the brush's.
-    let inv = g.transform.inverse();
-    g.gradient.kind = GradientKind::Linear(ondin_core::peniko::LinearGradientPosition::new(
-        inv * (centre - d),
-        inv * (centre + d),
-    ));
-    Brush::Gradient(g)
+    let dir = Vec2::from_angle(degrees.to_radians());
+    let half = (b - a).hypot() * 0.5;
+    let (mid, half) = if half > 1e-9 {
+        (a.midpoint(b), half)
+    } else {
+        let (w, h) = (box_size.width.max(1.0), box_size.height.max(1.0));
+        (
+            Point::new(w * 0.5, h * 0.5),
+            (w * dir.x.abs() + h * dir.y.abs()) * 0.5,
+        )
+    };
+    with_linear_ends(brush, mid - dir * half, mid + dir * half)
 }
 
 /// Reverse a gradient's stops in place (`0.3 → 0.7`), leaving its geometry
@@ -814,6 +812,211 @@ pub fn with_radial_centre(brush: &Brush, cx: f64, cy: f64, box_size: Size) -> Br
         end_radius: pos.end_radius,
     });
     Brush::Gradient(g)
+}
+
+// --- on-canvas geometry ----------------------------------------------------
+
+/// `t`'s linear part applied to `v`: where a direction goes, without the move.
+fn linear_part(t: Affine, v: Vec2) -> Vec2 {
+    let [a, b, c, d, _, _] = t.as_coeffs();
+    Vec2::new(a * v.x + c * v.y, b * v.x + d * v.y)
+}
+
+/// A linear gradient's two ends in the shape's space. `None` for anything else.
+pub fn linear_ends(brush: &Brush) -> Option<(Point, Point)> {
+    let Brush::Gradient(g) = brush else {
+        return None;
+    };
+    let GradientKind::Linear(pos) = g.gradient.kind else {
+        return None;
+    };
+    Some((g.transform * pos.start, g.transform * pos.end))
+}
+
+/// A linear gradient with its ends at `start` and `end` in the shape's space,
+/// stored back through the brush's transform. Any other brush, or one whose
+/// transform is singular, comes back unchanged.
+pub fn with_linear_ends(brush: &Brush, start: Point, end: Point) -> Brush {
+    let Brush::Gradient(g) = brush else {
+        return brush.clone();
+    };
+    if !matches!(g.gradient.kind, GradientKind::Linear(_))
+        || !ondin_core::build::affine_is_invertible(g.transform)
+    {
+        return brush.clone();
+    }
+    let mut g = g.clone();
+    let inv = g.transform.inverse();
+    g.gradient.kind = GradientKind::Linear(ondin_core::peniko::LinearGradientPosition::new(
+        inv * start,
+        inv * end,
+    ));
+    Brush::Gradient(g)
+}
+
+/// A radial gradient's centre and the two axes of its outer edge, in the shape's
+/// space: `a` is where offset 1 lies along the first axis (the one the stops are
+/// drawn on), `b` the other. A circle's axes are `(r, 0)` and `(0, r)`.
+pub fn radial_axes(brush: &Brush) -> Option<(Point, Vec2, Vec2)> {
+    let Brush::Gradient(g) = brush else {
+        return None;
+    };
+    let GradientKind::Radial(pos) = g.gradient.kind else {
+        return None;
+    };
+    let r = f64::from(pos.end_radius);
+    Some((
+        g.transform * pos.end_center,
+        linear_part(g.transform, Vec2::new(r, 0.0)),
+        linear_part(g.transform, Vec2::new(0.0, r)),
+    ))
+}
+
+/// A radial gradient whose outer edge is centred on `centre` with axes `a` and `b`
+/// in the shape's space, keeping the focal circle where it sits relative to the
+/// outer one.
+///
+/// The ellipse is a circle under the brush's transform, as an imported one is. Two
+/// equal, square axes write a plain circle under the identity instead, so a round
+/// gradient stays one that CSS can say. Axes that span no area, and any other
+/// brush, come back unchanged.
+pub fn with_radial_axes(brush: &Brush, centre: Point, a: Vec2, b: Vec2) -> Brush {
+    let Brush::Gradient(g) = brush else {
+        return brush.clone();
+    };
+    let GradientKind::Radial(pos) = g.gradient.kind else {
+        return brush.clone();
+    };
+    if a.cross(b).abs() < 1e-9 || !a.is_finite() || !b.is_finite() {
+        return brush.clone();
+    }
+    let r = match f64::from(pos.end_radius) {
+        r if r > 1e-9 => r,
+        _ => a.hypot(),
+    };
+    let m = Affine::new([a.x / r, a.y / r, b.x / r, b.y / r, 0.0, 0.0]);
+    let focal = pos.start_center - pos.end_center;
+    let mut g = g.clone();
+    let (la, lb) = (a.hypot(), b.hypot());
+    let round = (la - lb).abs() <= 1e-6 * la.max(lb) && a.dot(b).abs() <= 1e-6 * la * lb;
+    g.gradient.kind = if round {
+        let s = la / r;
+        g.transform = Affine::IDENTITY;
+        GradientKind::Radial(ondin_core::peniko::RadialGradientPosition {
+            start_center: centre + linear_part(m, focal),
+            start_radius: (f64::from(pos.start_radius) * s) as f32,
+            end_center: centre,
+            end_radius: la as f32,
+        })
+    } else {
+        let t = centre - m * pos.end_center;
+        g.transform = Affine::translate(t) * m;
+        GradientKind::Radial(pos)
+    };
+    Brush::Gradient(g)
+}
+
+/// A sweep's centre in the shape's space, and the direction its offset 0 starts
+/// in: degrees clockwise from three o'clock, the linear angle field's convention.
+pub fn sweep_geom(brush: &Brush) -> Option<(Point, f64)> {
+    let Brush::Gradient(g) = brush else {
+        return None;
+    };
+    let GradientKind::Sweep(pos) = g.gradient.kind else {
+        return None;
+    };
+    let d = sweep_dir(brush, 0.0)?;
+    Some((
+        g.transform * pos.center,
+        d.y.atan2(d.x).to_degrees().rem_euclid(360.0),
+    ))
+}
+
+/// A sweep centred on `centre` (shape space) whose offset 0 starts at `degrees`,
+/// keeping how far round it sweeps. Any other brush, or a singular transform,
+/// comes back unchanged.
+pub fn with_sweep_geom(brush: &Brush, centre: Point, degrees: f64) -> Brush {
+    let Brush::Gradient(g) = brush else {
+        return brush.clone();
+    };
+    let GradientKind::Sweep(pos) = g.gradient.kind else {
+        return brush.clone();
+    };
+    if !ondin_core::build::affine_is_invertible(g.transform) {
+        return brush.clone();
+    }
+    let inv = g.transform.inverse();
+    let d = linear_part(inv, Vec2::from_angle(degrees.to_radians()));
+    let start = d.y.atan2(d.x) as f32;
+    let span = pos.end_angle - pos.start_angle;
+    let mut g = g.clone();
+    g.gradient.kind = GradientKind::Sweep(ondin_core::peniko::SweepGradientPosition {
+        center: inv * centre,
+        start_angle: start,
+        end_angle: start + span,
+    });
+    Brush::Gradient(g)
+}
+
+/// The unit direction, in the shape's space, in which a sweep's offset `t` lies
+/// from its centre. `None` for anything that is not a sweep.
+pub fn sweep_dir(brush: &Brush, t: f32) -> Option<Vec2> {
+    let Brush::Gradient(g) = brush else {
+        return None;
+    };
+    let GradientKind::Sweep(pos) = g.gradient.kind else {
+        return None;
+    };
+    let angle = f64::from(pos.start_angle + t * (pos.end_angle - pos.start_angle));
+    let d = linear_part(g.transform, Vec2::from_angle(angle));
+    let len = d.hypot();
+    (len > 1e-12).then(|| d / len)
+}
+
+/// Where offset `t` sits on a gradient's canvas guide, in the shape's space: on
+/// the line for a linear, on the first axis for a radial. A sweep's stops sit on a
+/// ring of screen size, so they are placed by [`sweep_dir`] instead.
+pub fn guide_point(brush: &Brush, t: f32) -> Option<Point> {
+    let t = f64::from(t);
+    if let Some((a, b)) = linear_ends(brush) {
+        return Some(a.lerp(b, t));
+    }
+    let (c, a, _) = radial_axes(brush)?;
+    Some(c + a * t)
+}
+
+/// The offset a point in the shape's space stands for on the gradient's guide:
+/// projected onto the line, onto a radial's first axis, or read as an angle round
+/// a sweep. Clamped to `0..=1`; `None` for a brush with no guide, or one of no
+/// length.
+pub fn offset_at(brush: &Brush, p: Point) -> Option<f32> {
+    let along = |from: Point, d: Vec2| {
+        let len2 = d.hypot2();
+        (len2 > 1e-12).then(|| ((p - from).dot(d) / len2).clamp(0.0, 1.0) as f32)
+    };
+    if let Some((a, b)) = linear_ends(brush) {
+        return along(a, b - a);
+    }
+    if let Some((c, a, _)) = radial_axes(brush) {
+        return along(c, a);
+    }
+    let Brush::Gradient(g) = brush else {
+        return None;
+    };
+    let GradientKind::Sweep(pos) = g.gradient.kind else {
+        return None;
+    };
+    if !ondin_core::build::affine_is_invertible(g.transform) {
+        return None;
+    }
+    let inv = g.transform.inverse();
+    let v = inv * p - pos.center;
+    let span = f64::from(pos.end_angle - pos.start_angle);
+    if v.hypot2() < 1e-12 || span.abs() < 1e-9 {
+        return None;
+    }
+    let turned = v.y.atan2(v.x) - f64::from(pos.start_angle);
+    Some(((turned / span).rem_euclid(1.0)) as f32)
 }
 
 // --- presentation ----------------------------------------------------------
@@ -1064,13 +1267,13 @@ mod tests {
         assert_eq!(img.image.crop, Rect::new(0.1, 0.1, 0.4, 0.4));
     }
 
-    /// An image classifies as its own kind and is absent from the picker's tabs.
+    /// An image classifies as its own kind and is absent from the picker's kinds.
     #[test]
-    fn an_image_is_its_own_kind_and_stays_out_of_the_pickers_tabs() {
+    fn an_image_is_its_own_kind_and_stays_out_of_the_pickers_kinds() {
         assert_eq!(kind_of(&an_image()), PaintKind::Image);
         assert!(
-            !PaintKind::ALL.contains(&PaintKind::Image),
-            "the picker's tab strip must not offer Image"
+            !PaintKind::Image.is_gradient(),
+            "the picker's kind menu must not offer Image"
         );
         assert_eq!(label_of(&an_image()), "Image");
     }
@@ -1087,7 +1290,7 @@ mod tests {
         );
         assert_eq!(kind_of(&sweep), PaintKind::Sweep);
         assert_eq!(label_of(&sweep), "Angular");
-        assert!(!PaintKind::ALL.contains(&PaintKind::Sweep));
+        assert!(PaintKind::Sweep.is_gradient(), "the kind menu offers it");
         assert_eq!(
             with_linear_angle(&sweep, 45.0, BOX),
             sweep,
@@ -1250,27 +1453,194 @@ mod tests {
         );
     }
 
+    /// The angle field turns the line about its middle and keeps its length.
+    ///
+    /// flip: `with_linear_angle` reframing on the box every time → fails at the
+    /// length assertion for the off-centre line.
     #[test]
-    fn linear_angle_round_trips_and_spans_the_box() {
+    fn linear_angle_round_trips_about_the_line_s_middle() {
         let brush = default_brush(
             PaintKind::Linear,
             vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
             BOX,
         );
+        let brush = with_linear_ends(&brush, Point::new(20.0, 30.0), Point::new(60.0, 60.0));
+        assert_eq!(
+            linear_ends(&brush),
+            Some((Point::new(20.0, 30.0), Point::new(60.0, 60.0))),
+            "the fixture's ends are where they were put"
+        );
         for deg in [0.0, 45.0, 90.0, 135.0, 200.0, 315.0] {
             let aimed = with_linear_angle(&brush, deg, BOX);
             let got = linear_angle(&aimed).expect("linear");
             assert!((got - deg).abs() < 1e-6, "{deg} -> {got}");
-            // Centred on the box, whatever the angle.
-            let Brush::Gradient(g) = &aimed else {
-                panic!("gradient")
-            };
-            let GradientKind::Linear(pos) = g.gradient.kind else {
-                panic!("linear")
-            };
-            let mid = pos.start.midpoint(pos.end);
-            assert!((mid.x - 100.0).abs() < 1e-6 && (mid.y - 50.0).abs() < 1e-6);
+            let (a, b) = linear_ends(&aimed).expect("linear");
+            let mid = a.midpoint(b);
+            assert!((mid.x - 40.0).abs() < 1e-6 && (mid.y - 45.0).abs() < 1e-6);
+            assert!(((b - a).hypot() - 50.0).abs() < 1e-6, "{deg}: length kept");
         }
+    }
+
+    /// A line of no length has no middle to turn about, so the angle reframes it
+    /// across the box as CSS would.
+    #[test]
+    fn a_zero_length_line_takes_the_box_framing() {
+        let brush = default_brush(
+            PaintKind::Linear,
+            vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
+            BOX,
+        );
+        let flat = with_linear_ends(&brush, Point::new(5.0, 5.0), Point::new(5.0, 5.0));
+        let (a, b) = linear_ends(&with_linear_angle(&flat, 0.0, BOX)).expect("linear");
+        assert_eq!((a, b), (Point::new(0.0, 50.0), Point::new(200.0, 50.0)));
+    }
+
+    /// Ends round-trip through a transform the brush already carries, so a resized
+    /// gradient's handle lands where it was dragged.
+    #[test]
+    fn linear_ends_round_trip_through_the_brush_transform() {
+        let brush = default_brush(
+            PaintKind::Linear,
+            vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
+            BOX,
+        );
+        let squashed =
+            ondin_core::paint_box::carry_brush(&brush, Affine::scale_non_uniform(2.0, 0.5));
+        assert_eq!(
+            linear_ends(&squashed),
+            Some((Point::ZERO, Point::new(400.0, 50.0))),
+            "the map carries the ends"
+        );
+        let moved = with_linear_ends(&squashed, Point::new(10.0, 10.0), Point::new(90.0, 40.0));
+        let (a, b) = linear_ends(&moved).expect("linear");
+        assert!((a - Point::new(10.0, 10.0)).hypot() < 1e-9);
+        assert!((b - Point::new(90.0, 40.0)).hypot() < 1e-9);
+    }
+
+    /// Unequal axes are a squash under the transform; equal square ones go back to
+    /// a plain circle with no transform, and the focal offset turns and scales with
+    /// the circle.
+    ///
+    /// flip: dropping the `round` branch in `with_radial_axes` → fails at the
+    /// identity assertion.
+    #[test]
+    fn radial_axes_round_trip_and_a_circle_stays_plain() {
+        use ondin_core::peniko::{Gradient, RadialGradientPosition};
+        let mut gradient = Gradient::new_radial((100.0, 50.0), 40.0);
+        gradient.kind = GradientKind::Radial(RadialGradientPosition {
+            start_center: Point::new(90.0, 50.0),
+            start_radius: 4.0,
+            end_center: Point::new(100.0, 50.0),
+            end_radius: 40.0,
+        });
+        let brush = Brush::Gradient(gradient.into());
+        let (c, a, b) = radial_axes(&brush).expect("radial");
+        assert_eq!(
+            (c, a, b),
+            (
+                Point::new(100.0, 50.0),
+                Vec2::new(40.0, 0.0),
+                Vec2::new(0.0, 40.0)
+            )
+        );
+
+        let squashed = with_radial_axes(
+            &brush,
+            Point::new(60.0, 40.0),
+            Vec2::new(30.0, 0.0),
+            Vec2::new(0.0, 10.0),
+        );
+        let (c2, a2, b2) = radial_axes(&squashed).expect("radial");
+        assert!((c2 - Point::new(60.0, 40.0)).hypot() < 1e-9);
+        assert!((a2 - Vec2::new(30.0, 0.0)).hypot() < 1e-6);
+        assert!((b2 - Vec2::new(0.0, 10.0)).hypot() < 1e-6);
+
+        // Round again, turned a quarter: the focal offset (-10, 0) at radius 40
+        // becomes (0, -5) at radius 20.
+        let round = with_radial_axes(
+            &squashed,
+            Point::new(50.0, 50.0),
+            Vec2::new(0.0, 20.0),
+            Vec2::new(-20.0, 0.0),
+        );
+        let Brush::Gradient(g) = &round else {
+            panic!("gradient")
+        };
+        assert_eq!(g.transform, Affine::IDENTITY);
+        let GradientKind::Radial(p) = g.gradient.kind else {
+            panic!("radial")
+        };
+        assert_eq!(p.end_radius, 20.0);
+        assert!(
+            (p.start_center - Point::new(50.0, 45.0)).hypot() < 1e-4,
+            "{:?}",
+            p.start_center
+        );
+        assert!((p.start_radius - 2.0).abs() < 1e-6);
+    }
+
+    /// Axes that span no area are refused rather than written as a singular
+    /// transform.
+    #[test]
+    fn flat_radial_axes_are_refused() {
+        let brush = default_brush(
+            PaintKind::Radial,
+            vec![(0.0, Color::WHITE), (1.0, Color::BLACK)],
+            BOX,
+        );
+        let flat = with_radial_axes(
+            &brush,
+            Point::new(10.0, 10.0),
+            Vec2::new(20.0, 0.0),
+            Vec2::new(40.0, 0.0),
+        );
+        assert_eq!(flat, brush);
+    }
+
+    /// A sweep's start and centre round-trip, its span is kept, and a point read
+    /// back as an offset goes round from the start.
+    #[test]
+    fn sweep_geometry_round_trips_and_reads_offsets_round_the_ring() {
+        let brush = default_brush(
+            PaintKind::Sweep,
+            vec![(0.0, Color::WHITE), (1.0, Color::BLACK)],
+            BOX,
+        );
+        assert_eq!(sweep_geom(&brush), Some((Point::new(100.0, 50.0), 0.0)));
+        let turned = with_sweep_geom(&brush, Point::new(40.0, 30.0), 90.0);
+        let (c, deg) = sweep_geom(&turned).expect("sweep");
+        assert!((c - Point::new(40.0, 30.0)).hypot() < 1e-6);
+        assert!((deg - 90.0).abs() < 1e-4, "{deg}");
+        // Straight down is the start; to the left is a quarter turn on.
+        let down = offset_at(&turned, Point::new(40.0, 60.0)).expect("offset");
+        let left = offset_at(&turned, Point::new(10.0, 30.0)).expect("offset");
+        assert!(down.abs() < 1e-4 || (down - 1.0).abs() < 1e-4, "{down}");
+        assert!((left - 0.25).abs() < 1e-4, "{left}");
+    }
+
+    /// Offsets project onto the line and onto a radial's first axis, clamped.
+    #[test]
+    fn offsets_project_onto_the_guide() {
+        let lin = with_linear_ends(
+            &default_brush(
+                PaintKind::Linear,
+                vec![(0.0, Color::BLACK), (1.0, Color::WHITE)],
+                BOX,
+            ),
+            Point::new(0.0, 0.0),
+            Point::new(100.0, 0.0),
+        );
+        assert_eq!(offset_at(&lin, Point::new(25.0, 40.0)), Some(0.25));
+        assert_eq!(offset_at(&lin, Point::new(-30.0, 0.0)), Some(0.0));
+        assert_eq!(guide_point(&lin, 0.5), Some(Point::new(50.0, 0.0)));
+        let rad = default_brush(
+            PaintKind::Radial,
+            vec![(0.0, Color::WHITE), (1.0, Color::BLACK)],
+            BOX,
+        );
+        // Centre (100, 50), radius 50.
+        assert_eq!(offset_at(&rad, Point::new(125.0, 90.0)), Some(0.5));
+        assert_eq!(guide_point(&rad, 1.0), Some(Point::new(150.0, 50.0)));
     }
 
     #[test]

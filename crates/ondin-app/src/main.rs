@@ -47,6 +47,7 @@ mod eyedropper;
 #[cfg(windows)]
 mod file_type;
 mod fonts;
+mod gradient;
 mod grid;
 mod input;
 mod instances;

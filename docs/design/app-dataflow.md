@@ -67,7 +67,22 @@ input event (winit/egui)
 
 ### Colour picker
 
-It keeps no colour of its own: it reads its target brush through `display_node` each frame and writes each edit to the slot. It keeps only intent the document cannot hold: selected gradient stop, the hue behind a grey, a half-typed colour. Its window opens beside the field it edits every time (`Picker::spawn`; `placed` forces `current_pos` on the first frame; `default_size` height zero so the first-frame estimate is not clamped). A picker requested by a header `+` has no row yet: parked in `OndinApp::pending_picker` and claimed by the created row next frame. Retargeting keeps its position.
+It keeps no colour of its own: it reads its target brush through `display_node` each frame and writes each edit to the slot. A layer's gradient is edited as drawn: `OndinApp::slot_brush` maps a Fill or Stroke brush onto the box layout gives the layer (`paint_box_map`, §6.2) and `slot_transaction` maps it back (`stored_on_box`, which keeps the held transform exactly when the edit left it alone, so a colour edit leaves no rounding in it). It keeps only intent the document cannot hold: selected gradient stop, the hue behind a grey, a half-typed colour. Its window opens beside the field it edits every time (`Picker::spawn`; `placed` forces `current_pos` on the first frame; `default_size` height zero so the first-frame estimate is not clamped). A picker requested by a header `+` has no row yet: parked in `OndinApp::pending_picker` and claimed by the created row next frame. Retargeting keeps its position.
+
+**The faces.** The tab strip is *Solid* · *Gradient* · *Variables* (the last only where the slot binds;
+*Gradient* disabled where it cannot hold one). *Gradient* from a solid or a binding makes a linear.
+Each gradient face opens with its geometry row, whose first control is the 34px preview chip
+(`picker::kind_chip`, a caret badge on its corner): a click opens a menu of `PaintKind::GRADIENTS`,
+and picking one converts the paint, stops kept and geometry reframed on the box. The rest of the row:
+
+| Kind | Row after the chip |
+| --- | --- |
+| Linear | angle field, *Flip 180°*, *Reverse the stops* |
+| Radial | CX and CY fields |
+| Angular (`PaintKind::Sweep`) | start-angle field, *Reverse the stops* |
+
+Ends, centres and radii are dragged on the canvas, not in the picker (`tools.md`, gradient handles).
+The stop bar follows the row; the selected stop (`Picker::stop`) is shared with the canvas's dots.
 
 **The value row** (`hex_row`): the pick button, the format chooser, the colour in that format, the
 opacity.
@@ -122,7 +137,7 @@ app-wide and kept across launches, so the colour just used is one click away in 
 
 - Recorded when a colour is committed, never during a drag (each call rewrites the preferences
   file), and only what changed it: a click or a drag's release on the plane or a strip
-  (`write_stop_colour`, not a radial centre's drag), a field edit, a swatch click, `write_slot_rgb` (a typed colour, a picker's eyedropper), the eyedropper's selection
+  (`write_stop_colour`, not a gradient handle's drag), a field edit, a swatch click, `write_slot_rgb` (a typed colour, a picker's eyedropper), the eyedropper's selection
   pick, the inspector's paint rows and the Type panel's colour field.
 - The Solid face's swatches are two rows of six (`document_swatches`): the recent colours (clock
   glyph) above the document's own (`icon::FILE`, `document_palette`, most-used first). An empty place

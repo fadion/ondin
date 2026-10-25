@@ -35,8 +35,9 @@ use ondin_core::peniko::Color;
 pub struct Picker {
     pub node: NodeId,
     pub slot: PaintSlot,
-    /// Which gradient stop the colour controls are editing.
-    stop: usize,
+    /// Which gradient stop the colour controls are editing — the canvas handles'
+    /// too (`crate::gradient`).
+    pub(crate) stop: usize,
     /// The HSV the picker last wrote, and the 8-bit colour it produced.
     ///
     /// **The handle's position is re-derived from the stored colour every frame, and
@@ -51,7 +52,7 @@ pub struct Picker {
     /// deriving from the colour.
     intent: Option<(Hsv, [u8; 4])>,
     /// A hex field mid-edit. `None` when the field is showing the brush.
-    hex: Option<String>,
+    pub(crate) hex: Option<String>,
     /// Where the window goes, and whether it has been put there yet.
     ///
     /// Forced with `current_pos` on the first frame rather than offered as a
@@ -482,14 +483,17 @@ impl OndinApp {
         // Kind tabs + close. The track takes everything the close button and the
         // gap before it do not, so the row lands exactly on the right margin.
         //
-        // **A slot that cannot hold a gradient shows the tabs anyway, with Linear
-        // and Radial disabled**, so the header is not empty and the panel reads as
-        // the same one with two choices unavailable (§9.4).
+        // The tabs are *Solid* and *Gradient*; which gradient is the geometry row's
+        // chip's menu (`kind_menu`), so the strip stays words at any number of kinds.
         //
-        // **A slot a variable can bind carries a fourth tab, *Variables***: a
-        // binding is another kind of paint. A bound paint opens on it; leaving it
-        // for *Solid* detaches to the colour drawn, and for a gradient converts what
-        // is drawn, which detaches too.
+        // **A slot that cannot hold a gradient shows the tabs anyway, with Gradient
+        // disabled**, so the header is not empty and the panel reads as the same one
+        // with a choice unavailable (§9.4).
+        //
+        // **A slot a variable can bind carries a third tab, *Variables***: a binding
+        // is another kind of paint. A bound paint opens on it; leaving it for *Solid*
+        // detaches to the colour drawn, and for *Gradient* converts what is drawn,
+        // which detaches too.
         const CLOSE_W: f32 = 18.0;
         const TAB_GAP: f32 = 6.0;
         let gradients = slot.takes_gradients();
@@ -524,22 +528,23 @@ impl OndinApp {
             p.picking = false;
             p.preview = None;
         }
-        let tabs = if key.is_some() { 4 } else { 3 };
+        const SOLID: usize = 0;
+        const GRADIENT: usize = 1;
+        const VARIABLES: usize = 2;
+        let tabs = if key.is_some() { 3 } else { 2 };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = TAB_GAP;
-            let selected = match on_vars {
-                true => 3,
-                // A sweep has no tab, so none is lit; clicking one converts it.
-                false => PaintKind::ALL
-                    .iter()
-                    .position(|k| *k == kind)
-                    .unwrap_or(tabs),
+            let selected = match (on_vars, kind) {
+                (true, _) => VARIABLES,
+                (false, PaintKind::Solid) => SOLID,
+                (false, _) => GRADIENT,
             };
             let track = inner_w - CLOSE_W - TAB_GAP;
-            let live = |i: usize| i == 3 || gradients || PaintKind::ALL[i] == PaintKind::Solid;
+            let live = |i: usize| i != GRADIENT || gradients;
             let label = |i: usize| match i {
-                3 => "Variables",
-                _ => PaintKind::ALL[i].label(),
+                SOLID => "Solid",
+                GRADIENT => "Gradient",
+                _ => "Variables",
             };
             let picked = ui::segmented_enabled(
                 ui,
@@ -555,7 +560,7 @@ impl OndinApp {
             );
             match picked {
                 Some(i) if i == selected => {}
-                Some(3) => {
+                Some(VARIABLES) => {
                     if let Some(p) = &mut self.picker {
                         p.browse = true;
                         p.scrolled = false;
@@ -566,7 +571,13 @@ impl OndinApp {
                         p.browse = false;
                         p.stop = 0;
                     }
-                    let to = PaintKind::ALL[i];
+                    // *Gradient* from a solid or a binding makes a linear; the
+                    // chip's menu picks another.
+                    let to = match (i, kind) {
+                        (SOLID, _) => PaintKind::Solid,
+                        (_, k) if k.is_gradient() => k,
+                        _ => PaintKind::Linear,
+                    };
                     match (bound, key) {
                         // Solid off a binding: the colour drawn, `%` folded in.
                         (Some(_), Some(FaceTarget::Field(k))) if to == PaintKind::Solid => {
@@ -605,7 +616,7 @@ impl OndinApp {
             PaintKind::Solid => {}
             PaintKind::Linear => self.linear_controls(ui, node, slot, brush, box_size),
             PaintKind::Radial => self.radial_controls(ui, node, slot, brush, box_size),
-            PaintKind::Sweep => self.sweep_controls(ui, node, slot, brush),
+            PaintKind::Sweep => self.sweep_controls(ui, node, slot, brush, box_size),
             // Unreachable (the guard above returned); spelled out so removing that
             // guard stops compiling here rather than drawing a stop bar over a photo.
             PaintKind::Image => {}
@@ -646,7 +657,7 @@ impl OndinApp {
         close
     }
     // --- gradient geometry -------------------------------------------------
-    /// Preview chip, angle field, and the two stop-order controls.
+    /// Kind chip, angle field, and the two stop-order controls.
     fn linear_controls(
         &mut self,
         ui: &mut egui::Ui,
@@ -657,7 +668,7 @@ impl OndinApp {
     ) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 7.0;
-            self.preview_chip(ui, brush);
+            self.kind_chip(ui, node, slot, brush, box_size);
             // The two buttons are square, the size of the inspector's per-corner
             // radius button; the angle takes what is left after the chip.
             let unit = ui::CONTROL_H;
@@ -692,26 +703,48 @@ impl OndinApp {
             }
         });
     }
-    /// An imported sweep's face: the preview chip and *Reverse the stops*. Its
-    /// geometry has no editor yet, and nothing here rewrites it; the stops and the
-    /// opacity edit as on any gradient.
-    fn sweep_controls(&mut self, ui: &mut egui::Ui, node: NodeId, slot: PaintSlot, brush: &Brush) {
+    /// Kind chip, the start-angle field, and *Reverse the stops*. The centre is
+    /// dragged on the canvas.
+    fn sweep_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        node: NodeId,
+        slot: PaintSlot,
+        brush: &Brush,
+        box_size: Size,
+    ) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 7.0;
-            self.preview_chip(ui, brush);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let unit = ui::CONTROL_H;
-                if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, 15.0, ui::FieldButton::Off)
-                    .on_hover_text("Reverse the stops")
-                    .clicked()
-                {
-                    let next = paint::reverse_stops(brush);
-                    self.write_slot(node, slot, next);
-                }
-            });
+            self.kind_chip(ui, node, slot, brush, box_size);
+            let unit = ui::CONTROL_H;
+            let col = ui.available_width() - (unit + 7.0);
+            let (centre, start) =
+                paint::sweep_geom(brush).unwrap_or((ondin_core::kurbo::Point::ZERO, 0.0));
+            let mut deg = start;
+            // `paint::sweep_geom` ends `rem_euclid(360.0)`, so the range never meets a
+            // stored value it would have to clamp.
+            let resp = ui::value_field(
+                ui,
+                egui::vec2(col, ROW_H),
+                ui::Prefix::Icon(icon::ARROW_CLOCKWISE),
+                &mut deg,
+                ui::Scrub::whole(0.5).range(0.0..=360.0),
+                |d| d.suffix("°").max_decimals(0),
+            );
+            let resp = resp.on_hover_text("Where the sweep starts");
+            let next = paint::with_sweep_geom(brush, centre, deg % 360.0);
+            self.valve_slot(&resp, node, slot, next);
+            if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, 15.0, ui::FieldButton::Off)
+                .on_hover_text("Reverse the stops")
+                .clicked()
+            {
+                let next = paint::reverse_stops(brush);
+                self.write_slot(node, slot, next);
+            }
         });
     }
-    /// Preview chip with a draggable centre handle, plus CX/CY fields.
+    /// Kind chip, plus CX/CY fields. The centre and the radii are dragged on the
+    /// canvas.
     fn radial_controls(
         &mut self,
         ui: &mut egui::Ui,
@@ -723,22 +756,7 @@ impl OndinApp {
         let (cx0, cy0) = paint::radial_centre(brush, box_size).unwrap_or((0.5, 0.5));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 7.0;
-            // Dragging inside the chip moves the gradient's centre — the same
-            // gesture as on canvas, at thumbnail scale.
-            let chip = self.preview_chip(ui, brush);
-            let p = ui.painter();
-            let handle = chip.rect.min
-                + egui::vec2(
-                    chip.rect.width() * cx0 as f32,
-                    chip.rect.height() * cy0 as f32,
-                );
-            p.circle_stroke(handle, 3.0, egui::Stroke::new(1.2, egui::Color32::WHITE));
-            if let Some(pos) = chip.interact_pointer_pos() {
-                let cx = ((pos.x - chip.rect.min.x) / chip.rect.width()).clamp(0.0, 1.0);
-                let cy = ((pos.y - chip.rect.min.y) / chip.rect.height()).clamp(0.0, 1.0);
-                let next = paint::with_radial_centre(brush, cx as f64, cy as f64, box_size);
-                self.pointer_slot(&chip, node, slot, next);
-            }
+            self.kind_chip(ui, node, slot, brush, box_size);
             // Split what is left after the chip, allowing for the one gap
             // between the two fields — the row's own `item_spacing`, so the pair
             // finishes flush with the right margin.
@@ -770,22 +788,66 @@ impl OndinApp {
             }
         });
     }
-    /// The 34px gradient thumbnail. Returns its response so the radial face can
-    /// drag the centre on it.
-    fn preview_chip(&mut self, ui: &mut egui::Ui, brush: &Brush) -> egui::Response {
-        let (rect, resp) =
-            ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click_and_drag());
+    /// The 34px gradient thumbnail, which is also the kind button: a click opens a
+    /// menu of the gradient kinds, and picking one converts the paint (its stops
+    /// kept, its geometry reframed on the box). A caret badge on its corner says so.
+    fn kind_chip(
+        &mut self,
+        ui: &mut egui::Ui,
+        node: NodeId,
+        slot: PaintSlot,
+        brush: &Brush,
+        box_size: Size,
+    ) {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click());
         let p = ui.painter();
         ui::paint_checkerboard(p, rect, 5.0);
         ui::paint_ramp(p, rect, &ramp(brush));
         mask_corners(p, rect, 5.0, color::CARD);
+        let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
+        let rim = match (open, resp.hovered()) {
+            (true, _) => egui::Stroke::new(1.5, theme::color::text_a(200)),
+            (false, true) => egui::Stroke::new(1.0, theme::color::text_a(110)),
+            _ => egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)),
+        };
         p.rect_stroke(
             rect,
             egui::CornerRadius::same(5),
-            egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)),
+            rim,
             egui::StrokeKind::Inside,
         );
-        resp
+        // The badge hangs off the corner, ringed in the card's colour.
+        let badge = egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0);
+        p.circle_filled(badge, 7.0, color::CARD);
+        p.circle_filled(badge, 5.5, theme::color::text_a(60));
+        p.text(
+            badge,
+            egui::Align2::CENTER_CENTER,
+            icon::CARET_DOWN,
+            theme::icon_font(8.0),
+            theme::text::STRONG,
+        );
+        let kind = paint::kind_of(brush);
+        let resp = resp.on_hover_text("Gradient kind");
+        let mut picked = None;
+        egui::Popup::menu(&resp).gap(ui::MENU_GAP).show(|ui| {
+            ui::menu_rows(ui);
+            ui.set_width(MENU_W);
+            for k in PaintKind::GRADIENTS {
+                let row = ui::MenuRow::new("", k.label()).checked(k == kind);
+                if ui::menu_row(ui, row, ui::MENU_ITEM_H).clicked() {
+                    picked = Some(k);
+                }
+            }
+        });
+        if let Some(k) = picked.filter(|k| *k != kind) {
+            if let Some(pk) = &mut self.picker {
+                pk.stop = 0;
+                pk.hex = None;
+            }
+            let next = paint::convert(brush, k, box_size);
+            self.write_slot(node, slot, next);
+        }
     }
     /// The stop bar: the ramp with a draggable handle per stop. Clicking the bar
     /// adds a stop where it was clicked (sampled, so the ramp does not jump);

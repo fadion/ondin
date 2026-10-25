@@ -34,7 +34,7 @@ ondin-core/src/
    └─ migrate.rs   # migrations old→current
 ```
 
-Other modules are named in their own sections: `container` (layout engine, §5.3c), `component`/`propagate`/`variant`/`swap`/`reset` (§5.3d), `kit` (§5.3e), `variable`/`style`/`tokens` (§5.3f), `boolean`, `item` (`Keyed<T>`).
+Other modules are named in their own sections: `container` (layout engine, §5.3c), `component`/`propagate`/`variant`/`swap`/`reset` (§5.3d), `kit` (§5.3e), `variable`/`style`/`tokens` (§5.3f), `boolean`, `item` (`Keyed<T>`), `paint_box` (gradients following the box, §6.2).
 
 ### 5.2 Identity
 

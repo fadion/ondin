@@ -3629,8 +3629,8 @@ mod tests {
     /// measured as the bounds of everything the popup paints, shadow included,
     /// on each tab in turn.
     ///
-    /// Flip, run: the gradient plane back at 84 fails on *Linear*, 8 points
-    /// taller than *Solid* — the height D1043 left.
+    /// Flip, run: the gradient plane back at 84 fails on *Gradient*, 8 points
+    /// taller than *Solid*.
     #[test]
     fn every_face_of_the_colour_popup_is_one_height() {
         let (ctx, mut app, rect, _, _) = fixture();
@@ -3652,10 +3652,29 @@ mod tests {
             picker_frame(&ctx, &mut app, vec![]);
         }
         let solid = h(&ctx, &mut app);
-        for t in ["Linear", "Radial", "Variables", "Solid"] {
-            click_text(&ctx, &mut app, t);
+        // The other gradient kinds are the chip's menu, reached here by converting.
+        let to_kind = |app: &mut OndinApp, k: crate::panels::paint::PaintKind| {
+            let brush = app.slot_brush(rect, PaintSlot::Fill(0)).expect("fill");
+            let size = app.local_box(rect).expect("box");
+            let next = crate::panels::paint::convert(&brush, k, size);
+            app.write_slot(rect, PaintSlot::Fill(0), next);
+        };
+        for t in ["Gradient", "Radial", "Angular", "Variables", "Solid"] {
+            match t {
+                "Radial" => to_kind(&mut app, crate::panels::paint::PaintKind::Radial),
+                "Angular" => to_kind(&mut app, crate::panels::paint::PaintKind::Sweep),
+                _ => click_text(&ctx, &mut app, t),
+            }
             for _ in 0..3 {
                 picker_frame(&ctx, &mut app, vec![]);
+            }
+            if t == "Gradient" {
+                let brush = app.slot_brush(rect, PaintSlot::Fill(0)).expect("fill");
+                assert_eq!(
+                    crate::panels::paint::kind_of(&brush),
+                    crate::panels::paint::PaintKind::Linear,
+                    "the Gradient tab makes a linear from a solid"
+                );
             }
             assert_eq!(h(&ctx, &mut app), solid, "{t} is the Solid face's height");
         }

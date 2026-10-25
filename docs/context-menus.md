@@ -24,7 +24,7 @@ variable*).
   the click disarms it and opens no menu, on the canvas or off it. The menu opens at the press position.
 - **R2** — A menu is claimed per region: the canvas, a layers row, the layers panel's background,
   and an inspector field (§6.7). Widgets that already use the secondary button keep it (gradient
-  stop bar, ruler).
+  stop bar and the edited gradient's canvas handles, ruler).
 - **R3** — An open menu is `Escape`'s first rung, above focus mode: one press closes only the
   menu. While open the menu holds the keyboard (`input::resolve` does not run). The same
   one-press-one-rung rule holds for the top-bar dropdowns and the inspector popovers.

@@ -1051,11 +1051,16 @@ fn scale_geometry(
                 geometry: GeometryPatch::Size(new),
             });
         }
+        // A line's or a path's gradients ride the same scale as its points, here:
+        // `paint_box::keep_gradients` cannot tell a path resize from a point edit.
         None => match res.used_kind_of(node) {
-            NodeKind::Line { end } => ops.push(Operation::SetGeometry {
-                id,
-                geometry: GeometryPatch::LineEnd(Point::new(end.x * csx, end.y * csy)),
-            }),
+            NodeKind::Line { end } => {
+                ops.push(Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::LineEnd(Point::new(end.x * csx, end.y * csy)),
+                });
+                carry_gradients(doc, id, csx, csy, ops);
+            }
             NodeKind::Path { path, corner_radii } => {
                 let mut scaled = path.clone();
                 scaled.apply_affine(Affine::scale_non_uniform(csx, csy));
@@ -1067,6 +1072,7 @@ fn scale_geometry(
                         corner_radii: corner_radii.clone(),
                     },
                 });
+                carry_gradients(doc, id, csx, csy, ops);
             }
             // A group with a layout is a box and a resize sets its `width`/`height`;
             // scaling its children would hand the layout bigger items. The Scale tool
@@ -1091,6 +1097,14 @@ fn scale_geometry(
             }
             _ => scale_subtree(doc, res, id, Point::ZERO, csx, csy, scaling, ops),
         },
+    }
+}
+
+/// `id`'s gradients carried by a scale of `csx` by `csy` about its origin, within
+/// `ops` (`paint_box::carry_into`). Nothing for the identity.
+fn carry_gradients(doc: &Document, id: NodeId, csx: f64, csy: f64, ops: &mut Vec<Operation>) {
+    if (csx, csy) != (1.0, 1.0) && csx.is_finite() && csy.is_finite() {
+        ondin_core::paint_box::carry_into(doc, id, Affine::scale_non_uniform(csx, csy), ops);
     }
 }
 

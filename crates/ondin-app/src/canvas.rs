@@ -966,6 +966,11 @@ impl OndinApp {
             self.open_context_menu(&ctx, crate::menu::Target::Points, Some(world));
             return;
         }
+        // A gradient's handles keep the secondary button, as the stop bar does: a
+        // stop's dot is removed by it.
+        if self.gradient_secondary(screen, rect, ppp) {
+            return;
+        }
         // C7: guides out-rank layers while unlocked (`guide_at` answers `None`
         // once locked, which is why the canvas menu carries *Lock guides*).
         if let Some(g) = self.guide_at(screen, rect, ppp) {
@@ -1170,6 +1175,10 @@ impl OndinApp {
         ppp: f32,
     ) -> (egui::CursorIcon, Option<Bitmap>) {
         const NONE: (egui::CursorIcon, Option<Bitmap>) = (egui::CursorIcon::Default, None);
+        // The edited gradient's handles, in the press's order.
+        if let Some(c) = self.gradient_cursor(resp.hover_pos(), rect, ppp) {
+            return (c, None);
+        }
         // Mid-gesture the cursor reports the gesture, so a resize dragged past the
         // opposite corner does not flicker.
         let handles = self.selection_handles(rect, ppp);
@@ -1383,6 +1392,14 @@ impl OndinApp {
             return;
         }
 
+        // The edited gradient's handles select a stop, its bare guide adds one.
+        if clicked
+            && let Some(p) = resp.interact_pointer_pos()
+            && self.gradient_click(p, rect, ppp)
+        {
+            return;
+        }
+
         // A selected set's `+`, ahead of every pick: it sits over the set's edge.
         if self.tool.selects()
             && clicked
@@ -1590,6 +1607,7 @@ impl OndinApp {
         handles: &Option<Handles>,
     ) -> bool {
         self.on_pivot(screen, rect, ppp).is_some()
+            || self.gradient_claims(screen, rect, ppp)
             || self.set_plus_at(screen, rect, ppp).is_some()
             || (self.line_ends(rect, ppp).is_some()
                 && self.grab_line_end(screen, rect, ppp).is_some())
@@ -1618,6 +1636,11 @@ impl OndinApp {
 
         if let Some(id) = self.on_pivot(grab, rect, ppp) {
             self.drag = Drag::Pivot { id };
+            return;
+        }
+
+        // The edited gradient's handles and stops, over the artwork they sit on.
+        if self.begin_gradient_drag(grab, rect, ppp) {
             return;
         }
 
@@ -1719,6 +1742,12 @@ impl OndinApp {
         shift: bool,
         alt: bool,
     ) {
+        // Ahead of the match, which borrows the drag it reads.
+        if matches!(self.drag, Drag::Gradient { .. }) {
+            self.update_gradient_drag(world, shift);
+            ui.ctx().request_repaint();
+            return;
+        }
         match &self.drag {
             Drag::Pan => self.pan_by_drag(ui, resp),
             Drag::Move { anchor } => {
@@ -1816,8 +1845,10 @@ impl OndinApp {
                 self.apply_marquee(origin, world, mode, &base);
             }
             // Guide and crop drags are owned by `guide_input`/`image_edit_input`;
-            // a pivot drag has nothing to preview through the renderer.
-            Drag::CropPan { .. }
+            // a pivot drag has nothing to preview through the renderer; a gradient's
+            // returned above.
+            Drag::Gradient { .. }
+            | Drag::CropPan { .. }
             | Drag::CropResize { .. }
             | Drag::Pivot { .. }
             | Drag::Guide(_)
@@ -1885,6 +1916,12 @@ impl OndinApp {
                 let tx = self.rail_offset_tx(id, world);
                 self.session.commit(tx);
             }
+            Drag::Gradient {
+                id,
+                slot,
+                grab,
+                from,
+            } => self.finish_gradient_drag(id, slot, grab, &from, world, shift),
             // A release where every slot already draws the value commits nothing,
             // compared against the drawn value so a bound slot is right.
             drag @ Drag::Spacing { id, .. } => {
@@ -5881,10 +5918,13 @@ impl OndinApp {
         self.editing_in_place() || self.chrome_hold.holding()
     }
 
-    /// The first two of [`Self::chrome_hidden`]'s reasons: a path or an image
-    /// being edited on the canvas, the pen's included.
+    /// The first two of [`Self::chrome_hidden`]'s reasons: a path, an image or a
+    /// gradient being edited on the canvas, the pen's included.
     pub(crate) fn editing_in_place(&self) -> bool {
-        self.pen.is_some() || self.edited_path().is_some() || self.edited_image().is_some()
+        self.pen.is_some()
+            || self.edited_path().is_some()
+            || self.edited_image().is_some()
+            || self.edited_gradient().is_some()
     }
 
     /// Outline whatever the pointer is over but has not selected: the exact shape,
@@ -7346,6 +7386,10 @@ impl OndinApp {
     /// The two ends of the selected line, in screen space — the chrome and the grab
     /// targets that replace a box for this one kind ([`lone_line`] says which).
     fn line_ends(&self, rect: egui::Rect, ppp: f32) -> Option<(NodeId, egui::Pos2, egui::Pos2)> {
+        // The gradient's handles stand in for the line's, as for the box's.
+        if self.edited_gradient().is_some() {
+            return None;
+        }
         let (id, end) = lone_line(&self.session)?;
         let world = self.session.preview_world_transform(id)?;
         Some((
@@ -7368,8 +7412,9 @@ impl OndinApp {
 
     /// Whether `screen` is grabbing that handle.
     fn grab_rail_handle(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<NodeId> {
-        // Refused on a locked selection, as the box handles are.
-        if self.selection_locked() {
+        // Refused on a locked selection, as the box handles are, and under the
+        // gradient's handles.
+        if self.selection_locked() || self.edited_gradient().is_some() {
             return None;
         }
         let (id, at) = self.rail_handle(rect, ppp)?;
@@ -7502,7 +7547,9 @@ impl OndinApp {
     /// ([`Self::line_ends`] replaces it), refused on the kind ([`lone_line`]) so it
     /// cannot fail open.
     fn selection_handles(&self, rect: egui::Rect, ppp: f32) -> Option<Handles> {
-        if lone_line(&self.session).is_some() {
+        // The box steps aside for the gradient's handles: hidden handles that still
+        // armed would resize from under them.
+        if lone_line(&self.session).is_some() || self.edited_gradient().is_some() {
             return None;
         }
         let (target, box_, world, local_pivot) = match self.session.selection.ids() {
@@ -7566,8 +7613,13 @@ impl OndinApp {
     /// Whether a press at `screen` grabs the pivot marker; asked ahead of the
     /// resize handles, or a pivot parked on a corner could never be grabbed back.
     fn on_pivot(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<NodeId> {
-        // Drawn on a locked layer, but it does not move.
-        if !self.show_pivot || self.mode != Mode::Normal || self.selection_locked() {
+        // Drawn on a locked layer, but it does not move; hidden under the gradient's
+        // handles, so not armed there either, or it would take a centre's press.
+        if !self.show_pivot
+            || self.mode != Mode::Normal
+            || self.selection_locked()
+            || self.edited_gradient().is_some()
+        {
             return None;
         }
         self.pivot_screen(rect, ppp)
@@ -8007,6 +8059,8 @@ impl OndinApp {
         // Image editing's crop window; not inside `draw_points`, which returns
         // unless the node tool has a path.
         self.draw_crop_box(painter, rect, ppp);
+
+        self.draw_gradient_handles(painter, rect, ppp);
 
         // Text caret and selection highlight. The phase is asked unconditionally:
         // `CaretBlink` notices a caret move by being asked.

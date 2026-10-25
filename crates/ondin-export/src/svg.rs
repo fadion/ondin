@@ -581,7 +581,10 @@ fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs:
             Brush::Solid(_) => {}
         }
     };
-    let paint = doc.resolved_paint(id, node.paint());
+    // As drawn: gradients on the box layout gives the layer.
+    let Some(paint) = ondin_core::paint_box::node_paint(doc, res, id) else {
+        return;
+    };
     for (i, f) in visible_fills(&paint) {
         consider(f.brush.drawn(), &format!("fill-{i}"));
     }
@@ -1128,7 +1131,8 @@ fn emit_node(
 
     // Root carries nothing of its own; skip its wrapper to keep output tidy.
     let wrap = !matches!(node.kind(), NodeKind::Root);
-    let paint = doc.resolved_paint(id, node.paint());
+    let paint = ondin_core::paint_box::node_paint(doc, res, id)
+        .unwrap_or_else(|| doc.resolved_paint(id, node.paint()));
     let strokes: Vec<(usize, &Stroke)> = visible_strokes(&paint).collect();
     // A frame's stroke cannot live inside the group that clips its contents, so a
     // clip plus a stroke makes an outer group (transform, opacity) holding an inner
@@ -1333,7 +1337,8 @@ fn emit_shape(
     if emit_failed_boolean(out, doc, res, id, pad) {
         return;
     }
-    let paint = doc.resolved_paint(id, node.paint());
+    let paint = ondin_core::paint_box::node_paint(doc, res, id)
+        .unwrap_or_else(|| doc.resolved_paint(id, node.paint()));
     let fills: Vec<(usize, &Fill)> = visible_fills(&paint).collect();
     let strokes: Vec<(usize, &Stroke)> = visible_strokes(&paint).collect();
     let derived = res.boolean_path(id);

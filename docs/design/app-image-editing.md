@@ -6,9 +6,9 @@ Part of §9.4.
 
 ## 9.4 The image fill row
 
-- `panels::paint::PaintKind::Image` exists but is not in `PaintKind::ALL` (that array is the picker's
-  tab strip; an image comes from a file dialog, not a colour wheel). `picker_body` returns early for an
-  image.
+- `panels::paint::PaintKind::Image` exists but is no picker kind (neither *Solid* nor in
+  `PaintKind::GRADIENTS`; an image comes from a file dialog, not a colour wheel). `picker_body` returns
+  early for an image.
 - One line. The chip draws the thumbnail (`ui::Swatch::Picture`) over the checkerboard **at the brush's
   `ImageSampler::alpha`** — carried on the variant, a uniform white×alpha tint, because `thumbs` shares
   one texture per picture across layers. Grey ramp while a thumbnail is missing or deferred. The hex

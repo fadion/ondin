@@ -8,12 +8,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
 
 ## Now · Immediately
 
-- **Gradient editing.** On-canvas handles; a linear gradient's two ends (only an angle today, spanning
-  the box: `paint::with_linear_angle`); a radial's radius and ellipse (`paint::with_radial_centre`,
-  `GradientBrush::transform`); conic in the picker (`paint::PaintKind::Sweep` has no tab and no
-  geometry editor, though the model and both renderers draw it; a fifth tab does not fit the strip
-  beside *Variables* at 10pt).
-
 ## Later · Before MCP
 
 - **Pages.** `Document` has one root (and the kit vault). Settle it before MCP fixes the snapshot and

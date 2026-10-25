@@ -19,7 +19,7 @@ Built: table, reference, brush, decode cache, framing, image editing (`Tool::Ima
 
 ### The brush
 
-The model's brush is `peniko::Brush<ImageBrush<ImageRef>, GradientBrush>`, aliased `ondin_core::Brush`. `GradientBrush` is a `peniko::Gradient` plus an affine from authored space to the shape's space (identity for gradients the app makes; a squash for imported elliptical radials). Consequences:
+The model's brush is `peniko::Brush<ImageBrush<ImageRef>, GradientBrush>`, aliased `ondin_core::Brush`. `GradientBrush` is a `peniko::Gradient` plus an affine from authored space to the shape's space: the identity for a new gradient (`paint::default_brush`) and a round radial, a circle's squash for an elliptical radial (imported, or shaped by the canvas handles), and the box's scale once the layer is resized (§6.2). Consequences:
 
 - **The save format did not move**: `Solid` and `Gradient` are the same variants; the gradient transform is `#[serde(flatten)]` with `skip_serializing_if` at identity.
 - `alpha` and `extend` are not restated: `ImageBrush` carries an `ImageSampler` with both plus quality.

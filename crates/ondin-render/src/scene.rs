@@ -577,14 +577,22 @@ fn paint_node<P: ScenePainter>(
         .and_then(|o| o.opacity)
         .unwrap_or_else(|| doc.drawn_opacity(id));
 
+    // The box the paint is stored against: a gesture's kind is its stored one.
+    let stored = over.and_then(|o| o.kind.as_ref()).unwrap_or(node.kind());
+    let kind = over
+        .and_then(|o| o.kind.as_ref())
+        .or_else(|| res.used_kind(doc, id))
+        .unwrap_or(node.kind());
     let painted = Painted {
-        kind: over
-            .and_then(|o| o.kind.as_ref())
-            .or_else(|| res.used_kind(doc, id))
-            .unwrap_or(node.kind()),
-        paint: doc.resolved_paint(
-            id,
-            over.and_then(|o| o.paint.as_ref()).unwrap_or(node.paint()),
+        kind,
+        // Gradients drawn on the box layout gives the layer, not the stored one.
+        paint: ondin_core::paint_box::drawn_paint(
+            doc.resolved_paint(
+                id,
+                over.and_then(|o| o.paint.as_ref()).unwrap_or(node.paint()),
+            ),
+            stored,
+            kind,
         ),
         // Committed only: a preview cannot change the rule (`absorb` refuses
         // `SetFillRule`), so there is no override to prefer here.

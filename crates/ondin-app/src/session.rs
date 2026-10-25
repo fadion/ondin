@@ -301,6 +301,13 @@ impl<'a> DisplayNode<'a> {
             .or(self.used)
             .unwrap_or_else(|| self.node.kind())
     }
+    /// The kind the paint is stored against: a preview's kind, else the committed
+    /// one, never layout's (`paint_box::drawn_paint`).
+    pub fn stored_kind(&self) -> &'a NodeKind {
+        self.over
+            .and_then(|o| o.kind.as_ref())
+            .unwrap_or_else(|| self.node.kind())
+    }
     pub fn paint(&self) -> &'a Paint {
         self.over
             .and_then(|o| o.paint.as_ref())
@@ -773,7 +780,8 @@ impl EditorSession {
         };
         ops.extend(tx.0.iter().cloned());
         ops.extend(holds);
-        let composed = Transaction(ops);
+        // A resize drag draws its gradients carried, as the commit will write them.
+        let composed = ondin_core::paint_box::keep_gradients(&self.doc, Transaction(ops));
         let tx = &composed;
         let follows = self.preview_follows(tx);
         self.overrides = RenderOverrides::from_transaction_following(
@@ -1032,6 +1040,9 @@ impl EditorSession {
         // whose `style::settle` writes a newly applied text style's family after this
         // has detached the binding it replaces.
         let tx = ondin_core::build::keep_text_bindings(&self.doc, tx);
+        // A box-sized layer's gradients follow its stored size — after the passes
+        // that write sizes of their own (a detached binding's literal).
+        let tx = ondin_core::paint_box::keep_gradients(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure
         // and fields reaching its instances, the links and variant names settled —

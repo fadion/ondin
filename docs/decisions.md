@@ -24,6 +24,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D340** The effect stack is reordered by dragging its rows, as fills and strokes are, though order changes pixels only between `Filters` and `LayerBlur` and between two shadows on one side.
 - **D176** Image fills use `peniko::Brush<ImageBrush<ImageRef>>` with our reference in place of pixels; there is no brush enum of our own. **D178** peniko has no transparent extend, so a fitted picture needs a clip as well as a brush transform.
 - **D412** A gradient carries its own affine on the brush. An elliptical radial is a circular gradient under a squash. **D767** Gradient opacity is a field separate from the stops.
+- **A gradient follows its layer's box.** Its points stay stored in the layer's own px, and a box changing size is composed into `GradientBrush::transform` as scale(new/old), exact for every kind and with no save-format change: on write when a resize changes the stored size, at draw time when layout or a bound size draws another box (`ondin_core::paint_box`). Without it, free ends on a resized shape end in a flat band of the last stop.
 - **D301** Image data is `Arc<[u8]>`, so commits and undo never deep-copy pictures. **D600** Exactly PNG, JPEG, WebP and GIF are accepted, enforced by a magic-byte predicate (`images::signature_is_accepted`), not by Cargo features.
 - **D358** There is one unit, px. Density is the export scale.
 - **D868** Specified and used values are two numbers. Used boxes are derived in `Resolved` and never saved.
@@ -148,4 +149,6 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Present mode is its own branch of `OndinApp::ui`**, which reads only its own keys and returns, not a flag the overlays and commands check.
 - **D749** The dashboard's default page is set only in Settings.
 - **D768** Open and Recover ask or save before replacing the open document.
+- **The colour picker's tabs are Solid · Gradient · Variables**; the gradient kind (Linear, Radial, Angular) is a menu on the geometry row's preview chip. A tab per kind does not fit beside *Variables* at 10pt, and a menu adds no row, so every face keeps one height and another kind costs one menu row.
+- **The open picker is the gradient editing mode**: no tool of its own. While it shows a gradient fill or stroke of the one selected layer, the canvas draws that gradient's handles in place of the selection box.
 - **The eyedropper picks what is seen**, anywhere in the window: on the canvas the rendered pixel, composited over the ground, with egui's overlays never in it; elsewhere a frame of the window frozen while armed, chrome included. Hovering previews nothing on the canvas, since the next sample would read the preview.

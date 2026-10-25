@@ -1044,7 +1044,9 @@ impl Walk<'_> {
         {
             return Some("a mask".into());
         }
-        let paint = doc.resolved_paint(id, node.paint());
+        // As drawn, so a gradient layout stretched is judged in its drawn form.
+        let paint = ondin_core::paint_box::node_paint(doc, self.res, id)
+            .unwrap_or_else(|| doc.resolved_paint(id, node.paint()));
         let fills: Vec<&Fill> = paint
             .fills
             .iter()
@@ -1549,7 +1551,8 @@ impl Walk<'_> {
     /// checked that each has a form. Answers the element drawing a frame's
     /// stroke over its children, which goes after them.
     fn paint(&mut self, el: &mut Element, node: &Node, size: Size) -> Option<Element> {
-        let paint = self.doc.resolved_paint(node.id(), node.paint());
+        let paint = ondin_core::paint_box::node_paint(self.doc, self.res, node.id())
+            .unwrap_or_else(|| self.doc.resolved_paint(node.id(), node.paint()));
         // The resolved list for the tier's checks, the stored one for bindings;
         // resolving keeps every item in place.
         let stored = node.paint();

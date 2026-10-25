@@ -353,8 +353,9 @@ No menu. The ruler claims no right-click region, and the canvas menu must not be
 A separate `Area` (`OndinApp::field_menu_ui`), closed by its act, a press outside or `Escape`.
 Offered on a **bindable** field: a solid paint row's hex field, a bound field's chip (not a *Mixed*
 capsule), a single layer's corner radius and per-corner fields, the Container card's gap and
-padding fields, the identity card's eye, W and H, opacity, a stroke's width, an effect's numbers,
-and the Type card's content and family. X, Y and rotation are not bindable.
+padding fields, the identity card's eye, W and H, a single layer's Item card min/max width and height, opacity, a stroke's width, an effect's numbers,
+the Type card's content, family, size, variant (the weight), line height and letter spacing, and
+the Paragraph tab's spacing. X, Y and rotation are not bindable.
 
 | Row | Accelerator | Shown / enabled |
 |---|---|---|

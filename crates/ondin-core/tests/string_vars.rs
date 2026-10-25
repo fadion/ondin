@@ -151,15 +151,24 @@ fn used(doc: &Document, id: NodeId) -> (String, String) {
     }
 }
 
-/// The stored literals and the bindings.
+/// The stored literals and the content's and family's bindings.
 fn stored(doc: &Document, id: NodeId) -> (String, String, [Option<VarId>; 2]) {
     let n = doc.get(id).unwrap();
+    let v = n.text_vars();
     match n.kind() {
         NodeKind::Text { content, style, .. } => {
-            (content.clone(), style.font_family.clone(), n.text_vars())
+            (content.clone(), style.font_family.clone(), [v[0], v[1]])
         }
         _ => unreachable!(),
     }
+}
+
+/// The text bindings of a content and a family, the number slots unbound.
+fn two(content: Option<VarId>, family: Option<VarId>) -> ondin_core::TextVars {
+    let mut vars = ondin_core::TextVars::default();
+    vars[0] = content;
+    vars[1] = family;
+    vars
 }
 
 fn bold_word(doc: &mut Document, id: NodeId) {
@@ -185,7 +194,7 @@ fn bold_word(doc: &mut Document, id: NodeId) {
 fn a_bound_content_and_family_draw_their_strings_in_the_mode_in_force() {
     let mut f = fixture();
     bold_word(&mut f.doc, f.text);
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), Some(f.font)]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), Some(f.font)));
     f.doc.apply(&Transaction(ops)).unwrap();
     assert_eq!(
         stored(&f.doc, f.text),
@@ -238,7 +247,7 @@ fn binding_the_family_alone_keeps_the_content_and_its_other_spans() {
             spans,
         }]))
         .unwrap();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [None, Some(f.font)]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(None, Some(f.font)));
     f.doc.apply(&Transaction(ops)).unwrap();
     let NodeKind::Text {
         content,
@@ -279,7 +288,7 @@ fn binding_the_family_alone_keeps_the_content_and_its_other_spans() {
 #[test]
 fn an_edit_of_a_bound_text_detaches_what_it_edits() {
     let mut f = fixture();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), Some(f.font)]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), Some(f.font)));
     f.doc.apply(&Transaction(ops)).unwrap();
     let keep =
         |doc: &Document, ops: Vec<Operation>| ondin_core::keep_text_bindings(doc, Transaction(ops));
@@ -390,7 +399,7 @@ fn string_bindings_detach_to_what_they_draw_and_round_trip() {
             mode: Some(f.dark),
         }]))
         .unwrap();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), Some(f.font)]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), Some(f.font)));
     f.doc.apply(&Transaction(ops)).unwrap();
     let bytes = ondin_core::io::save(&f.doc).unwrap();
     let back = ondin_core::io::load(&bytes).unwrap();
@@ -407,7 +416,7 @@ fn string_bindings_detach_to_what_they_draw_and_round_trip() {
         .apply(&Transaction(ondin_core::detach_text_ops(
             &f.doc,
             f.text,
-            [true, true],
+            [true, true, false, false, false, false, false],
         )))
         .unwrap();
     assert_eq!(
@@ -427,12 +436,12 @@ fn string_bindings_detach_to_what_they_draw_and_round_trip() {
 
     let wrong = f.doc.apply(&Transaction(vec![Operation::SetTextVars {
         id: f.text,
-        vars: [Some(f.gap), None],
+        vars: two(Some(f.gap), None),
     }]));
     assert!(wrong.is_err(), "a number variable cannot bind a content");
     let not_text = f.doc.apply(&Transaction(vec![Operation::SetTextVars {
         id: f.frame,
-        vars: [Some(f.font), None],
+        vars: two(Some(f.font), None),
     }]));
     assert!(not_text.is_err(), "nor can a frame bind one");
 }
@@ -442,7 +451,7 @@ fn string_bindings_detach_to_what_they_draw_and_round_trip() {
 #[test]
 fn a_paste_without_the_variable_detaches_to_the_copied_strings() {
     let mut f = fixture();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), Some(f.font)]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), Some(f.font)));
     f.doc.apply(&Transaction(ops)).unwrap();
     let node = f.doc.get(f.text).unwrap().clone();
     let carried = ondin_core::variable::carried(&f.doc, &[vec![node.clone()]]);
@@ -455,7 +464,7 @@ fn a_paste_without_the_variable_detaches_to_the_copied_strings() {
     };
     assert_eq!(
         (content.as_str(), style.font_family.as_str(), n.text_vars()),
-        ("Sign in", "Inter", [None, None]),
+        ("Sign in", "Inter", two(None, None)),
         "Light's strings, the bindings gone"
     );
 }
@@ -465,7 +474,7 @@ fn a_paste_without_the_variable_detaches_to_the_copied_strings() {
 #[test]
 fn a_text_property_reads_the_bound_string() {
     let mut f = fixture();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     assert_eq!(
         ondin_core::variant::field_value(&f.doc, f.text, ondin_core::variant::PropKind::Text),
@@ -483,7 +492,7 @@ fn a_text_property_reads_the_bound_string() {
 #[test]
 fn a_bound_text_emptied_detaches_empty() {
     let mut f = fixture();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     let tx = ondin_core::keep_text_bindings(
         &f.doc,
@@ -537,7 +546,7 @@ fn a_mode_change_re_measures_a_bound_text_in_a_layout() {
             },
         ]))
         .unwrap();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     let mut live = Resolved::rebuild(&f.doc);
     let x = |r: &Resolved| r.world_bounds(second).unwrap().min_x();
@@ -568,7 +577,7 @@ fn a_mode_change_re_measures_a_bound_text_in_a_layout() {
 #[test]
 fn a_text_property_reset_takes_the_mains_binding_back() {
     let mut f = fixture();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     f.doc
         .apply(&Transaction(vec![Operation::SetComponent {
@@ -644,7 +653,7 @@ fn a_copys_family_binding_goes_with_its_mains_text_style() {
     let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
     f.doc.apply(&tx).unwrap();
     let copy = f.doc.get(made[0]).unwrap().children()[0];
-    let ops = ondin_core::bind_text_ops(&f.doc, copy, [None, Some(f.font)]);
+    let ops = ondin_core::bind_text_ops(&f.doc, copy, two(None, Some(f.font)));
     f.doc.apply(&Transaction(ops)).unwrap();
     let s = ondin_core::style::StyleId(f.ids.mint());
     f.doc
@@ -710,7 +719,7 @@ fn a_mains_span_edit_skips_a_copy_bound_to_its_own_string() {
             ),
         }]))
         .unwrap();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     f.doc
         .apply(&Transaction(vec![Operation::SetComponent {
@@ -726,7 +735,7 @@ fn a_mains_span_edit_skips_a_copy_bound_to_its_own_string() {
     let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
     f.doc.apply(&tx).unwrap();
     let copy = f.doc.get(made[0]).unwrap().children()[0];
-    let ops = ondin_core::bind_text_ops(&f.doc, copy, [Some(ru), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, copy, two(Some(ru), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     let NodeKind::Text { style, .. } = f.doc.get(f.text).unwrap().kind() else {
         unreachable!()
@@ -780,7 +789,7 @@ fn a_bound_content_draws_without_spans_it_should_not_hold() {
             display: Some(ondin_core::container::Display::Flex(Default::default())),
         }]))
         .unwrap();
-    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(ru), None]);
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(ru), None));
     f.doc.apply(&Transaction(ops)).unwrap();
     let NodeKind::Text { style, .. } = f.doc.get(f.text).unwrap().kind() else {
         unreachable!()

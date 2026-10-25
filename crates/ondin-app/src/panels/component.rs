@@ -5006,7 +5006,8 @@ mod tests {
                 },
             },
         ])));
-        let ops = ondin_core::build::bind_text_ops(&v.app.session.doc, v.ilabel, [Some(var), None]);
+        let vars = ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_CONTENT, var);
+        let ops = ondin_core::build::bind_text_ops(&v.app.session.doc, v.ilabel, vars);
         assert!(v.app.commit_edit(Transaction(ops)));
         assert_eq!(
             v.app.session.doc.get(v.ilabel).unwrap().text_vars()[0],
@@ -5034,7 +5035,8 @@ mod tests {
         );
 
         // Bound again, a key typed replaces the text.
-        let ops = ondin_core::build::bind_text_ops(&v.app.session.doc, v.ilabel, [Some(var), None]);
+        let vars = ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_CONTENT, var);
+        let ops = ondin_core::build::bind_text_ops(&v.app.session.doc, v.ilabel, vars);
         assert!(v.app.commit_edit(Transaction(ops)));
         let out = settled(&mut v.app, &ctx, v.i);
         let chip = named(&out).expect("bound again: the chip");

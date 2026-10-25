@@ -244,6 +244,7 @@ impl Node {
             || self.visible_var.is_some()
             || self.size_vars.iter().any(Option::is_some)
             || self.text_vars.iter().any(Option::is_some)
+            || self.item.limit_vars.iter().any(Option::is_some)
             || self.opacity_var.is_some()
             || self
                 .effects

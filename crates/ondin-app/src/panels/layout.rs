@@ -2298,6 +2298,7 @@ impl OndinApp {
             main,
             row,
             &[SizeMode::Auto, SizeMode::Px, SizeMode::Percent],
+            None,
         );
 
         // --- align-self -------------------------------------------------------
@@ -2403,8 +2404,13 @@ impl OndinApp {
                     |i, d| i.max_height = d,
                 ),
             ];
-            for (label, horizontal, get, put) in limits {
+            for (slot, (label, horizontal, get, put)) in limits.into_iter().enumerate() {
                 let along = drawn.map(|b| if horizontal { b.width() } else { b.height() });
+                // One layer's limit binds; a selection's row is its shared value.
+                let key = match subjects {
+                    [id] => Some(super::binding::FieldKey::Limit { id: *id, slot }),
+                    _ => None,
+                };
                 self.dimension_row(
                     ui,
                     subjects,
@@ -2416,6 +2422,7 @@ impl OndinApp {
                     along,
                     horizontal,
                     &[SizeMode::Auto, SizeMode::Px, SizeMode::Percent],
+                    key,
                 );
             }
         }
@@ -2443,7 +2450,7 @@ impl OndinApp {
     /// from the unit converts each subject's specified length in its own container
     /// ([`specified_along`]) — so switching the unit moves nothing.
     /// `drawn` is the first subject's drawn length, where a scrub under a keyword
-    /// starts.
+    /// starts. `key`, a limit's binding: bound, the row is its chip.
     #[allow(clippy::too_many_arguments)]
     fn dimension_row(
         &mut self,
@@ -2457,6 +2464,7 @@ impl OndinApp {
         drawn: Option<f64>,
         horizontal: bool,
         modes: &[SizeMode],
+        key: Option<super::binding::FieldKey>,
     ) {
         let shown = shared(items, |i| get(i));
         let mode = shown.map(plain_mode);
@@ -2464,15 +2472,35 @@ impl OndinApp {
             Some(Dimension::Px(v) | Dimension::Percent(v)) => Some(v),
             _ => None,
         };
+        // A limit's mark compares its binding with its literal, which is `Px(0)`
+        // on every bound side, and its reset writes the main's binding with it.
+        let slot = match key {
+            Some(super::binding::FieldKey::Limit { slot, .. }) => Some(slot),
+            _ => None,
+        };
+        let table = self.session.doc.variables();
         let mark = self.sub_mark(
             subjects,
             item_of,
             |n| Some(*n.item()),
-            &get,
-            put,
+            |i| (get(i), slot.and_then(|s| i.limit_vars[s])),
+            |i, (d, v)| {
+                put(i, d);
+                if let Some(s) = slot {
+                    i.limit_vars[s] = v;
+                }
+            },
             |id, item| Operation::SetLayoutItem { id, item },
-            dimension_words,
+            |(d, v)| match v.and_then(|v| table.get(v)) {
+                Some(var) => var.name.clone(),
+                None => dimension_words(d),
+            },
         );
+        if let Some(key) = key
+            && self.bound_field_ui(ui, key, width, &mark)
+        {
+            return;
+        }
         let edit = size_field(
             ui,
             egui::vec2(width, ui::CONTROL_H),
@@ -2485,6 +2513,9 @@ impl OndinApp {
             mark.as_ref().map(OverrideMark::field),
         );
         self.reset_marked(edit.reset, &mark);
+        if let Some(key) = key {
+            self.field_doors(ui, key, &edit.resp);
+        }
         if let Some(m) = edit.picked {
             // Each subject's own value, converted in its own container from what it
             // **specifies** (`specified_along`): a mixed `100px`/`160px` basis picked
@@ -3263,6 +3294,74 @@ mod tests {
             (c0, d0),
             "a group too"
         );
+    }
+
+    /// A min width extracted into a variable (`FieldKey::Limit`) draws as before,
+    /// the variable's px laid out; an item write of another min detaches it and
+    /// the status says so; a number typed over its chip writes the limit and
+    /// detaches.
+    ///
+    /// flip: `number_retype`'s `Limit` arm returning early → fails at *"the
+    /// typed min"*; `commit_inner`'s `limits_cut` left out of the status → fails
+    /// at *"and says so"*.
+    #[test]
+    fn a_min_width_binds_and_takes_a_number_back() {
+        use crate::panels::binding::{FieldKey, Retype};
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| i.min_width = Dimension::Px(70.0));
+        let w0 = drawn(&s.app, s.a).width();
+        assert_eq!(w0, 70.0, "the fixture lays out at its min");
+        let key = FieldKey::Limit { id: s.a, slot: 0 };
+        let value = s.app.field_value(key).expect("a value");
+        s.app.extract_field(key, value);
+        assert!(s.app.field_var(key).is_some(), "bound");
+        assert_eq!(
+            s.app.session.doc.get(s.a).unwrap().item().min_width,
+            Dimension::Px(0.0),
+            "the literal 0"
+        );
+        assert_eq!(drawn(&s.app, s.a).width(), w0, "drawn as before");
+
+        // A min written over the binding by the row's own write detaches it, said.
+        set_item(&mut s.app, s.a, |i| i.min_width = Dimension::Px(80.0));
+        assert_eq!(s.app.field_var(key), None, "a typed min detaches");
+        assert_eq!(
+            s.app.session.status().text,
+            "Detached number 1",
+            "and says so"
+        );
+        s.app.session.undo();
+
+        s.app.var_retype = Some(Retype {
+            key,
+            text: "90".into(),
+            focus: true,
+        });
+        let ctx = egui::Context::default();
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.number_retype(ui, key, app.var_retype.clone().unwrap(), 200.0);
+                },
+            );
+        };
+        run(&mut s.app, Vec::new());
+        run(
+            &mut s.app,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(drawn(&s.app, s.a).width(), 90.0, "the typed min");
+        assert_eq!(s.app.field_var(key), None, "detached");
     }
 
     /// *Add flex layout* (`OndinApp::add_layout`) on loose layers wraps them in a

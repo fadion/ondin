@@ -83,6 +83,7 @@ pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
         .chain(n.spacing_vars.iter().flatten().copied())
         .chain(n.size_vars.iter().flatten().copied())
         .chain(n.text_vars.iter().flatten().copied())
+        .chain(n.item.limit_vars.iter().flatten().copied())
         .chain(n.visible_var)
         .chain(n.opacity_var)
 }
@@ -276,6 +277,7 @@ impl Plan {
         n.spacing_vars.iter_mut().flatten().for_each(v);
         n.size_vars.iter_mut().flatten().for_each(v);
         n.text_vars.iter_mut().flatten().for_each(v);
+        n.item.limit_vars.iter_mut().flatten().for_each(v);
         if let Some(x) = &mut n.visible_var {
             v(x);
         }
@@ -905,6 +907,7 @@ fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault:
         && slots(&n.spacing_vars, &s.spacing_vars)
         && slots(&n.size_vars, &s.size_vars)
         && slots(&n.text_vars, &s.text_vars)
+        && slots(&n.item.limit_vars, &s.item.limit_vars)
         && (!hit(n.visible_var) || n.visible_var.is_some_and(|x| alike(x, s.visible_var)))
         && (!hit(n.opacity_var) || n.opacity_var.is_some_and(|x| alike(x, s.opacity_var)))
 }
@@ -1013,6 +1016,10 @@ fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
     vs.extend(slots(&n.spacing_vars, src.map(|s| &s.spacing_vars[..])));
     vs.extend(slots(&n.size_vars, src.map(|s| &s.size_vars[..])));
     vs.extend(slots(&n.text_vars, src.map(|s| &s.text_vars[..])));
+    vs.extend(slots(
+        &n.item.limit_vars,
+        src.map(|s| &s.item.limit_vars[..]),
+    ));
     vs.extend(own(n.visible_var, src.and_then(|s| s.visible_var)));
     vs.extend(own(n.opacity_var, src.and_then(|s| s.opacity_var)));
     let ss = n
@@ -1342,6 +1349,11 @@ impl Fork {
         }
         if let Some(vars) = slots(n.text_vars, src.map(|s| s.text_vars), to) {
             ops.push(Operation::SetTextVars { id, vars });
+        }
+        if let Some(vars) = slots(n.item.limit_vars, src.map(|s| s.item.limit_vars), to) {
+            let mut item = n.item;
+            item.limit_vars = vars;
+            ops.push(Operation::SetLayoutItem { id, item });
         }
         if let Some(v) = to(n.visible_var, src.and_then(|s| s.visible_var)) {
             ops.push(Operation::SetVisibleVar { id, var: Some(v) });

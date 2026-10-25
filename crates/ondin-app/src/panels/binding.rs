@@ -53,6 +53,16 @@ pub(crate) enum FieldKey {
     /// string variable. Not typed: the row is a picker, so the binding is the
     /// field menu's, as the eye's is.
     Family { id: NodeId },
+    /// One of a text's type numbers — the Type card's size, weight, line height
+    /// or letter spacing, or the Paragraph tab's spacing — `slot` its
+    /// `variable::TextVars` place, bound to a number variable read as the number
+    /// the field shows. The node's default, on one layer. The weight is a picker,
+    /// so its binding is the field menu's, as the family's is.
+    Type { id: NodeId, slot: usize },
+    /// One of a layout item's size limits — the Item card's *Min / max* rows —
+    /// `slot` its `variable::LimitVars` place, bound to a number variable read
+    /// as px, on one layer.
+    Limit { id: NodeId, slot: usize },
     /// A layer's opacity — the Appearance card's field (§15 D1072), bound to a
     /// number variable read as a percentage, on one layer: a selection's field is
     /// the outermost members' shared value, which no one variable stands in for.
@@ -73,6 +83,9 @@ pub(crate) enum FieldKey {
         slot: usize,
     },
 }
+
+/// [`FieldKey::Limit`]'s rows' own labels, in `variable::LimitVars`' order.
+pub(crate) const LIMIT_LABELS: [&str; 4] = ["Min width", "Max width", "Min height", "Max height"];
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
 pub(crate) const COLUMN_GAP: u8 = 1 << 0;
@@ -100,17 +113,39 @@ impl FieldKey {
             | FieldKey::Size { id, .. }
             | FieldKey::Content { id }
             | FieldKey::Family { id }
+            | FieldKey::Type { id, .. }
+            | FieldKey::Limit { id, .. }
             | FieldKey::Opacity { id }
             | FieldKey::StrokeWidth { id, .. }
             | FieldKey::EffectNumber { id, .. } => id,
         }
     }
 
+    /// The `variable::TextVars` slot a text field binds — `None` for any other.
+    pub(crate) fn text_slot(self) -> Option<usize> {
+        use ondin_core::variable::{TEXT_CONTENT, TEXT_FAMILY};
+        match self {
+            FieldKey::Content { .. } => Some(TEXT_CONTENT),
+            FieldKey::Family { .. } => Some(TEXT_FAMILY),
+            FieldKey::Type { slot, .. } => Some(slot),
+            _ => None,
+        }
+    }
+
     /// Whether the field is one the keyboard types into — the `--` list's door
     /// and `Backspace`'s, which the field menu names as its accelerators. The eye
-    /// is clicked, never typed (§15 D1059), and the family picked (§15 D1069).
+    /// is clicked, never typed (§15 D1059), and the family and weight picked (§15
+    /// D1069).
     pub(crate) fn typed(self) -> bool {
-        !matches!(self, FieldKey::Visible { .. } | FieldKey::Family { .. })
+        !matches!(
+            self,
+            FieldKey::Visible { .. }
+                | FieldKey::Family { .. }
+                | FieldKey::Type {
+                    slot: ondin_core::variable::TEXT_WEIGHT,
+                    ..
+                }
+        )
     }
 
     /// The glyph a number field's badge carries: the corners icon for all four,
@@ -131,6 +166,16 @@ impl FieldKey {
             FieldKey::Content { .. } => icon::TEXT_T,
             // The family row's own glyph, so the chip sits where the combo's did.
             FieldKey::Family { .. } => icon::TEXT_AA,
+            // Each type field's own prefix; the weight's is its picker's glyph.
+            FieldKey::Type { slot, .. } => match slot {
+                ondin_core::variable::TEXT_SIZE => icon::TEXT_T,
+                ondin_core::variable::TEXT_WEIGHT => icon::TEXT_BOLD,
+                ondin_core::variable::TEXT_LINE_HEIGHT => icon::ARROWS_VERTICAL,
+                ondin_core::variable::TEXT_LETTER_SPACING => icon::TEXT_AA,
+                _ => icon::PARAGRAPH,
+            },
+            // The row's own label.
+            FieldKey::Limit { slot, .. } => LIMIT_LABELS[slot],
             // The opacity field's own prefix.
             FieldKey::Opacity { .. } => icon::DROP_HALF,
             // The weight field's own prefix.
@@ -162,15 +207,18 @@ impl FieldKey {
                 ..
             } | FieldKey::Size { .. }
                 | FieldKey::EffectNumber { .. }
+                | FieldKey::Limit { .. }
         )
     }
 
     /// [`Self::badge`] as the unbound field's own prefix — a word or a glyph at
     /// that field's size (§15 D1092).
     pub(crate) fn prefix(self) -> ui::Prefix {
-        match self.badge_is_icon() {
-            true => ui::Prefix::Icon(self.badge()),
-            false => ui::Prefix::Text(self.badge()),
+        match (self, self.badge_is_icon()) {
+            // A whole word, as the unbound row's `Prefix::Label`.
+            (FieldKey::Limit { .. }, _) => ui::Prefix::Label(self.badge()),
+            (_, true) => ui::Prefix::Icon(self.badge()),
+            (_, false) => ui::Prefix::Text(self.badge()),
         }
     }
 
@@ -183,7 +231,9 @@ impl FieldKey {
             | FieldKey::Size { .. }
             | FieldKey::Opacity { .. }
             | FieldKey::StrokeWidth { .. }
-            | FieldKey::EffectNumber { .. } => VarKind::Number,
+            | FieldKey::EffectNumber { .. }
+            | FieldKey::Type { .. }
+            | FieldKey::Limit { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
             FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
         }
@@ -607,6 +657,8 @@ impl OndinApp {
             | FieldKey::Size { id, .. }
             | FieldKey::Content { id }
             | FieldKey::Family { id }
+            | FieldKey::Type { id, .. }
+            | FieldKey::Limit { id, .. }
             | FieldKey::Opacity { id }
             | FieldKey::StrokeWidth { id, .. }
             | FieldKey::EffectNumber { id, .. } => vec![id],
@@ -650,11 +702,15 @@ impl OndinApp {
                 vars[axis] = Some(var);
                 Transaction(ondin_core::bind_size_ops(doc, id, vars))
             }
-            FieldKey::Content { id } => {
-                Transaction(ondin_core::bind_text_ops(doc, id, [Some(var), None]))
+            FieldKey::Content { id } | FieldKey::Family { id } | FieldKey::Type { id, .. } => {
+                let mut vars = ondin_core::TextVars::default();
+                if let Some(k) = key.text_slot() {
+                    vars[k] = Some(var);
+                }
+                Transaction(ondin_core::bind_text_ops(doc, id, vars))
             }
-            FieldKey::Family { id } => {
-                Transaction(ondin_core::bind_text_ops(doc, id, [None, Some(var)]))
+            FieldKey::Limit { id, slot } => {
+                Transaction(ondin_core::build::bind_limit_ops(doc, id, slot, var))
             }
             FieldKey::Opacity { id } => Transaction(ondin_core::bind_opacity_ops(doc, id, var)),
             FieldKey::StrokeWidth { id, item } => {
@@ -693,11 +749,12 @@ impl OndinApp {
                 which[axis] = true;
                 Transaction(ondin_core::detach_size_ops(doc, id, which))
             }
-            FieldKey::Content { id } => {
-                Transaction(ondin_core::detach_text_ops(doc, id, [true, false]))
+            FieldKey::Content { id } | FieldKey::Family { id } | FieldKey::Type { id, .. } => {
+                let which = std::array::from_fn(|k| key.text_slot() == Some(k));
+                Transaction(ondin_core::detach_text_ops(doc, id, which))
             }
-            FieldKey::Family { id } => {
-                Transaction(ondin_core::detach_text_ops(doc, id, [false, true]))
+            FieldKey::Limit { id, slot } => {
+                Transaction(ondin_core::build::detach_limit_ops(doc, id, slot))
             }
             FieldKey::Opacity { id } => Transaction(ondin_core::detach_opacity_ops(doc, id)),
             FieldKey::StrokeWidth { id, item } => {
@@ -840,8 +897,10 @@ impl OndinApp {
             }
             FieldKey::Visible { id } => doc.get(id)?.visible_var(),
             FieldKey::Size { id, axis } => doc.get(id)?.size_vars()[axis],
-            FieldKey::Content { id } => doc.get(id)?.text_vars()[0],
-            FieldKey::Family { id } => doc.get(id)?.text_vars()[1],
+            FieldKey::Content { id } | FieldKey::Family { id } | FieldKey::Type { id, .. } => {
+                doc.get(id)?.text_vars()[key.text_slot()?]
+            }
+            FieldKey::Limit { id, slot } => doc.get(id)?.item().limit_vars[slot],
             FieldKey::Opacity { id } => doc.get(id)?.opacity_var(),
             FieldKey::StrokeWidth { id, item } => {
                 doc.get(id)?
@@ -897,6 +956,8 @@ impl OndinApp {
             | FieldKey::Size { .. }
             | FieldKey::Content { .. }
             | FieldKey::Family { .. }
+            | FieldKey::Type { .. }
+            | FieldKey::Limit { .. }
             | FieldKey::Opacity { .. }
             | FieldKey::StrokeWidth { .. }
             | FieldKey::EffectNumber { .. } => {
@@ -1641,6 +1702,69 @@ impl OndinApp {
                         e.vars[slot] = None;
                         ops.push(Operation::SetEffects { id, effects });
                     }
+                    // The one number into the text's style or paragraph, in the
+                    // slot's unit, over what the detach above leaves; letter
+                    // spacing may be negative.
+                    FieldKey::Type { id, slot } => {
+                        let Some(ondin_core::NodeKind::Text {
+                            style, paragraph, ..
+                        }) = doc.get(id).map(|n| n.kind())
+                        else {
+                            return;
+                        };
+                        let mut style = (**style).clone();
+                        let mut paragraph = paragraph.clone();
+                        for op in &ops {
+                            match op {
+                                Operation::SetTextStyle { style: s, .. } => style = s.clone(),
+                                Operation::SetParagraphStyle { paragraph: p, .. } => {
+                                    paragraph = p.clone()
+                                }
+                                _ => {}
+                            }
+                        }
+                        let x = match slot {
+                            ondin_core::variable::TEXT_LETTER_SPACING => raw,
+                            ondin_core::variable::TEXT_SIZE => {
+                                r.min(ondin_core::typography::MAX_FONT_SIZE)
+                            }
+                            _ => r,
+                        };
+                        ondin_core::variable::set_text_slot_number(
+                            slot,
+                            &mut style,
+                            &mut paragraph,
+                            x,
+                        );
+                        match slot {
+                            ondin_core::variable::TEXT_PARAGRAPH_SPACING => {
+                                ops.push(Operation::SetParagraphStyle {
+                                    id,
+                                    paragraph,
+                                    spans: None,
+                                })
+                            }
+                            _ => ops.push(Operation::SetTextStyle {
+                                id,
+                                style,
+                                spans: None,
+                            }),
+                        }
+                    }
+                    // The one limit in px, over the item as the detach above
+                    // leaves it, the others as they are.
+                    FieldKey::Limit { id, slot } => {
+                        let mut item = match ops.last() {
+                            Some(Operation::SetLayoutItem { item, .. }) => *item,
+                            _ => match doc.get(id) {
+                                Some(n) => *n.item(),
+                                None => return,
+                            },
+                        };
+                        *item.limit_mut(slot) = ondin_core::container::Dimension::Px(r);
+                        item.limit_vars[slot] = None;
+                        ops.push(Operation::SetLayoutItem { id, item });
+                    }
                     // The content is the text arm's above; the family and the
                     // eye are never typed.
                     FieldKey::Paint { .. }
@@ -1656,7 +1780,7 @@ impl OndinApp {
     }
 
     /// `key`'s value as a cell — what *Extract* files.
-    fn field_value(&self, key: FieldKey) -> Option<Cell> {
+    pub(super) fn field_value(&self, key: FieldKey) -> Option<Cell> {
         let doc = &self.session.doc;
         match key {
             FieldKey::Paint { id, slot } => {
@@ -1703,6 +1827,34 @@ impl OndinApp {
                 Some(Cell::Number(
                     paint.strokes.iter().find(|s| s.id == item)?.width,
                 ))
+            }
+            // The number the field shows, as drawn; an Auto line height the px it
+            // was laid at, the unit it binds in.
+            FieldKey::Type { id, slot } => match doc.resolved_kind(id)?.into_owned() {
+                ondin_core::NodeKind::Text {
+                    style, paragraph, ..
+                } => ondin_core::variable::text_slot_number(slot, &style, &paragraph)
+                    .or_else(|| {
+                        (slot == ondin_core::variable::TEXT_LINE_HEIGHT)
+                            .then(|| self.session.resolved.text_layout(id))
+                            .flatten()
+                            .map(|l| l.line_height)
+                    })
+                    .map(Cell::Number),
+                _ => None,
+            },
+            // The limit as px: as specified, a percentage of the parent's content
+            // box, or `None` for `auto`, which no number stands in for.
+            FieldKey::Limit { id, slot } => {
+                let node = doc.get(id)?;
+                match doc.resolved_item(id).limit(slot) {
+                    ondin_core::container::Dimension::Px(v) => Some(Cell::Number(v)),
+                    ondin_core::container::Dimension::Percent(p) => {
+                        let extent = self.content_extent(node.parent()?, slot < 2)?;
+                        Some(Cell::Number(extent * p / 100.0))
+                    }
+                    _ => None,
+                }
             }
             // The percentage it draws at, the unit a bound opacity reads in.
             FieldKey::Opacity { id } => {
@@ -2376,7 +2528,8 @@ mod tests {
     /// **Every kind of field draws as before once extracted** — the value
     /// `field_value` files is the one the field draws in the unit its binding
     /// reads: opacity 30% as 30, a stroke's width, an effect's blur, a corner, a
-    /// size axis and a text's content.
+    /// size axis, a text's content and its type numbers — a `%` letter spacing as
+    /// its percentage, an Auto line height as the px it was laid at.
     ///
     /// flip: `field_value`'s opacity arm without its `* 100.0` → fails
     /// *"opacity"*, the layer redrawn at 0.3%.
@@ -2422,7 +2575,10 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Text {
                     content: "Hello".into(),
-                    style: Default::default(),
+                    style: Box::new(ondin_core::TextStyle {
+                        letter_spacing: ondin_core::Length::Em(0.05),
+                        ..Default::default()
+                    }),
                     spans: Default::default(),
                     para_spans: Default::default(),
                     paragraph: Default::default(),
@@ -2484,6 +2640,36 @@ mod tests {
         extract(&mut app, FieldKey::Content { id: text });
         match app.session.doc.resolved_kind(text).map(|k| k.into_owned()) {
             Some(NodeKind::Text { content, .. }) => assert_eq!(content, "Hello", "content"),
+            k => panic!("a text: {k:?}"),
+        }
+        // Every type number, an Auto line height as the px it was laid at.
+        app.session.resolved = ondin_core::Resolved::rebuild(&app.session.doc);
+        let laid = app
+            .session
+            .resolved
+            .text_layout(text)
+            .expect("laid")
+            .line_height;
+        for slot in ondin_core::variable::TEXT_SIZE..=ondin_core::variable::TEXT_PARAGRAPH_SPACING {
+            extract(&mut app, FieldKey::Type { id: text, slot });
+        }
+        match app.session.doc.resolved_kind(text).map(|k| k.into_owned()) {
+            Some(NodeKind::Text {
+                style, paragraph, ..
+            }) => {
+                assert_eq!((style.font_size, style.weight), (16.0, 400), "size, weight");
+                assert_eq!(
+                    style.letter_spacing,
+                    ondin_core::Length::Em(0.05),
+                    "tracking"
+                );
+                assert_eq!(
+                    style.line_height,
+                    Some(ondin_core::Length::Px(laid).canonical()),
+                    "leading"
+                );
+                assert_eq!(paragraph.spacing, ondin_core::Length::Px(0.0), "spacing");
+            }
             k => panic!("a text: {k:?}"),
         }
     }

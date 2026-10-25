@@ -3310,6 +3310,89 @@ pub fn keep_effect_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
     tx
 }
 
+/// Bind limit `k` of layer `id`'s layout item (`variable::LimitVars`' order) to
+/// number variable `var`, its literal written `Px(0)`. Empty when it already is.
+pub fn bind_limit_ops(doc: &Document, id: NodeId, k: usize, var: crate::VarId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut item = *node.item();
+    item.limit_vars[k] = Some(var);
+    *item.limit_mut(k) = crate::container::Dimension::Px(0.0);
+    if item == *node.item() {
+        return Vec::new();
+    }
+    vec![Operation::SetLayoutItem { id, item }]
+}
+
+/// Detach limit `k` of layer `id` to the px it lays out at against table `t`.
+/// Empty when it is not bound.
+pub fn detach_limit_ops_in(
+    doc: &Document,
+    t: &crate::Variables,
+    id: NodeId,
+    k: usize,
+) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    if node.item().limit_vars[k].is_none() {
+        return Vec::new();
+    }
+    let drawn = doc.limits_drawn_in(t, id, *node.item()).limit(k);
+    let mut item = *node.item();
+    item.limit_vars[k] = None;
+    *item.limit_mut(k) = drawn;
+    vec![Operation::SetLayoutItem { id, item }]
+}
+
+/// [`detach_limit_ops_in`] against the document's own table.
+pub fn detach_limit_ops(doc: &Document, id: NodeId, k: usize) -> Vec<Operation> {
+    detach_limit_ops_in(doc, doc.variables(), id, k)
+}
+
+/// `item`, about to be written to layer `id`, with each bound limit the write
+/// leaves bound kept and any other detached — [`keep_corner_bindings`]' two
+/// halves: a write of the literal `Px(0)` or of the px drawn keeps it (every
+/// item edit writes the whole record), any other value detaches. A binding the
+/// write itself sets is left alone. Shared by the commit and the preview.
+pub fn kept_limits(
+    doc: &Document,
+    id: NodeId,
+    mut item: crate::container::LayoutItem,
+) -> crate::container::LayoutItem {
+    let Some(node) = doc.get(id) else {
+        return item;
+    };
+    let was = *node.item();
+    let drawn = doc.resolved_item(id);
+    for k in 0..item.limit_vars.len() {
+        let Some(var) = item.limit_vars[k] else {
+            continue;
+        };
+        if was.limit_vars[k] != Some(var) {
+            continue;
+        }
+        let written = item.limit(k);
+        if written == was.limit(k) || written == drawn.limit(k) {
+            *item.limit_mut(k) = was.limit(k);
+        } else {
+            item.limit_vars[k] = None;
+        }
+    }
+    item
+}
+
+/// [`keep_corner_bindings`]' rule for every `SetLayoutItem`, through [`kept_limits`].
+pub fn keep_limit_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    for op in tx.0.iter_mut() {
+        if let Operation::SetLayoutItem { id, item } = op {
+            *item = kept_limits(doc, *id, *item);
+        }
+    }
+    tx
+}
+
 /// [`keep_corner_bindings`]' rule for every `SetStrokes`, through [`kept_stroke_widths`].
 pub fn keep_stroke_width_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     for op in tx.0.iter_mut() {
@@ -3659,14 +3742,17 @@ pub fn keep_size_bindings(
     tx
 }
 
-/// Bind text `id`'s content and family to `vars` — `None` leaving a field as it
-/// is, [`bind_size_ops`]' shape: a bound field's literal is written empty.
+/// Bind text `id`'s slots to `vars` (`variable::TextVars`) — `None` leaving a
+/// slot as it is, [`bind_size_ops`]' shape: a bound slot's literal is written
+/// empty or 0 (`variable::clear_text_slot_number`).
 ///
 /// Binding the content clears the spans and paragraph spans (a byte range cannot
-/// index a string whose length changes with the mode); binding the family clears
-/// runs with a family of their own. A family is not bound under a text style,
-/// which holds a plain family. Empty for a non-text layer or when nothing changes.
+/// index a string whose length changes with the mode); binding a default clears
+/// the runs or paragraphs with a value of their own. The slots a text style holds
+/// (`variable::TEXT_STYLED`) are not bound under one, which holds plain values.
+/// Empty for a non-text layer or when nothing changes.
 pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<Operation> {
+    use crate::variable::{TEXT_CONTENT, TEXT_FAMILY, TEXT_PARAGRAPH_SPACING};
     let Some(node) = doc.get(id) else {
         return Vec::new();
     };
@@ -3675,35 +3761,57 @@ pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<O
         style,
         spans,
         para_spans,
+        paragraph,
         ..
     } = node.kind()
     else {
         return Vec::new();
     };
+    let styled = node.styles().text.is_some();
     let mut next = node.text_vars();
-    if vars[0].is_some() {
-        next[0] = vars[0];
-    }
-    if vars[1].is_some() && node.styles().text.is_none() {
-        next[1] = vars[1];
+    for (k, v) in vars.iter().enumerate() {
+        if v.is_some() && !(styled && crate::variable::TEXT_STYLED.contains(&k)) {
+            next[k] = *v;
+        }
     }
     if next == node.text_vars() {
         return Vec::new();
     }
     let mut ops = Vec::new();
+    // Only a slot bound now is cleared, against the defaults as they stand: a
+    // span list canonicalizes what it is given, and a size or weight of 0 — a
+    // bound slot's literal — would come back a run of the smallest one over the
+    // whole text.
+    let numbers: Vec<usize> = (crate::variable::TEXT_SIZE..next.len())
+        .filter(|k| next[*k].is_some() && node.text_vars()[*k].is_none())
+        .collect();
+    let mut spans2 = spans.clone();
+    let mut para_spans2 = para_spans.clone();
+    if next[TEXT_CONTENT].is_some() {
+        spans2 = Default::default();
+        para_spans2 = Default::default();
+    } else {
+        let all = 0..content.len();
+        if next[TEXT_FAMILY].is_some() {
+            spans2.clear(all.clone(), crate::typography::CharAttrKind::Family, style);
+        }
+        for kind in numbers
+            .iter()
+            .filter_map(|k| crate::variable::text_slot_attr(*k))
+        {
+            spans2.clear(all.clone(), kind, style);
+        }
+        if next[TEXT_PARAGRAPH_SPACING].is_some() {
+            para_spans2.clear(all, crate::typography::ParaAttrKind::Spacing, paragraph);
+        }
+    }
     let mut style2 = (**style).clone();
-    if next[1].is_some() {
+    let mut paragraph2 = paragraph.clone();
+    if next[TEXT_FAMILY].is_some() {
         style2.font_family.clear();
     }
-    let mut spans2 = spans.clone();
-    if next[0].is_some() {
-        spans2 = Default::default();
-    } else if next[1].is_some() {
-        spans2.clear(
-            0..content.len(),
-            crate::typography::CharAttrKind::Family,
-            &style2,
-        );
+    for k in numbers {
+        crate::variable::clear_text_slot_number(k, &mut style2, &mut paragraph2);
     }
     if style2 != **style || spans2 != *spans {
         ops.push(Operation::SetTextStyle {
@@ -3712,7 +3820,18 @@ pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<O
             spans: Some(spans2.clone()),
         });
     }
-    if next[0].is_some() && (!content.is_empty() || !spans2.is_empty() || !para_spans.is_empty()) {
+    // A bound content's spans go with its `SetText` below.
+    let own_spans = next[TEXT_CONTENT].is_none();
+    if paragraph2 != *paragraph || (own_spans && para_spans2 != *para_spans) {
+        ops.push(Operation::SetParagraphStyle {
+            id,
+            paragraph: paragraph2,
+            spans: own_spans.then_some(para_spans2),
+        });
+    }
+    if next[TEXT_CONTENT].is_some()
+        && (!content.is_empty() || !spans2.is_empty() || !para_spans.is_empty())
+    {
         ops.push(Operation::SetText {
             id,
             content: String::new(),
@@ -3724,9 +3843,9 @@ pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<O
     ops
 }
 
-/// Detach the fields of text `id` that `which` names to the strings they are
-/// drawn with, the other field as it is. Empty when neither is bound.
-pub fn detach_text_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Operation> {
+/// Detach the slots of text `id` that `which` names to the strings and numbers
+/// they are drawn with, the others as they are. Empty when none of them is bound.
+pub fn detach_text_ops(doc: &Document, id: NodeId, which: [bool; 7]) -> Vec<Operation> {
     detach_text_ops_in(doc, doc.variables(), id, which)
 }
 
@@ -3736,51 +3855,65 @@ pub fn detach_text_ops_in(
     doc: &Document,
     t: &crate::Variables,
     id: NodeId,
-    which: [bool; 2],
+    which: [bool; 7],
 ) -> Vec<Operation> {
+    use crate::variable::TEXT_CONTENT;
     let Some(node) = doc.get(id) else {
         return Vec::new();
     };
     let mut vars = node.text_vars();
-    if !(0..2).any(|k| which[k] && vars[k].is_some()) {
+    if !(0..vars.len()).any(|k| which[k] && vars[k].is_some()) {
         return Vec::new();
     }
     let NodeKind::Text {
         style,
         spans,
         para_spans,
+        paragraph,
         ..
     } = node.kind()
     else {
         return Vec::new();
     };
+    let drawn = doc.text_drawn_in(t, id, node.kind(), vars);
+    let mut kind = node.kind().clone();
+    for k in 0..vars.len() {
+        if which[k] && vars[k].is_some() {
+            crate::variable::copy_text_slot(k, &drawn, &mut kind);
+            vars[k] = None;
+        }
+    }
     let NodeKind::Text {
-        content: drawn,
-        style: drawn_style,
+        content: content2,
+        style: style2,
+        paragraph: paragraph2,
         ..
-    } = doc.text_drawn_in(t, id, node.kind(), vars)
+    } = kind
     else {
         return Vec::new();
     };
     let mut ops = Vec::new();
-    if which[1] && vars[1].is_some() {
-        let mut s = (**style).clone();
-        s.font_family = drawn_style.font_family;
+    if style2 != *style {
         ops.push(Operation::SetTextStyle {
             id,
-            style: s,
+            style: *style2,
             spans: Some(spans.clone()),
         });
-        vars[1] = None;
     }
-    if which[0] && vars[0].is_some() {
+    if paragraph2 != *paragraph {
+        ops.push(Operation::SetParagraphStyle {
+            id,
+            paragraph: paragraph2,
+            spans: Some(para_spans.clone()),
+        });
+    }
+    if which[TEXT_CONTENT] && node.text_vars()[TEXT_CONTENT].is_some() {
         ops.push(Operation::SetText {
             id,
-            content: drawn,
+            content: content2,
             spans: spans.clone(),
             para_spans: para_spans.clone(),
         });
-        vars[0] = None;
     }
     ops.push(Operation::SetTextVars { id, vars });
     ops
@@ -3794,12 +3927,15 @@ pub fn detach_text_ops_in(
 ///   emptied on purpose writes. Styling a range writes spans that index the drawn
 ///   string, so a `SetTextSpans` or `SetParagraphSpans` that leaves any is
 ///   rewritten into a `SetText` of the drawn string carrying them.
-/// - The family. A `SetTextStyle` whose family is the drawn one or the empty
-///   literal stays bound (every Type card row but the family writes the whole
-///   style); any other detaches. A run with its own family is a span, and the
-///   default stays bound under it. Applying a text style detaches it: the style
-///   holds a plain family, which `crate::style::settle` then writes.
+/// - The family and the type numbers. A `SetTextStyle` (or, for the paragraph
+///   spacing, a `SetParagraphStyle`) writing the drawn value or the literal stays
+///   bound, its literal put back (every Type card row writes the whole style);
+///   any other value detaches. A run or paragraph with a value of its own is a
+///   span, and the default stays bound under it. Applying a text style detaches
+///   the slots it holds (`variable::TEXT_STYLED`): the style holds plain values,
+///   which `crate::style::settle` then writes.
 pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    use crate::variable::{TEXT_CONTENT, TEXT_FAMILY, TEXT_PARAGRAPH_SPACING, TEXT_SIZE};
     let sets_var: FxHashSet<NodeId> =
         tx.0.iter()
             .filter_map(|op| match op {
@@ -3808,7 +3944,7 @@ pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
             })
             .collect();
     let mut vars: FxHashMap<NodeId, crate::TextVars> = FxHashMap::default();
-    let bound = |id: NodeId| -> Option<(&Node, String, String)> {
+    let bound = |id: NodeId| -> Option<(&Node, NodeKind)> {
         if sets_var.contains(&id) {
             return None;
         }
@@ -3816,10 +3952,12 @@ pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
         if node.text_vars().iter().all(Option::is_none) {
             return None;
         }
-        match doc.resolved_kind(id)?.into_owned() {
-            NodeKind::Text { content, style, .. } => Some((node, content, style.font_family)),
-            _ => None,
-        }
+        let drawn = doc.resolved_kind(id)?.into_owned();
+        matches!(drawn, NodeKind::Text { .. }).then_some((node, drawn))
+    };
+    let drawn_content = |k: &NodeKind| match k {
+        NodeKind::Text { content, .. } => content.clone(),
+        _ => String::new(),
     };
     for op in tx.0.iter_mut() {
         match op {
@@ -3829,25 +3967,25 @@ pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
                 spans,
                 para_spans,
             } => {
-                let Some((node, drawn, _)) = bound(*id) else {
+                let Some((node, drawn)) = bound(*id) else {
                     continue;
                 };
-                if node.text_vars()[0].is_none() {
+                if node.text_vars()[TEXT_CONTENT].is_none() {
                     continue;
                 }
                 let plain = spans.is_empty() && para_spans.is_empty();
-                if plain && *content == drawn {
+                if plain && *content == drawn_content(&drawn) {
                     content.clear();
                 } else {
-                    vars.entry(*id).or_insert(node.text_vars())[0] = None;
+                    vars.entry(*id).or_insert(node.text_vars())[TEXT_CONTENT] = None;
                 }
             }
             Operation::SetTextSpans { id, spans } if !spans.is_empty() => {
                 let id = *id;
-                let Some((node, drawn, _)) = bound(id) else {
+                let Some((node, drawn)) = bound(id) else {
                     continue;
                 };
-                if node.text_vars()[0].is_none() {
+                if node.text_vars()[TEXT_CONTENT].is_none() {
                     continue;
                 }
                 let NodeKind::Text { para_spans, .. } = node.kind() else {
@@ -3856,18 +3994,18 @@ pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
                 let spans = std::mem::take(spans);
                 *op = Operation::SetText {
                     id,
-                    content: drawn,
+                    content: drawn_content(&drawn),
                     spans,
                     para_spans: para_spans.clone(),
                 };
-                vars.entry(id).or_insert(node.text_vars())[0] = None;
+                vars.entry(id).or_insert(node.text_vars())[TEXT_CONTENT] = None;
             }
             Operation::SetParagraphSpans { id, spans } if !spans.is_empty() => {
                 let id = *id;
-                let Some((node, drawn, _)) = bound(id) else {
+                let Some((node, drawn)) = bound(id) else {
                     continue;
                 };
-                if node.text_vars()[0].is_none() {
+                if node.text_vars()[TEXT_CONTENT].is_none() {
                     continue;
                 }
                 let NodeKind::Text { spans: chars, .. } = node.kind() else {
@@ -3876,31 +4014,91 @@ pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
                 let para_spans = std::mem::take(spans);
                 *op = Operation::SetText {
                     id,
-                    content: drawn,
+                    content: drawn_content(&drawn),
                     spans: chars.clone(),
                     para_spans,
                 };
-                vars.entry(id).or_insert(node.text_vars())[0] = None;
+                vars.entry(id).or_insert(node.text_vars())[TEXT_CONTENT] = None;
             }
             Operation::SetTextStyle { id, style, .. } => {
-                let Some((node, _, family)) = bound(*id) else {
+                let Some((node, drawn)) = bound(*id) else {
                     continue;
                 };
-                if node.text_vars()[1].is_none() {
+                let (
+                    NodeKind::Text {
+                        style: literal,
+                        paragraph,
+                        ..
+                    },
+                    NodeKind::Text { style: drawn, .. },
+                ) = (node.kind(), &drawn)
+                else {
+                    continue;
+                };
+                let v = node.text_vars();
+                if v[TEXT_FAMILY].is_some() {
+                    if style.font_family.is_empty() || style.font_family == drawn.font_family {
+                        style.font_family.clear();
+                    } else {
+                        vars.entry(*id).or_insert(v)[TEXT_FAMILY] = None;
+                    }
+                }
+                for k in TEXT_SIZE..TEXT_PARAGRAPH_SPACING {
+                    if v[k].is_none() {
+                        continue;
+                    }
+                    let same = |a: &crate::typography::TextStyle| {
+                        crate::variable::text_slot_eq(k, (style, paragraph), (a, paragraph))
+                    };
+                    if same(literal) || same(drawn) {
+                        let mut p = paragraph.clone();
+                        crate::variable::clear_text_slot_number(k, style, &mut p);
+                    } else {
+                        vars.entry(*id).or_insert(v)[k] = None;
+                    }
+                }
+            }
+            Operation::SetParagraphStyle { id, paragraph, .. } => {
+                let Some((node, drawn)) = bound(*id) else {
+                    continue;
+                };
+                let (
+                    NodeKind::Text {
+                        paragraph: literal,
+                        style,
+                        ..
+                    },
+                    NodeKind::Text {
+                        paragraph: drawn, ..
+                    },
+                ) = (node.kind(), &drawn)
+                else {
+                    continue;
+                };
+                let v = node.text_vars();
+                if v[TEXT_PARAGRAPH_SPACING].is_none() {
                     continue;
                 }
-                if style.font_family.is_empty() || style.font_family == family {
-                    style.font_family.clear();
+                if paragraph.spacing == literal.spacing || paragraph.spacing == drawn.spacing {
+                    let mut s = (**style).clone();
+                    crate::variable::clear_text_slot_number(
+                        TEXT_PARAGRAPH_SPACING,
+                        &mut s,
+                        paragraph,
+                    );
                 } else {
-                    vars.entry(*id).or_insert(node.text_vars())[1] = None;
+                    vars.entry(*id).or_insert(v)[TEXT_PARAGRAPH_SPACING] = None;
                 }
             }
             Operation::SetTypeStyle { id, style: Some(_) } => {
-                let Some((node, _, _)) = bound(*id) else {
+                let Some((node, _)) = bound(*id) else {
                     continue;
                 };
-                if node.text_vars()[1].is_some() {
-                    vars.entry(*id).or_insert(node.text_vars())[1] = None;
+                let v = node.text_vars();
+                for k in crate::variable::TEXT_STYLED {
+                    if v[k].is_some() {
+                        vars.entry(*id).or_insert(v)[k] = None;
+                    }
                 }
             }
             _ => {}

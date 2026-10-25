@@ -38,6 +38,8 @@ const LABEL_W: f32 = 76.0;
 const BOUND_SWITCH_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
 /// A value chip's height.
 const CHIP_H: f32 = 22.0;
+/// A text property's binding: the content's slot of `variable::TextVars` alone.
+const CONTENT_ONLY: [bool; 7] = [true, false, false, false, false, false, false];
 /// The inner width of a value chip's menu — the top bar's View and Snap menus'
 /// 160 less their frame.
 const CHIP_MENU_W: f32 = 150.0;
@@ -1932,7 +1934,7 @@ impl OndinApp {
                                     .iter()
                                     .flat_map(|r| variant::counterparts(doc, *r, p))
                                     .flat_map(|c| {
-                                        ondin_core::build::detach_text_ops(doc, c, [true, false])
+                                        ondin_core::build::detach_text_ops(doc, c, CONTENT_ONLY)
                                     })
                                     .collect();
                                 out.push(Transaction(ops));
@@ -1988,7 +1990,7 @@ impl OndinApp {
                                         )
                                 })
                                 .flat_map(|c| {
-                                    ondin_core::build::detach_text_ops(doc, c, [true, false])
+                                    ondin_core::build::detach_text_ops(doc, c, CONTENT_ONLY)
                                 })
                                 .collect();
                             ops.extend(variant::set_property(doc, roots, p, &PropValue::Text(t)));

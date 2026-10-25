@@ -708,7 +708,7 @@ fn a_bound_field_reports_its_drawn_value() {
     ops.extend(ondin_core::bind_text_ops(
         &f.doc,
         f.text,
-        [Some(label), None],
+        ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_CONTENT, label),
     ));
     f.doc.apply(&Transaction(ops)).unwrap();
     let res = ondin_core::Resolved::rebuild(&f.doc);

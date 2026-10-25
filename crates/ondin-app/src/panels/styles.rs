@@ -1825,7 +1825,8 @@ mod tests {
         );
         assert!(app.session.commit(size));
         for (id, v) in [(a, inter), (b, georgia)] {
-            let ops = ondin_core::build::bind_text_ops(&app.session.doc, id, [None, Some(v)]);
+            let vars = ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_FAMILY, v);
+            let ops = ondin_core::build::bind_text_ops(&app.session.doc, id, vars);
             assert!(app.session.commit(Transaction(ops)));
         }
         let doc = &app.session.doc;
@@ -1833,7 +1834,8 @@ mod tests {
             agreed(doc, &[a, b], StyleSlot::Text).is_none(),
             "Inter and Georgia agreed"
         );
-        let ops = ondin_core::build::bind_text_ops(&app.session.doc, b, [None, Some(inter)]);
+        let vars = ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_FAMILY, inter);
+        let ops = ondin_core::build::bind_text_ops(&app.session.doc, b, vars);
         assert!(app.session.commit(Transaction(ops)));
         assert!(
             agreed(&app.session.doc, &[a, b], StyleSlot::Text).is_some(),

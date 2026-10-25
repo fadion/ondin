@@ -1283,6 +1283,13 @@ pub struct LayoutItem {
     pub grid_column: GridLines,
     #[serde(default, skip_serializing_if = "is_default")]
     pub grid_row: GridLines,
+    /// The number variables the four limits are bound to, in
+    /// `variable::LimitVars`' order — beside the values as an effect's bindings
+    /// are, so every door that writes the item from the stored one carries them.
+    /// A bound limit's literal is `Px(0)` and is never laid out: every layout
+    /// view reads the item through `Document::resolved_item`.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub limit_vars: crate::variable::LimitVars,
 }
 
 impl Default for LayoutItem {
@@ -1301,11 +1308,33 @@ impl Default for LayoutItem {
             justify_self: None,
             grid_column: GridLines::default(),
             grid_row: GridLines::default(),
+            limit_vars: Default::default(),
         }
     }
 }
 
 impl LayoutItem {
+    /// Limit `k` of `variable::LimitVars`' order — min width, max width, min
+    /// height, max height.
+    pub fn limit(&self, k: usize) -> Dimension {
+        [
+            self.min_width,
+            self.max_width,
+            self.min_height,
+            self.max_height,
+        ][k]
+    }
+
+    /// The field limit `k` is stored in.
+    pub fn limit_mut(&mut self, k: usize) -> &mut Dimension {
+        match k {
+            0 => &mut self.min_width,
+            1 => &mut self.max_width,
+            2 => &mut self.min_height,
+            _ => &mut self.max_height,
+        }
+    }
+
     /// All at CSS's defaults — what the save format skips.
     pub fn is_default(&self) -> bool {
         *self == LayoutItem::default()

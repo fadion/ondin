@@ -1023,6 +1023,11 @@ impl EditorSession {
         // edit — after `keep_flex_sizes`, whose holds are among the layout writes it
         // reads.
         let tx = ondin_core::build::keep_size_bindings(&self.doc, Some(&self.resolved), tx);
+        // A size limit written over its binding, rewritten in the item, so the
+        // limits the pass cuts are read around it for the status.
+        let limits = limits_bound(&tx);
+        let tx = ondin_core::build::keep_limit_bindings(&self.doc, tx);
+        let limits_cut = limits_cut(&self.doc, &tx, &limits);
         // A text's content or family written over its binding — before `propagate`,
         // whose `style::settle` writes a newly applied text style's family after this
         // has detached the binding it replaces.
@@ -1034,7 +1039,7 @@ impl EditorSession {
         let user = tx.0.len();
         ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         let mut vars_cut = variables_detached(&self.doc, &tx, asked_ops, user);
-        for name in widths_cut.into_iter().chain(numbers_cut) {
+        for name in widths_cut.into_iter().chain(numbers_cut).chain(limits_cut) {
             if !vars_cut.contains(&name) {
                 vars_cut.push(name);
             }
@@ -1544,6 +1549,47 @@ fn stroke_widths_cut(
                 Operation::SetStrokes { id: n, strokes } if n == id => strokes
                     .iter()
                     .any(|s| s.id == *item && s.width_var.is_none()),
+                _ => false,
+            })
+        })
+        .filter_map(|(_, _, v)| table.get(*v).map(|x| x.name.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every size limit `tx` writes bound, as (layer, slot, variable) —
+/// [`stroke_widths_bound`]' twin for `build::keep_limit_bindings`.
+fn limits_bound(tx: &Transaction) -> Vec<(NodeId, usize, ondin_core::VarId)> {
+    tx.0.iter()
+        .filter_map(|op| match op {
+            Operation::SetLayoutItem { id, item } => Some((*id, item.limit_vars)),
+            _ => None,
+        })
+        .flat_map(|(id, vars)| {
+            vars.into_iter()
+                .enumerate()
+                .filter_map(move |(k, v)| v.map(|v| (id, k, v)))
+        })
+        .collect()
+}
+
+/// The variables `bound`'s limits lost in `tx`, the pass run — [`stroke_widths_cut`]'s
+/// twin.
+fn limits_cut(
+    doc: &Document,
+    tx: &Transaction,
+    bound: &[(NodeId, usize, ondin_core::VarId)],
+) -> Vec<String> {
+    let table = doc.variables();
+    let mut names: Vec<String> = bound
+        .iter()
+        .filter(|(id, k, _)| {
+            tx.0.iter().any(|op| match op {
+                Operation::SetLayoutItem { id: n, item } if n == id => {
+                    item.limit_vars[*k].is_none()
+                }
                 _ => false,
             })
         })

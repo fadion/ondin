@@ -1,6 +1,6 @@
 # Text node and fonts (§5.4, §5.4a)
 
-The `Text` node kind (scopes, spans, layout, editing, decoration, type on a path, lists) and how fonts are found, loaded and cached. Text styles and string-variable bindings of text are in `styles-variables.md`.
+The `Text` node kind (scopes, spans, layout, editing, decoration, type on a path, lists) and how fonts are found, loaded and cached. Text styles and variable bindings of text are in `styles-variables.md`.
 
 ## 5.4 Text node
 

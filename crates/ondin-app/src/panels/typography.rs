@@ -590,6 +590,77 @@ impl OndinApp {
         })
     }
 
+    /// A type number's override mark on text `id` — [`Self::family_mark`]'s rule
+    /// for `variable::TextVars` slot `slot`: where the copy is bound apart from its
+    /// main, a mark resetting the main's binding beside its literal; else
+    /// `literal`, the field's own mark on the stored value.
+    fn binding_mark(
+        &self,
+        id: NodeId,
+        slot: usize,
+        literal: Option<OverrideMark>,
+    ) -> Option<OverrideMark> {
+        let doc = &self.session.doc;
+        let resets = self.resets_of(id);
+        let node = doc.get(id)?;
+        let own = node.text_vars();
+        let theirs = resets.iter().find_map(|op| match op {
+            Operation::SetTextVars { vars, .. } => Some(vars[slot]),
+            _ => None,
+        });
+        let Some(var) = theirs.filter(|v| *v != own[slot]) else {
+            return literal;
+        };
+        // The main's literal for this slot alone, over the copy's own values.
+        let mut main = node.kind().clone();
+        for op in resets.iter() {
+            if let ondin_core::NodeKind::Text {
+                style, paragraph, ..
+            } = &mut main
+            {
+                match op {
+                    Operation::SetTextStyle { style: s, .. } => **style = s.clone(),
+                    Operation::SetParagraphStyle { paragraph: p, .. } => *paragraph = p.clone(),
+                    _ => {}
+                }
+            }
+        }
+        let mut kind = node.kind().clone();
+        ondin_core::variable::copy_text_slot(slot, &main, &mut kind);
+        let ondin_core::NodeKind::Text {
+            style, paragraph, ..
+        } = kind
+        else {
+            return literal;
+        };
+        let shown = match var {
+            Some(v) => doc
+                .variables()
+                .get(v)
+                .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+            None => ondin_core::variable::text_slot_number(slot, &style, &paragraph)
+                .map_or_else(|| "auto".to_owned(), mark_num),
+        };
+        let mut vars = own;
+        vars[slot] = var;
+        let write = match slot {
+            ondin_core::variable::TEXT_PARAGRAPH_SPACING => Operation::SetParagraphStyle {
+                id,
+                paragraph,
+                spans: None,
+            },
+            _ => Operation::SetTextStyle {
+                id,
+                style: *style,
+                spans: None,
+            },
+        };
+        Some(OverrideMark {
+            tip: format!("Reset to main · {shown}"),
+            tx: Transaction(vec![write, Operation::SetTextVars { id, vars }]),
+        })
+    }
+
     /// The *Content* row's override mark on text `id` — [`Self::family_mark`]'s
     /// binding-with-the-literal rule for the other half of `TextVars`. The reset is
     /// the main's `SetText` (its spans with it) and its content binding.
@@ -758,56 +829,71 @@ impl OndinApp {
         self.unstyled_marks(id)
     }
 
-    /// [`Self::type_marks`] whatever the layer's text style.
+    /// [`Self::type_marks`] whatever the layer's text style. A type number bound
+    /// apart from its main is marked by its binding ([`Self::binding_mark`]).
     fn unstyled_marks(&self, id: NodeId) -> TypeMarks {
+        use ondin_core::variable::{TEXT_LETTER_SPACING, TEXT_LINE_HEIGHT, TEXT_SIZE, TEXT_WEIGHT};
+        let bound = |slot, literal| self.binding_mark(id, slot, literal);
         TypeMarks {
             family: self.family_mark(id),
             content: self.content_mark(id),
             // The face: weight, italic and the axes they drive, as one.
-            variant: self.style_mark(
-                id,
-                |s| AxesOf {
-                    shown: (
-                        s.weight,
-                        s.italic,
-                        s.variations
-                            .iter()
-                            .copied()
-                            .filter(|a| AXES_DRIVEN_ELSEWHERE.contains(&a.tag))
-                            .collect::<Vec<_>>(),
-                    ),
-                    whole: s.variations.clone(),
-                },
-                |s, v| {
-                    (s.weight, s.italic) = (v.shown.0, v.shown.1);
-                    s.variations = axes_reset(&s.variations, &v.whole, |t| {
-                        AXES_DRIVEN_ELSEWHERE.contains(&t)
-                    });
-                },
-                |AxesOf {
-                     shown: (w, i, _), ..
-                 }| match i {
-                    true => format!("{w} italic"),
-                    false => w.to_string(),
-                },
+            variant: bound(
+                TEXT_WEIGHT,
+                self.style_mark(
+                    id,
+                    |s| AxesOf {
+                        shown: (
+                            s.weight,
+                            s.italic,
+                            s.variations
+                                .iter()
+                                .copied()
+                                .filter(|a| AXES_DRIVEN_ELSEWHERE.contains(&a.tag))
+                                .collect::<Vec<_>>(),
+                        ),
+                        whole: s.variations.clone(),
+                    },
+                    |s, v| {
+                        (s.weight, s.italic) = (v.shown.0, v.shown.1);
+                        s.variations = axes_reset(&s.variations, &v.whole, |t| {
+                            AXES_DRIVEN_ELSEWHERE.contains(&t)
+                        });
+                    },
+                    |AxesOf {
+                         shown: (w, i, _), ..
+                     }| match i {
+                        true => format!("{w} italic"),
+                        false => w.to_string(),
+                    },
+                ),
             ),
-            size: self.style_mark(
-                id,
-                |s| s.font_size,
-                |s, v| s.font_size = v,
-                |v| mark_num(*v),
+            size: bound(
+                TEXT_SIZE,
+                self.style_mark(
+                    id,
+                    |s| s.font_size,
+                    |s, v| s.font_size = v,
+                    |v| mark_num(*v),
+                ),
             ),
-            line_height: self.style_mark(
-                id,
-                |s| s.line_height,
-                |s, v| s.line_height = v,
-                |v| v.as_ref().map_or_else(|| "auto".to_owned(), length_words),
+            line_height: bound(
+                TEXT_LINE_HEIGHT,
+                self.style_mark(
+                    id,
+                    |s| s.line_height,
+                    |s, v| s.line_height = v,
+                    |v| v.as_ref().map_or_else(|| "auto".to_owned(), length_words),
+                ),
             ),
-            letter_spacing: self.style_mark(
-                id,
-                |s| s.letter_spacing,
-                |s, v| s.letter_spacing = v,
-                length_words,
+            letter_spacing: bound(
+                TEXT_LETTER_SPACING,
+                self.style_mark(
+                    id,
+                    |s| s.letter_spacing,
+                    |s, v| s.letter_spacing = v,
+                    length_words,
+                ),
             ),
             align: self.sub_mark(
                 &[id],
@@ -1255,6 +1341,12 @@ impl OndinApp {
         size: egui::Vec2,
         mark: Option<&OverrideMark>,
     ) {
+        // Bound, the field is the weight's chip; picking a face would detach it.
+        let key = self.type_key(subject, ondin_core::variable::TEXT_WEIGHT);
+        if self.type_bound(key) {
+            self.type_bound_ui(ui, key, size.x, mark);
+            return;
+        }
         let family = attr!(subject, Family, Family);
         let variants = text::family_variants(&family);
         let weight = attr!(subject, Weight, Weight);
@@ -1285,6 +1377,7 @@ impl OndinApp {
         }
         let mut pick: Option<usize> = None;
         let mut reset = false;
+        let mut menu_at = None;
         ui.scope(|ui| {
             // The combo paints its border inside its rect, so its height is `size.y` whole.
             ui.spacing_mut().interact_size.y = size.y;
@@ -1313,7 +1406,17 @@ impl OndinApp {
             if mark.is_some() {
                 super::component::combo_dot(ui.painter(), face.rect);
             }
+            // The door to a binding is the field menu (a picker takes no `--`).
+            if let Some(key) = key
+                && face.secondary_clicked()
+                && let Some(at) = face.interact_pointer_pos()
+            {
+                menu_at = Some((key, at, face.rect));
+            }
         });
+        if let Some(menu) = menu_at {
+            self.field_menu = Some(menu);
+        }
         if reset && let Some(m) = mark {
             self.commit_reset(m.tx.clone());
             return;
@@ -1439,6 +1542,68 @@ impl OndinApp {
         });
     }
 
+    /// The binding key of `subject`'s type number `slot` (`variable::TextVars`),
+    /// where one binds: one layer's default, not a session's selection or
+    /// paragraphs, and a character number not under a text style, which holds
+    /// plain values.
+    fn type_key(&self, subject: &TypeSubject, slot: usize) -> Option<super::binding::FieldKey> {
+        let styled = self
+            .session
+            .doc
+            .get(subject.id)
+            .is_some_and(|n| n.styles().text.is_some());
+        let refused = styled && ondin_core::variable::TEXT_STYLED.contains(&slot);
+        // The paragraph spacing's scope is the session's paragraphs, a caret's too.
+        let partial = match slot {
+            ondin_core::variable::TEXT_PARAGRAPH_SPACING => subject.para_partial,
+            _ => subject.partial,
+        };
+        (!partial && subject.others.is_empty() && !refused).then_some(
+            super::binding::FieldKey::Type {
+                id: subject.id,
+                slot,
+            },
+        )
+    }
+
+    /// Whether `key`'s field draws its bound face: bound, or its chip typed over
+    /// (a typed field only — the weight is picked).
+    fn type_bound(&self, key: Option<super::binding::FieldKey>) -> bool {
+        key.is_some_and(|k| self.typed_over(k) || self.field_var(k).is_some())
+    }
+
+    fn typed_over(&self, key: super::binding::FieldKey) -> bool {
+        key.typed() && self.var_retype.as_ref().is_some_and(|r| r.key == key)
+    }
+
+    /// A type number's bound face in a field `w` wide — the buffer a key on its
+    /// chip began, else the chip — `true` when it drew one and the plain field is
+    /// not drawn. `mark` is the field's override mark, whose ↺ resets.
+    fn type_bound_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: Option<super::binding::FieldKey>,
+        w: f32,
+        mark: Option<&OverrideMark>,
+    ) -> bool {
+        let Some(key) = key else { return false };
+        if self.typed_over(key)
+            && let Some(rt) = self.var_retype.clone()
+        {
+            self.number_retype(ui, key, rt, w);
+            return true;
+        }
+        let Some(var) = self.field_var(key) else {
+            return false;
+        };
+        if self.number_chip(ui, key, var, w, mark)
+            && let Some(m) = mark
+        {
+            self.commit_reset(m.tx.clone());
+        }
+        true
+    }
+
     /// Size: `T` prefix, px only, no unit toggle (a size in ems would be relative
     /// to itself).
     ///
@@ -1451,6 +1616,11 @@ impl OndinApp {
         size: egui::Vec2,
         mark: Option<&OverrideMark>,
     ) -> (egui::Response, bool) {
+        let key = self.type_key(subject, ondin_core::variable::TEXT_SIZE);
+        if self.type_bound(key) {
+            let r = ui.scope(|ui| self.type_bound_ui(ui, key, size.x, mark));
+            return (r.response, false);
+        }
         let mut value = subject.font_size();
         let (resp, hit) = ui::value_field_marked(
             ui,
@@ -1465,6 +1635,9 @@ impl OndinApp {
             },
         );
         self.char_valve(&resp, subject, CharAttr::Size(value));
+        if let Some(key) = key {
+            self.field_doors(ui, key, &resp);
+        }
         (resp, hit)
     }
 
@@ -1479,6 +1652,11 @@ impl OndinApp {
         size: egui::Vec2,
         mark: Option<&OverrideMark>,
     ) {
+        let key = self.type_key(subject, ondin_core::variable::TEXT_LINE_HEIGHT);
+        if self.type_bound(key) {
+            self.type_bound_ui(ui, key, size.x, mark);
+            return;
+        }
         let current = match subject.shown(CharAttrKind::LineHeight) {
             CharAttr::LineHeight(v) => v,
             _ => None,
@@ -1550,6 +1728,9 @@ impl OndinApp {
                 d
             },
         );
+        if let Some(key) = key {
+            self.field_doors(ui, key, &resp);
+        }
         // The valve below still runs: it owns the latch.
         if hit && let Some(m) = mark {
             self.commit_reset(m.tx.clone());
@@ -2951,21 +3132,35 @@ impl OndinApp {
                 )
             },
         );
+        let spacing_mark = self.binding_mark(
+            subject.id,
+            ondin_core::variable::TEXT_PARAGRAPH_SPACING,
+            spacing_mark,
+        );
         let (_, hit) = section_marked(ui, "Spacing & indent", spacing_mark.as_ref(), |ui| {
             let half = (MENU_INNER - COL_GAP) / 2.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
-                let e = length_field(
-                    ui,
-                    egui::vec2(half, CELL),
-                    Prefix::Icon(icon::PARAGRAPH),
-                    shown.spacing,
-                    subject.para_mixed(ParaAttrKind::Spacing),
-                    font_size,
-                    Bounds::PARAGRAPH_SPACING,
-                    "Space before this paragraph",
-                );
-                self.paragraph_length(subject, &e, ParaAttr::Spacing);
+                // The section's mark is the chip's reset too.
+                let key = self.type_key(subject, ondin_core::variable::TEXT_PARAGRAPH_SPACING);
+                if self.type_bound(key) {
+                    self.type_bound_ui(ui, key, half, None);
+                } else {
+                    let e = length_field(
+                        ui,
+                        egui::vec2(half, CELL),
+                        Prefix::Icon(icon::PARAGRAPH),
+                        shown.spacing,
+                        subject.para_mixed(ParaAttrKind::Spacing),
+                        font_size,
+                        Bounds::PARAGRAPH_SPACING,
+                        "Space before this paragraph",
+                    );
+                    self.paragraph_length(subject, &e, ParaAttr::Spacing);
+                    if let Some(key) = key {
+                        self.field_doors(ui, key, &e.resp);
+                    }
+                }
                 let e = length_field(
                     ui,
                     egui::vec2(half, CELL),
@@ -3492,6 +3687,17 @@ impl OndinApp {
         tooltip: &str,
         mark: Option<&OverrideMark>,
     ) {
+        // Letter spacing binds; word spacing and baseline shift do not.
+        let key = match kind {
+            CharAttrKind::LetterSpacing => {
+                self.type_key(subject, ondin_core::variable::TEXT_LETTER_SPACING)
+            }
+            _ => None,
+        };
+        if self.type_bound(key) {
+            self.type_bound_ui(ui, key, size.x, mark);
+            return;
+        }
         let pct_range = bounds.pct.clone();
         let current = match subject.shown(kind) {
             CharAttr::LetterSpacing(l) | CharAttr::WordSpacing(l) | CharAttr::BaselineShift(l) => l,
@@ -3531,6 +3737,9 @@ impl OndinApp {
                 mixed_text(d, mixed)
             },
         );
+        if let Some(key) = key {
+            self.field_doors(ui, key, &resp);
+        }
         // A marked field's tip names the main's value instead.
         let resp = match mark {
             None => resp.on_hover_text(tooltip),
@@ -8471,6 +8680,100 @@ mod char_valve_tests {
         }
     }
 
+    /// The size field's binding doors (`FieldKey::Type`): a right-click opens the
+    /// field menu on it; bound, the field is the chip at the field's own width and
+    /// the text draws the variable; a number typed over the chip writes the size
+    /// and detaches.
+    ///
+    /// flip: `type_size_field`'s `field_doors` call dropped → fails at *"the
+    /// size's field menu"*; `number_retype`'s `Type` arm returning early → fails
+    /// at *"the typed size"*.
+    #[test]
+    fn the_size_field_binds_shows_its_chip_and_takes_a_number_back() {
+        use crate::panels::binding::{FieldKey, Retype};
+        use ondin_core::variable::TEXT_SIZE;
+        let (ctx, mut app, id, at) = settled();
+        let key = FieldKey::Type {
+            id,
+            slot: TEXT_SIZE,
+        };
+        frame(&ctx, &mut app, id, vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            frame(
+                &ctx,
+                &mut app,
+                id,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: Default::default(),
+                }],
+            );
+        }
+        assert_eq!(
+            app.field_menu.map(|(k, ..)| k),
+            Some(key),
+            "the size's field menu"
+        );
+        app.field_menu = None;
+
+        let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: ondin_core::Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: ondin_core::Variable {
+                    id: var,
+                    name: "type/size".into(),
+                    kind: ondin_core::VarKind::Number,
+                    cells: [(mode, ondin_core::Cell::Number(32.0))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ])));
+        app.bind_field(key, var);
+        assert_eq!(font_size(&app, id), 0.0, "the literal 0");
+        let drawn = match app.session.doc.resolved_kind(id).map(|k| k.into_owned()) {
+            Some(ondin_core::NodeKind::Text { style, .. }) => style.font_size,
+            _ => -1.0,
+        };
+        assert_eq!(drawn, 32.0, "the text draws the variable");
+        let chip = frame(&ctx, &mut app, id, Vec::new());
+        assert_eq!(chip.width(), 120.0, "the chip at the field's width");
+
+        app.var_retype = Some(Retype {
+            key,
+            text: "30".into(),
+            focus: true,
+        });
+        for _ in 0..2 {
+            frame(&ctx, &mut app, id, Vec::new());
+        }
+        frame(
+            &ctx,
+            &mut app,
+            id,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(font_size(&app, id), 30.0, "the typed size");
+        assert_eq!(app.field_var(key), None, "detached");
+    }
+
     /// A typed font size is one undo step, and the sizes on the way to it never reach the document.
     ///
     /// flip: restoring `drag_stopped() || lost_focus() || changed()` → fails at the during-typing assertion, before the count.
@@ -8776,7 +9079,8 @@ mod skip_ink_tests {
                 },
             },
         ])));
-        let ops = ondin_core::build::bind_text_ops(&app.session.doc, copy, [Some(var), None]);
+        let vars = ondin_core::variable::text_vars_at(ondin_core::variable::TEXT_CONTENT, var);
+        let ops = ondin_core::build::bind_text_ops(&app.session.doc, copy, vars);
         assert!(app.session.commit(Transaction(ops)));
         app.gather_card_overrides();
         let mark = app.type_marks(copy).content.expect("bound apart: marked");

@@ -1708,6 +1708,94 @@ fn variables_match_the_canvas_in_every_mode() {
     }
 }
 
+/// A text's bound type numbers write their variables in the unit each literal
+/// holds — a size and a paragraph spacing in px, a weight bare, a `%` line height
+/// as a multiple and a `%` letter spacing in hundredths of an em — and draw as
+/// the canvas does in both modes.
+///
+/// flip: `Walk::text` writing a bound `%` line height in px → 122.5 in the
+/// browser, its lines 140 px apart, and *"styles.css lacks"* its reading.
+#[test]
+fn bound_type_numbers_match_the_canvas_in_every_mode() {
+    use ondin_core::variable::{
+        Cell, Mode, TEXT_LETTER_SPACING, TEXT_LINE_HEIGHT, TEXT_PARAGRAPH_SPACING, TEXT_SIZE,
+        TEXT_WEIGHT, VarKind, Variable,
+    };
+    let mut d = Doc::new();
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (index, (id, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
+        d.apply(vec![Operation::AddMode {
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        }]);
+    }
+    let num = |d: &mut Doc, name: &str, a: f64, b: f64| {
+        let id = d.ids.mint_var();
+        d.apply(vec![Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Number,
+                cells: [(light, Cell::Number(a)), (dark, Cell::Number(b))]
+                    .into_iter()
+                    .collect(),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        }]);
+        id
+    };
+    // Dark's 5% of 20 tracks a whole pixel: a fractional tracking at 22 is placed
+    // apart enough by the two renderers to pass the text limit.
+    let size = num(&mut d, "size", 16.0, 20.0);
+    let weight = num(&mut d, "weight", 400.0, 700.0);
+    let leading = num(&mut d, "leading", 140.0, 120.0);
+    let tracking = num(&mut d, "tracking", 2.0, 5.0);
+    let space = num(&mut d, "space", 6.0, 12.0);
+    for (i, mode) in [None, Some(dark)].into_iter().enumerate() {
+        let f = d.frame(None, 0.0, i as f64 * 140.0, 300.0, 130.0, "Board");
+        d.apply(vec![Operation::SetMode { id: f, mode }]);
+        let kind = text_node(
+            "Bound type\nA second paragraph",
+            TextSizing::Auto,
+            TextStyle {
+                line_height: Some(ondin_core::Length::Em(1.0)),
+                letter_spacing: ondin_core::Length::Em(0.0),
+                ..Default::default()
+            },
+            |_| {},
+        );
+        let t = d.add(Some(f), kind, Affine::translate((12.0, 10.0)), "Copy");
+        d.fill(t, solid(30, 40, 60, 255));
+        let mut vars = ondin_core::TextVars::default();
+        vars[TEXT_SIZE] = Some(size);
+        vars[TEXT_WEIGHT] = Some(weight);
+        vars[TEXT_LINE_HEIGHT] = Some(leading);
+        vars[TEXT_LETTER_SPACING] = Some(tracking);
+        vars[TEXT_PARAGRAPH_SPACING] = Some(space);
+        let ops = ondin_core::bind_text_ops(&d.doc, t, vars);
+        d.apply(ops);
+    }
+    let (doc, res) = d.done();
+    holds_within("bound-type", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+    let export = html_of(&doc, &res, doc.get(doc.root()).unwrap().children());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    for read in [
+        "font-size: max(1px, calc(var(--size) * 1px))",
+        "font-weight: clamp(1, round(var(--weight)), 1000)",
+        "line-height: max(0, calc(var(--leading) / 100))",
+        "letter-spacing: calc(var(--tracking) * 0.01em)",
+        "margin-top: calc(var(--space) * 1px)",
+    ] {
+        assert!(css.contains(read), "styles.css lacks `{read}`:\n{css}");
+    }
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

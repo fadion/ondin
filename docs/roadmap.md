@@ -13,8 +13,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   `GradientBrush::transform`); conic in the picker (`paint::PaintKind::Sweep` has no tab and no
   geometry editor, though the model and both renderers draw it; a fifth tab does not fit the strip
   beside *Variables* at 10pt).
-- **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,
-  min/max W/H (`binding::FieldKey`).
 
 ## Later · Before MCP
 

@@ -491,7 +491,9 @@ impl Walk<'_> {
                 return true;
             }
             if pictured {
-                let mut drawn: Vec<Option<VarId>> = vec![n.opacity_var(), n.text_vars()[1]];
+                let mut drawn: Vec<Option<VarId>> = vec![n.opacity_var()];
+                drawn.extend(&n.text_vars()[1..]);
+                drawn.extend(n.item().limit_vars);
                 drawn.extend(n.size_vars());
                 drawn.extend(n.corner_vars());
                 drawn.extend(n.spacing_vars());
@@ -1527,14 +1529,17 @@ impl Walk<'_> {
         if let Some(h) = h.filter(|_| !stretched.1) {
             el.set("height", h);
         }
-        for (d, prop) in [
-            (item.min_width, "min-width"),
-            (item.min_height, "min-height"),
-            (item.max_width, "max-width"),
-            (item.max_height, "max-height"),
+        // `k` is `LayoutItem::limit`'s place; a bound limit is its variable in px.
+        for (k, prop) in [
+            (0, "min-width"),
+            (2, "min-height"),
+            (1, "max-width"),
+            (3, "max-height"),
         ] {
-            if d != Dimension::Auto {
-                el.set(prop, dimension(d));
+            match (item.limit_vars[k], item.limit(k)) {
+                (Some(var), _) => el.set(prop, self.tokens.px_floored(var)),
+                (None, Dimension::Auto) => {}
+                (None, d) => el.set(prop, dimension(d)),
             }
         }
     }
@@ -1834,12 +1839,39 @@ impl Walk<'_> {
         for (p, v) in face(style, None) {
             el.set(p, v);
         }
-        let [content_var, family_var] = node.text_vars();
-        if let Some(var) = family_var {
+        let vars = node.text_vars();
+        let content_var = vars[ondin_core::variable::TEXT_CONTENT];
+        if let Some(var) = vars[ondin_core::variable::TEXT_FAMILY] {
             el.set(
                 "font-family",
                 format!("{}, sans-serif", self.tokens.var(var)),
             );
+        }
+        // A bound type number in the unit its literal holds, a % as hundredths of
+        // an em, within the ranges the model keeps it to (`variable::TextVars`).
+        let em = |l: Option<ondin_core::Length>| matches!(l, Some(ondin_core::Length::Em(_)));
+        if let Some(var) = vars[ondin_core::variable::TEXT_SIZE] {
+            el.set("font-size", format!("max(1px, {})", self.tokens.px(var)));
+        }
+        if let Some(var) = vars[ondin_core::variable::TEXT_WEIGHT] {
+            el.set(
+                "font-weight",
+                format!("clamp(1, round({}), 1000)", self.tokens.var(var)),
+            );
+        }
+        if let Some(var) = vars[ondin_core::variable::TEXT_LINE_HEIGHT] {
+            let v = match em(style.line_height) {
+                true => format!("max(0, calc({} / 100))", self.tokens.var(var)),
+                false => self.tokens.px_floored(var),
+            };
+            el.set("line-height", v);
+        }
+        if let Some(var) = vars[ondin_core::variable::TEXT_LETTER_SPACING] {
+            let v = match em(Some(style.letter_spacing)) {
+                true => format!("calc({} * 0.01em)", self.tokens.var(var)),
+                false => self.tokens.px(var),
+            };
+            el.set("letter-spacing", v);
         }
         if let Some(var) = content_var
             && tokens::varies(self.doc, var)
@@ -1922,7 +1954,18 @@ impl Walk<'_> {
                 "white-space",
                 if wraps { white_space } else { "pre" }.into(),
             ));
-            if !first && !p_style.spacing.is_zero() {
+            // A paragraph with no spacing of its own draws the bound default.
+            let bound = vars[ondin_core::variable::TEXT_PARAGRAPH_SPACING]
+                .filter(|_| p_style.spacing == paragraph.spacing);
+            if !first && let Some(var) = bound {
+                let v = match paragraph.spacing {
+                    ondin_core::Length::Em(_) => {
+                        format!("calc({} * 0.01em)", self.tokens.var(var))
+                    }
+                    ondin_core::Length::Px(_) => self.tokens.px(var),
+                };
+                decl.push(("margin-top", v));
+            } else if !first && !p_style.spacing.is_zero() {
                 decl.push(("margin-top", px(p_style.spacing.resolve(style.font_size))));
             }
             decl.push((

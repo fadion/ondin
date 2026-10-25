@@ -1933,7 +1933,9 @@ pub fn set_property(
                             doc.resolved_kind(s.id).map(|k| k.into_owned())
                         && drawn == *t
                     {
-                        ops.extend(crate::build::bind_text_ops(doc, c, [Some(var), None]));
+                        let mut vars = crate::TextVars::default();
+                        vars[crate::variable::TEXT_CONTENT] = Some(var);
+                        ops.extend(crate::build::bind_text_ops(doc, c, vars));
                         continue;
                     }
                     let op = match src.map(|s| &s.kind) {
@@ -1979,16 +1981,15 @@ fn property_reset_ops(doc: &Document, c: NodeId, kind: PropKind) -> Vec<Operatio
             .then_some(op),
             // The content and **its** binding (§15 D1069), for the visibility's
             // reason: a copy detached from a bound source reset by its `SetText`
-            // alone took the source's empty literal and drew nothing. The family's
-            // binding rides in the same op and is the Type card's, so it stays
+            // alone took the source's empty literal and drew nothing. The other
+            // bindings ride in the same op and are the Type card's, so they stay
             // the copy's own.
             PropKind::Text => match op {
                 Operation::SetText { .. } => Some(op),
                 Operation::SetTextVars { id, vars } if vars[0] != own[0] => {
-                    Some(Operation::SetTextVars {
-                        id,
-                        vars: [vars[0], own[1]],
-                    })
+                    let mut kept = own;
+                    kept[0] = vars[0];
+                    Some(Operation::SetTextVars { id, vars: kept })
                 }
                 _ => None,
             },

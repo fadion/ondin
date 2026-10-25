@@ -649,25 +649,247 @@ pub type SpacingVars = [Option<VarId>; 6];
 /// is detached (`crate::build::keep_size_bindings`).
 pub type SizeVars = [Option<VarId>; 2];
 
-/// A text layer's content and family bindings, in that order (§15 D1069) —
-/// string variables, D1038 (d)'s two fields.
+/// A layout item's size-limit bindings — min width, max width, min height, max
+/// height — held in the item itself (`crate::container::LayoutItem::limit_vars`).
+///
+/// A bound limit is px: its variable's number, never below 0, and its literal
+/// `Px(0)` (`crate::build::bind_limit_ops`). An item write keeps a binding that
+/// writes the literal or the number drawn and detaches any other value
+/// (`crate::build::keep_limit_bindings`).
+pub type LimitVars = [Option<VarId>; 4];
+
+/// A text layer's bindings, slot by slot ([`TEXT_CONTENT`] … [`TEXT_PARAGRAPH_SPACING`]):
+/// the content and family to string variables (§15 D1069), the size, weight,
+/// line height, letter spacing and paragraph spacing to number variables.
 ///
 /// **On the node beside the kind, as [`SizeVars`] sits beside the size**: a
-/// bound field's literal is written empty by the verb that binds it
+/// bound field's literal is written empty or 0 by the verb that binds it
 /// (`crate::build::bind_text_ops`) — the content with **no spans and no
 /// paragraph spans**, since a byte range cannot index a string whose length
-/// changes with the mode, and the family with no family spans over it — so a
+/// changes with the mode, and a default with no runs of its own over it — so a
 /// main and a copy bound alike compare equal, and is never drawn: every reader
 /// that shapes, draws or exports the text reads the kind through
 /// [`crate::Document::resolved_kind`]. Only a `Text` binds.
 ///
 /// **The content binding is the text, whole**: an edit of the text — on the
 /// canvas, through a component's text property, or a range styled — detaches it
-/// to what was written (`crate::build::keep_text_bindings`). **The family
-/// binding is the node's default**, as a text style's family is (§15 D1067): a
-/// run given a family of its own keeps it, and applying a text style, which
-/// holds a plain family, detaches it.
-pub type TextVars = [Option<VarId>; 2];
+/// to what was written (`crate::build::keep_text_bindings`). **Every other
+/// binding is the node's default**, as a text style's values are (§15 D1067): a
+/// run or paragraph given a value of its own keeps it, and applying a text
+/// style, which holds plain values, detaches the slots it holds
+/// ([`TEXT_STYLED`]). A number binding reads its variable as the number the
+/// field shows, in the literal's unit: a line height, letter spacing or
+/// paragraph spacing in `%` is that many hundredths of an em.
+pub type TextVars = [Option<VarId>; 7];
+
+/// [`TextVars`]' slots.
+pub const TEXT_CONTENT: usize = 0;
+pub const TEXT_FAMILY: usize = 1;
+pub const TEXT_SIZE: usize = 2;
+pub const TEXT_WEIGHT: usize = 3;
+pub const TEXT_LINE_HEIGHT: usize = 4;
+pub const TEXT_LETTER_SPACING: usize = 5;
+pub const TEXT_PARAGRAPH_SPACING: usize = 6;
+
+/// The [`TextVars`] slots a text style holds — the character defaults — which
+/// applying one detaches.
+pub const TEXT_STYLED: std::ops::RangeInclusive<usize> = TEXT_FAMILY..=TEXT_LETTER_SPACING;
+
+/// [`TextVars`] binding slot `k` to `var` and nothing else — what
+/// `crate::build::bind_text_ops` binds one field with.
+pub fn text_vars_at(k: usize, var: VarId) -> TextVars {
+    let mut vars = TextVars::default();
+    vars[k] = Some(var);
+    vars
+}
+
+/// [`TextVars`]' slot `k` alone, as `crate::build::detach_text_ops` names slots.
+pub fn text_slot_mask(k: usize) -> [bool; 7] {
+    std::array::from_fn(|i| i == k)
+}
+
+/// Whether `vars` binds any slot a text style holds ([`TEXT_STYLED`]).
+pub fn binds_styled(vars: &TextVars) -> bool {
+    vars[TEXT_STYLED].iter().any(Option::is_some)
+}
+
+/// The kind of variable [`TextVars`] slot `k` binds to.
+pub fn text_slot_kind(k: usize) -> VarKind {
+    match k {
+        TEXT_CONTENT | TEXT_FAMILY => VarKind::String,
+        _ => VarKind::Number,
+    }
+}
+
+/// The character attribute a number slot of [`TextVars`] is the default of;
+/// `None` for the content, the family and the paragraph spacing.
+pub fn text_slot_attr(k: usize) -> Option<crate::typography::CharAttrKind> {
+    use crate::typography::CharAttrKind as K;
+    match k {
+        TEXT_SIZE => Some(K::Size),
+        TEXT_WEIGHT => Some(K::Weight),
+        TEXT_LINE_HEIGHT => Some(K::LineHeight),
+        TEXT_LETTER_SPACING => Some(K::LetterSpacing),
+        _ => None,
+    }
+}
+
+/// Number slot `k` of a text's style and paragraph as its field shows it — a
+/// size, a weight, px, or an em length ×100. `None` for a string slot, and for
+/// an Auto line height.
+pub fn text_slot_number(
+    k: usize,
+    style: &crate::typography::TextStyle,
+    paragraph: &crate::typography::ParagraphStyle,
+) -> Option<f64> {
+    let shown = |l: crate::typography::Length| match l {
+        crate::typography::Length::Px(v) => v,
+        crate::typography::Length::Em(m) => m * 100.0,
+    };
+    match k {
+        TEXT_SIZE => Some(style.font_size),
+        TEXT_WEIGHT => Some(f64::from(style.weight)),
+        TEXT_LINE_HEIGHT => style.line_height.map(shown),
+        TEXT_LETTER_SPACING => Some(shown(style.letter_spacing)),
+        TEXT_PARAGRAPH_SPACING => Some(shown(paragraph.spacing)),
+        _ => None,
+    }
+}
+
+/// Write `x` — a number as [`text_slot_number`] reads it — into number slot `k`
+/// of a text's style or paragraph, in the unit the slot holds (px for an Auto
+/// line height). A size is floored at `MIN_FONT_SIZE` and a weight kept to
+/// 1–1000, the ranges the fields allow.
+pub fn set_text_slot_number(
+    k: usize,
+    style: &mut crate::typography::TextStyle,
+    paragraph: &mut crate::typography::ParagraphStyle,
+    x: f64,
+) {
+    use crate::typography::Length;
+    let like = |l: Option<Length>, x: f64| match l {
+        Some(Length::Em(_)) => Length::Em(x / 100.0).canonical(),
+        _ => Length::Px(x).canonical(),
+    };
+    match k {
+        TEXT_SIZE => style.font_size = x.max(crate::typography::MIN_FONT_SIZE),
+        TEXT_WEIGHT => style.weight = x.round().clamp(1.0, 1000.0) as u16,
+        // A line is never less than no height.
+        TEXT_LINE_HEIGHT => style.line_height = Some(like(style.line_height, x.max(0.0))),
+        TEXT_LETTER_SPACING => style.letter_spacing = like(Some(style.letter_spacing), x),
+        TEXT_PARAGRAPH_SPACING => paragraph.spacing = like(Some(paragraph.spacing), x),
+        _ => {}
+    }
+}
+
+/// Number slot `k`'s literal while bound: 0 in the slot's unit (a weight 0), so
+/// a main and a copy bound alike compare equal.
+pub fn clear_text_slot_number(
+    k: usize,
+    style: &mut crate::typography::TextStyle,
+    paragraph: &mut crate::typography::ParagraphStyle,
+) {
+    use crate::typography::Length;
+    let zero = |l: Option<Length>| match l {
+        Some(Length::Em(_)) => Length::Em(0.0),
+        _ => Length::Px(0.0),
+    };
+    match k {
+        TEXT_SIZE => style.font_size = 0.0,
+        TEXT_WEIGHT => style.weight = 0,
+        TEXT_LINE_HEIGHT => style.line_height = Some(zero(style.line_height)),
+        TEXT_LETTER_SPACING => style.letter_spacing = zero(Some(style.letter_spacing)),
+        TEXT_PARAGRAPH_SPACING => paragraph.spacing = zero(Some(paragraph.spacing)),
+        _ => {}
+    }
+}
+
+/// Whether `a` and `b` (each a text's style and paragraph) hold the same value
+/// in slot `k` — a number with its unit, so a line height moved from px to % is
+/// another value. False for the content, which neither holds.
+pub fn text_slot_eq(
+    k: usize,
+    a: (
+        &crate::typography::TextStyle,
+        &crate::typography::ParagraphStyle,
+    ),
+    b: (
+        &crate::typography::TextStyle,
+        &crate::typography::ParagraphStyle,
+    ),
+) -> bool {
+    match k {
+        TEXT_FAMILY => a.0.font_family == b.0.font_family,
+        TEXT_SIZE => a.0.font_size == b.0.font_size,
+        TEXT_WEIGHT => a.0.weight == b.0.weight,
+        TEXT_LINE_HEIGHT => a.0.line_height == b.0.line_height,
+        TEXT_LETTER_SPACING => a.0.letter_spacing == b.0.letter_spacing,
+        TEXT_PARAGRAPH_SPACING => a.1.spacing == b.1.spacing,
+        _ => false,
+    }
+}
+
+/// Copy slot `k`'s literal — the content, the family or a number — from text
+/// kind `from` to text kind `to`; nothing when either is not a text.
+pub fn copy_text_slot(k: usize, from: &crate::NodeKind, to: &mut crate::NodeKind) {
+    let (
+        crate::NodeKind::Text {
+            content: fc,
+            style: fs,
+            paragraph: fp,
+            ..
+        },
+        crate::NodeKind::Text {
+            content,
+            style,
+            paragraph,
+            ..
+        },
+    ) = (from, to)
+    else {
+        return;
+    };
+    match k {
+        TEXT_CONTENT => *content = fc.clone(),
+        TEXT_FAMILY => style.font_family = fs.font_family.clone(),
+        TEXT_SIZE => style.font_size = fs.font_size,
+        TEXT_WEIGHT => style.weight = fs.weight,
+        TEXT_LINE_HEIGHT => style.line_height = fs.line_height,
+        TEXT_LETTER_SPACING => style.letter_spacing = fs.letter_spacing,
+        TEXT_PARAGRAPH_SPACING => paragraph.spacing = fp.spacing,
+        _ => {}
+    }
+}
+
+/// [`TextVars`] as the file holds it: the slots up to the last bound one, at
+/// least the two the format first had, so a file written before the number
+/// slots loads and one binding only strings is written as it was.
+pub(crate) mod text_vars_serde {
+    use super::{TextVars, VarId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &TextVars, s: S) -> Result<S::Ok, S::Error> {
+        let len = v
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |i| i + 1)
+            .max(2);
+        v[..len].serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<TextVars, D::Error> {
+        let got = Vec::<Option<VarId>>::deserialize(d)?;
+        let mut out = TextVars::default();
+        if got.len() > out.len() {
+            return Err(serde::de::Error::invalid_length(
+                got.len(),
+                &"at most 7 slots",
+            ));
+        }
+        out[..got.len()].copy_from_slice(&got);
+        Ok(out)
+    }
+}
 
 /// `node` — a node of `doc`, or a copy of one still carrying its id — with every
 /// binding **detached to the value it draws** in `doc` (D1038's detach): a bound
@@ -695,8 +917,10 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
             s.width = doc.stroke_width_drawn_in(doc.variables(), id, v);
         }
     }
-    // And an effect's bound numbers theirs (§15 D1074).
+    // And an effect's bound numbers theirs (§15 D1074), and a size limit its px.
     node.effects = doc.resolved_effects(id, &node.effects).into_owned();
+    node.item = doc.limits_drawn_in(doc.variables(), id, node.item);
+    node.item.limit_vars = Default::default();
     if let crate::NodeKind::Rect { corner_radii, .. } = &mut node.kind
         && let Some(drawn) = doc.resolve_corners(id, *corner_radii)
     {
@@ -793,6 +1017,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .chain(n.spacing_vars.iter().flatten().copied())
             .chain(n.size_vars.iter().flatten().copied())
             .chain(n.text_vars.iter().flatten().copied())
+            .chain(n.item.limit_vars.iter().flatten().copied())
             .chain(n.visible_var)
             .chain(n.opacity_var);
         for v in vars {
@@ -970,6 +1195,17 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     }
                 }
             }
+            // A size limit's binding the same way, its fallback the twin's px.
+            for k in 0..n.item.limit_vars.len() {
+                if let Some(v) = n.item.limit_vars[k] {
+                    n.item.limit_vars[k] = rebind(v);
+                    if n.item.limit_vars[k].is_none()
+                        && let Some(t) = twin
+                    {
+                        *n.item.limit_mut(k) = t.item.limit(k);
+                    }
+                }
+            }
             if n.corner_vars.iter().any(Option::is_some) {
                 let drawn = twin.and_then(|d| match d.kind {
                     crate::NodeKind::Rect { corner_radii, .. } => Some(corner_radii),
@@ -1038,28 +1274,17 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 }
                 n.size_vars = vars;
             }
-            // A content's or a family's binding the same way, its fallback the
-            // twin's drawn string (§15 D1069).
+            // A text's bindings the same way, slot by slot, its fallback the
+            // twin's drawn string or number (§15 D1069).
             if n.text_vars.iter().any(Option::is_some) {
-                let fallback = twin.and_then(|t| match &t.kind {
-                    crate::NodeKind::Text { content, style, .. } => {
-                        Some((content.clone(), style.font_family.clone()))
-                    }
-                    _ => None,
-                });
                 let mut vars = n.text_vars;
-                if let crate::NodeKind::Text { content, style, .. } = &mut n.kind {
-                    for (k, var) in vars.iter_mut().enumerate() {
-                        if let Some(v) = *var {
-                            *var = rebind(v);
-                            if var.is_none()
-                                && let Some((c, f)) = &fallback
-                            {
-                                match k {
-                                    0 => *content = c.clone(),
-                                    _ => style.font_family = f.clone(),
-                                }
-                            }
+                for (k, var) in vars.iter_mut().enumerate() {
+                    if let Some(v) = *var {
+                        *var = rebind(v);
+                        if var.is_none()
+                            && let Some(t) = twin
+                        {
+                            copy_text_slot(k, &t.kind, &mut n.kind);
                         }
                     }
                 }
@@ -1132,6 +1357,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
             .iter()
             .any(|s| hit(s.brush.var()) || hit(s.width_var))
         || n.effects.iter().any(|e| e.vars.iter().any(|v| hit(*v)))
+        || n.item.limit_vars.iter().any(|v| hit(*v))
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
         || n.size_vars.iter().any(|v| hit(*v))
@@ -1230,6 +1456,18 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 }
             }
             ops.push(O::SetEffects { id, effects });
+        }
+        // A size limit bound to one, detached to its px in one item write.
+        if n.item.limit_vars.iter().flatten().any(|v| vars.contains(v)) {
+            let drawn = doc.limits_drawn_in(t, id, n.item);
+            let mut item = n.item;
+            for k in 0..item.limit_vars.len() {
+                if item.limit_vars[k].is_some_and(|v| vars.contains(&v)) {
+                    *item.limit_mut(k) = drawn.limit(k);
+                    item.limit_vars[k] = None;
+                }
+            }
+            ops.push(O::SetLayoutItem { id, item });
         }
         if let crate::NodeKind::Rect { corner_radii, .. } = &n.kind
             && n.corner_vars.iter().flatten().any(|v| vars.contains(v))
@@ -1718,6 +1956,7 @@ pub(crate) fn check<'a>(
                 .chain(n.spacing_vars.iter().flatten().copied())
                 .chain(n.size_vars.iter().flatten().copied())
                 .chain(n.text_vars.iter().flatten().copied())
+                .chain(n.item.limit_vars.iter().flatten().copied())
                 .chain(n.visible_var)
                 .chain(n.opacity_var)
                 .any(own);
@@ -1778,6 +2017,15 @@ pub(crate) fn check<'a>(
         {
             return Err(VarRule::BadBinding(n.id));
         }
+        // A size limit binds a number.
+        if n.item
+            .limit_vars
+            .iter()
+            .flatten()
+            .any(|v| t.kind_of(*v) != Some(VarKind::Number))
+        {
+            return Err(VarRule::BadBinding(n.id));
+        }
         if n.visible_var
             .is_some_and(|v| t.kind_of(v) != Some(VarKind::Boolean))
         {
@@ -1789,13 +2037,14 @@ pub(crate) fn check<'a>(
         {
             return Err(VarRule::BadBinding(n.id));
         }
-        // A content or a family binds a string, and only on a text (§15 D1069).
+        // A content or a family binds a string, a type number a number, and
+        // only on a text (§15 D1069).
         if n.text_vars.iter().any(Option::is_some)
             && (!matches!(n.kind, crate::NodeKind::Text { .. })
                 || n.text_vars
                     .iter()
-                    .flatten()
-                    .any(|v| t.kind_of(*v) != Some(VarKind::String)))
+                    .enumerate()
+                    .any(|(k, v)| v.is_some_and(|v| t.kind_of(v) != Some(text_slot_kind(k)))))
         {
             return Err(VarRule::BadBinding(n.id));
         }

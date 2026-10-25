@@ -925,13 +925,31 @@ impl RenderOverrides {
             return None;
         }
         patch(&mut kind);
-        // A bound family written its empty literal draws its variable, as the commit
-        // leaves it (`build::keep_text_bindings`). Not the content: an empty one
-        // written is a text emptied, and detaches.
-        if let (Some(n), NodeKind::Text { style, .. }) = (doc.get(id), &kind) {
-            let family = n.text_vars()[1].filter(|_| style.font_family.is_empty());
-            if family.is_some() {
-                kind = doc.text_drawn_in(doc.variables(), id, &kind, [None, family]);
+        // A bound family or type number written its literal draws its variable, as
+        // the commit leaves it (`build::keep_text_bindings`). Not the content: an
+        // empty one written is a text emptied, and detaches.
+        if let Some(n) = doc.get(id)
+            && let (
+                NodeKind::Text {
+                    style, paragraph, ..
+                },
+                NodeKind::Text {
+                    style: literal,
+                    paragraph: literal_para,
+                    ..
+                },
+            ) = (&kind, n.kind())
+        {
+            let mut kept = n.text_vars();
+            kept[ondin_core::variable::TEXT_CONTENT] = None;
+            for (k, v) in kept.iter_mut().enumerate() {
+                let written = (&**style, paragraph);
+                if !ondin_core::variable::text_slot_eq(k, written, (&**literal, literal_para)) {
+                    *v = None;
+                }
+            }
+            if kept.iter().any(Option::is_some) {
+                kind = doc.text_drawn_in(doc.variables(), id, &kind, kept);
             }
         }
         self.set_kind(doc, res, id, kind);
@@ -1040,7 +1058,8 @@ impl RenderOverrides {
                     return None;
                 }
                 if self.ghost(*id).is_none() {
-                    self.entry(*id).item = Some(*item);
+                    // Its bound limits where the commit will leave them.
+                    self.entry(*id).item = Some(ondin_core::build::kept_limits(doc, *id, *item));
                     self.mark_moved(doc, *id);
                 }
             }
@@ -1634,12 +1653,12 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
             None => self.doc.resolved_display(id),
         }
     }
+    /// Bound limits resolved, as `Document::resolved_item` lays them out.
     fn item(&self, id: NodeId) -> ondin_core::container::LayoutItem {
-        self.ov
-            .get(id)
-            .and_then(|o| o.item)
-            .or_else(|| self.doc.get(id).map(|n| *n.item()))
-            .unwrap_or_default()
+        match self.ov.get(id).and_then(|o| o.item) {
+            Some(item) => self.doc.limits_drawn_in(self.doc.variables(), id, item),
+            None => self.doc.resolved_item(id),
+        }
     }
     fn insets(&self, id: NodeId) -> ondin_core::Insets {
         self.ov

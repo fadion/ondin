@@ -633,6 +633,40 @@ impl Document {
         )))
     }
 
+    /// `item` with the limits its `limit_vars` binds read from table `t`, in the
+    /// mode in force at `id` — each its variable's number in px, never below 0.
+    /// The item is passed so a preview can resolve one it has not committed.
+    pub fn limits_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        mut item: crate::container::LayoutItem,
+    ) -> crate::container::LayoutItem {
+        for (k, var) in item.limit_vars.into_iter().enumerate() {
+            let Some(v) = var else { continue };
+            let x = match self.resolve_var_in(t, id, v) {
+                Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                _ => 0.0,
+            };
+            *item.limit_mut(k) = crate::container::Dimension::Px(x);
+        }
+        item
+    }
+
+    /// `id`'s layout item as it is laid out: its bound limits resolved
+    /// ([`Self::limits_drawn_in`]). **What every layout view answers `item`
+    /// with**, so a bound limit never lays out at the 0 its literal holds.
+    /// The default item for a node not in the document.
+    pub fn resolved_item(&self, id: NodeId) -> crate::container::LayoutItem {
+        match self.nodes.get(&id) {
+            Some(n) if n.item.limit_vars.iter().any(Option::is_some) => {
+                self.limits_drawn_in(&self.variables, id, n.item)
+            }
+            Some(n) => n.item,
+            None => Default::default(),
+        }
+    }
+
     /// Whether `id` is shown — its own visibility, **its boolean variable's
     /// value in the mode in force there where it is bound**, else its literal. Not
     /// whether an ancestor hides it: this is the layer's own eye. False for a node
@@ -747,10 +781,11 @@ impl Document {
         Some(std::borrow::Cow::Owned(kind))
     }
 
-    /// `kind` with the content and family `vars` binds read from table `t`, in
-    /// the mode in force at `id` — each its variable's string, the other field as
-    /// it is; `kind` unchanged when nothing is bound or it is no `Text`. `vars` is
-    /// named so a preview can resolve a binding it has not committed.
+    /// `kind` with the slots `vars` binds read from table `t`, in the mode in
+    /// force at `id` — each its variable's string or number
+    /// (`variable::set_text_slot_number`), the others as they are; `kind`
+    /// unchanged when nothing is bound or it is no `Text`. `vars` is named so a
+    /// preview can resolve a binding it has not committed.
     ///
     /// A bound content draws with no spans: a byte range cannot index a string
     /// whose length is the mode's, and one inside a character panics the shaper.
@@ -772,6 +807,7 @@ impl Document {
             style,
             spans,
             para_spans,
+            paragraph,
             ..
         } = &mut out
         else {
@@ -783,13 +819,22 @@ impl Document {
                 _ => None,
             })
         };
-        if let Some(s) = read(vars[0]) {
+        if let Some(s) = read(vars[crate::variable::TEXT_CONTENT]) {
             *content = s;
             *spans = Default::default();
             *para_spans = Default::default();
         }
-        if let Some(s) = read(vars[1]) {
+        if let Some(s) = read(vars[crate::variable::TEXT_FAMILY]) {
             style.font_family = s;
+        }
+        // A number slot whose variable reads no number draws 0, as a corner's does.
+        for (k, var) in vars.iter().enumerate().skip(crate::variable::TEXT_SIZE) {
+            let Some(v) = var else { continue };
+            let x = match self.resolve_var_in(t, id, *v) {
+                Some(crate::variable::Value::Number(x)) => x,
+                _ => 0.0,
+            };
+            crate::variable::set_text_slot_number(k, style, paragraph, x);
         }
         out
     }

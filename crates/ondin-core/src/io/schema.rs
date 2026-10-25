@@ -312,9 +312,14 @@ pub(crate) struct NodeDto {
     /// D1061), absent when neither is. New in v8.
     #[serde(default, skip_serializing_if = "no_size_vars")]
     pub size_vars: crate::variable::SizeVars,
-    /// The string variables a text's content and family are bound to (§15
-    /// D1069), absent when neither is. New in v8.
-    #[serde(default, skip_serializing_if = "no_text_vars")]
+    /// The variables a text's content, family and type numbers are bound to
+    /// (§15 D1069), absent when none is; up to the last bound slot, so a file
+    /// with the first two slots only loads. New in v8.
+    #[serde(
+        default,
+        skip_serializing_if = "no_text_vars",
+        with = "crate::variable::text_vars_serde"
+    )]
     pub text_vars: crate::variable::TextVars,
     /// The number variable a layer's opacity is bound to (§15 D1072), absent
     /// when unbound. New in v8.

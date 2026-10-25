@@ -727,16 +727,17 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
             if slot == StyleSlot::Layout && !crate::container::is_container(&n.kind) {
                 continue; // `check` refuses it
             }
-            // 🚨 **A text style's family is plain, and a bound family under it
-            // goes** (§15 D1069). `build::keep_text_bindings` detaches it where
+            // 🚨 **A text style's values are plain, and a binding under one
+            // goes** (§15 D1069). `build::keep_text_bindings` detaches them where
             // the user applies the style, but a copy receives its main's
             // `SetTypeStyle` from propagation, after that pass — and kept bound,
-            // it drew its variable over the family written here.
-            if slot == StyleSlot::Text && n.text_vars[1].is_some() {
-                out.push(Operation::SetTextVars {
-                    id: n.id,
-                    vars: [n.text_vars[0], None],
-                });
+            // it drew its variable over the value written here.
+            if slot == StyleSlot::Text && crate::variable::binds_styled(&n.text_vars) {
+                let mut vars = n.text_vars;
+                for k in crate::variable::TEXT_STYLED {
+                    vars[k] = None;
+                }
+                out.push(Operation::SetTextVars { id: n.id, vars });
             }
             // A container with no layout has no look, so it is off its style: a
             // layout style applied to a plain frame gives it the layout (§15 D1075).
@@ -972,16 +973,17 @@ pub fn create_ops(
 
 /// `node`'s values in `slot` **as drawn** — what a style made of it would hold.
 ///
-/// A bound family is read as drawn (§15 D1069): a text style holds a plain
-/// family, and a bound layer's literal is empty. Binding the layer then detaches
-/// its family (`build::keep_text_bindings`), the style's being the same string.
+/// A bound family or type number is read as drawn (§15 D1069): a text style holds
+/// plain values, and a bound layer's literal is empty or 0. Binding the layer to
+/// the style then detaches it (`build::keep_text_bindings`), the style's being
+/// the same value.
 /// Read by [`create_ops`] for its source and by the inspector's *Create* when it
 /// asks whether several layers agree (§15 D1077) — compared on the literal, two
 /// layers bound to different families both read `""` and agreed, and the style
 /// then rewrote the second one's family to the first one's.
 pub fn value_drawn(doc: &Document, node: NodeId, slot: StyleSlot) -> Option<StyleValue> {
     let mut source = doc.get(node)?.clone();
-    if slot == StyleSlot::Text && source.text_vars[1].is_some() {
+    if slot == StyleSlot::Text && crate::variable::binds_styled(&source.text_vars) {
         source.kind = doc.text_drawn_in(doc.variables(), node, &source.kind, source.text_vars);
     }
     StyleValue::of(&source, slot)

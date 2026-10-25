@@ -75,7 +75,7 @@ pub struct Node {
     insets: Insets,            // CSS top/right/bottom/left + auto margins inside its frame — §5.3c
     display: Option<Display>,  // Flex(..) or Grid(..); None = no layout (NOT CSS display:none)
     item: LayoutItem,          // flex-grow/-shrink/-basis, align-self, justify-self, grid-column/-row,
-                               // width/height and limits — one record for both layouts
+                               // width/height and limits (and the limits' bindings, §5.3f) — one record for both layouts
     component: bool,           // a MAIN component — frames and groups only — §5.3d
     link: Option<NodeId>,      // the node this was copied from, ONE level up
     swap: Option<NodeId>,      // the main a NESTED COPY shows instead of its link's — §5.3d

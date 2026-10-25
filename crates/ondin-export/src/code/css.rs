@@ -157,11 +157,12 @@ pub(crate) fn gradient(brush: &GradientBrush, size: Size) -> Option<String> {
             let centre = brush.transform * p.center;
             let (s, e) = (f64::from(p.start_angle), f64::from(p.end_angle));
             // Model angles run clockwise on screen from +x; CSS's from up. The
-            // stops are absolute angles so the uncovered arc pads as the model does.
-            let at = |o: f64| format!("{}deg", fmt((s + o * (e - s)).to_degrees()));
+            // start turns `from` and the stops count from it, as the renderer
+            // rotates the start into the transform (`sweep_from_zero`).
+            let at = |o: f64| format!("{}deg", fmt((o * (e - s)).to_degrees()));
             Some(format!(
                 "conic-gradient(from {}deg at {} {}, {})",
-                fmt(turn.to_degrees() + 90.0),
+                fmt((turn + s).to_degrees() + 90.0),
                 px(centre.x),
                 px(centre.y),
                 ramp(&at)
@@ -208,7 +209,9 @@ pub(crate) fn linear(t: Affine) -> Affine {
 mod tests {
     use super::*;
     use ondin_core::kurbo::Point;
-    use ondin_core::peniko::{LinearGradientPosition, RadialGradientPosition};
+    use ondin_core::peniko::{
+        LinearGradientPosition, RadialGradientPosition, SweepGradientPosition,
+    };
 
     fn two_stop(kind: GradientKind) -> GradientBrush {
         GradientBrush {
@@ -279,6 +282,22 @@ mod tests {
         assert_eq!(
             gradient(&plain, Size::new(40.0, 40.0)).unwrap(),
             "radial-gradient(30px 30px at 20px 20px, #000000 0%, #ffffff 100%)"
+        );
+    }
+
+    /// A sweep's start angle turns `from`, and its stops count from there, as
+    /// the renderer rotates the start into the transform.
+    #[test]
+    fn a_sweeps_start_angle_is_folded_into_from() {
+        let start = std::f32::consts::FRAC_PI_2;
+        let g = two_stop(GradientKind::Sweep(SweepGradientPosition {
+            center: Point::new(20.0, 20.0),
+            start_angle: start,
+            end_angle: start + std::f32::consts::TAU,
+        }));
+        assert_eq!(
+            gradient(&g, Size::new(40.0, 40.0)).unwrap(),
+            "conic-gradient(from 180deg at 20px 20px, #000000 0deg, #ffffff 360deg)"
         );
     }
 }

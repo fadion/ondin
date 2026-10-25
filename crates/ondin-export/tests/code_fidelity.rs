@@ -801,6 +801,31 @@ fn gradients_match_the_canvas() {
     holds("gradients", &doc, &res);
 }
 
+/// A full-turn sweep started at six o'clock goes all the way round from there.
+///
+/// flip: `css::gradient` writing the sweep's stops at absolute angles under a
+/// `from` without the start → the quarter before the start pads its first colour.
+#[test]
+fn a_sweep_with_a_start_angle_matches_the_canvas() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 100.0, 100.0, "Board");
+    let e = d.rect(f, 10.0, 10.0, 80.0, 80.0, 0.0);
+    let start = std::f32::consts::FRAC_PI_2;
+    d.fill(
+        e,
+        ramp(
+            GradientKind::Sweep(SweepGradientPosition {
+                center: Point::new(40.0, 40.0),
+                start_angle: start,
+                end_angle: start + std::f32::consts::TAU,
+            }),
+            Extend::Pad,
+        ),
+    );
+    let (doc, res) = d.done();
+    holds("sweep-start", &doc, &res);
+}
+
 /// A rotated rect, and a rotated frame whose child turns with it.
 #[test]
 fn rotation_matches_the_canvas() {

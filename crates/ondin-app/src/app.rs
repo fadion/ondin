@@ -5528,6 +5528,7 @@ impl OndinApp {
             return;
         }
         let at = self.drop_point(ctx);
+        let alone = dropped.len() == 1;
         let (mut loaded, mut failed, mut vector) = (Vec::new(), Vec::new(), Vec::new());
         for file in dropped {
             let name = file
@@ -5557,7 +5558,7 @@ impl OndinApp {
         let mut selected = Vec::new();
         let pictures = !loaded.is_empty();
         if pictures {
-            self.drop_images_at(loaded, at);
+            self.drop_images_at(loaded, at, alone);
             selected.extend_from_slice(self.session.selection.ids());
         }
         self.import_svg_files(vector, at, selected, pictures);
@@ -5621,12 +5622,15 @@ impl OndinApp {
 
     /// Place dropped images, or hand one to the shape under the pointer: onto a shape it
     /// replaces that shape's picture, keeping the framing; onto bare canvas it makes
-    /// layers, cascaded since N files arrive at one point.
-    fn drop_images_at(&mut self, loaded: Vec<LoadedImage>, at: Option<Point>) {
+    /// layers, cascaded since N files arrive at one point. `may_replace` says the
+    /// whole drop was this one file, the gate the drop pill reads (`drop_label`): a
+    /// picture that came with an SVG or a refused file never replaces.
+    fn drop_images_at(&mut self, loaded: Vec<LoadedImage>, at: Option<Point>, may_replace: bool) {
         let n = loaded.len();
         // A single picture replaces the fill under it, only with a real drop point:
         // the paste's selection-only `None` arm would replace whatever was selected.
         if n == 1
+            && may_replace
             && let Some(p) = at
             && let Some(target) = self.image_drop_target(Some(p))
         {
@@ -9842,6 +9846,7 @@ mod image_drop_tests {
         app.drop_images_at(
             vec![loaded(1, None), loaded(2, None), loaded(3, None)],
             Some(Point::ZERO),
+            false,
         );
 
         assert_eq!(pictures(&app).len(), 3, "three layers landed");
@@ -9875,6 +9880,7 @@ mod image_drop_tests {
         app.drop_images_at(
             vec![loaded(1, None), loaded(2, None), loaded(3, None)],
             Some(Point::ZERO),
+            false,
         );
 
         let names: Vec<String> = pictures(&app)
@@ -9899,6 +9905,7 @@ mod image_drop_tests {
         app.drop_images_at(
             vec![loaded(7, Some("a")), loaded(7, Some("b"))],
             Some(Point::ZERO),
+            false,
         );
 
         assert_eq!(pictures(&app).len(), 2, "two layers");
@@ -9992,7 +9999,11 @@ mod image_drop_tests {
         assert_eq!(app.session.doc.get(b).unwrap().styles().fills, Some(style));
 
         app.session.selection.set_one(a);
-        app.drop_images_at(vec![loaded(1, Some("photo"))], Some(Point::new(50.0, 50.0)));
+        app.drop_images_at(
+            vec![loaded(1, Some("photo"))],
+            Some(Point::new(50.0, 50.0)),
+            true,
+        );
         let fill = &app.session.doc.get(a).unwrap().paint().fills[0];
         assert_eq!(
             fill.brush.var(),
@@ -10008,6 +10019,7 @@ mod image_drop_tests {
         app.drop_images_at(
             vec![loaded(2, Some("photo"))],
             Some(Point::new(250.0, 50.0)),
+            true,
         );
         assert_eq!(app.session.doc.get(b).unwrap().styles().fills, None);
         assert_eq!(
@@ -13335,6 +13347,100 @@ mod library_wiring_tests {
             "{}",
             status.text
         );
+        let _ = std::fs::remove_dir_all(&root_dir);
+    }
+
+    /// A picture dropped with an SVG on a selected shape places beside it, as the
+    /// pill's "Place 2 files" says, instead of replacing the shape's fill; the
+    /// picture alone replaces it.
+    ///
+    /// flip: `take_dropped_images` gating the replace on the pictures loaded, not
+    /// the files dropped → fails at "the fill stands".
+    #[test]
+    fn a_picture_dropped_with_an_svg_does_not_replace_the_selected_fill() {
+        use ondin_core::kurbo::{Affine, Point, Size};
+        use ondin_core::peniko::Color;
+        use ondin_core::{Brush, Fill, NodeKind, Operation, Transaction, keyed_by_position};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root_dir = temp_root("drop-mixed-replace");
+        let mut app = app_at(&ctx, root_dir.clone());
+        app.canvas_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let shape = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: shape,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetFills {
+                id: shape,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ])));
+        let mut png = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut png),
+            &[255u8, 0, 0, 255],
+            1,
+            1,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .expect("a 1×1 red PNG");
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>"#;
+        let file = |name: &str, bytes: &[u8]| egui::DroppedFile {
+            name: name.to_string(),
+            bytes: Some(bytes.to_vec().into()),
+            ..Default::default()
+        };
+        app.session.camera.center = Point::new(50.0, 50.0);
+        app.session.camera.zoom = 1.0;
+        let at = app.to_screen(Point::new(50.0, 50.0), app.canvas_rect, 1.0);
+        let drop = |app: &mut OndinApp, files: Vec<egui::DroppedFile>| {
+            app.session.selection.set_one(shape);
+            let input = egui::RawInput {
+                events: vec![egui::Event::PointerMoved(at)],
+                dropped_files: files,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                app.session.next_status_pass();
+                app.take_dropped_images(ui.ctx());
+            });
+        };
+        let image_fill = |app: &OndinApp| {
+            matches!(
+                app.session.doc.get(shape).unwrap().paint().fills[0]
+                    .brush
+                    .literal(),
+                Some(Brush::Image(_))
+            )
+        };
+
+        drop(
+            &mut app,
+            vec![file("logo.svg", svg), file("photo.png", &png)],
+        );
+        assert!(!image_fill(&app), "the fill stands");
+        assert!(
+            app.session.status().text.contains("Placed image"),
+            "the picture is placed beside it: {}",
+            app.session.status().text
+        );
+
+        drop(&mut app, vec![file("photo.png", &png)]);
+        assert!(image_fill(&app), "fixture: the picture alone replaces it");
         let _ = std::fs::remove_dir_all(&root_dir);
     }
 

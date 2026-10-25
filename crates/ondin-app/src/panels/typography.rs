@@ -116,6 +116,9 @@ pub(crate) struct TypeSubject {
     /// [`Self::mixed`] reads them, and [`char_attrs_tx`] writes each its own
     /// defaults with only the one attribute changed.
     pub others: Vec<TypeSubject>,
+    /// The node's text bindings: a whole-node write keeps the span lists against
+    /// a bound default's literal, not what it draws (`variable::span_defaults`).
+    pub text_vars: ondin_core::TextVars,
 }
 
 impl TypeSubject {
@@ -186,6 +189,12 @@ impl TypeSubject {
             para_range,
             para_partial,
             others: Vec::new(),
+            text_vars: app
+                .session
+                .doc
+                .get(id)
+                .map(|n| n.text_vars())
+                .unwrap_or_default(),
         })
     }
 
@@ -4264,10 +4273,13 @@ fn variant_attrs(v: &text::FontVariant, coords: &[AxisSetting]) -> Vec<CharAttr>
 fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, bool) {
     let mut style = subject.style.clone();
     let mut spans = subject.spans.clone();
+    let (mut kept, _) =
+        ondin_core::variable::span_defaults(subject.text_vars, &style, &subject.paragraph);
     for attr in attrs {
         let kind = attr.kind();
-        style.set(attr);
-        spans.clear(subject.range.clone(), kind, &style);
+        style.set(attr.clone());
+        kept.set(attr);
+        spans.clear(subject.range.clone(), kind, &kept);
     }
     let changes = style != subject.style || spans != subject.spans;
     (
@@ -4295,10 +4307,13 @@ fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transactio
 fn para_attrs_tx(subject: &TypeSubject, attrs: Vec<ParaAttr>) -> (Transaction, bool) {
     let mut paragraph = subject.paragraph.clone();
     let mut spans = subject.para_spans.clone();
+    let (_, mut kept) =
+        ondin_core::variable::span_defaults(subject.text_vars, &subject.style, &paragraph);
     for attr in attrs {
         let kind = attr.kind();
         paragraph.set(attr);
-        spans.clear(subject.para_range.clone(), kind, &paragraph);
+        kept.set(attr);
+        spans.clear(subject.para_range.clone(), kind, &kept);
     }
     let changes = paragraph != subject.paragraph || spans != subject.para_spans;
     (
@@ -7212,6 +7227,7 @@ mod tests {
             para_range: 0..8,
             para_partial: false,
             others: Vec::new(),
+            text_vars: Default::default(),
         }
     }
 

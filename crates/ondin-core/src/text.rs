@@ -3599,6 +3599,10 @@ pub struct TextEdit {
     spans: CharSpans,
     para_spans: ParaSpans,
     paragraph: ParagraphStyle,
+    /// The defaults the span lists are kept against: `style` and `paragraph`
+    /// unless [`Self::keep_spans_against`] says otherwise (a bound default's literal).
+    span_style: TextStyle,
+    span_paragraph: ParagraphStyle,
     block: BlockStyle,
     sizing: TextSizing,
     /// The rail, carried for the whole session: the caret and hit test are measured
@@ -3635,6 +3639,8 @@ impl TextEdit {
         let warp = warp_for(parts.as_ref(&content), &shaped);
         Self {
             content,
+            span_style: parts.style.clone(),
+            span_paragraph: parts.paragraph.clone(),
             style: parts.style,
             spans: parts.spans,
             para_spans: parts.para_spans,
@@ -3694,9 +3700,19 @@ impl TextEdit {
         extract(&self.shaped, self.parts())
     }
 
+    /// Keep the span lists against `style` and `paragraph` rather than the
+    /// defaults the text is shaped with (`variable::span_defaults`), until the
+    /// next [`Self::restyle`].
+    pub fn keep_spans_against(&mut self, style: TextStyle, paragraph: ParagraphStyle) {
+        self.span_style = style;
+        self.span_paragraph = paragraph;
+    }
+
     /// Adopt a style change made while the session is open (the inspector stays
     /// live during editing), keeping the caret where it is.
     pub fn restyle(&mut self, parts: TextParts) {
+        self.span_style = parts.style.clone();
+        self.span_paragraph = parts.paragraph.clone();
         self.style = parts.style;
         self.spans = parts.spans;
         self.para_spans = parts.para_spans;
@@ -3721,7 +3737,7 @@ impl TextEdit {
     /// in a paragraph.
     pub fn style_paragraph(&mut self, attr: crate::typography::ParaAttr) {
         let range = self.paragraph_range();
-        self.para_spans.set(range, attr, &self.paragraph);
+        self.para_spans.set(range, attr, &self.span_paragraph);
         self.reshape_keeping_selection();
     }
 
@@ -3754,7 +3770,7 @@ impl TextEdit {
             // `paragraph_bounds`, so an empty trailing paragraph reaches back over its break.
             let write = paragraph_bounds(&self.content, start..start);
             self.para_spans
-                .set(write, ParaAttr::Level(next), &self.paragraph);
+                .set(write, ParaAttr::Level(next), &self.span_paragraph);
             moved = true;
         }
         if moved {
@@ -3776,7 +3792,7 @@ impl TextEdit {
             self.pending.push(attr);
             return;
         }
-        self.spans.set(range, attr, &self.style);
+        self.spans.set(range, attr, &self.span_style);
         self.reshape_keeping_selection();
     }
 
@@ -3798,7 +3814,7 @@ impl TextEdit {
         // Collected first: `runs_of` borrows the spans the loop writes.
         let runs = self.spans.runs_of(&self.style, kind, range);
         for (at, old) in runs {
-            self.spans.set(at, f(&old), &self.style);
+            self.spans.set(at, f(&old), &self.span_style);
         }
         self.reshape_keeping_selection();
     }
@@ -3818,14 +3834,14 @@ impl TextEdit {
         let at = range.start;
         let removed = range.len();
         self.content.replace_range(range, s);
-        self.spans = self.spans.edited(at, removed, s.len(), &self.style);
+        self.spans = self.spans.edited(at, removed, s.len(), &self.span_style);
         self.para_spans = self
             .para_spans
-            .edited(at, removed, s.len(), &self.paragraph);
+            .edited(at, removed, s.len(), &self.span_paragraph);
         let pending = std::mem::take(&mut self.pending);
         if !s.is_empty() {
             for attr in pending {
-                self.spans.set(at..at + s.len(), attr, &self.style);
+                self.spans.set(at..at + s.len(), attr, &self.span_style);
             }
         }
         self.reshape(at + s.len());
@@ -3877,10 +3893,10 @@ impl TextEdit {
         let at = range.start;
         let removed = range.len();
         self.content.replace_range(range, with);
-        self.spans = self.spans.edited(at, removed, with.len(), &self.style);
+        self.spans = self.spans.edited(at, removed, with.len(), &self.span_style);
         self.para_spans = self
             .para_spans
-            .edited(at, removed, with.len(), &self.paragraph);
+            .edited(at, removed, with.len(), &self.span_paragraph);
         self.reshape(at + with.len());
     }
 

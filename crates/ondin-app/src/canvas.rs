@@ -5507,7 +5507,11 @@ impl OndinApp {
             parts.spans.clone(),
             parts.para_spans.clone(),
         );
+        let defaults = self.span_defaults(id, &parts);
         let mut editor = TextEdit::new(content, parts);
+        if let Some((style, paragraph)) = defaults {
+            editor.keep_spans_against(style, paragraph);
+        }
         match world.and_then(|w| self.text_local(id, w)) {
             Some(local) => editor.click(local),
             None => editor.select_all(),
@@ -5522,6 +5526,19 @@ impl OndinApp {
         });
         self.mode = Mode::TextInsert;
         self.session.info("Editing text; Esc to finish");
+    }
+
+    /// What `id`'s span lists are kept against while it is edited, when a binding
+    /// makes that differ from the drawn `parts` (`variable::span_defaults`).
+    fn span_defaults(
+        &self,
+        id: NodeId,
+        parts: &TextParts,
+    ) -> Option<(ondin_core::TextStyle, ondin_core::ParagraphStyle)> {
+        let vars = self.session.doc.get(id)?.text_vars();
+        vars.iter()
+            .any(Option::is_some)
+            .then(|| ondin_core::variable::span_defaults(vars, &parts.style, &parts.paragraph))
     }
 
     /// Map a world point into a text node's local space.
@@ -5886,6 +5903,7 @@ impl OndinApp {
             } => (content.clone(), spans.clone(), para_spans.clone()),
             _ => return,
         };
+        let defaults = self.span_defaults(id, &parts);
         if let Some(s) = self.text.as_mut() {
             let spans = spans.unwrap_or_else(|| s.editor.spans().clone());
             let para_spans = para_spans.unwrap_or_else(|| s.editor.para_spans().clone());
@@ -5894,6 +5912,9 @@ impl OndinApp {
                 para_spans,
                 ..parts
             });
+            if let Some((style, paragraph)) = defaults {
+                s.editor.keep_spans_against(style, paragraph);
+            }
             // The base moves with the document's content, not the editor's (which
             // may hold uncommitted text), or `changed()` answers yes after any
             // outside write.
@@ -20886,5 +20907,159 @@ mod join_and_grid_snap_tests {
                 "snaps to the drawn edge {x}: {xs:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod bound_default_span_tests {
+    //! A run equal to a bound default's drawn value is a value of its own: the editor
+    //! and the Type card keep span lists against the literal (`variable::span_defaults`).
+
+    use super::*;
+    use crate::app::OndinApp;
+    use crate::panels::TypeSubject;
+    use ondin_core::typography::{CharAttr, CharAttrKind};
+    use ondin_core::{Cell, Document, IdSource, Mode, Operation, Transaction, VarKind, Variable};
+
+    /// "foo bar" in a Dark frame, its size bound to a variable reading 16 in Light
+    /// and 24 in Dark, and "foo" pinned to 24 by a run of its own.
+    fn app_with_a_pinned_run(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        crate::theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (frame, text) = (ids.mint(), ids.mint());
+        let (light, dark, size) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
+        let parts = crate::fonts::FontService::default_text_parts();
+        let mode = |id, name: &str| Mode {
+            id,
+            name: name.into(),
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(400.0, 200.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: text,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "foo bar".into(),
+                    style: Box::new(parts.style),
+                    spans: parts.spans,
+                    para_spans: parts.para_spans,
+                    paragraph: parts.paragraph,
+                    block: parts.block,
+                    sizing: parts.sizing,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::AddMode {
+                mode: mode(light, "Light"),
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddMode {
+                mode: mode(dark, "Dark"),
+                index: 1,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: size,
+                    name: "type/size".into(),
+                    kind: VarKind::Number,
+                    cells: [(light, Cell::Number(16.0)), (dark, Cell::Number(24.0))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetMode {
+                id: frame,
+                mode: Some(dark),
+            },
+        ]))
+        .expect("the fixture");
+        let mut vars = [None; 7];
+        vars[ondin_core::variable::TEXT_SIZE] = Some(size);
+        doc.apply(&Transaction(ondin_core::bind_text_ops(&doc, text, vars)))
+            .expect("the bound size");
+        let NodeKind::Text { style, spans, .. } = doc.get(text).unwrap().kind() else {
+            unreachable!()
+        };
+        let mut spans = spans.clone();
+        spans.set(0..3, CharAttr::Size(24.0), style);
+        doc.apply(&Transaction(vec![Operation::SetTextSpans {
+            id: text,
+            spans,
+        }]))
+        .expect("the pinned run");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(text);
+        app.canvas_px = (800, 600);
+        (app, text)
+    }
+
+    /// The stored size of the character at `byte`: a run's, else the literal.
+    fn stored_size(app: &OndinApp, id: NodeId, byte: usize) -> CharAttr {
+        let NodeKind::Text { style, spans, .. } = app.session.doc.get(id).unwrap().kind() else {
+            unreachable!()
+        };
+        spans.resolve(style, byte).get(CharAttrKind::Size)
+    }
+
+    /// **A keystroke and a whole-node write keep a run equal to a bound default's
+    /// drawn value**: "foo" stays 24 when Dark draws the default at 24 too.
+    ///
+    /// flip: `begin_edit_text` not calling `keep_spans_against` → fails at *"a
+    /// keystroke"*; `one_char_attrs_tx` clearing against the drawn style → fails
+    /// at *"an italic toggle"*.
+    #[test]
+    fn a_run_equal_to_a_bound_default_survives_an_edit() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_pinned_run(&ctx);
+        assert_eq!(
+            stored_size(&app, id, 1),
+            CharAttr::Size(24.0),
+            "fixture: pinned"
+        );
+
+        app.begin_edit_text(Some(id), None);
+        if let Some(s) = app.text.as_mut() {
+            s.editor.move_right(false, false);
+            s.editor.insert("!");
+        }
+        app.finish_text_edit();
+        assert_eq!(
+            stored_size(&app, id, 1),
+            CharAttr::Size(24.0),
+            "a keystroke"
+        );
+
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        app.toggle_face(&subject, false);
+        assert_eq!(
+            TypeSubject::of(&app, id).map(|s| s.style.italic),
+            Some(true),
+            "fixture: italic"
+        );
+        assert_eq!(
+            stored_size(&app, id, 1),
+            CharAttr::Size(24.0),
+            "an italic toggle"
+        );
     }
 }

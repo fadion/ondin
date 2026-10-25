@@ -804,6 +804,31 @@ pub fn clear_text_slot_number(
     }
 }
 
+/// `style` and `paragraph` with each slot `vars` binds at its literal: the
+/// defaults a text's span lists are kept against while it is edited. A run equal
+/// to a bound default's drawn value is a value of its own, since the variable
+/// draws another in another mode, so it must not be normalized away against
+/// what is drawn.
+pub fn span_defaults(
+    vars: TextVars,
+    style: &crate::typography::TextStyle,
+    paragraph: &crate::typography::ParagraphStyle,
+) -> (
+    crate::typography::TextStyle,
+    crate::typography::ParagraphStyle,
+) {
+    let (mut style, mut paragraph) = (style.clone(), paragraph.clone());
+    if vars[TEXT_FAMILY].is_some() {
+        style.font_family.clear();
+    }
+    for (k, var) in vars.iter().enumerate().skip(TEXT_SIZE) {
+        if var.is_some() {
+            clear_text_slot_number(k, &mut style, &mut paragraph);
+        }
+    }
+    (style, paragraph)
+}
+
 /// Whether `a` and `b` (each a text's style and paragraph) hold the same value
 /// in slot `k` — a number with its unit, so a line height moved from px to % is
 /// another value. False for the content, which neither holds.

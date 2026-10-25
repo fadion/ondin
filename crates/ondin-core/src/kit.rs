@@ -900,6 +900,15 @@ pub fn vendor(
                         *b = into_vault(*b)?;
                     }
                 }
+                // A preferred main is pointed at where the document holds it and
+                // never vendored for its sake: unheld, it is passed over.
+                for q in &mut p.value.preferred {
+                    if !inside.contains(q)
+                        && let Some(found) = src.get(*q).and_then(|m| find(doc, &held, &key(m)))
+                    {
+                        *q = found;
+                    }
+                }
             }
         }
     }
@@ -1931,6 +1940,15 @@ impl Builder<'_> {
                 })
                 .collect();
             deferred |= p.value.bound.len() != before;
+            // Pointed where held, never deferred: an unheld preferred main is
+            // passed over.
+            for q in &mut p.value.preferred {
+                if !inside.contains(q)
+                    && let Some(h) = self.here(*q)
+                {
+                    *q = h;
+                }
+            }
         }
         deferred
     }

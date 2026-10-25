@@ -666,8 +666,11 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   (`swap::preferred`); the rest of the list leaves them out. One that is no longer a main the slot
   can show is passed over, not removed. Edited on the main under the filter row
   (`variants::preferred_rows`): a row per main with a ×, then *Add a preferred main…* over
-  `swap::options` at the bound slot. Copies remap them by the swap's rule (`remap_subtree`), and
-  vendoring by `kit::relink`. The nested copy's own *Swap* row and the *Main* row offer none.
+  `swap::options` at the bound slot. Copies remap them by the swap's rule (`remap_subtree`), a
+  paste or *Make local* by `kit::relink`, and `kit::vendor` and a kit update point each at the
+  document's copy of that main where it holds one. A preferred main never forces vendoring: one the
+  document does not hold keeps the kit's id and is passed over. The nested copy's own *Swap* row
+  and the *Main* row offer none.
 
 ### Variants chrome — `panels/variants.rs`, `panels/component.rs`
 

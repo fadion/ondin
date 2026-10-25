@@ -657,6 +657,72 @@ fn a_v5_file_loads_as_the_current_version() {
     assert_eq!(back, d);
 }
 
+/// `k` with *Card* given a swap property on its nested *Icon* preferring
+/// *Icon*, published again as `version`.
+fn prefer_icon(k: &mut Kit, version: u32) {
+    let nested = k.doc.get(k.card).unwrap().children()[0];
+    let mut items = IdSource::new(0xEE);
+    k.doc
+        .apply(&Transaction(vec![Operation::SetProperties {
+            id: k.card,
+            props: vec![ondin_core::Keyed::new(
+                items.mint_item(),
+                ondin_core::variant::Property {
+                    name: "Icon".into(),
+                    kind: ondin_core::variant::PropKind::Swap,
+                    bound: vec![nested],
+                    filter: String::new(),
+                    preferred: vec![k.icon],
+                },
+            )],
+        }]))
+        .expect("a swap property preferring Icon");
+    let mut meta = k.doc.meta().clone();
+    meta.kit.as_mut().unwrap().version = version;
+    k.doc.set_meta(meta);
+    let published = kit::freeze(&k.doc).expect("the kit has mains");
+    k.doc.set_published(Some(published));
+}
+
+/// The preferred mains of `main`'s vault copy, and its vault copy of `icon`.
+fn preferred_and_icon(d: &Document, main: NodeId, icon: NodeId) -> (Vec<NodeId>, NodeId) {
+    let copy_of = |m: NodeId| {
+        vault_children(d)
+            .into_iter()
+            .find(|v| d.get(*v).unwrap().origin().is_some_and(|o| o.node == m))
+            .expect("vendored")
+    };
+    let card = d.get(copy_of(main)).unwrap();
+    (card.props()[0].value.preferred.clone(), copy_of(icon))
+}
+
+/// **A vendored main's preferred mains name the vault's copies**, on insert and
+/// on update: *Card* prefers *Icon*, another top-level main of the kit, so the
+/// consumer's copy must prefer the consumer's vendored *Icon*, not the kit's id.
+///
+/// flip: `vendor` without its `preferred` remap → fails at *"inserted"*;
+/// `point_or_defer` without it → fails at *"updated"*.
+#[test]
+fn a_vendored_mains_preferred_mains_name_the_vaults_copies() {
+    let mut k = kit();
+    prefer_icon(&mut k, 4);
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.card);
+    let (preferred, icon) = preferred_and_icon(&d, k.card, k.icon);
+    assert_eq!(preferred, vec![icon], "inserted");
+
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.card);
+    prefer_icon(&mut k, 5);
+    let u = kit::update(&d, &mut ids, L_ID, 5, published(&k)).unwrap();
+    let mut tx = u.tx.clone();
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("the update commits");
+    let (preferred, icon) = preferred_and_icon(&d, k.card, k.icon);
+    assert_eq!(preferred, vec![icon], "updated");
+}
+
 /// A v8 kit, published document and all, loads as the current version and
 /// saves as v9 inside and out (`migrate_8_to_9`).
 #[test]

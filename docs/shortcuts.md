@@ -417,6 +417,7 @@ combinations asserts the two **partition** the space.
 | `Ctrl+A` | select all | ✅ |
 | `Ctrl+G` / `Ctrl+Shift+G` | group / ungroup | ✅ |
 | `Ctrl+Alt+G` | frame selection | ✅ Figma (§15 D987); free because the group chords are `cmd_only`. `ctrl_alt_g_frames_and_leaves_the_group_chords_alone` |
+| `Shift+A` | add flex layout, read from where the children sit; a loose selection is framed first | ✅ Figma's chord. Plain `A` is the Node tool, read with no Shift. `shift_a_adds_a_layout_and_leaves_a_alone` |
 | `Ctrl+E` | flatten | ✅ Figma |
 | `Ctrl+Alt+M` | use as mask / release | ✅ Figma (§15 D286). `M` is otherwise unspent; `masking_is_a_chord_and_the_bare_letter_is_still_unspent` keeps plain `M` and `Ctrl+M` free |
 | `Ctrl+Alt+U` `S` `I` `X` | union, subtract, intersect, exclude | ✅ Figma; `X` from the **release** (§L2) |

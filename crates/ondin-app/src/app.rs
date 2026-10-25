@@ -1824,6 +1824,7 @@ impl OndinApp {
             Action::Group => self.group_selection(),
             Action::Mask => self.toggle_mask(),
             Action::FrameSelection => self.frame_selection(),
+            Action::AddLayout => self.add_layout(),
             Action::CreateComponent => self.create_component(),
             Action::DetachInstance => self.detach_instances(),
             Action::Boolean(op) => self.apply_boolean(op),
@@ -2678,6 +2679,51 @@ impl OndinApp {
                 }
             }
             Err(e) => self.session.fail(format!("Cannot frame: {e}")),
+        }
+    }
+
+    /// *Add flex layout* (`Shift+A`): a flex layout read from where the children
+    /// sit (`build::flex_from_placement`) on every selected frame and group without
+    /// one, or — when the selection holds anything else — on a frame wrapped around
+    /// it, in one undo step.
+    pub(crate) fn add_layout(&mut self) {
+        let doc = &self.session.doc;
+        let res = &self.session.resolved;
+        let ids = build::outermost(doc, self.session.selection.ids());
+        if ids.is_empty() {
+            self.session.info("Select a layer to add a layout");
+            return;
+        }
+        let containers = ids.iter().all(|id| {
+            doc.get(*id)
+                .is_some_and(|n| ondin_core::container::is_container(n.kind()))
+        });
+        if containers {
+            let ops: Vec<Operation> = ids
+                .iter()
+                .filter_map(|id| build::flex_from_placement(doc, res, *id))
+                .flatten()
+                .collect();
+            if ops.is_empty() {
+                self.session.info("Already laid out");
+            } else {
+                self.commit_edit(Transaction(ops));
+            }
+            return;
+        }
+        let (mut tx, frame) = match build::frame(doc, res, &mut self.session.ids, &ids) {
+            Ok(framed) => framed,
+            Err(e) => return self.session.fail(format!("Cannot frame: {e}")),
+        };
+        // The layout is read from the framed document, the frame's children in it.
+        let mut after = doc.clone();
+        if after.apply(&tx).is_err() {
+            return self.session.fail("Cannot frame the selection");
+        }
+        let laid = ondin_core::Resolved::rebuild(&after);
+        tx.0.extend(build::flex_from_placement(&after, &laid, frame).unwrap_or_default());
+        if self.commit_edit(tx) {
+            self.session.selection.set_one(frame);
         }
     }
 

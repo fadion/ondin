@@ -146,6 +146,10 @@ pub enum Action {
     /// *Frame selection* (`Ctrl+Alt+G`): wrap the selection in a frame
     /// at the union's corner — `build::frame`, the menu row's verb.
     FrameSelection,
+    /// *Add flex layout* (`Shift+A`): a flex layout read from where the children
+    /// sit, on the selected frames and groups that have none, or on a frame
+    /// wrapped around a loose selection — `OndinApp::add_layout`.
+    AddLayout,
     /// *Create component* (`Ctrl+Alt+K`): the selected frame or group
     /// becomes a main, or the selection is framed and the frame becomes one.
     CreateComponent,
@@ -1147,6 +1151,12 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             Action::VariablesBrowser,
             &mut out,
         );
+        // *Add flex layout*, on Figma's `Shift+A`; plain `A` is the Node tool.
+        on(
+            plain && m.shift && i.key_pressed(egui::Key::A),
+            Action::AddLayout,
+            &mut out,
+        );
         // *Publish kit…*, on `Ctrl+Alt+P`, beside the booleans in the `Ctrl+Alt`
         // namespace.
         on(
@@ -2077,6 +2087,23 @@ mod tests {
                 !actions(Mode::Normal, vec![key(egui::Key::S, m)], m)
                     .contains(&Action::VariablesBrowser),
                 "{m:?}+S is not this"
+            );
+        }
+    }
+
+    /// `Shift+A` adds a flex layout, and leaves `A` the Node tool's and `Ctrl+A`
+    /// the select-all's.
+    #[test]
+    fn shift_a_adds_a_layout_and_leaves_a_alone() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::A, shift)], shift),
+            vec![Action::AddLayout]
+        );
+        for m in [egui::Modifiers::NONE, egui::Modifiers::COMMAND] {
+            assert!(
+                !actions(Mode::Normal, vec![key(egui::Key::A, m)], m).contains(&Action::AddLayout),
+                "{m:?}+A is not this"
             );
         }
     }

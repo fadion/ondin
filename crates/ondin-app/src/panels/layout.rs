@@ -1145,7 +1145,9 @@ impl OndinApp {
     /// those transforms stand, because the same transaction relays their parent.
     ///
     /// **Switching between flex and grid keeps the padding and the gaps** and starts
-    /// the rest at CSS's defaults.
+    /// the rest at CSS's defaults. **Flex on a container with none** reads its
+    /// direction, gap, padding and alignment from where the children sit and
+    /// orders them so (`build::flex_from_placement`).
     fn set_display(&mut self, subjects: &[NodeId], to: usize) {
         let doc = &self.session.doc;
         let res = &self.session.resolved;
@@ -1164,6 +1166,12 @@ impl OndinApp {
                 }
                 d
             };
+            if (to, was) == (1, None)
+                && let Some(placed) = ondin_core::build::flex_from_placement(doc, res, *id)
+            {
+                ops.extend(placed);
+                continue;
+            }
             let now = match (to, was) {
                 (1, Some(Display::Flex(_))) | (2, Some(Display::Grid(_))) | (0, None) => continue,
                 (1, _) => Some(kept(Display::Flex(Flex::default()))),
@@ -3188,6 +3196,126 @@ mod tests {
         assert!(
             s.app.session.doc.get(s.frame).unwrap().display().is_some(),
             "one undo step"
+        );
+    }
+
+    /// Flex on a frame with none (`OndinApp::set_display`) reads the row back
+    /// from where its children sit — the gap and the padding the layout taken away
+    /// had — orders them left to right, and moves nothing.
+    ///
+    /// flip: `set_display`'s `flex_from_placement` arm dropped → fails at *"the
+    /// gap read from the row"*.
+    #[test]
+    fn flex_on_loose_children_reads_their_row() {
+        let mut s = scene();
+        s.app.set_display(&[s.frame], 0);
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::Reorder { id: s.a, index: 1 }]))
+        );
+        let (a0, b0) = (drawn(&s.app, s.a), drawn(&s.app, s.b));
+        s.app.set_display(&[s.frame], 1);
+        let frame = s.app.session.doc.get(s.frame).unwrap();
+        let Some(Display::Flex(flex)) = frame.display() else {
+            panic!("a flex layout");
+        };
+        assert_eq!(flex.column_gap, 10.0, "the gap read from the row");
+        assert_eq!((flex.padding[0], flex.padding[3]), (20.0, 20.0));
+        assert_eq!(frame.children(), &[s.a, s.b], "ordered left to right");
+        assert_eq!((drawn(&s.app, s.a), drawn(&s.app, s.b)), (a0, b0));
+
+        // A group, moved to its children's corner through the app's commit.
+        let root = s.app.session.doc.root();
+        let (g, c, d) = (
+            s.app.session.ids.mint(),
+            s.app.session.ids.mint(),
+            s.app.session.ids.mint(),
+        );
+        let rect = |id, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent: g,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(30.0, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: g,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            rect(c, (600.0, 300.0)),
+            rect(d, (600.0, 350.0)),
+        ])));
+        let (c0, d0) = (drawn(&s.app, c), drawn(&s.app, d));
+        s.app.set_display(&[g], 1);
+        assert!(s.app.session.doc.get(g).unwrap().display().is_some());
+        assert_eq!(
+            (drawn(&s.app, c), drawn(&s.app, d)),
+            (c0, d0),
+            "a group too"
+        );
+    }
+
+    /// *Add flex layout* (`OndinApp::add_layout`) on loose layers wraps them in a
+    /// frame laid out as they sit, selected, in one undo step; on that frame again
+    /// it says so and writes nothing.
+    ///
+    /// flip: `add_layout`'s `flex_from_placement` on the framed document dropped →
+    /// panics at *"a flex layout"*.
+    #[test]
+    fn add_layout_wraps_a_loose_selection_in_a_laid_frame() {
+        let mut s = scene();
+        let root = s.app.session.doc.root();
+        let (c, d) = (s.app.session.ids.mint(), s.app.session.ids.mint());
+        let rect = |id, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(30.0, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        assert!(s.app.session.commit(Transaction(vec![
+            rect(c, (600.0, 350.0)),
+            rect(d, (600.0, 300.0)),
+        ])));
+        let (c0, d0) = (drawn(&s.app, c), drawn(&s.app, d));
+        let steps = s.app.session.history.undo_depth();
+        s.app.session.selection.set(vec![c, d]);
+        s.app.add_layout();
+        let frame = s.app.session.doc.get(c).unwrap().parent().unwrap();
+        assert_ne!(frame, root, "wrapped");
+        assert_eq!(s.app.session.selection.ids(), &[frame]);
+        let node = s.app.session.doc.get(frame).unwrap();
+        let Some(Display::Flex(flex)) = node.display() else {
+            panic!("a flex layout");
+        };
+        assert_eq!(
+            (flex.direction, flex.row_gap),
+            (FlexDirection::Column, 20.0),
+            "a column read from the stack"
+        );
+        assert_eq!(node.children(), &[d, c], "top to bottom");
+        assert_eq!((drawn(&s.app, c), drawn(&s.app, d)), (c0, d0));
+        assert_eq!(s.app.session.history.undo_depth(), steps + 1, "one step");
+
+        s.app.add_layout();
+        assert_eq!(
+            s.app.session.history.undo_depth(),
+            steps + 1,
+            "nothing more"
         );
     }
 

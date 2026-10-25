@@ -199,6 +199,9 @@ pub enum Item {
     Group,
     /// Wrap the selection in a new frame sized to its union (`build::frame`).
     FrameSelection,
+    /// *Add flex layout* (`Shift+A`) — read from where the children sit, a loose
+    /// selection framed first (`OndinApp::add_layout`).
+    AddLayout,
     /// *Create component* (`Ctrl+Alt+K`) — on an ordinary layer or a selection; a
     /// frame or group becomes the main, anything else is framed first.
     CreateComponent,
@@ -504,6 +507,7 @@ impl Item {
         Item::PasteProperties,
         Item::Group,
         Item::FrameSelection,
+        Item::AddLayout,
         Item::CreateComponent,
         Item::DuplicateAsComponent,
         Item::SelectAllInstances,
@@ -648,6 +652,12 @@ impl Item {
                 "Frame selection",
                 icon::FRAME_CORNERS,
                 Some("Ctrl+Alt+G"),
+                Group::Structure,
+            ),
+            Item::AddLayout => s(
+                "Add flex layout",
+                icon::ARROWS_OUT_LINE_HORIZONTAL,
+                Some("Shift+A"),
                 Group::Structure,
             ),
             // Component rows and chords (`shortcuts.md` §12); the filled hexagon
@@ -1195,6 +1205,7 @@ impl Item {
             Item::Group => Action::Group,
             Item::Ungroup => Action::Ungroup,
             Item::FrameSelection => Action::FrameSelection,
+            Item::AddLayout => Action::AddLayout,
             Item::CreateComponent => Action::CreateComponent,
             Item::DetachInstance => Action::DetachInstance,
             Item::Mask => Action::Mask,
@@ -2081,6 +2092,7 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     (Item::PasteProperties, NEEDS_SELECTION),
     (Item::Group, NEEDS_SELECTION),
     (Item::FrameSelection, NEEDS_SELECTION),
+    (Item::AddLayout, NEEDS_SELECTION),
     (Item::Restack(build::ZMove::Front), NEEDS_SELECTION),
     (Item::Restack(build::ZMove::Forward), NEEDS_SELECTION),
     (Item::Restack(build::ZMove::Backward), NEEDS_SELECTION),
@@ -2635,6 +2647,7 @@ impl OndinApp {
             }
             // The selection, not the hit, as *Group selection* does.
             Item::FrameSelection => self.dispatch(ctx, Action::FrameSelection),
+            Item::AddLayout => self.dispatch(ctx, Action::AddLayout),
             Item::CreateComponent => self.dispatch(ctx, Action::CreateComponent),
             Item::DetachInstance => self.dispatch(ctx, Action::DetachInstance),
             // No chord, so no `Action`.

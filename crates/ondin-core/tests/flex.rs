@@ -1964,3 +1964,64 @@ fn a_stretched_label_is_baked_as_auto_height() {
     );
     assert_eq!(s.bounds(label).size(), was.size(), "the same picture");
 }
+
+/// `build::flex_from_placement` on a frame of three loose rects in a row: the
+/// row, the mean gap, the padding around them and their shared top are read
+/// from where they sit, the children are ordered left to right, and nothing
+/// moves.
+///
+/// **Flip:** `flex_from_placement`'s reorder skipped fails at *"ordered left to
+/// right"*; its padding left at zero fails at the padding's assertion.
+#[test]
+fn flex_from_placement_reads_a_row_where_it_sits() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let c = s.add(f, rect(40.0, 30.0), (140.0, 50.0));
+    let a = s.add(f, rect(40.0, 30.0), (20.0, 50.0));
+    let b = s.add(f, rect(40.0, 20.0), (80.0, 50.0));
+    let was: Vec<Rect> = [a, b, c].iter().map(|id| s.bounds(*id)).collect();
+    let ops = ondin_core::build::flex_from_placement(&s.doc, &s.res, f).expect("a container");
+    s.commit(ops);
+    let Some(Display::Flex(flex)) = s.doc.get(f).unwrap().display().cloned() else {
+        panic!("a flex layout");
+    };
+    assert_eq!(flex.direction, FlexDirection::Row);
+    assert_eq!(flex.column_gap, 20.0, "the mean gap");
+    assert_eq!(flex.padding, [50.0, 220.0, 120.0, 20.0]);
+    assert_eq!(flex.align_items, AlignItems::Start, "the shared top");
+    assert_eq!(
+        s.doc.get(f).unwrap().children(),
+        &[a, b, c],
+        "ordered left to right"
+    );
+    let now: Vec<Rect> = [a, b, c].iter().map(|id| s.bounds(*id)).collect();
+    assert_eq!(now, was, "nothing moves");
+}
+
+/// A group of rects stacked down a centre line becomes a centred column, moved
+/// to its children's corner so its box does not start at the parent's origin.
+///
+/// **Flip:** `flex_from_placement`'s group move skipped fails at *"nothing
+/// moves"*, the column drawn at the origin.
+#[test]
+fn flex_from_placement_reads_a_column_in_a_group() {
+    let mut s = Scene::new();
+    let g = s.add(s.root, NodeKind::Group, (0.0, 0.0));
+    let top = s.add(g, rect(60.0, 30.0), (100.0, 100.0));
+    let below = s.add(g, rect(40.0, 30.0), (110.0, 140.0));
+    let was = [s.bounds(top), s.bounds(below)];
+    let ops = ondin_core::build::flex_from_placement(&s.doc, &s.res, g).expect("a container");
+    s.commit(ops);
+    let Some(Display::Flex(flex)) = s.doc.get(g).unwrap().display().cloned() else {
+        panic!("a flex layout");
+    };
+    assert_eq!(flex.direction, FlexDirection::Column);
+    assert_eq!(flex.row_gap, 10.0);
+    assert_eq!(flex.padding, [0.0; 4]);
+    assert_eq!(flex.align_items, AlignItems::Center, "the shared centre");
+    assert_eq!([s.bounds(top), s.bounds(below)], was, "nothing moves");
+    assert!(
+        ondin_core::build::flex_from_placement(&s.doc, &s.res, g).is_none(),
+        "a container with a layout is left to its card"
+    );
+}

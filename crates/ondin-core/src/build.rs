@@ -720,6 +720,133 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
     ) && doc.frame_may_sit_under(parent_id)
 }
 
+/// The operations that give container `id`, its children placed by hand, a flex
+/// layout read from where they sit: the direction they spread along, the mean gap
+/// between them, the padding a frame leaves around them and the cross alignment
+/// they share, with the in-flow children reordered left to right or top to bottom.
+/// `None` when `id` is not a container or already has a layout.
+///
+/// A group's box starts at its origin, so a group is moved to its children's
+/// corner and every child back by it. No reorder when a child is a mask, which
+/// masks what is above it.
+pub fn flex_from_placement(doc: &Document, res: &Resolved, id: NodeId) -> Option<Vec<Operation>> {
+    use crate::container::{AlignItems, Display, Flex, FlexDirection};
+    let node = doc.get(id)?;
+    if node.display().is_some() || !crate::container::is_container(node.kind()) {
+        return None;
+    }
+    let view = crate::resolve::DocView(doc);
+    // Each in-flow child's slot: its unrotated box where the layout would place it.
+    let mut slots: Vec<(NodeId, kurbo::Rect)> = node
+        .children()
+        .iter()
+        .filter(|c| crate::container::in_flow(&view, **c))
+        .filter_map(|c| {
+            let bx = crate::local_box(doc, res, *c)?;
+            let at = crate::container::slot_of(res.used_local(doc, *c)?, bx);
+            Some((*c, kurbo::Rect::from_origin_size(at, bx.size())))
+        })
+        .collect();
+    let union = slots.iter().map(|(_, r)| *r).reduce(|a, b| a.union(b));
+    let centres = |f: fn(Point) -> f64| {
+        let c: Vec<f64> = slots.iter().map(|(_, r)| f(r.center())).collect();
+        c.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            - c.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    let row = slots.len() < 2 || centres(|p| p.x) >= centres(|p| p.y);
+    // (start, end) along the main axis and across it.
+    let main = |r: &kurbo::Rect| if row { (r.x0, r.x1) } else { (r.y0, r.y1) };
+    let cross = |r: &kurbo::Rect| if row { (r.y0, r.y1) } else { (r.x0, r.x1) };
+    slots.sort_by(|a, b| {
+        let key = |r: &kurbo::Rect| (main(r).0, cross(r).0);
+        key(&a.1)
+            .partial_cmp(&key(&b.1))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let gaps: Vec<f64> = slots
+        .windows(2)
+        .map(|w| main(&w[1].1).0 - main(&w[0].1).1)
+        .collect();
+    let gap = match gaps.len() {
+        0 => 0.0,
+        n => (gaps.iter().sum::<f64>() / n as f64).max(0.0).round(),
+    };
+    let shared = |f: &dyn Fn(&kurbo::Rect) -> f64| {
+        let first = slots.first().map(|(_, r)| f(r));
+        first.is_some_and(|v| slots.iter().all(|(_, r)| (f(r) - v).abs() < 0.5))
+    };
+    let align_items = if shared(&|r| cross(r).0) {
+        AlignItems::Start
+    } else if shared(&|r| (cross(r).0 + cross(r).1) / 2.0) {
+        AlignItems::Center
+    } else if shared(&|r| cross(r).1) {
+        AlignItems::End
+    } else {
+        AlignItems::Start
+    };
+    let mut ops = Vec::new();
+    let padding = match (node.kind(), union) {
+        (NodeKind::Artboard { size }, Some(u)) => {
+            [u.y0, size.width - u.x1, size.height - u.y1, u.x0].map(|p| p.max(0.0).round())
+        }
+        // A group in its parent's flow is placed there whatever it stores.
+        (NodeKind::Group, Some(u)) if u.origin() != Point::ZERO && !is_flex_item(doc, id) => {
+            let by = u.origin().to_vec2();
+            ops.push(Operation::SetTransform {
+                id,
+                transform: node.transform() * Affine::translate(by),
+            });
+            for c in node.children() {
+                let Some(child) = doc.get(*c) else { continue };
+                let local = res.used_local(doc, *c).unwrap_or(child.transform());
+                ops.push(Operation::SetTransform {
+                    id: *c,
+                    transform: Affine::translate(-by) * local,
+                });
+            }
+            [0.0; 4]
+        }
+        _ => [0.0; 4],
+    };
+    let has_mask = node
+        .children()
+        .iter()
+        .any(|c| doc.get(*c).is_some_and(|n| n.mask()));
+    if !has_mask {
+        // The in-flow children take the places they held, in their new order.
+        let mut order = slots.iter().map(|(c, _)| *c);
+        let next: Vec<NodeId> = node
+            .children()
+            .iter()
+            .map(|c| match slots.iter().any(|(s, _)| s == c) {
+                true => order.next().unwrap_or(*c),
+                false => *c,
+            })
+            .collect();
+        if next != node.children() {
+            for (index, c) in next.iter().enumerate() {
+                ops.push(Operation::Reorder { id: *c, index });
+            }
+        }
+    }
+    ops.push(Operation::SetDisplay {
+        id,
+        display: Some(Display::Flex(Flex {
+            direction: if row {
+                FlexDirection::Row
+            } else {
+                FlexDirection::Column
+            },
+            align_items,
+            row_gap: if row { 0.0 } else { gap },
+            column_gap: if row { gap } else { 0.0 },
+            padding,
+            ..Flex::default()
+        })),
+    });
+    Some(ops)
+}
+
 /// Wrap `members` in a [`NodeKind::Boolean`] container performing `op`.
 ///
 /// Shaped like [`group`], with three differences:

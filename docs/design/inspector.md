@@ -98,7 +98,14 @@ Labels use CSS names in sentence case (*Justify content*, *Flex start*), with lo
 
 - **Under `flex`:** direction and wrap with per-cell tooltips (`ui::segmented_tipped`); three alignment dropdowns whose pictures turn with the container (`layout::Orient`, a transpose and a mirror, never a rotation); two gaps; padding as two paired fields that open to four.
 - **Under `grid`** (`panels/layout/grid.rs`): `grid-auto-flow` (*Row*/*Column*); column and row track lists, each with a count, a `+`, and rows of grip, kind menu, fields and cross, plus the whole template as an editable CSS line (applied on a committing defocus, never on `Escape`; parse errors in red); `justify-content`, `justify-items`, `align-items` and `align-content` with *Start*/*End* names, the items rows leading with *Normal*; `align-items` offers *Baseline* and `justify-items` does not, and a held baseline reads *Baseline · Start* on its own lit row; gaps (columns first); padding.
-- Switching between flex and grid keeps padding and gaps.
+- Switching between flex and grid keeps padding and gaps. Grid on a container with none starts at CSS's defaults.
+- **Flex on a container with none reads the layout from where the in-flow children sit** (`build::flex_from_placement`). Each child's slot is its unrotated box where the layout would place it (`container::slot_of`).
+  - Direction: row unless the slots' centres spread further in y than in x.
+  - Gap: the mean gap between consecutive slots, on the main axis's gap only. Padding (a frame): the distances from its edges to the slots' union. Both clamped at 0 and rounded to whole px.
+  - `align-items`: the cross start the slots share, else the centre, else the end, else start. Never `stretch`, which would resize the children.
+  - The in-flow children are reordered into main-axis order (ties by cross start) within the places in-flow children held; out-of-flow ones keep theirs. No reorder when a child is a mask, since a mask masks what is above it.
+  - A group gets no padding. A laid group's box starts at its origin, so the group moves to the slots' union corner and every child back by it; without that the content jumps to the group's origin (`flex_from_placement_reads_a_column_in_a_group`). A group in its parent's flow is placed there and is not moved.
+  - *Add flex layout* (`Shift+A`, `OndinApp::add_layout`) is the same reading without the card: on every selected frame and group with no layout, or, when the selection holds any other layer, on a frame wrapped around it (`build::frame`), in one undo step.
 
 **Item.** In flex: grow, shrink, basis, `align-self`. In grid: `grid-column`/`grid-row` as CSS, start/end, `justify-self`/`align-self` (the latter with *Baseline*). An unset self-alignment reads *Auto · \<inherited\>*.
 

@@ -219,6 +219,7 @@ fn sections(lead: Lead) -> Vec<Section> {
                 Item::Group,
                 Item::Ungroup,
                 Item::FrameSelection,
+                Item::AddLayout,
                 Item::Mask,
                 Item::Flatten,
                 Item::Boolean(BoolOp::Union),

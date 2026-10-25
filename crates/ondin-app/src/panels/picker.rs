@@ -287,6 +287,16 @@ fn hsv_of_hsl(h: f32, s: f32, l: f32, a: f32) -> Hsv {
     let sv = if v <= 0.0 { 0.0 } else { 2.0 * (1.0 - l / v) };
     Hsv::new(h, sv, v, a)
 }
+
+/// Whether a channel field's `text`, which arithmetic reads as `n`, is a
+/// hash-less hex colour instead. Six or eight hex digits always are, since no
+/// channel goes that high; three or four only past the channel's `max`, so a
+/// `128` typed into a field stays a number.
+fn hex_not_number(text: &str, n: f64, max: f64) -> bool {
+    let t = text.trim();
+    let hex = matches!(t.len(), 3 | 4 | 6 | 8) && t.chars().all(|c| c.is_ascii_hexdigit());
+    hex && (t.len() >= 6 || n > max)
+}
 /// The picker window's name, which `picker_window` also makes its `Area` id and
 /// so its layer's.
 ///
@@ -1311,7 +1321,8 @@ impl OndinApp {
                         .max_decimals(0)
                         .update_while_editing(false);
                     ui::bare_drag_value_parsed(ui, field, |s| {
-                        crate::expr::eval(s).or_else(|| match colour_text::parse(s) {
+                        let number = crate::expr::eval(s).filter(|n| !hex_not_number(s, *n, max));
+                        number.or_else(|| match colour_text::parse(s) {
                             Some(t) => {
                                 whole.set(Some(t));
                                 Some(start)
@@ -2606,6 +2617,31 @@ mod mixed_hex_tests {
         type_at(&ctx, &mut app, red, "hsl(120 100% 25%)");
         assert_eq!(rgba8(&app, b), [0, 128, 0, 102]);
         assert_eq!(app.session.history.undo_depth(), 1, "one paste, one step");
+    }
+
+    /// A hash-less hex of only digits is a colour, not a number clamped to the
+    /// channel's max; a short one is a colour only past the max, so `128` stays
+    /// a channel value.
+    ///
+    /// flip: `hex_not_number` answering false → fails at "a six-digit hex";
+    /// dropping its max test → fails at "a short number within it".
+    #[test]
+    fn an_all_digit_hex_in_a_channel_field_sets_the_colour() {
+        let ctx = egui::Context::default();
+        let (mut app, b) = on_b(&ctx, Format::Rgb);
+        let red = field_at(&ctx, &mut app, "0", 0);
+        type_at(&ctx, &mut app, red, "333333");
+        assert_eq!(rgba8(&app, b), [0x33, 0x33, 0x33, 102], "a six-digit hex");
+        let red = field_at(&ctx, &mut app, "51", 0);
+        type_at(&ctx, &mut app, red, "900");
+        assert_eq!(
+            rgba8(&app, b),
+            [0x99, 0, 0, 102],
+            "a short hex past the max"
+        );
+        let red = field_at(&ctx, &mut app, "153", 0);
+        type_at(&ctx, &mut app, red, "128");
+        assert_eq!(rgba8(&app, b), [128, 0, 0, 102], "a short number within it");
     }
 
     /// HSB's B taken to 0 and back keeps the hue and saturation, as the plane does:

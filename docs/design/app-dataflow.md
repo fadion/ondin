@@ -96,7 +96,8 @@ opacity.
   `update_while_editing(false)`), previewing through `valve_slot` like the panel's numbers, one undo
   step per edit. HSB is the plane's own HSV and HSL is computed from it, both through the picker's
   `intent` (`channel_brush`), so B to 0 and back keeps the hue. A whole colour typed or pasted into
-  one channel field sets the whole colour.
+  one channel field sets the whole colour; a hash-less hex of six or eight digits is a colour
+  before it is a number, one of three or four only past the channel's max.
 - **Over a *Mixed* row** (`PaintSlot::SelectionAll`) a field format falls back to the text field,
   reading *Mixed*: layers that disagree have no one channel to show.
 

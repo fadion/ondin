@@ -102,10 +102,10 @@ nothing the canvas does not already offer except the last two.
   `OFFSET_REFIT_ACCURACY`, a fitted cubic that lies along its chord written as a line). flo_curves,
   which an earlier version used, drops or inverts operands that share an edge, and an offset built
   from band pieces is all shared edges. An open subpath grows into a round-capped stroke around it
-  and has no inside to shrink. `ondin-core`'s `tests/offset_suite.rs` checks a catalogue of shapes at
-  sixteen distances against an independent point-by-point oracle (the shape and its mitred stroke),
-  and for specks, stray edges and runaway segment counts. A shape that misbehaves belongs in its
-  catalogue. The bar's *Offset* opens a card with one scrubbable distance field through the
+  and has no inside to shrink. `ondin-core`'s `tests/offset_suite.rs` checks the shapes of
+  `tests/common` at sixteen distances against an independent point-by-point oracle (the shape and
+  its mitred stroke), and for specks, stray edges and runaway segment counts. A shape that misbehaves
+  belongs in that catalogue. The bar's *Offset* opens a card with one scrubbable distance field through the
   edit valve; every distance is measured from the outline the card opened on, and zero writes the
   stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.
 - Both write a new path with no corner radii, the radii baked into the curves, and clear the point

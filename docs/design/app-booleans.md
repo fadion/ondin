@@ -127,15 +127,21 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
 
 ### Outline stroke
 
-- **The geometry is the ink as drawn** (private `build::stroke_ink`, mirroring `scene::paint_strokes`):
-  the drawn width (`Document::resolved_paint`), per-side strokes, dash patterns
+- **The geometry is the ink as drawn** (`build::stroke_ink`, mirroring `scene::paint_strokes`): the
+  drawn width (`Document::resolved_paint`), per-side strokes, dash patterns
   (`geometry::dash_fit_pieces`, `resolved_dashes`, cut with `kurbo::dash`), caps, joins and mitre
   limit. An inside or outside stroke is laid at twice the width, then intersected with or subtracted
-  from the shape through `boolean::evaluate`.
-- **The band is `geometry::stroke_pieces`**, a union of simple contours: each segment stroked alone
-  with butt ends, a join wedge on the outside of each corner, and the caps. Not `kurbo::stroke`'s
-  expansion: that is right only filled non-zero (its inner joins pivot through the vertex and loop back
-  over the band), and `boolean::evaluate` reads every operand even-odd.
+  from the shape.
+- **It is polygon arithmetic, as *Offset path* is** (`build::stroke_polygons`, then `refit`): each
+  laid path flattened finer the wider the stroke, stroked by i_overlay with bevels at the
+  flattening's vertices, round joins and caps as asked, and each real corner's mitre added as its own
+  wedge while it is within the limit. i_overlay's own mitre clips past the limit where a rendered
+  stroke bevels, and flo_curves, which an earlier version united band pieces with, drops or inverts
+  pieces that share an edge (a 50-radius circle stroked 110 wide lost a quarter). The union and the
+  inside or outside cut are i_overlay's, read non-zero.
+  `ondin-core`'s `tests/stroke_suite.rs` checks the closed shapes and open paths of
+  `tests/common` at three widths with each join, cap and alignment, dashed too, against an
+  independent oracle.
 - **Result shape.** A layer with no visible fill and one stroke is replaced by the path
   (`replace_with_path`, then the stroke's brush as its one fill, no strokes, non-zero). Otherwise the
   layer, its strokes removed, and the stroke paths above it (each named "‹layer› stroke") go into a new
@@ -216,7 +222,7 @@ the balanced fold; per-operand caching is not to be built. Pixel tests live in
 - Group's lone-container refusal looks redundant in front of a builder that says yes, and nothing
   tests the row's gating.
 - `replace_with_path` must carry the effective fill rule, or a flattened `Exclude` becomes its union.
-- *Outline stroke*'s band must stay `stroke_pieces`, though `kurbo::stroke` looks like the same thing
-  in one call: its expansion read even-odd double-counts the inner corners (a 100 square with a 10
-  stroke comes out 4100 instead of 4000). `outline_stroke_traces_the_ink_each_alignment_draws` and
-  `stroke_pieces_cover_what_a_non_zero_expansion_fills` (`ondin-core/tests/build.rs`) pin it.
+- *Outline stroke*'s ink must not be `kurbo::stroke`'s expansion, though that looks like the same
+  thing in one call: read even-odd it double-counts the inner corners (a 100 square with a 10 stroke
+  comes out 4100 instead of 4000). `outline_stroke_traces_the_ink_each_alignment_draws` and
+  `stroke_ink_covers_what_a_non_zero_expansion_fills` (`ondin-core/tests/build.rs`) pin it.

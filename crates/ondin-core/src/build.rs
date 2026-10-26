@@ -1213,8 +1213,8 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
         }
         if distance > 0.0 && !lines.is_empty() {
             let style = StrokeStyle::new(2.0 * distance)
-                .start_cap(LineCap::Round(0.1))
-                .end_cap(LineCap::Round(0.1))
+                .start_cap(LineCap::Round(round_step(h)))
+                .end_cap(LineCap::Round(round_step(h)))
                 .line_join(mitre);
             for line in &lines {
                 out.extend(line.stroke(style.clone(), false).into_iter().flatten());
@@ -1224,8 +1224,34 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
         out.simplify_shape(FillRule::NonZero)
     })
     .map_err(|_| OpError::EmptyGeometry)?;
+    let result = refit(contours);
+    if result.elements().is_empty() {
+        return Err(OpError::EmptyGeometry);
+    }
+    Ok(result)
+}
+
+/// The angle step, as i_overlay's arc-segment-length over radius, that keeps a
+/// round join or cap of radius `h` within [`OFFSET_FLATTEN`] of its arc, and
+/// under [`OFFSET_MAX_TURN_DEG`] so the refit reads it as a curve.
+fn round_step(h: f64) -> f64 {
+    (8.0 * OFFSET_FLATTEN / h.max(1e-9))
+        .sqrt()
+        .min(OFFSET_MAX_TURN_DEG.to_radians())
+}
+
+/// The most a flattened curve turns at one vertex, in degrees: under
+/// [`OFFSET_REFIT_CORNER_DEG`], or the refit would take a small, tight curve for a
+/// run of corners and write it as lines.
+const OFFSET_MAX_TURN_DEG: f64 = 12.0;
+
+/// The polygons i_overlay answers with as curves again, for *Offset path* and
+/// *Outline stroke*: each contour thinned, fitted with cubics (`fit::fit_closed`)
+/// and its straight stretches written as lines. A contour too small to see or edit
+/// is dropped.
+fn refit(shapes: Vec<Vec<Vec<[f64; 2]>>>) -> kurbo::BezPath {
     let mut result = kurbo::BezPath::new();
-    for contour in contours.into_iter().flatten() {
+    for contour in shapes.into_iter().flatten() {
         // The polygon offset snaps to an integer grid, which leaves steps a fraction
         // of the refit's accuracy long; their jitter in direction throws the fit.
         let mut points: Vec<kurbo::Point> = Vec::with_capacity(contour.len());
@@ -1237,7 +1263,6 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
                 points.push(p);
             }
         }
-        // A sliver the polygon offset rounds to: nothing anyone could see or edit.
         let area: f64 = (0..points.len())
             .map(|i| {
                 points[i]
@@ -1254,10 +1279,7 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
             OFFSET_REFIT_CORNER_DEG,
         )));
     }
-    if result.elements().is_empty() {
-        return Err(OpError::EmptyGeometry);
-    }
-    Ok(result)
+    result
 }
 
 /// `sub` flattened to its distinct points for an offset of `h`, if it has at least
@@ -1321,7 +1343,8 @@ fn cut(
     let d = c.deriv();
     let (a, b) = (d.eval(t0).to_vec2(), d.eval(t1).to_vec2());
     let turn = a.cross(b).atan2(a.dot(b)).abs();
-    let joined = h * turn * turn / 8.0 <= OFFSET_FLATTEN;
+    let joined =
+        h * turn * turn / 8.0 <= OFFSET_FLATTEN && turn <= OFFSET_MAX_TURN_DEG.to_radians();
     if depth >= 16 || (flat && joined) {
         push(span.p3);
         return;
@@ -1525,7 +1548,7 @@ pub fn outline_stroke(
 /// fill non-zero: what `scene::paint_strokes` draws, built the same way — per side
 /// where the stroke has sides, dash patterns resolved against each piece, and an
 /// inside or outside stroke laid at twice the width and cut to the shape.
-fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option<kurbo::BezPath> {
+pub fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option<kurbo::BezPath> {
     use crate::node::StrokeAlign;
     if s.width.is_nan() || s.width <= 0.0 {
         return None;
@@ -1535,7 +1558,8 @@ fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option<kur
     } else {
         StrokeAlign::Center
     };
-    let mut pieces: Vec<kurbo::BezPath> = Vec::new();
+    // Each path the stroke lays, dashed already, and the width it is laid at.
+    let mut laid_paths: Vec<(kurbo::BezPath, f64)> = Vec::new();
     let mut lay = |path: &kurbo::BezPath, width: f64| {
         let laid = if align == StrokeAlign::Center {
             width
@@ -1554,13 +1578,7 @@ fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option<kur
             } else {
                 kurbo::BezPath::from_iter(kurbo::dash(sub.iter(), s.dash_offset, &dashes))
             };
-            pieces.extend(crate::geometry::stroke_pieces(
-                &laid_path,
-                laid,
-                s.join,
-                s.cap,
-                s.miter_limit,
-            ));
+            laid_paths.push((laid_path, laid));
         }
     };
     match crate::geometry::effective_sides(kind, s).per_side(s.width) {
@@ -1573,18 +1591,164 @@ fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option<kur
             }
         }
     }
-    if pieces.is_empty() {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::simplify::SimplifyShape;
+    use i_overlay::float::single::SingleFloatOverlay;
+    // i_overlay asserts on bounds it cannot scale, so a panic draws nothing.
+    let shapes = std::panic::catch_unwind(|| {
+        let mut band: Vec<Vec<[f64; 2]>> = Vec::new();
+        for (path, width) in &laid_paths {
+            band.extend(stroke_polygons(path, width / 2.0, s));
+        }
+        let band = band.simplify_shape(FillRule::NonZero);
+        let rule = match align {
+            StrokeAlign::Center => return band,
+            StrokeAlign::Inside => OverlayRule::Intersect,
+            StrokeAlign::Outside => OverlayRule::Difference,
+        };
+        let region: Vec<Vec<[f64; 2]>> = crate::geometry::subpaths(shape)
+            .iter()
+            .filter_map(|sub| polyline(sub, 0.0, 3))
+            .collect();
+        band.overlay(&region, rule, FillRule::NonZero)
+    })
+    .ok()?;
+    let ink = refit(shapes);
+    (!ink.elements().is_empty()).then_some(ink)
+}
+
+/// The polygons a stroke of half-width `h` with `s`'s joins and caps lays along
+/// `path`, as i_overlay strokes the flattened path: their union is the ink.
+///
+/// The flattening's own vertices are bevelled, within [`OFFSET_FLATTEN`] of the
+/// curve's true parallel. A real corner gets `s`'s join: round, a bevel, or a mitre
+/// added as its own wedge while it is within the mitre limit. i_overlay's mitre
+/// clips past the limit where a rendered stroke bevels.
+fn stroke_polygons(path: &kurbo::BezPath, h: f64, s: &Stroke) -> Vec<Vec<[f64; 2]>> {
+    use i_overlay::mesh::float::stroke::offset::StrokeOffset;
+    use i_overlay::mesh::float::style::{LineCap, LineJoin, StrokeStyle};
+    let cap = |c: kurbo::Cap| match c {
+        kurbo::Cap::Butt => LineCap::Butt,
+        kurbo::Cap::Round => LineCap::Round(round_step(h)),
+        kurbo::Cap::Square => LineCap::Square,
+    };
+    let join = match s.join {
+        kurbo::Join::Round => LineJoin::Round(round_step(h)),
+        _ => LineJoin::Bevel,
+    };
+    let style = StrokeStyle::new(2.0 * h)
+        .start_cap(cap(s.cap))
+        .end_cap(cap(s.cap))
+        .line_join(join);
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+    for sub in crate::geometry::subpaths(path) {
+        let closed = matches!(sub.elements().last(), Some(kurbo::PathEl::ClosePath));
+        let segs: Vec<kurbo::PathSeg> = sub
+            .segments()
+            .filter(|seg| kurbo::ParamCurveArclen::arclen(seg, 1e-6) > 1e-9)
+            .collect();
+        let Some(mut points) = polyline(&sub, h, 2) else {
+            // A dot, as a zero-length dash is: only its caps draw it.
+            if let Some(kurbo::PathEl::MoveTo(p)) = sub.elements().first() {
+                out.extend(dot(*p, h, s.cap).map(outer));
+            }
+            continue;
+        };
+        if closed && points.len() > 2 && points.first() == points.last() {
+            points.pop();
+        }
+        out.extend(points.stroke(style.clone(), closed).into_iter().flatten());
+        if s.join != kurbo::Join::Miter {
+            continue;
+        }
+        let n = segs.len();
+        let joints = if closed { n } else { n.saturating_sub(1) };
+        for i in 0..joints {
+            let (a, b) = (&segs[i], &segs[(i + 1) % n]);
+            out.extend(mitre_wedge(a, b, h, s.miter_limit).map(outer));
+        }
+    }
+    out
+}
+
+/// `polygon` wound as i_overlay winds an outer ring (positive area), so it adds to
+/// the stroke's contours under non-zero rather than cancelling where they overlap.
+fn outer(mut polygon: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    let n = polygon.len();
+    let area: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (polygon[i], polygon[(i + 1) % n]);
+            a[0] * b[1] - a[1] * b[0]
+        })
+        .sum();
+    if area < 0.0 {
+        polygon.reverse();
+    }
+    polygon
+}
+
+/// The mitre a stroke of half-width `h` draws on the outside of the corner where
+/// `a` meets `b`, as a polygon, if the corner turns and its mitre is within `limit`.
+fn mitre_wedge(
+    a: &kurbo::PathSeg,
+    b: &kurbo::PathSeg,
+    h: f64,
+    limit: f64,
+) -> Option<Vec<[f64; 2]>> {
+    let (c_in, c_out) = (a.to_cubic(), b.to_cubic());
+    let t_in = [c_in.p2, c_in.p1, c_in.p0]
+        .into_iter()
+        .map(|p| c_in.p3 - p)
+        .find(|v| v.hypot() > 1e-9)?
+        .normalize();
+    let t_out = [c_out.p1, c_out.p2, c_out.p3]
+        .into_iter()
+        .map(|p| p - c_out.p0)
+        .find(|v| v.hypot() > 1e-9)?
+        .normalize();
+    let cross = t_in.cross(t_out);
+    if cross.abs() < 1e-9 {
         return None;
     }
-    let band = crate::boolean::evaluate(crate::BoolOp::Union, &pieces)?;
-    match align {
-        StrokeAlign::Center => Some(band),
-        StrokeAlign::Inside => {
-            crate::boolean::evaluate(crate::BoolOp::Intersect, &[band, shape.clone()])
+    let side = -cross.signum();
+    let (o1, o2) = (t_in.turn_90() * side, t_out.turn_90() * side);
+    let bisector = (o1 + o2).normalize();
+    let cos_half = o1.dot(bisector);
+    if cos_half <= 1e-9 || 1.0 / cos_half > limit {
+        return None;
+    }
+    let p = c_in.p3;
+    let at = |q: kurbo::Point| [q.x, q.y];
+    Some(vec![
+        at(p),
+        at(p + o1 * h),
+        at(p + bisector * (h / cos_half)),
+        at(p + o2 * h),
+    ])
+}
+
+/// The caps alone of a zero-length dash at `p`, half-width `h`, laid along x.
+fn dot(p: kurbo::Point, h: f64, cap: kurbo::Cap) -> Option<Vec<[f64; 2]>> {
+    match cap {
+        kurbo::Cap::Butt => None,
+        kurbo::Cap::Round => {
+            let steps = ((std::f64::consts::TAU / round_step(h)).ceil() as usize).max(8);
+            Some(
+                (0..steps)
+                    .map(|k| {
+                        let a = k as f64 / steps as f64 * std::f64::consts::TAU;
+                        [p.x + h * a.cos(), p.y + h * a.sin()]
+                    })
+                    .collect(),
+            )
         }
-        StrokeAlign::Outside => {
-            crate::boolean::evaluate(crate::BoolOp::Subtract, &[band, shape.clone()])
-        }
+        kurbo::Cap::Square => Some(vec![
+            [p.x - h, p.y - h],
+            [p.x + h, p.y - h],
+            [p.x + h, p.y + h],
+            [p.x - h, p.y + h],
+        ]),
     }
 }
 

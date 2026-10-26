@@ -2830,12 +2830,12 @@ fn outline_stroke_traces_the_ink_each_alignment_draws() {
     }
 }
 
-/// `geometry::stroke_pieces`' union covers what `kurbo::stroke`'s expansion fills
-/// non-zero — the renderer's reading — on a concave star, an ellipse and an open,
-/// round-capped, dashed zigzag, sampled on a grid.
-/// flip: `join_piece` putting the wedge on the inside of the turn → fails at the star.
+/// `build::stroke_ink` covers what `kurbo::stroke`'s expansion fills non-zero — the
+/// renderer's reading — on a concave star, an ellipse and an open, round-capped,
+/// dashed zigzag, sampled on a grid.
+/// flip: `mitre_wedge` putting the wedge on the inside of the turn → fails at the star.
 #[test]
-fn stroke_pieces_cover_what_a_non_zero_expansion_fills() {
+fn stroke_ink_covers_what_a_non_zero_expansion_fills() {
     use ondin_core::kurbo::{self, BezPath, Cap, Join, Shape};
     let star = ondin_core::geometry::local_path(&NodeKind::Star {
         size: Size::new(100.0, 100.0),
@@ -2854,13 +2854,19 @@ fn stroke_pieces_cover_what_a_non_zero_expansion_fills() {
         ("ellipse", ellipse, Join::Miter, Cap::Butt, vec![]),
         ("zigzag", zig, Join::Round, Cap::Round, vec![30.0, 12.0]),
     ] {
-        let dashed = if dashes.is_empty() {
-            path.clone()
-        } else {
-            BezPath::from_iter(kurbo::dash(path.iter(), 0.0, &dashes))
+        let stroke = ondin_core::Stroke {
+            width: 8.0,
+            join,
+            cap,
+            dashes: dashes.clone(),
+            miter_limit: 4.0,
+            ..Default::default()
         };
-        let pieces = ondin_core::geometry::stroke_pieces(&dashed, 8.0, join, cap, 4.0);
-        let ours = ondin_core::boolean::evaluate(ondin_core::BoolOp::Union, &pieces).unwrap();
+        let kind = NodeKind::Path {
+            path: path.clone(),
+            corner_radii: Vec::new(),
+        };
+        let ours = ondin_core::build::stroke_ink(&kind, &path, &stroke).unwrap();
         let style = kurbo::Stroke {
             width: 8.0,
             join,

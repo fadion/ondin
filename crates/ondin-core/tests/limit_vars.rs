@@ -48,6 +48,7 @@ fn fixture() -> F {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

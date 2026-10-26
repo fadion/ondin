@@ -1889,6 +1889,7 @@ fn starter_document() -> (Document, IdSource) {
             kind: NodeKind::Rect {
                 size: Size::new(200.0, 120.0),
                 corner_radii: RoundedRectRadii::from_single_radius(12.0),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((80.0, 80.0))),
             name: None,
@@ -1983,6 +1984,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2330,6 +2332,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((20.0, 20.0))),
             name: None,
@@ -2772,6 +2775,7 @@ mod tests {
             &NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             box_,
             Point::new(box_.x0, box_.y0),

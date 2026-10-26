@@ -1382,6 +1382,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     NodeKind::Rect {
                         size: Size::new(w, h),
                         corner_radii: kurbo::RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     Affine::translate((x, y)),
                     // Painted below; `shape` takes fills from the style.
@@ -1834,6 +1835,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 NodeKind::Rect {
                     size,
                     corner_radii: kurbo::RoundedRectRadii::from_single_radius(rx),
+                    corner_smoothing: 0.0,
                 },
                 Affine::translate((x, y)),
                 style,

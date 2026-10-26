@@ -40,6 +40,7 @@ fn document(effects: Vec<Effect>, opacity: f32) -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((30.0, 30.0))),
             name: None,
@@ -322,6 +323,7 @@ fn photographs(n: usize, w: u32, h: u32) -> (Document, Resolved, ImageStore) {
             kind: NodeKind::Rect {
                 size: Size::new(25.0, 25.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((5.0 + 30.0 * i as f64, 20.0))),
             name: None,
@@ -421,6 +423,7 @@ fn banner(effects: Vec<Effect>) -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(1600.0, 12.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((0.0, 0.0))),
             name: None,
@@ -697,6 +700,7 @@ fn a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour() {
                 kind: NodeKind::Rect {
                     size: Size::new(w, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((x, 30.0))),
                 name: None,
@@ -882,6 +886,7 @@ fn nested(stacks: Vec<Vec<Effect>>) -> (Document, Resolved) {
         kind: NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate((30.0, 30.0))),
         name: None,
@@ -940,6 +945,7 @@ fn siblings(n: usize, size: f64) -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(size, size),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             // Staggered so no two layers resolve to the identical box.
             transform: Some(Affine::translate((
@@ -1017,6 +1023,7 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(30.0, 30.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,
@@ -1044,6 +1051,7 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(18.0, 18.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((60.0, 6.0 + 22.0 * i as f64))),
             name: None,
@@ -1278,6 +1286,7 @@ fn card_grid(n: usize) -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(70.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((col * 80.0, row * 50.0))),
             name: None,
@@ -1296,6 +1305,7 @@ fn card_grid(n: usize) -> (Document, Resolved) {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((col * 80.0 + 10.0, row * 50.0 + 10.0))),
                 name: None,

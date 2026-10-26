@@ -38,6 +38,7 @@ fn red_square_doc() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -232,6 +233,7 @@ fn stroked_rect_doc(align: StrokeAlign) -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(ondin_core::kurbo::Affine::translate((30.0, 30.0))),
             name: None,
@@ -345,6 +347,7 @@ fn an_aligned_stroke_does_not_clip_its_siblings() {
         kind: NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(ondin_core::kurbo::Affine::translate((5.0, 5.0))),
         name: None,
@@ -860,6 +863,7 @@ fn a_very_wide_stroke_buries_the_middle_of_the_shape() {
             NodeKind::Rect {
                 size: Size::new(200.0, 120.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
     ];
@@ -954,6 +958,7 @@ fn framed_doc(
             kind: NodeKind::Rect {
                 size,
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1566,6 +1571,7 @@ fn two_fills_of_one_picture_carry_their_own_adjustments() {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 50.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((0.0, 50.0))),
             name: None,
@@ -1649,6 +1655,7 @@ fn overlapping_siblings() -> (Document, Resolved, ondin_core::NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((30.0, 30.0))),
             name: None,
@@ -1752,6 +1759,7 @@ fn a_mask_keeps_the_ink_it_covers_and_removes_the_rest() {
         kind: NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -1836,6 +1844,7 @@ fn an_alpha_mask_fades_what_it_masks_and_reads_only_its_alpha() {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2070,6 +2079,7 @@ fn a_squashed_radial_gradient_paints_an_ellipse_rather_than_a_circle() {
             NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         Operation::SetFills {
@@ -2134,6 +2144,7 @@ fn boolean_then_sibling(effects: Vec<ondin_core::Effect>) -> (Document, Resolved
         kind: NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate(at)),
         name: None,
@@ -2278,6 +2289,7 @@ fn text_whose_picture_is_missing_draws_nothing_rather_than_the_last_paint() {
             kind: NodeKind::Rect {
                 size: Size::new(300.0, 60.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2413,6 +2425,7 @@ fn a_gradient_with_descending_stops_draws_the_ramp_svg_says_it_means() {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

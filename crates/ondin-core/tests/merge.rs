@@ -27,6 +27,7 @@ fn base() -> Base {
     let rect = |w| NodeKind::Rect {
         size: Size::new(w, 10.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
         id,

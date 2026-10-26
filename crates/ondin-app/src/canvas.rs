@@ -3815,6 +3815,7 @@ impl OndinApp {
                     kind: NodeKind::Rect {
                         size: limit.size(),
                         corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(0.0),
+                        corner_smoothing: 0.0,
                     },
                     paint: ondin_core::Paint {
                         fills: ondin_core::keyed_by_position([ondin_core::Fill {
@@ -9440,6 +9441,7 @@ mod tests {
             NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
         );
 
@@ -9547,6 +9549,7 @@ mod tests {
         let kind = NodeKind::Rect {
             size: ondin_core::kurbo::Size::new(80.0, 40.0),
             corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(0.0),
+            corner_smoothing: 0.0,
         };
         let path = ondin_core::geometry::local_path(&kind).expect("a rect has an outline");
         let (mut subpaths, mut closes) = (0, 0);
@@ -10581,6 +10584,7 @@ mod grid_track_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -10931,6 +10935,7 @@ mod grid_track_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(w, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -11140,6 +11145,7 @@ mod paste_text_tests {
         let rect = || NodeKind::Rect {
             size: ondin_core::kurbo::Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let create = |id, parent, index, kind| Operation::CreateNode {
             id,
@@ -11291,6 +11297,7 @@ mod image_name_tests {
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some((*name).to_string()),
@@ -11898,6 +11905,7 @@ mod origin_field_tests {
         NodeKind::Rect {
             size: Size::new(80.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         }
     }
 
@@ -12337,6 +12345,7 @@ mod headless_app_tests {
         NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         }
     }
 
@@ -14288,6 +14297,7 @@ mod headless_app_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -14392,6 +14402,7 @@ mod size_badge_lock_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(120.0, 80.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((200.0, 150.0))),
                 name: None,
@@ -14742,6 +14753,7 @@ mod baseline_overlay_tests {
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(50.0, 50.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -15023,6 +15035,7 @@ mod paste_placement_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -15107,6 +15120,7 @@ mod frame_menu_door_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -16136,6 +16150,7 @@ mod locked_picture_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -16331,6 +16346,7 @@ mod crop_click_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -16619,6 +16635,7 @@ mod boolean_outline_tests {
         let rect = || NodeKind::Rect {
             size: ondin_core::kurbo::Size::new(100.0, 100.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             Operation::CreateNode {
@@ -16809,6 +16826,7 @@ mod outline_reject_tests {
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((i as f64 * 200.0, 0.0))),
                 name: None,
@@ -17721,6 +17739,7 @@ mod point_box_snap_tests {
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -17735,6 +17754,7 @@ mod point_box_snap_tests {
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(ondin_core::kurbo::Affine::translate((300.0, 300.0))),
             name: None,
@@ -17794,6 +17814,7 @@ mod pivot_snap_scale_tests {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(basis),
             name: None,
@@ -17897,6 +17918,7 @@ mod zero_travel_release_tests {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 60.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -17934,6 +17956,7 @@ mod zero_travel_release_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -18219,6 +18242,7 @@ mod pick_policy_tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -18316,6 +18340,7 @@ mod marquee_selectability_tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((20.0 * index as f64, 0.0))),
             name: None,
@@ -18540,6 +18565,7 @@ mod frame_edge_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((90.0, 90.0))),
                 name: None,
@@ -18799,6 +18825,7 @@ mod group_fence_tests {
         let square = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(page, root, frame(1000.0, 1000.0), (0.0, 0.0)),
@@ -18963,6 +18990,7 @@ mod group_fence_tests {
                 NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 (0.0, 0.0),
             ),
@@ -19090,6 +19118,7 @@ mod group_fence_tests {
                 NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 (0.0, 0.0),
             ),
@@ -19181,6 +19210,7 @@ mod group_fence_tests {
                 NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 (10.0, 10.0),
             ),
@@ -19237,6 +19267,7 @@ mod flex_drag_tests {
         let rect = |w| NodeKind::Rect {
             size: Size::new(w, 30.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(
@@ -19348,6 +19379,7 @@ mod flex_canvas_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((300.0, 150.0))),
             name: None,
@@ -19753,6 +19785,7 @@ mod flex_canvas_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((300.0, 150.0))),
             name: None,
@@ -19957,6 +19990,7 @@ mod flex_canvas_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((500.0, 300.0))),
             name: None,
@@ -20014,6 +20048,7 @@ mod flex_canvas_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20120,6 +20155,7 @@ mod flex_canvas_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 150.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -20197,6 +20233,7 @@ mod flex_canvas_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, h),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20710,6 +20747,7 @@ mod bound_resize_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 60.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

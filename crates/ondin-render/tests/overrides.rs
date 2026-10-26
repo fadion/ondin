@@ -269,6 +269,7 @@ fn fixture() -> Fixture {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((3.0, 4.0))),
             name: None,
@@ -280,6 +281,7 @@ fn fixture() -> Fixture {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 50.0),
                 corner_radii: RoundedRectRadii::from_single_radius(6.0),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((120.0, 90.0))),
             name: None,
@@ -1164,6 +1166,7 @@ fn boolean_fixture(op: ondin_core::BoolOp) -> (Document, NodeId, NodeId, NodeId)
     let rect = |w: f64, h: f64| NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let fill = |c: Color| {
         keyed_by_position([Fill {
@@ -1431,6 +1434,7 @@ fn a_ghost_evaluates_a_boolean_inside_a_boolean() {
         kind: NodeKind::Rect {
             size: Size::new(60.0, 200.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate((0.0, -50.0))),
         name: None,
@@ -1506,6 +1510,7 @@ fn dragging_an_operand_of_a_nested_boolean_previews_the_outer_one_too() {
         kind: NodeKind::Rect {
             size: Size::new(60.0, 200.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate((0.0, -50.0))),
         name: None,
@@ -1702,6 +1707,7 @@ fn a_ghost_draws_at_its_index_not_on_top() {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((i as f64 * 20.0, 0.0))),
             name: None,
@@ -1777,6 +1783,7 @@ fn a_reorder_changes_the_paint_order_it_commits() {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((i as f64 * 20.0, 0.0))),
             name: None,
@@ -1857,6 +1864,7 @@ fn a_chrome_ghost_draws_under_its_layer_without_counting_as_a_preview() {
                 kind: NodeKind::Rect {
                     size: Size::new(140.0, 90.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 paint: ondin_core::Paint {
                     fills: keyed_by_position([Fill {
@@ -2053,6 +2061,7 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
                     kind: NodeKind::Rect {
                         size: limit.size(),
                         corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     paint: ondin_core::Paint {
                         fills: keyed_by_position([Fill {
@@ -2294,6 +2303,7 @@ fn shadowed_layer() -> (Document, NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 60.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((100.0, 100.0))),
             name: None,
@@ -2712,6 +2722,7 @@ fn pinned_fixture() -> (Document, NodeId, NodeId) {
     let rect = |w, h| NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let frame = add(
         &mut doc,
@@ -2896,6 +2907,7 @@ fn flex_fixture() -> (Document, NodeId, NodeId, NodeId) {
     let rect = |w, h| NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let frame = add(
         &mut doc,
@@ -3171,6 +3183,7 @@ fn a_layout_nested_in_a_plain_group_previews_as_it_commits() {
     let rect = |s| NodeKind::Rect {
         size: Size::new(s, s),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let fill = |id| Operation::SetFills {
         id,
@@ -3466,6 +3479,7 @@ fn grid_fixture() -> (Document, NodeId, [NodeId; 4]) {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((300.0, 150.0))),
                 name: None,
@@ -3664,6 +3678,7 @@ fn sized_rect(w: f64, h: f64) -> NodeKind {
     NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -4140,6 +4155,7 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4241,6 +4257,7 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
         kind: NodeKind::Rect {
             size: Size::new(30.0, 20.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -4366,6 +4383,7 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4443,6 +4461,7 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
         kind: NodeKind::Rect {
             size: Size::new(30.0, 20.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -4529,6 +4548,7 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4614,6 +4634,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4726,6 +4747,7 @@ fn a_copy_bound_on_its_own_previews_its_mains_resize_as_committed() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4848,6 +4870,7 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
         kind: NodeKind::Rect {
             size: Size::new(40.0, 20.0),
             corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -4973,6 +4996,7 @@ fn a_rect_with_bound_corners_previews_rounded_when_relaid_or_ghosted() {
         kind: NodeKind::Rect {
             size: Size::new(40.0, 20.0),
             corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -5106,6 +5130,7 @@ fn a_variable_cell_previews_on_what_reads_it() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -5173,6 +5198,7 @@ fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -5264,6 +5290,7 @@ fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -5358,6 +5385,7 @@ fn an_effect_binding_previews_as_the_number_it_will_draw() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

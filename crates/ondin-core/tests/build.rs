@@ -16,6 +16,7 @@ fn rect(w: f64, h: f64) -> NodeKind {
     NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -2577,6 +2578,7 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
         NodeKind::Rect {
             size: ondin_core::kurbo::Size::new(100.0, 60.0),
             corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(10.0),
+            corner_smoothing: 0.0,
         },
         (7.0, 3.0),
     );

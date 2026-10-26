@@ -1254,6 +1254,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(80.0, 60.0),
                     corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

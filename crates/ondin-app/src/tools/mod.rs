@@ -1682,6 +1682,7 @@ pub fn create_rect(
             kind: NodeKind::Rect {
                 size,
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(origin.to_vec2())),
             name: None,
@@ -1820,6 +1821,7 @@ fn image_ops(
         kind: NodeKind::Rect {
             size,
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate(origin.to_vec2())),
         name,
@@ -3169,6 +3171,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(50.0, 50.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((100.0, 100.0))),
                 name: None,
@@ -3278,6 +3281,7 @@ mod tests {
         let rect = |size: Size| NodeKind::Rect {
             size,
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             Operation::CreateNode {
@@ -3487,6 +3491,7 @@ mod tests {
         let rect = || NodeKind::Rect {
             size: Size::new(100.0, 100.0),
             corner_radii: ondin_core::kurbo::RoundedRectRadii::new(16.0, 0.0, 0.0, 0.0),
+            corner_smoothing: 0.0,
         };
         let path = || {
             let mut pen = BezPath::new();
@@ -3610,6 +3615,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3956,6 +3962,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3967,6 +3974,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((80.0, 0.0))),
                 name: None,
@@ -4040,6 +4048,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(50.0, 50.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4685,6 +4694,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(80.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((0.0, 120.0))),
                 name: None,
@@ -6219,6 +6229,7 @@ mod tests {
                     kind: NodeKind::Rect {
                         size: Size::new(100.0, 100.0),
                         corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -6278,6 +6289,7 @@ mod tests {
         let square = || NodeKind::Rect {
             size: Size::new(20.0, 20.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             Operation::CreateNode {
@@ -6558,6 +6570,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(200.0, 120.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -6991,6 +7004,7 @@ mod tests {
                     kind: NodeKind::Rect {
                         size: Size::new(20.0, 10.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: Some(Affine::translate((10.0, 10.0))),
                     name: None,
@@ -7065,6 +7079,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -7160,6 +7175,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(side, side),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -7380,6 +7396,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((0.0, 100.0))),
                 name: None,
@@ -8154,6 +8171,7 @@ mod tests {
             NodeKind::Rect {
                 size: Size::new(200.0, 100.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             "it fits, so it keeps its pixel size"
         );
@@ -8747,6 +8765,7 @@ mod overflow_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(1e-306, 1e-306),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::scale(1e308)),
                 name: None,
@@ -8758,6 +8777,7 @@ mod overflow_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((80.0, 0.0))),
                 name: None,
@@ -8879,6 +8899,7 @@ mod unrepresentable_basis_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 40.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::new([1.0, 2.0, 2.0, 4.0, 0.0, 0.0])),
                 name: None,
@@ -8891,6 +8912,7 @@ mod unrepresentable_basis_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((80.0, 0.0))),
                 name: None,

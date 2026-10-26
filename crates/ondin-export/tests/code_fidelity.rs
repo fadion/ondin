@@ -109,6 +109,7 @@ impl Doc {
             NodeKind::Rect {
                 size: Size::new(w, h),
                 corner_radii: RoundedRectRadii::from_single_radius(r),
+                corner_smoothing: 0.0,
             },
             Affine::translate((x, y)),
             "Rect",
@@ -734,6 +735,7 @@ fn a_join_on_mixed_corners_matches_the_canvas() {
             NodeKind::Rect {
                 size: Size::new(120.0, 80.0),
                 corner_radii: RoundedRectRadii::new(20.0, 0.0, 0.0, 0.0),
+                corner_smoothing: 0.0,
             },
             Affine::translate((30.0 + i as f64 * 160.0, 30.0)),
             "Tab",
@@ -836,6 +838,7 @@ fn rotation_matches_the_canvas() {
         NodeKind::Rect {
             size: Size::new(80.0, 40.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         Affine::translate((60.0, 40.0)) * Affine::rotate(0.4),
         "Tilted",

@@ -55,6 +55,7 @@ fn doc(ink: (u8, u8, u8), size: f64, panel: bool) -> Doc {
             kind: NodeKind::Rect {
                 size: Size::new(400.0, 200.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("Panel".into()),

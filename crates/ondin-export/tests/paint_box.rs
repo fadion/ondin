@@ -38,6 +38,7 @@ fn stretched() -> (Document, Resolved, NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(50.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,

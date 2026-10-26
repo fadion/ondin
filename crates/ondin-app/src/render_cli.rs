@@ -748,6 +748,7 @@ mod tests {
         let badge = || NodeKind::Rect {
             size: Size::new(8.0, 8.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
             id,

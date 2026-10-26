@@ -1912,6 +1912,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2048,6 +2049,7 @@ mod pointer_slot_tests {
             kind: ondin_core::NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2218,6 +2220,7 @@ mod mixed_hex_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2857,6 +2860,7 @@ mod radial_centre_tests {
                 kind: NodeKind::Rect {
                     size: BOX,
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3152,6 +3156,7 @@ mod grid_orphan_tests {
                 NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             Operation::SetLayoutGrids {

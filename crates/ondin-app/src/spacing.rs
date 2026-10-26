@@ -1047,6 +1047,7 @@ mod canvas_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(w, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2166,6 +2167,7 @@ mod canvas_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(400.0, 200.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

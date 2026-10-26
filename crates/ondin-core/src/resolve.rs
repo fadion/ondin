@@ -492,9 +492,15 @@ fn with_bound_corners(doc: &Document, id: NodeId, used: Option<Used>) -> Option<
         .as_ref()
         .and_then(|u| u.kind.as_ref())
         .unwrap_or_else(|| node.kind());
-    let NodeKind::Rect { size, corner_radii } = kind else {
+    let NodeKind::Rect {
+        size,
+        corner_radii,
+        corner_smoothing,
+    } = kind
+    else {
         return used;
     };
+    let corner_smoothing = *corner_smoothing;
     let Some(drawn) = doc.resolve_corners(id, *corner_radii) else {
         return used;
     };
@@ -507,6 +513,7 @@ fn with_bound_corners(doc: &Document, id: NodeId, used: Option<Used>) -> Option<
     u.kind = Some(NodeKind::Rect {
         size,
         corner_radii: drawn,
+        corner_smoothing,
     });
     Some(u)
 }
@@ -1505,6 +1512,7 @@ mod measurable_bounds_tests {
         NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     }
 
@@ -1803,6 +1811,7 @@ mod used_geometry_tests {
         NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     }
 

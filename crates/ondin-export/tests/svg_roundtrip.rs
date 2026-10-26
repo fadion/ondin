@@ -103,6 +103,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(6.0),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,
@@ -262,6 +263,46 @@ fn a_rounded_polygon_and_star_round_trip_with_their_rounding() {
     }
 }
 
+/// A smoothed rect is written as its outline, not as a `<rect rx>`, whose
+/// corners are circular, and comes back with the smoothed area.
+///
+/// flip: the writer's `filter` on smoothing removed → fails at the no-`<rect`
+/// assertion.
+#[test]
+fn a_smoothed_rect_round_trips_as_its_outline() {
+    use ondin_core::kurbo::Shape;
+    let mut ids = IdSource::new(0x5252);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let id = ids.mint();
+    let kind = NodeKind::Rect {
+        size: Size::new(120.0, 80.0),
+        corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(20.0),
+        corner_smoothing: 0.6,
+    };
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind: kind.clone(),
+        transform: None,
+        name: None,
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = svg_of(&doc, &res, &[id]);
+    assert!(!out.contains("<rect"), "{out}");
+    let (back, got) = reimport(&out);
+    let NodeKind::Path { path, .. } = back.get(got[0]).unwrap().kind() else {
+        panic!("{out}");
+    };
+    let want = ondin_core::geometry::local_path(&kind)
+        .unwrap()
+        .area()
+        .abs();
+    assert!((path.area().abs() - want).abs() < want * 1e-3);
+}
+
 /// A group's opacity survives as the group's: `opacity` on a `<g>` composites the
 /// group as a unit, and flattening it would draw the overlap twice as dark.
 #[test]
@@ -277,6 +318,7 @@ fn a_group_keeps_its_opacity_rather_than_fading_each_child() {
         kind: NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate((at, 0.0))),
         name: None,
@@ -348,6 +390,7 @@ fn an_exclusion_comes_back_with_its_hole() {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -359,6 +402,7 @@ fn an_exclusion_comes_back_with_its_hole() {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((50.0, 0.0))),
             name: None,
@@ -897,6 +941,7 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 80.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -974,6 +1019,7 @@ fn an_effect_stack_round_trips_as_the_same_stack() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((20.0, 20.0))),
             name: None,
@@ -1066,6 +1112,7 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,
@@ -1185,6 +1232,7 @@ fn a_layers_name_survives_the_round_trip() {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 30.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(r#"Ampersand & "angle" <bracket>"#.into()),
@@ -1196,6 +1244,7 @@ fn a_layers_name_survives_the_round_trip() {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((60.0, 0.0))),
             name: Some("Two fills".into()),
@@ -1292,6 +1341,7 @@ fn the_writers_own_clip_spelling_round_trips() {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,

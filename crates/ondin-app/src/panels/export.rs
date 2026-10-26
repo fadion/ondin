@@ -2670,6 +2670,7 @@ mod tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(40.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2864,6 +2865,7 @@ mod tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(100.0, 60.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3012,6 +3014,7 @@ mod tests {
             kind: ondin_core::NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(w, h),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3106,6 +3109,7 @@ mod export_all_scope_tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(40.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Icon".into()),
@@ -3165,6 +3169,7 @@ mod export_all_scope_tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(40.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some(format!("Sibling {i}")),
@@ -3356,6 +3361,7 @@ mod export_all_scope_tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(40.0, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Icon".into()),
@@ -3440,6 +3446,7 @@ mod export_all_scope_tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(40.0, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Icon".into()),
@@ -3520,6 +3527,7 @@ mod export_all_scope_tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(40.0, 30.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Icon".into()),

@@ -1353,7 +1353,11 @@ impl RenderOverrides {
                         let drawn = doc.resolved_paint_in(&t, n, &paint).into_owned();
                         self.set_paint(n, drawn);
                     }
-                    if let Some(NodeKind::Rect { size, corner_radii }) = self.current_kind(doc, n)
+                    if let Some(NodeKind::Rect {
+                        size,
+                        corner_radii,
+                        corner_smoothing,
+                    }) = self.current_kind(doc, n)
                         && let Some(radii) = doc.resolve_corners_in(&t, n, corner_radii)
                     {
                         self.set_kind(
@@ -1363,6 +1367,7 @@ impl RenderOverrides {
                             NodeKind::Rect {
                                 size,
                                 corner_radii: radii,
+                                corner_smoothing,
                             },
                         );
                         self.moved.insert(n);
@@ -1453,6 +1458,7 @@ impl RenderOverrides {
                 let NodeKind::Rect {
                     size,
                     mut corner_radii,
+                    corner_smoothing,
                 } = self.current_kind(doc, *id)?
                 else {
                     return None;
@@ -1471,7 +1477,16 @@ impl RenderOverrides {
                         *slot = n;
                     }
                 }
-                self.set_kind(doc, res, *id, NodeKind::Rect { size, corner_radii });
+                self.set_kind(
+                    doc,
+                    res,
+                    *id,
+                    NodeKind::Rect {
+                        size,
+                        corner_radii,
+                        corner_smoothing,
+                    },
+                );
                 self.moved.insert(*id);
             }
             // A width's or height's binding previews as the size it will draw, over
@@ -1810,17 +1825,20 @@ fn specified_kind(doc: &Document, id: NodeId) -> Option<NodeKind> {
 /// `kind` with `n`'s bound corners read in the mode in force, for a rect.
 fn with_corners_drawn(doc: &Document, n: &ondin_core::Node, kind: NodeKind) -> NodeKind {
     match kind {
-        NodeKind::Rect { size, corner_radii } if n.corner_vars().iter().any(Option::is_some) => {
-            NodeKind::Rect {
-                size,
-                corner_radii: doc.corners_drawn_in(
-                    doc.variables(),
-                    n.id(),
-                    corner_radii,
-                    n.corner_vars(),
-                ),
-            }
-        }
+        NodeKind::Rect {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } if n.corner_vars().iter().any(Option::is_some) => NodeKind::Rect {
+            size,
+            corner_radii: doc.corners_drawn_in(
+                doc.variables(),
+                n.id(),
+                corner_radii,
+                n.corner_vars(),
+            ),
+            corner_smoothing,
+        },
         k => k,
     }
 }

@@ -193,6 +193,7 @@ mod tests {
             NodeKind::Rect {
                 size: one,
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             NodeKind::Ellipse { size: one },
             NodeKind::Polygon {

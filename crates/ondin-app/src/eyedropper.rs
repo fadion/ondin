@@ -668,6 +668,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((x, 0.0))),
             name: None,

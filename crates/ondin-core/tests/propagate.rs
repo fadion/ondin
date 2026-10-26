@@ -76,6 +76,7 @@ fn fixture() -> F {
             NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         create(t, m, 1, text_kind("Label")),
@@ -505,6 +506,7 @@ fn rect_kind() -> NodeKind {
     NodeKind::Rect {
         size: Size::new(5.0, 5.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 

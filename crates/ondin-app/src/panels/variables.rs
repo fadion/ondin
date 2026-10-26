@@ -3556,6 +3556,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3623,6 +3624,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4361,6 +4363,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

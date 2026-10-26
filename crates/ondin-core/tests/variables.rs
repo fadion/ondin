@@ -74,6 +74,7 @@ fn fixture() -> F {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 20.0),
                 corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -576,6 +577,7 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1019,6 +1021,7 @@ fn flex_frame(f: &mut F) -> NodeId {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 20.0),
                     corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -1462,6 +1465,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                         kind: NodeKind::Rect {
                             size: Size::new(10.0, 10.0),
                             corner_radii: RoundedRectRadii::from_single_radius(1.0),
+                            corner_smoothing: 0.0,
                         },
                         transform: None,
                         name: None,

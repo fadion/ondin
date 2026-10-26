@@ -1095,7 +1095,11 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         O::SetTextVars { .. } => Some("Type"),
         O::SetGeometry { geometry, .. } => match geometry {
             G::Size(_) | G::LineEnd(_) => Some("Transform"),
-            G::CornerRadius(_) | G::CornerRadii(_) | G::Sides(_) | G::InnerRatio(_) => {
+            G::CornerRadius(_)
+            | G::CornerRadii(_)
+            | G::CornerSmoothing(_)
+            | G::Sides(_)
+            | G::InnerRatio(_) => {
                 Some("Appearance")
             }
             G::TextSizing(_) => Some("Type"),
@@ -1993,6 +1997,7 @@ mod tests {
         let rect = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let create = |id, parent, kind, name: &str| Operation::CreateNode {
             id,
@@ -3625,6 +3630,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(6.0, 6.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Dot".into()),
@@ -4440,6 +4446,7 @@ mod tests {
                     kind: NodeKind::Rect {
                         size: ondin_core::kurbo::Size::new(4.0, 4.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -4560,6 +4567,7 @@ mod tests {
                 NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 "Label",
             ),
@@ -5085,6 +5093,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(4.0, 4.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("Dot".into()),

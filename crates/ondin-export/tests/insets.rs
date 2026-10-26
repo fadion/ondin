@@ -69,6 +69,7 @@ fn pinned() -> (Document, Vec<NodeId>) {
     let rect = |w, h| NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let frame = add(
         &mut doc,

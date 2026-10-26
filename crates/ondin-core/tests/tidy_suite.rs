@@ -396,6 +396,7 @@ fn tidy_up_moves_layers_by_their_world_boxes() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((x, 0.0))),
             name: None,

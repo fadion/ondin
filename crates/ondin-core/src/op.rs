@@ -1255,6 +1255,8 @@ pub enum GeometryPatch {
     /// Per-corner radii. The inverse of *either* corner patch is always this one,
     /// so a uniform set can be undone to four unequal values.
     CornerRadii(RoundedRectRadii),
+    /// A rect's corner smoothing, `0..=1` (`geometry::smoothed_rect`).
+    CornerSmoothing(f64),
     /// Vertex count: a polygon's sides, or a star's points.
     Sides(u32),
     /// A star's inner radius as a fraction of its outer one, 0..=1.
@@ -1320,6 +1322,7 @@ impl GeometryPatch {
             | GeometryPatch::BoolOp(_) => true,
             GeometryPatch::CornerRadius(_)
             | GeometryPatch::CornerRadii(_)
+            | GeometryPatch::CornerSmoothing(_)
             | GeometryPatch::Sides(_)
             | GeometryPatch::InnerRatio(_) => false,
         }
@@ -1345,7 +1348,10 @@ impl GeometryPatch {
         let size = |s: &kurbo::Size| s.width.is_finite() && s.height.is_finite();
         match self {
             Self::Size(s) => size(s),
-            Self::CornerRadius(v) | Self::InnerRatio(v) | Self::TextPathOffset(v) => v.is_finite(),
+            Self::CornerRadius(v)
+            | Self::CornerSmoothing(v)
+            | Self::InnerRatio(v)
+            | Self::TextPathOffset(v) => v.is_finite(),
             Self::CornerRadii(r) => [r.top_left, r.top_right, r.bottom_right, r.bottom_left]
                 .iter()
                 .all(|v| v.is_finite()),
@@ -1790,6 +1796,7 @@ mod changes_nothing_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

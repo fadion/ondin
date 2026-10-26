@@ -44,6 +44,7 @@ fn frame_with_a_small_rect() -> (Document, Resolved, NodeId, NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 50.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(ondin_core::kurbo::Affine::translate((150.0, 125.0))),
             name: Some("Button".into()),
@@ -314,6 +315,7 @@ fn thin_rect(w: f64, h: f64) -> (Document, Resolved, NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(w, h),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

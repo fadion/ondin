@@ -67,6 +67,7 @@ fn abutting_pair() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(800.0, SPLIT),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((0.0, 0.0))),
             name: None,
@@ -78,6 +79,7 @@ fn abutting_pair() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(800.0, 500.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((0.0, SPLIT))),
             name: None,
@@ -170,6 +172,7 @@ fn a_sub_pixel_shape_survives_snapping() {
         kind: NodeKind::Rect {
             size: Size::new(400.0, 2.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate((0.0, 50.0))),
         name: None,

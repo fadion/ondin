@@ -2287,6 +2287,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(24.0, 24.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Close".into()),

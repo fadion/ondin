@@ -62,6 +62,7 @@ fn fixture() -> F {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 20.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -260,6 +261,7 @@ fn paste_properties_carries_a_bound_opacity_by_the_paste_rule() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -608,6 +610,7 @@ fn paste_properties_carries_a_bound_stroke_width_by_the_paste_rule() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -682,6 +685,7 @@ fn paste_properties_carries_effects_by_the_paste_rule() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

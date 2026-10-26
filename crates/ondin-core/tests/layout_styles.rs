@@ -64,6 +64,7 @@ fn fixture() -> F {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -366,6 +367,7 @@ fn a_layout_style_detaches_a_child_size_its_layout_computes() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

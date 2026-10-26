@@ -210,6 +210,7 @@ fn a_nested_frame_clips_inside_its_parent() {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((5.0, 5.0))),
                 name: None,
@@ -403,6 +404,7 @@ fn a_bound_stroke_width_exports_at_its_number() {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 20.0),
                 corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3731,6 +3733,7 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -3895,6 +3898,7 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
             kind: NodeKind::Rect {
                 size: Size::new(200.0, 200.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((1000.0, 1000.0))),
             name: None,
@@ -4059,6 +4063,7 @@ fn shared_image_export(n: usize) -> String {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(ondin_core::kurbo::Affine::translate((30.0 * i as f64, 0.0))),
             name: None,

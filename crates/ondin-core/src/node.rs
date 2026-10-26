@@ -555,10 +555,13 @@ pub enum NodeKind {
     Group,
     /// `corner_radii` is per corner (§5.3). A uniform radius is the same value
     /// four times — there is no separate scalar, so nothing has to decide which
-    /// of two fields wins.
+    /// of two fields wins. `corner_smoothing`, `0..=1`, eases each rounded corner
+    /// into its sides (`geometry::smoothed_rect`); 0 is a circular corner.
     Rect {
         size: Size,
         corner_radii: RoundedRectRadii,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     Ellipse {
         size: Size,
@@ -798,8 +801,10 @@ impl NodeKind {
             NodeKind::Rect {
                 size: s,
                 corner_radii,
+                corner_smoothing,
             } => {
                 size(s)
+                    && corner_smoothing.is_finite()
                     && [
                         corner_radii.top_left,
                         corner_radii.top_right,
@@ -1376,6 +1381,7 @@ pub(crate) mod kind_fixture {
             NodeKind::Rect {
                 size: one,
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             NodeKind::Ellipse { size: one },
             NodeKind::Polygon {

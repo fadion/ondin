@@ -21,6 +21,7 @@ fn render(effects: Vec<Effect>) -> (Vec<u8>, usize) {
         NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         },
         effects,
     )
@@ -502,6 +503,7 @@ fn render_with(opacity: f32, clip: bool, effects: Vec<Effect>) -> (Vec<u8>, usiz
         NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         }
     };
     doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -647,6 +649,7 @@ fn render_view(effects: &[Effect], view: Rect) -> Vec<u8> {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((30.0, 30.0))),
             name: None,

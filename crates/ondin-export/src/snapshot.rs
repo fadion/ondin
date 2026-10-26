@@ -159,6 +159,9 @@ pub enum Geometry {
         height: f64,
         /// Per corner, named so a reader need not know the positional order.
         corner_radii: RoundedRectRadii,
+        /// `0..=1`, absent at 0 (circular corners).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     Ellipse {
         width: f64,
@@ -501,10 +504,15 @@ fn geometry(kind: &NodeKind) -> Geometry {
             width: size.width,
             height: size.height,
         },
-        NodeKind::Rect { size, corner_radii } => Geometry::Rect {
+        NodeKind::Rect {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } => Geometry::Rect {
             width: size.width,
             height: size.height,
             corner_radii: *corner_radii,
+            corner_smoothing: *corner_smoothing,
         },
         NodeKind::Ellipse { size } => Geometry::Ellipse {
             width: size.width,

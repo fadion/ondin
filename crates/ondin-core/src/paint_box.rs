@@ -303,6 +303,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 50.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -421,6 +422,7 @@ mod tests {
         let wide = NodeKind::Rect {
             size: Size::new(300.0, 50.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let drawn = drawn_paint(Cow::Borrowed(node.paint()), node.kind().box_size(), &wide);
         let Some(Brush::Gradient(g)) = drawn.fills[0].brush.literal() else {

@@ -35,6 +35,7 @@ fn rect(id: NodeId, parent: NodeId, index: usize, name: &str, at: (f64, f64)) ->
         kind: NodeKind::Rect {
             size: Size::new(20.0, 20.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate(at)),
         name: Some(name.into()),

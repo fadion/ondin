@@ -414,13 +414,19 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
         NodeKind::Artboard { size, .. } => {
             Some(Rect::new(0.0, 0.0, size.width, size.height).to_path(TOLERANCE))
         }
-        NodeKind::Rect { size, corner_radii } => {
+        NodeKind::Rect {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } => {
             let rect = Rect::new(0.0, 0.0, size.width, size.height);
             // `from_rect` clamps each radius to half the shorter side, so an
             // over-large corner rounds as far as it can rather than turning the
             // outline inside out.
             Some(if is_square_cornered(corner_radii) {
                 rect.to_path(TOLERANCE)
+            } else if *corner_smoothing > 0.0 {
+                smoothed_rect(*size, *corner_radii, *corner_smoothing)
             } else {
                 RoundedRect::from_rect(rect, *corner_radii).to_path(TOLERANCE)
             })
@@ -548,6 +554,108 @@ fn rounded_star(path: BezPath, radius: f64) -> BezPath {
     }
     let vertices = path.elements().len().saturating_sub(1);
     round_corners(&path, &vec![radius; vertices])
+}
+
+/// A rect's outline with each rounded corner smoothed by `smoothing` (`0..=1`):
+/// the corner's arc is shortened to `90° × (1 − smoothing)` and eased into both
+/// sides by a cubic, so the curvature grows from the side rather than jumping
+/// to the radius — Figma's corner smoothing, after its published construction.
+///
+/// A corner takes `(1 + smoothing) × radius` of each side. That is capped at half
+/// the shorter side, the smoothing giving way first, so neighbours cannot meet.
+/// A smoothing of 0 draws circular corners, the outline `RoundedRect` draws.
+pub fn smoothed_rect(size: Size, radii: RoundedRectRadii, smoothing: f64) -> BezPath {
+    let (w, h) = (size.width, size.height);
+    let budget = (w.min(h) / 2.0).max(0.0);
+    let s0 = if smoothing.is_nan() {
+        0.0
+    } else {
+        smoothing.clamp(0.0, 1.0)
+    };
+    // Corners clockwise from the top right: where the corner is, the direction
+    // the outline travels into it, and the direction it leaves in.
+    let corners = [
+        (
+            Point::new(w, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.0, 1.0),
+            radii.top_right,
+        ),
+        (
+            Point::new(w, h),
+            Vec2::new(0.0, 1.0),
+            Vec2::new(-1.0, 0.0),
+            radii.bottom_right,
+        ),
+        (
+            Point::new(0.0, h),
+            Vec2::new(-1.0, 0.0),
+            Vec2::new(0.0, -1.0),
+            radii.bottom_left,
+        ),
+        (
+            Point::new(0.0, 0.0),
+            Vec2::new(0.0, -1.0),
+            Vec2::new(1.0, 0.0),
+            radii.top_left,
+        ),
+    ];
+    // A corner's radius, smoothing and reach along each side, all clamped.
+    let reach = |r: f64| {
+        let r = if r.is_nan() {
+            0.0
+        } else {
+            r.clamp(0.0, budget)
+        };
+        if r <= 0.0 {
+            return (0.0, 0.0, 0.0);
+        }
+        let s = s0.min((budget / r - 1.0).max(0.0));
+        (r, s, ((1.0 + s) * r).min(budget))
+    };
+    let mut path = BezPath::new();
+    path.move_to(Point::new(reach(radii.top_left).2, 0.0));
+    for (k, u, v, radius) in corners {
+        let (r, s, p) = reach(radius);
+        if r <= 0.0 {
+            path.line_to(k);
+            continue;
+        }
+        let arc_deg = 90.0 * (1.0 - s);
+        let arc_section = (arc_deg / 2.0).to_radians().sin() * r * std::f64::consts::SQRT_2;
+        let alpha = (90.0 - arc_deg) / 2.0;
+        let beta = 45.0 * s;
+        let c = r * (alpha / 2.0).to_radians().tan() * beta.to_radians().cos();
+        let d = c * beta.to_radians().tan();
+        let b = (p - arc_section - c - d) / 3.0;
+        let a = 2.0 * b;
+        // `along` back from the corner on the side coming in, `across` out along
+        // the side going on.
+        let at = |along: f64, across: f64| k - u * along + v * across;
+        path.line_to(at(p, 0.0));
+        let e1 = at(p - a - b - c, d);
+        path.curve_to(at(p - a, 0.0), at(p - a - b, 0.0), e1);
+        let e2 = at(d, d + arc_section);
+        let arc = kurbo::SvgArc {
+            from: e1,
+            to: e2,
+            radii: Vec2::new(r, r),
+            x_rotation: 0.0,
+            large_arc: false,
+            sweep: true,
+        };
+        match kurbo::Arc::from_svg_arc(&arc) {
+            Some(arc) => arc.append_iter(TOLERANCE).for_each(|el| path.push(el)),
+            None => path.line_to(e2),
+        }
+        path.curve_to(
+            at(0.0, d + arc_section + c),
+            at(0.0, d + arc_section + b + c),
+            at(0.0, p),
+        );
+    }
+    path.close_path();
+    path
 }
 
 /// Whether a rect's radii round nothing — every corner at or below zero.
@@ -696,13 +804,16 @@ pub fn effective_sides(kind: &NodeKind, stroke: &Stroke) -> StrokeSides {
 /// sharing it, where cutting at the straight edge would leave corners bare.
 ///
 /// The radii come back off [`RoundedRect::from_rect`] rather than being clamped
-/// here, so the arc is the same curve the fill uses. A corner with no radius
+/// here, so the arc is the same curve the fill uses — a circular one: a smoothed
+/// rect's per-side stroke keeps circular corners. A corner with no radius
 /// contributes its sharp vertex.
 ///
 /// `None` for any kind [`stroke_sides_apply`] rejects.
 pub fn side_path(kind: &NodeKind, side: Side) -> Option<BezPath> {
     let (size, corner_radii) = match kind {
-        NodeKind::Rect { size, corner_radii } => (*size, *corner_radii),
+        NodeKind::Rect {
+            size, corner_radii, ..
+        } => (*size, *corner_radii),
         // A frame is the same box with no radii, so its four sides are four
         // straight edges meeting at sharp vertices — the `radius == 0` branch
         // below, which a square-cornered rect already takes.
@@ -1328,6 +1439,7 @@ mod tests {
         NodeKind::Rect {
             size: Size::new(100.0, 60.0),
             corner_radii: radii,
+            corner_smoothing: 0.0,
         }
     }
 
@@ -1648,6 +1760,111 @@ mod tests {
         assert!((top - inset).abs() < 1e-3, "top at {top}, want {inset}");
     }
 
+    /// Every segment of `path` leaves in the direction the one before arrived,
+    /// except at the points `corners` names: the outline has no kinks.
+    fn kinks(path: &BezPath) -> Vec<Point> {
+        use kurbo::ParamCurveDeriv;
+        let tangent = |seg: &PathSeg, t: f64| -> Vec2 {
+            match seg {
+                PathSeg::Line(l) => l.p1 - l.p0,
+                PathSeg::Quad(q) => q.deriv().eval(t).to_vec2(),
+                PathSeg::Cubic(c) => c.deriv().eval(t).to_vec2(),
+            }
+        };
+        let segs: Vec<PathSeg> = path.segments().filter(|s| s.arclen(1e-6) > 1e-9).collect();
+        let mut out = Vec::new();
+        for k in 0..segs.len() {
+            let (a, b) = (&segs[k], &segs[(k + 1) % segs.len()]);
+            let (ta, tb) = (tangent(a, 1.0), tangent(b, 0.0));
+            if ta.hypot() < 1e-12 || tb.hypot() < 1e-12 {
+                continue;
+            }
+            let cos = ta.normalize().dot(tb.normalize());
+            if cos < 1.0 - 1e-6 {
+                out.push(a.eval(1.0));
+            }
+        }
+        out
+    }
+
+    /// A smoothed rect, over sizes, radii and smoothings: it fills its box
+    /// exactly, has no kink, loses area as smoothing grows, and at 0 is the
+    /// circular `RoundedRect`.
+    ///
+    /// flip: `smoothed_rect` dropping the arc (a line from `e1` to `e2`) → fails
+    /// at the kink assertion.
+    #[test]
+    fn a_smoothed_rect_fills_its_box_without_kinks_and_eases_its_corners() {
+        for (w, h) in [(100.0, 100.0), (200.0, 60.0), (30.0, 90.0)] {
+            let size = Size::new(w, h);
+            for r in [2.0, 10.0, 25.0, 1e3] {
+                let radii = RoundedRectRadii::from_single_radius(r);
+                let circular = RoundedRect::from_rect(Rect::new(0.0, 0.0, w, h), radii)
+                    .to_path(TOLERANCE)
+                    .area()
+                    .abs();
+                let mut last = f64::INFINITY;
+                for s in [0.0, 0.3, 0.6, 1.0] {
+                    let path = smoothed_rect(size, radii, s);
+                    let at = format!("{w}x{h} r{r} s{s}");
+                    let b = path.bounding_box();
+                    assert!(
+                        b.x0.abs() < 1e-6
+                            && b.y0.abs() < 1e-6
+                            && (b.x1 - w).abs() < 1e-6
+                            && (b.y1 - h).abs() < 1e-6,
+                        "{at}: spans {b:?}"
+                    );
+                    assert!(kinks(&path).is_empty(), "{at}: kinks at {:?}", kinks(&path));
+                    let area = path.area().abs();
+                    assert!(area <= last + 1e-6, "{at}: area {area} grew from {last}");
+                    if s == 0.0 {
+                        assert!(
+                            (area - circular).abs() < circular * 1e-3,
+                            "{at}: {area} is not the circular {circular}"
+                        );
+                    }
+                    last = area;
+                }
+            }
+        }
+    }
+
+    /// A smoothed corner reaches `(1 + s) × r` along each side, so a 10-unit
+    /// radius at full smoothing leaves the top edge straight only from 20 in.
+    #[test]
+    fn a_smoothed_corner_reaches_further_along_its_sides() {
+        let path = smoothed_rect(
+            Size::new(200.0, 200.0),
+            RoundedRectRadii::from_single_radius(10.0),
+            1.0,
+        );
+        // The first point is where the top-left corner hands over to the top edge.
+        let Some(PathEl::MoveTo(start)) = path.elements().first().copied() else {
+            panic!("{path:?}")
+        };
+        assert!(
+            (start.x - 20.0).abs() < 1e-9 && start.y.abs() < 1e-9,
+            "{start:?}"
+        );
+    }
+
+    /// A square corner stays a sharp vertex amid smoothed ones, and a `NaN` or
+    /// negative smoothing draws circular corners.
+    #[test]
+    fn smoothing_leaves_square_corners_and_bad_values_alone() {
+        let radii = RoundedRectRadii::new(0.0, 12.0, 0.0, 12.0);
+        let path = smoothed_rect(Size::new(80.0, 80.0), radii, 0.6);
+        let sharp = kinks(&path);
+        assert_eq!(sharp.len(), 2, "{sharp:?}");
+        assert!(sharp.contains(&Point::new(0.0, 0.0)) && sharp.contains(&Point::new(80.0, 80.0)));
+        for s in [f64::NAN, -1.0] {
+            let a = smoothed_rect(Size::new(80.0, 80.0), radii, s).area();
+            let b = smoothed_rect(Size::new(80.0, 80.0), radii, 0.0).area();
+            assert_eq!(a, b, "smoothing {s}");
+        }
+    }
+
     /// The picking allowance reaches a few units outward from the edge, not far
     /// outside it; three distances are asserted so a canvas-wide allowance fails.
     #[test]
@@ -1655,6 +1872,7 @@ mod tests {
         let node = bare(NodeKind::Rect {
             size: Size::new(100.0, 50.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         });
         let slop = 4.0;
 
@@ -1998,10 +2216,12 @@ mod tests {
         let sharp = NodeKind::Rect {
             size,
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let soft = NodeKind::Rect {
             size,
             corner_radii: RoundedRectRadii::from_single_radius(20.0),
+            corner_smoothing: 0.0,
         };
         assert_eq!(local_bounds(&sharp, None), local_bounds(&soft, None));
     }

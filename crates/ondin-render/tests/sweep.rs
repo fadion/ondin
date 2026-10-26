@@ -27,6 +27,7 @@ fn render(start: f32) -> (Vec<u8>, usize) {
             kind: NodeKind::Rect {
                 size: Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,

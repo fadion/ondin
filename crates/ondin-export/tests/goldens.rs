@@ -144,6 +144,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(90.0, 50.0),
                 corner_radii: RoundedRectRadii::new(8.0, 4.0, 0.0, 12.0),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((20.0, 20.0))),
             name: Some("Rounded".into()),
@@ -221,6 +222,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -243,6 +245,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 60.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

@@ -4512,6 +4512,39 @@ impl OndinApp {
                     }
                 });
             }
+            app.corner_smoothing_field(ui, id);
+        });
+    }
+    /// A rect's corner smoothing as a percentage, under the per-corner fields:
+    /// how far each rounded corner eases into its sides (`geometry::smoothed_rect`).
+    fn corner_smoothing_field(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        let Some(NodeKind::Rect {
+            corner_smoothing, ..
+        }) = self.session.display_node(id).map(|n| n.kind())
+        else {
+            return;
+        };
+        let mut pct = corner_smoothing * 100.0;
+        let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+        ui.horizontal(|ui| {
+            let (resp, _) = ui::value_field_marked(
+                ui,
+                egui::vec2(fw, 28.0),
+                Prefix::Icon(icon::CIRCLE),
+                None,
+                &mut pct,
+                Scrub::whole(0.5).range(0.0..=100.0),
+                |d| d.suffix("%").max_decimals(0),
+            );
+            let resp =
+                resp.on_hover_text("Corner smoothing: how gradually each corner meets its sides");
+            self.edit_valve(
+                &resp,
+                Transaction(vec![Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::CornerSmoothing((pct / 100.0).clamp(0.0, 1.0)),
+                }]),
+            );
         });
     }
     /// A polygon's or star's corner radius, one value for every vertex. Unlike a
@@ -11843,6 +11876,7 @@ mod polish_tests {
         let rect = |r: f64| NodeKind::Rect {
             size: Size::new(40.0, 20.0),
             corner_radii: RoundedRectRadii::from_single_radius(r),
+            corner_smoothing: 0.0,
         };
         assert!(stroke_join_applies(&rect(0.0)));
         assert!(
@@ -12053,6 +12087,7 @@ mod mask_card_tests {
                 NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             )
         }
@@ -12922,6 +12957,7 @@ mod line_length_tests {
         let rect = size_prefixes(NodeKind::Rect {
             size: Size::new(100.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         });
         assert_eq!(
             rect,
@@ -13020,6 +13056,7 @@ mod frame_fill_tests {
         let rect = panel_titles(NodeKind::Rect {
             size: Size::new(100.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         });
         assert_eq!(
             rect.iter().filter(|t| *t == "FILL").count(),
@@ -13094,6 +13131,7 @@ mod frame_fill_tests {
                     kind: NodeKind::Rect {
                         size: Size::new(20.0, 20.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -13149,6 +13187,7 @@ mod frame_fill_tests {
         let rect = NodeKind::Rect {
             size: Size::new(100.0, 40.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let frame = NodeKind::Artboard {
             size: Size::new(200.0, 200.0),
@@ -13184,6 +13223,7 @@ mod frame_fill_tests {
             NodeKind::Rect {
                 size: Size::new(100.0, 40.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             Vec::new(),
         );
@@ -13319,6 +13359,7 @@ mod frame_fill_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -13400,6 +13441,7 @@ mod frame_fill_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -13473,6 +13515,7 @@ mod spacing_readout_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(ondin_core::kurbo::Affine::translate((x, 0.0))),
                 name: None,
@@ -13541,6 +13584,7 @@ mod scale_row_tests {
                     kind: NodeKind::Rect {
                         size: Size::new(100.0, 100.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: Some(Affine::translate((200.0 * i as f64, 0.0))),
                     name: None,
@@ -14221,6 +14265,7 @@ mod several_layer_binding_tests {
                     kind: NodeKind::Rect {
                         size: Size::new(40.0, 40.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -14343,6 +14388,7 @@ mod several_layer_binding_tests {
                     kind: NodeKind::Rect {
                         size: Size::new(10.0, 10.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -14596,6 +14642,7 @@ mod align_card_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((x, 0.0))),
                 name: None,
@@ -14749,6 +14796,7 @@ mod stroke_card_geometry_tests {
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(100.0, 100.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -14943,6 +14991,7 @@ mod fill_row_door_tests {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 60.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -15059,6 +15108,7 @@ mod effects_panel_tests {
                     kind: NodeKind::Rect {
                         size: ondin_core::kurbo::Size::new(100.0, 100.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -15691,6 +15741,7 @@ mod effects_multi_tests {
                     kind: NodeKind::Rect {
                         size: ondin_core::kurbo::Size::new(100.0, 100.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -16016,6 +16067,7 @@ mod multi_lock_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -16171,6 +16223,7 @@ mod multi_field_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at) * t),
             name: None,
@@ -16462,6 +16515,7 @@ mod multi_valve_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -16874,6 +16928,7 @@ mod rhythm_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -17154,6 +17209,7 @@ mod rhythm_tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -17853,6 +17909,7 @@ mod mixed_opacity_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -18054,6 +18111,7 @@ mod paint_hex_field_tests {
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(80.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -18236,6 +18294,7 @@ mod mixed_corner_radius_tests {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 60.0),
                 corner_radii: radii,
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -18586,6 +18645,7 @@ mod shipped_shared_readout_tests {
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(50.0, 50.0),
                     corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(*r),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -18780,6 +18840,7 @@ mod subject_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -19258,6 +19319,7 @@ mod paint_write_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -19312,6 +19374,7 @@ mod paint_write_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -19752,6 +19815,7 @@ mod paint_write_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20045,6 +20109,7 @@ mod paint_write_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -20124,6 +20189,7 @@ mod paint_write_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20186,6 +20252,7 @@ mod paint_write_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20259,6 +20326,7 @@ mod paint_write_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -20305,6 +20373,7 @@ mod paint_write_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20416,6 +20485,7 @@ mod mixed_spread_tests {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -20552,6 +20622,7 @@ mod mixed_spread_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -20615,6 +20686,7 @@ mod slot_decision_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((200.0 * i as f64, 0.0))),
                 name: None,
@@ -20693,6 +20765,7 @@ mod slot_decision_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(80.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -21082,6 +21155,7 @@ mod select_by_color_lock_tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((20.0 * index as f64, 0.0))),
             name: None,
@@ -21253,6 +21327,7 @@ mod inset_card_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 50.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((40.0, 30.0))),
                 name: None,
@@ -21283,6 +21358,7 @@ mod inset_card_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -21495,6 +21571,7 @@ mod inset_card_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -21579,6 +21656,7 @@ mod inset_card_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -21641,6 +21719,7 @@ mod inset_card_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -21952,6 +22031,7 @@ mod multi_xy_flex_tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -22082,6 +22162,7 @@ mod multi_xy_flex_tests {
         let rect = || NodeKind::Rect {
             size: Size::new(20.0, 20.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(200.0, 100.0),
@@ -22164,6 +22245,7 @@ mod effect_reorder_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 100.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

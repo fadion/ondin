@@ -1350,6 +1350,7 @@ mod tests {
         let rect = |size: f64| NodeKind::Rect {
             size: Size::new(size, size),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             Operation::CreateNode {

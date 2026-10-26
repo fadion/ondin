@@ -2755,6 +2755,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(w, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((300.0, 150.0))),
             name: None,
@@ -3012,6 +3013,7 @@ mod tests {
         let rect = NodeKind::Rect {
             size: Size::new(1.0, 1.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let path = NodeKind::Path {
             path: Default::default(),
@@ -3270,6 +3272,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(30.0, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -3382,6 +3385,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(30.0, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -3457,6 +3461,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3502,6 +3507,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(20.0, 20.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3978,6 +3984,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(50.0, 30.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

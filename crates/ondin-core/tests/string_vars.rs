@@ -531,6 +531,7 @@ fn a_mode_change_re_measures_a_bound_text_in_a_layout() {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

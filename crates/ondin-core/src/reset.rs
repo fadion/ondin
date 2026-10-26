@@ -229,9 +229,15 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
     match kind {
         NodeKind::Root | NodeKind::Group => Vec::new(),
         NodeKind::Artboard { size } | NodeKind::Ellipse { size } => vec![geo(G::Size(*size))],
-        NodeKind::Rect { size, corner_radii } => {
-            vec![geo(G::Size(*size)), geo(G::CornerRadii(*corner_radii))]
-        }
+        NodeKind::Rect {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } => vec![
+            geo(G::Size(*size)),
+            geo(G::CornerRadii(*corner_radii)),
+            geo(G::CornerSmoothing(*corner_smoothing)),
+        ],
         NodeKind::Polygon {
             size,
             sides,

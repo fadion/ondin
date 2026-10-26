@@ -21,6 +21,7 @@ fn rect() -> NodeKind {
     NodeKind::Rect {
         size: Size::new(100.0, 50.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -186,7 +187,8 @@ fn set_geometry_applies_and_reverses() {
         doc.get(r).unwrap().kind(),
         &NodeKind::Rect {
             size: Size::new(200.0, 80.0),
-            corner_radii: RoundedRectRadii::default()
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0
         }
     );
 
@@ -195,7 +197,8 @@ fn set_geometry_applies_and_reverses() {
         doc.get(r).unwrap().kind(),
         &NodeKind::Rect {
             size: Size::new(100.0, 50.0),
-            corner_radii: RoundedRectRadii::default()
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0
         }
     );
 }
@@ -257,6 +260,37 @@ fn a_polygon_and_star_corner_radius_applies_and_reverses() {
         assert!(hist.undo(&mut doc).unwrap().is_some());
         assert_eq!(doc.get(id).unwrap().kind(), &kind);
     }
+}
+
+/// A rect's corner smoothing is set, clamped to `0..=1`, and undone by
+/// `CornerSmoothing`; it saves only when set.
+#[test]
+fn a_rect_corner_smoothing_applies_clamps_reverses_and_saves_only_when_set() {
+    let (mut doc, mut ids, ab) = base();
+    let mut hist = History::new();
+    let r = ids.mint();
+    create(&mut hist, &mut doc, r, ab, rect());
+    let smoothing = |doc: &Document| match doc.get(r).unwrap().kind() {
+        NodeKind::Rect {
+            corner_smoothing, ..
+        } => *corner_smoothing,
+        other => panic!("{other:?}"),
+    };
+    for (asked, kept) in [(0.6, 0.6), (3.0, 1.0), (-1.0, 0.0)] {
+        hist.commit(
+            &mut doc,
+            Transaction(vec![Operation::SetGeometry {
+                id: r,
+                geometry: GeometryPatch::CornerSmoothing(asked),
+            }]),
+        )
+        .unwrap();
+        assert_eq!(smoothing(&doc), kept, "asked {asked}");
+        assert!(hist.undo(&mut doc).unwrap().is_some());
+        assert_eq!(smoothing(&doc), 0.0);
+    }
+    let json = serde_json::to_string(&rect()).unwrap();
+    assert!(!json.contains("corner_smoothing"), "{json}");
 }
 
 /// A square-cornered polygon saves without the field, so files written before it
@@ -1633,6 +1667,7 @@ fn deleting_the_last_layer_showing_an_image_leaves_the_table_alone() {
                 kind: NodeKind::Rect {
                     size: Size::new(200.0, 150.0),
                     corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -1931,6 +1966,7 @@ fn a_subtree_holding_an_orphan_is_refused() {
         kind: NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,

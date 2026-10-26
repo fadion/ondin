@@ -68,6 +68,7 @@ fn rich_document() -> (Document, NodeId) {
                 kind: NodeKind::Rect {
                     size: Size::new(100.0, 50.0),
                     corner_radii: RoundedRectRadii::new(8.0, 4.0, 0.0, 12.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(ondin_core::kurbo::Affine::translate((12.0, 34.0))),
                 name: None,
@@ -318,6 +319,7 @@ fn a_v1_file_carrying_all_three_old_shapes_migrates_through_every_step() {
         &NodeKind::Rect {
             size: Size::new(100.0, 50.0),
             corner_radii: RoundedRectRadii::from_single_radius(6.0),
+            corner_smoothing: 0.0,
         },
         "v1→v2: the scalar radius is spread over four corners"
     );
@@ -397,6 +399,7 @@ fn migration_spreads_a_v1_corner_radius_over_four_corners() {
         &NodeKind::Rect {
             size: Size::new(100.0, 50.0),
             corner_radii: RoundedRectRadii::from_single_radius(6.0),
+            corner_smoothing: 0.0,
         }
     );
 }
@@ -2782,6 +2785,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3258,6 +3262,7 @@ fn a_file_already_holding_a_non_finite_number_is_reported_by_name() {
         kind: NodeKind::Rect {
             size: Size::new(10.0, 20.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -4047,6 +4052,7 @@ fn a_blur_past_the_cap_loads_at_the_cap_and_its_delete_undoes() {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

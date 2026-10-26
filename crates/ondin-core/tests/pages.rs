@@ -19,6 +19,7 @@ fn rect() -> NodeKind {
     NodeKind::Rect {
         size: Size::new(40.0, 40.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 

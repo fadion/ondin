@@ -5350,6 +5350,7 @@ mod restore_children_tests {
         let rect = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(
@@ -5458,6 +5459,7 @@ mod restore_children_tests {
         let rect = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let frame = |w: f64| NodeKind::Artboard {
             size: Size::new(w, w),
@@ -5597,6 +5599,7 @@ mod restore_children_tests {
         let rect = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let frame = |w: f64| NodeKind::Artboard {
             size: Size::new(w, w),

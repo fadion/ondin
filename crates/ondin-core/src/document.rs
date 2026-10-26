@@ -3284,6 +3284,15 @@ pub(crate) fn apply_geometry_patch(
         (NodeKind::Rect { corner_radii, .. }, G::CornerRadii(new)) => {
             Ok(G::CornerRadii(std::mem::replace(corner_radii, *new)))
         }
+        (
+            NodeKind::Rect {
+                corner_smoothing, ..
+            },
+            G::CornerSmoothing(new),
+        ) => Ok(G::CornerSmoothing(std::mem::replace(
+            corner_smoothing,
+            new.clamp(0.0, 1.0),
+        ))),
         (NodeKind::Polygon { corner_radius, .. }, G::CornerRadius(new))
         | (NodeKind::Star { corner_radius, .. }, G::CornerRadius(new)) => {
             Ok(G::CornerRadius(std::mem::replace(corner_radius, *new)))
@@ -3502,6 +3511,7 @@ mod tests {
         let rect = || NodeKind::Rect {
             size: Size::new(5.0, 5.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(5.0, 5.0),
@@ -3822,6 +3832,7 @@ mod tests {
                 NodeKind::Rect {
                     size: Size::new(5.0, 5.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             );
             n.paint = paint;
@@ -3929,6 +3940,7 @@ mod tests {
                 NodeKind::Rect {
                     size: Size::new(5.0, 5.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
         ];

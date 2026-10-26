@@ -109,6 +109,7 @@ fn two_rect_doc() -> (Document, Resolved, NodeId, NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,
@@ -120,6 +121,7 @@ fn two_rect_doc() -> (Document, Resolved, NodeId, NodeId) {
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((1500.0, 1500.0))),
             name: None,
@@ -719,6 +721,7 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
         NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     } else {
         NodeKind::Line {
@@ -925,6 +928,7 @@ fn painted_rect(fills: Vec<Fill>, strokes: Vec<ondin_core::Stroke>) -> (Document
         kind: NodeKind::Rect {
             size: Size::new(40.0, 40.0),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -1332,6 +1336,7 @@ fn stroked_frame(strokes: Vec<ondin_core::Stroke>, opacity: f32) -> (Document, R
             kind: NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((5.0, 5.0))),
             name: None,
@@ -1735,6 +1740,7 @@ fn a_second_mask_ends_the_first_ones_run_instead_of_nesting() {
             kind: NodeKind::Rect {
                 size: Size::new(40.0, 40.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((5.0, 5.0))),
             name: None,
@@ -2125,6 +2131,7 @@ fn a_group_masked_by_a_group_that_masks_internally_is_not_culled_away() {
         let square = |w: f64| NodeKind::Rect {
             size: Size::new(w, w),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             node(
@@ -2250,6 +2257,7 @@ fn parked_containers(kind: NodeKind, n: usize) -> (Document, Resolved) {
     let rect = || NodeKind::Rect {
         size: Size::new(20.0, 20.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let c_kind_takes_paint = matches!(kind, NodeKind::Boolean { .. });
     let seen = ids.mint();

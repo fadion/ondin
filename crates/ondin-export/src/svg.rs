@@ -1762,9 +1762,15 @@ fn write_element(
     op: &str,
 ) {
     match kind {
-        // `<rect rx>` can only say one number, so unequal corners go out as the
-        // canvas's own outline (`local_path`).
-        NodeKind::Rect { size, corner_radii } => match geometry::uniform_radius(corner_radii) {
+        // `<rect rx>` can only say one circular radius, so unequal or smoothed
+        // corners go out as the canvas's own outline (`local_path`).
+        NodeKind::Rect {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } => match geometry::uniform_radius(corner_radii)
+            .filter(|r| *r <= 0.0 || *corner_smoothing <= 0.0)
+        {
             Some(r) => {
                 let rx = if r > 0.0 {
                     format!(r#" rx="{}""#, fmt(r))
@@ -2365,6 +2371,7 @@ mod def_count_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

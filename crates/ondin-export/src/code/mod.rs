@@ -432,6 +432,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(120.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((300.0, 200.0))),
                 name: Some("Card */ x".into()),
@@ -491,6 +492,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((10.0, 30.0))),
                 name: Some("Badge".into()),

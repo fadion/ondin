@@ -1988,6 +1988,7 @@ pub(crate) mod tests {
                 kind: ondin_core::NodeKind::Rect {
                     size: Size::new(200.0, 200.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3255,6 +3256,7 @@ pub(crate) mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(120.0, 40.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

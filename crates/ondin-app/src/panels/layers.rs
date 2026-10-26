@@ -2149,6 +2149,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -2232,6 +2233,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -2243,6 +2245,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -2405,6 +2408,7 @@ mod rename_layout_tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2567,6 +2571,7 @@ mod missing_picture_tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2668,6 +2673,7 @@ mod subtract_base_tests {
                     kind: NodeKind::Rect {
                         size: Size::new(10.0, 10.0),
                         corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -2765,6 +2771,7 @@ mod subtract_base_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3251,6 +3258,7 @@ mod tree_guide_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3481,6 +3489,7 @@ mod drop_indent_tests {
             kind: NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3562,6 +3571,7 @@ mod drop_indent_tests {
                 NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             Operation::SetMask {
@@ -3617,6 +3627,7 @@ mod drop_indent_tests {
                 NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             Operation::SetComponent {
@@ -3681,6 +3692,7 @@ mod drop_indent_tests {
                 NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             set(e),
@@ -4509,6 +4521,7 @@ mod autoscroll_ownership_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4625,6 +4638,7 @@ mod drag_start_sync_tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4908,6 +4922,7 @@ mod collapse_all_tests {
         let rect = |w: f64| NodeKind::Rect {
             size: Size::new(w, w),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         let (board, inside, boolean, a, b, empty) = (
             ids.mint(),
@@ -5118,6 +5133,7 @@ mod row_mark_tests {
         let rect = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(
@@ -5259,6 +5275,7 @@ mod row_mark_tests {
             kind: NodeKind::Rect {
                 size: Size::new(4.0, 4.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

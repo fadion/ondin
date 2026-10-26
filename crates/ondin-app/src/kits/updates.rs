@@ -1324,6 +1324,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: Size::new(30.0, 30.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1394,6 +1395,7 @@ mod tests {
                     kind: NodeKind::Rect {
                         size: Size::new(120.0, 40.0),
                         corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,

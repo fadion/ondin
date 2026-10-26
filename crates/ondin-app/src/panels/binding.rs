@@ -2267,6 +2267,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 20.0),
                     corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2630,7 +2631,9 @@ mod tests {
         extract(&mut app, FieldKey::Size { id: rect, axis: 0 });
         app.session.resolved = ondin_core::Resolved::rebuild(&app.session.doc);
         match app.session.resolved.used_kind(&app.session.doc, rect) {
-            Some(NodeKind::Rect { size, corner_radii }) => {
+            Some(NodeKind::Rect {
+                size, corner_radii, ..
+            }) => {
                 assert_eq!(corner_radii.bottom_right, 2.0, "corner");
                 assert_eq!(size.width, 40.0, "width");
             }
@@ -3053,6 +3056,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(10.0, 10.0),
                     corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3989,6 +3993,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: Size::new(40.0, 20.0),
                     corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

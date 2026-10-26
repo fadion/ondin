@@ -13,6 +13,7 @@ fn rect(w: f64, h: f64) -> NodeKind {
     NodeKind::Rect {
         size: Size::new(w, h),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -1129,6 +1130,7 @@ fn a_pivot_round_trips_through_the_variant_its_kind_gets() {
     let authored = NodeKind::Rect {
         size: Size::new(80.0, 40.0),
         corner_radii: Default::default(),
+        corner_smoothing: 0.0,
     };
     let emergent = NodeKind::Group;
     // A group's box need not start at the origin — it is its children's union —
@@ -1168,6 +1170,7 @@ fn an_authored_box_keeps_the_pivots_fraction_and_an_emergent_one_its_point() {
     let rect = NodeKind::Rect {
         size: Size::new(80.0, 40.0),
         corner_radii: Default::default(),
+        corner_smoothing: 0.0,
     };
     let before = Rect::new(0.0, 0.0, 80.0, 40.0);
     // Right edge, vertically centred.
@@ -1228,6 +1231,7 @@ fn the_centre_of_the_box_is_the_absence_of_a_pivot() {
     let rect = NodeKind::Rect {
         size: Size::new(80.0, 40.0),
         corner_radii: Default::default(),
+        corner_smoothing: 0.0,
     };
     // Offset, so "the centre" cannot be confused with the local origin.
     let box_ = Rect::new(-20.0, 10.0, 60.0, 50.0);
@@ -1330,6 +1334,7 @@ fn a_rounded_corner_is_split_between_the_two_sides_that_share_it() {
     let kind = NodeKind::Rect {
         size: Size::new(40.0, 20.0),
         corner_radii: RoundedRectRadii::from_single_radius(R),
+        corner_smoothing: 0.0,
     };
     let top = side_path(&kind, Side::Top).expect("a rect has sides");
     let Some(PathEl::MoveTo(start)) = top.elements().first().copied() else {
@@ -1709,6 +1714,7 @@ fn sides_survive_a_clamped_radius_and_a_collapsed_box() {
         let kind = NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: RoundedRectRadii::from_single_radius(r),
+            corner_smoothing: 0.0,
         };
         let sides: Vec<_> = Side::ALL
             .iter()
@@ -1733,6 +1739,7 @@ fn sides_survive_a_clamped_radius_and_a_collapsed_box() {
     let flat = NodeKind::Rect {
         size: Size::new(0.0, 0.0),
         corner_radii: RoundedRectRadii::from_single_radius(4.0),
+        corner_smoothing: 0.0,
     };
     for side in Side::ALL {
         let path = side_path(&flat, side).expect("still a rect");

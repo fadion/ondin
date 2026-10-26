@@ -1504,6 +1504,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(10.0, 10.0),
                 corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),
@@ -1821,6 +1822,7 @@ mod tests {
                 kind: NodeKind::Rect {
                     size: ondin_core::kurbo::Size::new(10.0, 10.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("CARD inner".into()),
@@ -1909,6 +1911,7 @@ mod tests {
             kind: NodeKind::Rect {
                 size: ondin_core::kurbo::Size::new(20.0, 10.0),
                 corner_radii: Default::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

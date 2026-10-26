@@ -2679,6 +2679,7 @@ mod tests {
         NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     }
 
@@ -3122,6 +3123,7 @@ mod flex_tests {
         NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     }
 

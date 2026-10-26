@@ -82,6 +82,7 @@ pub fn fixture() -> Fixture {
             kind: NodeKind::Rect {
                 size: Size::new(80.0, 40.0),
                 corner_radii: RoundedRectRadii::from_single_radius(6.0),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((20.0, 20.0))),
             name: None,
@@ -121,6 +122,7 @@ pub fn fixture() -> Fixture {
             kind: NodeKind::Rect {
                 size: Size::new(30.0, 30.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

@@ -1222,7 +1222,20 @@ impl Walk<'_> {
 
         let mut over_children = None;
         match &kind {
-            NodeKind::Rect { corner_radii, size } => {
+            NodeKind::Rect {
+                corner_radii,
+                size,
+                corner_smoothing,
+            } => {
+                if *corner_smoothing > 0.0
+                    && !ondin_core::geometry::is_square_cornered(corner_radii)
+                {
+                    self.report.approximate(format!(
+                        "{} {}: CSS has no corner smoothing, so its corners are circular",
+                        kind_word(node),
+                        label(node)
+                    ));
+                }
                 let half = size.width.min(size.height).max(0.0) * 0.5;
                 // Clamped per corner as the outline is, so CSS's own proportional
                 // scaling never has an overlap to resolve — against the bound size

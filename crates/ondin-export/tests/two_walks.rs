@@ -149,6 +149,7 @@ fn tree() -> Tree {
                 false => NodeKind::Rect {
                     size: Size::new(30.0, 20.0),
                     corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
                 },
             },
             transform: Some(Affine::translate((10.0 * i as f64, 10.0 * i as f64))),

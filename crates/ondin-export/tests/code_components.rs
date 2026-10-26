@@ -71,6 +71,7 @@ fn card(
             NodeKind::Rect {
                 size: Size::new(20.0, 20.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             (10.0, 10.0),
             "Icon",
@@ -460,6 +461,7 @@ fn button_set(badge: Badge) -> (Document, NodeId) {
     let rect = NodeKind::Rect {
         size: Size::new(8.0, 8.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     if badge != Badge::None {
         doc.apply(&Transaction(vec![
@@ -694,6 +696,7 @@ fn swap_card() -> (Document, NodeId) {
     let dot = || NodeKind::Rect {
         size: Size::new(10.0, 10.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let [star, star_dot, heart, heart_dot] = [(); 4].map(|_| ids.mint());
     let [card, slot, slot_dot] = [(); 3].map(|_| ids.mint());
@@ -859,6 +862,7 @@ fn shown_card() -> (Document, [NodeId; 2]) {
     let icon = || NodeKind::Rect {
         size: Size::new(12.0, 12.0),
         corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     doc.apply(&Transaction(vec![
         create(button, (root, 0), frame(80.0, 30.0), (0.0, 0.0), "Button"),
@@ -1063,6 +1067,7 @@ fn kit_badge() -> (Document, NodeId) {
             NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
                 corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             (5.0, 5.0),
             "Dot",
@@ -1217,6 +1222,7 @@ fn a_prop_never_takes_a_reserved_name() {
                 NodeKind::Rect {
                     size: Size::new(4.0, 4.0),
                     corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 (i as f64 * 6.0, 0.0),
                 name,

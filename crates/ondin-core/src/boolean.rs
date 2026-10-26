@@ -533,7 +533,7 @@ fn from_flo(paths: &[SimpleBezierPath]) -> Option<BezPath> {
             .filter(|(j, other)| {
                 *j != i
                     && <BezPath as kurbo::Shape>::area(other).abs() > own_area
-                    && <BezPath as kurbo::Shape>::contains(other, inside)
+                    && crate::geometry::winding(other, inside) != 0
             })
             .count();
         // Even depth is solid and odd is a hole; `Shape::area` is signed, so its
@@ -658,7 +658,7 @@ fn is_degenerate(subpath: &BezPath) -> bool {
 fn representative_point(subpath: &BezPath) -> Option<Point> {
     use kurbo::ParamCurve;
     let bounds = <BezPath as kurbo::Shape>::bounding_box(subpath);
-    if <BezPath as kurbo::Shape>::contains(subpath, bounds.center()) {
+    if crate::geometry::winding(subpath, bounds.center()) != 0 {
         return Some(bounds.center());
     }
     // Several heights: a single scan line can miss on a tangency or an hourglass
@@ -683,7 +683,7 @@ fn representative_point(subpath: &BezPath) -> Option<Point> {
         // two segments.
         for w in xs.windows(2) {
             let mid = Point::new(f64::midpoint(w[0], w[1]), y);
-            if w[1] > w[0] && <BezPath as kurbo::Shape>::contains(subpath, mid) {
+            if w[1] > w[0] && crate::geometry::winding(subpath, mid) != 0 {
                 return Some(mid);
             }
         }

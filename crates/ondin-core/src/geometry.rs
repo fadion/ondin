@@ -1216,9 +1216,13 @@ const WINDING_FLATTEN: f64 = 0.01;
 /// horizontal mid-segment reads some points up to a unit and a half outside it as
 /// inside, which a click zoomed in can land on.
 pub fn winding(path: &BezPath, p: Point) -> i32 {
-    if !path.bounding_box().contains(p) {
+    let bounds = path.bounding_box();
+    if !bounds.contains(p) {
         return 0;
     }
+    // A ten-millionth of the path's size past ordinary sizes, so an enormous one is
+    // flattened into a few points rather than more than memory holds.
+    let flat = WINDING_FLATTEN.max(1e-7 * bounds.width().max(bounds.height()));
     let mut w = 0;
     let mut cross = |a: Point, b: Point| {
         let side = (b - a).cross(p - a);
@@ -1229,7 +1233,7 @@ pub fn winding(path: &BezPath, p: Point) -> i32 {
         }
     };
     let (mut at, mut start) = (Point::ZERO, Point::ZERO);
-    kurbo::flatten(path.iter(), WINDING_FLATTEN, |el| match el {
+    kurbo::flatten(path.iter(), flat, |el| match el {
         PathEl::MoveTo(q) => {
             // The subpath before this one closes implicitly, as a fill closes it.
             cross(at, start);

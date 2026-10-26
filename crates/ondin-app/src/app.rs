@@ -7110,163 +7110,180 @@ impl OndinApp {
                 // The retune is for the edge only, or the content's text would go accent-blue.
                 ui.set_style(inner_style);
                 ui.set_min_width(ui.available_width());
-                // History docks at the foot before anything else is laid out, so
-                // the sections above share what it leaves.
-                if self.show_history {
-                    self.history_section(ui);
-                }
-                // Pages first: the tree below is the current page's.
-                self.pages_section(ui);
-                // Folded, the pane keeps its width and shows no layer names, for
-                // a screen shared with people who should not read them.
-                let folded = self.prefs.layers_folded;
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: crate::panels::layers::PAD_X,
-                        right: crate::panels::layers::PAD_X,
-                        // The divider above sits as far from the Pages list.
-                        top: 9,
-                        bottom: 9,
-                    })
-                    .show(ui, |ui| {
-                        // A stable id, so opening the search can focus it before it is built.
-                        let field = egui::Id::new("layer-search");
-                        let searching = self.layer_filter.is_some();
-                        ui.horizontal(|ui| {
-                            if crate::ui::fold_head(ui, "Layers", !folded).0.clicked() {
-                                self.prefs.layers_folded = !folded;
-                                self.prefs.save();
-                            }
-                            if folded {
-                                return;
-                            }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let glyph = if searching {
-                                        icon::X
-                                    } else {
-                                        icon::MAGNIFYING_GLASS
-                                    };
-                                    if icon_button(ui, glyph, 20.0, 15.0, searching, true)
-                                        .on_hover_text(if searching {
-                                            "Clear search"
+                // History docks at the foot before anything else is laid out, and the
+                // sections above take the room it leaves, drawing nothing below it.
+                let rest = match self.show_history {
+                    true => self.history_section(ui),
+                    false => ui.max_rect(),
+                };
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+                    ui.set_clip_rect(rest.intersect(ui.clip_rect()));
+                    // Pages first: the tree below is the current page's.
+                    self.pages_section(ui);
+                    // Folded, the pane keeps its width and shows no layer names, for
+                    // a screen shared with people who should not read them.
+                    let folded = self.prefs.layers_folded;
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin {
+                            left: crate::panels::layers::PAD_X,
+                            right: crate::panels::layers::PAD_X,
+                            // The divider above sits as far from the Pages list.
+                            top: 9,
+                            bottom: 9,
+                        })
+                        .show(ui, |ui| {
+                            // A stable id, so opening the search can focus it before it is built.
+                            let field = egui::Id::new("layer-search");
+                            let searching = self.layer_filter.is_some();
+                            ui.horizontal(|ui| {
+                                if crate::ui::fold_head(ui, "Layers", !folded).0.clicked() {
+                                    self.prefs.layers_folded = !folded;
+                                    self.prefs.save();
+                                }
+                                if folded {
+                                    return;
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let glyph = if searching {
+                                            icon::X
                                         } else {
-                                            "Search layers by name"
+                                            icon::MAGNIFYING_GLASS
+                                        };
+                                        if icon_button(ui, glyph, 20.0, 15.0, searching, true)
+                                            .on_hover_text(if searching {
+                                                "Clear search"
+                                            } else {
+                                                "Search layers by name"
+                                            })
+                                            .clicked()
+                                        {
+                                            if searching {
+                                                self.layer_filter = None;
+                                            } else {
+                                                self.layer_filter = Some(String::new());
+                                                ui.ctx().memory_mut(|m| m.request_focus(field));
+                                            }
+                                        }
+                                        // Fold or unfold the whole tree.
+                                        let folded = self.tree_is_all_collapsed();
+                                        if icon_button(
+                                            ui,
+                                            if folded {
+                                                icon::ARROWS_OUT_LINE_VERTICAL
+                                            } else {
+                                                icon::ARROWS_IN_LINE_VERTICAL
+                                            },
+                                            20.0,
+                                            15.0,
+                                            false,
+                                            true,
+                                        )
+                                        .on_hover_text(if folded {
+                                            "Expand all"
+                                        } else {
+                                            "Collapse all"
                                         })
                                         .clicked()
-                                    {
-                                        if searching {
-                                            self.layer_filter = None;
-                                        } else {
-                                            self.layer_filter = Some(String::new());
-                                            ui.ctx().memory_mut(|m| m.request_focus(field));
+                                        {
+                                            self.toggle_collapse_all();
+                                        }
+                                    },
+                                );
+                            });
+
+                            if !folded && let Some(filter) = &mut self.layer_filter {
+                                ui.add_space(4.0);
+                                field_row(ui, egui::vec2(ui.available_width(), 28.0), |ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(filter)
+                                            .id(field)
+                                            .hint_text("Name…")
+                                            // The row is the frame.
+                                            .frame(egui::Frame::NONE)
+                                            .desired_width(f32::INFINITY)
+                                            .font(egui::FontId::proportional(12.0)),
+                                    );
+                                });
+                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                    self.layer_filter = None;
+                                }
+                            }
+                        });
+                    // What History's divider may not cover: Layers keeps its header.
+                    self.history_pane.head_bottom = ui.cursor().top();
+
+                    if folded {
+                        return;
+                    }
+                    let tree = egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        // History may leave the tree no room at all; egui's default floor
+                        // would draw it over History.
+                        .min_scrolled_height(0.0)
+                        // No bar, though it still scrolls.
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            // A row dragged to the tree's edge scrolls it, on the canvas autopan's
+                            // curve. Inside the area, since `scroll_with_delta` targets the
+                            // enclosing one; instant, so it stops with the hand.
+                            if self.layer_drag.is_some()
+                                && let Some(p) = ui.ctx().pointer_interact_pos()
+                            {
+                                let view = ui.clip_rect();
+                                let v = crate::ui::edge_scroll_speed(
+                                    p.y,
+                                    view.top(),
+                                    view.bottom(),
+                                    LAYER_SCROLL_BAND,
+                                    LAYER_SCROLL_MAX,
+                                );
+                                if v != 0.0 {
+                                    let dt = ui.input(|i| i.stable_dt).min(1.0 / 15.0);
+                                    ui.scroll_with_delta_animation(
+                                        // Negative y scrolls down: the content moves.
+                                        egui::vec2(0.0, -v * dt),
+                                        egui::style::ScrollAnimation::none(),
+                                    );
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                            egui::Frame::NONE
+                                .inner_margin(egui::Margin::symmetric(
+                                    crate::panels::layers::TREE_PAD_X,
+                                    0,
+                                ))
+                                .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y = 1.0;
+                                    self.layers_tree(ui);
+                                    // The empty space below the last row is a context-menu
+                                    // target; allocated, so it cannot steal a row's right-click.
+                                    let rest = ui.available_size_before_wrap();
+                                    if rest.y > 0.0 {
+                                        let (_, back) =
+                                            ui.allocate_exact_size(rest, egui::Sense::click());
+                                        if back.secondary_clicked() {
+                                            self.open_context_menu(
+                                                ui.ctx(),
+                                                crate::menu::Target::PanelBackground,
+                                                None,
+                                            );
                                         }
                                     }
-                                    // Fold or unfold the whole tree.
-                                    let folded = self.tree_is_all_collapsed();
-                                    if icon_button(
-                                        ui,
-                                        if folded {
-                                            icon::ARROWS_OUT_LINE_VERTICAL
-                                        } else {
-                                            icon::ARROWS_IN_LINE_VERTICAL
-                                        },
-                                        20.0,
-                                        15.0,
-                                        false,
-                                        true,
-                                    )
-                                    .on_hover_text(if folded {
-                                        "Expand all"
-                                    } else {
-                                        "Collapse all"
-                                    })
-                                    .clicked()
-                                    {
-                                        self.toggle_collapse_all();
-                                    }
-                                },
-                            );
+                                });
                         });
-
-                        if !folded && let Some(filter) = &mut self.layer_filter {
-                            ui.add_space(4.0);
-                            field_row(ui, egui::vec2(ui.available_width(), 28.0), |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(filter)
-                                        .id(field)
-                                        .hint_text("Name…")
-                                        // The row is the frame.
-                                        .frame(egui::Frame::NONE)
-                                        .desired_width(f32::INFINITY)
-                                        .font(egui::FontId::proportional(12.0)),
-                                );
-                            });
-                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                self.layer_filter = None;
-                            }
-                        }
-                    });
-                // What History's divider may not cover: Layers keeps its header.
-                self.history_pane.head_bottom = ui.cursor().top();
-
-                if folded {
-                    return;
-                }
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    // No bar, though it still scrolls.
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        // A row dragged to the tree's edge scrolls it, on the canvas autopan's
-                        // curve. Inside the area, since `scroll_with_delta` targets the
-                        // enclosing one; instant, so it stops with the hand.
-                        if self.layer_drag.is_some()
-                            && let Some(p) = ui.ctx().pointer_interact_pos()
-                        {
-                            let view = ui.clip_rect();
-                            let v = crate::ui::edge_scroll_speed(
-                                p.y,
-                                view.top(),
-                                view.bottom(),
-                                LAYER_SCROLL_BAND,
-                                LAYER_SCROLL_MAX,
-                            );
-                            if v != 0.0 {
-                                let dt = ui.input(|i| i.stable_dt).min(1.0 / 15.0);
-                                ui.scroll_with_delta_animation(
-                                    // Negative y scrolls down: the content moves.
-                                    egui::vec2(0.0, -v * dt),
-                                    egui::style::ScrollAnimation::none(),
-                                );
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                        egui::Frame::NONE
-                            .inner_margin(egui::Margin::symmetric(
-                                crate::panels::layers::TREE_PAD_X,
-                                0,
-                            ))
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 1.0;
-                                self.layers_tree(ui);
-                                // The empty space below the last row is a context-menu
-                                // target; allocated, so it cannot steal a row's right-click.
-                                let rest = ui.available_size_before_wrap();
-                                if rest.y > 0.0 {
-                                    let (_, back) =
-                                        ui.allocate_exact_size(rest, egui::Sense::click());
-                                    if back.secondary_clicked() {
-                                        self.open_context_menu(
-                                            ui.ctx(),
-                                            crate::menu::Target::PanelBackground,
-                                            None,
-                                        );
-                                    }
-                                }
-                            });
-                    });
+                    crate::ui::scroll_fade_top(
+                        ui,
+                        tree.inner_rect,
+                        tree.state.offset.y,
+                        color::PANEL,
+                    );
+                    #[cfg(test)]
+                    {
+                        self.history_pane.tree_view = Some(tree.inner_rect);
+                    }
+                });
             });
         ui.set_style(style);
         self.remember_layers_width(ui.ctx(), shown.response.rect.width(), room);

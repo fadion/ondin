@@ -13,8 +13,14 @@ use ondin_core::{NodeId, Origin};
 
 /// A row's height — the layer tree's.
 const ROW_H: f32 = 26.0;
-/// The header band: its top inset, the fold head, and the gap under it.
-const HEAD_H: f32 = 10.0 + FOLD_HEAD_H + 7.0;
+/// The open section's least height: the divider, the header's top inset, the fold
+/// head, and the gap under it.
+const HEAD_H: f32 = 1.0 + 10.0 + FOLD_HEAD_H + 7.0;
+/// The folded header's inset above and below the fold head, equal so it sits
+/// centred between the divider and the pane's foot.
+const FOLDED_PAD: i8 = 12;
+/// The whole folded section: divider, insets and fold head.
+const FOLDED_H: f32 = 1.0 + 2.0 * FOLDED_PAD as f32 + FOLD_HEAD_H;
 /// The section's height until its divider is dragged, header included.
 const DEFAULT_H: f32 = 240.0;
 /// The divider's grab band, centred on its hairline.
@@ -40,6 +46,12 @@ pub(crate) struct HistoryState {
     /// Each drawn row's depth and rect, for the tests to aim at.
     #[cfg(test)]
     pub(crate) rows: Vec<(usize, egui::Rect)>,
+    /// The Layers tree's viewport last frame, which must end above this section.
+    #[cfg(test)]
+    pub(crate) tree_view: Option<egui::Rect>,
+    /// The section's rect and its fold head's, last frame.
+    #[cfg(test)]
+    pub(crate) drawn: Option<(egui::Rect, egui::Rect)>,
 }
 
 /// One row, read off the history before any of it is drawn.
@@ -62,8 +74,11 @@ struct Row {
 
 impl OndinApp {
     /// The section, docked at the bottom of the layers pane. Called before the pane's
-    /// other sections, which then take the room above it.
-    pub(crate) fn history_section(&mut self, ui: &mut egui::Ui) {
+    /// other sections; answers the room above it, which they take.
+    ///
+    /// Laid out by hand rather than as an `egui::Panel`: a panel's item spacing pushed
+    /// its content past the pane's foot and left the tree above reaching into it.
+    pub(crate) fn history_section(&mut self, ui: &mut egui::Ui) -> egui::Rect {
         let folded = self.prefs.history_folded;
         let pane = ui.max_rect();
         let floor = match self.history_pane.head_bottom {
@@ -72,24 +87,35 @@ impl OndinApp {
         };
         let max = (pane.bottom() - floor).max(HEAD_H);
         let height = match folded {
-            true => HEAD_H + 6.0,
+            true => FOLDED_H,
             false => self
                 .prefs
                 .history_height
                 .unwrap_or(DEFAULT_H)
                 .clamp(HEAD_H, max),
         };
-        egui::Panel::bottom("history-pane")
-            .resizable(false)
-            .exact_size(height)
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                self.history_divider(ui, folded, max);
-                self.history_head(ui, folded);
-                if !folded {
-                    self.history_list(ui);
-                }
-            });
+        let rect =
+            egui::Rect::from_min_max(egui::pos2(pane.left(), pane.bottom() - height), pane.max);
+        let mut section = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        section.set_clip_rect(rect.intersect(ui.clip_rect()));
+        // The insets are the section's own; spacing between its parts would push the
+        // head off its centre and the list past the pane's foot.
+        section.spacing_mut().item_spacing.y = 0.0;
+        self.history_divider(&mut section, folded, max);
+        let head = self.history_head(&mut section, folded);
+        if !folded {
+            self.history_list(&mut section);
+        }
+        #[cfg(test)]
+        {
+            self.history_pane.drawn = Some((rect, head));
+        }
+        let _ = head;
+        egui::Rect::from_min_max(pane.min, egui::pos2(pane.max.x, rect.top()))
     }
 
     /// The hairline above the section, and — while it is open — a band that drags
@@ -118,15 +144,18 @@ impl OndinApp {
     }
 
     /// The fold head. Folded, it names the current step and how many are ahead.
-    fn history_head(&mut self, ui: &mut egui::Ui, folded: bool) {
+    /// Answers the fold head's rect.
+    fn history_head(&mut self, ui: &mut egui::Ui, folded: bool) -> egui::Rect {
         egui::Frame::NONE
             .inner_margin(egui::Margin {
                 left: crate::panels::layers::PAD_X,
                 right: crate::panels::layers::PAD_X,
-                top: 10,
-                bottom: 7,
+                top: if folded { FOLDED_PAD } else { 10 },
+                bottom: if folded { FOLDED_PAD } else { 7 },
             })
             .show(ui, |ui| {
+                // The row is the fold head's height, so the insets alone place it.
+                ui.spacing_mut().interact_size.y = FOLD_HEAD_H;
                 ui.horizontal(|ui| {
                     let (head, baseline) = fold_head(ui, "History", !folded);
                     if head.clicked() {
@@ -134,7 +163,7 @@ impl OndinApp {
                         self.prefs.save();
                     }
                     if !folded {
-                        return;
+                        return head.rect;
                     }
                     let ahead = self.session.history.redo_depth();
                     let tail = (ahead > 0).then(|| format!("{ahead} ahead"));
@@ -171,8 +200,11 @@ impl OndinApp {
                             theme::text::DIM,
                         );
                     }
-                });
-            });
+                    head.rect
+                })
+                .inner
+            })
+            .inner
     }
 
     /// The step the document stands just after, as its row reads.
@@ -250,9 +282,10 @@ impl OndinApp {
         self.history_pane.shown = Some(key);
         #[cfg(test)]
         self.history_pane.rows.clear();
-        egui::ScrollArea::vertical()
+        let list = egui::ScrollArea::vertical()
             .id_salt("history")
             .auto_shrink([false, false])
+            .min_scrolled_height(0.0)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
                 egui::Frame::NONE
@@ -274,6 +307,7 @@ impl OndinApp {
                         }
                     });
             });
+        crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::PANEL);
     }
 
     /// One row; answers its rect.
@@ -359,54 +393,67 @@ impl OndinApp {
             p.galley(at.min + egui::vec2(5.0, 1.5), tag, theme::text::MUTED);
             right = at.left() - 6.0;
         }
-        if let Some(page) = &row.page {
-            let g = p.layout_no_wrap(
-                page.clone(),
-                egui::FontId::proportional(10.5),
-                dim(theme::text::DIM),
-            );
-            right -= g.size().x;
-            p.galley(
-                egui::pos2(right, cy - g.size().y / 2.0),
-                g,
-                theme::text::DIM,
-            );
-            right -= 6.0;
-        }
 
+        // `Label · Subject · Page`: the subject gives way first, then the page.
         let font = egui::FontId::proportional(12.5);
-        let mut job = egui::text::LayoutJob::default();
-        let ink = if lit { color::TEXT } else { theme::text::MUTED };
-        job.append(
-            &row.label,
-            0.0,
-            egui::TextFormat::simple(font.clone(), dim(ink)),
+        let ink = dim(if lit { color::TEXT } else { theme::text::MUTED });
+        let sub = dim(if lit {
+            theme::text::MUTED
+        } else {
+            theme::text::DIM
+        });
+        let cut = |text: String, ink: egui::Color32, width: f32| {
+            let mut job = egui::text::LayoutJob::simple_singleline(text, font.clone(), ink);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
+            p.layout_job(job)
+        };
+        let room = (right - x).max(0.0);
+        let label = cut(row.label.clone(), ink, room);
+        let subject = row.subject.as_ref().map(|(name, more)| match more {
+            0 => format!(" · {name}"),
+            n => format!(" · {name} +{n}"),
+        });
+        let page = row.page.as_ref().map(|page| format!(" · {page}"));
+        let natural = |text: &Option<String>| {
+            text.as_ref()
+                .map_or(0.0, |t| cut(t.clone(), sub, f32::INFINITY).size().x)
+        };
+        let least = cut(" · …".into(), sub, f32::INFINITY).size().x;
+        let (subject_w, page_w) = share(
+            room - label.size().x,
+            natural(&subject),
+            natural(&page),
+            least,
         );
-        if let Some((name, more)) = &row.subject {
-            let sub = if lit {
-                theme::text::MUTED
-            } else {
-                theme::text::DIM
-            };
-            let text = match more {
-                0 => format!(" · {name}"),
-                n => format!(" · {name} +{n}"),
-            };
-            job.append(&text, 0.0, egui::TextFormat::simple(font, dim(sub)));
+        let parts = [
+            Some(label),
+            subject.map(|t| cut(t, sub, subject_w)),
+            page.map(|t| cut(t, sub, page_w)),
+        ];
+        for part in parts.into_iter().flatten() {
+            let w = part.size().x;
+            // Each part's ink is in its galley.
+            p.galley(egui::pos2(x, cy - part.size().y / 2.0), part, ink);
+            x += w;
         }
-        job.wrap = egui::text::TextWrapping::truncate_at_width((right - x).max(0.0));
-        let galley = p.layout_job(job);
-        p.galley(
-            egui::pos2(x, cy - galley.size().y / 2.0),
-            galley,
-            theme::text::MUTED,
-        );
 
         if resp.clicked() && !current {
             self.jump_history(row.serial);
         }
         rect
     }
+}
+
+/// How a row's `rest` of width after its label splits between the subject and the
+/// page, from what each would take whole: the subject gives way first, down to
+/// `least` (a bare ` · …`), then the page.
+fn share(rest: f32, subject: f32, page: f32, least: f32) -> (f32, f32) {
+    let rest = rest.max(0.0);
+    if subject + page <= rest {
+        return (subject, page);
+    }
+    let subject = (rest - page).max(least.min(subject)).min(subject);
+    (subject, (rest - subject).max(0.0))
 }
 
 /// A row's text after its label: the subject's name and how many more.
@@ -535,6 +582,43 @@ mod tests {
         assert_eq!(app.current_step_text(), "Opacity · Card");
     }
 
+    /// Folded, the section ends at the pane's foot with its head centred between the
+    /// divider and the foot, and the tree above stops at the divider.
+    /// flip: the section back on `item_spacing` (no zeroing in `history_section`) →
+    /// fails at "head centred".
+    #[test]
+    fn the_folded_section_sits_centred_at_the_foot() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = shown(&ctx);
+        app.prefs.history_folded = true;
+        for _ in 0..4 {
+            whole_frame(&ctx, &mut app, vec![]);
+        }
+        let (section, head) = app.history_pane.drawn.expect("the section was drawn");
+        assert_eq!(section.bottom(), 820.0, "on the pane's foot");
+        let above = head.top() - (section.top() + 1.0);
+        let below = section.bottom() - head.bottom();
+        assert_eq!(above, below, "head centred: {above} above, {below} below");
+        let tree = app.history_pane.tree_view.expect("the tree was drawn");
+        assert!(
+            tree.bottom() <= section.top(),
+            "tree to {} over {}",
+            tree.bottom(),
+            section.top()
+        );
+    }
+
+    /// A row short of room cuts the layer name before the page, down to a bare
+    /// ` · …`, and only then the page.
+    #[test]
+    fn the_subject_gives_way_before_the_page() {
+        assert_eq!(share(200.0, 80.0, 50.0, 12.0), (80.0, 50.0), "all fits");
+        assert_eq!(share(100.0, 80.0, 50.0, 12.0), (50.0, 50.0), "subject cut");
+        assert_eq!(share(40.0, 80.0, 50.0, 12.0), (12.0, 28.0), "then the page");
+        assert_eq!(share(40.0, 0.0, 50.0, 12.0), (0.0, 40.0), "no subject");
+        assert_eq!(share(-5.0, 80.0, 50.0, 12.0), (12.0, 0.0), "no room at all");
+    }
+
     /// A jump aims at a step, not a position: a commit between reading the row and
     /// jumping (a text session finished first) moves it, or drops it with the redo
     /// rows, and the jump follows or does nothing.
@@ -651,7 +735,8 @@ mod tests {
 
     /// The divider drags History taller than its list, up to the Layers header and
     /// no further; folded, the section is only its header.
-    /// flip: `history_divider`'s clamp loosened → fails at the stored height.
+    /// flip: `history_divider`'s clamp loosened → fails at the stored height; the
+    /// layers tree's `min_scrolled_height(0.0)` removed → fails at the tree's viewport.
     #[test]
     fn the_divider_stops_at_the_layers_header() {
         let ctx = egui::Context::default();
@@ -712,6 +797,13 @@ mod tests {
         assert!(
             stored <= 820.0 - app.history_pane.head_bottom + 1.0,
             "the stored height overshot the room: {stored}"
+        );
+        // Layers keeps its header and nothing of its tree spills over History.
+        let tree = app.history_pane.tree_view.expect("the tree was drawn");
+        assert!(
+            tree.bottom() <= top + 0.5,
+            "the tree's viewport runs to {} over History's divider at {top}",
+            tree.bottom()
         );
 
         app.prefs.history_folded = true;

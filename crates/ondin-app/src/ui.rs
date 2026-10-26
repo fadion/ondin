@@ -1489,6 +1489,36 @@ impl Prefix {
     }
 }
 
+/// How tall a scrolled list's top fade is ([`scroll_fade_top`]).
+pub const SCROLL_FADE_H: f32 = 20.0;
+
+/// Fade the top of a scrolled list's `viewport` into `ground`, the panel behind
+/// it, so rows pass under a section header instead of being cut off. Comes in over
+/// the first [`SCROLL_FADE_H`] of scroll, so an unscrolled first row is untouched.
+pub fn scroll_fade_top(ui: &egui::Ui, viewport: egui::Rect, offset_y: f32, ground: egui::Color32) {
+    let strength = (offset_y / SCROLL_FADE_H).clamp(0.0, 1.0);
+    if strength <= 0.0 || viewport.height() <= 0.0 {
+        return;
+    }
+    let band = egui::Rect::from_min_max(
+        viewport.min,
+        egui::pos2(
+            viewport.max.x,
+            viewport.top() + SCROLL_FADE_H.min(viewport.height()),
+        ),
+    );
+    let solid = ground.gamma_multiply(strength);
+    let clear = egui::Color32::TRANSPARENT;
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(band.left_top(), solid);
+    mesh.colored_vertex(band.right_top(), solid);
+    mesh.colored_vertex(band.right_bottom(), clear);
+    mesh.colored_vertex(band.left_bottom(), clear);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
 /// Speed of an edge-triggered auto-scroll along one axis, in points per second:
 /// `0.0` while `p` is clear of both bands, rising quadratically to ±`top` at the
 /// edge of `min..max`. Shared by `canvas::autopan` and the layers tree; a

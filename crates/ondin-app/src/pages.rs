@@ -22,6 +22,8 @@ const FIT_ROWS: usize = 6;
 const MIN_LIST_H: f32 = ROW_H;
 /// The divider's grab band, centred on its hairline.
 const DIVIDER_GRAB: f32 = 6.0;
+/// The gap under the last page row, above the divider. It scrolls with the rows.
+const LIST_FOOT: f32 = 14.0;
 /// The check column's centre, from the row's left.
 const CHECK_X: f32 = 14.0;
 /// Where a row's name starts, from the row's left.
@@ -544,22 +546,28 @@ impl OndinApp {
         if !folded {
             let fit = self.session.doc.pages().len().min(FIT_ROWS) as f32 * ROW_H;
             let height = self.prefs.pages_height.unwrap_or(fit).max(MIN_LIST_H);
-            egui::Frame::NONE
-                .inner_margin(egui::Margin {
-                    left: crate::panels::layers::TREE_PAD_X,
-                    right: crate::panels::layers::TREE_PAD_X,
-                    top: 0,
-                    bottom: 8,
-                })
+            // The gap under the last row scrolls with the rows, so a list cut short runs
+            // to the divider, which is then the line it is cut on.
+            let list = egui::ScrollArea::vertical()
+                .id_salt("pages")
+                .max_height(height + LIST_FOOT)
+                .min_scrolled_height(height.min(fit) + LIST_FOOT)
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("pages")
-                        .max_height(height)
-                        .min_scrolled_height(height.min(fit))
-                        .auto_shrink([false, true])
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin {
+                            left: crate::panels::layers::TREE_PAD_X,
+                            right: crate::panels::layers::TREE_PAD_X,
+                            top: 0,
+                            bottom: LIST_FOOT as i8,
+                        })
                         .show(ui, |ui| self.page_rows(ui));
                 });
+            crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::PANEL);
+            // The divider sits on the list's edge: item spacing there would be a band
+            // the rows stop short of.
+            ui.add_space(-ui.spacing().item_spacing.y);
         }
         self.pages_divider(ui, folded);
     }

@@ -14,6 +14,8 @@
 use crate::document::Document;
 use crate::id::NodeId;
 use crate::op::{DirtySet, OpError, Operation, Transaction};
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::mem::Discriminant;
 
 /// The shape of a commit: which operation, on which node, in which order.
@@ -41,7 +43,7 @@ fn shape(tx: &Transaction) -> Option<Shape> {
 }
 
 /// Where an undo step's edit came from.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Origin {
     #[default]
     User,
@@ -53,13 +55,13 @@ pub enum Origin {
 /// What an undo step says about itself, recorded when it was committed: the
 /// name its edit gave (never derived from the operations), where it came from,
 /// and what it touched. History only keeps it; a list of the history reads it.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StepNote {
     /// The command's name as the menus say it, or the MCP tool's.
     pub label: String,
     /// The glyph a list draws beside the label, as its icon font spells it; empty
-    /// for none.
-    pub glyph: &'static str,
+    /// for none. Owned only once read back from a saved history.
+    pub glyph: Cow<'static, str>,
     pub origin: Origin,
     /// The nodes the edit named, in the order it named them.
     pub subjects: Vec<NodeId>,
@@ -83,6 +85,23 @@ struct Step {
 pub struct StepView<'a> {
     pub note: &'a StepNote,
     pub serial: u64,
+}
+
+/// A history in the form it is kept between sessions ([`History::saved`]): each
+/// step's transaction and note, without serials, which a restore mints afresh.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedHistory {
+    /// The undo stack, oldest first.
+    pub undo: Vec<SavedStep>,
+    /// The redo stack, nearest first.
+    pub redo: Vec<SavedStep>,
+}
+
+/// One step of a [`SavedHistory`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedStep {
+    pub tx: Transaction,
+    pub note: StepNote,
 }
 
 #[derive(Default)]
@@ -287,6 +306,45 @@ impl History {
     /// with what only the applied edit can tell (a created node's name).
     pub fn current_note_mut(&mut self) -> Option<&mut StepNote> {
         self.undo.last_mut().map(|s| &mut s.note)
+    }
+
+    /// At most `keep` steps of this history, to keep between sessions: the most
+    /// recent undo steps first, then the nearest redo steps with the room left.
+    pub fn saved(&self, keep: usize) -> SavedHistory {
+        let undo = self.undo.len().min(keep);
+        let redo = self.redo.len().min(keep - undo);
+        let saved = |s: &Step| SavedStep {
+            tx: s.tx.clone(),
+            note: s.note.clone(),
+        };
+        SavedHistory {
+            undo: self.undo[self.undo.len() - undo..]
+                .iter()
+                .map(saved)
+                .collect(),
+            redo: self.redo.iter().rev().take(redo).map(saved).collect(),
+        }
+    }
+
+    /// A history from a saved one, its steps minted fresh serials. The caller
+    /// vouches that the document stands where the saved history left it.
+    pub fn restore(saved: SavedHistory) -> Self {
+        let mut history = Self::new();
+        let mut step = |s: SavedStep| {
+            history.next_serial += 1;
+            Step {
+                tx: s.tx,
+                note: s.note,
+                serial: history.next_serial,
+            }
+        };
+        let undo: Vec<Step> = saved.undo.into_iter().map(&mut step).collect();
+        let mut redo: Vec<Step> = saved.redo.into_iter().map(&mut step).collect();
+        // Kept nearest first; the stack pops from its end.
+        redo.reverse();
+        history.undo = undo;
+        history.redo = redo;
+        history
     }
 
     pub fn can_undo(&self) -> bool {
@@ -742,6 +800,72 @@ mod tests {
 
         history.redo(&mut doc).unwrap();
         assert_eq!(history.current(), Some(top), "the same step came back");
+    }
+
+    /// A history saved, written as JSON and restored walks the document exactly as
+    /// the original did, a deleted node's subtree included, with its redo step.
+    #[test]
+    fn a_saved_history_walks_the_document_as_the_original_did() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        history
+            .commit_noted(&mut doc, move_to(rect, 5.0), note("Move"))
+            .unwrap();
+        history
+            .commit_noted(
+                &mut doc,
+                Transaction(vec![Operation::DeleteNode { id: rect }]),
+                note("Delete"),
+            )
+            .unwrap();
+        history
+            .commit_noted(&mut doc, Transaction(vec![]), note("Empty"))
+            .unwrap();
+        history.undo(&mut doc).unwrap();
+
+        let json = serde_json::to_string(&history.saved(100)).unwrap();
+        let mut restored = History::restore(serde_json::from_str(&json).unwrap());
+        let labels: Vec<_> = restored.done().map(|s| s.note.label.clone()).collect();
+        assert_eq!(labels, ["", "Move", "Delete"]);
+        assert_eq!(restored.undone().next().unwrap().note.label, "Empty");
+
+        restored.undo(&mut doc).unwrap();
+        assert_eq!(
+            x_of(&doc, rect),
+            5.0,
+            "the delete undone brings the rect back"
+        );
+        restored.undo(&mut doc).unwrap();
+        assert_eq!(x_of(&doc, rect), 0.0);
+        restored.redo(&mut doc).unwrap();
+        restored.redo(&mut doc).unwrap();
+        assert!(doc.get(rect).is_none(), "and redone takes it away again");
+    }
+
+    /// `saved` keeps the most recent undo steps first, then redo steps with the room
+    /// left, and `restore` puts the redo stack back in the order redo takes it.
+    /// flip: `restore` without its `reverse` → fails at the last assertion.
+    #[test]
+    fn a_saved_history_keeps_the_nearest_steps() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        for (x, l) in [(1.0, "A"), (2.0, "B"), (3.0, "C"), (4.0, "D")] {
+            history
+                .commit_noted(&mut doc, move_to(rect, x), note(l))
+                .unwrap();
+        }
+        history.undo(&mut doc).unwrap();
+        history.undo(&mut doc).unwrap();
+        let labels = |s: &[SavedStep]| s.iter().map(|s| s.note.label.clone()).collect::<Vec<_>>();
+        let two = history.saved(2);
+        assert_eq!(labels(&two.undo), ["A", "B"]);
+        assert!(two.redo.is_empty());
+        let four = history.saved(4);
+        assert_eq!(labels(&four.undo), ["", "A", "B"]);
+        assert_eq!(labels(&four.redo), ["C"], "the nearest redo step");
+
+        // Restored, the redo stack comes back in the order redo takes it.
+        let restored = History::restore(history.saved(10));
+        let undone: Vec<_> = restored.undone().map(|s| s.note.label.as_str()).collect();
+        assert_eq!(undone, ["C", "D"]);
     }
 
     /// `undone` lists the redo stack nearest first, the order redo takes it in.

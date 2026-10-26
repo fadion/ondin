@@ -28,7 +28,9 @@ pub const DEFAULT_GUIDE_COLOR: Color = Color::from_rgba8(0xa3, 0x33, 0x2d, 255);
 /// stops either being passed to the other's functions.
 ///
 /// [`IdSource`]: crate::id::IdSource
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub struct GuideId(pub NodeId);
 
 impl std::fmt::Debug for GuideId {
@@ -75,7 +77,7 @@ impl GuideAxis {
 
 /// One guide: a line at a coordinate in its owner's space, optionally
 /// recoloured.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Guide {
     pub id: GuideId,
     pub axis: GuideAxis,

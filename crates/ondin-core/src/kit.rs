@@ -47,7 +47,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// vendored node is minted its own id here (§5.2), because two documents
 /// vendoring one kit would otherwise hold the same ids and collide when one is
 /// pasted into the other (§15 D1010).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Origin {
     /// The kit's `meta.id` — 32 lowercase hex characters
     /// ([`crate::DocumentMeta::is_wellformed_id`]).

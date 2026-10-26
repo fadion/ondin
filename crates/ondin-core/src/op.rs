@@ -16,14 +16,14 @@ use rustc_hash::FxHashSet;
 
 /// What a description belongs to ([`Operation::SetDescription`]): a main (or a
 /// set), a style or a variable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Described {
     Node(NodeId),
     Style(crate::style::StyleId),
     Variable(crate::variable::VarId),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Operation {
     CreateNode {
         id: NodeId,
@@ -39,6 +39,7 @@ pub enum Operation {
     /// Paste / duplicate / import: nodes arrive with freshly-minted ids and are
     /// validated as a well-formed subtree.
     InsertSubtree {
+        #[serde(with = "crate::io::schema::node_list")]
         nodes: Vec<Node>,
         parent: NodeId,
         index: usize,
@@ -345,6 +346,7 @@ pub enum Operation {
     /// the same file twice deduplicates.
     AddImage {
         id: ImageId,
+        #[serde(with = "crate::io::schema::image_entry")]
         entry: ImageEntry,
     },
     /// Take an image out of the table.
@@ -1246,7 +1248,7 @@ impl Transaction {
 }
 
 /// Geometry edit targeting the kind-specific payload of a node (§5.6).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum GeometryPatch {
     Size(Size),
     /// The same radius on all four corners of a rect, or on every vertex of a
@@ -1372,7 +1374,10 @@ impl GeometryPatch {
 }
 
 /// Applied atomically; one entry in history.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// Serialisable for a history kept between sessions (`History::saved`). That form
+/// follows the model's own and is read back only by the build that wrote it.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Transaction(pub Vec<Operation>);
 
 /// Nodes whose world bounds / appearance changed (including descendants).

@@ -589,6 +589,46 @@ impl ImageDto {
     }
 }
 
+/// `serde(with)` for an operation's node list (`Operation::InsertSubtree`), in the
+/// file's own node form.
+pub(crate) mod node_list {
+    use super::NodeDto;
+    use crate::node::Node;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(nodes: &[Node], s: S) -> Result<S::Ok, S::Error> {
+        let dtos: Vec<NodeDto> = nodes.iter().map(NodeDto::from_node).collect();
+        dtos.serialize(s)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Node>, D::Error> {
+        Vec::<NodeDto>::deserialize(d)?
+            .into_iter()
+            .map(|n| n.into_node().map_err(serde::de::Error::custom))
+            .collect()
+    }
+}
+
+/// `serde(with)` for an operation's image entry (`Operation::AddImage`), in the
+/// file's own image form. The op carries the id beside the entry, so the form's id
+/// is left empty.
+pub(crate) mod image_entry {
+    use super::ImageDto;
+    use crate::image::{ImageEntry, ImageId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(entry: &ImageEntry, s: S) -> Result<S::Ok, S::Error> {
+        ImageDto::from_entry(&ImageId(String::new()), entry).serialize(s)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ImageEntry, D::Error> {
+        ImageDto::deserialize(d)?
+            .into_entry()
+            .map(|(_, entry)| entry)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 impl DocumentDto {
     /// Project a document to its DTO, nodes sorted by id (deterministic bytes).
     pub(crate) fn from_document(doc: &Document) -> Self {

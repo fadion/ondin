@@ -27,6 +27,11 @@
 //! ondin diff <a> <b> [--json]    what changed from document a to b, by layer;
 //!                                exit 0 when nothing did, 1 when something did,
 //!                                2 when either cannot be read
+//! ondin merge <base> <ours> <theirs> [-o out]
+//!                                three-way merge, written over ours unless -o;
+//!                                exit 0 clean, 1 with conflicts (ours kept at
+//!                                each), 2 when a file cannot be read; git's
+//!                                merge driver: `ondin merge %O %A %B`
 //! ondin tokens export <file> [--mode <name>] [-o out.json]
 //!                                variables and styles as DTCG tokens.json,
 //!                                the default mode's values unless --mode
@@ -146,6 +151,14 @@ enum Command {
         b: String,
         json: bool,
     },
+    /// Three-way merge of a document (`ondin_core::merge`), the result written to
+    /// `out`, by default over `ours` as git's merge driver expects.
+    Merge {
+        base: String,
+        ours: String,
+        theirs: String,
+        out: Option<String>,
+    },
     /// Write the document's variables and styles as DTCG `tokens.json`
     /// (`ondin_export::dtcg`), `mode` naming the mode whose values are `$value`.
     TokensExport {
@@ -243,6 +256,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         Some("render") => render_cli::parse(&args[1..]).map(Command::Render),
         Some("diff") => parse_diff(&args[1..]),
         Some("tokens") => parse_tokens(&args[1..]),
+        Some("merge") => parse_merge(&args[1..]),
         Some("mcp-proxy") => Ok(Command::McpProxy),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
@@ -276,6 +290,57 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
             files.len()
         )),
     }
+}
+
+fn parse_merge(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str =
+        "usage: ondin merge <base.ondin> <ours.ondin> <theirs.ondin> [-o <out.ondin>]";
+    let (mut files, mut out) = (Vec::new(), None);
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--out" => {
+                i += 1;
+                let value = args.get(i).filter(|v| !v.starts_with('-'));
+                out = Some(
+                    value
+                        .ok_or_else(|| format!("-o wants a filename\n{USAGE}"))?
+                        .clone(),
+                );
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown option {other}\n{USAGE}"));
+            }
+            other => files.push(other.to_string()),
+        }
+        i += 1;
+    }
+    match <[String; 3]>::try_from(files) {
+        Ok([base, ours, theirs]) => Ok(Command::Merge {
+            base,
+            ours,
+            theirs,
+            out,
+        }),
+        Err(files) => Err(format!(
+            "merge takes three documents; got {}\n{USAGE}",
+            files.len()
+        )),
+    }
+}
+
+/// `ondin merge`: whether it merged cleanly, after writing the result and listing
+/// each conflict on stderr.
+fn run_merge(base: &str, ours: &str, theirs: &str, out: Option<&str>) -> Result<bool, String> {
+    let read = |file: &str| std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"));
+    let merged = ondin_core::merge::merge(&read(base)?, &read(ours)?, &read(theirs)?)
+        .map_err(|e| format!("cannot merge: {e}"))?;
+    let out = out.unwrap_or(ours);
+    std::fs::write(out, &merged.bytes).map_err(|e| format!("cannot write {out}: {e}"))?;
+    for c in &merged.conflicts {
+        eprintln!("conflict: {c}");
+    }
+    Ok(merged.conflicts.is_empty())
 }
 
 fn parse_tokens(args: &[String]) -> Result<Command, String> {
@@ -573,6 +638,19 @@ fn main() {
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 std::process::exit(i32::from(differs));
             }
+            Err(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+        },
+        // `diff`'s codes: 1 is "conflicts", so a failure is 2.
+        Ok(Command::Merge {
+            base,
+            ours,
+            theirs,
+            out,
+        }) => match run_merge(&base, &ours, &theirs, out.as_deref()) {
+            Ok(clean) => std::process::exit(i32::from(!clean)),
             Err(msg) => {
                 eprintln!("{msg}");
                 std::process::exit(2);
@@ -1194,6 +1272,80 @@ mod tests {
         ] {
             assert!(export(refused).is_err(), "{refused:?}");
         }
+    }
+
+    /// `merge` takes three documents and an output, and refuses the rest.
+    #[test]
+    fn merge_takes_three_documents_and_an_output() {
+        let merge = |s: &[&str]| {
+            let mut v = vec!["merge".to_string()];
+            v.extend(s.iter().map(|a| a.to_string()));
+            parse(&v)
+        };
+        assert_eq!(
+            merge(&["o", "a", "b", "-o", "m"]),
+            Ok(Command::Merge {
+                base: "o".into(),
+                ours: "a".into(),
+                theirs: "b".into(),
+                out: Some("m".into()),
+            })
+        );
+        for refused in [
+            &["o", "a"][..],
+            &["o", "a", "b", "c"],
+            &["o", "a", "b", "--x"],
+        ] {
+            assert!(merge(refused).is_err(), "{refused:?}");
+        }
+    }
+
+    /// `run_merge` writes over ours by default, as git's driver protocol has it,
+    /// and answers whether the merge was clean.
+    #[test]
+    fn run_merge_writes_over_ours_and_answers_clean() {
+        use ondin_core::{IdSource, NodeKind, Operation, Transaction};
+        let dir = std::env::temp_dir().join(format!("ondin-merge-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ids = IdSource::new(0xD4);
+        let root = ids.mint();
+        let dot = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: dot,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: ondin_core::kurbo::Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: Some("Dot".into()),
+        }]))
+        .unwrap();
+        let named = |name: &str| {
+            let mut d = doc.clone();
+            d.apply(&Transaction(vec![Operation::SetName {
+                id: dot,
+                name: name.into(),
+            }]))
+            .unwrap();
+            ondin_core::io::save(&d).unwrap()
+        };
+        let write = |file: &str, bytes: &[u8]| {
+            let p = dir.join(file);
+            std::fs::write(&p, bytes).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        let base = write("o.ondin", &ondin_core::io::save(&doc).unwrap());
+        let ours = write("a.ondin", &named("Ours"));
+        let theirs = write("b.ondin", &ondin_core::io::save(&doc).unwrap());
+        assert_eq!(run_merge(&base, &ours, &theirs, None), Ok(true));
+        assert_eq!(std::fs::read(&ours).unwrap(), named("Ours"));
+
+        let theirs = write("b.ondin", &named("Theirs"));
+        assert_eq!(run_merge(&base, &ours, &theirs, None), Ok(false));
+        assert!(run_merge(&base, "missing.ondin", &theirs, None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// `tokens export` takes one document, a mode and an output, and refuses the rest.

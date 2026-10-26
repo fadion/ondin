@@ -55,8 +55,8 @@ reads true.
   its changes. Scoping, in *First*, would make a number's `dimension` or `number` explicit rather than
   read from its bindings.
 - **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
-  open is a visual diff marking the changed regions over the canvas, the same compare in the version
-  history card (`versions.rs`), and a git merge driver later.
+  open is a visual diff marking the changed regions over the canvas, and the same compare in the
+  version history card (`versions.rs`). The git merge driver is built (`ondin merge`).
 - **A fidelity report for code export.** Render the HTML output in a browser, as `code_fidelity.rs`
   does, and report to the user what did not translate (background blur in SVG, a property with no
   CSS) instead of drifting silently.

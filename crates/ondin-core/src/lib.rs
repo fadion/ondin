@@ -39,6 +39,7 @@ pub mod io;
 pub mod item;
 pub mod kit;
 pub mod layout;
+pub mod merge;
 pub mod meta;
 pub mod naming;
 pub mod node;

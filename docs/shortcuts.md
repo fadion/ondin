@@ -199,7 +199,7 @@ one is designated (§15 D113).
 | `Shift+R` | rulers | ✅ Figma |
 | `Ctrl+'` | show grid | ✅ Illustrator, Photoshop |
 | — | show layout grid | **unbound** (§15 D755) |
-| — | outline view | **unbound**: Figma's and Illustrator's `Ctrl+Y` is redo, and `Ctrl+Shift+Y` stays unspent beside it |
+| — | outline mode | **unbound**: Figma's and Illustrator's `Ctrl+Y` is redo, and `Ctrl+Shift+Y` stays unspent beside it |
 | `Ctrl+Shift+'` | snap to grid | ✅ Illustrator's `Ctrl+"` |
 | `Ctrl+U` | snap to shapes | ✅ Illustrator's Smart Guides |
 | `Ctrl+;` | show / hide guides | ✅ Illustrator |
@@ -209,7 +209,7 @@ one is designated (§15 D113).
 | `Ctrl+\` | focus mode (hide the panels) | ✅ Figma's show/hide-UI |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
-| — | show status messages | **unbound** (§15 D1025) |
+| — | show messages | **unbound** (§15 D1025) |
 
 `ViewSwitch::accel` answers `None` for exactly the four unbound rows (`LayoutGrid`, `Outline`,
 `StatusMessages`, `SnapBaselines`): no free convention to match, a menu one click away. They are listed
@@ -558,7 +558,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, toolbar, status messages, focus, and the snap switches.
+  grid, layout grid, layers panel, toolbar, messages, outline mode, focus, and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
   drives stay in step while the chord is a second caller that never sees the row.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,

@@ -54,9 +54,9 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - Rows are `ui::menu_check`, `ui::MENU_ITEM_H` (24) tall, in `ui::menu_frame`; width 160pt or the
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
-- **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Outline
-  view*, *Show layers*, *Show toolbar*, *Show status messages*, *Focus mode*, then *Present* — a verb, not a switch: a
-  check row that never ticks, which closes the menu and dispatches `Action::Present`.
+- **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
+  layers*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*, then *Present mode* — a verb,
+  not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
@@ -66,9 +66,9 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   *Zoom in*, *Zoom out*, *Actual size*, *Zoom to fit*, *Fit selection*. `OndinApp::zoom_entry`
   holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
-  one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline view*,
-  *Show status messages*.
-- **Outline view** draws the artwork as one-device-pixel hairlines of every path the walk would fill
+  one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline mode*,
+  *Show messages*.
+- **Outline mode** draws the artwork as one-device-pixel hairlines of every path the walk would fill
   or stroke, with type in the same ink, in near-black or near-white by the page ground's luminance.
   It pushes no layer, so nothing is clipped, masked, faded or given an effect: the view exists to
   show what the artwork covers. It is `scene::OutlinePainter` wrapping the backend's painter, so the
@@ -174,7 +174,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   Pen*, `P`). The pages, the one way to another page with the layers pane hidden: *New page*,
   *Next page* and *Previous page* (dim at either end), and per page *Go to page: ‹name›* (dim on the
   current one) and, for every other page, *Move to page: ‹name›* (dim with nothing selected). The View and Snap switches show their tick, which gives the unbound ones (*Snap to
-  baselines*, *Show status messages*, *Show layout grid*, *Outline view*) a keyboard route.
+  baselines*, *Show messages*, *Show layout grid*, *Outline mode*) a keyboard route.
 - **In a text session** the chord opens the palette too, with the text session's menu rows and
   styling chords first. The session stays open under it; the palette's field holds focus, so the
   canvas reads no keys, and Escape closes only the palette.
@@ -258,7 +258,7 @@ with nothing of the editor around them and nothing to edit with. `OndinApp::pres
 `Presenting { frames, pages, entered_at, at, was_fullscreen, stepped_at, view, to_top }` while it
 runs (`pages` names each frame's page, index for index).
 
-- **Doors.** `Action::Present`: `Ctrl+Alt+Enter` in normal mode, `menu::Item::Present` (*Present*,
+- **Doors.** `Action::Present`: `Ctrl+Alt+Enter` in normal mode, `menu::Item::Present` (*Present mode*,
   `PLAY`, `Group::View`) in the palette and the cheatsheet's File section, and the View menu's last
   row. The palette row dims *"No frames to present"* on the same test `start_presenting` makes
   (`presentable`: the current page's visible top-level frames with bounds).

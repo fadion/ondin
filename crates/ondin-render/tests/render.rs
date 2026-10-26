@@ -278,7 +278,7 @@ impl ScenePainter for OutlineRecorder {
     fn pop_layer(&mut self) {}
 }
 
-/// Outline view turns every fill into a one-device-pixel stroke in the ink and
+/// Outline mode turns every fill into a one-device-pixel stroke in the ink and
 /// pushes no layer, not even the frame's clip. The same document without it fills
 /// and clips, so the fixture is not trivially empty.
 ///

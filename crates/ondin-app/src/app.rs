@@ -778,7 +778,7 @@ pub struct OndinApp {
     /// three gates (with each grid's eye and `shown_visible`). Nothing snaps to a layout
     /// grid, so hiding the bands cannot change where anything lands. Per session.
     pub(crate) show_layout_grids: bool,
-    /// *View ▸ Outline view*: the artwork as hairlines (`RenderOverrides::set_outline`,
+    /// *View ▸ Outline mode*: the artwork as hairlines (`RenderOverrides::set_outline`,
     /// installed by `draw_canvas`). Not a preference: a launch into it would look
     /// like a broken document.
     pub(crate) outline_view: bool,
@@ -786,7 +786,7 @@ pub struct OndinApp {
     /// are on screen.
     pub(crate) show_layers: bool,
     pub(crate) show_toolbar: bool,
-    /// *View ▸ Show status messages*: whether the floating status bar reports what just
+    /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
     pub(crate) show_status: bool,
     /// *View ▸ Focus mode*: the panels hidden while the canvas and its overlays keep
@@ -6594,7 +6594,7 @@ impl OndinApp {
                 TopMenu::View => ViewSwitch::VIEW_MENU
                     .iter()
                     .map(|s| s.label())
-                    .chain(["Present"])
+                    .chain([crate::menu::Item::Present.spec().label])
                     .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
             };
@@ -6621,7 +6621,13 @@ impl OndinApp {
                         }
                     }
                     // A verb after the switches, in their column: no tick, ever.
-                    if which == TopMenu::View && crate::ui::menu_check(ui, "Present", false, ITEM_H)
+                    if which == TopMenu::View
+                        && crate::ui::menu_check(
+                            ui,
+                            crate::menu::Item::Present.spec().label,
+                            false,
+                            ITEM_H,
+                        )
                     {
                         app.open_menu = TopMenu::None;
                         let ctx = ui.ctx().clone();
@@ -6831,7 +6837,7 @@ impl OndinApp {
 
     /// The floating status bar at the canvas's bottom left: the mode when not the
     /// default, and the last status message for [`status_hold`], then a fade.
-    /// *View ▸ Show status messages* hides the message, never the mode. Drawn in focus
+    /// *View ▸ Show messages* hides the message, never the mode. Drawn in focus
     /// mode too (its Escape hint). Not interactable; truncated so it never runs under the
     /// inspector.
     fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) {
@@ -12654,9 +12660,11 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The View menu is wide enough for its widest row, *Show status messages*.
+    /// The View menu is wide enough for every row's label.
     ///
-    /// flip: the menu back at `MENU_W` → fails at the label-inside-card assertion
+    /// flip: the card a fixed 100 wide rather than `menu_check_width` → fails at the
+    /// label-inside-card assertion. At `MENU_W` today's labels all fit, so a floor-only
+    /// card passes until a row outgrows it.
     #[test]
     fn the_view_menu_fits_its_widest_label() {
         let ctx = egui::Context::default();
@@ -12677,21 +12685,27 @@ mod library_wiring_tests {
         let card = ctx
             .memory(|m| m.area_rect(egui::Id::new("view-menu")))
             .expect("the View menu's area");
-        let label = shapes
-            .iter()
-            .find_map(|s| match &s.shape {
-                egui::Shape::Text(t) if t.galley.text() == "Show status messages" => {
-                    Some(t.pos.x + t.galley.size().x)
-                }
-                _ => None,
-            })
-            .expect("the row");
         let inset = crate::app::MENU_PAD + crate::ui::MENU_BORDER + 8.0;
-        assert!(
-            label <= card.right() - inset + 0.5,
-            "the label ends at {label}, the card at {}",
-            card.right()
-        );
+        let rows = crate::input::ViewSwitch::VIEW_MENU
+            .iter()
+            .map(|s| s.label())
+            .chain([crate::menu::Item::Present.spec().label]);
+        for row in rows {
+            let end = shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == row => {
+                        Some(t.pos.x + t.galley.size().x)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("the row {row}"));
+            assert!(
+                end <= card.right() - inset + 0.5,
+                "{row} ends at {end}, the card at {}",
+                card.right()
+            );
+        }
     }
 
     /// The floating status bar shows a message for its hold, then nothing; the

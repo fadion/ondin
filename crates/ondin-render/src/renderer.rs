@@ -184,7 +184,7 @@ pub struct RenderOverrides {
     /// Re-installed every frame from `OndinApp::draw_canvas`, since `set_preview`
     /// replaces this whole struct.
     chrome: Option<(NodeId, Ghost)>,
-    /// Outline view's ink: every outline drawn as a hairline in this colour, no
+    /// Outline mode's ink: every outline drawn as a hairline in this colour, no
     /// fill, effect, clip or mask (`scene::OutlinePainter`). A view, not an edit,
     /// so it is re-installed every frame as [`Self::chrome`] is, and not a term
     /// of [`Self::is_empty`].
@@ -308,7 +308,7 @@ impl RenderOverrides {
         self.outline = ink;
     }
 
-    /// Outline view's ink, `None` when the artwork draws as itself.
+    /// Outline mode's ink, `None` when the artwork draws as itself.
     pub fn outline(&self) -> Option<Color> {
         self.outline
     }

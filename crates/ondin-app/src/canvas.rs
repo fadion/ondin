@@ -612,7 +612,7 @@ fn default_shape_fill() -> Color {
     Color::from_rgba8(217, 217, 217, 255)
 }
 
-/// Outline view's ink on a page of `ground`: near-black on a light page,
+/// Outline mode's ink on a page of `ground`: near-black on a light page,
 /// near-white on a dark one, by the ground's luminance.
 fn outline_ink(ground: Color) -> Color {
     let [r, g, b, _] = ground.components;

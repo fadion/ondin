@@ -1226,7 +1226,12 @@ impl Item {
                 Some("Ctrl+Shift+/"),
                 Group::File,
             ),
-            Item::Present => s("Present", icon::PLAY, Some("Ctrl+Alt+Enter"), Group::View),
+            Item::Present => s(
+                "Present mode",
+                icon::PLAY,
+                Some("Ctrl+Alt+Enter"),
+                Group::View,
+            ),
         }
     }
 
@@ -5211,7 +5216,7 @@ mod view_switch_registry_tests {
                 "Lock guides",
                 "Show grid",
                 "Show layout grid",
-                "Outline view"
+                "Outline mode"
             ],
             "the struct's fields and the switches it answers for are not the same set"
         );

@@ -205,7 +205,7 @@ fn walk_origins<P: ScenePainter>(
     }
 }
 
-/// Outline view: the walk as it is, every path it fills or strokes drawn instead
+/// Outline mode: the walk as it is, every path it fills or strokes drawn instead
 /// as a one-device-pixel hairline of that path in `ink`, and type in `ink`.
 ///
 /// **Every layer is dropped** — opacity, clip, mask and effect alike — so what a

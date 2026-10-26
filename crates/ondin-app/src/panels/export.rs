@@ -1678,82 +1678,80 @@ impl OndinApp {
         self.write_export(files, destination);
     }
 
-    /// Render and write, reporting what happened.
+    /// Render and write on a worker, saying so; [`Self::poll_exports`] reports what
+    /// happened when it lands.
     ///
-    /// A failure stops nothing that has already succeeded, and is reported rather
-    /// than raised.
+    /// The worker gets a copy of the committed document and its `Resolved`, so an
+    /// edit made while it runs is not in the files — they are what was on screen
+    /// when the export was asked for.
     fn write_export(&mut self, files: Vec<PlannedFile>, destination: Destination) {
-        let mut rendered: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
-        let mut skipped = 0usize;
-        for f in &files {
-            match ondin_export::plan::render(&self.session.doc, &self.session.resolved, f) {
-                Some(bytes) => rendered.push((f.path.clone(), bytes)),
-                // The one refusal both writers make: a subject with no bounds at
-                // all — an empty group, a layer whose contents are all hidden.
-                None => skipped += 1,
+        let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
+        let ctx = self.egui_ctx.clone();
+        self.session.info(EXPORTING);
+        let job = crate::job::Job::spawn("ondin-export", &ctx, move || {
+            deliver(&doc, &resolved, &files, destination)
+        });
+        self.exports.push(job);
+    }
+
+    /// Report the exports that have landed, and keep *Exporting…* on the status
+    /// line while any is still running. Every frame.
+    pub(crate) fn poll_exports(&mut self, ctx: &egui::Context) {
+        let mut landed = Vec::new();
+        self.exports.retain(|job| match job.poll() {
+            Ok(None) => true,
+            Ok(Some(d)) => {
+                landed.push(Some(d));
+                false
+            }
+            Err(()) => {
+                landed.push(None);
+                false
+            }
+        });
+        for d in landed {
+            match d {
+                Some(d) => self.land_export(d),
+                None => self.session.fail("Could not export: the writer stopped"),
             }
         }
-        if rendered.is_empty() {
+        if !self.exports.is_empty() {
+            // Said again so it outlasts the status line's hold, but only while
+            // nothing newer has replaced it.
+            let status = self.session.status();
+            if status.text == EXPORTING && status.at.elapsed().as_secs_f32() > 1.0 {
+                self.session.info(EXPORTING);
+            }
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        }
+    }
+
+    /// Wait for every running export and report it (tests only).
+    #[cfg(test)]
+    pub(crate) fn settle_exports(&mut self) {
+        for job in std::mem::take(&mut self.exports) {
+            match job.wait() {
+                Some(d) => self.land_export(d),
+                None => self.session.fail("Could not export: the writer stopped"),
+            }
+        }
+    }
+
+    /// Report a finished export, and remember where it went.
+    fn land_export(&mut self, d: Delivered) {
+        let Delivered {
+            written,
+            skipped,
+            replaced,
+            to_folder,
+            failed,
+            where_,
+        } = d;
+        if written == 0 && failed.is_none() {
             self.session
                 .fail("Nothing to export — none of that has any size");
             return;
         }
-        // The folder arm owes a replacement count (§15 D636): a File or Archive was
-        // named in a save dialog, but a Folder export can arrive with no dialog
-        // (`export_all` takes `prefs.export_dir`, and *Re-export on save* fires it
-        // on an autosave), replacing same-named files with a bare `fs::write`.
-        let mut replaced = 0usize;
-        let mut to_folder = false;
-        let (written, failed, where_): (usize, Option<String>, std::path::PathBuf) =
-            match destination {
-                Destination::File(path) => {
-                    let dir = path.parent().map(Into::into).unwrap_or_default();
-                    // As the folder arm does (§15 D656): a name like `icons/close`
-                    // may carry a folder the save dialog did not create.
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    match std::fs::write(&path, &rendered[0].1) {
-                        Ok(()) => (1, None, dir),
-                        Err(e) => (0, Some(e.to_string()), dir),
-                    }
-                }
-                Destination::Archive(path) => {
-                    let dir = path.parent().map(Into::into).unwrap_or_default();
-                    let packed = ondin_export::plan::zip(&rendered)
-                        .and_then(|bytes| std::fs::write(&path, bytes));
-                    match packed {
-                        Ok(()) => (rendered.len(), None, dir),
-                        Err(e) => (0, Some(e.to_string()), dir),
-                    }
-                }
-                Destination::Folder(dir) => {
-                    let (mut ok, mut err) = (0, None);
-                    for (name, bytes) in &rendered {
-                        let path = dir.join(name);
-                        // The `/` in a name is a folder the user asked for, and it
-                        // may not exist yet. Created here rather than by the plan,
-                        // which never touches the filesystem.
-                        if let Some(parent) = path.parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        // Asked before the write: afterwards it always exists.
-                        let existed = path.exists();
-                        match std::fs::write(&path, bytes) {
-                            Ok(()) => {
-                                ok += 1;
-                                if existed {
-                                    replaced += 1;
-                                }
-                            }
-                            Err(e) => err = err.or(Some(e.to_string())),
-                        }
-                    }
-                    to_folder = true;
-                    (ok, err, dir)
-                }
-            };
-
         // Remembered for the next export, and for *Show in folder*. Saved eagerly:
         // the app has no shutdown hook to rely on.
         if written > 0 {
@@ -2205,6 +2203,106 @@ enum Destination {
     Folder(std::path::PathBuf),
     /// One archive holding the lot.
     Archive(std::path::PathBuf),
+}
+
+/// The status line's word while an export runs.
+const EXPORTING: &str = "Exporting…";
+
+/// What an export worker did: the files written, those with no size, how many a
+/// folder export replaced, and the first write error. `written` and `failed` both
+/// empty means nothing had a size.
+pub(crate) struct Delivered {
+    written: usize,
+    skipped: usize,
+    replaced: usize,
+    to_folder: bool,
+    failed: Option<String>,
+    where_: std::path::PathBuf,
+}
+
+/// Render `files` and write them to `destination`, off the UI thread.
+///
+/// A failure stops nothing that has already succeeded, and is reported rather
+/// than raised.
+fn deliver(
+    doc: &ondin_core::Document,
+    resolved: &ondin_core::Resolved,
+    files: &[PlannedFile],
+    destination: Destination,
+) -> Delivered {
+    let mut rendered: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
+    let mut skipped = 0usize;
+    for f in files {
+        match ondin_export::plan::render(doc, resolved, f) {
+            Some(bytes) => rendered.push((f.path.clone(), bytes)),
+            // The one refusal both writers make: a subject with no bounds at
+            // all — an empty group, a layer whose contents are all hidden.
+            None => skipped += 1,
+        }
+    }
+    let mut out = Delivered {
+        written: 0,
+        skipped,
+        replaced: 0,
+        to_folder: false,
+        failed: None,
+        where_: Default::default(),
+    };
+    if rendered.is_empty() {
+        return out;
+    }
+    // The folder arm owes a replacement count (§15 D636): a File or Archive was
+    // named in a save dialog, but a Folder export can arrive with no dialog
+    // (`export_all` takes `prefs.export_dir`, and *Re-export on save* fires it
+    // on an autosave), replacing same-named files with a bare `fs::write`.
+    match destination {
+        Destination::File(path) => {
+            out.where_ = path.parent().map(Into::into).unwrap_or_default();
+            // As the folder arm does (§15 D656): a name like `icons/close`
+            // may carry a folder the save dialog did not create.
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(&path, &rendered[0].1) {
+                Ok(()) => out.written = 1,
+                Err(e) => out.failed = Some(e.to_string()),
+            }
+        }
+        Destination::Archive(path) => {
+            out.where_ = path.parent().map(Into::into).unwrap_or_default();
+            let packed =
+                ondin_export::plan::zip(&rendered).and_then(|bytes| std::fs::write(&path, bytes));
+            match packed {
+                Ok(()) => out.written = rendered.len(),
+                Err(e) => out.failed = Some(e.to_string()),
+            }
+        }
+        Destination::Folder(dir) => {
+            for (name, bytes) in &rendered {
+                let path = dir.join(name);
+                // The `/` in a name is a folder the user asked for, and it
+                // may not exist yet. Created here rather than by the plan,
+                // which never touches the filesystem.
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                // Asked before the write: afterwards it always exists.
+                let existed = path.exists();
+                match std::fs::write(&path, bytes) {
+                    Ok(()) => {
+                        out.written += 1;
+                        if existed {
+                            out.replaced += 1;
+                        }
+                    }
+                    Err(e) => out.failed = out.failed.or(Some(e.to_string())),
+                }
+            }
+            out.to_folder = true;
+            out.where_ = dir;
+        }
+    }
+    out
 }
 
 fn export_count(n: usize) -> String {
@@ -3126,7 +3224,7 @@ mod export_all_scope_tests {
     /// skipped arm. `OndinApp::headless` uses ephemeral prefs, so the user's
     /// `prefs.json` is untouched.
     ///
-    /// flip: count the `None` arm of `write_export` as a success (push empty bytes
+    /// flip: count the `None` arm of `deliver` as a success (push empty bytes
     /// instead of `skipped += 1`) → fails at the files assertion (2 against 1), as
     /// it writes a zero-byte PNG. The `if written > 0` guard is not reached.
     #[test]
@@ -3179,6 +3277,8 @@ mod export_all_scope_tests {
         assert_eq!(layers.len(), 2, "fixture: both layers are collected");
         let files = app.export_plan(&layers);
         app.write_export(files, Destination::Folder(dir.clone()));
+        assert_eq!(app.session.status().text, EXPORTING, "it says it started");
+        app.settle_exports();
 
         let on_disk: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -3213,7 +3313,7 @@ mod export_all_scope_tests {
     /// is a difference: it must read no replacement, then one. A `Destination::File`
     /// write is the control for the other arms.
     ///
-    /// flip: move the `path.exists()` read in `write_export` after the write → fails
+    /// flip: move the `path.exists()` read in `deliver` after the write → fails
     /// on the first run at the `!contains("replaced")` assertion.
     #[test]
     fn a_folder_export_says_what_it_replaced_and_where() {
@@ -3250,6 +3350,7 @@ mod export_all_scope_tests {
         let plan = |app: &crate::app::OndinApp| app.export_plan(&app.exportable_layers());
 
         app.write_export(plan(&app), Destination::Folder(dir.clone()));
+        app.settle_exports();
         let first = app.session.status().text.clone();
         assert!(
             first.starts_with("Exported 1 file"),
@@ -3266,6 +3367,7 @@ mod export_all_scope_tests {
         );
 
         app.write_export(plan(&app), Destination::Folder(dir.clone()));
+        app.settle_exports();
         let again = app.session.status().text.clone();
         assert!(
             again.contains("(1 replaced)"),
@@ -3279,12 +3381,71 @@ mod export_all_scope_tests {
         // A *File* export is unchanged: its dialog already said where.
         let one = dir.join("named.png");
         app.write_export(plan(&app), Destination::File(one));
+        app.settle_exports();
         let file = app.session.status().text.clone();
         assert_eq!(
             file, "Exported 1 file",
             "a save-dialog destination reports as it always did"
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An export renders on a worker: `write_export` returns before a file exists
+    /// is not something a test can pin, so this pins the other half — the frame
+    /// loop's `poll_exports` reports it when it lands. flip: `poll_exports` keeping
+    /// a landed job → fails at "the frame loop reports it".
+    #[test]
+    fn an_export_lands_through_the_frame_loop() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let parent = app.session.doc.first_page();
+        let rect = app.session.ids.mint();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: rect,
+                parent,
+                index: 0,
+                kind: ondin_core::NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: Some("Icon".into()),
+            },
+            ondin_core::Operation::SetExports {
+                id: rect,
+                exports: ondin_core::keyed_by_position([ExportSpec::new(
+                    ExportFormat::Svg,
+                    ExportScale::Times(1.0),
+                )]),
+            },
+        ])));
+        let dir = std::env::temp_dir().join(format!("ondin-worker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        app.write_export(
+            app.export_plan(&app.exportable_layers()),
+            Destination::Folder(dir.clone()),
+        );
+        assert_eq!(app.exports.len(), 1, "on a worker");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !app.exports.is_empty() && std::time::Instant::now() < deadline {
+            app.poll_exports(&ctx);
+            std::thread::yield_now();
+        }
+        assert!(
+            app.session.status().text.starts_with("Exported 1 file"),
+            "the frame loop reports it: {:?}",
+            app.session.status().text
+        );
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "and the file is there"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -704,6 +704,10 @@ pub struct OndinApp {
     pub(crate) offset_card: Option<crate::path_bar::OffsetCard>,
     /// The path bar's *Simplify*, while its worker runs.
     pub(crate) simplifying: Option<crate::path_bar::Simplifying>,
+    /// Exports rendering and writing on workers (`panels::export`).
+    pub(crate) exports: Vec<crate::job::Job<crate::panels::Delivered>>,
+    /// The window's context, for work that must wake the frame loop from a worker.
+    pub(crate) egui_ctx: egui::Context,
     /// The styles and variables browser; it shares a place with the insert picker.
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
     /// The browser's collapsed groups per document root; view state, not saved.
@@ -1088,6 +1092,7 @@ impl OndinApp {
         // catalog thread is spawned at all.
         let prefs = crate::prefs::Prefs::load();
         let mut app = Self::with(
+            &cc.egui_ctx,
             CanvasRenderer::new(render_state),
             FontService::new(&cc.egui_ctx, prefs.web_fonts),
             prefs,
@@ -1190,11 +1195,16 @@ impl OndinApp {
             ..Default::default()
         };
         CLIPBOARD_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
-        Self::with(CanvasRenderer::headless(), FontService::inert(), prefs)
+        Self::with(ctx, CanvasRenderer::headless(), FontService::inert(), prefs)
     }
 
     /// The one field list, so the two constructors cannot drift.
-    fn with(canvas: CanvasRenderer, fonts: FontService, prefs: crate::prefs::Prefs) -> Self {
+    fn with(
+        ctx: &egui::Context,
+        canvas: CanvasRenderer,
+        fonts: FontService,
+        prefs: crate::prefs::Prefs,
+    ) -> Self {
         let root = crate::library::root(prefs.base_folder.as_deref())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
         let library = crate::library::state::Library::open(root);
@@ -1276,6 +1286,8 @@ impl OndinApp {
             pen_button: egui::Rect::NOTHING,
             offset_card: None,
             simplifying: None,
+            exports: Vec::new(),
+            egui_ctx: ctx.clone(),
             var_browser: None,
             var_collapsed: Default::default(),
             var_button: egui::Rect::NOTHING,
@@ -1630,6 +1642,7 @@ impl eframe::App for OndinApp {
 
         self.watch_kits(&ctx);
         self.poll_simplify();
+        self.poll_exports(&ctx);
         if !self.focus {
             self.inspector_panel(&ctx);
             self.path_bar(&ctx);
@@ -17216,6 +17229,7 @@ mod view_prefs_tests {
         assert!(!app.prefs.view.snap_grid && !app.prefs.view.rulers && !app.prefs.view.guides);
 
         let next = OndinApp::with(
+            &ctx,
             CanvasRenderer::headless(),
             FontService::inert(),
             app.prefs.clone(),

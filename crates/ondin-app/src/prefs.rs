@@ -43,6 +43,7 @@ pub struct ViewPrefs {
     pub layout_grids: bool,
     pub layers: bool,
     pub history: bool,
+    pub minimap: bool,
     pub toolbar: bool,
     pub status: bool,
     pub snap_shapes: bool,
@@ -52,7 +53,7 @@ pub struct ViewPrefs {
 }
 
 impl Default for ViewPrefs {
-    /// Every switch on but the guide lock and History.
+    /// Every switch on but the guide lock, History and the minimap.
     fn default() -> Self {
         Self {
             rulers: true,
@@ -62,6 +63,7 @@ impl Default for ViewPrefs {
             layout_grids: true,
             layers: true,
             history: false,
+            minimap: false,
             toolbar: true,
             status: true,
             snap_shapes: true,

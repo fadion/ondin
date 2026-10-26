@@ -488,6 +488,7 @@ impl ViewState {
             ViewSwitch::Outline => Some(self.outline),
             ViewSwitch::Layers
             | ViewSwitch::History
+            | ViewSwitch::Minimap
             | ViewSwitch::Toolbar
             | ViewSwitch::StatusMessages
             | ViewSwitch::Focus
@@ -945,6 +946,7 @@ impl Item {
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
                     | ViewSwitch::History
+                    | ViewSwitch::Minimap
                     | ViewSwitch::Toolbar
                     | ViewSwitch::StatusMessages
                     | ViewSwitch::Focus
@@ -3966,6 +3968,7 @@ mod tests {
                     sw,
                     ViewSwitch::Layers
                         | ViewSwitch::History
+                        | ViewSwitch::Minimap
                         | ViewSwitch::Toolbar
                         | ViewSwitch::StatusMessages
                         | ViewSwitch::Focus

@@ -330,6 +330,9 @@ pub enum ViewSwitch {
     /// The History section at the foot of the layers pane (`panels::history`).
     /// Off by default and deliberately unbound: a list few people keep open.
     History,
+    /// `Ctrl+Shift+M` — the minimap card at the canvas's bottom left
+    /// (`minimap.rs`). Off by default.
+    Minimap,
     /// `Ctrl+Shift+\`, which reaches egui as `Key::Pipe` (§0).
     Toolbar,
     /// The floating status bar at the canvas's bottom left, on by default.
@@ -364,6 +367,7 @@ impl ViewSwitch {
             Self::Outline => "Outline mode",
             Self::Layers => "Show layers",
             Self::History => "Show history",
+            Self::Minimap => "Show minimap",
             Self::Toolbar => "Show toolbar",
             Self::StatusMessages => "Show messages",
             Self::Focus => "Focus mode",
@@ -381,8 +385,8 @@ impl ViewSwitch {
     /// there can render a switch with a chord that is not its own.
     ///
     /// This is the menu's *spelling*; `resolve` is the binding, and nothing makes
-    /// them agree beyond a hand check. `SnapBaselines`, `LayoutGrid`, `Outline`
-    /// and `StatusMessages` are `None` (each variant's doc says why).
+    /// them agree beyond a hand check. `SnapBaselines`, `LayoutGrid`, `Outline`,
+    /// `History` and `StatusMessages` are `None` (each variant's doc says why).
     pub fn accel(self) -> Option<&'static str> {
         Some(match self {
             Self::Rulers => "Shift+R",
@@ -390,6 +394,7 @@ impl ViewSwitch {
             Self::GuideLock => "Ctrl+Alt+;",
             Self::Grid => "Ctrl+'",
             Self::Layers => "Ctrl+Alt+\\",
+            Self::Minimap => "Ctrl+Shift+M",
             Self::Toolbar => "Ctrl+Shift+\\",
             Self::Focus => "Ctrl+\\",
             Self::SnapShapes => "Ctrl+U",
@@ -409,7 +414,7 @@ impl ViewSwitch {
     /// rulers, then the guides that are pulled out of them, then the grid — and
     /// then the layout grid, adjacent so the two grid rows read against each other;
     /// outline view after them, the last row about the artwork.
-    pub const VIEW_MENU: [Self; 11] = [
+    pub const VIEW_MENU: [Self; 12] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -417,6 +422,7 @@ impl ViewSwitch {
         Self::LayoutGrid,
         Self::Layers,
         Self::History,
+        Self::Minimap,
         Self::Toolbar,
         Self::StatusMessages,
         Self::Outline,
@@ -433,7 +439,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -442,6 +448,7 @@ impl ViewSwitch {
         Self::Outline,
         Self::Layers,
         Self::History,
+        Self::Minimap,
         Self::Toolbar,
         Self::StatusMessages,
         Self::Focus,
@@ -1129,6 +1136,13 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
                 && (i.key_pressed(egui::Key::Pipe)
                     || (m.shift && i.key_pressed(egui::Key::Backslash))),
             Action::ToggleView(ViewSwitch::Toolbar),
+            &mut out,
+        );
+        // The minimap. `M` is a letter, so Shift arrives as a modifier, not a
+        // second key (§0); `Ctrl+Alt+M` is the mask chord, kept apart by Alt.
+        on(
+            cmd_only && m.shift && i.key_pressed(egui::Key::M),
+            Action::ToggleView(ViewSwitch::Minimap),
             &mut out,
         );
 
@@ -2040,6 +2054,27 @@ mod tests {
         assert!(
             actions(Mode::Normal, vec![key(egui::Key::M, cmd)], cmd).is_empty(),
             "Ctrl+M is not an alias — one chord, and the Figma one"
+        );
+    }
+
+    /// `Ctrl+Shift+M` toggles the minimap, beside the mask chord on the same letter.
+    #[test]
+    fn ctrl_shift_m_toggles_the_minimap() {
+        let cmd_shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::COMMAND
+        };
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::M, cmd_shift)], cmd_shift),
+            vec![Action::ToggleView(ViewSwitch::Minimap)]
+        );
+        let all = egui::Modifiers {
+            alt: true,
+            ..cmd_shift
+        };
+        assert!(
+            actions(Mode::Normal, vec![key(egui::Key::M, all)], all).is_empty(),
+            "Ctrl+Alt+Shift+M is neither"
         );
     }
 

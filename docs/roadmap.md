@@ -21,14 +21,6 @@ reads true.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Canvas**: lasso, spacing handles on a loose multi-selection (`spacing.rs` covers
   containers).
-- **Minimap** (design canvas, *Minimap*). A 220 pt card in the canvas's bottom-left corner, its height
-  following the page's shape (90–160 pt). *View › Show minimap*, `Ctrl+Shift+M`, a `ViewSwitch` kept in
-  `prefs.view`, off by default. It draws the current page flat: each top-level layer and each layer
-  directly inside a frame as a box in its fill colour, text as a bar, an image as a grey box, the
-  selection outlined; nothing deeper, so it costs one pass over two levels of the tree. The map fits
-  the page's content and the viewport together, so the viewport box never leaves it. Click centres
-  the canvas there, dragging the box pans live, scrolling zooms around the pointer, double-click zooms
-  to fit; none of it is an edit. Present mode hides it; focus mode keeps it.
 - **PDF import.**
 - **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
   Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when

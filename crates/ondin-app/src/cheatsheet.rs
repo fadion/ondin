@@ -157,6 +157,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         ViewSwitch::GuideLock,
         ViewSwitch::Grid,
         ViewSwitch::Layers,
+        ViewSwitch::Minimap,
         ViewSwitch::Toolbar,
         ViewSwitch::Focus,
         ViewSwitch::SnapShapes,

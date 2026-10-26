@@ -209,6 +209,7 @@ one is designated (§15 D113).
 | `Ctrl+\` | focus mode (hide the panels) | ✅ Figma's show/hide-UI |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | — | show history | **unbound**: a list few people keep open |
+| `Ctrl+Shift+M` | minimap | ✅ `cmd_only && shift`; `Ctrl+Alt+M` stays the mask chord. `ctrl_shift_m_toggles_the_minimap` |
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show messages | **unbound** (§15 D1025) |
 
@@ -427,7 +428,7 @@ combinations asserts the two **partition** the space.
 | `Ctrl+Alt+G` | frame selection | ✅ Figma (§15 D987); free because the group chords are `cmd_only`. `ctrl_alt_g_frames_and_leaves_the_group_chords_alone` |
 | `Shift+A` | add flex layout, read from where the children sit; a loose selection is framed first | ✅ Figma's chord. Plain `A` is the Node tool, read with no Shift. `shift_a_adds_a_layout_and_leaves_a_alone` |
 | `Ctrl+E` | flatten | ✅ Figma |
-| `Ctrl+Alt+M` | use as mask / release | ✅ Figma (§15 D286). `M` is otherwise unspent; `masking_is_a_chord_and_the_bare_letter_is_still_unspent` keeps plain `M` and `Ctrl+M` free |
+| `Ctrl+Alt+M` | use as mask / release | ✅ Figma (§15 D286). `M` is otherwise spent only by `Ctrl+Shift+M` (minimap, §6); `masking_is_a_chord_and_the_bare_letter_is_still_unspent` keeps plain `M` and `Ctrl+M` free |
 | `Ctrl+Alt+U` `S` `I` `X` | union, subtract, intersect, exclude | ✅ Figma; `X` from the **release** (§L2) |
 | `Ctrl+]` / `[` | bring forward / send backward | ✅ |
 | `Ctrl+Shift+]` / `[` | bring to front / send to back | ✅ curly spellings handled |

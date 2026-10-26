@@ -814,6 +814,11 @@ pub struct OndinApp {
     pub(crate) show_layers: bool,
     /// *View ▸ Show history*: the History section at the layers pane's foot.
     pub(crate) show_history: bool,
+    /// *View ▸ Show minimap*: the map card at the canvas's bottom left. Focus mode keeps
+    /// it; present mode, which draws nothing but the page, hides it.
+    pub(crate) show_minimap: bool,
+    /// The minimap's drag and remembered shape (`minimap.rs`).
+    pub(crate) minimap: crate::minimap::Minimap,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1355,6 +1360,8 @@ impl OndinApp {
             outline_view: false,
             show_layers: view.layers,
             show_history: view.history,
+            show_minimap: view.minimap,
+            minimap: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -1668,6 +1675,11 @@ impl eframe::App for OndinApp {
         // previous frame's inspector.
         self.fold_chrome_hold(&ctx);
         self.fold_opacity_entry(&ctx);
+
+        // Before the canvas, placed from last frame's canvas rect, so a pan the map
+        // makes reaches this frame's render. Outside the `focus` guard: focus mode keeps
+        // it.
+        self.minimap_ui(&ctx);
 
         // The canvas takes the remaining area; the inspector and picker float over it.
         let canvas = egui::CentralPanel::default()
@@ -6778,6 +6790,7 @@ impl OndinApp {
             layout_grids: self.show_layout_grids,
             layers: self.show_layers,
             history: self.show_history,
+            minimap: self.show_minimap,
             toolbar: self.show_toolbar,
             status: self.show_status,
             snap_shapes: self.snap_shapes,
@@ -6802,6 +6815,7 @@ impl OndinApp {
             ViewSwitch::Outline => self.outline_view,
             ViewSwitch::Layers => self.show_layers,
             ViewSwitch::History => self.show_history,
+            ViewSwitch::Minimap => self.show_minimap,
             ViewSwitch::Toolbar => self.show_toolbar,
             ViewSwitch::StatusMessages => self.show_status,
             ViewSwitch::Focus => self.focus,
@@ -6831,6 +6845,7 @@ impl OndinApp {
                 // History lives in the layers pane, so showing it shows the pane.
                 self.show_layers |= on;
             }
+            ViewSwitch::Minimap => self.show_minimap = on,
             ViewSwitch::Toolbar => self.show_toolbar = on,
             ViewSwitch::StatusMessages => {
                 self.show_status = on;
@@ -6952,8 +6967,8 @@ impl OndinApp {
         }
     }
 
-    /// The floating status bar at the canvas's bottom left: the mode when not the
-    /// default, and the last status message for [`status_hold`], then a fade.
+    /// The floating status bar at the canvas's bottom left, to the minimap's right when
+    /// that shows: the mode when not the default, and the last status message for [`status_hold`], then a fade.
     /// *View ▸ Show messages* hides the message, never the mode. Drawn in focus
     /// mode too (its Escape hint). Not interactable; truncated so it never runs under the
     /// inspector.
@@ -6981,13 +6996,15 @@ impl OndinApp {
             }));
         }
         let max_w = (canvas.width() * 0.6).min(560.0);
+        // Beside the minimap, which holds the corner.
+        let beside = self.minimap_clearance();
         egui::Area::new(egui::Id::new("status-bar"))
             .order(egui::Order::Middle)
             .interactable(false)
             // Its own fade only: egui's appear fade would dim the mode.
             .fade_in(false)
             .pivot(egui::Align2::LEFT_BOTTOM)
-            .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN, -MARGIN))
+            .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN + beside, -MARGIN))
             .show(ctx, |ui| {
                 // The card fades only when the message is all it holds.
                 let message_fade = if moded {
@@ -17563,6 +17580,8 @@ mod view_prefs_tests {
         app.set_view_switch(ViewSwitch::SnapGrid, false);
         app.set_view_switch(ViewSwitch::Rulers, false);
         app.set_view_switch(ViewSwitch::Focus, true);
+        assert!(!app.show_minimap, "the minimap starts off");
+        app.set_view_switch(ViewSwitch::Minimap, true);
         // A side door: pulling a guide out turns guides on without the switch.
         app.show_guides = false;
         let mut frame = eframe::Frame::_new_kittest();
@@ -17579,6 +17598,7 @@ mod view_prefs_tests {
         );
         assert!(!next.snap_grid && !next.show_rulers && !next.show_guides);
         assert!(next.snap_shapes && next.show_layers, "the rest stay on");
+        assert!(next.show_minimap, "and the minimap stays on");
         assert!(!next.focus, "a launch never opens in focus mode");
     }
 }

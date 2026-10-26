@@ -1,7 +1,7 @@
 # Canvas chrome, the top bar's menus, the command palette, the cheatsheet, focus and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the top bar's View/Snap menus and Settings button, the command palette, the shortcut
+pixel grid, the minimap, the top bar's View/Snap menus and Settings button, the command palette, the shortcut
 cheatsheet, focus mode and present mode. Part of §9.4.
 
 ## 9.4 Gesture chrome
@@ -45,6 +45,38 @@ marks the original that stays. Toggles live with the key.
 - Every line lands via `rulers::snap_across_axis`, the guides' own snap.
 - Showing the grid and snapping to it are separate switches.
 
+## The minimap (`minimap.rs`)
+
+*View ▸ Show minimap* (`ViewSwitch::Minimap`, `Ctrl+Shift+M`, `prefs.view.minimap`, off by default).
+In the View menu and the palette, not the canvas menu: it is chrome-wide, like *Show layers*. The
+design canvas's *Minimap* artboard is the mockup; these rules are the spec.
+
+- **The card.** An `egui::Area` at `Order::Middle`, pivoted at the canvas's bottom left, 12pt in
+  (the status bar's margin): a `ui::menu_frame` 220pt wide with 6pt padding. The map's height
+  follows the page content's aspect, the card clamped to 90–160pt; an empty page keeps the last
+  height. The floating status bar moves right by the card's width + 8pt
+  (`OndinApp::minimap_clearance`), so the two share the bottom line.
+- **What it draws**, the current page flat: each shown top-level layer and each shown layer directly
+  inside a top-level frame, nothing deeper, so it stays legible small and costs one pass over two
+  levels. Each is a box of its preview world bounds (a live drag shows) in its first visible fill: a
+  bound colour resolved, a gradient as its first stop, an image as grey, no fill as a faint neutral
+  box. A text layer is a rounded bar through the middle 60% of its box. The selection's bounds are outlined in `color::SELECT`; the viewport is an accent box.
+- **The fit** is the page content ∪ the viewport, padded 4% of the larger side, so the viewport box
+  never leaves the map; an empty page fits the viewport at 2.4× its size.
+- **Input.** A press outside the box centres the camera there and carries on as a drag; a press
+  inside picks the box up. The canvas follows the drag frame by frame; the fit is frozen at the
+  press, so the map holds still under the pointer, and a dashed ghost marks where the box started.
+  A right-click during the drag puts the camera back. The wheel, any axis or modifier, zooms around
+  the world point under the pointer (`Camera::zoom_by` anchored at that point's canvas position,
+  even off-screen). Double-click zooms to fit the page. Hovering a top-level frame outside the box
+  shows its name as a tooltip, the only text the map shows. Cursor: grab over the box, grabbing
+  while dragging.
+- **None of it is an edit**: camera only, no history step, nothing in the file. egui gives a press
+  on the card to the map's widget, so it never reaches the canvas and never deselects.
+- **Placement in the frame.** `minimap_ui` runs before the canvas's `CentralPanel`, placed from last
+  frame's `canvas_rect`, so a pan it makes reaches this frame's render. It is outside the `!focus`
+  guard, so focus mode keeps it; present mode's early return hides it.
+
 ## The top bar's right cluster
 
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
@@ -55,8 +87,9 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
-  layers*, *Show history*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*, then *Present mode* — a verb,
+  layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*, then *Present mode* — a verb,
   not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
+  *Show minimap* follows *Show history* so the two rows about the layers pane stay together.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
@@ -78,8 +111,9 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - All are **view state**, not document state. All but focus mode and outline view are kept in `prefs.view`
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
-  ruler turning guides on), and a launch opens on them. All default on except *Lock guides* and
-  focus mode; a launch never opens in focus mode.
+  ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
+  *Show history*, *Show minimap*, outline view and focus mode; a launch never opens in focus mode
+  or outline view.
 
 ### Settings
 
@@ -237,7 +271,7 @@ none of the rules below are its.
   *with* stays — ruler bars, guides, layout grids, selection box, handles, size badge, hover outline,
   frame tags — and the canvas works normally, so a guide can be pulled out of a ruler. The rulers
   are an editing aid like guides and layout grids, not app chrome. The **floating status bar stays**
-  (it carries *"Focus mode — Escape to leave"*).
+  (it carries *"Focus mode — Escape to leave"*), and so does the minimap.
 - On Windows/Linux the top bar is the title bar, so caption buttons go too; `chrome::focus_strip`
   shows them in a 32pt strip when the pointer reaches the window's top edge with no button held, keeps
   it while hovered or a button is down. Approaching from the canvas below shows nothing.
@@ -309,6 +343,9 @@ runs (`pages` names each frame's page, index for index).
   panels, not what the canvas is edited with; read §15 D750 first.
   `focus_mode_leaves_the_guides_and_rulers_on_screen_and_live` pins the rulers and guides.
 - A modal flag set behind a `!focus` draw guard swallows all keys in focus mode.
+- `minimap_ui` sits before the canvas and outside the `!focus` guard. Moving it beside
+  `status_bar` lags every pan it makes by a frame; moving it into the guard drops it from focus
+  mode (`focus_mode_keeps_the_map`).
 - Deriving the escape clip from overrides makes resized children pop out of their frame.
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
   frame's input; `just_opened` is all that stops the opening press closing it.

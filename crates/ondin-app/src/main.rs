@@ -85,6 +85,7 @@ mod logging;
 mod machine_dir;
 mod measure;
 mod menu;
+mod minimap;
 mod pages;
 mod palette;
 mod panels;

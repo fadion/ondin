@@ -71,6 +71,7 @@ ondin-app/src/
 ├─ input.rs         Mode + Action: mode-aware keyboard routing
 ├─ measure.rs       Axis + Measure: Alt-hover measure and spacing-snap gaps; pure Rect geometry
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
+├─ minimap.rs       the minimap card at the canvas's bottom left (app-canvas-chrome.md)
 ├─ path_bar.rs      the path bar beside the rail while points are edited (app-pen-and-nodes.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)

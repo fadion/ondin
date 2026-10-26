@@ -199,6 +199,7 @@ one is designated (§15 D113).
 | `Shift+R` | rulers | ✅ Figma |
 | `Ctrl+'` | show grid | ✅ Illustrator, Photoshop |
 | — | show layout grid | **unbound** (§15 D755) |
+| — | outline view | **unbound**: Figma's and Illustrator's `Ctrl+Y` is redo, and `Ctrl+Shift+Y` stays unspent beside it |
 | `Ctrl+Shift+'` | snap to grid | ✅ Illustrator's `Ctrl+"` |
 | `Ctrl+U` | snap to shapes | ✅ Illustrator's Smart Guides |
 | `Ctrl+;` | show / hide guides | ✅ Illustrator |
@@ -210,8 +211,8 @@ one is designated (§15 D113).
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show status messages | **unbound** (§15 D1025) |
 
-`ViewSwitch::accel` answers `None` for exactly the three unbound rows (`LayoutGrid`,
-`StatusMessages`, `SnapBaselines`): no convention to match, a menu one click away. They are listed
+`ViewSwitch::accel` answers `None` for exactly the four unbound rows (`LayoutGrid`, `Outline`,
+`StatusMessages`, `SnapBaselines`): no free convention to match, a menu one click away. They are listed
 so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide the
 panels, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
 Guide lock is a workspace toggle on `OndinApp`, not a per-guide property (`architecture.md` §9.4).

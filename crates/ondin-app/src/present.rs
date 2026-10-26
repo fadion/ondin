@@ -364,6 +364,8 @@ impl crate::app::OndinApp {
         p.view = hold_on_frame(view, bounds, px);
         let camera = p.view.unwrap_or(fitted);
         self.session.set_chrome_ghost(None);
+        // Presenting shows the design, whatever the canvas view is.
+        self.session.set_outline(None);
         let (doc, res, overrides) = self.session.render_inputs();
         if let Some(tex) = self
             .canvas

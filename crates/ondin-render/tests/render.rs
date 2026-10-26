@@ -229,6 +229,99 @@ fn artboards_push_a_clip_layer_so_content_cannot_overflow() {
     assert_eq!(painter.depth, 0, "every pushed layer was popped");
 }
 
+/// What outline view hands a backend: per stroke, its width in device pixels
+/// and whether it was the ink.
+#[derive(Default)]
+struct OutlineRecorder {
+    fills: usize,
+    strokes: Vec<(f64, bool)>,
+    layers: usize,
+    ink: Option<Color>,
+}
+
+impl ScenePainter for OutlineRecorder {
+    fn has_image(&self, _id: &ondin_core::ImageId) -> bool {
+        true
+    }
+    fn fill_path(
+        &mut self,
+        _: Affine,
+        _: &ondin_core::kurbo::BezPath,
+        _: &Brush,
+        _: Option<ondin_core::Framing>,
+        _: ClipRule,
+    ) {
+        self.fills += 1;
+    }
+    fn stroke_path(&mut self, t: Affine, _: &ondin_core::kurbo::BezPath, s: &StrokePaint<'_>) {
+        // The painter's world transform times the 400 px / 2000 unit view.
+        let [a, b, c, d, _, _] = t.as_coeffs();
+        let device = (a * d - b * c).abs().sqrt() * 0.2;
+        let inked = matches!(s.brush, Brush::Solid(c) if Some(*c) == self.ink);
+        self.strokes.push((s.width * device, inked));
+    }
+    fn draw_text(&mut self, _: Affine, _: &TextRun<'_>) {}
+    fn push_layer(
+        &mut self,
+        _: Affine,
+        _: Option<&ondin_core::kurbo::BezPath>,
+        _: ClipRule,
+        _: f32,
+    ) {
+        self.layers += 1;
+    }
+    fn push_mask_layer(&mut self) {
+        self.layers += 1;
+    }
+    fn pop_layer(&mut self) {}
+}
+
+/// Outline view turns every fill into a one-device-pixel stroke in the ink and
+/// pushes no layer, not even the frame's clip. The same document without it fills
+/// and clips, so the fixture is not trivially empty.
+///
+/// flip: `build_of` ignoring `overrides.outline()` → fails at *no fill*.
+#[test]
+fn outline_view_strokes_every_outline_as_a_hairline_and_drops_layers() {
+    let (doc, res, _n, _f) = two_rect_doc();
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 2000.0, 2000.0),
+        pixel_size: (400, 400),
+    };
+    let ink = Color::from_rgba8(255, 0, 128, 255);
+    let mut plain = OutlineRecorder::default();
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut plain,
+    );
+    assert!(
+        plain.fills > 0 && plain.layers > 0,
+        "the control fills and clips"
+    );
+
+    let mut ov = RenderOverrides::default();
+    ov.set_outline(Some(ink));
+    let mut outlined = OutlineRecorder {
+        ink: Some(ink),
+        ..Default::default()
+    };
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut outlined);
+    assert_eq!(outlined.fills, 0, "no fill");
+    assert_eq!(outlined.layers, 0, "no layer");
+    assert_eq!(outlined.strokes.len(), plain.fills, "one hairline per fill");
+    for (width, inked) in &outlined.strokes {
+        assert!(
+            (width - 1.0).abs() < 1e-9,
+            "a hairline is {width} device px"
+        );
+        assert!(inked, "drawn in the ink");
+    }
+}
+
 /// "Clip content", off. The frame stops pushing a clip layer — and stops being
 /// a culling boundary with it, because its own bounds no longer say anything
 /// about where its children can paint. A child outside the frame but inside the

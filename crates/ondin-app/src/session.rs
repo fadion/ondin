@@ -666,6 +666,12 @@ impl EditorSession {
         self.overrides.set_chrome_ghost(glued);
     }
 
+    /// Turn outline view on in `ink`, or off. Called once a frame for
+    /// [`Self::set_chrome_ghost`]'s reason.
+    pub fn set_outline(&mut self, ink: Option<Color>) {
+        self.overrides.set_outline(ink);
+    }
+
     /// The canvas ground, including a colour being dragged in the picker.
     /// The current page's ground, including any live edit of it.
     pub fn preview_ground(&self) -> Color {

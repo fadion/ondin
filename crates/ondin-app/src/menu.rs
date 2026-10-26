@@ -455,10 +455,10 @@ impl Kind {
     }
 }
 
-/// The five View switches a context menu can show, read once by the caller.
+/// The View switches a context menu can show, read once by the caller.
 ///
 /// A struct rather than a closure over the app, so building a menu borrows nothing
-/// and a test can build one from five bools.
+/// and a test can build one from bools.
 #[derive(Clone, Copy, Default)]
 pub struct ViewState {
     pub rulers: bool,
@@ -466,6 +466,7 @@ pub struct ViewState {
     pub guide_lock: bool,
     pub grid: bool,
     pub layout_grid: bool,
+    pub outline: bool,
 }
 
 impl ViewState {
@@ -481,6 +482,7 @@ impl ViewState {
             ViewSwitch::GuideLock => Some(self.guide_lock),
             ViewSwitch::Grid => Some(self.grid),
             ViewSwitch::LayoutGrid => Some(self.layout_grid),
+            ViewSwitch::Outline => Some(self.outline),
             ViewSwitch::Layers
             | ViewSwitch::Toolbar
             | ViewSwitch::StatusMessages
@@ -591,6 +593,7 @@ impl Item {
         Item::ViewSwitch(ViewSwitch::GuideLock),
         Item::ViewSwitch(ViewSwitch::Grid),
         Item::ViewSwitch(ViewSwitch::LayoutGrid),
+        Item::ViewSwitch(ViewSwitch::Outline),
         Item::RenamePage,
         Item::DuplicatePage,
         Item::PageDraft,
@@ -926,6 +929,7 @@ impl Item {
                     ViewSwitch::Grid => icon::GRID_FOUR,
                     // The glyph the Layout grid card already draws for columns.
                     ViewSwitch::LayoutGrid => icon::COLUMNS,
+                    ViewSwitch::Outline => icon::SQUARE,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
@@ -2132,8 +2136,8 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
     rows
 }
 
-/// The five View switches §6.1 and §6.3 share, each carrying its own state.
-/// All five stay live in focus mode, which hides none of what they switch.
+/// The View switches §6.1 and §6.3 share, each carrying its own state. All
+/// stay live in focus mode, which hides none of what they switch.
 fn view_rows(cx: &Context<'_>) -> Vec<Row> {
     [
         ViewSwitch::Rulers,
@@ -2141,6 +2145,7 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
         ViewSwitch::GuideLock,
         ViewSwitch::Grid,
         ViewSwitch::LayoutGrid,
+        ViewSwitch::Outline,
     ]
     .into_iter()
     .map(|sw| Row::new(Item::ViewSwitch(sw)).checked(cx.view.get(sw)))
@@ -2616,6 +2621,7 @@ impl OndinApp {
                 guide_lock: self.view_switch(ViewSwitch::GuideLock),
                 grid: self.view_switch(ViewSwitch::Grid),
                 layout_grid: self.view_switch(ViewSwitch::LayoutGrid),
+                outline: self.view_switch(ViewSwitch::Outline),
             },
             focus: self.focus,
             segment_selected: self
@@ -3942,6 +3948,7 @@ mod tests {
             guide_lock: true,
             grid: false,
             layout_grid: true,
+            outline: false,
         };
         let mut cx = open(Target::Canvas, &[], &[]);
         cx.view = st;
@@ -3951,6 +3958,7 @@ mod tests {
             (ViewSwitch::GuideLock, true),
             (ViewSwitch::Grid, false),
             (ViewSwitch::LayoutGrid, true),
+            (ViewSwitch::Outline, false),
         ] {
             let row = build(&cx)
                 .iter()
@@ -5175,6 +5183,7 @@ mod view_switch_registry_tests {
             guide_lock: false,
             grid: true,
             layout_grid: false,
+            outline: false,
         };
         let answered: Vec<&str> = ViewSwitch::ALL
             .iter()
@@ -5188,7 +5197,8 @@ mod view_switch_registry_tests {
                 "Show guides",
                 "Lock guides",
                 "Show grid",
-                "Show layout grid"
+                "Show layout grid",
+                "Outline view"
             ],
             "the struct's fields and the switches it answers for are not the same set"
         );

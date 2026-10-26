@@ -778,6 +778,10 @@ pub struct OndinApp {
     /// three gates (with each grid's eye and `shown_visible`). Nothing snaps to a layout
     /// grid, so hiding the bands cannot change where anything lands. Per session.
     pub(crate) show_layout_grids: bool,
+    /// *View ▸ Outline view*: the artwork as hairlines (`RenderOverrides::set_outline`,
+    /// installed by `draw_canvas`). Not a preference: a launch into it would look
+    /// like a broken document.
+    pub(crate) outline_view: bool,
     /// *View ▸ Show layers* and *Show toolbar*: whether the left pane and the tool rail
     /// are on screen.
     pub(crate) show_layers: bool,
@@ -1317,6 +1321,7 @@ impl OndinApp {
             secondary_press: None,
             show_grid: view.grid,
             show_layout_grids: view.layout_grids,
+            outline_view: false,
             show_layers: view.layers,
             show_toolbar: view.toolbar,
             show_status: view.status,
@@ -6677,6 +6682,7 @@ impl OndinApp {
             ViewSwitch::GuideLock => self.lock_guides,
             ViewSwitch::Grid => self.show_grid,
             ViewSwitch::LayoutGrid => self.show_layout_grids,
+            ViewSwitch::Outline => self.outline_view,
             ViewSwitch::Layers => self.show_layers,
             ViewSwitch::Toolbar => self.show_toolbar,
             ViewSwitch::StatusMessages => self.show_status,
@@ -6700,6 +6706,7 @@ impl OndinApp {
             }
             ViewSwitch::Grid => self.show_grid = on,
             ViewSwitch::LayoutGrid => self.show_layout_grids = on,
+            ViewSwitch::Outline => self.outline_view = on,
             ViewSwitch::Layers => self.show_layers = on,
             ViewSwitch::Toolbar => self.show_toolbar = on,
             ViewSwitch::StatusMessages => {

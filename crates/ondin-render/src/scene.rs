@@ -174,6 +174,27 @@ pub fn build_of<P: ScenePainter>(
     painter: &mut P,
 ) {
     let base = device_base(vp);
+    if let Some(ink) = overrides.outline() {
+        let mut outline = OutlinePainter {
+            inner: painter,
+            ink: Brush::Solid(ink),
+            base,
+        };
+        walk_origins(doc, res, vp, overrides, origins, base, &mut outline);
+    } else {
+        walk_origins(doc, res, vp, overrides, origins, base, painter);
+    }
+}
+
+fn walk_origins<P: ScenePainter>(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    origins: &[NodeId],
+    base: Affine,
+    painter: &mut P,
+) {
     for id in origins {
         let outer = doc
             .get(*id)
@@ -182,6 +203,79 @@ pub fn build_of<P: ScenePainter>(
             .unwrap_or(Affine::IDENTITY);
         paint_node(doc, res, overrides, *id, outer, vp.view, base, painter);
     }
+}
+
+/// Outline view: the walk as it is, every path it fills or strokes drawn instead
+/// as a one-device-pixel hairline of that path in `ink`, and type in `ink`.
+///
+/// **Every layer is dropped** — opacity, clip, mask and effect alike — so what a
+/// frame clips or a mask hides is shown, which is what the view is for: finding
+/// what the artwork covers. Dropped, not pushed plain, so a deep document pays no
+/// offscreen buffers; a push forwards nothing and so a pop forwards nothing.
+struct OutlinePainter<'a, P: ScenePainter> {
+    inner: &'a mut P,
+    ink: Brush,
+    /// World → device pixels, to size the hairline in device pixels.
+    base: Affine,
+}
+
+impl<P: ScenePainter> OutlinePainter<'_, P> {
+    fn hairline(&mut self, transform: Affine, path: &BezPath) {
+        // One device pixel in `transform`'s space: the inverse of the mean scale
+        // of world → device after it.
+        let scale = (base_linear_det(self.base * transform)).abs().sqrt();
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        let stroke = StrokePaint {
+            brush: &self.ink,
+            framing: None,
+            width: 1.0 / scale,
+            join: kurbo::Join::Round,
+            cap: kurbo::Cap::Butt,
+            miter_limit: 4.0,
+            dashes: Vec::new(),
+            dash_offset: 0.0,
+        };
+        self.inner.stroke_path(transform, path, &stroke);
+    }
+}
+
+/// The determinant of `a`'s linear part — its area scale.
+fn base_linear_det(a: Affine) -> f64 {
+    let [m11, m12, m21, m22, _, _] = a.as_coeffs();
+    m11 * m22 - m12 * m21
+}
+
+impl<P: ScenePainter> ScenePainter for OutlinePainter<'_, P> {
+    fn has_image(&self, id: &ondin_core::ImageId) -> bool {
+        self.inner.has_image(id)
+    }
+    fn fill_path(
+        &mut self,
+        transform: Affine,
+        path: &BezPath,
+        _brush: &Brush,
+        _framing: Option<Framing>,
+        _rule: ClipRule,
+    ) {
+        self.hairline(transform, path);
+    }
+    fn stroke_path(&mut self, transform: Affine, path: &BezPath, _stroke: &StrokePaint<'_>) {
+        self.hairline(transform, path);
+    }
+    fn draw_text(&mut self, transform: Affine, run: &TextRun<'_>) {
+        let run = TextRun {
+            brush: &self.ink,
+            framing: None,
+            ..*run
+        };
+        self.inner.draw_text(transform, &run);
+    }
+    fn push_layer(&mut self, _: Affine, _: Option<&BezPath>, _: ClipRule, _: f32) {}
+    fn push_mask_layer(&mut self) {}
+    fn push_effect_layer(&mut self, _: Affine, _: Rect, _: &[ondin_core::Keyed<Effect>]) {}
+    fn pop_layer(&mut self) {}
 }
 
 /// Whether axis-aligned boxes snap to whole device pixels (see

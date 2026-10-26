@@ -612,6 +612,18 @@ fn default_shape_fill() -> Color {
     Color::from_rgba8(217, 217, 217, 255)
 }
 
+/// Outline view's ink on a page of `ground`: near-black on a light page,
+/// near-white on a dark one, by the ground's luminance.
+fn outline_ink(ground: Color) -> Color {
+    let [r, g, b, _] = ground.components;
+    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if luma > 0.5 {
+        Color::from_rgba8(24, 24, 24, 255)
+    } else {
+        Color::from_rgba8(232, 232, 232, 255)
+    }
+}
+
 /// The stroke a freshly drawn pen path and line get, which the pen's preview
 /// shares.
 const PEN_STROKE_COLOR: Color = Color::BLACK;
@@ -7767,6 +7779,10 @@ impl OndinApp {
         // the state can change; before `render_inputs` takes the borrow.
         let ghost = self.image_ghost();
         self.session.set_chrome_ghost(ghost);
+        let ink = self
+            .outline_view
+            .then(|| outline_ink(self.session.preview_ground()));
+        self.session.set_outline(ink);
 
         // Split the borrow so the read-only inputs and the mutable renderer coexist.
         let camera = self.session.camera;

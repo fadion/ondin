@@ -54,8 +54,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - Rows are `ui::menu_check`, `ui::MENU_ITEM_H` (24) tall, in `ui::menu_frame`; width 160pt or the
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
-- **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show layers*,
-  *Show toolbar*, *Show status messages*, *Focus mode*, then *Present* — a verb, not a switch: a
+- **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Outline
+  view*, *Show layers*, *Show toolbar*, *Show status messages*, *Focus mode*, then *Present* — a verb, not a switch: a
   check row that never ticks, which closes the menu and dispatches `Action::Present`.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
@@ -66,9 +66,16 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   *Zoom in*, *Zoom out*, *Actual size*, *Zoom to fit*, *Fit selection*. `OndinApp::zoom_entry`
   holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
-  one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
-  messages*.
-- All are **view state**, not document state. All but focus mode are kept in `prefs.view`
+  one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline view*,
+  *Show status messages*.
+- **Outline view** draws the artwork as one-device-pixel hairlines of every path the walk would fill
+  or stroke, with type in the same ink, in near-black or near-white by the page ground's luminance.
+  It pushes no layer, so nothing is clipped, masked, faded or given an effect: the view exists to
+  show what the artwork covers. It is `scene::OutlinePainter` wrapping the backend's painter, so the
+  walk itself is unchanged, and `RenderOverrides::set_outline` carries the ink, installed every frame
+  by `draw_canvas` (present mode clears it). Hit testing and selection are unchanged. The eyedropper
+  samples the canvas as drawn, so in outline view it picks up the ink.
+- All are **view state**, not document state. All but focus mode and outline view are kept in `prefs.view`
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides* and
@@ -167,7 +174,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   Pen*, `P`). The pages, the one way to another page with the layers pane hidden: *New page*,
   *Next page* and *Previous page* (dim at either end), and per page *Go to page: ‹name›* (dim on the
   current one) and, for every other page, *Move to page: ‹name›* (dim with nothing selected). The View and Snap switches show their tick, which gives the unbound ones (*Snap to
-  baselines*, *Show status messages*, *Show layout grid*) a keyboard route.
+  baselines*, *Show status messages*, *Show layout grid*, *Outline view*) a keyboard route.
 - **In a text session** the chord opens the palette too, with the text session's menu rows and
   styling chords first. The session stays open under it; the palette's field holds focus, so the
   canvas reads no keys, and Escape closes only the palette.

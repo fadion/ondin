@@ -320,6 +320,11 @@ pub enum ViewSwitch {
     /// Deliberately unbound, on [`Self::SnapBaselines`]'s reasoning: no convention
     /// to match (`docs/shortcuts.md` §6, "none, on purpose").
     LayoutGrid,
+    /// Every outline as a hairline, nothing filled, clipped or masked
+    /// (`RenderOverrides::set_outline`). Deliberately unbound: Figma's and
+    /// Illustrator's `Ctrl+Y` is redo here, and `Ctrl+Shift+Y` stays unspent
+    /// beside it (`ctrl_shift_is_not_a_second_spelling_of_ctrl`).
+    Outline,
     /// `Ctrl+Alt+\`.
     Layers,
     /// `Ctrl+Shift+\`, which reaches egui as `Key::Pipe` (§0).
@@ -353,6 +358,7 @@ impl ViewSwitch {
             Self::GuideLock => "Lock guides",
             Self::Grid => "Show grid",
             Self::LayoutGrid => "Show layout grid",
+            Self::Outline => "Outline view",
             Self::Layers => "Show layers",
             Self::Toolbar => "Show toolbar",
             Self::StatusMessages => "Show status messages",
@@ -371,8 +377,8 @@ impl ViewSwitch {
     /// there can render a switch with a chord that is not its own.
     ///
     /// This is the menu's *spelling*; `resolve` is the binding, and nothing makes
-    /// them agree beyond a hand check. `SnapBaselines`, `LayoutGrid` and
-    /// `StatusMessages` are `None` (each variant's doc says why).
+    /// them agree beyond a hand check. `SnapBaselines`, `LayoutGrid`, `Outline`
+    /// and `StatusMessages` are `None` (each variant's doc says why).
     pub fn accel(self) -> Option<&'static str> {
         Some(match self {
             Self::Rulers => "Shift+R",
@@ -385,19 +391,23 @@ impl ViewSwitch {
             Self::SnapShapes => "Ctrl+U",
             Self::SnapGuides => "Ctrl+Shift+;",
             Self::SnapGrid => "Ctrl+Shift+'",
-            Self::LayoutGrid | Self::StatusMessages | Self::SnapBaselines => return None,
+            Self::LayoutGrid | Self::Outline | Self::StatusMessages | Self::SnapBaselines => {
+                return None;
+            }
         })
     }
 
     /// The View menu's rows, in the order Illustrator's View menu reads them:
     /// rulers, then the guides that are pulled out of them, then the grid — and
-    /// then the layout grid, adjacent so the two grid rows read against each other.
-    pub const VIEW_MENU: [Self; 9] = [
+    /// then the layout grid, adjacent so the two grid rows read against each other;
+    /// outline view after them, the last row about the artwork.
+    pub const VIEW_MENU: [Self; 10] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
         Self::Grid,
         Self::LayoutGrid,
+        Self::Outline,
         Self::Layers,
         Self::Toolbar,
         Self::StatusMessages,
@@ -414,12 +424,13 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
         Self::Grid,
         Self::LayoutGrid,
+        Self::Outline,
         Self::Layers,
         Self::Toolbar,
         Self::StatusMessages,

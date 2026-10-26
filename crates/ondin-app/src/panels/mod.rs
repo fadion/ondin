@@ -24,7 +24,7 @@ pub(crate) use component::PropCache;
 /// reports it — the export card and *Copy as SVG* (§15 D780).
 pub(crate) use export::fidelity_clauses;
 pub(crate) use export::{ExportAll, ExportPreview};
-pub(crate) use inspector::{ImageCard, MultiField};
+pub(crate) use inspector::{ImageCard, MultiField, interacting};
 pub use layers::LayerDrag;
 /// The kind icon shared by the tree and the inspector header.
 pub(crate) use layers::node_icon as layers_icon;

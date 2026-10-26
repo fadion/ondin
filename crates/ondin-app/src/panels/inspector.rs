@@ -65,7 +65,7 @@ const ALIGN_CELL: egui::Vec2 = egui::vec2(24.0, 22.0);
 ///
 /// Not the set [`OndinApp::edit_valve`] acts on: a focused, idle field is engaged
 /// for the valve but not interacting here.
-fn interacting(resp: &egui::Response) -> bool {
+pub(crate) fn interacting(resp: &egui::Response) -> bool {
     // valve-gate-not-a-commit: decides whether to build a transaction; the valves commit on their own latch.
     resp.dragged() || resp.drag_stopped() || resp.lost_focus() || resp.changed()
 }

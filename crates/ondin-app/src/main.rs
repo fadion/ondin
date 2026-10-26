@@ -66,6 +66,7 @@ mod menu;
 mod pages;
 mod palette;
 mod panels;
+mod path_bar;
 mod prefs;
 mod present;
 mod preview;

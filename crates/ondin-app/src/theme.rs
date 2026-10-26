@@ -596,6 +596,14 @@ pub mod icon {
     /// crop*, `ARROWS_CLOCKWISE` is *reverse*, `ARROW_CLOCKWISE` is rotation. A
     /// fourth ring would be two verbs with one picture.
     pub const BROOM: &str = "\u{ec54}";
+    /// The path bar's *Join* — two ends plugged together. Not [`ARROWS_MERGE`],
+    /// which is *Flatten*.
+    pub const PLUGS_CONNECTED: &str = "\u{eb5a}";
+    /// The path bar's *Simplify*.
+    pub const MAGIC_WAND: &str = "\u{e6b6}";
+    /// The path bar's *Offset* — the outline pushed out on every side. Not
+    /// [`CORNERS_OUT`], which is *Zoom to fit*.
+    pub const ARROWS_OUT_CARDINAL: &str = "\u{e0a4}";
     /// Every icon this module names, paired with its Phosphor name (lower-kebab).
     ///
     /// Rust cannot reflect over `pub const`s, so this is the one list the tests
@@ -771,6 +779,9 @@ pub mod icon {
         ("file-zip", FILE_ZIP),
         ("folder-simple", FOLDER_SIMPLE),
         ("broom", BROOM),
+        ("plugs-connected", PLUGS_CONNECTED),
+        ("magic-wand", MAGIC_WAND),
+        ("arrows-out-cardinal", ARROWS_OUT_CARDINAL),
     ];
 }
 

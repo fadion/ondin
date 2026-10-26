@@ -16,7 +16,7 @@ reads true.
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Tools**: pencil (freehand), slices.
 - **Shapes**: ellipse arcs and donuts, corner smoothing, a polygon's and star's corner radius.
-- **Paths**: simplify, offset, and vector networks (`core-model.md`: every reader takes a `BezPath`).
+- **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Canvas**: lasso, tidy up, spacing handles on a loose multi-selection (`spacing.rs` covers
   containers).
 - **Views and panels**: outline (wireframe) view, minimap, an undo history panel.

@@ -698,6 +698,10 @@ pub struct OndinApp {
     /// Where the rail's insert button was drawn last frame; the picker hangs beside it.
     /// `NOTHING` until the rail has drawn.
     pub(crate) kit_button: egui::Rect,
+    /// Where the rail's Pen button was drawn last frame; the path bar centres on it.
+    pub(crate) pen_button: egui::Rect,
+    /// The path bar's Offset card, while it is open (`crate::path_bar`).
+    pub(crate) offset_card: Option<crate::path_bar::OffsetCard>,
     /// The styles and variables browser; it shares a place with the insert picker.
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
     /// The browser's collapsed groups per document root; view state, not saved.
@@ -1267,6 +1271,8 @@ impl OndinApp {
             kit_watch: Default::default(),
             kit_users: None,
             kit_button: egui::Rect::NOTHING,
+            pen_button: egui::Rect::NOTHING,
+            offset_card: None,
             var_browser: None,
             var_collapsed: Default::default(),
             var_button: egui::Rect::NOTHING,
@@ -1622,6 +1628,7 @@ impl eframe::App for OndinApp {
         self.watch_kits(&ctx);
         if !self.focus {
             self.inspector_panel(&ctx);
+            self.path_bar(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
             self.var_browser_ui(&ctx);
@@ -2156,6 +2163,9 @@ impl OndinApp {
         } else if self.chrome_focus {
             // A chrome field surrendered focus to this `Escape`. Below `cancel_gesture`,
             // which a valved field's cancel must still reach to set `gesture_cancelled`.
+        } else if self.offset_card.is_some() {
+            // The path bar's card, above the pen bias and the points it was opened over.
+            self.offset_card = None;
         } else if self.pen_bias {
             // The bias, above the points it was armed over.
             self.pen_bias = false;
@@ -6923,19 +6933,7 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for e in &rail {
                         match e {
-                            E::Sep => {
-                                ui.add_space(4.0);
-                                let (r, _) = ui.allocate_exact_size(
-                                    egui::vec2(22.0, 1.0),
-                                    egui::Sense::empty(),
-                                );
-                                ui.painter().rect_filled(
-                                    r,
-                                    egui::CornerRadius::ZERO,
-                                    theme::color::text_a(31),
-                                );
-                                ui.add_space(4.0);
-                            }
+                            E::Sep => crate::path_bar::separator(ui),
                             E::Btn(glyph, tool, tip) => {
                                 // With the pen armed inside a node edit both are lit.
                                 let active = tool.is_some_and(|t| {
@@ -6944,6 +6942,10 @@ impl OndinApp {
                                 let enabled = tool.is_some();
                                 let resp = icon_button(ui, glyph, 30.0, 20.0, active, enabled)
                                     .on_hover_text(*tip);
+                                // The path bar centres itself on the Pen button.
+                                if *tool == Some(Tool::Pen) {
+                                    self.pen_button = resp.rect;
+                                }
                                 if resp.clicked() {
                                     match tool {
                                         // Arming the image tool is picking files.

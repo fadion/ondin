@@ -76,10 +76,32 @@ two path layers, and per-anchor corner radii. Part of §9.4.
   act on points (two to align, three to distribute); spacing row via `tools::space_points` (two needed,
   first point held). Arrows nudge points.
 
+## The path bar
+
+While a path's points are edited (`canvas::edited_path`), a short rail floats beside the tool rail,
+centred on its Pen button and free to overlap the ruler (`crate::path_bar`). It holds the tool's verbs:
+select points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Join*, dimmed until the
+point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`). It shows
+nothing the canvas does not already offer except the last two.
+
+- **Simplify** (`build::simplify_path`) refits the drawn outline with kurbo's optimizing simplifier,
+  within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units). Turns sharper than `SIMPLIFY_CORNER_DEG`
+  (15°) stay corners, so a drawn polyline loses its jitter and a real corner survives. A refit with no
+  fewer segments commits nothing.
+- **Offset** (`build::offset_outline`) is the drawn outline united with its own stroke at twice the
+  distance (mitred to `OFFSET_MITER_LIMIT`, round caps), or less that stroke for a negative distance.
+  The band is united before a shrink subtracts it, because subtracting the overlapping pieces one at a
+  time leaves slivers outside the path. An open subpath grows into the band around it and has no
+  inside to shrink. The bar's *Offset* opens a card with one scrubbable distance field through the
+  edit valve; every distance is measured from the outline the card opened on, and zero writes the
+  stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.
+- Both write a new path with no corner radii, the radii baked into the curves, and clear the point
+  selection, whose anchors are gone.
+
 ## Path corner radii
 
 `NodeKind::Path` carries a radius per anchor, resolved by `geometry::local_path` like a `Rect`'s four —
-never baked. The Appearance field writes the selected corner points, or every corner when the path is
+never baked, except by *Simplify* and *Offset*, which replace the anchors. The Appearance field writes the selected corner points, or every corner when the path is
 selected without the node tool. Every corner rounds; a radius on a smooth anchor draws nothing.
 
 ## Traps

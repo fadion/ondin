@@ -27,6 +27,9 @@
 //! ondin diff <a> <b> [--json]    what changed from document a to b, by layer;
 //!                                exit 0 when nothing did, 1 when something did,
 //!                                2 when either cannot be read
+//! ondin tokens export <file> [--mode <name>] [-o out.json]
+//!                                variables and styles as DTCG tokens.json,
+//!                                the default mode's values unless --mode
 //! ondin serve <file>             headless: MCP endpoint over a document (§8.2)
 //! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
 //! ```
@@ -143,6 +146,13 @@ enum Command {
         b: String,
         json: bool,
     },
+    /// Write the document's variables and styles as DTCG `tokens.json`
+    /// (`ondin_export::dtcg`), `mode` naming the mode whose values are `$value`.
+    TokensExport {
+        file: String,
+        mode: Option<String>,
+        out: Option<String>,
+    },
     McpProxy,
 }
 
@@ -230,6 +240,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         Some("export") => parse_export(&args[1..]),
         Some("render") => render_cli::parse(&args[1..]).map(Command::Render),
         Some("diff") => parse_diff(&args[1..]),
+        Some("tokens") => parse_tokens(&args[1..]),
         Some("mcp-proxy") => Ok(Command::McpProxy),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
@@ -263,6 +274,44 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
             files.len()
         )),
     }
+}
+
+fn parse_tokens(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str =
+        "usage: ondin tokens export <file.ondin> [--mode <name>] [-o <tokens.json>]";
+    if args.first().map(String::as_str) != Some("export") {
+        return Err(USAGE.to_string());
+    }
+    let (mut file, mut mode, mut out) = (None, None, None);
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            flag @ ("--mode" | "-o" | "--out") => {
+                i += 1;
+                let value = args.get(i).filter(|v| !v.starts_with('-'));
+                let value = value.ok_or_else(|| format!("{flag} wants a value\n{USAGE}"))?;
+                match flag {
+                    "--mode" => mode = Some(value.clone()),
+                    _ => out = Some(value.clone()),
+                }
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown option {other}\n{USAGE}"));
+            }
+            other if file.is_some() => {
+                return Err(format!(
+                    "tokens export takes one document; got a second, {other}\n{USAGE}"
+                ));
+            }
+            other => file = Some(other.to_string()),
+        }
+        i += 1;
+    }
+    Ok(Command::TokensExport {
+        file: file.ok_or_else(|| USAGE.to_string())?,
+        mode,
+        out,
+    })
 }
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
@@ -513,6 +562,9 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Ok(Command::TokensExport { file, mode, out }) => {
+            run_tokens_export(&file, mode.as_deref(), out.as_deref())
+        }
         Ok(Command::Serve { file }) => Err(format!("ondin serve {file}: not yet implemented (M6)")),
         Ok(Command::McpProxy) => Err("ondin mcp-proxy: not yet implemented (M6)".to_string()),
         Err(msg) => {
@@ -603,6 +655,43 @@ fn diff_files(a: &str, b: &str, json: bool) -> Result<(String, bool), String> {
         d.text()
     };
     Ok((report, !d.is_empty()))
+}
+
+/// `ondin tokens export`: the DTCG file to `out`, or to stdout, its notes on
+/// stderr. A `mode` the document does not have is refused with the names it does.
+fn run_tokens_export(file: &str, mode: Option<&str>, out: Option<&str>) -> Result<(), String> {
+    let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
+    let modes = doc.variables().modes();
+    let mode = match mode {
+        None => None,
+        Some(name) => Some(
+            modes
+                .iter()
+                .find(|m| m.name == name)
+                .map(|m| m.id)
+                .ok_or_else(|| {
+                    let names: Vec<&str> = modes.iter().map(|m| m.name.as_str()).collect();
+                    format!(
+                        "{file} has no mode {name:?}; its modes: {}",
+                        names.join(", ")
+                    )
+                })?,
+        ),
+    };
+    let tokens = ondin_export::dtcg::tokens(&doc, mode);
+    for note in &tokens.notes {
+        eprintln!("note: {note}");
+    }
+    match out {
+        Some(path) => {
+            std::fs::write(path, &tokens.json).map_err(|e| format!("cannot write {path}: {e}"))
+        }
+        None => {
+            print!("{}", tokens.json);
+            Ok(())
+        }
+    }
 }
 
 /// Headless export (§7). Loads the document, resolves it, and writes one of the
@@ -1040,6 +1129,79 @@ mod tests {
         ] {
             assert!(diff(refused).is_err(), "{refused:?}");
         }
+    }
+
+    /// `tokens export` takes one document, a mode and an output, and refuses the rest.
+    #[test]
+    fn tokens_export_takes_one_document_a_mode_and_an_output() {
+        let tokens = |s: &[&str]| {
+            let mut v = vec!["tokens".to_string()];
+            v.extend(s.iter().map(|a| a.to_string()));
+            parse(&v)
+        };
+        assert_eq!(
+            tokens(&["export", "a.ondin", "--mode", "Dark", "-o", "t.json"]),
+            Ok(Command::TokensExport {
+                file: "a.ondin".into(),
+                mode: Some("Dark".into()),
+                out: Some("t.json".into()),
+            })
+        );
+        for refused in [
+            &["a.ondin"][..],
+            &["export"],
+            &["export", "a.ondin", "b.ondin"],
+            &["export", "a.ondin", "--mode"],
+            &["export", "a.ondin", "-o", "--mode"],
+            &["export", "a.ondin", "--svg"],
+        ] {
+            assert!(tokens(refused).is_err(), "{refused:?}");
+        }
+    }
+
+    /// The CLI writes the file `ondin_export::dtcg` makes, and refuses a mode the
+    /// document does not have, naming the ones it does.
+    #[test]
+    fn tokens_export_writes_the_file_and_refuses_an_unknown_mode() {
+        use ondin_core::{Cell, IdSource, Mode, Operation, Transaction, VarKind, Variable};
+        let dir = std::env::temp_dir().join(format!("ondin-tokens-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ids = IdSource::new(0xD3);
+        let mut doc = ondin_core::Document::new(ids.mint());
+        let (m, v) = (ids.mint_mode(), ids.mint_var());
+        doc.apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: m,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: v,
+                    name: "space/4".into(),
+                    kind: VarKind::Number,
+                    cells: [(m, Cell::Number(4.0))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]))
+        .unwrap();
+        let src = dir.join("a.ondin");
+        std::fs::write(&src, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let out = dir.join("t.json");
+        let (src, out) = (src.to_str().unwrap(), out.to_str().unwrap());
+
+        run_tokens_export(src, Some("Light"), Some(out)).unwrap();
+        let written = std::fs::read_to_string(out).unwrap();
+        assert_eq!(written, ondin_export::dtcg::tokens(&doc, None).json);
+        let err = run_tokens_export(src, Some("Dusk"), Some(out)).unwrap_err();
+        assert!(err.contains("Dusk") && err.contains("Light"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Two saves of one document differ in nothing and print nothing; an edit

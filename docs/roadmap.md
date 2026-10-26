@@ -49,14 +49,12 @@ reads true.
   The same check as `ondin check contrast` for CI.
 - **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
   `Item::Rename`, one layer, exists.
-- **Design tokens as DTCG JSON** — export and import of variables, modes and styles (`typography`,
-  `shadow`, `gradient`), beside the `tokens.css` code export writes (`code::tokens`). Slash paths
-  become groups; a number is a `dimension` or a `number` by what it binds (scoping, in *First*, makes
-  this explicit); strings and booleans without a DTCG type ride in `$extensions`, as does each
-  variable's id, so import matches by id, then path, and a rename made in code is not a delete plus a
-  create. Import shows what is added, changed, removed and renamed, and applies as one transaction.
-  A `tokens.json` can also be linked like a kit: `watch_kits`' pill offers its changes. Also
-  `ondin tokens export`.
+- **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).
+  Import of the same file matches by the id in `$extensions`, then by path, so a rename made in code
+  is not a delete plus a create. It shows what is added, changed, removed and renamed, and applies it
+  as one transaction. A `tokens.json` can also be linked like a kit, with `watch_kits`' pill offering
+  its changes. Scoping, in *First*, would make a number's `dimension` or `number` explicit rather than
+  read from its bindings.
 - **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
   open is a visual diff marking the changed regions over the canvas, the same compare in the version
   history card (`versions.rs`), and a git merge driver later.

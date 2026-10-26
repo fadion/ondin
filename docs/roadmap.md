@@ -21,7 +21,27 @@ reads true.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Canvas**: lasso, spacing handles on a loose multi-selection (`spacing.rs` covers
   containers).
-- **Views and panels**: minimap, an undo history panel.
+- **Minimap** (design canvas, *Minimap*). A 220 pt card in the canvas's bottom-left corner, its height
+  following the page's shape (90–160 pt). *View › Show minimap*, `Ctrl+Shift+M`, a `ViewSwitch` kept in
+  `prefs.view`, off by default. It draws the current page flat: each top-level layer and each layer
+  directly inside a frame as a box in its fill colour, text as a bar, an image as a grey box, the
+  selection outlined; nothing deeper, so it costs one pass over two levels of the tree. The map fits
+  the page's content and the viewport together, so the viewport box never leaves it. Click centres
+  the canvas there, dragging the box pans live, scrolling zooms around the pointer, double-click zooms
+  to fit; none of it is an edit. Present mode hides it; focus mode keeps it.
+- **Undo history panel** (design canvas, *Undo History*). A section at the foot of the layers pane,
+  *View › Show history*, off by default, no chord. One row per undo step, oldest first, under an
+  *Opened* row; a row reads `Move · Card +1`, names the page when its subjects are on another, marks
+  MCP steps with a sparkle (the tooltip names the client and tool) and the step on disk with *Saved*.
+  Clicking a row undoes or redoes to just after it in one go, following the last step's page; the
+  redo rows dim, and a new edit drops them. Hovering outlines the step's subjects on this page.
+  - **Steps carry a record.** `History` holds bare inverses today; each step gains the label its edit
+    gave when it was committed (the command's menu name, or the MCP tool's) and its origin. Labels
+    are not derived from the operations.
+  - **The divider** between Layers and History drags without the Pages section's cap at content
+    height, so either section can take the room. Folded, History's header drops to the pane's foot
+    and names the latest step. Its height and fold are prefs; focus mode hides it with the pane.
+  - History stays session-only and uncapped.
 - **PDF import.**
 - **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
   Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when
@@ -40,14 +60,25 @@ reads true.
   recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
   colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
   eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
-- **Contrast overlay.** A *View* toggle over the view or a selected layer, group or frame: each text
-  layer is measured against the backdrop actually drawn behind it (rendered with the text hidden,
-  through `RenderOverrides`), taking the worst sample under the glyphs after opacity. WCAG AA by size
-  and weight (4.5 : 1, 3 : 1 at large sizes), AAA and APCA as options, non-text 3 : 1 as an opt-in.
-  A failing layer gets a red outline and a `3.1 : 1 · needs 4.5` badge; clicking it offers the nearest
-  passing lightness at the same hue, or a passing variable. Checks every mode and reports the worst.
-  The measurement is built (`contrast::check`, `ondin check contrast`; `export.md`); APCA and the
-  non-text option are not.
+- **Contrast check mode** (design canvas, *Contrast Check*). *View › Check contrast* or the palette, no
+  chord; view state, off when a document opens. A bar at the canvas's top centre holds the level menu,
+  the failure count and arrows stepping through failures in reading order (selecting each, zooming
+  only when it is off screen); closing it ends the mode. It checks the page's shown text layers, or
+  those inside the selection the mode started with: that scope is fixed, named in the bar, and
+  cleared only from the bar.
+  - **Measuring** is `contrast::check`'s (`export.md`), off the main thread. An edit remeasures the
+    edited layers and the text they overlap; a badge waiting on that dims with a spinner, and a
+    dragged layer's badge hides until release. Every mode is checked and the badge names the worst.
+  - **Badges** keep one size at every zoom. A failure gets a red outline and a warning badge, `2.3 : 1
+    · needs 4.5`; a pass a quiet chip (`3.8 · large` when only size makes it pass), hidden by *Show
+    passing*; an unmeasurable layer a dashed chip saying why.
+  - **The fix card** opens from a failing badge: the text and worst backdrop colours, the ratio, one
+    row per mode, the nearest passing lightness at the same hue and chroma, then the passing colour
+    variables. Hover previews, applying is one undo step on the failing runs. When no colour at that
+    hue passes, it offers only variables. It never offers to change the backdrop.
+  - **Options:** AA (default), AAA, APCA (Lc values), a pref; *Non-text (3 : 1)* measures strokes and
+    shapes under 24 pt across (icons, borders, outlines) and skips larger blocks. APCA and non-text
+    are not built in `contrast::check` either. Never saved, never exported, hidden in present mode.
 - **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
   `Item::Rename`, one layer, exists.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).

@@ -60,7 +60,7 @@ struct Row {
     depth: usize,
     /// The step's serial, which a click aims at; `None` for the first row.
     serial: Option<u64>,
-    glyph: &'static str,
+    glyph: std::borrow::Cow<'static, str>,
     label: String,
     /// The step's subject and how many more it touched.
     subject: Option<(String, usize)>,
@@ -218,15 +218,20 @@ impl OndinApp {
         }
     }
 
+    /// The first row: the document as opened, or — with a history kept from an
+    /// earlier session — as it stood before the oldest step kept.
     fn first_row_label(&self) -> &'static str {
-        match self.session.opened_from_file() {
-            true => "Opened",
-            false => "New document",
+        match (
+            self.session.resumed_history(),
+            self.session.opened_from_file(),
+        ) {
+            (true, _) => "Earlier",
+            (false, true) => "Opened",
+            (false, false) => "New document",
         }
     }
 
-    /// Every row, oldest first: the document as opened, the done steps, then the
-    /// undone ones.
+    /// Every row, oldest first: the first row, the done steps, then the undone ones.
     fn history_rows(&self) -> Vec<Row> {
         let history = &self.session.history;
         let saved = self.session.saved_step();
@@ -236,7 +241,10 @@ impl OndinApp {
         let mut rows = vec![Row {
             depth: 0,
             serial: None,
-            glyph: icon::FOLDER_OPEN,
+            glyph: match self.session.resumed_history() {
+                true => icon::CLOCK_COUNTER_CLOCKWISE.into(),
+                false => icon::FOLDER_OPEN.into(),
+            },
             label: self.first_row_label().into(),
             subject: None,
             page: None,
@@ -254,9 +262,9 @@ impl OndinApp {
             rows.push(Row {
                 depth: i + 1,
                 serial: Some(step.serial),
-                glyph: match note.glyph {
-                    "" => icon::PENCIL_SIMPLE,
-                    g => g,
+                glyph: match note.glyph.is_empty() {
+                    true => icon::PENCIL_SIMPLE.into(),
+                    false => note.glyph.clone(),
                 },
                 label: note.label.clone(),
                 subject: subject_of(&note.subject, note.subjects.len()),
@@ -354,7 +362,7 @@ impl OndinApp {
         p.text(
             egui::pos2(x + 7.0, cy),
             egui::Align2::CENTER_CENTER,
-            row.glyph,
+            &row.glyph,
             theme::icon_font(14.0),
             dim(if current {
                 color::ACCENT

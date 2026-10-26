@@ -15,6 +15,7 @@
 //! when the new base folder is on a synced drive, so `move_file` falls back to
 //! copy-and-delete.
 
+use super::history::HISTORY_DIR;
 use super::naming;
 use super::project::{PROJECTS_FILE, Projects, ProjectsRead};
 use super::recovery::RECOVERY_DIR;
@@ -176,12 +177,13 @@ pub fn relocate(from: &Path, to: &Path) -> Moved {
         moved.paths.push((path, target));
     }
 
-    // Version history, the trash and the crash snapshots: whole trees, merged
+    // Version history, undo history, the trash and the crash snapshots: whole trees, merged
     // rather than replaced. `.recovery` must travel too, or an unanswered crash
     // snapshot is stranded silently. The policy per tree is argued at
     // [`Collision`].
     for (dir, collision) in [
         (VERSIONS_DIR, Collision::Identical),
+        (HISTORY_DIR, Collision::Identical),
         (TRASH_DIR, Collision::Rename),
         (RECOVERY_DIR, Collision::Stranded),
     ] {
@@ -197,8 +199,10 @@ pub fn relocate(from: &Path, to: &Path) -> Moved {
 /// strand a document, since two libraries can hold different `notes.ondin`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Collision {
-    /// The same file arriving twice, so skipping loses nothing. True only of
-    /// `.versions`, where a path is `<document id>/<unix seconds>.ondin`.
+    /// The same file arriving twice, so skipping loses nothing. True of
+    /// `.versions`, where a path is `<document id>/<unix seconds>.ondin`, and near
+    /// enough of `.history`, where either copy is read only if its digest matches
+    /// the document and losing one costs only undo steps.
     Identical,
     /// Different files sharing a name, so the arrival takes a suffix through
     /// [`naming::unique_stem`], as `store::trash` does within one folder.

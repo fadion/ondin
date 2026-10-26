@@ -69,7 +69,26 @@ enum Job {
         /// As `Snapshot`'s; it also decides whether the session may be marked
         /// clean, since an edit made in flight leaves the file behind.
         at: u64,
+        /// The undo history to keep beside it, taken with `doc`.
+        history: Option<Box<KeptHistory>>,
     },
+}
+
+/// An undo history to write once its document has landed (`super::history`):
+/// it is tied to the bytes that write produces.
+pub struct KeptHistory {
+    pub root: PathBuf,
+    /// The document's library id.
+    pub id: String,
+    pub history: ondin_core::SavedHistory,
+}
+
+impl KeptHistory {
+    /// Write it against the document bytes digested `file`. A failure is not
+    /// reported: the document is safe, and a history not kept costs undo steps.
+    pub fn write(self, file: &str) {
+        let _ = super::history::write(&self.root, &self.id, file, self.history);
+    }
 }
 
 /// The one document path the worker will panic on instead of writing.
@@ -134,7 +153,12 @@ impl Writer {
                         recovery::remove(&root, &key);
                         Done::Forgot
                     }
-                    Job::Document { path, doc, at } => {
+                    Job::Document {
+                        path,
+                        doc,
+                        at,
+                        history,
+                    } => {
                         #[cfg(test)]
                         if POISONED
                             .lock()
@@ -142,8 +166,13 @@ impl Writer {
                         {
                             panic!("synthetic writer panic — writer::poison_document({path:?})");
                         }
-                        match store::write_document(&path, &doc) {
-                            Ok(()) => Done::Saved { path, at },
+                        match store::write_document_digest(&path, &doc) {
+                            Ok(file) => {
+                                if let Some(history) = history {
+                                    history.write(&file);
+                                }
+                                Done::Saved { path, at }
+                            }
                             Err(e) => Done::SaveFailed(e.to_string()),
                         }
                     }
@@ -181,12 +210,14 @@ impl Writer {
         });
     }
 
-    /// Queue a write of `doc` over `path`, taken at revision `at`.
-    pub fn document(&mut self, path: &Path, doc: Document, at: u64) {
+    /// Queue a write of `doc` over `path`, taken at revision `at`, and of the undo
+    /// history to keep beside it.
+    pub fn document(&mut self, path: &Path, doc: Document, at: u64, history: Option<KeptHistory>) {
         self.send(Job::Document {
             path: path.to_path_buf(),
             doc: Box::new(doc),
             at,
+            history: history.map(Box::new),
         });
     }
 

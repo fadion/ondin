@@ -265,7 +265,7 @@ impl OndinApp {
         let Some(entry) = self.library.entry_at(path).cloned() else {
             return;
         };
-        if let Err(e) = crate::library::store::set_kit(&entry, sharing) {
+        if let Err(e) = crate::library::store::set_kit(&self.library.root, &entry, sharing) {
             self.session
                 .fail(format!("Could not change {}: {e}", entry.display_name()));
             return;

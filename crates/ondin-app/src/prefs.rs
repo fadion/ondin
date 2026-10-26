@@ -201,6 +201,13 @@ pub struct Prefs {
     /// `0` means purge on delete, a real choice: the trash is the library's only
     /// undo.
     pub trash_keep_days: u64,
+    /// How many undo steps a document keeps once it is closed
+    /// (`crate::library::history`), or `0` for none. The open session's history is
+    /// never cut.
+    ///
+    /// A hundred: enough to come back to an afternoon's work, and a file of a size a
+    /// synced library does not notice.
+    pub history_size: u64,
     /// Whether `Ctrl+S` pins a version at all.
     ///
     /// On. Off is for a library in a synced folder where the extra copies are not
@@ -275,6 +282,7 @@ impl Default for Prefs {
             unreadable: false,
             autosave_secs: 30,
             trash_keep_days: 30,
+            history_size: 100,
             version_history: true,
             dashboard_page: "recent".into(),
             dashboard_list_view: false,

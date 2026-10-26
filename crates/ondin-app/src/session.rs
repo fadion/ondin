@@ -459,6 +459,9 @@ pub struct EditorSession {
     /// Whether the document was read from a file rather than made new: the
     /// History section's first row says *Opened* or *New document*.
     opened: bool,
+    /// Whether the history was resumed from an earlier session
+    /// ([`Self::resume_history`]), so its first row is not the document as opened.
+    resumed: bool,
     /// The style the browser's *Edit* opened: while set, a write of its slot on a
     /// layer bound to it is an edit of the style itself (`style::edit_through`, at
     /// the commit door), so the inspector's cards edit every user at once.
@@ -551,6 +554,7 @@ impl EditorSession {
             naming: None,
             saved_step,
             opened: saved_step.is_some(),
+            resumed: false,
             style_edit: None,
             saved_at,
             revision: 0,
@@ -1166,7 +1170,7 @@ impl EditorSession {
         let first = subjects.first().copied();
         ondin_core::StepNote {
             label,
-            glyph,
+            glyph: glyph.into(),
             origin,
             subject: first
                 .and_then(|id| self.doc.get(id))
@@ -1561,6 +1565,20 @@ impl EditorSession {
         self.opened
     }
 
+    /// Take up a history kept from an earlier session, just after
+    /// [`Self::adopt_document`] read the file it was saved with: the step on top is
+    /// the state on disk.
+    pub fn resume_history(&mut self, saved: ondin_core::SavedHistory) {
+        self.history = History::restore(saved);
+        self.saved_step = Some(self.history.current());
+        self.resumed = true;
+    }
+
+    /// Whether the history was resumed — see the field.
+    pub fn resumed_history(&self) -> bool {
+        self.resumed
+    }
+
     /// Replace the open document (open / new). Resets history, selection and
     /// save state, and re-seeds the id source so subsequent creates cannot
     /// collide with ids the loaded file already uses.
@@ -1581,6 +1599,7 @@ impl EditorSession {
         self.saved_at = path.is_some().then(Instant::now);
         self.saved_step = path.is_some().then_some(None);
         self.opened = path.is_some();
+        self.resumed = false;
         self.naming = None;
         self.path = path;
         self.dirty = false;

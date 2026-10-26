@@ -352,8 +352,26 @@ pub(crate) struct FrameIndex {
 /// worker's answer, and when it was asked for — the pulse's clock.
 pub(crate) struct Opening {
     pub path: std::path::PathBuf,
-    rx: std::sync::mpsc::Receiver<Result<ondin_core::Document, String>>,
+    rx: std::sync::mpsc::Receiver<Result<Opened, String>>,
     pub at: std::time::Instant,
+}
+
+/// A document read for opening, with the undo history kept for exactly its bytes.
+pub(crate) type Opened = (ondin_core::Document, Option<ondin_core::SavedHistory>);
+
+/// Read `path` as a document, and the history kept for it under `root` when `keep`
+/// says histories are kept.
+fn read_opened(
+    path: &std::path::Path,
+    root: &std::path::Path,
+    keep: bool,
+) -> Result<Opened, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("Read failed: {e}"))?;
+    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("Load error: {e}"))?;
+    let history = keep
+        .then(|| crate::library::history::for_opened(root, &doc, &bytes))
+        .flatten();
+    Ok((doc, history))
 }
 
 pub struct OndinApp {
@@ -4787,9 +4805,16 @@ impl OndinApp {
                 None => return false,
             },
         };
-        if let Err(e) = crate::library::store::write_document(&path, &self.session.doc) {
-            self.session.fail(format!("Save failed: {e}"));
-            return false;
+        match crate::library::store::write_document_digest(&path, &self.session.doc) {
+            Ok(file) => {
+                if let Some(history) = self.kept_history() {
+                    history.write(&file);
+                }
+            }
+            Err(e) => {
+                self.session.fail(format!("Save failed: {e}"));
+                return false;
+            }
         }
         self.session.mark_saved(path.clone());
         self.last_autosave = std::time::Instant::now();
@@ -4871,8 +4896,29 @@ impl OndinApp {
         self.last_autosave = std::time::Instant::now();
         let at = self.session.revision();
         let doc = self.session.doc.clone();
+        let history = self.kept_history();
         self.session.begin_save(at);
-        self.writer(ctx).document(&path, doc, at);
+        self.writer(ctx).document(&path, doc, at, history);
+    }
+
+    /// The undo history to keep beside the document's next write, cut to the *Undo
+    /// history* setting: `None` for a document with no id or outside the library — a
+    /// copy elsewhere carrying a library document's id would write over that
+    /// document's history — and an empty one, which forgets any kept before, for a
+    /// size of zero.
+    fn kept_history(&self) -> Option<crate::library::writer::KeptHistory> {
+        let path = self.session.path.as_deref()?;
+        if !path.starts_with(&self.library.root) {
+            return None;
+        }
+        Some(crate::library::writer::KeptHistory {
+            root: self.library.root.clone(),
+            id: self.session.doc.meta().id.clone()?,
+            history: self
+                .session
+                .history
+                .saved(usize::try_from(self.prefs.history_size).unwrap_or(usize::MAX)),
+        })
     }
 
     /// Take a crash snapshot if the interval has elapsed and something has been
@@ -5187,15 +5233,10 @@ impl OndinApp {
         }
         // A card still loading loses to this one.
         self.opening = None;
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) => return self.session.fail(format!("Read failed: {e}")),
-        };
-        let doc = match ondin_core::io::load(&bytes) {
-            Ok(d) => d,
-            Err(e) => return self.session.fail(format!("Load error: {e}")),
-        };
-        self.adopt_opened(path, doc);
+        match read_opened(path, &self.library.root, self.prefs.history_size > 0) {
+            Ok(opened) => self.adopt_opened_with(path, opened),
+            Err(why) => self.session.fail(why),
+        }
     }
 
     /// Open `path` with the read and the load on a worker, the library's card pulsing
@@ -5209,13 +5250,12 @@ impl OndinApp {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let at = path.to_path_buf();
+        let root = self.library.root.clone();
+        let keep = self.prefs.history_size > 0;
         let spawned = std::thread::Builder::new()
             .name("ondin-open".into())
             .spawn(move || {
-                let loaded = std::fs::read(&at)
-                    .map_err(|e| format!("Read failed: {e}"))
-                    .and_then(|b| ondin_core::io::load(&b).map_err(|e| format!("Load error: {e}")));
-                let _ = tx.send(loaded);
+                let _ = tx.send(read_opened(&at, &root, keep));
             });
         match spawned {
             Ok(_) => {
@@ -5241,7 +5281,7 @@ impl OndinApp {
                 let path = o.path.clone();
                 self.opening = None;
                 match loaded {
-                    Ok(doc) => self.adopt_opened(&path, doc),
+                    Ok(opened) => self.adopt_opened_with(&path, opened),
                     Err(why) => self.session.fail(why),
                 }
             }
@@ -5260,9 +5300,17 @@ impl OndinApp {
             return;
         };
         match o.rx.recv_timeout(std::time::Duration::from_secs(20)) {
-            Ok(Ok(doc)) => self.adopt_opened(&o.path, doc),
+            Ok(Ok(opened)) => self.adopt_opened_with(&o.path, opened),
             Ok(Err(why)) => self.session.fail(why),
             Err(_) => self.session.fail("Load error: the reader stopped"),
+        }
+    }
+
+    /// [`Self::adopt_opened`], then take up the undo history kept for the file read.
+    fn adopt_opened_with(&mut self, path: &std::path::Path, (doc, history): Opened) {
+        self.adopt_opened(path, doc);
+        if let Some(history) = history {
+            self.session.resume_history(history);
         }
     }
 
@@ -10783,6 +10831,142 @@ mod library_wiring_tests {
             "the smoothing disclosure still holds {:?}",
             app.corner_smoothing_open
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A library document with one page, opened in a fresh app at `root`, and one
+    /// named step committed and saved: a rect added.
+    fn saved_with_a_step(
+        ctx: &egui::Context,
+        root: &std::path::Path,
+    ) -> (PathBuf, ondin_core::NodeId) {
+        use crate::theme::icon;
+        use ondin_core::{Operation, Transaction};
+        let mut app = app_at(ctx, root.to_path_buf());
+        let mut ids = ondin_core::IdSource::new(0x415);
+        let mut doc = ondin_core::Document::new(ids.mint());
+        let path = crate::library::store::file_document(root, None, "Kept", &mut doc).unwrap();
+        app.open_path(&path);
+        let page = app.session.page;
+        let rect = app.session.ids.mint();
+        app.session.name_step("Add rectangle", icon::SQUARE);
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: rect,
+            parent: page,
+            index: 0,
+            kind: ondin_core::NodeKind::Rect {
+                size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some("Card".into()),
+        }])));
+        assert!(app.save_file(false));
+        (path, rect)
+    }
+
+    /// The undo history outlives the session: reopened, the document comes back with
+    /// its steps, the current one *Saved*, and undoing walks back past the reopen.
+    /// flip: `adopt_opened_with` without its `resume_history` → fails at the labels.
+    #[test]
+    fn a_reopened_document_keeps_its_undo_history() {
+        let ctx = egui::Context::default();
+        let root = temp_root("kept-history");
+        let (path, rect) = saved_with_a_step(&ctx, &root);
+
+        let mut app = app_at(&ctx, root.clone());
+        app.open_path(&path);
+        let labels: Vec<_> = app
+            .session
+            .history
+            .done()
+            .map(|s| s.note.label.clone())
+            .collect();
+        assert_eq!(labels, ["Add rectangle"]);
+        assert_eq!(
+            app.session.saved_step(),
+            Some(app.session.history.current())
+        );
+        assert!(app.session.resumed_history());
+
+        app.undo();
+        assert!(
+            app.session.doc.get(rect).is_none(),
+            "undone across the reopen"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A document saved outside the library keeps no history, though it carries a
+    /// library document's id: it would write over that document's.
+    /// flip: `kept_history` without its root test → fails at the assertion.
+    #[test]
+    fn a_copy_outside_the_library_keeps_no_history() {
+        let ctx = egui::Context::default();
+        let root = temp_root("kept-history-outside");
+        let (path, _) = saved_with_a_step(&ctx, &root);
+        let mut app = app_at(&ctx, root.clone());
+        app.open_path(&path);
+        assert!(
+            app.kept_history().is_some(),
+            "fixture: filed in the library"
+        );
+        app.session.path = Some(std::env::temp_dir().join("elsewhere.ondin"));
+        assert!(app.kept_history().is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A file changed while closed drops its kept history; a library rename, which
+    /// rewrites only its metadata, keeps it; a *History size* of zero keeps none.
+    /// flip: `store::rewrite` without its `restamp` → fails at "a rename keeps the
+    /// history".
+    #[test]
+    fn a_kept_history_is_dropped_for_a_file_that_changed() {
+        use ondin_core::{Operation, Transaction};
+        let ctx = egui::Context::default();
+        let root = temp_root("kept-history-changed");
+        let (path, _) = saved_with_a_step(&ctx, &root);
+
+        // Renamed in the library: kept.
+        let mut app = app_at(&ctx, root.clone());
+        app.library.refresh();
+        let entry = app
+            .library
+            .entry_at(&path)
+            .cloned()
+            .expect("the file is filed");
+        let path = crate::library::store::rename(&root, &entry, "Renamed").unwrap();
+        app.open_path(&path);
+        assert_eq!(
+            app.session.history.undo_depth(),
+            1,
+            "a rename keeps the history"
+        );
+
+        // Changed by something else: dropped.
+        let mut doc = app.session.doc.clone();
+        let page = doc.first_page();
+        doc.apply(&Transaction(vec![Operation::SetName {
+            id: page,
+            name: "Elsewhere".into(),
+        }]))
+        .unwrap();
+        crate::library::store::write_document(&path, &doc).unwrap();
+        let mut app = app_at(&ctx, root.clone());
+        app.open_path(&path);
+        assert!(
+            !app.session.history.can_undo(),
+            "a changed file keeps no history"
+        );
+        assert!(!app.session.resumed_history());
+
+        // A size of zero: the next save forgets what was kept.
+        let (path, _) = saved_with_a_step(&ctx, &root);
+        let mut app = app_at(&ctx, root.clone());
+        app.prefs.history_size = 0;
+        app.open_path(&path);
+        assert!(!app.session.history.can_undo(), "zero reads nothing back");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -363,6 +363,7 @@ pub(crate) struct LibrarySettings {
     pub(crate) autosave_secs: u64,
     pub(crate) trash_keep_days: u64,
     pub(crate) version_history: bool,
+    pub(crate) history_size: u64,
     pub(crate) default_page: Nav,
     pub(crate) default_list_view: bool,
     pub(crate) default_sort: Sort,
@@ -379,6 +380,7 @@ impl LibrarySettings {
             autosave_secs: prefs.autosave_secs,
             trash_keep_days: prefs.trash_keep_days,
             version_history: prefs.version_history,
+            history_size: prefs.history_size,
             default_page: Nav::from_id(&prefs.dashboard_page),
             default_list_view: prefs.dashboard_list_view,
             default_sort: Sort::from_id(&prefs.dashboard_sort),
@@ -3012,8 +3014,15 @@ impl OndinApp {
     pub(crate) fn trash_or_purge(&mut self, path: &std::path::Path) {
         let root = self.library.root.clone();
         if self.dash.nav == Nav::Trash {
-            if let Err(e) = std::fs::remove_file(path) {
-                self.session.fail(format!("Delete failed: {e}"));
+            // Read before the file goes: its id names the kept undo history.
+            let id = crate::library::scan::read_meta(path).and_then(|(meta, _)| meta.id);
+            match std::fs::remove_file(path) {
+                Ok(()) => {
+                    if let Some(id) = id {
+                        crate::library::history::remove(&root, &id);
+                    }
+                }
+                Err(e) => self.session.fail(format!("Delete failed: {e}")),
             }
             // The permanent delete bypasses `store` and the trash listing is cached, so it
             // must announce itself. Unconditional, and not a full `refresh`: nothing
@@ -3130,7 +3139,7 @@ impl OndinApp {
         let Some(entry) = self.library.entry_at(&path).cloned() else {
             return;
         };
-        match store::rename(&entry, name) {
+        match store::rename(&self.library.root, &entry, name) {
             Ok(moved) => {
                 self.open_document_follows(&path, moved, |m| m.name = Some(name.to_string()));
                 self.library.refresh();
@@ -3864,6 +3873,11 @@ impl OndinApp {
             {
                 d.version_history = !d.version_history;
             }
+            ui.add_space(settings::ROW_GAP);
+            whole_field(ui, half, "Undo history", "steps", &mut d.history_size, 1000);
+            if d.history_size == 0 {
+                warn_caption(ui, "Undo history is cleared when a document is closed.");
+            }
 
             settings::section(ui, "Library");
             picker_row(
@@ -4022,6 +4036,7 @@ impl OndinApp {
         self.prefs.autosave_secs = d.autosave_secs;
         self.prefs.trash_keep_days = d.trash_keep_days;
         self.prefs.version_history = d.version_history;
+        self.prefs.history_size = d.history_size;
         self.prefs.dashboard_page = d.default_page.id().to_string();
         self.prefs.dashboard_list_view = d.default_list_view;
         self.prefs.dashboard_sort = d.default_sort.id().to_string();

@@ -34,7 +34,7 @@ Decided non-goals are in `docs/non-goals.md`.
 
 - **D421** Finiteness is enforced at `Document::apply` (`OpError::NonFinite`); the loader does not check. Derived bounds are guarded too.
 - **D428** A transaction that changes nothing is not an undo step: `Operation::changes_nothing` is exhaustive, with no wildcard arm. It cannot see real ops that net to zero, so planners guard those themselves.
-- **An undo step carries the name its door gave at the commit** (the command's menu name, or the MCP tool's), never one derived from its operations. History stays session-only and uncapped.
+- **An undo step carries the name its door gave at the commit** (the command's menu name, or the MCP tool's), never one derived from its operations. The open session's history is uncapped.
 - **D416** `io::MAX_TREE_DEPTH` (256) bounds the tree at load and at the op layer, because a stack overflow kills unsaved work.
 - **D491** A transaction that orphans a guide is refused. **D492** Unusable export specs are refused at the op and dropped on load.
 - **D439** A new container (group, frame, boolean, flatten, mask) takes the topmost member's z-slot, through one `container_slot`.
@@ -123,6 +123,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Filesystem is truth.** Every action writes to disk and re-scans. Nothing about a document lives only in the app's memory, and no fact lives only in a cache.
 - **The format stays git-friendly**: pretty JSON (line-level diffs), an id-sorted node list, stable string ids, byte-stable output (invariant 9), the camera in `EditorSession` rather than the DTO, and `skip_serializing_if`. A modified-at stamp or view state in `DocumentDto` would break all of it, so an edit time is read off the directory entry. An edit touches only its node and its parent, with no cascade across unrelated nodes.
 - **Autosave is debounced**: writing on every op into a synced folder thrashes the sync client.
+- **Undo history is kept per document in the library** (`.history/<document id>.json`), never beside the file, so it does not travel with a copy. It is read back only for byte-identical file contents written by the same build: a history replayed onto any other document would corrupt it.
 
 ## Workspace and build
 

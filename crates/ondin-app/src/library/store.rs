@@ -87,22 +87,29 @@ pub fn file_document(
 /// Atomic (`crate::atomic`): a plain write truncates the document before writing
 /// a byte, leaving a crash with neither version.
 pub fn write_document(path: &Path, doc: &Document) -> io::Result<()> {
+    write_document_digest(path, doc).map(|_| ())
+}
+
+/// [`write_document`], answering the written bytes' digest
+/// (`super::history::digest`), which a kept undo history is tied to.
+pub fn write_document_digest(path: &Path, doc: &Document) -> io::Result<String> {
     let bytes = ondin_core::io::save(doc).map_err(io::Error::other)?;
-    crate::atomic::write(path, &bytes)
+    crate::atomic::write(path, &bytes)?;
+    Ok(super::history::digest(&bytes))
 }
 
 /// Rename a document: the typed name inside the file, then the file itself.
 ///
 /// Returns the new path, which is the old one when the slug did not change —
 /// "Landing v4" to "Landing V4" is a real rename that moves no file.
-pub fn rename(entry: &Entry, new_name: &str) -> io::Result<PathBuf> {
-    let mut doc = load(&entry.path)?;
+pub fn rename(root: &Path, entry: &Entry, new_name: &str) -> io::Result<PathBuf> {
+    let (mut doc, was) = load_digest(&entry.path)?;
     let mut meta = doc.meta().clone();
     meta.name = Some(new_name.to_string());
     doc.set_meta(meta);
     // Written to the *old* path first. See the module's note on which half is
     // allowed to fail.
-    write_document(&entry.path, &doc)?;
+    rewrite(root, &entry.path, &doc, &was)?;
 
     let dir = entry.path.parent().unwrap_or(Path::new("."));
     let stem = free_stem(dir, new_name, Some(&entry.path));
@@ -124,11 +131,11 @@ pub fn move_to_project(
     entry: &Entry,
     project: Option<&Project>,
 ) -> io::Result<PathBuf> {
-    let mut doc = load(&entry.path)?;
+    let (mut doc, was) = load_digest(&entry.path)?;
     let mut meta = doc.meta().clone();
     meta.project = project.map(|p| p.id.clone());
     doc.set_meta(meta);
-    write_document(&entry.path, &doc)?;
+    rewrite(root, &entry.path, &doc, &was)?;
 
     let dir = project
         .map(|p| p.dir(root))
@@ -152,8 +159,8 @@ pub fn move_to_project(
 /// last publish; turning it off keeps the mark and its published state, and
 /// only stops the sharing. An unfiled document's identity is minted here as
 /// filing mints one, since a kit is found by its id.
-pub fn set_kit(entry: &Entry, sharing: bool) -> io::Result<()> {
-    let mut doc = load(&entry.path)?;
+pub fn set_kit(root: &Path, entry: &Entry, sharing: bool) -> io::Result<()> {
+    let (mut doc, was) = load_digest(&entry.path)?;
     let mut meta = doc.meta().clone();
     if sharing {
         if meta.id.is_none() {
@@ -169,7 +176,7 @@ pub fn set_kit(entry: &Entry, sharing: bool) -> io::Result<()> {
         }
     }
     doc.set_meta(meta);
-    write_document(&entry.path, &doc)
+    rewrite(root, &entry.path, &doc, &was)
 }
 
 /// Copy a document into a new one, with a fresh identity.
@@ -271,7 +278,8 @@ fn owner_may_write(perms: &mut std::fs::Permissions) {
     perms.set_readonly(false);
 }
 
-/// Delete trashed documents older than `keep_days`, permanently.
+/// Delete trashed documents older than `keep_days`, permanently, with their kept
+/// undo history.
 ///
 /// Returns how many were removed. `0` for `keep_days` empties the trash.
 pub fn purge_trash(root: &Path, keep_days: u64) -> usize {
@@ -279,6 +287,9 @@ pub fn purge_trash(root: &Path, keep_days: u64) -> usize {
     let mut removed = 0;
     for entry in trashed(root) {
         if clock::since(entry.modified) >= cutoff && std::fs::remove_file(&entry.path).is_ok() {
+            if let Some(id) = &entry.meta.id {
+                super::history::remove(root, id);
+            }
             removed += 1;
         }
     }
@@ -347,8 +358,25 @@ pub fn version_stamp(path: &Path) -> Option<(u64, u64)> {
 
 /// Read a document off disk.
 fn load(path: &Path) -> io::Result<Document> {
+    load_digest(path).map(|(doc, _)| doc)
+}
+
+/// [`load`], with the digest of the bytes read, for [`rewrite`].
+fn load_digest(path: &Path) -> io::Result<(Document, String)> {
     let bytes = std::fs::read(path)?;
-    ondin_core::io::load(&bytes).map_err(io::Error::other)
+    let doc = ondin_core::io::load(&bytes).map_err(io::Error::other)?;
+    Ok((doc, super::history::digest(&bytes)))
+}
+
+/// Write a closed document back after changing its metadata, carrying its kept
+/// undo history from the bytes it was read as (`was`) to the ones written: the
+/// edits it records are as true of the renamed, moved or marked file.
+fn rewrite(root: &Path, path: &Path, doc: &Document, was: &str) -> io::Result<()> {
+    let now = write_document_digest(path, doc)?;
+    if let Some(id) = doc.meta().id.as_deref() {
+        super::history::restamp(root, id, was, &now);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -442,7 +470,7 @@ mod tests {
         let mut doc = blank();
         file_document(&root, None, "Landing v4", &mut doc).unwrap();
         let entry = entry_named(&root, "Landing v4");
-        let moved = rename(&entry, "Homepage hero").unwrap();
+        let moved = rename(&root, &entry, "Homepage hero").unwrap();
         assert_eq!(moved, root.join("homepage-hero.ondin"));
         assert!(!root.join("landing-v4.ondin").exists());
         assert_eq!(entry_named(&root, "Homepage hero").stem, "homepage-hero");
@@ -459,7 +487,7 @@ mod tests {
         let mut doc = blank();
         file_document(&root, None, "Landing v4", &mut doc).unwrap();
         let entry = entry_named(&root, "Landing v4");
-        let moved = rename(&entry, "Landing V4").unwrap();
+        let moved = rename(&root, &entry, "Landing V4").unwrap();
         assert_eq!(moved, root.join("landing-v4.ondin"));
         assert_eq!(entry_named(&root, "Landing V4").stem, "landing-v4");
         assert_eq!(scan(&root).len(), 1, "no second file may appear");
@@ -680,7 +708,7 @@ mod tests {
         assert!(pin_version(&root, &entry).unwrap().is_some());
         assert_eq!(versions(&root, &id).len(), 1);
 
-        rename(&entry, "Homepage hero").unwrap();
+        rename(&root, &entry, "Homepage hero").unwrap();
         assert_eq!(
             versions(&root, &id).len(),
             1,

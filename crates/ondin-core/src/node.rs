@@ -440,11 +440,13 @@ impl FillRule {
     /// `BezPath::contains` is always non-zero, so hit-testing a boolean with it
     /// under an even-odd fill would be clickable in holes it does not draw.
     /// Even-odd is the parity of the same winding number, so no second traversal.
+    /// The winding is `geometry::winding`'s, not kurbo's, which misreads points
+    /// near some curves.
     pub fn contains(self, path: &BezPath, p: Point) -> bool {
-        use kurbo::Shape;
+        let w = crate::geometry::winding(path, p);
         match self {
-            FillRule::NonZero => path.contains(p),
-            FillRule::EvenOdd => path.winding(p) % 2 != 0,
+            FillRule::NonZero => w != 0,
+            FillRule::EvenOdd => w % 2 != 0,
         }
     }
 }

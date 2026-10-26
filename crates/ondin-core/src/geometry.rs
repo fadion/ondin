@@ -1184,9 +1184,8 @@ pub fn contains_local(
         // Star spokes and a polygon's corners leave a lot of the box empty, so
         // these test the outline rather than the box — clicking the gap between
         // two points of a star must fall through to whatever is behind it.
-        NodeKind::Polygon { .. } | NodeKind::Star { .. } => {
-            local_path(kind).is_some_and(|path| path.contains(p) || near_outline(&path, p, tol))
-        }
+        NodeKind::Polygon { .. } | NodeKind::Star { .. } => local_path(kind)
+            .is_some_and(|path| winding(&path, p) != 0 || near_outline(&path, p, tol)),
         // An open path is grabbed by its stroke: `BezPath::contains` closes it
         // implicitly, which would make the empty space inside the closure
         // selectable. The rounded outline is tested, not the authored one, so a
@@ -1205,6 +1204,49 @@ pub fn contains_local(
         // build; the test lives beside the cache in `query::hit_test`.
         NodeKind::Group | NodeKind::Root | NodeKind::Boolean { .. } => false,
     }
+}
+
+/// How finely [`winding`] flattens a path, in its own units.
+const WINDING_FLATTEN: f64 = 0.01;
+
+/// The winding number of `path` at `p`, every subpath closed, counted on a
+/// flattening within [`WINDING_FLATTEN`] of the outline.
+///
+/// Not `Shape::winding`: kurbo's ray cast over a cubic that turns through
+/// horizontal mid-segment reads some points up to a unit and a half outside it as
+/// inside, which a click zoomed in can land on.
+pub fn winding(path: &BezPath, p: Point) -> i32 {
+    if !path.bounding_box().contains(p) {
+        return 0;
+    }
+    let mut w = 0;
+    let mut cross = |a: Point, b: Point| {
+        let side = (b - a).cross(p - a);
+        if a.y <= p.y && b.y > p.y && side > 0.0 {
+            w += 1;
+        } else if b.y <= p.y && a.y > p.y && side < 0.0 {
+            w -= 1;
+        }
+    };
+    let (mut at, mut start) = (Point::ZERO, Point::ZERO);
+    kurbo::flatten(path.iter(), WINDING_FLATTEN, |el| match el {
+        PathEl::MoveTo(q) => {
+            // The subpath before this one closes implicitly, as a fill closes it.
+            cross(at, start);
+            (at, start) = (q, q);
+        }
+        PathEl::LineTo(q) => {
+            cross(at, q);
+            at = q;
+        }
+        PathEl::ClosePath => {
+            cross(at, start);
+            at = start;
+        }
+        _ => {}
+    });
+    cross(at, start);
+    w
 }
 
 /// Whether `p` is within `tol` of a path's outline, curves included.

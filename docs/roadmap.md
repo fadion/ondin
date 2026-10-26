@@ -45,7 +45,8 @@ reads true.
   and weight (4.5 : 1, 3 : 1 at large sizes), AAA and APCA as options, non-text 3 : 1 as an opt-in.
   A failing layer gets a red outline and a `3.1 : 1 · needs 4.5` badge; clicking it offers the nearest
   passing lightness at the same hue, or a passing variable. Checks every mode and reports the worst.
-  The same check as `ondin check contrast` for CI.
+  The measurement is built (`contrast::check`, `ondin check contrast`; `export.md`); APCA and the
+  non-text option are not.
 - **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
   `Item::Rename`, one layer, exists.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).

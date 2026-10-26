@@ -27,6 +27,10 @@
 //! ondin diff <a> <b> [--json]    what changed from document a to b, by layer;
 //!                                exit 0 when nothing did, 1 when something did,
 //!                                2 when either cannot be read
+//! ondin check contrast <file> [--page <name|n>] [--aaa]
+//!                                every text layer against what is drawn behind
+//!                                it, in every mode; exit 0 all pass, 1 some fail,
+//!                                2 unreadable
 //! ondin merge <base> <ours> <theirs> [-o out]
 //!                                three-way merge, written over ours unless -o;
 //!                                exit 0 clean, 1 with conflicts (ours kept at
@@ -151,6 +155,13 @@ enum Command {
         b: String,
         json: bool,
     },
+    /// Measure every text layer's contrast against what is drawn behind it
+    /// (`ondin_export::contrast`), on one page.
+    CheckContrast {
+        file: String,
+        page: Option<String>,
+        aaa: bool,
+    },
     /// Three-way merge of a document (`ondin_core::merge`), the result written to
     /// `out`, by default over `ours` as git's merge driver expects.
     Merge {
@@ -257,6 +268,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         Some("diff") => parse_diff(&args[1..]),
         Some("tokens") => parse_tokens(&args[1..]),
         Some("merge") => parse_merge(&args[1..]),
+        Some("check") => parse_check(&args[1..]),
         Some("mcp-proxy") => Ok(Command::McpProxy),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
@@ -290,6 +302,84 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
             files.len()
         )),
     }
+}
+
+fn parse_check(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str = "usage: ondin check contrast <file.ondin> [--page <name|n>] [--aaa]";
+    if args.first().map(String::as_str) != Some("contrast") {
+        return Err(USAGE.to_string());
+    }
+    let (mut file, mut page, mut aaa) = (None, None, false);
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--aaa" => aaa = true,
+            "--page" => {
+                i += 1;
+                let value = args.get(i).filter(|v| !v.starts_with('-'));
+                page = Some(
+                    value
+                        .ok_or_else(|| format!("--page wants a name or number\n{USAGE}"))?
+                        .clone(),
+                );
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown option {other}\n{USAGE}"));
+            }
+            other if file.is_some() => {
+                return Err(format!(
+                    "check takes one document; got a second, {other}\n{USAGE}"
+                ));
+            }
+            other => file = Some(other.to_string()),
+        }
+        i += 1;
+    }
+    Ok(Command::CheckContrast {
+        file: file.ok_or_else(|| USAGE.to_string())?,
+        page,
+        aaa,
+    })
+}
+
+/// `ondin check contrast`: the report as text, and whether every measured layer
+/// passed.
+fn run_check_contrast(file: &str, page: Option<&str>, aaa: bool) -> Result<(String, bool), String> {
+    use ondin_export::contrast::{Level, check};
+    let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
+    let page = chosen_page(&doc, page)?;
+    let level = if aaa { Level::Aaa } else { Level::Aa };
+    let report = check(&doc, page, level);
+    let mut out = String::new();
+    let mut failed = 0;
+    for f in &report.findings {
+        if f.passes() {
+            continue;
+        }
+        failed += 1;
+        let mode = f
+            .mode
+            .as_ref()
+            .map(|m| format!(" in {m}"))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "fail  {}: {:.2} : 1, needs {}{mode}\n",
+            f.trail.join(" / "),
+            f.ratio,
+            f.needs
+        ));
+    }
+    for s in &report.skipped {
+        out.push_str(&format!("skip  {}: {}\n", s.trail.join(" / "), s.why));
+    }
+    out.push_str(&format!(
+        "{} of {} text layers pass {}\n",
+        report.findings.len() - failed,
+        report.findings.len(),
+        if aaa { "AAA" } else { "AA" }
+    ));
+    Ok((out, failed == 0))
 }
 
 fn parse_merge(args: &[String]) -> Result<Command, String> {
@@ -643,6 +733,20 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        // `diff`'s codes: 1 is "a layer fails", so an unreadable file is 2.
+        Ok(Command::CheckContrast { file, page, aaa }) => {
+            match run_check_contrast(&file, page.as_deref(), aaa) {
+                Ok((report, passed)) => {
+                    print!("{report}");
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    std::process::exit(i32::from(!passed));
+                }
+                Err(msg) => {
+                    eprintln!("{msg}");
+                    std::process::exit(2);
+                }
+            }
+        }
         // `diff`'s codes: 1 is "conflicts", so a failure is 2.
         Ok(Command::Merge {
             base,
@@ -1272,6 +1376,106 @@ mod tests {
         ] {
             assert!(export(refused).is_err(), "{refused:?}");
         }
+    }
+
+    /// `check contrast` takes one document, a page and a level, and refuses the rest.
+    #[test]
+    fn check_contrast_takes_one_document_a_page_and_a_level() {
+        let check = |s: &[&str]| {
+            let mut v = vec!["check".to_string()];
+            v.extend(s.iter().map(|a| a.to_string()));
+            parse(&v)
+        };
+        assert_eq!(
+            check(&["contrast", "a.ondin", "--page", "2", "--aaa"]),
+            Ok(Command::CheckContrast {
+                file: "a.ondin".into(),
+                page: Some("2".into()),
+                aaa: true,
+            })
+        );
+        for refused in [
+            &["a.ondin"][..],
+            &["contrast"],
+            &["contrast", "a.ondin", "b.ondin"],
+            &["contrast", "a.ondin", "--page"],
+            &["contrast", "a.ondin", "--aa"],
+        ] {
+            assert!(check(refused).is_err(), "{refused:?}");
+        }
+    }
+
+    /// Light grey type on white fails and names the layer; the run answers
+    /// "not all passed".
+    #[test]
+    fn check_contrast_reports_a_failing_layer() {
+        use ondin_core::{
+            Brush, Fill, IdSource, NodeKind, Operation, TextSizing, TextStyle, Transaction,
+        };
+        let dir = std::env::temp_dir().join(format!("ondin-contrast-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ids = IdSource::new(0xD5);
+        let root = ids.mint();
+        let (frame, text) = (ids.mint(), ids.mint());
+        let mut doc = ondin_core::Document::new(root);
+        let fill = |r, g, b| {
+            ondin_core::keyed_by_position([Fill {
+                brush: Brush::Solid(ondin_core::peniko::Color::from_rgba8(r, g, b, 255)).into(),
+                visible: true,
+            }])
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(300.0, 100.0),
+                },
+                transform: None,
+                name: Some("Card".into()),
+            },
+            Operation::SetFills {
+                id: frame,
+                fills: fill(255, 255, 255),
+            },
+            Operation::CreateNode {
+                id: text,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "Faint".into(),
+                    style: Box::new(TextStyle {
+                        font_family: "Inter".into(),
+                        font_size: 16.0,
+                        weight: 400,
+                        ..Default::default()
+                    }),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: Default::default(),
+                    sizing: TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: Some(ondin_core::kurbo::Affine::translate((10.0, 10.0))),
+                name: Some("Caption".into()),
+            },
+            Operation::SetFills {
+                id: text,
+                fills: fill(200, 200, 200),
+            },
+        ]))
+        .unwrap();
+        let file = dir.join("c.ondin");
+        std::fs::write(&file, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let (report, passed) = run_check_contrast(file.to_str().unwrap(), None, false).unwrap();
+        assert!(!passed, "{report}");
+        assert!(report.contains("fail  Card / Caption"), "{report}");
+        assert!(report.contains("0 of 1 text layers pass AA"), "{report}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// `merge` takes three documents and an output, and refuses the rest.

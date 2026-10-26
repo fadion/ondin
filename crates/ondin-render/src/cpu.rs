@@ -100,6 +100,21 @@ impl VelloCpuRenderer {
         images: &ImageStore,
         origins: &[ondin_core::NodeId],
     ) -> (Vec<u8>, u32, u32) {
+        self.render_subtrees_with(doc, res, vp, images, origins, &RenderOverrides::default())
+    }
+
+    /// [`Self::render_subtrees_to_rgba`] drawn through `overrides`, as the canvas
+    /// draws a preview — the contrast check's backdrop is a page with one layer
+    /// hidden.
+    pub fn render_subtrees_with(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        vp: &Viewport,
+        images: &ImageStore,
+        origins: &[ondin_core::NodeId],
+        overrides: &RenderOverrides,
+    ) -> (Vec<u8>, u32, u32) {
         let (w, h) = vp.pixel_size;
         let mut ctx = RenderContext::new_with(w as u16, h as u16, export_settings());
 
@@ -117,14 +132,7 @@ impl VelloCpuRenderer {
                 base,
                 resources: &mut resources,
             };
-            scene::build_of(
-                doc,
-                res,
-                vp,
-                &RenderOverrides::default(),
-                origins,
-                &mut painter,
-            );
+            scene::build_of(doc, res, vp, overrides, origins, &mut painter);
         }
 
         ctx.flush();

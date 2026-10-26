@@ -39,6 +39,7 @@
 #![allow(rustdoc::private_intra_doc_links)]
 
 pub mod code;
+pub mod contrast;
 pub mod dtcg;
 pub mod jpeg;
 pub mod pdf;

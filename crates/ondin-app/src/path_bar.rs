@@ -6,13 +6,19 @@
 //! so it reads as that button's drawer. *Offset* opens a card with one scrubbable
 //! distance field, previewed through the edit valve and always measured from the
 //! outline the card opened on, so scrubbing back to zero gives the path back.
+//!
+//! Both path operations run on a worker ([`Job`]), so a scrub never waits on the
+//! arithmetic: the preview shows the newest offset that has landed, and only the
+//! release waits for the distance it ends on.
 
 use crate::app::OndinApp;
+use crate::job::Job;
 use crate::theme::{self, color, icon};
 use crate::tools::Tool;
 use crate::ui::{self, Prefix, Scrub, icon_button, value_field};
 use ondin_core::kurbo::BezPath;
 use ondin_core::{GeometryPatch, NodeId, NodeKind, Operation, Transaction, build};
+use std::sync::Arc;
 
 /// The gap between the tool rail's edge and the bar, and between the bar and the
 /// Offset card.
@@ -29,35 +35,90 @@ pub(crate) struct OffsetCard {
     /// Written back at distance zero, so the corner radii come back too.
     stored: (BezPath, Vec<f64>),
     /// What every distance offsets: the stored path with its radii applied.
-    drawn: BezPath,
+    drawn: Arc<BezPath>,
     distance: f64,
-    /// Whether the last distance left nothing (a shrink past the path's middle).
-    empty: bool,
+    /// The newest offset to land: its distance, and the outline, `None` where that
+    /// distance left nothing (a shrink past the path's middle).
+    landed: Option<(f64, Option<BezPath>)>,
+    /// The offset on the worker, and its distance. One at a time: a scrub that moves
+    /// on meanwhile asks again when it lands, so the worker never falls behind.
+    working: Option<(f64, Job<Option<BezPath>>)>,
 }
 
 impl OffsetCard {
-    /// The transaction that puts the path `distance` from where the card found it.
-    fn tx(&mut self) -> Transaction {
-        let (path, corner_radii) = if self.distance == 0.0 {
-            self.empty = false;
-            self.stored.clone()
-        } else {
-            match build::offset_outline(&self.drawn, self.distance) {
-                Ok(path) => {
-                    self.empty = false;
-                    (path, Vec::new())
+    /// Take in an offset that has landed and set the worker on the field's distance
+    /// if it is not already done; whether anything landed.
+    fn pump(&mut self, ctx: &egui::Context) -> bool {
+        let mut fresh = false;
+        if let Some((d, job)) = &self.working {
+            match job.poll() {
+                Ok(Some(path)) => {
+                    self.landed = Some((*d, path));
+                    self.working = None;
+                    fresh = true;
                 }
-                Err(_) => {
-                    self.empty = true;
-                    return Transaction::default();
-                }
+                Ok(None) => {}
+                Err(()) => self.working = None,
             }
+        }
+        if self.working.is_none() && self.distance != 0.0 && !self.done() {
+            let (drawn, d) = (Arc::clone(&self.drawn), self.distance);
+            let job = Job::spawn("ondin-offset", ctx, move || {
+                build::offset_outline(&drawn, d).ok()
+            });
+            self.working = Some((d, job));
+        }
+        fresh
+    }
+
+    /// Whether the field's distance has landed.
+    fn done(&self) -> bool {
+        self.landed
+            .as_ref()
+            .is_some_and(|(d, _)| *d == self.distance)
+    }
+
+    /// Make the field's distance land, waiting on the worker if it has it in hand
+    /// and working it out here otherwise: the release commits what it shows.
+    fn settle(&mut self) {
+        if self.distance == 0.0 || self.done() {
+            return;
+        }
+        let path = match self.working.take() {
+            Some((d, job)) if d == self.distance => job.wait().flatten(),
+            _ => build::offset_outline(&self.drawn, self.distance).ok(),
+        };
+        self.landed = Some((self.distance, path));
+    }
+
+    /// Whether the field's distance left nothing.
+    fn empty(&self) -> bool {
+        self.done() && self.landed.as_ref().is_some_and(|(_, p)| p.is_none())
+    }
+
+    /// The transaction that puts the path where the newest offset to land does, or
+    /// back where the card found it at zero; empty while nothing useful has landed.
+    fn tx(&self) -> Transaction {
+        let (path, corner_radii) = if self.distance == 0.0 {
+            self.stored.clone()
+        } else if let Some((_, Some(path))) = &self.landed {
+            (path.clone(), Vec::new())
+        } else {
+            return Transaction::default();
         };
         Transaction(vec![Operation::SetGeometry {
             id: self.id,
             geometry: GeometryPatch::Path { path, corner_radii },
         }])
     }
+}
+
+/// *Simplify* on its worker: the path it was asked of, as stored then, so an answer
+/// that lands after the path changed is dropped rather than written over the change.
+pub(crate) struct Simplifying {
+    id: NodeId,
+    asked: NodeKind,
+    job: Job<BezPath>,
 }
 
 /// One entry of the bar.
@@ -228,7 +289,7 @@ impl OndinApp {
             Some(Verb::Smooth(smooth)) => self.set_point_smoothness(smooth),
             Some(Verb::Join) => self.join_points(),
             Some(Verb::Reverse) => self.reverse_subpaths(),
-            Some(Verb::Simplify) => self.simplify_edited_path(),
+            Some(Verb::Simplify) => self.simplify_edited_path(ctx),
             Some(Verb::Offset) => self.toggle_offset_card(id),
             Some(Verb::Done) => {
                 self.choose_tool(Tool::Select);
@@ -241,19 +302,81 @@ impl OndinApp {
         }
     }
 
-    /// *Simplify* over the edited path (`build::simplify_path`), one commit.
-    pub(crate) fn simplify_edited_path(&mut self) {
+    /// *Simplify* over the edited path, on a worker; [`Self::poll_simplify`] commits
+    /// it as `build::simplify_path` would. A second ask while one runs is ignored.
+    pub(crate) fn simplify_edited_path(&mut self, ctx: &egui::Context) {
         let Some(id) = self.edited_path() else { return };
-        match build::simplify_path(&self.session.doc, id) {
-            Ok(tx) if tx.0.is_empty() => self.session.info("Already as simple as it gets"),
-            Ok(tx) => {
-                if self.session.commit(tx) {
-                    // The anchors are new, so the old point references mean nothing.
-                    self.points.clear();
-                    self.session.info("Simplified");
-                }
-            }
-            Err(e) => self.session.info(format!("Could not simplify: {e}")),
+        if self.simplifying.is_some() {
+            return;
+        }
+        let Some(asked) = self.session.doc.get(id).map(|n| n.kind().clone()) else {
+            return;
+        };
+        let Some(drawn) =
+            ondin_core::geometry::local_path(&asked).filter(|p| !p.elements().is_empty())
+        else {
+            self.session.info(format!(
+                "Could not simplify: {}",
+                ondin_core::OpError::EmptyGeometry
+            ));
+            return;
+        };
+        let job = Job::spawn("ondin-simplify", ctx, move || {
+            build::simplify_outline(&drawn)
+        });
+        self.simplifying = Some(Simplifying { id, asked, job });
+    }
+
+    /// Commit a *Simplify* that has landed, in one step, unless the path changed while
+    /// it ran or the refit has no fewer segments. Every frame, focus mode included.
+    pub(crate) fn poll_simplify(&mut self) {
+        let Some(s) = &self.simplifying else { return };
+        let fitted = match s.job.poll() {
+            Ok(None) => return,
+            Ok(Some(fitted)) => Some(fitted),
+            Err(()) => None,
+        };
+        let Some(Simplifying { id, asked, .. }) = self.simplifying.take() else {
+            return;
+        };
+        self.land_simplify(id, &asked, fitted);
+    }
+
+    /// Write the refit `fitted` of the path `id`, asked of it as `asked`.
+    fn land_simplify(&mut self, id: NodeId, asked: &NodeKind, fitted: Option<BezPath>) {
+        let Some(fitted) = fitted else {
+            self.session.fail("Could not simplify: the worker stopped");
+            return;
+        };
+        if self.session.doc.get(id).map(|n| n.kind()) != Some(asked) {
+            return;
+        }
+        let NodeKind::Path { path: stored, .. } = asked else {
+            return;
+        };
+        if fitted.segments().count() >= stored.segments().count() {
+            self.session.info("Already as simple as it gets");
+            return;
+        }
+        let tx = Transaction(vec![Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Path {
+                path: fitted,
+                corner_radii: Vec::new(),
+            },
+        }]);
+        if self.session.commit(tx) {
+            // The anchors are new, so the old point references mean nothing.
+            self.points.clear();
+            self.session.info("Simplified");
+        }
+    }
+
+    /// Wait for a running *Simplify* and land it (tests only).
+    #[cfg(test)]
+    pub(crate) fn settle_simplify(&mut self) {
+        if let Some(Simplifying { id, asked, job }) = self.simplifying.take() {
+            self.land_simplify(id, &asked, job.wait());
         }
     }
 
@@ -271,9 +394,10 @@ impl OndinApp {
         self.offset_card = Some(OffsetCard {
             id,
             stored: (path, corner_radii),
-            drawn,
+            drawn: Arc::new(drawn),
             distance: 0.0,
-            empty: false,
+            landed: None,
+            working: None,
         });
     }
 
@@ -284,6 +408,7 @@ impl OndinApp {
             return;
         };
         let at = egui::pos2(bar.right() + GAP, button.top());
+        let fresh = card.pump(ctx);
         let mut field: Option<egui::Response> = None;
         let shown = egui::Area::new(egui::Id::new("offset-card"))
             .order(egui::Order::Foreground)
@@ -303,7 +428,7 @@ impl OndinApp {
                         )
                         .on_hover_text("Distance — negative shrinks the outline");
                         field = Some(resp);
-                        if card.empty {
+                        if card.empty() {
                             ui.label(
                                 egui::RichText::new("Nothing left at this distance")
                                     .size(11.0)
@@ -313,11 +438,16 @@ impl OndinApp {
                     });
                 });
             });
+        // An offset landing while the field is held still is shown too.
         if let Some(resp) = field
-            && crate::panels::interacting(&resp)
+            && (crate::panels::interacting(&resp) || (fresh && resp.has_focus()))
         {
-            let tx = card.tx();
-            if self.edit_valve(&resp, tx) {
+            if resp.dragged() || resp.has_focus() {
+                card.pump(ctx);
+            } else {
+                card.settle();
+            }
+            if self.edit_valve(&resp, card.tx()) {
                 self.points.clear();
             }
         }
@@ -424,6 +554,7 @@ mod tests {
         let card = app.offset_card.as_mut().expect("the card opened");
 
         card.distance = 10.0;
+        card.settle();
         let grow = card.tx();
         app.session.commit(grow);
         let b = stored(&app, id).0.bounding_box();
@@ -432,6 +563,7 @@ mod tests {
         // Measured from the opening outline, not from the one just committed.
         let card = app.offset_card.as_mut().expect("still open");
         card.distance = 5.0;
+        card.settle();
         let grow = card.tx();
         app.session.commit(grow);
         let b = stored(&app, id).0.bounding_box();
@@ -448,8 +580,40 @@ mod tests {
 
         let card = app.offset_card.as_mut().expect("still open");
         card.distance = -80.0;
+        card.settle();
         assert!(card.tx().0.is_empty(), "nothing left to write");
-        assert!(card.empty, "and the card says so");
+        assert!(card.empty(), "and the card says so");
+    }
+
+    /// A scrub hands the offset to the worker and the release lands the distance it
+    /// ends on, not one the worker was still busy with. flip: `OffsetCard::settle`
+    /// waiting on whatever the worker holds → fails at "the distance released on".
+    #[test]
+    fn offset_card_works_off_the_ui_thread_and_lands_the_last_distance() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ring(&ctx);
+        app.toggle_offset_card(id);
+        let card = app.offset_card.as_mut().expect("the card opened");
+        card.distance = 10.0;
+        card.pump(&ctx);
+        assert!(
+            card.working.as_ref().is_some_and(|(d, _)| *d == 10.0),
+            "on the worker"
+        );
+        card.distance = 20.0;
+        card.pump(&ctx);
+        assert!(
+            card.working.as_ref().is_some_and(|(d, _)| *d == 10.0),
+            "one at a time"
+        );
+        card.settle();
+        let tx = card.tx();
+        app.session.commit(tx);
+        let b = stored(&app, id).0.bounding_box();
+        assert!(
+            (b.width() - 140.0).abs() < 0.5,
+            "the distance released on: {b:?}"
+        );
     }
 
     /// Simplify refits the ring in one undo step and drops the point selection,
@@ -461,12 +625,34 @@ mod tests {
         app.points.set_one(id, (0, 3));
         let depth = app.session.history.undo_depth();
         let segments = stored(&app, id).0.segments().count();
-        app.simplify_edited_path();
+        app.simplify_edited_path(&ctx);
+        app.settle_simplify();
         let (path, radii) = stored(&app, id);
         assert!(path.segments().count() < segments / 4, "refitted");
         assert!(radii.is_empty(), "the radius is baked into the curves");
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
         assert!(app.points.is_empty(), "the old anchors are gone");
+    }
+
+    /// A *Simplify* that lands after the path changed writes nothing. flip:
+    /// `land_simplify` skipping its check of the asked-of kind → fails at "dropped".
+    #[test]
+    fn simplify_landing_on_a_changed_path_is_dropped() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ring(&ctx);
+        app.simplify_edited_path(&ctx);
+        assert!(app.simplifying.is_some(), "on the worker");
+        let mut moved = stored(&app, id).0;
+        moved.apply_affine(ondin_core::kurbo::Affine::translate((5.0, 0.0)));
+        app.session.commit(Transaction(vec![Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Path {
+                path: moved.clone(),
+                corner_radii: Vec::new(),
+            },
+        }]));
+        app.settle_simplify();
+        assert_eq!(stored(&app, id).0, moved, "dropped");
     }
 
     /// The bar shows only while a path's points are edited, beside the rail and

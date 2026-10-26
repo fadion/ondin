@@ -64,6 +64,7 @@ mod gradient;
 mod grid;
 mod input;
 mod instances;
+mod job;
 mod kits;
 // No blanket `dead_code` allow here: the plain build is the gate that catches an
 // unwired item. `store::versions` (test-only callers) carries its own allow.

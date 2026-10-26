@@ -702,6 +702,8 @@ pub struct OndinApp {
     pub(crate) pen_button: egui::Rect,
     /// The path bar's Offset card, while it is open (`crate::path_bar`).
     pub(crate) offset_card: Option<crate::path_bar::OffsetCard>,
+    /// The path bar's *Simplify*, while its worker runs.
+    pub(crate) simplifying: Option<crate::path_bar::Simplifying>,
     /// The styles and variables browser; it shares a place with the insert picker.
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
     /// The browser's collapsed groups per document root; view state, not saved.
@@ -1273,6 +1275,7 @@ impl OndinApp {
             kit_button: egui::Rect::NOTHING,
             pen_button: egui::Rect::NOTHING,
             offset_card: None,
+            simplifying: None,
             var_browser: None,
             var_collapsed: Default::default(),
             var_button: egui::Rect::NOTHING,
@@ -1626,6 +1629,7 @@ impl eframe::App for OndinApp {
         self.status_bar(&ctx, canvas);
 
         self.watch_kits(&ctx);
+        self.poll_simplify();
         if !self.focus {
             self.inspector_panel(&ctx);
             self.path_bar(&ctx);

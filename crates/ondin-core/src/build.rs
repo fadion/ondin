@@ -1130,12 +1130,7 @@ fn reshaped(id: NodeId, path: kurbo::BezPath) -> Transaction {
 /// [`SIMPLIFY_ACCURACY`] of it, keeping turns sharper than [`SIMPLIFY_CORNER_DEG`] as
 /// corners. Empty when the refit has no fewer segments than the path already has.
 pub fn simplify_path(doc: &Document, id: NodeId) -> Result<Transaction, OpError> {
-    use kurbo::simplify::{SimplifyOptLevel, SimplifyOptions, simplify_bezpath};
-    let path = drawn_path(doc, id)?;
-    let options = SimplifyOptions::default()
-        .opt_level(SimplifyOptLevel::Optimize)
-        .angle_thresh(SIMPLIFY_CORNER_DEG.to_radians().tan());
-    let fitted = simplify_bezpath(path.iter(), SIMPLIFY_ACCURACY, &options);
+    let fitted = simplify_outline(&drawn_path(doc, id)?);
     let NodeKind::Path { path: stored, .. } = doc.get(id).map(Node::kind).expect("checked") else {
         unreachable!("drawn_path checked the kind");
     };
@@ -1143,6 +1138,16 @@ pub fn simplify_path(doc: &Document, id: NodeId) -> Result<Transaction, OpError>
         return Ok(Transaction::default());
     }
     Ok(reshaped(id, fitted))
+}
+
+/// The refit *Simplify* makes of a drawn outline, with no document: what
+/// [`simplify_path`] writes when it has fewer segments than the path it replaces.
+pub fn simplify_outline(path: &kurbo::BezPath) -> kurbo::BezPath {
+    use kurbo::simplify::{SimplifyOptLevel, SimplifyOptions, simplify_bezpath};
+    let options = SimplifyOptions::default()
+        .opt_level(SimplifyOptLevel::Optimize)
+        .angle_thresh(SIMPLIFY_CORNER_DEG.to_radians().tan());
+    simplify_bezpath(path.iter(), SIMPLIFY_ACCURACY, &options)
 }
 
 /// *Offset path* on the path `id` draws, as [`offset_outline`] offsets it.

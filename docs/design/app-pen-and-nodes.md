@@ -103,6 +103,10 @@ nothing the canvas does not already offer except the last two.
   stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.
 - Both write a new path with no corner radii, the radii baked into the curves, and clear the point
   selection, whose anchors are gone.
+- Both run on a worker thread (`crate::job::Job`), so the frame loop never waits on the arithmetic.
+  The Offset card keeps one offset in flight; the preview shows the newest that has landed, and a
+  scrub that moved on asks again when it does. Only the release waits, for the distance it ends on,
+  so the commit is what the field says. A *Simplify* that lands after its path changed is dropped.
 
 ## Path corner radii
 

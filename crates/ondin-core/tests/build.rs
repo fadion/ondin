@@ -4734,3 +4734,140 @@ fn affine_is_invertible_asks_one_question_and_the_old_spellings_disagreed() {
         "its inverse is 1e9 — representable, finite, and what the caller wanted"
     );
 }
+
+fn path_kind(path: ondin_core::kurbo::BezPath) -> NodeKind {
+    NodeKind::Path {
+        path,
+        corner_radii: Vec::new(),
+    }
+}
+
+/// The stored path of `id` once `tx` is committed.
+fn path_after(f: &mut Fixture, id: NodeId, tx: Transaction) -> ondin_core::kurbo::BezPath {
+    f.commit(tx);
+    let NodeKind::Path { path, corner_radii } = f.doc.get(id).unwrap().kind() else {
+        panic!("still a path");
+    };
+    assert!(corner_radii.is_empty(), "the radii are baked in");
+    path.clone()
+}
+
+/// Simplify refits a 64-gon circle to a few curves that stay on it, and leaves a
+/// square's four corners alone. flip: `angle_thresh` left at kurbo's default → fails
+/// at "few curves" (every polyline vertex reads as a corner).
+#[test]
+fn simplify_refits_a_polyline_and_keeps_real_corners() {
+    use ondin_core::kurbo::{BezPath, ParamCurve, Rect, Shape};
+    let mut f = Fixture::new();
+    let (r, c) = (100.0, Point::new(100.0, 100.0));
+    let mut ring = BezPath::new();
+    for i in 0..64 {
+        let a = i as f64 / 64.0 * std::f64::consts::TAU;
+        let p = c + Vec2::new(a.cos(), a.sin()) * r;
+        if i == 0 {
+            ring.move_to(p)
+        } else {
+            ring.line_to(p)
+        }
+    }
+    ring.close_path();
+    let id = f.add(f.artboard, path_kind(ring), (0.0, 0.0));
+    let tx = build::simplify_path(&f.doc, id).unwrap();
+    let out = path_after(&mut f, id, tx);
+    let n = out.segments().count();
+    assert!(n < 16, "few curves, got {n}");
+    for seg in out.segments() {
+        for t in [0.0, 0.25, 0.5, 0.75] {
+            let d = (seg.eval(t) - c).hypot();
+            assert!((d - r).abs() < 0.75, "on the circle: {d}");
+        }
+    }
+
+    let square = Rect::new(0.0, 0.0, 100.0, 100.0).to_path(0.1);
+    let sq = f.add(f.artboard, path_kind(square), (0.0, 0.0));
+    let tx = build::simplify_path(&f.doc, sq).unwrap();
+    assert!(tx.0.is_empty(), "a square is already as simple as it gets");
+}
+
+/// Offset grows a square by the distance with mitred corners, shrinks it, bands an
+/// open line with round caps, and refuses what has nothing left. flip: `Subtract`
+/// swapped for `Union` in `offset_path` → fails at the shrunk box.
+#[test]
+fn offset_grows_shrinks_and_bands() {
+    use ondin_core::kurbo::{BezPath, Rect, Shape};
+    let mut f = Fixture::new();
+    let square = Rect::new(0.0, 0.0, 100.0, 100.0).to_path(0.1);
+    let near = |a: Rect, b: Rect| {
+        [a.x0 - b.x0, a.y0 - b.y0, a.x1 - b.x1, a.y1 - b.y1]
+            .iter()
+            .all(|d| d.abs() < 0.01)
+    };
+
+    let id = f.add(f.artboard, path_kind(square.clone()), (0.0, 0.0));
+    let tx = build::offset_path(&f.doc, id, 10.0).unwrap();
+    let grown = path_after(&mut f, id, tx);
+    let b = grown.bounding_box();
+    assert!(near(b, Rect::new(-10.0, -10.0, 110.0, 110.0)), "{b:?}");
+    // Mitred: each corner is still square, so the area is the full 120².
+    assert!((grown.area().abs() - 120.0 * 120.0).abs() < 1.0);
+
+    let id = f.add(f.artboard, path_kind(square), (0.0, 0.0));
+    let tx = build::offset_path(&f.doc, id, -10.0).unwrap();
+    let b = path_after(&mut f, id, tx).bounding_box();
+    assert!(near(b, Rect::new(10.0, 10.0, 90.0, 90.0)), "{b:?}");
+    assert!(
+        matches!(
+            build::offset_path(&f.doc, id, -60.0),
+            Err(OpError::EmptyGeometry)
+        ),
+        "eroded to nothing"
+    );
+
+    let mut line = BezPath::new();
+    line.move_to((0.0, 0.0));
+    line.line_to((100.0, 0.0));
+    let open = f.add(f.artboard, path_kind(line), (0.0, 0.0));
+    assert!(
+        matches!(
+            build::offset_path(&f.doc, open, -5.0),
+            Err(OpError::EmptyGeometry)
+        ),
+        "an open path has no inside to shrink"
+    );
+    let tx = build::offset_path(&f.doc, open, 5.0).unwrap();
+    let b = path_after(&mut f, open, tx).bounding_box();
+    assert!(near(b, Rect::new(-5.0, -5.0, 105.0, 5.0)), "{b:?}");
+}
+
+/// Shrinking a many-sided ring leaves only what is inside it, and nothing once the
+/// distance passes its middle. flip: the band subtracted piece by piece instead of
+/// united first → fails at "nothing left" (a sliver outside the ring survives).
+#[test]
+fn offset_shrinks_a_ring_without_slivers() {
+    use ondin_core::kurbo::{BezPath, Shape};
+    let mut ring = BezPath::new();
+    for i in 0..64 {
+        let a = i as f64 / 64.0 * std::f64::consts::TAU;
+        let p = (50.0 + 50.0 * a.cos(), 50.0 + 50.0 * a.sin());
+        if i == 0 {
+            ring.move_to(p)
+        } else {
+            ring.line_to(p)
+        }
+    }
+    ring.close_path();
+    let inner = build::offset_outline(&ring, -10.0).unwrap();
+    let b = inner.bounding_box();
+    assert!(
+        b.x0 > 9.0 && b.y0 > 9.0 && b.x1 < 91.0 && b.y1 < 91.0,
+        "inside the ring: {b:?}"
+    );
+    assert!((b.width() - 80.0).abs() < 0.5, "{b:?}");
+    assert!(
+        matches!(
+            build::offset_outline(&ring, -80.0),
+            Err(OpError::EmptyGeometry)
+        ),
+        "nothing left"
+    );
+}

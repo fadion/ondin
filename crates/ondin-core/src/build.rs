@@ -1091,6 +1091,121 @@ pub fn outline_text(
     replace_with_path(doc, ids, id, path)
 }
 
+/// How far *Simplify* may move a path's outline, in the layer's own units: half a
+/// pixel at 100%.
+pub const SIMPLIFY_ACCURACY: f64 = 0.5;
+
+/// The sharpest turn, in degrees, *Simplify* smooths over. A sharper one stays a
+/// corner, so a drawn polyline loses its jitter and a real corner survives.
+pub const SIMPLIFY_CORNER_DEG: f64 = 15.0;
+
+/// The miter limit of the joins *Offset path* draws; past it a corner is bevelled.
+pub const OFFSET_MITER_LIMIT: f64 = 4.0;
+
+/// The outline the `Path` node `id` draws — its corner radii applied — or the error
+/// the path operations below refuse with.
+fn drawn_path(doc: &Document, id: NodeId) -> Result<kurbo::BezPath, OpError> {
+    let node = doc.get(id).ok_or(OpError::NoSuchNode(id))?;
+    if !matches!(node.kind(), NodeKind::Path { .. }) {
+        return Err(OpError::WrongKindForOp);
+    }
+    crate::geometry::local_path(node.kind())
+        .filter(|p| !p.elements().is_empty())
+        .ok_or(OpError::EmptyGeometry)
+}
+
+/// Write `path` into `id` with no corner radii: both operations below bake the radii
+/// into the curves, since the new anchors are not the ones the radii were on.
+fn reshaped(id: NodeId, path: kurbo::BezPath) -> Transaction {
+    Transaction(vec![Operation::SetGeometry {
+        id,
+        geometry: GeometryPatch::Path {
+            path,
+            corner_radii: Vec::new(),
+        },
+    }])
+}
+
+/// *Simplify*: the path `id` draws, refitted with as few curves as stay within
+/// [`SIMPLIFY_ACCURACY`] of it, keeping turns sharper than [`SIMPLIFY_CORNER_DEG`] as
+/// corners. Empty when the refit has no fewer segments than the path already has.
+pub fn simplify_path(doc: &Document, id: NodeId) -> Result<Transaction, OpError> {
+    use kurbo::simplify::{SimplifyOptLevel, SimplifyOptions, simplify_bezpath};
+    let path = drawn_path(doc, id)?;
+    let options = SimplifyOptions::default()
+        .opt_level(SimplifyOptLevel::Optimize)
+        .angle_thresh(SIMPLIFY_CORNER_DEG.to_radians().tan());
+    let fitted = simplify_bezpath(path.iter(), SIMPLIFY_ACCURACY, &options);
+    let NodeKind::Path { path: stored, .. } = doc.get(id).map(Node::kind).expect("checked") else {
+        unreachable!("drawn_path checked the kind");
+    };
+    if fitted.segments().count() >= stored.segments().count() {
+        return Ok(Transaction::default());
+    }
+    Ok(reshaped(id, fitted))
+}
+
+/// *Offset path* on the path `id` draws, as [`offset_outline`] offsets it.
+pub fn offset_path(doc: &Document, id: NodeId, distance: f64) -> Result<Transaction, OpError> {
+    let path = drawn_path(doc, id)?;
+    if distance == 0.0 {
+        return Ok(Transaction::default());
+    }
+    Ok(reshaped(id, offset_outline(&path, distance)?))
+}
+
+/// The outline `distance` outside `path`, or inside it when negative: the path
+/// united with its own stroke at twice the distance (mitred joins, round caps), or
+/// less that stroke when shrinking.
+///
+/// An open subpath has no inside, so it grows into the band around it and is left
+/// out of a shrink. A shrink that erodes everything is `EmptyGeometry`.
+pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::BezPath, OpError> {
+    if !distance.is_finite() {
+        return Err(OpError::NonFinite);
+    }
+    if distance == 0.0 {
+        return Ok(path.clone());
+    }
+    let (closed, open): (Vec<_>, Vec<_>) = crate::geometry::subpaths(path)
+        .into_iter()
+        .partition(|s| matches!(s.elements().last(), Some(kurbo::PathEl::ClosePath)));
+    let joined = |parts: &[kurbo::BezPath]| {
+        kurbo::BezPath::from_iter(parts.iter().flat_map(|p| p.elements().iter().copied()))
+    };
+    let closed = joined(&closed);
+    let band = |p: &kurbo::BezPath| {
+        crate::geometry::stroke_pieces(
+            p,
+            2.0 * distance.abs(),
+            kurbo::Join::Miter,
+            kurbo::Cap::Round,
+            OFFSET_MITER_LIMIT,
+        )
+    };
+    use crate::boolean::evaluate;
+    use crate::node::BoolOp;
+    let result = if distance > 0.0 {
+        let mut operands: Vec<kurbo::BezPath> = band(&closed);
+        operands.extend(band(&joined(&open)));
+        if !closed.elements().is_empty() {
+            operands.push(closed);
+        }
+        evaluate(BoolOp::Union, &operands)
+    } else {
+        if closed.elements().is_empty() {
+            return Err(OpError::EmptyGeometry);
+        }
+        // The band is united before it is taken away: subtracting the overlapping
+        // pieces one by one leaves slivers outside the path.
+        let band = evaluate(BoolOp::Union, &band(&closed)).ok_or(OpError::EmptyGeometry)?;
+        evaluate(BoolOp::Subtract, &[closed, band])
+    };
+    result
+        .filter(|p| p.segments().next().is_some())
+        .ok_or(OpError::EmptyGeometry)
+}
+
 /// Whether *Outline stroke* has something to turn into a shape: a shape, path or
 /// boolean with a visible stroke. A frame (whose children would be lost), a group
 /// and text are refused, and so is a mask that would be grouped.

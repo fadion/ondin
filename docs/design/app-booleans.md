@@ -33,9 +33,23 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
   SVG). Nesting is counted from `representative_point`: the bbox centre if inside, else a horizontal
   scan line through all segments, taking the midpoint of the first confirmed span. A subpath whose
   point cannot be found is **kept**, not dropped.
+- **Shared edges are spliced** (`boolean::spliced`, in `from_flo`): flo_curves leaves operands that
+  share an edge as separate contours either side of it, which fill right and stroke a line through
+  the result, so two contours walking one edge in opposite directions become one. Ends must match
+  within `SEAM_EPS` (10⁻⁶), well under the thinnest sliver a boolean keeps, so a sliver's two sides
+  are never taken for one edge; handles within `SEAM_HANDLE_EPS`, since flo_curves hands a split edge
+  back with handles off by around 10⁻⁶. A contour of no area (two touching circles' intersection)
+  is dropped; a thin one is a shape and is kept.
 - `Exclude` is `exclude_of`: all operand outlines concatenated and read **even-odd** (via
   `Node::fill_rule` deriving even-odd for an `Exclude`). It is not `sub(add(a,b), intersect(a,b))`,
-  which returns the operands unchanged.
+  which returns the operands unchanged. Each contour is turned one way first, so two that share a
+  whole edge walk it oppositely and are spliced, and a contour that appears twice is dropped, as the
+  even-odd read cancels it. An edge shared only in part stays, since no arithmetic splits it: the
+  fill is right and a stroke draws along it.
+- `ondin-core`'s `tests/boolean_suite.rs` checks shared, partly shared and nearly shared edges,
+  touching corners, containment, identical operands and the shapes of `tests/common` under every
+  operation against the definition, and for specks and stray edges; its `KNOWN` list holds what still
+  fails, each entry required to keep failing.
 - `boolean::fold_operands`: `Union` and `Intersect` fold as a **balanced tree** (N log N on disjoint
   operands, which is what icon masks are); `Subtract` keeps the left fold — it is not associative.
 

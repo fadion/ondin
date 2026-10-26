@@ -294,11 +294,49 @@ fn fold_operands(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
 /// fold, which this replaced, accumulated large error on dense operand sets.
 /// `None` for no operands, matching the fold.
 fn exclude_of(operands: &[BezPath]) -> Option<BezPath> {
+    // Read even-odd, a subpath means the same either way round, so each is turned
+    // one way: two that share an edge then walk it in opposite directions and
+    // `spliced` joins them, and a subpath walked twice cancels out.
+    let mut subs: Vec<BezPath> = operands
+        .iter()
+        .flat_map(crate::geometry::subpaths)
+        .filter(|s| s.segments().next().is_some())
+        .map(|s| match <BezPath as kurbo::Shape>::area(&s) < 0.0 {
+            true => s.reverse_subpaths(),
+            false => s,
+        })
+        .collect();
+    let mut k = 0;
+    while k < subs.len() {
+        match (k + 1..subs.len()).find(|&j| same_loop(&subs[k], &subs[j])) {
+            Some(j) => {
+                subs.remove(j);
+                subs.remove(k);
+            }
+            None => k += 1,
+        }
+    }
     let mut out = BezPath::new();
-    for p in operands.iter().filter(|p| !p.is_empty()) {
-        out.extend(p.iter());
+    for s in spliced(subs) {
+        out.extend(s.iter());
     }
     (!out.is_empty()).then_some(out)
+}
+
+/// Whether `a` and `b` are one closed loop, whatever segment each starts at.
+fn same_loop(a: &BezPath, b: &BezPath) -> bool {
+    let near = |p: Point, q: Point| (p - q).hypot() <= SEAM_EPS;
+    let handle = |p: Point, q: Point| (p - q).hypot() <= SEAM_HANDLE_EPS;
+    let (a, b): (Vec<_>, Vec<_>) = (
+        a.segments().map(|s| s.to_cubic()).collect(),
+        b.segments().map(|s| s.to_cubic()).collect(),
+    );
+    a.len() == b.len()
+        && (0..b.len()).any(|r| {
+            a.iter().zip(b.iter().cycle().skip(r)).all(|(x, y)| {
+                near(x.p0, y.p0) && handle(x.p1, y.p1) && handle(x.p2, y.p2) && near(x.p3, y.p3)
+            })
+        })
 }
 
 /// One step of the fold: `acc` combined with one more operand.
@@ -469,6 +507,10 @@ fn from_flo(paths: &[SimpleBezierPath]) -> Option<BezPath> {
             Some(out)
         })
         .collect();
+    let subpaths: Vec<BezPath> = spliced(subpaths)
+        .into_iter()
+        .filter(|s| !is_degenerate(s))
+        .collect();
 
     let mut out = BezPath::new();
     for (i, sub) in subpaths.iter().enumerate() {
@@ -505,6 +547,104 @@ fn from_flo(paths: &[SimpleBezierPath]) -> Option<BezPath> {
         out.extend(sub.iter());
     }
     (!out.is_empty()).then_some(out)
+}
+
+/// How close two segments' ends must be, in world units, for [`spliced`] to take
+/// them for one edge walked both ways: well under the thinnest sliver a boolean
+/// keeps (`a_thin_intersect_keeps_its_area`), whose two long sides must not be
+/// taken for one.
+const SEAM_EPS: f64 = 1e-6;
+
+/// How close their handles must be: flo_curves hands an edge it split back with
+/// handles off by around 10⁻⁶ along it.
+const SEAM_HANDLE_EPS: f64 = 1e-3;
+
+/// The least area, in square world units, a result's subpath keeps. Less is no
+/// shape at all — the point two touching circles intersect in — where a sliver
+/// however thin is one (`a_thin_intersect_keeps_its_area`).
+const DEGENERATE_AREA: f64 = 1e-6;
+
+/// `subpaths` with every edge that two of them walk in opposite directions taken
+/// out and the two joined into one. flo_curves leaves operands that share an edge
+/// as separate contours on either side of it, which fill right and stroke a line
+/// through the middle of the result. A subpath that walks one edge both ways is
+/// split there the same way.
+fn spliced(subpaths: Vec<BezPath>) -> Vec<BezPath> {
+    use kurbo::CubicBez;
+    let near = |a: Point, b: Point| (a - b).hypot() <= SEAM_EPS;
+    let handle = |a: Point, b: Point| (a - b).hypot() <= SEAM_HANDLE_EPS;
+    let reverse_of = |a: &CubicBez, b: &CubicBez| {
+        near(a.p0, b.p3) && handle(a.p1, b.p2) && handle(a.p2, b.p1) && near(a.p3, b.p0)
+    };
+    let mut loops: Vec<Vec<CubicBez>> = subpaths
+        .iter()
+        .map(|s| s.segments().map(|seg| seg.to_cubic()).collect())
+        .collect();
+    // Segments by their quantised ends, so a candidate partner is a lookup. A pair
+    // straddling a cell boundary is missed and keeps its seam.
+    let cell = |p: Point| ((p.x / 0.01).round() as i64, (p.y / 0.01).round() as i64);
+    // Each splice removes two segments, so this ends.
+    loop {
+        let mut by_ends: std::collections::HashMap<_, Vec<(usize, usize)>> =
+            std::collections::HashMap::new();
+        for (i, l) in loops.iter().enumerate() {
+            for (s, c) in l.iter().enumerate() {
+                by_ends
+                    .entry((cell(c.p0), cell(c.p3)))
+                    .or_default()
+                    .push((i, s));
+            }
+        }
+        let found = loops.iter().enumerate().find_map(|(i, l)| {
+            l.iter().enumerate().find_map(|(si, c)| {
+                by_ends
+                    .get(&(cell(c.p3), cell(c.p0)))?
+                    .iter()
+                    .find(|&&(j, sj)| (j, sj) > (i, si) && reverse_of(c, &loops[j][sj]))
+                    .map(|&(j, sj)| (i, si, j, sj))
+            })
+        });
+        let Some((i, si, j, sj)) = found else {
+            break;
+        };
+        if i == j {
+            // One loop pinched along the edge: the runs either side of it are loops
+            // of their own.
+            let l = std::mem::take(&mut loops[i]);
+            loops[i] = l[sj + 1..].iter().chain(&l[..si]).copied().collect();
+            loops.push(l[si + 1..sj].to_vec());
+        } else {
+            // `i` runs P→Q along the edge and `j` Q→P: from Q round `i` to P, then
+            // from P round `j` to Q.
+            let b = std::mem::take(&mut loops[j]);
+            let a = std::mem::take(&mut loops[i]);
+            loops[i] = a[si + 1..]
+                .iter()
+                .chain(&a[..si])
+                .chain(&b[sj + 1..])
+                .chain(&b[..sj])
+                .copied()
+                .collect();
+        }
+        loops.retain(|l| !l.is_empty());
+    }
+    loops
+        .into_iter()
+        .map(|l| {
+            let mut p = BezPath::new();
+            p.move_to(l[0].p0);
+            for c in &l {
+                p.curve_to(c.p1, c.p2, c.p3);
+            }
+            p.close_path();
+            p
+        })
+        .collect()
+}
+
+/// Whether `subpath` encloses less than [`DEGENERATE_AREA`].
+fn is_degenerate(subpath: &BezPath) -> bool {
+    <BezPath as kurbo::Shape>::area(subpath).abs() < DEGENERATE_AREA
 }
 
 /// A point strictly inside `subpath`, for the containment tests above.

@@ -263,13 +263,31 @@ pub fn and(a: Option<bool>, b: Option<bool>) -> Option<bool> {
 
 /// Everything wrong with `result` against `expected` over the box `area`: points
 /// on the wrong side, specks, stray edges, and more than `max_segments` segments.
-/// `None` is an empty result.
+/// `None` is an empty result. The result is read non-zero, and must read the same
+/// even-odd.
 pub fn check(
     result: Option<&BezPath>,
     area: Rect,
     max_segments: usize,
     expected: impl Fn(Point) -> Option<bool>,
 ) -> Vec<String> {
+    check_read(result, area, max_segments, false, 1.0, expected)
+}
+
+/// [`check`], reading the result even-odd where `even_odd` says so, and taking a
+/// subpath of less than `speck` square units for junk.
+pub fn check_read(
+    result: Option<&BezPath>,
+    area: Rect,
+    max_segments: usize,
+    even_odd: bool,
+    speck: f64,
+    expected: impl Fn(Point) -> Option<bool>,
+) -> Vec<String> {
+    let filled = |w: i32| match even_odd {
+        true => w % 2 != 0,
+        false => w != 0,
+    };
     let mut out = Vec::new();
     let empty = BezPath::new();
     let r = result.unwrap_or(&empty);
@@ -288,11 +306,11 @@ pub fn check(
                 area.y0 + area.height() * j as f64 / GRID as f64,
             );
             let w = winding(&rf, p);
-            if (w != 0) != (w % 2 != 0) {
+            if !even_odd && (w != 0) != (w % 2 != 0) {
                 parity += 1;
             }
             if let Some(want) = expected(p)
-                && (w != 0) != want
+                && filled(w) != want
             {
                 wrong += 1;
                 first.get_or_insert((p, want));
@@ -314,14 +332,19 @@ pub fn check(
     }
     for (k, sub) in ondin_core::geometry::subpaths(r).iter().enumerate() {
         let area = sub.area().abs();
-        if area < 1.0 {
+        if area < speck {
             out.push(format!("subpath {k} is a speck ({area:.2} units²)"));
         }
     }
     // Every edge bounds the fill: filled on exactly one side. Probed close in,
-    // since a shape eroded past its width leaves legitimately thin slivers.
+    // since a shape eroded past its width leaves legitimately thin slivers; a
+    // subpath thinner on average than the probe's reach is not probed.
+    const PROBE: f64 = 0.01;
     let (mut stray, mut first_stray) = (0, None);
-    for seg in r.segments() {
+    let probed = ondin_core::geometry::subpaths(r)
+        .into_iter()
+        .filter(|s| 2.0 * s.area().abs() / s.perimeter(1e-3).max(1e-12) > 4.0 * PROBE);
+    for seg in probed.flat_map(|s| s.segments().collect::<Vec<_>>()) {
         if seg.arclen(1e-3) < 1.0 {
             continue;
         }
@@ -330,9 +353,9 @@ pub fn check(
         if t.hypot() < 1e-9 {
             continue;
         }
-        let n = t.normalize().turn_90() * 0.01;
+        let n = t.normalize().turn_90() * PROBE;
         let m = c.eval(0.5);
-        if (winding(&rf, m + n) != 0) == (winding(&rf, m - n) != 0) {
+        if filled(winding(&rf, m + n)) == filled(winding(&rf, m - n)) {
             stray += 1;
             first_stray.get_or_insert(m);
         }
@@ -350,6 +373,17 @@ pub fn check(
 /// both being slow in a debug build, and fail with every failure listed. Items are
 /// handed out one at a time, so one slow case does not hold up those behind it.
 pub fn run_all<T: Sync>(items: &[(String, T)], case: impl Fn(&T) -> Vec<String> + Sync) {
+    run_all_known(items, &[], case)
+}
+
+/// [`run_all`], excusing the failures of `known`: a case's name and a phrase its
+/// failure contains. Each must still fail, so one that is fixed is struck off the
+/// list rather than left to excuse a regression later.
+pub fn run_all_known<T: Sync>(
+    items: &[(String, T)],
+    known: &[(&str, &str)],
+    case: impl Fn(&T) -> Vec<String> + Sync,
+) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let next = AtomicUsize::new(0);
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -374,7 +408,26 @@ pub fn run_all<T: Sync>(items: &[(String, T)], case: impl Fn(&T) -> Vec<String> 
             .collect()
     });
     failures.sort_by_key(|(i, _)| *i);
-    let failures: Vec<String> = failures.into_iter().map(|(_, f)| f).collect();
+    let excused = |f: &str| {
+        known
+            .iter()
+            .any(|(name, phrase)| f.starts_with(&format!("{name}: ")) && f.contains(phrase))
+    };
+    let stale: Vec<String> = known
+        .iter()
+        .filter(|(name, phrase)| {
+            !failures
+                .iter()
+                .any(|(_, f)| f.starts_with(&format!("{name}: ")) && f.contains(phrase))
+        })
+        .map(|(name, phrase)| format!("{name}: \"{phrase}\" no longer fails; strike it off"))
+        .collect();
+    let failures: Vec<String> = failures
+        .into_iter()
+        .map(|(_, f)| f)
+        .filter(|f| !excused(f))
+        .chain(stale)
+        .collect();
     assert!(
         failures.is_empty(),
         "{} failures over {} cases:\n{}",

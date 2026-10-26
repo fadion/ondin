@@ -360,6 +360,43 @@ enum RowBadge {
     Icon(&'static str, f32),
 }
 
+/// How far a layer name stops short of what the row draws on its right.
+const NAME_CLEAR: f32 = 6.0;
+
+/// What a row draws on its right, for [`name_limit`]: each is an x on the row, or
+/// absent when this row does not draw it.
+struct NameLimit {
+    row_right: f32,
+    /// A component mark at the row's very edge.
+    mark: bool,
+    /// The lock's centre, drawn hovered or locked.
+    lock: Option<f32>,
+    /// The eye's centre, and whether it wears the bound capsule.
+    eye: Option<(f32, bool)>,
+    /// Where a resting badge (a frame's size) begins.
+    badge_left: Option<f32>,
+}
+
+/// Where a layer row's name must stop: short of the leftmost thing the row draws on
+/// its right, and a point inside the row's own edge, which is the panel's.
+fn name_limit(l: NameLimit) -> f32 {
+    let mut right = match l.mark {
+        true => l.row_right - MARK_SLOT,
+        false => l.row_right - 1.0,
+    };
+    if let Some(lock) = l.lock {
+        right = right.min(lock - ICON_PT / 2.0 - NAME_CLEAR);
+    }
+    if let Some((eye, bound)) = l.eye {
+        let half = if bound { BOUND_EYE.x } else { ICON_PT } / 2.0;
+        right = right.min(eye - half - NAME_CLEAR);
+    }
+    if let Some(badge) = l.badge_left {
+        right = right.min(badge - NAME_CLEAR);
+    }
+    right
+}
+
 /// Type size for the base operand's `stack-simple`, so it inks the same height as
 /// the worded badge beside it (`800 × 600` at 10.5). Measured from the galley's
 /// `uv_rect`; the two match at 100%–150% scaling, and
@@ -1527,15 +1564,42 @@ impl OndinApp {
                     );
                 }
             }
+            // The badge is laid out before the name, which stops short of it. Drawn
+            // only while neither lock is: they share the row's end.
+            let badge = badge.filter(|_| !locked && !show_lock).map(|b| {
+                // One layout for both, differing only in the font.
+                let (s, font, worded) = match b {
+                    RowBadge::Text(s) => (s, egui::FontId::proportional(10.5), true),
+                    RowBadge::Icon(g, size) => (g.to_string(), theme::icon_font(size), false),
+                };
+                // Clear of a component mark, which holds the very edge.
+                let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
+                // A worded badge ends before a resting eye (§15 D1060; see
+                // `bound_eye_tests`); a glyph badge clears it where it is.
+                let right = match worded && show_eye {
+                    true => eye_x - BOUND_EYE.x / 2.0 - 4.0,
+                    false => rect.right() - edge,
+                };
+                (p.layout_no_wrap(s, font, theme::text::FAINT), right)
+            });
+            let name_right = name_limit(NameLimit {
+                row_right: rect.right(),
+                mark: mark.is_some(),
+                lock: (show_lock || locked).then_some(lock_x),
+                eye: show_eye.then_some((eye_x, bound_eye)),
+                badge_left: badge.as_ref().map(|(g, right)| right - g.size().x),
+            });
             let renaming = matches!(&self.renaming_layer, Some((n, _)) if *n == id);
             if !renaming {
-                p.text(
-                    egui::pos2(icon_x + NAME_GAP, cy),
-                    egui::Align2::LEFT_CENTER,
-                    &name,
+                let x = icon_x + NAME_GAP;
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    name.to_string(),
                     egui::FontId::proportional(12.5),
                     name_col,
                 );
+                job.wrap = egui::text::TextWrapping::truncate_at_width((name_right - x).max(0.0));
+                let galley = p.layout_job(job);
+                p.galley(egui::pos2(x, cy - galley.size().y / 2.0), galley, name_col);
             }
 
             if show_eye {
@@ -1582,27 +1646,11 @@ impl OndinApp {
                     theme::icon_font(ICON_PT),
                     lit(under == Some(RowHit::Lock), theme::text::DIM),
                 );
-            } else if let Some(b) = &badge {
-                // One `text` call for both, differing only in the font.
-                let (s, font) = match b {
-                    RowBadge::Text(s) => (s.as_str(), egui::FontId::proportional(10.5)),
-                    RowBadge::Icon(g, size) => (*g, theme::icon_font(*size)),
-                };
-                // Clear of a component mark, which holds the very edge.
-                let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
-                // A worded badge ends before a resting eye (§15 D1060; see
-                // `bound_eye_tests`); a glyph badge clears it where it is.
-                let right = match b {
-                    RowBadge::Text(_) if show_eye => eye_x - BOUND_EYE.x / 2.0 - 4.0,
-                    _ => rect.right() - edge,
-                };
-                p.text(
-                    egui::pos2(right, cy),
-                    egui::Align2::RIGHT_CENTER,
-                    s,
-                    font,
-                    theme::text::FAINT,
-                );
+            } else if let Some((galley, right)) = badge {
+                let at = egui::Align2::RIGHT_CENTER
+                    .anchor_size(egui::pos2(right, cy), galley.size())
+                    .min;
+                p.galley(at, galley, theme::text::FAINT);
             }
             // The mark sits after the lock and eye at the row's very edge, in every
             // row state (§15 D981).
@@ -2847,6 +2895,125 @@ mod badge_ink_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod name_limit_tests {
+    use super::*;
+
+    fn limit(lock: Option<f32>, eye: Option<(f32, bool)>, badge: Option<f32>, mark: bool) -> f32 {
+        name_limit(NameLimit {
+            row_right: 290.0,
+            mark,
+            lock,
+            eye,
+            badge_left: badge,
+        })
+    }
+
+    /// The name stops short of the leftmost thing on the row's right, and a point
+    /// inside the row when nothing is there.
+    #[test]
+    fn the_name_stops_short_of_the_rows_right_hand_end() {
+        assert_eq!(
+            limit(None, None, None, false),
+            289.0,
+            "a point inside the row"
+        );
+        assert_eq!(limit(None, None, None, true), 290.0 - MARK_SLOT);
+        assert_eq!(limit(None, None, Some(240.0), false), 240.0 - NAME_CLEAR);
+        let eye = 253.0;
+        assert_eq!(
+            limit(Some(276.0), Some((eye, false)), None, false),
+            eye - ICON_PT / 2.0 - NAME_CLEAR,
+            "the eye, left of the lock"
+        );
+        assert_eq!(
+            limit(None, Some((eye, true)), None, false),
+            eye - BOUND_EYE.x / 2.0 - NAME_CLEAR,
+            "the bound eye's capsule"
+        );
+    }
+
+    /// The painted text shapes of one whole frame, with their rects.
+    fn texts(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        let mut frame = eframe::Frame::_new_kittest();
+        let time = ctx.input(|i| i.time) + 0.1;
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(app, ui, &mut frame),
+        );
+        out.shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => {
+                    Some((t.galley.text().to_string(), t.visual_bounding_rect()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Drawn, a long frame name ends before the frame's size, and hovered, before the
+    /// eye that replaces it.
+    /// flip: the name laid out without `truncate_at_width` → fails at the size.
+    #[test]
+    fn a_long_frame_name_clears_its_size_and_the_eye() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.view = crate::app::View::Editor;
+        let frame = app.session.doc.get(app.session.page).unwrap().children()[0];
+        let long = "Ko-padel — Home with a name far too long for the pane";
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::SetName {
+                id: frame,
+                name: long.into(),
+            }
+        ])));
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = texts(&ctx, &mut app, vec![]);
+        }
+        let find = |shapes: &[(String, egui::Rect)], f: &dyn Fn(&str) -> bool| {
+            shapes.iter().find(|(t, _)| f(t)).map(|(_, r)| *r)
+        };
+        let name = find(&shapes, &|t| t.starts_with("Ko-padel")).expect("the row was drawn");
+        let size = find(&shapes, &|t| {
+            t.contains(" × ") && t.chars().next().is_some_and(|c| c.is_ascii_digit())
+        })
+        .expect("the frame's size was drawn");
+        assert!(
+            name.right() <= size.left() - NAME_CLEAR + 0.5,
+            "the name runs to {} over the size at {}",
+            name.right(),
+            size.left()
+        );
+
+        let at = name.center();
+        texts(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        let shapes = texts(&ctx, &mut app, vec![]);
+        let name = find(&shapes, &|t| t.starts_with("Ko-padel")).unwrap();
+        let eye = find(&shapes, &|t| t == icon::EYE).expect("hovered, the eye is drawn");
+        assert!(
+            name.right() <= eye.left(),
+            "hovered, the name runs to {} under the eye at {}",
+            name.right(),
+            eye.left()
+        );
     }
 }
 

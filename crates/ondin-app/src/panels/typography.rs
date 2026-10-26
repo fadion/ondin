@@ -429,6 +429,8 @@ fn seg_cell_of(track: f32, n: usize) -> f32 {
 /// Height of one row in the family list. Fixed because `ScrollArea::show_rows`
 /// virtualizes by dividing the scroll offset by it.
 const FAMILY_ROW_H: f32 = 24.0;
+/// The family list's tallest, before it scrolls.
+const FAMILY_LIST_H: f32 = 320.0;
 
 /// Room a family row keeps at its right edge for the loading dot, reserved on every
 /// row so the name does not reflow when its face arrives.
@@ -494,6 +496,26 @@ const SCREEN_MARGIN: f32 = 12.0;
 /// re-picking the shown family makes the selection agree.
 fn family_actually_changed(chosen: Option<String>, current: &str, mixed: bool) -> Option<String> {
     chosen.filter(|f| mixed || f != current)
+}
+
+/// Whether `ui` was not drawn on the previous pass: the first frame of a popup
+/// that has just opened. Keyed by `ui.id()`, so each dropdown keeps its own count.
+fn just_opened(ui: &egui::Ui) -> bool {
+    // Read first: nesting it inside `data_mut` deadlocks.
+    let pass = ui.ctx().cumulative_pass_nr();
+    let id = ui.id().with("drawn-on-pass");
+    let last = ui.ctx().data_mut(|d| {
+        let last = d.get_temp::<u64>(id);
+        d.insert_temp(id, pass);
+        last
+    });
+    last.is_none_or(|last| last + 1 != pass)
+}
+
+/// The family list's scroll offset that puts row `index` in the middle of the
+/// list, or as near as the top allows. The bottom is clamped by the scroll area.
+fn centred_row_offset(index: usize, pitch: f32) -> f32 {
+    (index as f32 * pitch - (FAMILY_LIST_H - FAMILY_ROW_H) / 2.0).max(0.0)
 }
 
 /// The Type card's override marks — `OndinApp::type_marks`.
@@ -1267,6 +1289,9 @@ impl OndinApp {
 
     /// The family dropdown's body: a search field over every family, each row in
     /// its own face. Returns the row clicked, having closed the popup.
+    ///
+    /// It opens scrolled to `current`, however that family was set. The scroll
+    /// area's remembered offset would only find a family picked from this list.
     pub(crate) fn family_list(&mut self, ui: &mut egui::Ui, current: &str) -> Option<String> {
         let mut chosen = None;
         ui.add(
@@ -1275,20 +1300,22 @@ impl OndinApp {
                 .hint_text("Search…"),
         );
         let total = self.fonts.match_count(&self.font_filter);
-        egui::ScrollArea::vertical().max_height(320.0).show_rows(
-            ui,
-            FAMILY_ROW_H,
-            total,
-            |ui, rows| {
-                let names = self.fonts.matched_names(&self.font_filter, rows);
-                for name in names {
-                    if self.family_row(ui, &name, current) {
-                        chosen = Some(name);
-                        ui.close();
-                    }
+        let mut area = egui::ScrollArea::vertical().max_height(FAMILY_LIST_H);
+        if just_opened(ui)
+            && let Some(i) = self.fonts.match_position(&self.font_filter, current)
+        {
+            let pitch = FAMILY_ROW_H + ui.spacing().item_spacing.y;
+            area = area.vertical_scroll_offset(centred_row_offset(i, pitch));
+        }
+        area.show_rows(ui, FAMILY_ROW_H, total, |ui, rows| {
+            let names = self.fonts.matched_names(&self.font_filter, rows);
+            for name in names {
+                if self.family_row(ui, &name, current) {
+                    chosen = Some(name);
+                    ui.close();
                 }
-            },
-        );
+            }
+        });
         chosen
     }
 
@@ -9479,6 +9506,65 @@ mod family_repick_tests {
             pick("Inter"),
             "but over a mixed selection `current` is one member's, so picking it \
              is the edit that makes the selection agree"
+        );
+    }
+}
+
+#[cfg(test)]
+mod family_list_scroll_tests {
+    use super::*;
+    use crate::app::OndinApp;
+
+    /// The family list opens scrolled to the current family however that was set,
+    /// and does not jump while it stays open.
+    /// flip: dropping the `just_opened` branch from `family_list` → fails at "opens
+    /// on the current family".
+    #[test]
+    fn the_family_list_opens_on_the_current_family() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let names: Vec<String> = (0..200).map(|i| format!("Family {i:03}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        app.fonts.list_for_test(&names);
+        let pitch = FAMILY_ROW_H + 3.0;
+        // One frame, with the list drawn when `current` is given; returns its offset.
+        let frame = |app: &mut OndinApp, current: Option<&str>| {
+            let mut y = None;
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                ui.spacing_mut().item_spacing.y = 3.0;
+                if let Some(current) = current {
+                    app.family_list(ui, current);
+                }
+                let id = ui.make_persistent_id(egui::IdSalt::new("scroll_area"));
+                y = egui::scroll_area::State::load(ui.ctx(), id).map(|s| s.offset.y);
+            });
+            y.unwrap_or(0.0)
+        };
+
+        // "Inter" sorts first, so "Family 150" is row 150.
+        let opened = frame(&mut app, Some("Family 150"));
+        assert_eq!(
+            app.fonts.match_position("", "Family 150"),
+            Some(150),
+            "the fixture's row"
+        );
+        assert_eq!(
+            opened,
+            centred_row_offset(150, pitch),
+            "opens on the current family"
+        );
+        assert!(opened > 0.0, "and that is a real scroll");
+        assert_eq!(
+            frame(&mut app, Some("Family 010")),
+            opened,
+            "a list still open keeps its scroll"
+        );
+
+        frame(&mut app, None);
+        assert_eq!(
+            frame(&mut app, Some("Family 010")),
+            centred_row_offset(10, pitch),
+            "reopened, it finds the new current family"
         );
     }
 }

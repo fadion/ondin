@@ -3177,7 +3177,7 @@ impl OndinApp {
                 parent_world,
                 start,
                 corner,
-                &crate::fonts::FontService::default_text_parts(),
+                &self.new_text_parts(),
             ),
             // `None` when the cursor has nothing left to place.
             Tool::Image => {
@@ -5109,7 +5109,7 @@ impl OndinApp {
         let local = parent_world.inverse() * world;
         let id = self.session.ids.mint();
         let index = self.child_count(parent);
-        let parts = crate::fonts::FontService::default_text_parts();
+        let parts = self.new_text_parts();
         let tx = Transaction(vec![Operation::CreateNode {
             id,
             parent,
@@ -5139,7 +5139,7 @@ impl OndinApp {
     /// the Text tool's click on an outline. It consumes the layer, so the status
     /// line says so; one transaction, one undo step.
     fn begin_text_on_path(&mut self, path: NodeId, world: Point) {
-        let parts = crate::fonts::FontService::default_text_parts();
+        let parts = self.new_text_parts();
         match build::text_on_new_path(
             &self.session.doc,
             &self.session.resolved,
@@ -5290,7 +5290,7 @@ impl OndinApp {
 
         // Through a `TextEdit`: `insert` normalizes `\r\n` (a bare `TextEdit::new`
         // would double-space every line).
-        let mut parts = crate::fonts::FontService::default_text_parts();
+        let mut parts = self.new_text_parts();
         let mut editor = TextEdit::new("", parts.clone());
         editor.insert(&text);
         let mut layout = editor.text_layout();
@@ -16541,6 +16541,41 @@ mod empty_text_session_tests {
         assert!(
             app.session.doc.get(made).is_none(),
             "control: a node created and left empty is still removed"
+        );
+    }
+
+    /// The Text tool's click starts a layer in the Settings default font, and in
+    /// Inter once that font is known to be missing.
+    /// flip: `begin_text` back on `FontService::default_text_parts` → fails at "in
+    /// the default font".
+    #[test]
+    fn a_new_text_layer_starts_in_the_default_font() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0x7E);
+        let root = ids.mint();
+        app.session.adopt_document(Document::new(root), None);
+        app.session.ids = ids;
+        app.prefs.default_font = "Gone Sans".into();
+        app.tool = Tool::Text;
+        let family_of = |app: &OndinApp, id| match app.session.doc.get(id).map(|n| n.kind()) {
+            Some(NodeKind::Text { style, .. }) => style.font_family.clone(),
+            _ => panic!("not a text node"),
+        };
+
+        app.begin_text(Point::new(10.0, 10.0));
+        let made = app.text.as_ref().expect("a session on a new node").id;
+        // Pending: the inert service's sources have not landed.
+        assert_eq!(family_of(&app, made), "Gone Sans", "in the default font");
+        app.finish_text_edit();
+
+        app.fonts.settle_for_test();
+        app.begin_text(Point::new(40.0, 40.0));
+        let made = app.text.as_ref().expect("a session on a new node").id;
+        assert_eq!(
+            family_of(&app, made),
+            "Inter",
+            "a default font nothing lists falls back to Inter"
         );
     }
 }

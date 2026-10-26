@@ -27,7 +27,6 @@ reads true.
   Figma changes it; the REST API is documented but needs a network and the user's token), then
   **Penpot** (open source, so its format can be read from its code). Pixso works with `.fig`;
   Affinity and Illustrator arrive through SVG and PDF.
-- **A default font preference** — `FontService::default_text_parts` is Inter.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
 ## Later · Second

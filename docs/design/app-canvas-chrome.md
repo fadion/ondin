@@ -79,7 +79,9 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - Rightmost: Phosphor `sliders`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. On Windows/Linux the window caption buttons are to its right.
 - Opens `settings.rs`'s modal: nudge step, *Show tree guides* and *Collapse groups on open* (under a
-  **Layers** eyebrow), the web-font switch and cache row. `Ctrl+,` opens it (and only opens:
+  **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
+  its glyph `WARN` with a tooltip when the family is `Missing`, §5.4a), the web-font switch and
+  cache row. `Ctrl+,` opens it (and only opens:
   `input::resolve` is not called while a modal is up). Staged; writes on *Save changes*.
 - Not a `TopMenu` value. Panel-owned preferences stay on their panel (export habits in the export
   popover, written on the spot).

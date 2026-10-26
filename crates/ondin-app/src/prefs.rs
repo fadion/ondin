@@ -118,6 +118,12 @@ pub struct Prefs {
     /// for offline, metered and locked-down machines. Neither state hides
     /// anything the other shows.
     pub web_fonts: bool,
+    /// The family a new text layer starts in (`fonts::FontService::new_text_parts`).
+    ///
+    /// A family name rather than a font: one that is no longer installed or
+    /// downloadable degrades to Inter at creation, and the preference stays, for a
+    /// font that comes back.
+    pub default_font: String,
     /// How wide the layers panel is, in points (`panels::layers::MIN_W ..= MAX_W`).
     ///
     /// A preference: how much room a tree needs is a fact about the monitor and
@@ -241,6 +247,7 @@ impl Default for Prefs {
             tree_guides: true,
             collapse_groups_on_open: false,
             web_fonts: true,
+            default_font: "Inter".into(),
             // An `f32`'s own default of 0.0 would clamp the panel to `MIN_W` on
             // every upgraded install.
             layers_width: crate::panels::layers::DEFAULT_W,

@@ -1487,6 +1487,7 @@ impl eframe::App for OndinApp {
         if fonts.families_changed {
             // A document opened before the font scan landed could not resolve its families.
             self.ensure_document_fonts();
+            self.ensure_default_font();
         }
         for family in self.fonts.take_evicted() {
             self.previews.forget(&family);
@@ -5811,6 +5812,20 @@ impl OndinApp {
         for family in families {
             self.fonts.ensure_loaded(&family);
         }
+    }
+
+    /// Load the Settings modal's default font ahead of the first text layer, so
+    /// that layer is drawn in it from its first frame. Called when the font lists
+    /// change, the launch scan's landing included (a family nothing lists yet cannot
+    /// load), and when the preference is saved.
+    pub(crate) fn ensure_default_font(&mut self) {
+        self.fonts.ensure_loaded(&self.prefs.default_font);
+    }
+
+    /// The attributes a new text layer starts with, in the default font
+    /// (`FontService::new_text_parts`).
+    pub(crate) fn new_text_parts(&self) -> ondin_core::text::TextParts {
+        self.fonts.new_text_parts(&self.prefs.default_font)
     }
 
     /// Every family the document's text nodes name, lowercased, for

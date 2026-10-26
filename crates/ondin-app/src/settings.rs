@@ -2,8 +2,8 @@
 //!
 //! Rows that are a door onto a panel stay there (*Slashes in names make folders*
 //! and *Re-export on save* live in the export popover). What is here has no panel
-//! to hang off: the arrow-key step, the layer tree's guides and fold-on-open, and
-//! whether the web-font library is offered. `prefs.rs` lists the same four.
+//! to hang off: the arrow-key step, the layer tree's guides and fold-on-open, the
+//! font new text starts in, and whether the web-font library is offered.
 //!
 //! **A form, not a switchboard.** Every row is staged and written by *Save
 //! changes*; Cancel, Escape, the ✕ and the backdrop all discard. The export
@@ -63,6 +63,8 @@ const BUTTON_H: f32 = FIELD_H;
 const BUTTON_PAD_X: f32 = 14.0;
 /// Between two controls on one row (the design's `gap:10px` / the field gap).
 pub(crate) const COL_GAP: f32 = 10.0;
+/// The *Default font* dropdown: room for a long family name beside its label.
+const DEFAULT_FONT_W: f32 = 200.0;
 
 /// Type size of a row's label — [`ui::SWITCH_ROW_LABEL_PT`], because half these
 /// rows *are* switch rows and a caption beside one has to match it.
@@ -81,6 +83,7 @@ pub(crate) struct Settings {
     nudge: NudgeStep,
     tree_guides: bool,
     collapse_groups_on_open: bool,
+    default_font: String,
     web_fonts: bool,
 }
 
@@ -91,6 +94,7 @@ impl Settings {
             nudge: prefs.nudge,
             tree_guides: prefs.tree_guides,
             collapse_groups_on_open: prefs.collapse_groups_on_open,
+            default_font: prefs.default_font.clone(),
             web_fonts: prefs.web_fonts,
         }
     }
@@ -109,6 +113,7 @@ impl Settings {
         prefs.nudge = self.nudge;
         prefs.tree_guides = self.tree_guides;
         prefs.collapse_groups_on_open = self.collapse_groups_on_open;
+        prefs.default_font.clone_from(&self.default_font);
         prefs.web_fonts = self.web_fonts;
         web_fonts_changed
     }
@@ -223,6 +228,17 @@ impl OndinApp {
                 draft.collapse_groups_on_open = !draft.collapse_groups_on_open;
             }
 
+            // --- text --------------------------------------------------
+            section(ui, "Text");
+            if let Some(family) = self.default_font_row(ui, &draft.default_font) {
+                draft.default_font = family;
+            }
+            caption(
+                ui,
+                "New text layers start in this font, or in Inter where it is neither \
+                 installed nor downloadable.",
+            );
+
             // --- web fonts ---------------------------------------------
             section(ui, "Web fonts");
             if ui::switch_row(ui, "Load web fonts", draft.web_fonts, SWITCH_H).clicked() {
@@ -261,6 +277,7 @@ impl OndinApp {
                 if draft.apply(&mut self.prefs) {
                     self.fonts.set_web_fonts(self.prefs.web_fonts, ctx);
                 }
+                self.ensure_default_font();
                 self.prefs.save();
                 self.settings = None;
                 self.in_flight.settings_scrub = None;
@@ -310,6 +327,53 @@ impl OndinApp {
                 });
             });
         });
+    }
+
+    /// *Default font* and the family dropdown, the typography panel's list in it.
+    /// Returns the family picked, for the draft. A family that can never be had
+    /// wears its glyph in `WARN`, as in the panel.
+    fn default_font_row(&mut self, ui: &mut egui::Ui, current: &str) -> Option<String> {
+        let mut chosen = None;
+        let missing = self.fonts.family_status(current) == crate::fonts::FamilyStatus::Missing;
+        let head = if missing {
+            ui::glyph_and_text_tinted(icon::TEXT_AA, current, color::WARN)
+        } else {
+            ui::glyph_and_text(icon::TEXT_AA, current)
+        };
+        // Allocated right to left for `font_cache_row`'s reason.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = COL_GAP;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().interact_size.y = FIELD_H;
+                ui.spacing_mut().button_padding.y = 0.0;
+                let combo = egui::ComboBox::from_id_salt("settings-default-font")
+                    .icon(ui::combo_chevron)
+                    .width(DEFAULT_FONT_W)
+                    // The popup holds a search field, so a click inside must not dismiss it.
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .selected_text(head)
+                    .show_ui(ui, |ui| {
+                        ui::menu_rows(ui);
+                        ui.spacing_mut().item_spacing.y = 3.0;
+                        chosen = self.family_list(ui, current);
+                    })
+                    .response;
+                if missing {
+                    combo.on_hover_text(
+                        "This font is not installed and cannot be downloaded — \
+                         new text starts in Inter",
+                    );
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new("Default font")
+                            .size(LABEL_PT)
+                            .color(ui::switch_row_ink(true)),
+                    );
+                });
+            });
+        });
+        chosen
     }
 }
 
@@ -1033,6 +1097,7 @@ mod tests {
                 nudge: NudgeStep::default(),
                 tree_guides: true,
                 collapse_groups_on_open: false,
+                default_font: "Inter".into(),
                 web_fonts: true,
             },
             "the form opens showing what is saved"
@@ -1045,6 +1110,7 @@ mod tests {
             },
             tree_guides: false,
             collapse_groups_on_open: true,
+            default_font: "Roboto".into(),
             web_fonts: false,
         };
         assert!(edited != opened, "the fixture has to be a real edit");

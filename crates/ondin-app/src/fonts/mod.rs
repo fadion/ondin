@@ -665,6 +665,13 @@ impl FontService {
         }
     }
 
+    /// List `names` as installed families, as a landed system scan would.
+    #[cfg(test)]
+    pub(crate) fn list_for_test(&mut self, names: &[&str]) {
+        self.system.extend(names.iter().map(|n| n.to_string()));
+        self.rebuild_families();
+    }
+
     /// Mark both sources as landed with nothing in them, so a family nothing lists
     /// is `Missing` rather than `Pending`.
     #[cfg(test)]
@@ -706,6 +713,20 @@ impl FontService {
         }
     }
 
+    /// [`Self::default_text_parts`] set in `family`, the Settings modal's default
+    /// font, or left in Inter when `family` is empty or can never be had.
+    ///
+    /// Only [`FamilyStatus::Missing`] falls back: a family still `Pending` at launch
+    /// is most likely on its way, and the text redraws in it when it lands. Loading
+    /// it is the caller's (`OndinApp::ensure_default_font`), so this can take `&self`.
+    pub fn new_text_parts(&self, family: &str) -> ondin_core::text::TextParts {
+        let mut parts = Self::default_text_parts();
+        if !family.is_empty() && self.family_status(family) != FamilyStatus::Missing {
+            parts.style.font_family = self.spelled(family);
+        }
+        parts
+    }
+
     // --- the picker's list ------------------------------------------------
 
     /// How many families match `needle`, memoizing the match list for
@@ -726,6 +747,18 @@ impl FontService {
             .iter()
             .map(|i| self.families[*i as usize].clone())
             .collect()
+    }
+
+    /// Where `family` sits among the matches for `needle`, so the picker can open
+    /// scrolled to it; `None` when the filter hides it or nothing lists it.
+    pub fn match_position(&mut self, needle: &str, family: &str) -> Option<usize> {
+        let family = self.spelled(family);
+        let index = self.families.binary_search(&family).ok()? as u32;
+        // The match list holds ascending family indices.
+        self.filter
+            .sync(needle, &self.keys, self.revision)
+            .binary_search(&index)
+            .ok()
     }
 
     // --- loading -----------------------------------------------------------
@@ -1850,6 +1883,42 @@ mod tests {
             "the box should end on the baseline {lowest}, not at {}",
             tl.bounds().y1
         );
+    }
+
+    /// New text takes the preferred family in its listed spelling, waits on one
+    /// still pending, and stays in Inter for an empty or missing one, keeping every
+    /// other default attribute either way.
+    /// flip: dropping the `Missing` test from `new_text_parts` → fails at "a family
+    /// nothing lists falls back to Inter".
+    #[test]
+    fn new_text_takes_the_default_font_unless_it_is_missing() {
+        let mut service = FontService::inert();
+        service.list_for_test(&["Roboto"]);
+        assert_eq!(
+            service.family_status("Gone Sans"),
+            FamilyStatus::Pending,
+            "the fixture's sources have not landed yet"
+        );
+        assert_eq!(
+            service.new_text_parts("Gone Sans").style.font_family,
+            "Gone Sans",
+            "a family that may still arrive is kept"
+        );
+
+        service.settle_for_test();
+        assert_eq!(service.family_status("Gone Sans"), FamilyStatus::Missing);
+        assert_eq!(
+            service.new_text_parts("Gone Sans").style.font_family,
+            "Inter",
+            "a family nothing lists falls back to Inter"
+        );
+        assert_eq!(service.new_text_parts("").style.font_family, "Inter");
+
+        let parts = service.new_text_parts("roboto");
+        assert_eq!(parts.style.font_family, "Roboto", "in the list's spelling");
+        let mut expected = FontService::default_text_parts();
+        expected.style.font_family = "Roboto".into();
+        assert_eq!(parts, expected, "only the family differs from the default");
     }
 
     /// `n` families, each `bytes` big, drawn in order — family 0 the oldest.

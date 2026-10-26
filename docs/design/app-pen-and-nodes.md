@@ -86,10 +86,14 @@ select points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Jo
 point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`). It shows
 nothing the canvas does not already offer except the last two.
 
-- **Simplify** (`build::simplify_path`) refits the drawn outline with kurbo's optimizing simplifier,
-  within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units). Turns sharper than `SIMPLIFY_CORNER_DEG`
-  (15°) stay corners, so a drawn polyline loses its jitter and a real corner survives. A refit with no
-  fewer segments commits nothing.
+- **Simplify** (`build::simplify_path`, `simplify_outline`) flattens the drawn outline and refits it
+  with `fit`'s cubics, within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units), as *Offset path*'s
+  refit does. Turns sharper than `SIMPLIFY_CORNER_DEG` (15°), read over a few accuracies rather than
+  between neighbouring points, stay corners, so a drawn polyline loses its jitter and a real corner
+  survives; a run its chord already passes within the accuracy of becomes a line. kurbo's simplifier,
+  which an earlier version used, wants a smooth source: on a drawn polyline it looped and strayed tens
+  of units. A refit with no fewer segments commits nothing. `ondin-core`'s `tests/simplify_suite.rs`
+  holds it to that over drawn polylines and the catalogue's curves.
 - **Offset** (`build::offset_outline`) is the shape grown by the distance, or shrunk for a negative
   one: everything within the distance of the outline, with corners mitred and the mitre clipped
   square at `OFFSET_MITER_LIMIT` (4) times the distance from the corner (SVG 2's `miter-clip`), so a

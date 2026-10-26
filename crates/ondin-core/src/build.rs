@@ -1143,12 +1143,30 @@ pub fn simplify_path(doc: &Document, id: NodeId) -> Result<Transaction, OpError>
 
 /// The refit *Simplify* makes of a drawn outline, with no document: what
 /// [`simplify_path`] writes when it has fewer segments than the path it replaces.
+///
+/// Each subpath is flattened and refitted with `fit`'s cubics, as *Offset path*'s
+/// polygons are: `kurbo::simplify` wants a smooth source, and on a drawn polyline
+/// it looped and strayed tens of units from the outline.
 pub fn simplify_outline(path: &kurbo::BezPath) -> kurbo::BezPath {
-    use kurbo::simplify::{SimplifyOptLevel, SimplifyOptions, simplify_bezpath};
-    let options = SimplifyOptions::default()
-        .opt_level(SimplifyOptLevel::Optimize)
-        .angle_thresh(SIMPLIFY_CORNER_DEG.to_radians().tan());
-    simplify_bezpath(path.iter(), SIMPLIFY_ACCURACY, &options)
+    let mut out = kurbo::BezPath::new();
+    for sub in crate::geometry::subpaths(path) {
+        let closed = matches!(sub.elements().last(), Some(kurbo::PathEl::ClosePath));
+        let Some(flat) = polyline(&sub, 0.0, 2) else {
+            out.extend(sub.iter());
+            continue;
+        };
+        let mut points: Vec<kurbo::Point> =
+            flat.iter().map(|p| kurbo::Point::new(p[0], p[1])).collect();
+        if closed && points.len() > 2 && points.first() == points.last() {
+            points.pop();
+        }
+        let fitted = match closed && points.len() >= 3 {
+            true => crate::fit::fit_closed(&points, SIMPLIFY_ACCURACY, SIMPLIFY_CORNER_DEG),
+            false => crate::fit::fit_open(&points, SIMPLIFY_ACCURACY, SIMPLIFY_CORNER_DEG),
+        };
+        out.extend(straightened(&fitted, SIMPLIFY_ACCURACY).iter());
+    }
+    out
 }
 
 /// *Offset path* on the path `id` draws, as [`offset_outline`] offsets it.
@@ -1273,11 +1291,10 @@ fn refit(shapes: Vec<Vec<Vec<[f64; 2]>>>) -> kurbo::BezPath {
         if points.len() < 3 || area.abs() < 2.0 {
             continue;
         }
-        result.extend(straightened(&crate::fit::fit_closed(
-            &points,
+        result.extend(straightened(
+            &crate::fit::fit_closed(&points, OFFSET_REFIT_ACCURACY, OFFSET_REFIT_CORNER_DEG),
             OFFSET_REFIT_ACCURACY,
-            OFFSET_REFIT_CORNER_DEG,
-        )));
+        ));
     }
     result
 }
@@ -1355,20 +1372,33 @@ fn cut(
 }
 
 /// `path` with every cubic whose handles lie on its chord written as the line it is.
-/// Runs of lines along one line become one.
-fn straightened(path: &kurbo::BezPath) -> kurbo::BezPath {
+/// Runs of lines along one line become one, and a line back to the start just
+/// before a close is left to the close, as a drawn path has it.
+fn straightened(path: &kurbo::BezPath, accuracy: f64) -> kurbo::BezPath {
     // How far a point may sit off a chord and still count as on it: a quarter of
-    // the refit's accuracy, which a straight stretch fitted with a cubic is within.
-    const ON: f64 = OFFSET_REFIT_ACCURACY / 4.0;
+    // the fit's `accuracy`, which a straight stretch fitted with a cubic is within.
+    let on = accuracy / 4.0;
     let off = |a: kurbo::Point, b: kurbo::Point, p: kurbo::Point| {
         (b - a).cross(p - a).abs() / (b - a).hypot().max(1e-12)
     };
     let mut out: Vec<kurbo::PathEl> = Vec::new();
+    let mut start = kurbo::Point::ZERO;
     for el in path.elements() {
+        match *el {
+            kurbo::PathEl::MoveTo(p) => start = p,
+            kurbo::PathEl::ClosePath => {
+                if let Some(&kurbo::PathEl::LineTo(q)) = out.last()
+                    && (q - start).hypot() < 1e-9
+                {
+                    out.pop();
+                }
+            }
+            _ => {}
+        }
         let p0 = out.last().and_then(|e| e.end_point());
         let el = match (*el, p0) {
             (kurbo::PathEl::CurveTo(p1, p2, p3), Some(p0))
-                if off(p0, p3, p1).max(off(p0, p3, p2)) < ON =>
+                if off(p0, p3, p1).max(off(p0, p3, p2)) < on =>
             {
                 kurbo::PathEl::LineTo(p3)
             }
@@ -1378,7 +1408,7 @@ fn straightened(path: &kurbo::BezPath) -> kurbo::BezPath {
         if let kurbo::PathEl::LineTo(p) = el
             && let Some(&kurbo::PathEl::LineTo(q)) = out.last()
             && let Some(o) = out.len().checked_sub(2).and_then(|i| out[i].end_point())
-            && off(o, p, q) < ON
+            && off(o, p, q) < on
             && (q - o).dot(p - q) > 0.0
         {
             out.pop();

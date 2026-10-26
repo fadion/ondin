@@ -19,13 +19,7 @@ pub fn fit_closed(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
         return out;
     }
     let at = |i: usize| points[i % n];
-    let cos_corner = corner_deg.to_radians().cos();
-    let corners: Vec<usize> = (0..n)
-        .filter(|&i| {
-            let (a, b) = (at(i) - at(i + n - 1), at(i + 1) - at(i));
-            a.normalize().dot(b.normalize()) < cos_corner
-        })
-        .collect();
+    let corners = corners(points, true, accuracy, corner_deg);
     // With no corner the loop runs on smoothly through where it is cut, so both
     // ends of the one run share a tangent.
     let (starts, smooth) = match corners.is_empty() {
@@ -37,7 +31,16 @@ pub fn fit_closed(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
         let e = starts.get(k + 1).copied().unwrap_or(starts[0] + n);
         let run = densified(&(s..=e).map(at).collect::<Vec<_>>(), SPACING);
         let (t1, t2) = if smooth {
-            let t = through(at(n - 1), at(0), at(1));
+            let reach = (10.0 * accuracy).min(length(points, true) / 12.0);
+            let behind = (1..n)
+                .map(|k| at(n - k))
+                .find(|p| (*p - at(0)).hypot() >= reach)
+                .unwrap_or(at(n - 1));
+            let ahead = (1..n)
+                .map(at)
+                .find(|p| (*p - at(0)).hypot() >= reach)
+                .unwrap_or(at(1));
+            let t = through(behind, at(0), ahead);
             (t, -t)
         } else {
             (
@@ -49,6 +52,111 @@ pub fn fit_closed(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
     }
     out.close_path();
     out
+}
+
+/// The open polyline `points` as cubics within `accuracy` of each point, keeping
+/// a corner wherever it turns by more than `corner_deg`.
+pub fn fit_open(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
+    let n = points.len();
+    let mut out = BezPath::new();
+    if n < 2 {
+        return out;
+    }
+    let mut stops: Vec<usize> = std::iter::once(0)
+        .chain(
+            corners(points, false, accuracy, corner_deg)
+                .into_iter()
+                .filter(|&i| i > 0 && i < n - 1),
+        )
+        .collect();
+    stops.push(n - 1);
+    out.move_to(points[0]);
+    for w in stops.windows(2) {
+        let run = densified(&points[w[0]..=w[1]], SPACING);
+        let back: Vec<Point> = run.iter().rev().copied().collect();
+        fit_run(&run, lead(&run), lead(&back), accuracy, 0, &mut out);
+    }
+    out
+}
+
+/// The vertices of `points` where the outline turns by more than `corner_deg`.
+///
+/// The turn is read between the points `8 · accuracy` behind and ahead, not the
+/// neighbours: a hand-drawn line's jitter turns its neighbours by more than a
+/// corner's worth, where a real corner turns at any scale. Of a cluster of
+/// vertices that all read as one corner, the sharpest stands for it.
+fn corners(points: &[Point], closed: bool, accuracy: f64, corner_deg: f64) -> Vec<usize> {
+    let n = points.len();
+    // No more than a twelfth of the outline, which a small shape is shorter than.
+    let reach = (8.0 * accuracy).min(length(points, closed) / 12.0);
+    let cos_corner = corner_deg.to_radians().cos();
+    // The point at least `reach` from `i` stepping by `step`, or the last in range.
+    let away = |i: usize, back: bool| {
+        let mut j = i;
+        for _ in 1..n {
+            let next = match (back, closed) {
+                (true, true) => (j + n - 1) % n,
+                (false, true) => (j + 1) % n,
+                (true, false) if j > 0 => j - 1,
+                (false, false) if j + 1 < n => j + 1,
+                _ => break,
+            };
+            j = next;
+            if (points[j] - points[i]).hypot() >= reach {
+                break;
+            }
+        }
+        j
+    };
+    let turn = |i: usize| {
+        let (a, b) = (
+            points[i] - points[away(i, true)],
+            points[away(i, false)] - points[i],
+        );
+        match a.hypot() > 1e-12 && b.hypot() > 1e-12 {
+            true => a.normalize().dot(b.normalize()),
+            false => 1.0,
+        }
+    };
+    let cos: Vec<f64> = (0..n).map(turn).collect();
+    let candidate = |i: usize| cos[i] < cos_corner;
+    (0..n)
+        .filter(|&i| candidate(i))
+        .filter(|&i| {
+            // The sharpest of the candidates within `reach` either side; a tie goes
+            // to the first.
+            let mut best = true;
+            for back in [true, false] {
+                let mut j = i;
+                for _ in 1..n {
+                    let next = match (back, closed) {
+                        (true, true) => (j + n - 1) % n,
+                        (false, true) => (j + 1) % n,
+                        (true, false) if j > 0 => j - 1,
+                        (false, false) if j + 1 < n => j + 1,
+                        _ => break,
+                    };
+                    j = next;
+                    if j == i || (points[j] - points[i]).hypot() > reach {
+                        break;
+                    }
+                    if candidate(j) && (cos[j] < cos[i] || (cos[j] == cos[i] && back)) {
+                        best = false;
+                    }
+                }
+            }
+            best
+        })
+        .collect()
+}
+
+/// The length of the polyline `points`, round to the start if `closed`.
+fn length(points: &[Point], closed: bool) -> f64 {
+    let open: f64 = points.windows(2).map(|w| (w[1] - w[0]).hypot()).sum();
+    match (closed, points.first(), points.last()) {
+        (true, Some(a), Some(b)) => open + (*a - *b).hypot(),
+        _ => open,
+    }
 }
 
 /// The longest stretch of a run the fit checks no point along, in units.
@@ -106,6 +214,23 @@ fn fit_run(pts: &[Point], t1: Vec2, t2: Vec2, accuracy: f64, depth: u32, out: &m
         out.curve_to(first + t1 * span / 3.0, last + t2 * span / 3.0, last);
         return;
     }
+    // A run its chord already passes within the accuracy of is a line, not a curve
+    // that follows its jitter.
+    let chord = last - first;
+    if span > 1e-9
+        && pts.iter().all(|p| {
+            chord.cross(*p - first).abs() / span <= accuracy
+                && (*p - first).dot(chord) >= -accuracy * span
+                && (*p - last).dot(chord) <= accuracy * span
+        })
+    {
+        out.curve_to(
+            first.lerp(last, 1.0 / 3.0),
+            first.lerp(last, 2.0 / 3.0),
+            last,
+        );
+        return;
+    }
     let mut u = chord_lengths(pts);
     let mut c = generate(pts, &u, t1, t2);
     let (mut worst, mut split) = max_error(pts, &u, &c);
@@ -126,7 +251,17 @@ fn fit_run(pts: &[Point], t1: Vec2, t2: Vec2, accuracy: f64, depth: u32, out: &m
             }
         }
     }
-    let centre = -through(pts[split - 1], pts[split], pts[split + 1]);
+    // The neighbours a few accuracies away, within the run: next-door points carry
+    // a drawn line's jitter into the tangent.
+    let reach = (10.0 * accuracy).min(length(pts, false) / 12.0);
+    let behind = (0..split)
+        .rev()
+        .find(|&j| (pts[j] - pts[split]).hypot() >= reach)
+        .unwrap_or(0);
+    let ahead = (split + 1..pts.len())
+        .find(|&j| (pts[j] - pts[split]).hypot() >= reach)
+        .unwrap_or(pts.len() - 1);
+    let centre = -through(pts[behind], pts[split], pts[ahead]);
     fit_run(&pts[..=split], t1, centre, accuracy, depth + 1, out);
     fit_run(&pts[split..], -centre, t2, accuracy, depth + 1, out);
 }

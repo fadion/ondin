@@ -17,6 +17,8 @@ use ondin_core::{NodeKind, Stroke};
 
 /// The most segments one stroke's ink may come back with.
 const MAX_SEGMENTS: usize = 200;
+/// A dashed stroke's: some two dozen dashes, a round-capped one ten segments.
+const MAX_DASHED_SEGMENTS: usize = 300;
 
 const WIDTHS: [f64; 3] = [3.0, 24.0, 110.0];
 
@@ -57,7 +59,11 @@ fn stroke_case(path: &BezPath, s: &Stroke) -> Vec<String> {
     let reach = laid * 1.5 + 5.0;
     let area = path.bounding_box().inflate(reach, reach);
     let result = stroke_ink(&kind, path, s);
-    common::check(result.as_ref(), area, MAX_SEGMENTS, expected)
+    let max = match s.dashes.is_empty() {
+        true => MAX_SEGMENTS,
+        false => MAX_DASHED_SEGMENTS,
+    };
+    common::check(result.as_ref(), area, max, expected)
 }
 
 fn stroke(width: f64, join: kurbo::Join, cap: kurbo::Cap, align: StrokeAlign) -> Stroke {

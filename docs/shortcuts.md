@@ -208,10 +208,11 @@ one is designated (§15 D113).
 | `Ctrl+Alt+;` | lock guides | ✅ Illustrator |
 | `Ctrl+\` | focus mode (hide the panels) | ✅ Figma's show/hide-UI |
 | `Ctrl+Alt+\` | layers panel | ✅ |
+| — | show history | **unbound**: a list few people keep open |
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show messages | **unbound** (§15 D1025) |
 
-`ViewSwitch::accel` answers `None` for exactly the four unbound rows (`LayoutGrid`, `Outline`,
+`ViewSwitch::accel` answers `None` for exactly the unbound rows (`LayoutGrid`, `Outline`, `History`,
 `StatusMessages`, `SnapBaselines`): no free convention to match, a menu one click away. They are listed
 so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide the
 panels, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
@@ -558,7 +559,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, toolbar, messages, outline mode, focus, and the snap switches.
+  grid, layout grid, layers panel, history, toolbar, messages, outline mode, focus, and the snap
+  switches.
   `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
   drives stay in step while the chord is a second caller that never sees the row.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,

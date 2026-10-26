@@ -550,6 +550,7 @@ impl OndinApp {
         self.reset_marked(reset, &flow_mark);
         if let Some(i) = pick {
             let tx = self.grid_tx(subjects, |g| g.auto_flow = flows[i]);
+            self.session.name_step("Auto flow", icon::GRID_FOUR);
             self.commit_edit(tx);
         }
 
@@ -583,6 +584,7 @@ impl OndinApp {
         self.reset_marked(reset, &mark);
         if let Some(Some(c)) = pick {
             let tx = self.grid_tx(subjects, |g| g.justify_content = c);
+            self.session.name_step("Justify content", icon::ALIGN_LEFT);
             self.commit_edit(tx);
         }
         let mark = self.grid_mark(
@@ -609,6 +611,7 @@ impl OndinApp {
         self.reset_marked(reset, &mark);
         if let Some(Some(a)) = pick {
             let tx = self.grid_tx(subjects, |g| g.justify_items = a);
+            self.session.name_step("Justify items", icon::ALIGN_LEFT);
             self.commit_edit(tx);
         }
         let mark = self.grid_mark(
@@ -635,6 +638,7 @@ impl OndinApp {
         self.reset_marked(reset, &mark);
         if let Some(Some(a)) = pick {
             let tx = self.grid_tx(subjects, |g| g.align_items = a);
+            self.session.name_step("Align items", icon::ALIGN_TOP);
             self.commit_edit(tx);
         }
         let mark = self.grid_mark(
@@ -661,6 +665,7 @@ impl OndinApp {
         self.reset_marked(reset, &mark);
         if let Some(Some(c)) = pick {
             let tx = self.grid_tx(subjects, |g| g.align_content = c);
+            self.session.name_step("Align content", icon::ALIGN_TOP);
             self.commit_edit(tx);
         }
 
@@ -731,6 +736,14 @@ impl OndinApp {
                         l.push(one.clone());
                         with_list(g, rows, &l);
                     });
+                    self.session.name_step(
+                        if rows {
+                            "Add row track"
+                        } else {
+                            "Add column track"
+                        },
+                        icon::PLUS,
+                    );
                     self.commit_edit(tx);
                 }
                 let n = track_count(&list);
@@ -799,6 +812,7 @@ impl OndinApp {
                     ui.ctx().data_mut(|d| d.remove::<TrackDrag>(drag_key));
                     if let Some(moved) = reordered(&list, drag.from, to) {
                         let tx = self.grid_tx(subjects, |g| with_list(g, rows, &moved));
+                        self.name_tracks_step(rows);
                         self.commit_edit(tx);
                     }
                 }
@@ -824,6 +838,7 @@ impl OndinApp {
                     .is_valid() =>
                 {
                     let tx = self.grid_tx(subjects, |g| with_list(g, rows, &parsed));
+                    self.name_tracks_step(rows);
                     self.commit_edit(tx);
                 }
                 Ok(_) => refuse(
@@ -887,6 +902,7 @@ impl OndinApp {
             if let Some(k) = picked.filter(|k| *k != kind) {
                 let l = put(converted(&track, k));
                 let tx = self.grid_tx(subjects, |g| with_list(g, rows, &l));
+                self.name_tracks_step(rows);
                 self.commit_edit(tx);
             }
             // The fields, in what is left before the cross.
@@ -898,6 +914,14 @@ impl OndinApp {
                 let mut l = list.to_vec();
                 l.remove(i);
                 let tx = self.grid_tx(subjects, |g| with_list(g, rows, &l));
+                self.session.name_step(
+                    if rows {
+                        "Remove row track"
+                    } else {
+                        "Remove column track"
+                    },
+                    icon::X,
+                );
                 self.commit_edit(tx);
             }
             grip
@@ -959,7 +983,7 @@ impl OndinApp {
                     } else {
                         Transaction(Vec::new())
                     };
-                    self.edit_valve(&resp, tx);
+                    self.named_valve(tracks_label(rows), tracks_glyph(rows), &resp, tx);
                 }
                 None => {
                     ui.allocate_exact_size(egui::vec2(room, side), egui::Sense::hover());
@@ -979,6 +1003,7 @@ impl OndinApp {
                     };
                     if let Some(nb) = edit.picked {
                         let tx = commit_list(self, to(nb));
+                        self.name_tracks_step(rows);
                         self.commit_edit(tx);
                         continue;
                     }
@@ -986,7 +1011,7 @@ impl OndinApp {
                         Some(nb) => commit_list(self, to(nb)),
                         None => Transaction(Vec::new()),
                     };
-                    self.edit_valve(&edit.resp, tx);
+                    self.named_valve(tracks_label(rows), tracks_glyph(rows), &edit.resp, tx);
                 }
             }
             Track::Repeat { repeat, tracks } => {
@@ -1017,7 +1042,7 @@ impl OndinApp {
                 } else {
                     Transaction(Vec::new())
                 };
-                self.edit_valve(&resp, tx);
+                self.named_valve(tracks_label(rows), tracks_glyph(rows), &resp, tx);
                 let rest = egui::vec2((room - count_w - gap).max(20.0), side);
                 match tracks.as_slice() {
                     [TrackSize::Breadth(b)] => {
@@ -1028,13 +1053,19 @@ impl OndinApp {
                         };
                         if let Some(nb) = edit.picked {
                             let tx = commit_list(self, to(nb));
+                            self.name_tracks_step(rows);
                             self.commit_edit(tx);
                         } else {
                             let tx = match edit.typed {
                                 Some(nb) => commit_list(self, to(nb)),
                                 None => Transaction(Vec::new()),
                             };
-                            self.edit_valve(&edit.resp, tx);
+                            self.named_valve(
+                                tracks_label(rows),
+                                tracks_glyph(rows),
+                                &edit.resp,
+                                tx,
+                            );
                         }
                     }
                     several => {
@@ -1135,6 +1166,7 @@ impl OndinApp {
                                         l.end = p;
                                     }
                                 });
+                                self.session.name_step(label, icon::GRID_FOUR);
                                 self.commit_edit(tx);
                             }
                             // Said, not dropped — `arch-scribe` read the first cut
@@ -1222,6 +1254,14 @@ impl OndinApp {
                         i.align_self = to;
                     }
                 });
+                self.session.name_step(
+                    label,
+                    if across {
+                        icon::ALIGN_LEFT
+                    } else {
+                        icon::ALIGN_TOP
+                    },
+                );
                 self.commit_edit(tx);
             }
             if flipped {
@@ -1234,6 +1274,22 @@ impl OndinApp {
             }
         }
     }
+
+    /// Name the next step after the track list it edits.
+    fn name_tracks_step(&mut self, rows: bool) {
+        self.session
+            .name_step(tracks_label(rows), tracks_glyph(rows));
+    }
+}
+
+/// A track list's name as an undo step.
+fn tracks_label(rows: bool) -> &'static str {
+    if rows { "Grid rows" } else { "Grid columns" }
+}
+
+/// The glyph beside a track list's undo step.
+fn tracks_glyph(rows: bool) -> &'static str {
+    if rows { icon::ROWS } else { icon::COLUMNS }
 }
 
 /// The track row's two pure pieces — the kind menu's conversion and the grip's

@@ -805,6 +805,7 @@ impl OndinApp {
                 {
                     let name = val.trim().to_string();
                     if !name.is_empty() && name != name0 {
+                        self.session.name_step("Rename page", icon::PENCIL_SIMPLE);
                         self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
                     }
                 }
@@ -944,7 +945,7 @@ impl OndinApp {
                 .iter()
                 .map(|g| Operation::SetGuidePosition { id: g.id, position })
                 .collect();
-            self.edit_valve(&resp, Transaction(ops));
+            self.named_valve("Move guide", icon::RULER, &resp, Transaction(ops));
             if !resp.dragged() {
                 self.in_flight.guide_position_drag = None;
             }
@@ -1184,6 +1185,7 @@ impl OndinApp {
                     "{from} is set by a kit; its next update replaces it"
                 ));
             } else {
+                self.session.name_step("Replace font", icon::TEXT_AA);
                 self.commit_edit(tx);
                 self.session.info(format!("Replaced {from} with {to}"));
             }
@@ -1226,6 +1228,8 @@ impl OndinApp {
                 .clicked()
                     && card.resettable
                 {
+                    app.session
+                        .name_step("Reset colour", icon::ARROW_COUNTER_CLOCKWISE);
                     app.commit_edit(reset());
                 }
                 if opened {
@@ -1495,7 +1499,7 @@ impl OndinApp {
                         // The increment form, because a scrub reports one frame's
                         // step (`canvas::nudge_points_tx`).
                         let tx = app.nudge_points_tx(id, delta);
-                        app.edit_valve(&resp, tx);
+                        app.named_valve("Edit path", icon::BEZIER_CURVE, &resp, tx);
                         if interacting(&resp) {
                             app.reveal_selection();
                         }
@@ -1557,7 +1561,7 @@ impl OndinApp {
                         };
                         // The increment form, as the anchor's own fields use.
                         let tx = self.nudge_handle_tx(id, at, side, delta);
-                        self.edit_valve(&resp, tx);
+                        self.named_valve("Edit path", icon::BEZIER_CURVE, &resp, tx);
                         if interacting(&resp) {
                             self.reveal_selection();
                         }
@@ -1611,7 +1615,7 @@ impl OndinApp {
                     );
                     if enabled {
                         let tx = app.corner_radius_tx(id, scope.as_deref(), r);
-                        app.edit_valve(&rr, tx);
+                        app.named_valve("Corner radius", icon::CORNERS_OUT, &rr, tx);
                     }
                 });
                 let _ = ui::field_button(
@@ -1667,6 +1671,7 @@ impl OndinApp {
                 {
                     let name = val.trim().to_string();
                     if !name.is_empty() && name != name0 {
+                        self.session.name_step("Rename", icon::PENCIL_SIMPLE);
                         self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
                     }
                 }
@@ -1680,6 +1685,11 @@ impl OndinApp {
                         .on_hover_text(if locked0 { "Unlock" } else { "Lock" })
                         .clicked()
                     {
+                        let (verb, glyph) = match locked0 {
+                            true => ("Unlock", icon::LOCK_SIMPLE_OPEN),
+                            false => ("Lock", icon::LOCK_SIMPLE),
+                        };
+                        self.session.name_step(verb, glyph);
                         self.commit_edit(Transaction(vec![Operation::SetLocked {
                             id,
                             locked: !locked0,
@@ -1722,6 +1732,11 @@ impl OndinApp {
                             id,
                             visible: !visible0,
                         });
+                        let (verb, glyph) = match visible0 {
+                            true => ("Hide", icon::EYE_SLASH),
+                            false => ("Show", icon::EYE),
+                        };
+                        self.session.name_step(verb, glyph);
                         self.commit_edit(Transaction(ops));
                     }
                     if resp.secondary_clicked()
@@ -1792,9 +1807,11 @@ impl OndinApp {
                     );
             });
             if let Some(op) = pick {
+                self.name_action(crate::input::Action::Boolean(op));
                 self.apply_boolean(op);
             }
             if flatten {
+                self.name_action(crate::input::Action::Flatten);
                 self.flatten_selection();
             }
 
@@ -1825,6 +1842,7 @@ impl OndinApp {
             .inner
             .clicked()
             {
+                self.name_action(crate::input::Action::Mask);
                 self.toggle_mask();
             }
 
@@ -1844,6 +1862,7 @@ impl OndinApp {
             .inner
             .clicked()
             {
+                self.name_action(crate::input::Action::Group);
                 self.group_selection();
             }
             if ui::disable_unless(ui, can_ungroup, |ui| {
@@ -1861,9 +1880,36 @@ impl OndinApp {
             .inner
             .clicked()
             {
+                self.name_action(crate::input::Action::Ungroup);
                 self.ungroup_selection();
             }
         });
+    }
+
+    /// Name the next undo step as the menus name `action`, for a button that
+    /// runs the same verb without going through `dispatch`.
+    fn name_action(&mut self, action: crate::input::Action) {
+        if let Some((label, glyph)) = crate::menu::Item::step_name(action) {
+            self.session.name_step(label, glyph);
+        }
+    }
+
+    /// [`OndinApp::edit_valve`], naming the step it commits. A valve runs on idle
+    /// frames too, so a name it does not commit is dropped at once: left standing, it
+    /// would name whatever else commits this frame, and `dispatch` would not name its own.
+    pub(crate) fn named_valve(
+        &mut self,
+        label: &'static str,
+        glyph: &'static str,
+        resp: &egui::Response,
+        tx: Transaction,
+    ) -> bool {
+        self.session.name_step(label, glyph);
+        let committed = self.edit_valve(resp, tx);
+        if !committed {
+            self.session.forget_step_name();
+        }
+        committed
     }
 
     /// Why *Use as mask* would refuse the current selection — [`Self::mask_action`]'s
@@ -2056,6 +2102,7 @@ impl OndinApp {
                 .map(|(t, _)| Operation::SetMaskMode { id: *t, mode })
                 .collect();
             if !ops.is_empty() {
+                self.session.name_step("Mask mode", icon::CIRCLE_HALF);
                 self.commit_edit(Transaction(ops));
             }
         }
@@ -2384,6 +2431,7 @@ impl OndinApp {
                                 .clicked()
                                 && can_align
                             {
+                                app.name_action(crate::input::Action::Align(axis, at));
                                 if on_points {
                                     app.align_points(axis, at);
                                 } else {
@@ -2404,6 +2452,7 @@ impl OndinApp {
                             .clicked()
                                 && can_distribute
                             {
+                                app.name_action(crate::input::Action::Distribute(axis));
                                 if on_points {
                                     app.distribute_points(axis);
                                 } else {
@@ -2498,7 +2547,7 @@ impl OndinApp {
                 } else {
                     self.spacing_tx(axis, shown)
                 };
-                self.edit_valve(&resp, tx);
+                self.named_valve("Spacing", glyph, &resp, tx);
             }
         });
     }
@@ -2678,7 +2727,7 @@ impl OndinApp {
                         .flat_map(|id| ondin_core::detach_opacity_ops(doc, id))
                         .collect();
                     ops.extend(set.0);
-                    app.edit_valve(&ro, Transaction(ops));
+                    app.named_valve("Opacity", icon::DROP_HALF, &ro, Transaction(ops));
                 }
                 if !has_rect {
                     return;
@@ -2712,7 +2761,7 @@ impl OndinApp {
                 app.reset_marked(hit, &radius_mark);
                 if interacting(&rr) {
                     let tx = ondin_core::set_corner_radius_all(&app.session.doc, ids, r.max(0.0));
-                    app.edit_valve(&rr, tx);
+                    app.named_valve("Corner radius", icon::CORNERS_OUT, &rr, tx);
                 }
                 // Present and inert: the disclosures are keyed by node, and a
                 // vanishing button would move the fields.
@@ -2958,7 +3007,7 @@ impl OndinApp {
             .on_hover_text("Scale the selection — strokes, corner radii and type scale with it");
             self.scale_pct = pct;
             if let Some(tx) = self.scale_tx(pct) {
-                self.edit_valve(&resp, tx);
+                self.named_valve("Scale", icon::RESIZE, &resp, tx);
             }
             // Back to 100 once the valve has closed (`pct` applies to the committed
             // box every frame), and not while a canvas handle drag writes the readout.
@@ -2974,6 +3023,7 @@ impl OndinApp {
                     ))
                     .clicked();
                 if hit && let Some(tx) = self.scale_tx(factor * 100.0) {
+                    self.session.name_step("Scale", icon::RESIZE);
                     self.commit_edit(tx);
                 }
             }
@@ -3070,6 +3120,13 @@ impl OndinApp {
                     .clicked()
                 {
                     let tx = lock_all_tx(app.session.selection.ids(), !all_locked);
+                    app.session.name_step(
+                        match all_locked {
+                            true => "Unlock proportions",
+                            false => "Lock proportions",
+                        },
+                        glyph,
+                    );
                     app.commit_edit(tx);
                 }
             });
@@ -3149,6 +3206,7 @@ impl OndinApp {
                     .on_hover_text(turn_tips[i])
                     .clicked()
                 {
+                    app.name_action(crate::input::Action::RotateQuarter(turn > 0.0));
                     match scope {
                         TurnScope::Node(id) => app.rotate_quarter(id, turn),
                         TurnScope::Selection => app.rotate_selection_quarter(turn),
@@ -3166,6 +3224,7 @@ impl OndinApp {
                     .on_hover_text(flip_tips[i])
                     .clicked()
                 {
+                    app.name_action(crate::input::Action::Flip(axis));
                     app.flip(axis);
                 }
             }
@@ -3265,7 +3324,16 @@ impl OndinApp {
             MultiEdit::Nudge(delta)
         };
         let tx = self.multi_transform_tx(field, edit);
+        let (verb, glyph) = match field {
+            MultiField::X | MultiField::Y => ("Move", icon::ARROWS_OUT_CARDINAL),
+            MultiField::W | MultiField::H => ("Resize", icon::ARROWS_OUT),
+            MultiField::Rotation => ("Rotate", icon::ARROW_CLOCKWISE),
+            MultiField::Skew => ("Skew", icon::ANGLE),
+        };
+        self.session.name_step(verb, glyph);
         self.multi_valve(&resp, tx);
+        // Taken by the valve's commit, or left by an idle frame for nothing else to take.
+        self.session.forget_step_name();
         // Only the fields that move the selection keep it on screen.
         if matches!(field, MultiField::X | MultiField::Y) {
             self.reveal_selection();
@@ -3776,7 +3844,7 @@ impl OndinApp {
                     id,
                     Affine::translate(Vec2::new(x - shown.x, 0.0)) * Affine::new(world),
                 );
-                app.edit_valve(&rx, tx);
+                app.named_valve("Move", icon::ARROWS_OUT_CARDINAL, &rx, tx);
                 if interacting(&rx) {
                     app.reveal_selection();
                 }
@@ -3797,7 +3865,7 @@ impl OndinApp {
                     id,
                     Affine::translate(Vec2::new(0.0, y - shown.y)) * Affine::new(world),
                 );
-                app.edit_valve(&ry, ty);
+                app.named_valve("Move", icon::ARROWS_OUT_CARDINAL, &ry, ty);
                 if interacting(&ry) {
                     app.reveal_selection();
                 }
@@ -3966,7 +4034,7 @@ impl OndinApp {
                                 size_tx(app, want.width, want.height, true)
                             }
                         };
-                        app.edit_valve(&resp, tx);
+                        app.named_valve("Resize", icon::ARROWS_OUT, &resp, tx);
                         if bindable {
                             app.field_doors(ui, key, &resp);
                         }
@@ -3992,6 +4060,13 @@ impl OndinApp {
                         .clicked()
                         && both_px
                     {
+                        app.session.name_step(
+                            match locked {
+                                true => "Unlock proportions",
+                                false => "Lock proportions",
+                            },
+                            glyph,
+                        );
                         app.commit_edit(Transaction(vec![Operation::SetProportionsLocked {
                             id,
                             locked: !locked,
@@ -4000,6 +4075,7 @@ impl OndinApp {
                 });
                 for (horizontal, mode) in picks {
                     let tx = app.size_mode_tx(id, horizontal, mode, size);
+                    app.session.name_step("Resize", icon::ARROWS_OUT);
                     app.commit_edit(tx);
                 }
             }
@@ -4029,7 +4105,7 @@ impl OndinApp {
                             crate::preview::LineEnd::End,
                             target,
                         );
-                        app.edit_valve(&rl, tx);
+                        app.named_valve("Length", icon::LINE_SEGMENT, &rl, tx);
                     }
                 });
             }
@@ -4093,7 +4169,7 @@ impl OndinApp {
                     }
                     None => d.remove::<AngleScrub>(scrub_id),
                 });
-                app.edit_valve(&ra, tr);
+                app.named_valve("Rotate", icon::ARROW_CLOCKWISE, &ra, tr);
                 let mut skew_deg = shown_degrees(split.orientation.skew);
                 let rs = value_field(
                     ui,
@@ -4117,7 +4193,7 @@ impl OndinApp {
                     ),
                     false => Transaction::default(),
                 };
-                app.edit_valve(&rs, ts);
+                app.named_valve("Skew", icon::ANGLE, &rs, ts);
             });
             Self::quarters_row(app, ui, TurnScope::Node(id));
         });
@@ -4353,7 +4429,9 @@ impl OndinApp {
             |d| d.suffix("%").max_decimals(0),
         );
         self.reset_marked(hit, mark);
-        self.edit_valve(
+        self.named_valve(
+            "Opacity",
+            icon::DROP_HALF,
             &ro,
             Transaction(vec![Operation::SetOpacity {
                 id,
@@ -4416,7 +4494,9 @@ impl OndinApp {
                     // Seeded from one corner of a disagreeing set, it may not write
                     // until moved, or a bare click would flatten the other corners.
                     if shared.is_some() || r != seed {
-                        app.edit_valve(
+                        app.named_valve(
+                            "Corner radius",
+                            icon::CORNERS_OUT,
                             &rr,
                             Transaction(vec![Operation::SetGeometry {
                                 id,
@@ -4464,6 +4544,7 @@ impl OndinApp {
                     })
                     .clicked()
             {
+                app.session.name_step("Clip content", icon::CROP);
                 app.commit_edit(Transaction(vec![Operation::SetClip { id, clip: !clip }]));
             }
             let Some(corners) = corners0 else { return };
@@ -4515,7 +4596,9 @@ impl OndinApp {
                         app.reset_marked(hit, mark);
                         let mut next = corners;
                         corner.set(&mut next, v.max(0.0));
-                        app.edit_valve(
+                        app.named_valve(
+                            "Corner radius",
+                            glyph,
                             &resp,
                             Transaction(vec![Operation::SetGeometry {
                                 id,
@@ -4564,7 +4647,9 @@ impl OndinApp {
             );
             let resp =
                 resp.on_hover_text("Corner smoothing: how gradually each corner meets its sides");
-            self.edit_valve(
+            self.named_valve(
+                "Corner smoothing",
+                icon::CIRCLE,
                 &resp,
                 Transaction(vec![Operation::SetGeometry {
                     id,
@@ -4595,7 +4680,9 @@ impl OndinApp {
         );
         let rr = tip_unless_marked(rr, mark, "Corner radius");
         self.reset_marked(hit, mark);
-        self.edit_valve(
+        self.named_valve(
+            "Corner radius",
+            icon::CORNERS_OUT,
             &rr,
             Transaction(vec![Operation::SetGeometry {
                 id,
@@ -4635,7 +4722,9 @@ impl OndinApp {
             );
             let rn = tip_unless_marked(rn, &marks.count, tip);
             self.reset_marked(hit, &marks.count);
-            self.edit_valve(
+            self.named_valve(
+                tip,
+                glyph,
                 &rn,
                 Transaction(vec![Operation::SetGeometry {
                     id,
@@ -4658,7 +4747,9 @@ impl OndinApp {
             );
             let rr = tip_unless_marked(rr, &marks.ratio, "How far the inner points are pulled in");
             self.reset_marked(hit, &marks.ratio);
-            self.edit_valve(
+            self.named_valve(
+                "Inner ratio",
+                icon::ANGLE,
                 &rr,
                 Transaction(vec![Operation::SetGeometry {
                     id,
@@ -5012,6 +5103,13 @@ impl OndinApp {
             &brush,
         );
         let ids = self.session.selection.ids().to_vec();
+        let (noun, glyph) = match target {
+            ondin_core::PaintTarget::Fill => ("Fill", icon::PAINT_BUCKET),
+            ondin_core::PaintTarget::Stroke => ("Stroke", icon::LINE_SEGMENT),
+        };
+        if out.remove || out.toggle {
+            self.session.name_step(noun, glyph);
+        }
         if out.remove {
             let tx = match target {
                 ondin_core::PaintTarget::Fill => {
@@ -5141,7 +5239,7 @@ impl OndinApp {
             if interacting(&rw) {
                 // Weight is master over per-side widths (`weight_all_tx`).
                 let tx = weight_all_tx(&self.session.doc, &ids, width);
-                self.edit_valve(&rw, tx);
+                self.named_valve("Stroke weight", icon::LINE_SEGMENT, &rw, tx);
             }
             ui::field_button(
                 ui,
@@ -5156,6 +5254,7 @@ impl OndinApp {
         });
         if let Some(a) = picked {
             let tx = ondin_core::edit_strokes_all(&self.session.doc, &ids, |s| s.align = a);
+            self.session.name_step("Stroke position", icon::SQUARE_HALF);
             self.commit_edit(tx);
         }
     }
@@ -5500,7 +5599,7 @@ impl OndinApp {
             edit(slot);
         }
         let tx = self.strokes_tx(scope, next);
-        self.edit_valve(resp, tx);
+        self.named_valve("Stroke", icon::LINE_SEGMENT, resp, tx);
     }
     /// One stroke's dash, cap and join, behind the sliders button.
     ///
@@ -6088,6 +6187,7 @@ impl OndinApp {
                 .collect(),
         );
         if !tx.0.is_empty() {
+            self.session.name_step("Resize", icon::ARROWS_OUT);
             self.commit_edit(tx);
         }
     }
@@ -6207,6 +6307,7 @@ impl OndinApp {
                 _ => None,
             };
             if let (Some(grids), [id]) = (list, subjects.as_slice()) {
+                app.session.name_step("Layout grid", icon::GRID_FOUR);
                 app.commit_edit(Transaction(vec![Operation::SetLayoutGrids {
                     id: *id,
                     grids,
@@ -6412,6 +6513,8 @@ impl OndinApp {
             .flatten()
             .collect();
         let ops = self.kept_in_place(ops, subjects);
+        self.session
+            .name_step(if pin { "Pin" } else { "Unpin" }, icon::CROSSHAIR_SIMPLE);
         self.commit_edit(Transaction(ops));
     }
 
@@ -6586,6 +6689,10 @@ impl OndinApp {
             .flatten()
             .collect();
         let ops = self.kept_in_place(ops, subjects);
+        self.session.name_step(
+            if on { "Centre" } else { "Uncentre" },
+            icon::CROSSHAIR_SIMPLE,
+        );
         self.commit_edit(Transaction(ops));
     }
 
@@ -6705,6 +6812,7 @@ impl OndinApp {
         }
         if flip && let Some(was) = set {
             let ops = self.inset_flip_ops(subjects, edge, matches!(was, LengthPct::Px(_)));
+            self.session.name_step("Position", icon::CROSSHAIR_SIMPLE);
             self.commit_edit(Transaction(ops));
             return;
         }
@@ -6718,7 +6826,7 @@ impl OndinApp {
             };
             self.typed_inset_ops(subjects, edge, value)
         };
-        self.edit_valve(&resp, Transaction(ops));
+        self.named_valve("Position", icon::CROSSHAIR_SIMPLE, &resp, Transaction(ops));
     }
 
     /// The unit suffix's edit: every subject's pinned `edge` converted to `%` of
@@ -6836,7 +6944,16 @@ impl OndinApp {
             })
             .collect();
         if !ops.is_empty() {
+            self.name_grid_step("Layout grid");
             self.commit_edit(Transaction(ops));
+        }
+    }
+
+    /// Name the next step after the Layout grid card, unless the door that got here
+    /// already named it more particularly.
+    fn name_grid_step(&mut self, label: &'static str) {
+        if !self.session.has_step_name() {
+            self.session.name_step(label, icon::GRID_FOUR);
         }
     }
 
@@ -6866,6 +6983,7 @@ impl OndinApp {
                 .collect(),
         );
         if !tx.0.is_empty() {
+            self.name_grid_step("Layout grid");
             self.commit_edit(tx);
         }
     }
@@ -6887,6 +7005,7 @@ impl OndinApp {
             })
             .collect();
         if !ops.is_empty() {
+            self.name_grid_step("Add layout grid");
             self.commit_edit(Transaction(ops));
         }
     }
@@ -7453,13 +7572,17 @@ impl OndinApp {
                                     let a = (pct / 100.0).clamp(0.0, 1.0);
                                     let tx = self
                                         .edit_paints_all(target, move |b| paint::with_alpha(b, a));
+                                    self.name_slot_step(slot);
                                     self.edit_valve(&resp, tx);
+                                    self.session.forget_step_name();
                                 }
                             }
                             _ if bound_alpha.is_some() => {
                                 let a = (pct / 100.0).clamp(0.0, 1.0);
                                 let tx = self.rebind_alpha_tx(id, slot, a);
+                                self.name_slot_step(slot);
                                 self.edit_valve(&resp, tx);
+                                self.session.forget_step_name();
                             }
                             _ => {
                                 let next = paint::with_alpha(brush, pct / 100.0);
@@ -8106,6 +8229,7 @@ impl OndinApp {
                         index,
                         |_, _| lit.into(),
                     );
+                    self.name_slot_step(slot);
                     self.commit_edit(tx);
                     return;
                 }
@@ -8116,6 +8240,7 @@ impl OndinApp {
                             rgb.with_alpha(typed_alpha.unwrap_or_else(|| paint::alpha_of(b))),
                         )
                     });
+                    self.name_slot_step(slot);
                     self.commit_edit(tx);
                     return;
                 }
@@ -8297,6 +8422,7 @@ impl OndinApp {
             _ => None,
         };
         if let (Some(effects), [one]) = (list, subjects) {
+            self.session.name_step("Effects", icon::SPARKLE);
             self.commit_edit(Transaction(vec![Operation::SetEffects {
                 id: *one,
                 effects,
@@ -8373,6 +8499,9 @@ impl OndinApp {
                 .collect(),
         );
         if !tx.0.is_empty() {
+            if !self.session.has_step_name() {
+                self.session.name_step("Effects", icon::SPARKLE);
+            }
             self.commit_edit(tx);
         }
     }
@@ -8445,7 +8574,7 @@ impl OndinApp {
         };
         edit(&mut entry.kind);
         let tx = self.effects_tx(subjects, &anchor_list, &effects, |_, _| {});
-        self.edit_valve(resp, tx);
+        self.named_valve("Effects", icon::SPARKLE, resp, tx);
     }
 
     /// `SetEffects` writing `edited` (an edit of `anchor`'s list) onto every subject,
@@ -8568,7 +8697,7 @@ impl OndinApp {
                     }
                 })
             };
-            self.edit_valve(&resp, tx);
+            self.named_valve("Effects", icon::SPARKLE, &resp, tx);
         }
         if let Some(k) = key {
             self.field_doors(ui, k, &resp);
@@ -9234,6 +9363,9 @@ impl OndinApp {
             .map(|id| Operation::RemoveGuide { id: *id })
             .collect();
         let n = ops.len();
+        if !self.session.has_step_name() {
+            self.session.name_step("Delete guide", icon::TRASH);
+        }
         // `commit_edit`, not `session.commit`: panels commit through it.
         if n > 0 && self.commit_edit(Transaction(ops)) {
             self.session.info(match n {
@@ -9441,6 +9573,7 @@ impl OndinApp {
         }
         // Cloned: the retarget below reads the brush after the commit.
         let tx = self.slot_transaction(id, slot, brush.clone());
+        self.name_slot_step(slot);
         self.commit_edit(tx);
         // The grid preview buffer ends with the commit, as `edit_valve` drops it
         // for a drag.
@@ -9482,9 +9615,12 @@ impl OndinApp {
             return resp.drag_stopped() || ui::defocus_commits(resp);
         }
         let tx = self.slot_transaction(id, slot, brush.clone());
+        self.name_slot_step(slot);
         // Asked of the valve, not predicted from the response: a prediction would
         // retarget on every keystroke of a typed colour.
         let committing = self.edit_valve(resp, tx);
+        // An idle frame's name must not wait for some other commit to take it.
+        self.session.forget_step_name();
         // A Group Colors row is keyed by the colour it replaces; once that commits,
         // the row and its picker move onto the new colour or the picker would close.
         if committing {
@@ -9493,6 +9629,37 @@ impl OndinApp {
         committing
     }
 
+    /// Name the next step after the card `slot` belongs to, unless the door that got
+    /// here already named it.
+    pub(crate) fn name_slot_step(&mut self, slot: PaintSlot) {
+        if self.session.has_step_name() {
+            return;
+        }
+        let (label, glyph) = match slot {
+            PaintSlot::Fill(_)
+            | PaintSlot::Selection(PaintTarget::Fill, _)
+            | PaintSlot::SelectionAll(PaintTarget::Fill) => ("Fill", icon::PAINT_BUCKET),
+            PaintSlot::Stroke(_)
+            | PaintSlot::Selection(PaintTarget::Stroke, _)
+            | PaintSlot::SelectionAll(PaintTarget::Stroke) => ("Stroke", icon::LINE_SEGMENT),
+            PaintSlot::Canvas => ("Canvas colour", icon::PAINT_BUCKET),
+            PaintSlot::Guide => ("Guide colour", icon::RULER),
+            PaintSlot::TextDecoration(super::paint::DecorationSide::Underline) => {
+                ("Underline colour", icon::TEXT_UNDERLINE)
+            }
+            PaintSlot::TextDecoration(super::paint::DecorationSide::Strikethrough) => {
+                ("Strikethrough colour", icon::TEXT_STRIKETHROUGH)
+            }
+            PaintSlot::TextColor => ("Text colour", icon::TEXT_T),
+            PaintSlot::GroupColor(_) | PaintSlot::GroupGradient(_) => {
+                ("Group colors", icon::PALETTE)
+            }
+            PaintSlot::Effect(_) => ("Effects", icon::SPARKLE),
+            PaintSlot::Grid(_) => ("Layout grid", icon::GRID_FOUR),
+            PaintSlot::VarCell(..) => ("Variable", icon::BRACKETS_CURLY),
+        };
+        self.session.name_step(label, glyph);
+    }
     /// Follow the picker onto whatever the edit just turned its slot into, so the
     /// click (`write_slot`) and the drag (`valve_slot`) cannot disagree.
     ///
@@ -9593,6 +9760,9 @@ impl OndinApp {
     }
     fn write_fill_list(&mut self, scope: PaintScope, fills: Vec<Keyed<Fill>>) {
         let anchor = self.fills_in_scope(scope);
+        if !self.session.has_step_name() {
+            self.session.name_step("Fill", icon::PAINT_BUCKET);
+        }
         self.write_paint_list(
             scope,
             fills,
@@ -9603,6 +9773,9 @@ impl OndinApp {
     }
     fn write_strokes(&mut self, scope: PaintScope, strokes: Vec<Keyed<Stroke>>) {
         let anchor = self.strokes_in_scope(scope);
+        if !self.session.has_step_name() {
+            self.session.name_step("Stroke", icon::LINE_SEGMENT);
+        }
         self.write_paint_list(
             scope,
             strokes,

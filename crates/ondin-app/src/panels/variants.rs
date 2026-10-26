@@ -810,6 +810,8 @@ impl OndinApp {
             };
             match edit(&mut cx) {
                 Ok(Some(tx)) if !tx.0.is_empty() => {
+                    self.session
+                        .name_step("Properties", icon::SLIDERS_HORIZONTAL);
                     self.commit_edit(tx);
                 }
                 Ok(_) => {}
@@ -1182,6 +1184,7 @@ impl OndinApp {
             if still
                 && let Some(tx) = variant::delete_value(&self.session.doc, p.set, p.prop, p.value)
             {
+                self.session.name_step("Delete value", icon::TRASH);
                 self.commit_edit(tx);
             }
         } else if cancel {
@@ -1267,6 +1270,7 @@ impl OndinApp {
             });
         }
         if let Some(tx) = out {
+            self.session.name_step("Variant", icon::DIAMOND);
             self.commit_edit(tx);
         }
         if let Some(o) = select {
@@ -1483,6 +1487,8 @@ impl OndinApp {
         if resp.clicked()
             && let Some(tx) = variant::set_shown(doc, &mut self.session.ids, root, !on)
         {
+            self.session
+                .name_step("Show properties on instances", icon::EYE);
             self.commit_edit(tx);
         }
     }
@@ -2054,6 +2060,7 @@ impl OndinApp {
             }
         }
         for tx in out.into_iter().filter(|t| !t.0.is_empty()) {
+            self.session.name_step("Property", icon::SLIDERS_HORIZONTAL);
             self.commit_edit(tx);
         }
         // While a swap list is open, the library's kits are read, so their mains
@@ -2123,6 +2130,7 @@ impl OndinApp {
             return;
         }
         ops.extend(swap);
+        self.session.name_step("Swap", icon::SWAP);
         if self.commit_edit(Transaction(ops))
             && let Some(doc) = self.session.doc.meta().id.clone()
         {
@@ -2521,6 +2529,7 @@ impl OndinApp {
             }
         });
         if let Some(tx) = out {
+            self.session.name_step("Bind property", icon::LINK_SIMPLE);
             self.commit_edit(tx);
         }
     }

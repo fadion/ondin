@@ -171,6 +171,7 @@ impl OndinApp {
             draft: false,
             mode: None,
         }]);
+        self.name_step_as(crate::menu::Item::NewPage);
         if !self.session.commit(tx) {
             return;
         }
@@ -217,6 +218,7 @@ impl OndinApp {
             id: page,
             name: name.to_string(),
         }]);
+        self.session.name_step("Rename page", icon::PENCIL_SIMPLE);
         match fold {
             Some(at) => self.session.commit_into_last(tx, at),
             None => self.session.commit(tx),
@@ -297,6 +299,7 @@ impl OndinApp {
                 });
             }
         }
+        self.name_step_as(crate::menu::Item::DuplicatePage);
         if self.session.commit(Transaction(ops)) {
             self.go_to_page(id);
             self.start_new_page_rename(id);
@@ -410,6 +413,7 @@ impl OndinApp {
         // The page above, or the one below for the first.
         let above = doc.pages()[index.saturating_sub(1).max(usize::from(index == 0))].id;
         let leaving = page == self.session.page;
+        self.name_step_as(crate::menu::Item::DeletePage);
         if self.session.commit(Transaction(ops)) {
             if leaving {
                 self.go_to_page(above);
@@ -427,6 +431,7 @@ impl OndinApp {
         let Some(draft) = self.session.doc.page(page).map(|p| p.draft) else {
             return;
         };
+        self.name_step_as(crate::menu::Item::PageDraft);
         if self
             .session
             .commit(Transaction(vec![Operation::SetPageDraft {
@@ -468,6 +473,7 @@ impl OndinApp {
         }
         let n = ids.len();
         let name = self.page_name(page);
+        self.name_step_as(crate::menu::Item::MoveToPage);
         if self.session.commit(Transaction(ops)) {
             self.session.selection.clear();
             self.session.info(match n {
@@ -726,6 +732,7 @@ impl OndinApp {
             // Removing the row first shifts every slot below it up one.
             let to = if slot > from { slot - 1 } else { slot };
             if to != from {
+                self.session.name_step("Move page", icon::ARROWS_DOWN_UP);
                 self.session.commit(Transaction(vec![Operation::MovePage {
                     id: page,
                     index: to,

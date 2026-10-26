@@ -604,6 +604,14 @@ pub mod icon {
     /// The path bar's *Offset* — the outline pushed out on every side. Not
     /// [`CORNERS_OUT`], which is *Zoom to fit*.
     pub const ARROWS_OUT_CARDINAL: &str = "\u{e0a4}";
+    /// A History row's *Resize*.
+    pub const ARROWS_OUT: &str = "\u{e0a2}";
+    /// A History row's *Fill*.
+    pub const PAINT_BUCKET: &str = "\u{e392}";
+    /// A History row's *Rename*.
+    pub const CURSOR_TEXT: &str = "\u{e7d8}";
+    /// A History row's mark for a step made over MCP.
+    pub const SPARKLE: &str = "\u{e6a2}";
     /// Every icon this module names, paired with its Phosphor name (lower-kebab).
     ///
     /// Rust cannot reflect over `pub const`s, so this is the one list the tests
@@ -782,6 +790,10 @@ pub mod icon {
         ("plugs-connected", PLUGS_CONNECTED),
         ("magic-wand", MAGIC_WAND),
         ("arrows-out-cardinal", ARROWS_OUT_CARDINAL),
+        ("arrows-out", ARROWS_OUT),
+        ("paint-bucket", PAINT_BUCKET),
+        ("cursor-text", CURSOR_TEXT),
+        ("sparkle", SPARKLE),
     ];
 }
 

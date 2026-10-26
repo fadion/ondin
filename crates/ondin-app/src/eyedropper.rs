@@ -284,6 +284,17 @@ impl OndinApp {
                 let Some((node, slot)) = self.picker.as_ref().map(|p| (p.node, p.slot)) else {
                     return;
                 };
+                use ondin_core::PaintTarget as T;
+                use paint::PaintSlot as S;
+                let label = match slot {
+                    S::Fill(_) | S::Selection(T::Fill, _) | S::SelectionAll(T::Fill) => "Fill",
+                    S::Stroke(_) | S::Selection(T::Stroke, _) | S::SelectionAll(T::Stroke) => {
+                        "Stroke"
+                    }
+                    _ => "Colour",
+                };
+                self.session
+                    .name_step(label, crate::theme::icon::EYEDROPPER);
                 self.write_slot_rgb(node, slot, color, None);
                 if !pick.stay
                     && let Some(p) = &mut self.picker
@@ -312,6 +323,9 @@ impl OndinApp {
                         |b| Brush::Solid(color.with_alpha(b.map_or(1.0, paint::alpha_of))),
                         &mut self.session.ids,
                     );
+                    let label = if pick.stroke { "Stroke" } else { "Fill" };
+                    self.session
+                        .name_step(label, crate::theme::icon::EYEDROPPER);
                     self.commit_edit(tx);
                     self.remember_colour(color);
                 }

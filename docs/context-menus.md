@@ -302,7 +302,7 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Show layout grid ✓ | — | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
-switches less *Show layers*, *Show toolbar*, *Show messages* and *Focus mode*. Every View
+switches less *Show layers*, *Show history*, *Show toolbar*, *Show messages* and *Focus mode*. Every View
 row is live in focus mode, which hides none of what they switch.
 
 ### 6.2 Layers panel background
@@ -400,7 +400,7 @@ Opened on a row of the layers pane's Pages section, without switching to that pa
 - **The four image fit modes** — image editing's card owns them.
 - **Text on path** — the Text tool's gesture; the menu has only the way out (*Detach from path*).
 - **Type controls in a text session** — the Type card is beside it.
-- **Show layers, Show toolbar, Focus mode, Show messages** on the canvas menu —
+- **Show layers, Show history, Show toolbar, Focus mode, Show messages** on the canvas menu —
   chrome-wide switches, one click away in the View menu.
 - **Collapse all / Expand all** — the layers panel header has the button.
 - **Guide colour and position** — the inspector, for a selected guide.

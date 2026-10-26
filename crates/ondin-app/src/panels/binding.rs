@@ -121,6 +121,34 @@ impl FieldKey {
         }
     }
 
+    /// The field's name as the undo history writes an edit of it.
+    pub(crate) fn step_name(self) -> &'static str {
+        use ondin_core::variable as v;
+        match self {
+            FieldKey::Paint { .. } => "Colour",
+            FieldKey::Radius { .. } | FieldKey::Corner { .. } => "Corner radius",
+            FieldKey::Spacing { slots, .. } if slots & (COLUMN_GAP | ROW_GAP) != 0 => "Gap",
+            FieldKey::Spacing { .. } => "Padding",
+            FieldKey::Visible { .. } => "Visibility",
+            FieldKey::Size { axis: 0, .. } => "Width",
+            FieldKey::Size { .. } => "Height",
+            FieldKey::Content { .. } => "Edit text",
+            FieldKey::Family { .. } => "Font",
+            FieldKey::Type { slot, .. } => match slot {
+                v::TEXT_SIZE => "Font size",
+                v::TEXT_WEIGHT => "Font weight",
+                v::TEXT_LINE_HEIGHT => "Line height",
+                v::TEXT_LETTER_SPACING => "Letter spacing",
+                v::TEXT_PARAGRAPH_SPACING => "Paragraph spacing",
+                _ => "Typography",
+            },
+            FieldKey::Limit { slot, .. } => LIMIT_LABELS.get(slot).copied().unwrap_or("Size limit"),
+            FieldKey::Opacity { .. } => "Opacity",
+            FieldKey::StrokeWidth { .. } => "Stroke weight",
+            FieldKey::EffectNumber { .. } => "Effects",
+        }
+    }
+
     /// The `variable::TextVars` slot a text field binds — `None` for any other.
     pub(crate) fn text_slot(self) -> Option<usize> {
         use ondin_core::variable::{TEXT_CONTENT, TEXT_FAMILY};
@@ -771,12 +799,15 @@ impl OndinApp {
         self.var_retype = None;
         self.session.clear_gesture_preview();
         let tx = self.bind_tx(key, var);
+        self.session.name_step("Bind variable", icon::LINK_SIMPLE);
         self.commit_edit(tx);
     }
 
     /// Detach `key`, which then reads the value it resolved to.
     pub(crate) fn detach_field(&mut self, key: FieldKey) {
         let tx = self.detach_tx(key);
+        self.session
+            .name_step("Detach variable", icon::LINK_SIMPLE_BREAK);
         self.commit_edit(tx);
     }
 
@@ -1271,6 +1302,8 @@ impl OndinApp {
         // built against the document as it stands; the commit judges the two
         // together.
         ops.extend(self.bind_tx(key, id).0);
+        self.session
+            .name_step("Create variable", icon::BRACKETS_CURLY);
         if self.commit_edit(Transaction(ops)) {
             if self.var_browser.is_none() {
                 self.toggle_var_browser();
@@ -1567,6 +1600,7 @@ impl OndinApp {
                     spans: Default::default(),
                     para_spans: Default::default(),
                 });
+                self.session.name_step("Edit text", icon::CURSOR_TEXT);
                 self.commit_edit(Transaction(ops));
             }
             return;
@@ -1771,6 +1805,7 @@ impl OndinApp {
                     | FieldKey::Content { .. }
                     | FieldKey::Family { .. } => return,
                 }
+                self.session.name_step(key.step_name(), "");
                 self.commit_edit(Transaction(ops));
             }
             return;
@@ -2018,6 +2053,8 @@ impl OndinApp {
         match target {
             FaceTarget::Field(key) => self.bind_field(key, var),
             FaceTarget::Cell(of, mode) => {
+                self.session
+                    .name_step("Variable value", icon::BRACKETS_CURLY);
                 self.commit_edit(Transaction(vec![Operation::SetVariableCell {
                     id: of,
                     mode,

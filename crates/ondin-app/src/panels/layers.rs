@@ -1136,6 +1136,7 @@ impl OndinApp {
                 && !name.is_empty()
                 && self.session.doc.get(id).is_some_and(|n| n.name() != name)
             {
+                self.session.name_step("Rename", icon::TEXT_AA);
                 self.session
                     .commit(Transaction(vec![Operation::SetName { id, name }]));
             }
@@ -1687,12 +1688,20 @@ impl OndinApp {
                         }
                     }
                     Some(RowHit::Eye) => {
+                        match visible {
+                            true => self.session.name_step("Hide", icon::EYE_SLASH),
+                            false => self.session.name_step("Show", icon::EYE),
+                        }
                         self.session.commit(Transaction(vec![Operation::SetVisible {
                             id,
                             visible: !visible,
                         }]));
                     }
                     Some(RowHit::Lock) => {
+                        match locked {
+                            true => self.session.name_step("Unlock", icon::LOCK_SIMPLE_OPEN),
+                            false => self.session.name_step("Lock", icon::LOCK_SIMPLE),
+                        }
                         self.session.commit(Transaction(vec![Operation::SetLocked {
                             id,
                             locked: !locked,
@@ -2092,6 +2101,7 @@ impl OndinApp {
         match plan_layer_move(&self.session.doc, &self.session.resolved, &moving, target) {
             Ok(plan) if plan.ops.is_empty() => {}
             Ok(plan) => {
+                self.session.name_step("Move", icon::ARROWS_OUT_CARDINAL);
                 if self.session.commit(Transaction(plan.ops)) {
                     self.session.info(match (plan.reparented, n) {
                         (true, 1) => "Moved layer".to_string(),

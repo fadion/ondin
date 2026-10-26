@@ -365,6 +365,7 @@ impl OndinApp {
                 corner_radii: Vec::new(),
             },
         }]);
+        self.session.name_step("Simplify", icon::MAGIC_WAND);
         if self.session.commit(tx) {
             // The anchors are new, so the old point references mean nothing.
             self.points.clear();
@@ -447,6 +448,7 @@ impl OndinApp {
             } else {
                 card.settle();
             }
+            self.session.name_step("Offset", icon::ARROWS_OUT_CARDINAL);
             if self.edit_valve(&resp, card.tx()) {
                 self.points.clear();
             }

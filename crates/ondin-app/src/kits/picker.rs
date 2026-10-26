@@ -939,6 +939,7 @@ impl OndinApp {
         if let Some(op) = centred(&self.session.doc, &tx, instance, centre) {
             tx.0.push(op);
         }
+        self.session.name_step("Insert component", icon::HEXAGON);
         if !self.session.commit(tx) {
             return;
         }

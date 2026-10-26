@@ -487,6 +487,7 @@ impl ViewState {
             ViewSwitch::LayoutGrid => Some(self.layout_grid),
             ViewSwitch::Outline => Some(self.outline),
             ViewSwitch::Layers
+            | ViewSwitch::History
             | ViewSwitch::Toolbar
             | ViewSwitch::StatusMessages
             | ViewSwitch::Focus
@@ -943,6 +944,7 @@ impl Item {
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
+                    | ViewSwitch::History
                     | ViewSwitch::Toolbar
                     | ViewSwitch::StatusMessages
                     | ViewSwitch::Focus
@@ -1355,6 +1357,47 @@ impl Item {
             Item::StepPage(next) => Action::StepPage(next),
             _ => return None,
         })
+    }
+
+    /// The name and glyph of the undo step `action` makes when it edits: its row's,
+    /// for an action a row stands for, and the keymap's own name for the chords no
+    /// row carries. `None` for an action that never edits the document.
+    pub fn step_name(action: crate::input::Action) -> Option<(&'static str, &'static str)> {
+        use crate::input::Action;
+        let item = match action {
+            Action::Paste | Action::PasteRelease => Item::PasteHere,
+            Action::PasteInPlace => Item::PasteInPlace,
+            Action::PasteToReplace => Item::PasteToReplace,
+            Action::PasteProperties => Item::PasteProperties,
+            Action::Cut => Item::Cut,
+            Action::Duplicate => Item::Duplicate,
+            Action::Delete => Item::Delete,
+            Action::Group => Item::Group,
+            Action::Ungroup => Item::Ungroup,
+            Action::FrameSelection => Item::FrameSelection,
+            Action::AddLayout => Item::AddLayout,
+            Action::CreateComponent => Item::CreateComponent,
+            Action::DetachInstance => Item::DetachInstance,
+            Action::Mask => Item::Mask,
+            Action::Boolean(op) => Item::Boolean(op),
+            Action::Flatten => Item::Flatten,
+            Action::ReverseSubpaths => Item::ReverseSubpaths,
+            Action::Restack(mv) => Item::Restack(mv),
+            Action::Flip(axis) => Item::Flip(axis),
+            Action::ToggleHidden => Item::ToggleHidden,
+            Action::ToggleLocked => Item::ToggleLocked,
+            Action::Align(axis, edge) => Item::Align(axis, edge),
+            Action::Distribute(axis) => Item::Distribute(axis),
+            Action::TidyUp => Item::TidyUp,
+            Action::RotateQuarter(clockwise) => Item::RotateQuarter(clockwise),
+            Action::TextStyle(chord) => Item::TextChord(chord),
+            Action::Nudge(_) => return Some(("Nudge", icon::ARROWS_OUT_CARDINAL)),
+            Action::SizeStep(_) => return Some(("Resize", icon::ARROWS_OUT)),
+            Action::OpacityDigit(_) => return Some(("Opacity", icon::DROP_HALF)),
+            _ => return None,
+        };
+        let spec = item.spec();
+        Some((spec.label, spec.glyph))
     }
 }
 
@@ -2807,6 +2850,9 @@ impl OndinApp {
             _ => None,
         };
         let in_text = matches!(target, Target::TextSession);
+        // The step this row makes, if it makes one, reads as the row does.
+        let spec = item.spec();
+        self.session.name_step(spec.label, spec.glyph);
         match item {
             // --- the text session's four, which act on the editor ----------
             // First and guarded: in a session these chords are the editor's
@@ -3919,6 +3965,7 @@ mod tests {
                 !matches!(
                     sw,
                     ViewSwitch::Layers
+                        | ViewSwitch::History
                         | ViewSwitch::Toolbar
                         | ViewSwitch::StatusMessages
                         | ViewSwitch::Focus
@@ -3931,7 +3978,7 @@ mod tests {
         assert_eq!(
             got.iter().map(|(sw, _, _)| *sw).collect::<Vec<_>>(),
             expected,
-            "the canvas menu's View rows are not the View menu's, less §6.1's four"
+            "the canvas menu's View rows are not the View menu's, less the chrome switches"
         );
         assert!(
             got.iter().all(|(_, enabled, _)| *enabled),

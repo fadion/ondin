@@ -29,19 +29,6 @@ reads true.
   the page's content and the viewport together, so the viewport box never leaves it. Click centres
   the canvas there, dragging the box pans live, scrolling zooms around the pointer, double-click zooms
   to fit; none of it is an edit. Present mode hides it; focus mode keeps it.
-- **Undo history panel** (design canvas, *Undo History*). A section at the foot of the layers pane,
-  *View › Show history*, off by default, no chord. One row per undo step, oldest first, under an
-  *Opened* row; a row reads `Move · Card +1`, names the page when its subjects are on another, marks
-  MCP steps with a sparkle (the tooltip names the client and tool) and the step on disk with *Saved*.
-  Clicking a row undoes or redoes to just after it in one go, following the last step's page; the
-  redo rows dim, and a new edit drops them. Hovering outlines the step's subjects on this page.
-  - **Steps carry a record.** `History` holds bare inverses today; each step gains the label its edit
-    gave when it was committed (the command's menu name, or the MCP tool's) and its origin. Labels
-    are not derived from the operations.
-  - **The divider** between Layers and History drags without the Pages section's cap at content
-    height, so either section can take the room. Folded, History's header drops to the pane's foot
-    and names the latest step. Its height and fold are prefs; focus mode hides it with the pane.
-  - History stays session-only and uncapped.
 - **PDF import.**
 - **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
   Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when

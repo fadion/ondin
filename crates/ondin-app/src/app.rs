@@ -509,6 +509,8 @@ pub struct OndinApp {
     /// The Pages section's own state (`crate::pages`): the row being renamed or
     /// dragged, and the page the frame last showed.
     pub(crate) pages: crate::pages::PagesState,
+    /// The History section's own state (`crate::panels::history`).
+    pub(crate) history_pane: crate::panels::history::HistoryState,
     /// Whether the panel's drag edge is lit, and since when.
     pub(crate) layers_edge: EdgeDwell,
     /// Set when the window manager asked to close and there are unsaved edits.
@@ -792,6 +794,8 @@ pub struct OndinApp {
     /// *View ▸ Show layers* and *Show toolbar*: whether the left pane and the tool rail
     /// are on screen.
     pub(crate) show_layers: bool,
+    /// *View ▸ Show history*: the History section at the layers pane's foot.
+    pub(crate) show_history: bool,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1258,6 +1262,7 @@ impl OndinApp {
             opacity_entry: None,
             renaming_layer: None,
             pages: Default::default(),
+            history_pane: Default::default(),
             layers_synced_selection: Vec::new(),
             scroll_layers_to_selection: false,
             opening: None,
@@ -1331,6 +1336,7 @@ impl OndinApp {
             show_layout_grids: view.layout_grids,
             outline_view: false,
             show_layers: view.layers,
+            show_history: view.history,
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -1440,6 +1446,8 @@ impl eframe::App for OndinApp {
         let ctx = ui.ctx().clone();
         // First: this frame's status writes join one another, not the last frame's.
         self.session.next_status_pass();
+        self.session.forget_step_name();
+        self.history_pane.hover.clear();
         self.remember_view_switches();
 
         // Before any card: the editor's centre on the canvas, as the palette does.
@@ -1731,6 +1739,29 @@ impl OndinApp {
         }
     }
 
+    /// A History row's click: [`EditorSession::jump_to`] the step with this serial
+    /// (`None`: the document as opened), with what an undo drops.
+    ///
+    /// The step is found after the text session finishes, since that commit drops the
+    /// redo rows and adds one; a row it dropped jumps nowhere.
+    pub(crate) fn jump_history(&mut self, serial: Option<u64>) {
+        self.finish_text_first();
+        let history = &self.session.history;
+        let depth = match serial {
+            None => Some(0),
+            Some(s) => history
+                .done()
+                .chain(history.undone())
+                .position(|v| v.serial == s)
+                .map(|i| i + 1),
+        };
+        if let Some(depth) = depth
+            && self.session.jump_to(depth)
+        {
+            self.document_rewound();
+        }
+    }
+
     /// The document just moved under us (undo or redo). Drop the app-side state that
     /// names parts of it by index, and park or drop a cut's move (a claim about one point
     /// in the history).
@@ -1782,6 +1813,12 @@ impl OndinApp {
     }
 
     pub(crate) fn dispatch(&mut self, ctx: &egui::Context, action: Action) {
+        // A menu row that forwards here has already named its step, more particularly.
+        if !self.session.has_step_name()
+            && let Some((label, glyph)) = crate::menu::Item::step_name(action)
+        {
+            self.session.name_step(label, glyph);
+        }
         match action {
             // The arms that act on the whole document finish a live text session first,
             // or its buffer and `session.doc` disagree (Save would pin a version without
@@ -2065,6 +2102,7 @@ impl OndinApp {
             return;
         }
         self.opacity_entry = None;
+        self.session.name_step("Opacity", icon::DROP_HALF);
         // `entry.subject`, not the live selection, which may have moved.
         self.set_opacity_pct_on(&entry.subject, opacity_of_digit(entry.first), true);
     }
@@ -2706,6 +2744,7 @@ impl OndinApp {
             &ids,
         ) {
             Ok((tx, group_id)) => {
+                self.name_step_as(crate::menu::Item::Group);
                 if self.session.commit(tx) {
                     self.finish_grouping(group_id);
                 }
@@ -2764,6 +2803,7 @@ impl OndinApp {
             if ops.is_empty() {
                 self.session.info("Already laid out");
             } else {
+                self.name_step_as(crate::menu::Item::AddLayout);
                 self.commit_edit(Transaction(ops));
             }
             return;
@@ -2781,6 +2821,7 @@ impl OndinApp {
         let mut laid = res.clone();
         laid.update(&after, &outcome.dirty);
         tx.0.extend(build::flex_from_placement(&after, &laid, frame).unwrap_or_default());
+        self.name_step_as(crate::menu::Item::AddLayout);
         if self.commit_edit(tx) {
             self.session.selection.set_one(frame);
         }
@@ -2872,6 +2913,7 @@ impl OndinApp {
             .filter_map(|r| ondin_core::component::detach(doc, *r))
             .flat_map(|tx| tx.0)
             .collect();
+        self.name_step_as(crate::menu::Item::DetachInstance);
         self.session.commit(Transaction(ops));
     }
 
@@ -2964,6 +3006,7 @@ impl OndinApp {
             step,
             ondin_core::component::MainCopy::NewMain,
         );
+        self.name_step_as(crate::menu::Item::DuplicateAsComponent);
         if self.session.commit(tx) && !created.is_empty() {
             self.session.info("Duplicated as a new component");
             self.session.selection.set(created);
@@ -3058,6 +3101,7 @@ impl OndinApp {
             &mains,
         ) {
             Ok((tx, set)) => {
+                self.name_step_as(crate::menu::Item::CombineAsVariants);
                 if self.session.commit(tx) {
                     self.session.selection.set_one(set);
                     let name = self
@@ -3102,6 +3146,7 @@ impl OndinApp {
             self.session.info("This set has no variant to copy");
             return;
         };
+        self.name_step_as(crate::menu::Item::AddVariant);
         if self.session.commit(tx) {
             self.session.selection.set_one(new);
         }
@@ -3253,6 +3298,7 @@ impl OndinApp {
                 return;
             }
         };
+        self.name_step_as(crate::menu::Item::Ungroup);
         if !self.session.commit(tx) {
             return;
         }
@@ -5523,6 +5569,7 @@ impl OndinApp {
             });
         }
         ops.extend(self.slot_transaction(id, slot, next).0);
+        self.session.name_step("Replace image", icon::IMAGE);
         if self.commit_edit(Transaction(ops)) {
             let said = self.replaced_status(image.label(), None);
             self.session.info(said);
@@ -5745,6 +5792,9 @@ impl OndinApp {
             }
         }
         let placed = made.len();
+        if !self.session.has_step_name() {
+            self.session.name_step("Place image", icon::IMAGE);
+        }
         if placed == 0 || !self.session.commit(Transaction(ops)) {
             self.session.fail("Could not place the images");
             return;
@@ -5791,6 +5841,9 @@ impl OndinApp {
             });
         }
         ops.push(Operation::SetFills { id, fills });
+        if !self.session.has_step_name() {
+            self.session.name_step("Replace image", icon::IMAGE);
+        }
         if !self.commit_edit(Transaction(ops)) {
             return None;
         }
@@ -6676,6 +6729,7 @@ impl OndinApp {
             grid: self.show_grid,
             layout_grids: self.show_layout_grids,
             layers: self.show_layers,
+            history: self.show_history,
             toolbar: self.show_toolbar,
             status: self.show_status,
             snap_shapes: self.snap_shapes,
@@ -6699,6 +6753,7 @@ impl OndinApp {
             ViewSwitch::LayoutGrid => self.show_layout_grids,
             ViewSwitch::Outline => self.outline_view,
             ViewSwitch::Layers => self.show_layers,
+            ViewSwitch::History => self.show_history,
             ViewSwitch::Toolbar => self.show_toolbar,
             ViewSwitch::StatusMessages => self.show_status,
             ViewSwitch::Focus => self.focus,
@@ -6723,6 +6778,11 @@ impl OndinApp {
             ViewSwitch::LayoutGrid => self.show_layout_grids = on,
             ViewSwitch::Outline => self.outline_view = on,
             ViewSwitch::Layers => self.show_layers = on,
+            ViewSwitch::History => {
+                self.show_history = on;
+                // History lives in the layers pane, so showing it shows the pane.
+                self.show_layers |= on;
+            }
             ViewSwitch::Toolbar => self.show_toolbar = on,
             ViewSwitch::StatusMessages => {
                 self.show_status = on;
@@ -7050,6 +7110,11 @@ impl OndinApp {
                 // The retune is for the edge only, or the content's text would go accent-blue.
                 ui.set_style(inner_style);
                 ui.set_min_width(ui.available_width());
+                // History docks at the foot before anything else is laid out, so
+                // the sections above share what it leaves.
+                if self.show_history {
+                    self.history_section(ui);
+                }
                 // Pages first: the tree below is the current page's.
                 self.pages_section(ui);
                 // Folded, the pane keeps its width and shows no layer names, for
@@ -7143,6 +7208,8 @@ impl OndinApp {
                             }
                         }
                     });
+                // What History's divider may not cover: Layers keeps its header.
+                self.history_pane.head_bottom = ui.cursor().top();
 
                 if folded {
                     return;
@@ -7431,6 +7498,15 @@ impl OndinApp {
         self.session.commit(tx)
     }
 
+    /// Name the next undo step as `item`'s menu row names it, unless the door that
+    /// got here already named it — for a verb that buttons as well as menus reach.
+    pub(crate) fn name_step_as(&mut self, item: crate::menu::Item) {
+        if !self.session.has_step_name() {
+            let spec = item.spec();
+            self.session.name_step(spec.label, spec.glyph);
+        }
+    }
+
     /// Route an inspector edit through the preview→commit valve: live preview while the
     /// control is held, **one** commit when the edit ends.
     ///
@@ -7674,11 +7750,12 @@ mod tests {
     /// widening the scan would self-match.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 14] = [
+        let panels: [(&str, &str); 15] = [
             ("binding.rs", include_str!("panels/binding.rs")),
             ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
+            ("history.rs", include_str!("panels/history.rs")),
             ("inspector.rs", include_str!("panels/inspector.rs")),
             ("layers.rs", include_str!("panels/layers.rs")),
             ("layout.rs", include_str!("panels/layout.rs")),

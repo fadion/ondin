@@ -1409,6 +1409,8 @@ impl OndinApp {
                     color: None,
                     owner: d.owner,
                 };
+                self.session
+                    .name_step("Add guide", crate::theme::icon::RULER);
                 if self
                     .session
                     .commit(Transaction(vec![Operation::AddGuide { guide }]))
@@ -1439,6 +1441,8 @@ impl OndinApp {
                     color: from.color,
                     owner: d.owner,
                 };
+                self.session
+                    .name_step("Duplicate guide", crate::theme::icon::COPY);
                 if self
                     .session
                     .commit(Transaction(vec![Operation::AddGuide { guide }]))
@@ -1463,6 +1467,8 @@ impl OndinApp {
                 // One op, not two: the position is read in the owner's space, so
                 // two ops would pass through a state where the number means
                 // something else (`Operation::SetGuideScope`).
+                self.session
+                    .name_step("Move guide", crate::theme::icon::RULER);
                 self.session
                     .commit(Transaction(vec![Operation::SetGuideScope {
                         id,
@@ -1517,6 +1523,7 @@ impl OndinApp {
     /// Delete one guide. Shared by the Delete key, the drag-back-to-the-ruler
     /// gesture, and the inspector's own Remove.
     pub(crate) fn remove_guide(&mut self, id: GuideId) {
+        self.name_step_as(crate::menu::Item::DeleteGuide);
         if self
             .session
             .commit(Transaction(vec![Operation::RemoveGuide { id }]))
@@ -1532,6 +1539,7 @@ impl OndinApp {
             .map(|g| Operation::RemoveGuide { id: g.id })
             .collect();
         let n = ops.len();
+        self.name_step_as(crate::menu::Item::ClearGuides);
         if n > 0 && self.session.commit(Transaction(ops)) {
             self.session.info(format!("Removed {n} guide(s)"));
         }

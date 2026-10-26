@@ -1491,6 +1491,8 @@ impl OndinApp {
             let tx = self.edit_paints_all(target, move |b| {
                 Brush::Solid(rgb.with_alpha(alpha.unwrap_or_else(|| paint::alpha_of(b))))
             });
+            self.session
+                .name_step(paint_step_name(target), icon::PAINT_BUCKET);
             self.commit_edit(tx);
             return;
         }
@@ -1635,6 +1637,8 @@ impl OndinApp {
                 let tx = self.edit_paints_all(target, move |b| {
                     Brush::Solid(col.with_alpha(paint::alpha_of(b)))
                 });
+                self.session
+                    .name_step(paint_step_name(target), icon::PAINT_BUCKET);
                 self.commit_edit(tx);
                 if let Some(p) = &mut self.picker {
                     p.hex = None;
@@ -1805,6 +1809,14 @@ pub(super) fn stop_colours(brush: &Brush) -> Vec<(f32, egui::Color32)> {
         .into_iter()
         .map(|(off, c)| (off, color_to_egui(c)))
         .collect()
+}
+
+/// The undo-history name of a paint edit over a selection's shared list.
+fn paint_step_name(target: ondin_core::PaintTarget) -> &'static str {
+    match target {
+        ondin_core::PaintTarget::Fill => "Fill",
+        ondin_core::PaintTarget::Stroke => "Stroke",
+    }
 }
 #[cfg(test)]
 mod tests {

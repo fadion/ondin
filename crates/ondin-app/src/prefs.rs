@@ -31,7 +31,8 @@ pub struct ExportPreset {
 /// The View and Snap menus' switches as last set, so a launch opens on them.
 /// Focus mode is not here: it is a mode a launch should never open in.
 ///
-/// Container-level `#[serde(default)]`, as on [`Prefs`]: a missing key is on.
+/// Container-level `#[serde(default)]`, as on [`Prefs`]: a missing key takes
+/// `Default`'s value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewPrefs {
@@ -41,6 +42,7 @@ pub struct ViewPrefs {
     pub grid: bool,
     pub layout_grids: bool,
     pub layers: bool,
+    pub history: bool,
     pub toolbar: bool,
     pub status: bool,
     pub snap_shapes: bool,
@@ -50,7 +52,7 @@ pub struct ViewPrefs {
 }
 
 impl Default for ViewPrefs {
-    /// Every switch on but the guide lock.
+    /// Every switch on but the guide lock and History.
     fn default() -> Self {
         Self {
             rulers: true,
@@ -59,6 +61,7 @@ impl Default for ViewPrefs {
             grid: true,
             layout_grids: true,
             layers: true,
+            history: false,
             toolbar: true,
             status: true,
             snap_shapes: true,
@@ -143,6 +146,12 @@ pub struct Prefs {
     /// How tall the Pages section's list was dragged to, in points; `None` fits
     /// up to six rows.
     pub pages_height: Option<f32>,
+    /// Whether the layers pane's History section is folded to its header
+    /// (`crate::panels::history`).
+    pub history_folded: bool,
+    /// How tall the History section is, header included, in points, as its
+    /// divider was dragged; `None` for the default.
+    pub history_height: Option<f32>,
     /// Where the library lives, or `None` for `~/.ondin` (`crate::library::root`).
     ///
     /// The one preference whose loss is not cosmetic: lose it and the app opens
@@ -254,6 +263,8 @@ impl Default for Prefs {
             pages_folded: false,
             layers_folded: false,
             pages_height: None,
+            history_folded: false,
+            history_height: None,
             // `0` seconds would be autosave off, `0` days would empty the trash
             // on every delete, `false` would turn version history off, and empty
             // strings would be nav and sort ids matching nothing.

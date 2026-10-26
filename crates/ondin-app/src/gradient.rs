@@ -16,7 +16,7 @@ use crate::app::OndinApp;
 use crate::input::Mode;
 use crate::panels::paint::{self, PaintKind, PaintSlot};
 use crate::preview::Drag;
-use crate::theme::color;
+use crate::theme::{color, icon};
 use crate::ui::color_to_egui;
 use eframe::egui;
 use ondin_core::kurbo::{Affine, Point, Rect, Vec2};
@@ -336,6 +336,7 @@ impl OndinApp {
             .iter()
             .position(|s| s.0 == t)
             .unwrap_or(0);
+        self.session.name_step("Add stop", icon::PLUS);
         self.write_slot(m.id, m.slot, next);
         self.select_gradient_stop(index);
         true
@@ -365,6 +366,7 @@ impl OndinApp {
         {
             stops.remove(i);
             let last = stops.len() - 1;
+            self.session.name_step("Remove stop", icon::X);
             self.write_slot(m.id, m.slot, paint::with_stops(&m.brush, stops));
             let keep = self.gradient_stop().min(last);
             self.select_gradient_stop(keep);
@@ -520,6 +522,7 @@ impl OndinApp {
     ) {
         let (rect, ppp) = (self.canvas_rect, self.canvas_ppp);
         let (next, index) = self.gradient_drag_brush(grab, from, world, shift, rect, ppp);
+        self.session.name_step("Gradient", icon::PAINT_BUCKET);
         self.write_slot(id, slot, next);
         if let Some(i) = index {
             self.select_gradient_stop(i);

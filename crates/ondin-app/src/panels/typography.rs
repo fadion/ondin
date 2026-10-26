@@ -1154,6 +1154,7 @@ impl OndinApp {
             }
             let removed = old.len() - head - tail;
             let inserted = new.len() - head - tail;
+            self.session.name_step("Edit text", icon::CURSOR_TEXT);
             self.commit_edit(Transaction(vec![Operation::SetText {
                 id,
                 content: text,
@@ -1900,6 +1901,7 @@ impl OndinApp {
                     })
                     .collect();
                 if !ops.is_empty() {
+                    self.session.name_step("Text align", icon::TEXT_ALIGN_LEFT);
                     self.commit_edit(Transaction(ops));
                 }
             } else if let Some(i) = pick
@@ -1907,6 +1909,7 @@ impl OndinApp {
             {
                 let mut next = subject.paragraph.clone();
                 next.align = TextAlign::OFFERED[i];
+                self.session.name_step("Text align", icon::TEXT_ALIGN_LEFT);
                 self.commit_paragraph(subject.id, next);
             }
             let valign = subject.block.vertical_align;
@@ -1951,6 +1954,8 @@ impl OndinApp {
                         })
                         .collect();
                     if !ops.is_empty() {
+                        self.session
+                            .name_step("Vertical align", icon::ALIGN_CENTER_VERTICAL);
                         self.commit_edit(Transaction(ops));
                     }
                 } else if let Some(i) = pick
@@ -1960,6 +1965,8 @@ impl OndinApp {
                         vertical_align: VerticalAlign::ALL[i],
                         ..subject.block
                     };
+                    self.session
+                        .name_step("Vertical align", icon::ALIGN_CENTER_VERTICAL);
                     self.commit_block(subject.id, next);
                 }
             });
@@ -3307,6 +3314,8 @@ impl OndinApp {
                         })
                         && JustifyLast::ALL[i] != p.justify_last
                     {
+                        self.session
+                            .name_step("Last line", icon::TEXT_ALIGN_JUSTIFY);
                         self.commit_paragraph(
                             subject.id,
                             ParagraphStyle {
@@ -3343,6 +3352,7 @@ impl OndinApp {
                     })
                     && TextDirection::ALL[i] != p.direction
                 {
+                    self.session.name_step("Text direction", icon::PARAGRAPH);
                     self.commit_paragraph(
                         subject.id,
                         ParagraphStyle {
@@ -3402,6 +3412,7 @@ impl OndinApp {
             .preview_text_layout(id)
             .map(|l| l.size)
             .unwrap_or(Size::new(200.0, 60.0));
+        self.session.name_step("Sizing", icon::ARROWS_OUT);
         self.commit_edit(Transaction(vec![Operation::SetGeometry {
             id,
             geometry: GeometryPatch::TextSizing(sizing.to_cell(i, shaped)),
@@ -3448,6 +3459,7 @@ impl OndinApp {
                     })
                     && BoxTrim::ALL[i] != b.trim
                 {
+                    self.session.name_step("Box trim", icon::BOUNDING_BOX);
                     self.commit_trim(
                         subject.id,
                         BlockStyle {
@@ -3480,6 +3492,7 @@ impl OndinApp {
                 segment_label(p, rect, TextOverflow::ALL[i].label(), on)
             }) && TextOverflow::ALL[i] != b.overflow
             {
+                self.session.name_step("Overflow", icon::TEXT_T);
                 self.commit_block(
                     subject.id,
                     BlockStyle {
@@ -3523,6 +3536,7 @@ impl OndinApp {
                 max_lines: lines.round().clamp(0.0, f64::from(MAX_LINE_LIMIT)) as u32,
                 ..b
             };
+            self.session.name_step("Max lines", icon::LIST_NUMBERS);
             self.edit_valve(
                 &resp,
                 Transaction(vec![Operation::SetBlockStyle {
@@ -3585,6 +3599,7 @@ impl OndinApp {
                 segment_label(painter, rect, WrapMode::ALL[i].label(), on)
             }) && WrapMode::ALL[i] != p.wrap
             {
+                self.session.name_step("Wrap", icon::PARAGRAPH);
                 self.commit_paragraph(
                     subject.id,
                     ParagraphStyle {
@@ -3611,6 +3626,7 @@ impl OndinApp {
                         })
                         && WordBreak::ALL[i] != p.word_break
                     {
+                        self.session.name_step("Word break", icon::PARAGRAPH);
                         self.commit_paragraph(
                             subject.id,
                             ParagraphStyle {
@@ -3634,6 +3650,7 @@ impl OndinApp {
                         })
                         && OverflowWrap::ALL[i] != p.overflow_wrap
                     {
+                        self.session.name_step("Long words", icon::PARAGRAPH);
                         self.commit_paragraph(
                             subject.id,
                             ParagraphStyle {
@@ -3689,6 +3706,7 @@ impl OndinApp {
                 mark.is_some(),
             );
             if resp.clicked() {
+                self.session.name_step("Optical margins", icon::TEXT_INDENT);
                 self.commit_paragraph(
                     subject.id,
                     ParagraphStyle {
@@ -3848,6 +3866,7 @@ impl OndinApp {
         // The edit in flight between the last keystroke and the committing frame;
         // no test needs it, but the valve must not depend on when egui writes back.
 
+        let (step, glyph) = char_step_name(&attr);
         let pending_key = resp.id.with("char-valve-pending");
         let (tx, changes) = char_attrs_tx(subject, vec![attr.clone()]);
         let tx = if changes {
@@ -3871,6 +3890,7 @@ impl OndinApp {
         } else if was_engaged {
             // `Escape` abandons a typed value; egui merely surrenders focus.
             if !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.session.name_step(step, glyph);
                 self.commit_edit(tx.clone());
                 self.text_session_restyled_after(&tx);
             }
@@ -4012,8 +4032,12 @@ impl OndinApp {
         }
         // No preview is in play here, so equality is the right question: a no-op
         // click must leave no undo step.
+        let step = attrs.first().map(char_step_name);
         let (tx, changes) = char_attrs_tx(subject, attrs);
         if changes {
+            if let Some((label, glyph)) = step {
+                self.session.name_step(label, glyph);
+            }
             self.commit_edit(tx.clone());
             // A session on a bare caret reaches here, so the editor must adopt the
             // cleared span list.
@@ -4033,6 +4057,7 @@ impl OndinApp {
             self.apply_char_attrs(subject, each(subject));
             return;
         }
+        let step = each(subject).first().map(char_step_name);
         let mut tx = Transaction(Vec::new());
         let mut changes = false;
         for m in std::iter::once(subject).chain(&subject.others) {
@@ -4041,6 +4066,9 @@ impl OndinApp {
             changes |= moved;
         }
         if changes {
+            if let Some((label, glyph)) = step {
+                self.session.name_step(label, glyph);
+            }
             self.commit_edit(tx);
         }
     }
@@ -4153,8 +4181,12 @@ impl OndinApp {
             self.preview_session();
             return;
         }
+        let step = attrs.first().map(para_step_name);
         let (tx, changes) = para_attrs_tx(subject, attrs);
         if changes {
+            if let Some((label, glyph)) = step {
+                self.session.name_step(label, glyph);
+            }
             self.commit_edit(tx);
             self.text_session_restyled();
         }
@@ -4173,6 +4205,8 @@ impl OndinApp {
             }
             return;
         }
+        let (label, glyph) = para_step_name(&attr);
+        self.session.name_step(label, glyph);
         let (tx, _) = para_attrs_tx(subject, vec![attr]);
         self.edit_valve(resp, tx);
         self.text_session_restyled();
@@ -4191,6 +4225,40 @@ impl OndinApp {
         if self.commit_chrome_edit(Transaction(vec![Operation::SetBlockStyle { id, block }])) {
             self.text_session_restyled();
         }
+    }
+}
+
+/// The undo-history name of a character attribute's edit: its field's name and glyph.
+fn char_step_name(attr: &CharAttr) -> (&'static str, &'static str) {
+    match attr {
+        CharAttr::Family(_) => ("Font", icon::TEXT_AA),
+        CharAttr::Size(_) => ("Font size", icon::TEXT_T),
+        CharAttr::Weight(_) => ("Font weight", icon::TEXT_BOLD),
+        CharAttr::Italic(_) => ("Italic", icon::TEXT_ITALIC),
+        CharAttr::Variations(_) => ("Axes", icon::SLIDERS_HORIZONTAL),
+        CharAttr::Features(_) => ("OpenType", icon::TEXT_AA),
+        CharAttr::Locale(_) => ("Language", icon::TRANSLATE),
+        CharAttr::LineHeight(_) => ("Line height", icon::ARROWS_VERTICAL),
+        CharAttr::LetterSpacing(_) => ("Letter spacing", icon::ARROWS_HORIZONTAL),
+        CharAttr::WordSpacing(_) => ("Word spacing", icon::ARROWS_HORIZONTAL),
+        CharAttr::Underline(_) => ("Underline", icon::TEXT_UNDERLINE),
+        CharAttr::Strikethrough(_) => ("Strikethrough", icon::TEXT_STRIKETHROUGH),
+        CharAttr::Case(_) => ("Case", icon::TEXT_AA),
+        CharAttr::BaselineShift(_) => ("Baseline shift", icon::TEXT_SUPERSCRIPT),
+        CharAttr::Color(_) => ("Text colour", icon::PAINT_BUCKET),
+    }
+}
+
+/// [`char_step_name`] for a paragraph attribute.
+fn para_step_name(attr: &ParaAttr) -> (&'static str, &'static str) {
+    match attr {
+        ParaAttr::Spacing(_) => ("Paragraph spacing", icon::PARAGRAPH),
+        ParaAttr::Indent(_) | ParaAttr::IndentStart(_) | ParaAttr::IndentEnd(_) => {
+            ("Indent", icon::TEXT_INDENT)
+        }
+        ParaAttr::Hanging(_) => ("Hanging indent", icon::TEXT_OUTDENT),
+        ParaAttr::Marker(_) => ("List", icon::LIST_DASHES),
+        ParaAttr::Level(_) => ("List level", icon::TEXT_INDENT),
     }
 }
 

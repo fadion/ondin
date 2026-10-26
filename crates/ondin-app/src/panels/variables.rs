@@ -1006,6 +1006,7 @@ impl OndinApp {
                     let changed = st.name != text;
                     self.var_edit_done();
                     if changed {
+                        self.session.name_step("Rename style", icon::PENCIL_SIMPLE);
                         self.commit_edit(Transaction(vec![Operation::SetStyleName {
                             id,
                             name: text,
@@ -1029,6 +1030,7 @@ impl OndinApp {
                     Ok(ops) => {
                         self.var_edit_done();
                         if !ops.is_empty() {
+                            self.session.name_step("Rename group", icon::PENCIL_SIMPLE);
                             self.commit_edit(Transaction(ops));
                         }
                     }
@@ -1042,6 +1044,7 @@ impl OndinApp {
                 let same = op.changes_nothing(doc);
                 self.var_edit_done();
                 if !same {
+                    self.session.name_step("Description", icon::PENCIL_SIMPLE);
                     self.commit_edit(Transaction(vec![op]));
                 }
             }
@@ -1064,6 +1067,7 @@ impl OndinApp {
                 let n = who.len();
                 let tx = Transaction(sty::remove_ops(doc, &ids));
                 // No confirmation; the status says it, and one undo restores (D1038 (6)).
+                self.session.name_step("Delete style", icon::TRASH);
                 if self.commit_edit(tx) {
                     self.session.info(match n {
                         0 => format!("Deleted {name}"),
@@ -1108,6 +1112,7 @@ impl OndinApp {
                     Some(m) => km.map.insert(mode, m),
                     None => km.map.remove(&mode),
                 };
+                self.session.name_step("Kit mode", icon::PACKAGE);
                 self.commit_edit(Transaction(vec![Operation::SetKitModes {
                     kit,
                     modes: Some(km),
@@ -1184,6 +1189,7 @@ impl OndinApp {
                         description: String::new(),
                     },
                 });
+                self.session.name_step("New variable", icon::BRACKETS_CURLY);
                 if self.commit_edit(Transaction(ops))
                     && let Some(b) = self.var_browser.as_mut()
                 {
@@ -1209,6 +1215,7 @@ impl OndinApp {
                         cells: vec![],
                     }],
                 };
+                self.session.name_step("New mode", icon::PLUS);
                 if !ops.is_empty()
                     && self.commit_edit(Transaction(ops))
                     && let Some(b) = self.var_browser.as_mut()
@@ -1223,6 +1230,7 @@ impl OndinApp {
             Act::MoveMode(mode, to) => {
                 let ops = var::move_mode_ops(doc, mode, to);
                 if !ops.is_empty() {
+                    self.session.name_step("Move mode", icon::ARROWS_LEFT_RIGHT);
                     self.commit_edit(Transaction(ops));
                 }
             }
@@ -1240,6 +1248,7 @@ impl OndinApp {
                 let id = self.session.ids.mint_mode();
                 let ops = var::copy_mode_ops(doc, from, id, &name, index + 1);
                 if !ops.is_empty() {
+                    self.session.name_step("Duplicate mode", icon::COPY);
                     self.commit_edit(Transaction(ops));
                 }
             }
@@ -1251,6 +1260,8 @@ impl OndinApp {
                         let changed = table.get(id).is_some_and(|v| v.name != text);
                         self.var_edit_done();
                         if changed {
+                            self.session
+                                .name_step("Rename variable", icon::PENCIL_SIMPLE);
                             self.commit_edit(Transaction(vec![Operation::SetVariableName {
                                 id,
                                 name: text,
@@ -1270,6 +1281,7 @@ impl OndinApp {
                     let ops = var::rename_mode_ops(doc, id, &text);
                     self.var_edit_done();
                     if !ops.is_empty() {
+                        self.session.name_step("Rename mode", icon::PENCIL_SIMPLE);
                         self.commit_edit(Transaction(ops));
                     }
                 }
@@ -1289,6 +1301,7 @@ impl OndinApp {
                     Ok(ops) => {
                         self.var_edit_done();
                         if !ops.is_empty() {
+                            self.session.name_step("Rename group", icon::PENCIL_SIMPLE);
                             self.commit_edit(Transaction(ops));
                         }
                     }
@@ -1321,6 +1334,7 @@ impl OndinApp {
                     name,
                     ..v.clone()
                 };
+                self.session.name_step("Duplicate variable", icon::COPY);
                 self.commit_edit(Transaction(vec![Operation::AddVariable { var: copy }]));
             }
             Act::Delete(ids, label) => {
@@ -1343,6 +1357,7 @@ impl OndinApp {
                     _ => None,
                 };
                 let tx = Transaction(var::remove_ops(doc, &ids));
+                self.session.name_step("Delete variable", icon::TRASH);
                 if self.commit_edit(tx) {
                     let n = layers.len();
                     let said = match (n, value) {
@@ -1360,6 +1375,7 @@ impl OndinApp {
             Act::DeleteMode(mode) => {
                 let name = table.mode(mode).map(|m| m.name.clone()).unwrap_or_default();
                 let tx = Transaction(var::remove_mode_ops(doc, mode));
+                self.session.name_step("Delete mode", icon::TRASH);
                 if self.commit_edit(tx) {
                     self.session.info(format!("Deleted mode {name}"));
                 }
@@ -1381,7 +1397,12 @@ impl OndinApp {
             }
         };
         self.var_edit_done();
-        same || self.commit_edit(Transaction(vec![Operation::SetVariableCell {
+        if same {
+            return true;
+        }
+        self.session
+            .name_step("Variable value", icon::BRACKETS_CURLY);
+        self.commit_edit(Transaction(vec![Operation::SetVariableCell {
             id,
             mode,
             cell,
@@ -3321,6 +3342,7 @@ impl OndinApp {
         if let Some(mode) = pick {
             self.mode_menu = None;
             if mode != current {
+                self.session.name_step("Mode", icon::COLUMNS);
                 self.commit_edit(Transaction(vec![Operation::SetMode { id, mode }]));
             }
             return;

@@ -245,6 +245,7 @@ impl OndinApp {
             })
             .collect();
         if !ops.is_empty() {
+            self.session.name_step("Export", icon::EXPORT);
             self.commit_edit(Transaction(ops));
         }
     }
@@ -262,6 +263,7 @@ impl OndinApp {
         if !tx.0.is_empty() {
             // `edit_note` returns early for a transaction whose `changes_ink` is
             // false, so an export edit does not arm the chrome hide.
+            self.session.name_step("Export", icon::EXPORT);
             self.commit_edit(tx);
         }
     }
@@ -318,6 +320,7 @@ impl OndinApp {
         if !ops.is_empty() {
             // Through the panel committer, like `write_exports`: the two halves of
             // one button must commit on the same seam.
+            self.session.name_step("Add export", icon::EXPORT);
             self.commit_edit(Transaction(ops));
         }
     }
@@ -429,6 +432,8 @@ impl OndinApp {
                 _ => None,
             };
             if let (Some(exports), Some(id)) = (list, sizing) {
+                app.session
+                    .name_step("Reset", icon::ARROW_COUNTER_CLOCKWISE);
                 app.commit_edit(Transaction(vec![Operation::SetExports { id, exports }]));
                 (removed, changed) = (None, false);
             }

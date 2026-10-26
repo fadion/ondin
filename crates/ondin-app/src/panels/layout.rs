@@ -1216,6 +1216,14 @@ impl OndinApp {
                 _ => {}
             }
         }
+        self.session.name_step(
+            match to {
+                1 => "Flex layout",
+                2 => "Grid layout",
+                _ => "Remove layout",
+            },
+            icon::ARROWS_OUT_LINE_HORIZONTAL,
+        );
         self.commit_edit(Transaction(ops));
     }
 
@@ -1332,6 +1340,7 @@ impl OndinApp {
             self.reset_marked(reset, &direction_mark);
             if let Some(i) = pick {
                 let tx = self.flex_tx(subjects, |f| f.direction = DIRECTIONS[i]);
+                self.session.name_step("Direction", arrows[i]);
                 self.commit_edit(tx);
             }
             let turns = [
@@ -1359,6 +1368,7 @@ impl OndinApp {
             self.reset_marked(reset, &wrap_mark);
             if let Some(i) = pick {
                 let tx = self.flex_tx(subjects, |f| f.wrap = WRAPS[i]);
+                self.session.name_step("Wrap", turns[i]);
                 self.commit_edit(tx);
             }
         });
@@ -1382,6 +1392,7 @@ impl OndinApp {
         self.reset_marked(reset, &justify_mark);
         if let Some(Some(j)) = pick {
             let tx = self.flex_tx(subjects, |f| f.justify_content = j);
+            self.session.name_step("Justify content", icon::ALIGN_LEFT);
             self.commit_edit(tx);
         }
         let (pick, reset) = glyph_combo(
@@ -1402,6 +1413,7 @@ impl OndinApp {
         self.reset_marked(reset, &align_mark);
         if let Some(Some(a)) = pick {
             let tx = self.flex_tx(subjects, |f| f.align_items = a);
+            self.session.name_step("Align items", icon::ALIGN_TOP);
             self.commit_edit(tx);
         }
         // Dimmed in place rather than removed while nothing wraps: toggling wrap
@@ -1424,6 +1436,7 @@ impl OndinApp {
         self.reset_marked(reset, &content_mark);
         if let Some(Some(c)) = pick {
             let tx = self.flex_tx(subjects, |f| f.align_content = c);
+            self.session.name_step("Align content", icon::ALIGN_TOP);
             self.commit_edit(tx);
         }
 
@@ -1528,7 +1541,7 @@ impl OndinApp {
                             *(if is_column_gap { c } else { r }) = v.max(0.0);
                         })
                     };
-                    self.edit_valve(&resp, tx);
+                    self.named_valve("Gap", glyph, &resp, tx);
                     self.field_doors(ui, key, &resp);
                 });
             }
@@ -1647,7 +1660,7 @@ impl OndinApp {
                         }
                     })
                 };
-                self.edit_valve(&resp, tx);
+                self.named_valve("Padding", glyph, &resp, tx);
                 self.field_doors(ui, key, &resp);
             }
             let state = if uneven {
@@ -1712,7 +1725,7 @@ impl OndinApp {
                     } else {
                         self.display_tx(subjects, |d| d.padding_mut()[s] = v.max(0.0))
                     };
-                    self.edit_valve(&resp, tx);
+                    self.named_valve("Padding", icon::SQUARE, &resp, tx);
                     self.field_doors(ui, key, &resp);
                 }
             });
@@ -1866,6 +1879,12 @@ impl OndinApp {
                 })
                 .collect(),
         };
+        let (verb, glyph) = match why {
+            OutOfFlow::Absolute => ("Unpin", icon::CROSSHAIR_SIMPLE),
+            OutOfFlow::Hidden => ("Show", icon::EYE),
+            OutOfFlow::Mask => ("Release mask", icon::CIRCLE_HALF),
+        };
+        self.session.name_step(verb, glyph);
         self.commit_edit(Transaction(ops));
     }
 
@@ -2280,7 +2299,7 @@ impl OndinApp {
                         }
                     })
                 };
-                self.edit_valve(&resp, tx);
+                self.named_valve(label, icon::ARROWS_OUT_LINE_HORIZONTAL, &resp, tx);
             }
         });
 
@@ -2327,6 +2346,7 @@ impl OndinApp {
         self.reset_marked(reset, &mark);
         if let Some(pick) = pick {
             let tx = self.item_tx(subjects, |i| i.align_self = pick);
+            self.session.name_step("Align self", icon::ALIGN_TOP);
             self.commit_edit(tx);
         }
         accent(ui, at, flipped_align);
@@ -2548,6 +2568,7 @@ impl OndinApp {
                     (item != *node.item()).then_some(Operation::SetLayoutItem { id: *id, item })
                 })
                 .collect();
+            self.session.name_step(label, icon::ARROWS_OUT);
             self.commit_edit(Transaction(ops));
             return;
         }
@@ -2562,7 +2583,7 @@ impl OndinApp {
             }
             None => Transaction(Vec::new()),
         };
-        self.edit_valve(&edit.resp, tx);
+        self.named_valve(label, icon::ARROWS_OUT, &edit.resp, tx);
     }
 
     /// The ops a mode picked from W's or H's unit menu writes for layer `id`. Each

@@ -393,6 +393,11 @@ impl OndinApp {
                     )
             })
         });
+        // A caller that knows the field has named the step already.
+        if !self.session.has_step_name() {
+            self.session
+                .name_step("Reset", icon::ARROW_COUNTER_CLOCKWISE);
+        }
         self.commit_edit(tx.clone());
         if restyles {
             self.text_session_restyled_after(&tx);
@@ -775,6 +780,7 @@ impl OndinApp {
         {
             let text = val.trim().to_string();
             if text != saved {
+                self.session.name_step("Description", icon::PENCIL_SIMPLE);
                 self.commit_edit(Transaction(vec![Operation::SetDescription {
                     of: ondin_core::Described::Node(id),
                     text,

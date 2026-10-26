@@ -34,6 +34,7 @@ Decided non-goals are in `docs/non-goals.md`.
 
 - **D421** Finiteness is enforced at `Document::apply` (`OpError::NonFinite`); the loader does not check. Derived bounds are guarded too.
 - **D428** A transaction that changes nothing is not an undo step: `Operation::changes_nothing` is exhaustive, with no wildcard arm. It cannot see real ops that net to zero, so planners guard those themselves.
+- **An undo step carries the name its door gave at the commit** (the command's menu name, or the MCP tool's), never one derived from its operations. History stays session-only and uncapped.
 - **D416** `io::MAX_TREE_DEPTH` (256) bounds the tree at load and at the op layer, because a stack overflow kills unsaved work.
 - **D491** A transaction that orphans a guide is refused. **D492** Unusable export specs are refused at the op and dropped on load.
 - **D439** A new container (group, frame, boolean, flatten, mask) takes the topmost member's z-slot, through one `container_slot`.

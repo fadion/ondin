@@ -327,6 +327,9 @@ pub enum ViewSwitch {
     Outline,
     /// `Ctrl+Alt+\`.
     Layers,
+    /// The History section at the foot of the layers pane (`panels::history`).
+    /// Off by default and deliberately unbound: a list few people keep open.
+    History,
     /// `Ctrl+Shift+\`, which reaches egui as `Key::Pipe` (§0).
     Toolbar,
     /// The floating status bar at the canvas's bottom left, on by default.
@@ -360,6 +363,7 @@ impl ViewSwitch {
             Self::LayoutGrid => "Show layout grid",
             Self::Outline => "Outline mode",
             Self::Layers => "Show layers",
+            Self::History => "Show history",
             Self::Toolbar => "Show toolbar",
             Self::StatusMessages => "Show messages",
             Self::Focus => "Focus mode",
@@ -391,7 +395,11 @@ impl ViewSwitch {
             Self::SnapShapes => "Ctrl+U",
             Self::SnapGuides => "Ctrl+Shift+;",
             Self::SnapGrid => "Ctrl+Shift+'",
-            Self::LayoutGrid | Self::Outline | Self::StatusMessages | Self::SnapBaselines => {
+            Self::LayoutGrid
+            | Self::Outline
+            | Self::History
+            | Self::StatusMessages
+            | Self::SnapBaselines => {
                 return None;
             }
         })
@@ -401,13 +409,14 @@ impl ViewSwitch {
     /// rulers, then the guides that are pulled out of them, then the grid — and
     /// then the layout grid, adjacent so the two grid rows read against each other;
     /// outline view after them, the last row about the artwork.
-    pub const VIEW_MENU: [Self; 10] = [
+    pub const VIEW_MENU: [Self; 11] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
         Self::Grid,
         Self::LayoutGrid,
         Self::Layers,
+        Self::History,
         Self::Toolbar,
         Self::StatusMessages,
         Self::Outline,
@@ -424,7 +433,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -432,6 +441,7 @@ impl ViewSwitch {
         Self::LayoutGrid,
         Self::Outline,
         Self::Layers,
+        Self::History,
         Self::Toolbar,
         Self::StatusMessages,
         Self::Focus,

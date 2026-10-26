@@ -1597,6 +1597,7 @@ impl OndinApp {
             }
         {
             let tx = Transaction(vec![Operation::Reorder { id, index: 0 }]);
+            self.name_step_as(crate::menu::Item::MakeBaseOperand);
             if self.session.commit(tx) {
                 // Only `Subtract` reads the order; say so for the others.
                 self.session.info(match op {
@@ -1903,6 +1904,7 @@ impl OndinApp {
                         Some(clone) => {
                             let roots: Vec<NodeId> = clone.copies.iter().map(|c| c.root).collect();
                             let tx = built;
+                            self.session.name_step("Duplicate", icon::COPY);
                             if self.session.commit(tx) {
                                 // The copy is what stays selected.
                                 self.session.selection.set(roots);
@@ -1911,6 +1913,7 @@ impl OndinApp {
                         None => {
                             // Asked before the commit, so a refused drop says why.
                             let refused_set = self.drops_into_a_set_of_another_kind(delta);
+                            self.session.name_step("Move", icon::ARROWS_OUT_CARDINAL);
                             if self.session.commit(built)
                                 && let Some(why) = refused_set
                             {
@@ -1924,14 +1927,17 @@ impl OndinApp {
             Drag::Resize { target, handle } => {
                 let (at, _) = self.snapped_resize(target, handle, world);
                 let tx = self.resize_tx(target, handle, at, self.resize_opts(target, shift, alt));
+                self.session.name_step("Resize", icon::ARROWS_OUT);
                 self.session.commit(tx);
             }
             Drag::LineEnd { id, which } => {
                 let tx = self.line_end_tx(id, which, world, shift);
+                self.session.name_step("Resize", icon::LINE_SEGMENT);
                 self.session.commit(tx);
             }
             Drag::RailOffset { id } => {
                 let tx = self.rail_offset_tx(id, world);
+                self.session.name_step("Path offset", icon::TEXT_T);
                 self.session.commit(tx);
             }
             Drag::Gradient {
@@ -1942,7 +1948,7 @@ impl OndinApp {
             } => self.finish_gradient_drag(id, slot, grab, &from, world, shift),
             // A release where every slot already draws the value commits nothing,
             // compared against the drawn value so a bound slot is right.
-            drag @ Drag::Spacing { id, .. } => {
+            drag @ Drag::Spacing { id, band, .. } => {
                 self.drag = drag;
                 let built = self.band_drag_tx(world, shift, alt);
                 self.drag = Drag::None;
@@ -1952,6 +1958,12 @@ impl OndinApp {
                         if !drawn.is_some_and(|s| slots.iter().all(|i| s[*i] == value)) =>
                     {
                         let cut = self.band_drag_cut(&tx);
+                        let label = match band {
+                            crate::spacing::BandKind::Padding(_) => "Padding",
+                            _ => "Gap",
+                        };
+                        self.session
+                            .name_step(label, icon::ARROWS_OUT_LINE_HORIZONTAL);
                         if self.session.commit(tx) && !cut.is_empty() {
                             let (styles, mut vars) = self.session.last_detached().clone();
                             vars.extend(cut);
@@ -1978,6 +1990,7 @@ impl OndinApp {
                 ..
             } => {
                 let (tx, lean) = self.skew_tx(target, handle, press, world, shift);
+                self.session.name_step("Skew", icon::ANGLE);
                 if self.session.commit(tx) && matches!(target, Target::Selection) {
                     // A set has no stored frame; keep its lean on the selection.
                     let was = self.session.selection.frame();
@@ -1991,6 +2004,7 @@ impl OndinApp {
                 ..
             } => {
                 let (tx, turn) = self.rotate_tx(target, pivot, start, world, shift);
+                self.session.name_step("Rotate", icon::ARROW_CLOCKWISE);
                 if self.session.commit(tx) && matches!(target, Target::Selection) {
                     let was = self.session.selection.frame();
                     self.session.selection.set_frame(turn * was);
@@ -2021,6 +2035,7 @@ impl OndinApp {
             Drag::Pivot { id } => {
                 let pivot = self.pivot_at(id, world);
                 if self.session.doc.get(id).is_some_and(|n| n.pivot() != pivot) {
+                    self.session.name_step("Move pivot", icon::CROSSHAIR_SIMPLE);
                     self.session
                         .commit(Transaction(vec![Operation::SetPivot { id, pivot }]));
                 }
@@ -3082,6 +3097,19 @@ impl OndinApp {
     fn commit_create(&mut self, id: NodeId, shape: Tool, from: Point, to: Point) {
         let tx = self.create_tx(from, to);
         self.drag = Drag::None;
+        let label = match shape {
+            Tool::Frame => "Add frame",
+            Tool::Rect => "Add rectangle",
+            Tool::Ellipse => "Add ellipse",
+            Tool::Polygon => "Add polygon",
+            Tool::Star => "Add star",
+            Tool::Line => "Add line",
+            Tool::Text => "Add text",
+            Tool::Image => "Place image",
+            _ => "Add shape",
+        };
+        self.session
+            .name_step(label, crate::menu::Item::Tool(shape).spec().glyph);
         if let Some(tx) = tx
             && self.session.commit(tx)
         {
@@ -3427,6 +3455,7 @@ impl OndinApp {
         if let Some(other) = absorbed {
             tx.0.push(Operation::DeleteNode { id: other });
         }
+        self.session.name_step("Edit path", icon::PEN_NIB);
         if !self.session.commit(tx) {
             return false;
         }
@@ -4000,6 +4029,7 @@ impl OndinApp {
                 // flip a `Fill` picture's mode. The preview stays ungated for
                 // `image_ghost_live`.
                 if travelled {
+                    self.session.name_step("Crop", icon::CROP);
                     self.session.commit(tx);
                 } else {
                     self.session.clear_gesture_preview();
@@ -4048,6 +4078,7 @@ impl OndinApp {
                 if released {
                     self.drag = Drag::None;
                     // Empty when the pointer never moved: a click leaves no undo step.
+                    self.session.name_step("Edit path", icon::BEZIER_CURVE);
                     self.session.commit(tx);
                 }
             }
@@ -4056,6 +4087,7 @@ impl OndinApp {
                 self.session.set_preview(&tx);
                 if released {
                     self.drag = Drag::None;
+                    self.session.name_step("Edit path", icon::BEZIER_CURVE);
                     self.session.commit(tx);
                 }
             }
@@ -4074,6 +4106,7 @@ impl OndinApp {
                 self.session.set_preview(&tx);
                 if released {
                     self.drag = Drag::None;
+                    self.session.name_step("Edit path", icon::BEZIER_CURVE);
                     self.session.commit(tx);
                 }
             }
@@ -4088,6 +4121,7 @@ impl OndinApp {
                 self.session.set_preview(&tx);
                 if released {
                     self.drag = Drag::None;
+                    self.session.name_step("Edit path", icon::BEZIER_CURVE);
                     self.session.commit(tx);
                 }
             }
@@ -4096,6 +4130,7 @@ impl OndinApp {
                 self.session.set_preview(&tx);
                 if released {
                     self.drag = Drag::None;
+                    self.session.name_step("Edit path", icon::BEZIER_CURVE);
                     self.session.commit(tx);
                 }
             }
@@ -4432,6 +4467,7 @@ impl OndinApp {
     /// Align the selected points: the align row's verb, redirected from layers to
     /// points while the node tool is up. One commit.
     pub(crate) fn align_points(&mut self, axis: build::Axis, edge: build::Edge) {
+        self.name_step_as(crate::menu::Item::Align(axis, edge));
         self.edit_points(Some("Aligned"), None, |subpaths, points| {
             tools::align_points(subpaths, points, axis, edge)
         });
@@ -4439,6 +4475,7 @@ impl OndinApp {
 
     /// Distribute the selected points along `axis`, as [`Self::align_points`] aligns them.
     pub(crate) fn distribute_points(&mut self, axis: build::Axis) {
+        self.name_step_as(crate::menu::Item::Distribute(axis));
         self.edit_points(Some("Distributed"), None, |subpaths, points| {
             tools::distribute_points(subpaths, points, axis)
         });
@@ -4449,6 +4486,7 @@ impl OndinApp {
     /// `tools::set_smoothness`.
     pub(crate) fn set_point_smoothness(&mut self, smooth: bool) {
         let verb = if smooth { "Smoothed" } else { "Cornered" };
+        self.name_step_as(crate::menu::Item::SetSmooth(smooth));
         self.edit_points(Some(verb), None, |subpaths, points| {
             tools::set_smoothness(subpaths, points, smooth)
         });
@@ -4751,6 +4789,9 @@ impl OndinApp {
             return;
         };
         let tx = tools::rewrite_path(id, world, &subpaths, self.stored_path(id));
+        if !self.session.has_step_name() {
+            self.session.name_step("Add point", icon::PLUS);
+        }
         if self.session.commit(tx) {
             self.points.set_one(id, new);
             self.session.info("Point added");
@@ -4879,6 +4920,7 @@ impl OndinApp {
             return;
         };
         let tx = tools::rewrite_path(id, world, &list, self.stored_path(id));
+        self.name_step_as(crate::menu::Item::Join);
         if !tx.0.is_empty() && self.session.commit(tx) {
             self.points.set_segment(id, seam);
             self.session.info(match a.0 == b.0 {
@@ -4995,6 +5037,7 @@ impl OndinApp {
         };
         tools::reverse_subpaths(&mut subpaths, &which);
         let tx = tools::rewrite_path(id, world, &subpaths, self.stored_path(id));
+        self.name_step_as(crate::menu::Item::ReverseSubpaths);
         if tx.0.is_empty() || !self.session.commit(tx) {
             return;
         }
@@ -5069,7 +5112,8 @@ impl OndinApp {
             }
             return;
         }
-        if self.session.commit(tx) {
+        let label = if resumed { "Edit path" } else { "Add path" };
+        if self.session.commit_aside(tx, label, icon::PEN_NIB) {
             self.end_pen_gesture(id);
             self.session.info(done);
         }
@@ -5142,6 +5186,7 @@ impl OndinApp {
             transform: Some(Affine::translate(local.to_vec2())),
             name: None,
         }]);
+        self.session.name_step("Add text", icon::TEXT_T);
         if self.session.commit(tx) {
             self.session.selection.set_one(id);
             self.open_text_session(id);
@@ -5162,6 +5207,7 @@ impl OndinApp {
             world,
         ) {
             Ok((tx, id)) => {
+                self.session.name_step("Add text", icon::TEXT_T);
                 if self.session.commit(tx) {
                     self.session.selection.set_one(id);
                     self.open_text_session(id);
@@ -5240,6 +5286,9 @@ impl OndinApp {
     /// (that stays with [`Self::place_image_at`]).
     pub(crate) fn create_image_at(&mut self, image: &LoadedImage, world: Point) -> bool {
         let (tx, node) = self.image_tx(None, image, world);
+        if !self.session.has_step_name() {
+            self.session.name_step("Place image", icon::IMAGE);
+        }
         if !self.session.commit(tx) {
             return false;
         }
@@ -5432,6 +5481,9 @@ impl OndinApp {
             }
         }
 
+        if !self.session.has_step_name() {
+            self.session.name_step("Import SVG", icon::SHARE_NETWORK);
+        }
         if !self.session.commit(out.tx) {
             return SvgImport::Unreadable;
         }
@@ -5856,20 +5908,27 @@ impl OndinApp {
 
         if session.editor.content().is_empty() && session.created {
             // `created`, not an empty `original`: a pre-existing node can be empty.
-            self.session
-                .commit(Transaction(vec![Operation::DeleteNode { id: session.id }]));
+            self.session.commit_aside(
+                Transaction(vec![Operation::DeleteNode { id: session.id }]),
+                "Delete",
+                icon::TRASH,
+            );
             self.session.selection.clear();
             self.session.info("Removed empty text");
             return;
         }
         // Only on success, so a refused commit keeps its own message.
         if session.changed()
-            && self.session.commit(Transaction(vec![Operation::SetText {
-                id: session.id,
-                content: session.editor.content().to_string(),
-                spans: session.editor.spans().clone(),
-                para_spans: session.editor.para_spans().clone(),
-            }]))
+            && self.session.commit_aside(
+                Transaction(vec![Operation::SetText {
+                    id: session.id,
+                    content: session.editor.content().to_string(),
+                    spans: session.editor.spans().clone(),
+                    para_spans: session.editor.para_spans().clone(),
+                }]),
+                "Edit text",
+                icon::CURSOR_TEXT,
+            )
         {
             self.session.info("Text updated");
         }
@@ -6028,6 +6087,15 @@ impl OndinApp {
     /// a gesture, a text session, or while [`Self::chrome_hidden`] holds.
     fn hover_chrome_live(&self) -> bool {
         self.mode == Mode::Normal && self.drag.is_none() && !self.chrome_hidden()
+    }
+
+    /// Outline the layers the hovered History row's step touched, in the canvas
+    /// hover's stroke; the selection keeps its own frame.
+    fn draw_history_hover(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
+        for &id in &self.history_pane.hover {
+            let stroke = egui::Stroke::new(3.0, chrome_hue(&self.session.doc, id));
+            self.stroke_outlines(painter, id, rect, ppp, stroke, self.outline_view(stroke));
+        }
     }
 
     /// The layer a resting pointer points *at* — what a click would take and a
@@ -7823,6 +7891,7 @@ impl OndinApp {
         self.draw_spacing_bands(painter, rect, ppp);
 
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
+        self.draw_history_hover(painter, rect, ppp);
 
         self.draw_frame_drop_outline(ui, painter, rect, ppp, resp);
         self.draw_flex_landing(ui, painter, rect, ppp, resp);
@@ -8398,6 +8467,7 @@ impl OndinApp {
         let (resp, x_pct, y_pct) = edit?;
         let kind = self.session.display_node(id).map(|n| n.kind().clone())?;
         let pivot = origin_pivot(&kind, box_, x_pct, y_pct);
+        self.session.name_step("Move pivot", icon::CROSSHAIR_SIMPLE);
         self.edit_valve(&resp, Transaction(vec![Operation::SetPivot { id, pivot }]));
         Some(())
     }

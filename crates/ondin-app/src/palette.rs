@@ -342,7 +342,7 @@ const TEXT_CHORDS: [TextChord; 13] = [
     TextChord::Align(ondin_core::TextAlign::Justify),
 ];
 
-const SWITCHES: [ViewSwitch; 14] = [
+const SWITCHES: [ViewSwitch; 15] = [
     ViewSwitch::Rulers,
     ViewSwitch::Guides,
     ViewSwitch::GuideLock,
@@ -350,6 +350,7 @@ const SWITCHES: [ViewSwitch; 14] = [
     ViewSwitch::LayoutGrid,
     ViewSwitch::Outline,
     ViewSwitch::Layers,
+    ViewSwitch::History,
     ViewSwitch::Toolbar,
     ViewSwitch::StatusMessages,
     ViewSwitch::Focus,

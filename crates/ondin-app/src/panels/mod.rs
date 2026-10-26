@@ -8,6 +8,7 @@ pub(crate) mod binding;
 mod component;
 pub(crate) mod dashboard;
 mod export;
+pub(crate) mod history;
 mod inspector;
 pub(crate) mod layers;
 mod layout;

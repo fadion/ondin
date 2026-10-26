@@ -55,7 +55,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
-  layers*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*, then *Present mode* — a verb,
+  layers*, *Show history*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*, then *Present mode* — a verb,
   not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).

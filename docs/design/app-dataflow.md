@@ -10,7 +10,7 @@ input event (winit/egui)
   -> renderer draws Document + RenderOverrides(preview)
   -> on gesture end: tool builds ONE Transaction (ids minted via session IdSource)
   -> op queue -> Document::apply -> ApplyOutcome{inverse, dirty}
-  -> History.push(inverse); Resolved.update(dirty)
+  -> History.push(inverse + step note); Resolved.update(dirty)
   -> next frame renders committed state, preview cleared
 ```
 
@@ -23,6 +23,8 @@ input event (winit/egui)
   - *A press and release with no travel* (`canvas::gesture_travelled`, measured in world space from a stored `grab_world`; gates the commit, never the preview). Stored by `Drag::PointBox`'s `grab` and `CropPan`/`CropResize`'s `grab_world`. The crop drag genuinely sets `fit = Crop`, so `changes_nothing` is right to pass it.
   - *A transaction never built*: a zero nudge on the multi Transform card would cost a whole `tools::resize_selection` recursion; `build::local_for_world` may not return bit-identical for a zero move.
   - *A composition that returns to the start*: `layers::plan_layer_move` compares simulated child lists after the loop and clears the ops only when nothing was reparented.
+- **Every commit door names its step** as the menus and palette name the command: `EditorSession::name_step(label, glyph)` names the step the next commit makes, and that commit takes the name even if it changes nothing. `forget_step_name` drops an untaken name at the start of every frame, so one door's name never lands on another's step; an inspector field, which names on idle frames too, also forgets its name after its valve. An unnamed step reads *Edit*. `OndinApp::dispatch` names from `menu::Item::step_name(action)` (the row's label and glyph, plus *Nudge*, *Resize* and *Opacity* for chords with no row), `perform_menu_item` from the row's spec, and the canvas gestures, inspector fields (by field; a few cards by card), layers rows, pages, guides, kits, eyedropper and path bar each name their own. A forwarding door keeps the more particular name a menu row gave (`has_step_name`, `OndinApp::name_step_as`). `commit_aside(tx, label, glyph)` commits under its own name and puts back a waiting one, for a door that first finishes a live text session. `name_mcp_step(client, tool, glyph)` is the MCP door's (§8.3), not yet wired.
+- **The note's subjects are the transaction as the door asked it**, read before `commit_inner`'s passes add what the edit owes, so a step names what the user touched and not the copies that followed. When the commit made a new step, the subject's name and page are read again after the apply: a created layer is named, a renamed one reads by its new name, a deleted one keeps the name read before.
 - **Zero-travel releases are answered by four routes:** `Move` has its own epsilon, `Skew` is caught by emptiness (`tools::side_shear` returns `None` for zero), `Rotate` at its producer (`tools::rotate_node`), and `Resize`, `LineEnd`, `RailOffset` by `changes_nothing`. `canvas::zero_travel_release_tests::no_committing_drag_arm_spends_an_undo_step_on_a_zero_travel_release` asserts the outcome over a hand-written table (seven rows including `Drag::Spacing`); a new committing arm must add a row, and nothing forces it.
 
 ### Preview

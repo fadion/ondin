@@ -28,6 +28,10 @@ use std::time::{Duration, Instant};
 /// ([`EditorSession::commit_run`]).
 const RUN_WINDOW: Duration = Duration::from_millis(600);
 
+/// A step just undone or redone: its subjects, and the pages they were on before it
+/// (`EditorSession::follow_step`'s two arguments).
+type Followed = (Vec<NodeId>, Vec<NodeId>);
+
 /// How a commit joins the history ([`EditorSession::commit_inner`]).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fold {
@@ -444,6 +448,17 @@ pub struct EditorSession {
     /// The verb and moment of the last run commit, while the run is still open —
     /// see [`Self::commit_run`].
     run: Option<(&'static str, Instant)>,
+    /// The name and origin the next commit's undo step carries
+    /// ([`Self::name_step`]). Taken by that commit whether or not it changes
+    /// anything, and dropped each frame, so a door's name never lands on another's.
+    naming: Option<(String, &'static str, ondin_core::Origin)>,
+    /// Which step's state is on disk: `Some(None)` for the document as it was
+    /// opened, `Some(Some(serial))` for the state just after that step, `None`
+    /// when no state in the history is (never saved, or restored from a crash).
+    saved_step: Option<Option<u64>>,
+    /// Whether the document was read from a file rather than made new: the
+    /// History section's first row says *Opened* or *New document*.
+    opened: bool,
     /// The style the browser's *Edit* opened: while set, a write of its slot on a
     /// layer bound to it is an edit of the style itself (`style::edit_through`, at
     /// the commit door), so the inspector's cards edit every user at once.
@@ -513,6 +528,7 @@ impl EditorSession {
     fn from_parts(doc: Document, ids: IdSource, path: Option<PathBuf>) -> Self {
         let resolved = Resolved::rebuild(&doc);
         let saved_at = path.is_some().then(Instant::now);
+        let saved_step = path.is_some().then_some(None);
         let page = doc.first_page();
         Self {
             doc,
@@ -532,6 +548,9 @@ impl EditorSession {
             dirty: false,
             saving: None,
             run: None,
+            naming: None,
+            saved_step,
+            opened: saved_step.is_some(),
             style_edit: None,
             saved_at,
             revision: 0,
@@ -1087,6 +1106,97 @@ impl EditorSession {
         self.history.end_run();
     }
 
+    /// Name the undo step the next commit makes, as the menus name the command,
+    /// with the glyph they draw beside it. A step committed unnamed reads *Edit*.
+    pub fn name_step(&mut self, label: impl Into<String>, glyph: &'static str) {
+        self.naming = Some((label.into(), glyph, ondin_core::Origin::User));
+    }
+
+    /// [`Self::name_step`] for an edit an assistant makes over MCP: the step is
+    /// named by the tool it called, and remembers the client.
+    // Its door is the MCP transport's, which is not wired yet; the tests call it.
+    #[allow(dead_code)]
+    pub fn name_mcp_step(
+        &mut self,
+        client: impl Into<String>,
+        tool: impl Into<String>,
+        glyph: &'static str,
+    ) {
+        let tool = tool.into();
+        self.naming = Some((
+            tool.clone(),
+            glyph,
+            ondin_core::Origin::Mcp {
+                client: client.into(),
+                tool,
+            },
+        ));
+    }
+
+    /// Whether a step name is waiting for the next commit, so a door that forwards
+    /// to another keeps the more particular name the first gave.
+    pub fn has_step_name(&self) -> bool {
+        self.naming.is_some()
+    }
+
+    /// Drop a step name no commit took this frame; the app calls it once a frame.
+    pub fn forget_step_name(&mut self) {
+        self.naming = None;
+    }
+
+    /// [`Self::commit`] under its own name, leaving a name already waiting for the
+    /// commit after it — for an edit a door makes on the way to its own, such as the
+    /// live text session a page or kit verb finishes first.
+    pub fn commit_aside(&mut self, tx: Transaction, label: &str, glyph: &'static str) -> bool {
+        let waiting = self.naming.take();
+        self.name_step(label, glyph);
+        let applied = self.commit(tx);
+        self.naming = waiting;
+        applied
+    }
+
+    /// The note for a step committing `tx`, named by [`Self::name_step`] and read
+    /// before `tx` applies: a step that deletes its subject still names it.
+    fn note_for(&mut self, tx: &Transaction) -> ondin_core::StepNote {
+        let (label, glyph, origin) = self
+            .naming
+            .take()
+            .unwrap_or_else(|| ("Edit".into(), "", ondin_core::Origin::User));
+        let subjects = tx.subjects();
+        let first = subjects.first().copied();
+        ondin_core::StepNote {
+            label,
+            glyph,
+            origin,
+            subject: first
+                .and_then(|id| self.doc.get(id))
+                .map(|n| n.name().to_string()),
+            page: first.and_then(|id| self.doc.page_of(id)),
+            subjects,
+        }
+    }
+
+    /// Read the subject again after the commit, when it made a step of its own:
+    /// a created subject exists only after it, and a renamed one reads by its new
+    /// name. A subject the commit took away keeps what [`Self::note_for`] read.
+    fn finish_note(&mut self, before: Option<u64>) {
+        if self.history.current() == before {
+            return;
+        }
+        let Some(note) = self.history.current_note_mut() else {
+            return;
+        };
+        let Some(first) = note.subjects.first().copied() else {
+            return;
+        };
+        if let Some(n) = self.doc.get(first) {
+            note.subject = Some(n.name().to_string());
+        }
+        if let Some(page) = self.doc.page_of(first) {
+            note.page = Some(page);
+        }
+    }
+
     /// Commit and report the error to the caller. Empty transactions are a
     /// no-op success — tools legitimately produce them (a click that turned out
     /// not to be a drag) and they must not create an undo step.
@@ -1118,6 +1228,9 @@ impl EditorSession {
         // Cleared first, so a commit that empties, changes nothing or fails
         // never hands the caller the one before it's detaches.
         self.last_detached = Default::default();
+        // From the edit as the door asked it, before the passes below add what it
+        // owes: the step names what the user touched, not every copy that followed.
+        let note = self.note_for(&tx);
         if tx.0.is_empty() {
             return Ok(());
         }
@@ -1222,11 +1335,20 @@ impl EditorSession {
             // A plain commit is a new decision, so it closes any run.
             self.run = None;
         }
+        let before = self.history.current();
         let dirty = match fold {
-            Fold::Run => self.history.commit_into_run(&mut self.doc, tx)?,
-            Fold::Last => self.history.fold_into_last(&mut self.doc, tx)?,
-            Fold::None => self.history.commit(&mut self.doc, tx)?,
+            Fold::Run => self
+                .history
+                .commit_into_run_noted(&mut self.doc, tx, note)?,
+            Fold::Last => self.history.fold_into_last_noted(&mut self.doc, tx, note)?,
+            Fold::None => self.history.commit_noted(&mut self.doc, tx, note)?,
         };
+        self.finish_note(before);
+        // An edit folded into the saved step changes the document under the same
+        // serial, so that step no longer names what is on disk.
+        if self.history.current() == before && self.saved_step == Some(before) {
+            self.saved_step = None;
+        }
         // **The one place a caught boolean panic becomes something the user sees.**
         // `evaluate` answers `None` for a panic and for a correct empty result alike,
         // so only `boolean::failures` moving across this update tells them apart.
@@ -1309,27 +1431,9 @@ impl EditorSession {
     /// [`crate::app::OndinApp::undo`] when the ground shifts. **Not "an undo
     /// happened"**: `Ctrl+Z` at the bottom of the stack must not deselect anything.
     pub fn undo(&mut self) -> bool {
-        // An undo is never part of a run; `History` says so too.
-        self.run = None;
-        let subjects = self
-            .history
-            .next_undo()
-            .map(Transaction::subjects)
-            .unwrap_or_default();
-        let before: Vec<NodeId> = subjects
-            .iter()
-            .filter_map(|s| self.doc.page_of(*s))
-            .collect();
-        match self.history.undo(&mut self.doc) {
-            Ok(Some(dirty)) => {
-                self.resolved.update(&self.doc, &dirty);
-                self.keep_page();
-                let followed = self.follow_step(&subjects, &before);
-                self.dirty = true;
-                // `finish_save` above all must see it, or it marks the session
-                // clean over a save queued before the undo.
-                self.revision = self.revision.wrapping_add(1);
-                match followed {
+        match self.step_quietly(true) {
+            Ok(Some((subjects, before))) => {
+                match self.follow_step(&subjects, &before) {
                     Some(page) => self.info(format!("Undo · on {page}")),
                     None => self.info("Undo"),
                 }
@@ -1348,25 +1452,9 @@ impl EditorSession {
 
     /// Put back what [`Self::undo`] took, and answer the same question it does.
     pub fn redo(&mut self) -> bool {
-        self.run = None;
-        let subjects = self
-            .history
-            .next_redo()
-            .map(Transaction::subjects)
-            .unwrap_or_default();
-        let before: Vec<NodeId> = subjects
-            .iter()
-            .filter_map(|s| self.doc.page_of(*s))
-            .collect();
-        match self.history.redo(&mut self.doc) {
-            Ok(Some(dirty)) => {
-                self.resolved.update(&self.doc, &dirty);
-                self.keep_page();
-                let followed = self.follow_step(&subjects, &before);
-                self.dirty = true;
-                // `commits` stays put, so a redo brings the step's receipt back.
-                self.revision = self.revision.wrapping_add(1);
-                match followed {
+        match self.step_quietly(false) {
+            Ok(Some((subjects, before))) => {
+                match self.follow_step(&subjects, &before) {
                     Some(page) => self.info(format!("Redo · on {page}")),
                     None => self.info("Redo"),
                 }
@@ -1381,6 +1469,96 @@ impl EditorSession {
                 false
             }
         }
+    }
+
+    /// One undo (`back`) or redo with nothing said and no page followed. Answers
+    /// the step's subjects and the pages they were on before it, for
+    /// [`Self::follow_step`]; `Ok(None)` at the end of the history.
+    fn step_quietly(&mut self, back: bool) -> Result<Option<Followed>, OpError> {
+        // An undo or redo is never part of a run; `History` says so too.
+        self.run = None;
+        let next = match back {
+            true => self.history.next_undo(),
+            false => self.history.next_redo(),
+        };
+        let subjects = next.map(Transaction::subjects).unwrap_or_default();
+        let before: Vec<NodeId> = subjects
+            .iter()
+            .filter_map(|s| self.doc.page_of(*s))
+            .collect();
+        let moved = match back {
+            true => self.history.undo(&mut self.doc)?,
+            false => self.history.redo(&mut self.doc)?,
+        };
+        let Some(dirty) = moved else {
+            return Ok(None);
+        };
+        self.resolved.update(&self.doc, &dirty);
+        self.keep_page();
+        self.dirty = true;
+        // `finish_save` above all must see it, or it marks the session clean over a
+        // save queued before the undo. `commits` stays put, so a redo brings the
+        // step's receipt back.
+        self.revision = self.revision.wrapping_add(1);
+        Ok(Some((subjects, before)))
+    }
+
+    /// Undo or redo as many steps as it takes to stand just after the `depth`th
+    /// done step (0: the document as opened), in one go — a click on a History
+    /// row. Follows only the last step to its page, as `Ctrl+Z` would. A step that
+    /// fails stops the jump on the last one that applied, and the status says so.
+    /// Answers whether the document moved.
+    pub fn jump_to(&mut self, depth: usize) -> bool {
+        let here = self.history.undo_depth();
+        let depth = depth.min(here + self.history.redo_depth());
+        let back = depth < here;
+        let want = here.abs_diff(depth);
+        let (mut moved, mut last, mut error) = (0, None, None);
+        while moved < want {
+            match self.step_quietly(back) {
+                Ok(Some(step)) => {
+                    last = Some(step);
+                    moved += 1;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    error = Some(e);
+                    break;
+                }
+            }
+        }
+        let followed = last.and_then(|(subjects, before)| self.follow_step(&subjects, &before));
+        let verb = if back { "Undid" } else { "Redid" };
+        let steps = |n: usize| match n {
+            1 => "1 step".to_string(),
+            n => format!("{n} steps"),
+        };
+        if let Some(e) = error {
+            self.fail(format!(
+                "{verb} {moved} of {} — the next one failed: {e}",
+                steps(want)
+            ));
+        } else if moved > 0 {
+            let mut said = format!("{verb} {}", steps(moved));
+            if let Some(page) = followed {
+                said.push_str(&format!(" · on {page}"));
+            }
+            if back {
+                said.push_str(" · Ctrl+Y to redo");
+            }
+            self.info(said);
+        }
+        moved > 0
+    }
+
+    /// Which step's state is on disk — see the field.
+    pub fn saved_step(&self) -> Option<Option<u64>> {
+        self.saved_step
+    }
+
+    /// Whether the document was read from a file — see the field.
+    pub fn opened_from_file(&self) -> bool {
+        self.opened
     }
 
     /// Replace the open document (open / new). Resets history, selection and
@@ -1401,6 +1579,9 @@ impl EditorSession {
         self.style_edit = None;
         // A just-opened document matches its file, so it counts as saved now.
         self.saved_at = path.is_some().then(Instant::now);
+        self.saved_step = path.is_some().then_some(None);
+        self.opened = path.is_some();
+        self.naming = None;
         self.path = path;
         self.dirty = false;
         // A different document, so anything derived from the old one is stale.
@@ -1443,6 +1624,7 @@ impl EditorSession {
     pub fn mark_unsaved(&mut self) {
         self.dirty = true;
         self.saved_at = None;
+        self.saved_step = None;
     }
 
     /// Record that the current document state is what is on disk.
@@ -1450,6 +1632,7 @@ impl EditorSession {
         self.path = Some(path);
         self.dirty = false;
         self.saved_at = Some(Instant::now());
+        self.saved_step = Some(self.history.current());
         // `save_file` settles before it writes, so there is nothing to clear in
         // practice; clearing anyway stops the tooltip sticking on *Saving…* if that
         // order changes.
@@ -1499,6 +1682,9 @@ impl EditorSession {
         if self.revision == at && self.path.as_deref() == Some(path) {
             self.dirty = false;
             self.saved_at = Some(Instant::now());
+            // The revision has not moved since the write was queued, so the step on
+            // top now is the one it wrote.
+            self.saved_step = Some(self.history.current());
             return true;
         }
         false
@@ -3086,5 +3272,190 @@ mod tests {
         );
         let tx = Transaction(vec![swap, cut(b)]);
         assert_eq!(styles_detached(&s.doc, &tx, 1), vec!["Brand".to_string()]);
+    }
+
+    fn rename(s: &mut EditorSession, id: NodeId, name: &str) {
+        s.name_step("Rename", "");
+        assert!(s.commit(Transaction(vec![Operation::SetName {
+            id,
+            name: name.into(),
+        }])));
+    }
+
+    fn labels(s: &EditorSession) -> Vec<String> {
+        s.history.done().map(|v| v.note.label.clone()).collect()
+    }
+
+    /// A step carries the name its door gave and its subject's name; a commit takes
+    /// the name even when it changes nothing, and an unnamed commit reads *Edit*.
+    #[test]
+    fn a_step_carries_the_name_its_door_gave() {
+        let mut s = EditorSession::new();
+        let rect = add_rect(&mut s);
+        rename(&mut s, rect, "Card");
+        let top = s.history.done().last().unwrap().note.clone();
+        assert_eq!(top.label, "Rename");
+        assert_eq!(top.subject.as_deref(), Some("Card"), "named after the edit");
+        assert_eq!(top.page, Some(s.page));
+
+        // A door that names a step and then commits nothing leaves no name behind.
+        s.name_step("Fill", "");
+        let unchanged = s.doc.get(rect).unwrap().name().to_string();
+        assert!(s.commit(Transaction(vec![Operation::SetName {
+            id: rect,
+            name: unchanged,
+        }])));
+        rename(&mut s, rect, "Card 2");
+        s.forget_step_name();
+        assert!(s.commit(Transaction(vec![Operation::SetOpacity {
+            id: rect,
+            opacity: 0.5,
+        }])));
+        assert_eq!(labels(&s)[1..], ["Rename", "Rename", "Edit"]);
+    }
+
+    /// A created layer's step names it although it did not exist before the commit,
+    /// and a deleted one's names it although it is gone after.
+    #[test]
+    fn a_step_names_a_created_and_a_deleted_layer() {
+        let mut s = EditorSession::new();
+        let rect = add_rect(&mut s);
+        let made = s.history.done().last().unwrap().note.clone();
+        assert!(made.subject.is_some(), "the create names its layer");
+        assert_eq!(made.page, Some(s.page));
+
+        let name = s.doc.get(rect).unwrap().name().to_string();
+        s.name_step("Delete", "");
+        assert!(s.commit(Transaction(vec![Operation::DeleteNode { id: rect }])));
+        let gone = s.history.done().last().unwrap().note.clone();
+        assert_eq!(gone.subject, Some(name));
+    }
+
+    /// *Saved* names the step whose state is on disk, survives undo and redo, and
+    /// goes when a new edit drops that step; `Some(None)` is the opened document.
+    #[test]
+    fn the_saved_step_follows_the_history() {
+        let mut s = EditorSession::new();
+        assert_eq!(s.saved_step(), None, "a starter document was never saved");
+        let rect = add_rect(&mut s);
+        rename(&mut s, rect, "A");
+        s.mark_saved(PathBuf::from("x.ondin"));
+        let saved = s.history.current();
+        assert_eq!(s.saved_step(), Some(saved));
+
+        assert!(s.undo());
+        assert_eq!(s.saved_step(), Some(saved), "an undo moves nothing on disk");
+        rename(&mut s, rect, "B");
+        assert!(
+            s.history
+                .done()
+                .chain(s.history.undone())
+                .all(|v| Some(v.serial) != saved),
+            "the saved step went with the redo stack"
+        );
+
+        s.mark_unsaved();
+        assert_eq!(s.saved_step(), None);
+        s.adopt_document(s.doc.clone(), Some(PathBuf::from("y.ondin")));
+        assert_eq!(s.saved_step(), Some(None), "an opened document is its file");
+    }
+
+    /// An edit folded into the saved step (a nudge inside its run after a save) takes
+    /// *Saved* off it: the step is the same, the document is not.
+    /// flip: `commit_inner`'s saved-step clear removed → fails at the assertion.
+    #[test]
+    fn an_edit_folded_into_the_saved_step_unsaves_it() {
+        let mut s = EditorSession::new();
+        let rect = add_rect(&mut s);
+        let nudge = |x: f64| {
+            Transaction(vec![Operation::SetTransform {
+                id: rect,
+                transform: Affine::translate((x, 0.0)),
+            }])
+        };
+        assert!(s.commit_run(nudge(1.0), "nudge"));
+        s.mark_saved(PathBuf::from("x.ondin"));
+        let saved = s.history.current();
+        assert!(s.commit_run(nudge(2.0), "nudge"));
+        assert_eq!(
+            s.history.current(),
+            saved,
+            "fixture: the nudge folded into the step"
+        );
+        assert_eq!(s.saved_step(), None);
+    }
+
+    /// A jump undoes or redoes as many steps as it takes, stays put at either end,
+    /// and says how many it took.
+    #[test]
+    fn a_jump_walks_the_history_in_one_go() {
+        let mut s = EditorSession::new();
+        let rect = add_rect(&mut s);
+        let base = s.history.undo_depth();
+        for n in ["A", "B", "C", "D"] {
+            rename(&mut s, rect, n);
+        }
+        assert!(s.jump_to(base + 1));
+        assert_eq!(s.doc.get(rect).unwrap().name(), "A");
+        assert_eq!(s.history.redo_depth(), 3);
+        assert_eq!(s.status().text, "Undid 3 steps · Ctrl+Y to redo");
+
+        s.next_status_pass();
+        assert!(s.jump_to(base + 3));
+        assert_eq!(s.doc.get(rect).unwrap().name(), "C");
+        assert_eq!(s.status().text, "Redid 2 steps");
+
+        assert!(
+            !s.jump_to(base + 3),
+            "a jump to where it stands moves nothing"
+        );
+        assert!(s.jump_to(usize::MAX), "past the end is the end");
+        assert_eq!(s.doc.get(rect).unwrap().name(), "D");
+    }
+
+    /// A jump follows only its last step to its page: steps on another page undone
+    /// on the way do not leave the view there.
+    /// flip: `follow_step` called for every step in `jump_to` → the selection
+    /// assertion fails (the other page's layer is selected on the way).
+    #[test]
+    fn a_jump_follows_only_its_last_step() {
+        let mut s = EditorSession::new();
+        let home = s.page;
+        let rect = add_rect(&mut s);
+        let other = s.ids.mint();
+        assert!(s.commit(Transaction(vec![Operation::AddPage {
+            id: other,
+            index: 1,
+            name: "Archive".into(),
+            ground: Color::WHITE,
+            draft: false,
+            mode: None,
+        }])));
+        let card = add_rect(&mut s);
+        let opened = s.history.undo_depth();
+        rename(&mut s, card, "Card");
+        let away = s.ids.mint();
+        assert!(s.commit(Transaction(vec![Operation::CreateNode {
+            id: away,
+            parent: other,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }])));
+        s.switch_page(home);
+        s.selection.set_one(rect);
+
+        assert!(s.jump_to(opened));
+        assert_eq!(s.page, home, "the last step undone was on this page");
+        assert_eq!(
+            s.selection.ids(),
+            &[rect],
+            "and the step on Archive did not switch away and back on the way"
+        );
     }
 }

@@ -83,7 +83,7 @@ ondin-app/src/
 ├─ view.rs          Camera: screen<->world math
 ├─ fonts/           mod.rs FontService (§5.4a); queue.rs three-lane download queue; preview.rs picker rows
 ├─ tools/           pure transaction builders (create *, resize, rotate, pen_outline/pen_anchors, ...)
-├─ panels/          layers.rs, inspector.rs, picker.rs, paint.rs (pure Brush algebra + list reorder)
+├─ panels/          layers.rs, history.rs, inspector.rs, picker.rs, paint.rs (pure Brush algebra + list reorder)
 ├─ ui.rs            shared widgets (cards, fields, segmented, ramps, Hsv, dropdown frame/rows)
 └─ theme.rs         Nocturne tokens as egui Style/Visuals/fonts
 ```
@@ -130,6 +130,15 @@ ondin-app/src/
   - *Next page* / *Previous page* (`Ctrl+PageDown` / `Ctrl+PageUp`, `Action::StepPage`) stop at either end.
   - *Duplicate page*, *Draft* and *Delete page* as `context-menus.md` §6.8 gives them. The copy *Duplicate page* makes opens its name like *New page*'s, in the same undo step. *Delete page* deletes an empty page at once and asks first for one with layers (`page_delete_confirmation`: *Delete page?*, *Cancel* and *Delete* in danger red; `Escape`, the backdrop and ✕ cancel). Deleting the current page lands on the one above it (below it, for the first); the status line counts the instances detached.
   - *Move to page* (`move_selection_to_page`): the selection to the top of the other page, in order, at the same place on the canvas (every page shares one origin); it leaves the selection and the view stays. One undo step.
+
+### History (`panels/history.rs`)
+
+- **Where:** a section docked at the foot of the layers pane, below Layers. *View › Show history* (`ViewSwitch::History`, `prefs.view.history`): in the View menu and palette, not the canvas menu, off by default, no chord; turning it on also shows the layers pane. Focus mode hides it with the pane.
+- **Rows, oldest first:** *Opened* or *New document* (the document as opened), then one row per step (`History::done` then `undone`) reading `Label · Subject +n` beside the step's glyph (`StepNote`, §5.8). The step's page is named on the right when it is not the page in view and the subject is not the page itself. A *Saved* pill marks the row whose state is on disk (`EditorSession::saved_step`); a sparkle marks an MCP step, its tooltip naming the client and tool. The current row is accent-tinted and the rows after it (the redo stack) dimmed; the list keeps the current row in view.
+- **Click jumps** (`OndinApp::jump_history` → `EditorSession::jump_to`, plus what an undo drops). The click aims at the row's step by serial, found after a live text session is finished, since that commit drops the redo rows; a row it dropped jumps nowhere. The jump undoes or redoes as many steps as it takes in one go, following only the last step to its page as `Ctrl+Z` does. A jump is not a step. A step that fails stops it on the last one that applied (*Undid n of m steps — the next one failed: …*); otherwise *Undid 5 steps · Ctrl+Y to redo* or *Redid 2 steps*, plus *· on ‹page›* when it followed. A new edit drops the dimmed rows without warning, as after `Ctrl+Z`.
+- **Hover** outlines the step's layers that are on this page and still exist, in the canvas hover outline's stroke; it never switches page or selection.
+- **`saved_step`**: `Some(None)` is the document as opened, `Some(Some(serial))` the state just after that step, `None` no state in the history (never saved, or restored from a crash). Set by `mark_saved` and a successful `finish_save`, cleared by `mark_unsaved` and by an edit folded into the saved step (a run or `fold_into_last` changes the document under the same serial), reset by `adopt_document`.
+- **The divider drags freely** (`prefs.history_height`, the section's height with its header, default 240), capped only by the Layers header: History may be taller than its list and Layers as short as its header, unlike the Pages divider's cap at content height. Folded (`prefs.history_folded`), the header drops to the pane's foot and names the current step, plus *N ahead* when stepped back.
 
 ## Traps
 

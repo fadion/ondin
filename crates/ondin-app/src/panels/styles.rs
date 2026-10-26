@@ -723,6 +723,7 @@ impl OndinApp {
                 return;
             }
             if text != style.name {
+                self.session.name_step("Rename style", icon::PENCIL_SIMPLE);
                 self.commit_edit(Transaction(vec![Operation::SetStyleName {
                     id: style.id,
                     name: text,
@@ -743,6 +744,8 @@ impl OndinApp {
             .map(|t| style::bind_op(*t, slot, None))
             .collect();
         if !ops.is_empty() {
+            self.session
+                .name_step("Detach style", icon::LINK_SIMPLE_BREAK);
             self.commit_edit(Transaction(ops));
         }
     }
@@ -782,6 +785,7 @@ impl OndinApp {
         let Some(ops) = style::create_ops(&self.session.doc, id, &name, from, slot, targets) else {
             return;
         };
+        self.session.name_step("Create style", icon::SWATCHES);
         if self.commit_edit(Transaction(ops)) {
             // Open, or the name is typed in a card nobody can see.
             self.open_paint_panel(slot.title());
@@ -1116,6 +1120,7 @@ impl OndinApp {
         if let Some(s) = pick {
             self.session.clear_gesture_preview();
             let tx = self.apply_tx(s, pk.slot, &pk.targets, false);
+            self.session.name_step("Apply style", icon::SWATCHES);
             self.commit_edit(tx);
             // A text style applied over a live session writes its node's defaults
             // in the commit (`style::settle`), which the editor's layout cannot

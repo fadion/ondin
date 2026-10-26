@@ -93,7 +93,7 @@ pub use export::{ExportBackground, ExportFormat, ExportScale, ExportSpec, Export
 pub use guide::{
     DEFAULT_GUIDE_COLOR, Guide, GuideAxis, GuideId, guide_coord_of, guide_point, guide_span,
 };
-pub use history::History;
+pub use history::{History, Origin, StepNote, StepView};
 pub use id::{IdSource, NodeId};
 pub use image::{
     AdjustPipeline, Adjustment, Brush, Framing, GradientBrush, ImageAdjust, ImageBrush, ImageEntry,

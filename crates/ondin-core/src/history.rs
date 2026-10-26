@@ -7,6 +7,9 @@
 //! One transaction is one undo step, except a **run** ([`History::commit_into_run`])
 //! folds a burst of edits (arrow-key nudges) into one. The policy — which edits
 //! belong to one burst — is the caller's.
+//!
+//! Each step carries a [`StepNote`] its caller wrote at the commit, so the
+//! history can be listed as well as walked.
 
 use crate::document::Document;
 use crate::id::NodeId;
@@ -37,13 +40,61 @@ fn shape(tx: &Transaction) -> Option<Shape> {
     tx.0.iter().map(|op| op.shape_key()).collect()
 }
 
+/// Where an undo step's edit came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Origin {
+    #[default]
+    User,
+    /// An edit an assistant made over MCP: the client that sent it and the tool
+    /// it called.
+    Mcp { client: String, tool: String },
+}
+
+/// What an undo step says about itself, recorded when it was committed: the
+/// name its edit gave (never derived from the operations), where it came from,
+/// and what it touched. History only keeps it; a list of the history reads it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StepNote {
+    /// The command's name as the menus say it, or the MCP tool's.
+    pub label: String,
+    /// The glyph a list draws beside the label, as its icon font spells it; empty
+    /// for none.
+    pub glyph: &'static str,
+    pub origin: Origin,
+    /// The nodes the edit named, in the order it named them.
+    pub subjects: Vec<NodeId>,
+    /// The first subject's name as it was at the commit.
+    pub subject: Option<String>,
+    /// The page the subjects were on at the commit.
+    pub page: Option<NodeId>,
+}
+
+/// One undo step: the transaction that takes it back (or, on the redo stack,
+/// brings it back) and its note. `serial` names the step for as long as it
+/// lives, across undo and redo.
+struct Step {
+    tx: Transaction,
+    note: StepNote,
+    serial: u64,
+}
+
+/// A step as the history lists it.
+#[derive(Clone, Copy, Debug)]
+pub struct StepView<'a> {
+    pub note: &'a StepNote,
+    pub serial: u64,
+}
+
 #[derive(Default)]
 pub struct History {
-    undo: Vec<Transaction>,
-    redo: Vec<Transaction>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
     /// The shape of the most recent commit while it is open to merging. Cleared
     /// by an undo, a redo, a commit outside a run, or `end_run`.
     run: Option<Shape>,
+    /// The serial the next step takes; never reused, so a serial dropped with the
+    /// redo stack cannot come back naming another step.
+    next_serial: u64,
 }
 
 impl History {
@@ -59,9 +110,24 @@ impl History {
     /// [`Self::commit_into_run`] may merge into, so the caller need not know
     /// whether it is on the first edit of a burst.
     pub fn commit(&mut self, doc: &mut Document, tx: Transaction) -> Result<DirtySet, OpError> {
+        self.commit_noted(doc, tx, StepNote::default())
+    }
+
+    /// [`Self::commit`], with the note the new step carries.
+    pub fn commit_noted(
+        &mut self,
+        doc: &mut Document,
+        tx: Transaction,
+        note: StepNote,
+    ) -> Result<DirtySet, OpError> {
         let shape = shape(&tx);
         let outcome = doc.apply(&tx)?;
-        self.undo.push(outcome.inverse);
+        self.next_serial += 1;
+        self.undo.push(Step {
+            tx: outcome.inverse,
+            note,
+            serial: self.next_serial,
+        });
         self.redo.clear();
         self.run = shape;
         Ok(outcome.dirty)
@@ -80,9 +146,20 @@ impl History {
         doc: &mut Document,
         tx: Transaction,
     ) -> Result<DirtySet, OpError> {
+        self.commit_into_run_noted(doc, tx, StepNote::default())
+    }
+
+    /// [`Self::commit_into_run`]; `note` is used only when the edit starts a step
+    /// of its own, since a merged edit keeps the run's first note.
+    pub fn commit_into_run_noted(
+        &mut self,
+        doc: &mut Document,
+        tx: Transaction,
+        note: StepNote,
+    ) -> Result<DirtySet, OpError> {
         let shape = shape(&tx);
         if shape.is_none() || shape != self.run || !self.can_undo() {
-            return self.commit(doc, tx);
+            return self.commit_noted(doc, tx, note);
         }
         // This edit's inverse is discarded: it would restore where the previous
         // edit left off, not where the run began.
@@ -101,8 +178,19 @@ impl History {
         doc: &mut Document,
         tx: Transaction,
     ) -> Result<DirtySet, OpError> {
+        self.fold_into_last_noted(doc, tx, StepNote::default())
+    }
+
+    /// [`Self::fold_into_last`]; `note` is used only when there is no step to
+    /// fold into, since the folded edit belongs to the step's own note.
+    pub fn fold_into_last_noted(
+        &mut self,
+        doc: &mut Document,
+        tx: Transaction,
+        note: StepNote,
+    ) -> Result<DirtySet, OpError> {
         if !self.can_undo() {
-            return self.commit(doc, tx);
+            return self.commit_noted(doc, tx, note);
         }
         let outcome = doc.apply(&tx)?;
         self.redo.clear();
@@ -122,19 +210,22 @@ impl History {
     /// dropping it would lose what it held.
     pub fn undo(&mut self, doc: &mut Document) -> Result<Option<DirtySet>, OpError> {
         self.run = None;
-        let Some(tx) = self.undo.pop() else {
+        let Some(step) = self.undo.pop() else {
             return Ok(None);
         };
         // A step puts back values the document held, including a layout value a
         // file carried that CSS refuses (§15 D937).
-        let outcome = match doc.apply_restoring(&tx) {
+        let outcome = match doc.apply_restoring(&step.tx) {
             Ok(outcome) => outcome,
             Err(e) => {
-                self.undo.push(tx);
+                self.undo.push(step);
                 return Err(e);
             }
         };
-        self.redo.push(outcome.inverse);
+        self.redo.push(Step {
+            tx: outcome.inverse,
+            ..step
+        });
         Ok(Some(outcome.dirty))
     }
 
@@ -146,29 +237,56 @@ impl History {
         // step always finds `run` already `None`, so the only reachable effect is
         // that a redo with nothing to redo ends the run in progress.
         self.run = None;
-        let Some(tx) = self.redo.pop() else {
+        let Some(step) = self.redo.pop() else {
             return Ok(None);
         };
-        let outcome = match doc.apply_restoring(&tx) {
+        let outcome = match doc.apply_restoring(&step.tx) {
             Ok(outcome) => outcome,
             Err(e) => {
-                self.redo.push(tx);
+                self.redo.push(step);
                 return Err(e);
             }
         };
-        self.undo.push(outcome.inverse);
+        self.undo.push(Step {
+            tx: outcome.inverse,
+            ..step
+        });
         Ok(Some(outcome.dirty))
     }
 
     /// The transaction [`Self::undo`] would apply next, for a caller that must
     /// know what it touches before it runs (the app's page switch).
     pub fn next_undo(&self) -> Option<&Transaction> {
-        self.undo.last()
+        self.undo.last().map(|s| &s.tx)
     }
 
     /// The transaction [`Self::redo`] would apply next.
     pub fn next_redo(&self) -> Option<&Transaction> {
-        self.redo.last()
+        self.redo.last().map(|s| &s.tx)
+    }
+
+    /// The steps that are done, oldest first: what [`Self::undo`] would take back,
+    /// in the reverse of the order it would.
+    pub fn done(&self) -> impl DoubleEndedIterator<Item = StepView<'_>> + ExactSizeIterator {
+        self.undo.iter().map(Step::view)
+    }
+
+    /// The steps that are undone, nearest first: what [`Self::redo`] would bring
+    /// back, in the order it would.
+    pub fn undone(&self) -> impl DoubleEndedIterator<Item = StepView<'_>> + ExactSizeIterator {
+        self.redo.iter().rev().map(Step::view)
+    }
+
+    /// The serial of the step on top of the undo stack, `None` at the bottom of
+    /// the history: the name of the state the document is in now.
+    pub fn current(&self) -> Option<u64> {
+        self.undo.last().map(|s| s.serial)
+    }
+
+    /// The note of the step on top of the undo stack, for a caller completing it
+    /// with what only the applied edit can tell (a created node's name).
+    pub fn current_note_mut(&mut self) -> Option<&mut StepNote> {
+        self.undo.last_mut().map(|s| &mut s.note)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -185,6 +303,15 @@ impl History {
 
     pub fn redo_depth(&self) -> usize {
         self.redo.len()
+    }
+}
+
+impl Step {
+    fn view(&self) -> StepView<'_> {
+        StepView {
+            note: &self.note,
+            serial: self.serial,
+        }
     }
 }
 
@@ -581,5 +708,56 @@ mod tests {
             .unwrap();
         assert!(h2.redo(&mut fresh).is_err());
         assert!(h2.can_redo(), "the failed redo step is still there");
+    }
+
+    fn note(label: &str) -> StepNote {
+        StepNote {
+            label: label.into(),
+            ..StepNote::default()
+        }
+    }
+
+    /// A step keeps its note and serial across undo and redo, and a run's merged
+    /// edits keep the note of the edit that opened it.
+    /// flip: `..step` in `undo` replaced by a default note → fails at `undone`.
+    #[test]
+    fn a_step_keeps_its_note_and_serial_across_undo_and_redo() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        history
+            .commit_into_run_noted(&mut doc, move_to(rect, 1.0), note("Nudge"))
+            .unwrap();
+        history
+            .commit_into_run_noted(&mut doc, move_to(rect, 2.0), note("Other"))
+            .unwrap();
+        let top = history.current().unwrap();
+        assert_eq!(history.done().last().unwrap().note.label, "Nudge");
+
+        history.undo(&mut doc).unwrap();
+        let undone: Vec<_> = history
+            .undone()
+            .map(|s| (s.serial, s.note.label.clone()))
+            .collect();
+        assert_eq!(undone, vec![(top, "Nudge".to_string())]);
+        assert_ne!(history.current(), Some(top));
+
+        history.redo(&mut doc).unwrap();
+        assert_eq!(history.current(), Some(top), "the same step came back");
+    }
+
+    /// `undone` lists the redo stack nearest first, the order redo takes it in.
+    #[test]
+    fn undone_steps_list_nearest_first() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        for (x, l) in [(1.0, "A"), (2.0, "B"), (3.0, "C")] {
+            history
+                .commit_noted(&mut doc, move_to(rect, x), note(l))
+                .unwrap();
+        }
+        history.undo(&mut doc).unwrap();
+        history.undo(&mut doc).unwrap();
+        let labels: Vec<_> = history.undone().map(|s| s.note.label.as_str()).collect();
+        assert_eq!(labels, ["B", "C"]);
+        let done: Vec<_> = history.done().map(|s| s.note.label.as_str()).collect();
+        assert_eq!(done, ["", "A"], "the fixture's create carries no note");
     }
 }

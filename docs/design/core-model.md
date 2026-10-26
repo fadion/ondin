@@ -20,7 +20,7 @@ ondin-core/src/
 ├─ op.rs           # Operation, Transaction, OpError, ApplyOutcome, DirtySet
 ├─ build.rs        # composite + bulk-property builders, world-space projection facade (§5.7a)
 ├─ naming.rs       # the names the app generates for layers, and their numbering (§5.7b)
-├─ history.rs      # History (undo/redo stacks)
+├─ history.rs      # History (undo/redo stacks of noted steps)
 ├─ resolve.rs      # Resolved: world transforms, bounds, text layout cache, rstar index
 ├─ query.rs        # hit_test, nodes_in_view, bounds, group_chain, pivot_world
 ├─ geometry.rs     # local bounds per NodeKind; exact hit-testing (point-in-path, stroke distance);

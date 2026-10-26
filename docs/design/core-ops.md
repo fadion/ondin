@@ -181,17 +181,20 @@ Four things generate a name: creation, duplication, a boolean's label following 
 ### 5.8 History
 
 ```rust
-pub struct History { undo: Vec<Transaction>, redo: Vec<Transaction>, run: Option<Shape> }
+pub struct History { undo: Vec<Step>, redo: Vec<Step>, run: Option<Shape>, next_serial: u64 }
+struct Step { tx: Transaction, note: StepNote, serial: u64 }
+pub struct StepNote { label, glyph, origin: Origin /* User | Mcp { client, tool } */, subjects, subject, page }
 ```
 
-- `commit(doc, tx)`: `out = doc.apply(&tx)?; undo.push(out.inverse); redo.clear();`. `undo`/`redo` pop, apply, push the returned inverse to the other stack; a step that fails to apply goes back on the stack it came from, since `apply` changed nothing and dropping it would lose what it holds. Both apply through `Document::apply_restoring` (`apply` with `BadLayout` and the blur cap stood down, since a step writes back only values the document held, including a file's CSS-refused layout value); every other check stands.
+- `commit(doc, tx)`: `out = doc.apply(&tx)?; undo.push(Step { out.inverse, note, serial }); redo.clear();`. `undo`/`redo` pop, apply, push the returned inverse to the other stack; a step that fails to apply goes back on the stack it came from, since `apply` changed nothing and dropping it would lose what it holds. Both apply through `Document::apply_restoring` (`apply` with `BadLayout` and the blur cap stood down, since a step writes back only values the document held, including a file's CSS-refused layout value); every other check stands.
 - **`redo.clear()` on commit** stops a redo applying to a document that has moved on (commit A, undo, commit B, redo would re-write stale values).
 - **`run` is the merge window** for `commit_into_run`: the **shape** of the last commit, one `Operation::shape_key` per op = variant + the *field* where the payload names one + subject. Merge is refused unless shapes are equal (keeping the older inverse restores both edits only if the second overwrote exactly what the first did). The field matters: `SetGeometry`'s payload is a field selector, so a size edit and a corner-radius edit on one node must not merge. `shape_key` is not `Operation::overwrites` (which is `None` for every guide op; `SetGuidePosition` keys a run here, so a held arrow key on a guide is one undo step).
 - **No structural command can use the run:** `shape` needs `overwrites()` on every op, `None` for `Reparent`, `DeleteNode`, `CreateNode`. Ungroup, paste and image drop must fold their parts into one transaction *before* committing (§9.3).
 - **`fold_into_last`** applies a transaction and folds it into the top step, keeping that step's inverse, for an edit the step's undo already takes away whole: a page added, then named, is one step, since removing the page removes its name. The caller vouches for that; `commit_into_run` checks shapes instead.
+- **Each step carries a `StepNote` its caller writes at the commit** (`commit_noted`, `commit_into_run_noted`, `fold_into_last_noted`; the plain three carry a default note): the command's name and glyph as the menus give them, or the MCP tool's, where it came from, and what it touched. **A label is never derived from the operations.** A step keeps its note and serial across undo and redo; an edit merged into a run or folded into the last step keeps that step's note. Serials are never reused, so one dropped with the redo stack cannot come back naming another step. `done()` lists undo steps oldest first, `undone()` redo steps nearest first, `current()` is the top step's serial (`None` at the bottom: the document as opened).
 - `next_undo`/`next_redo` show the step about to run, and `Transaction::subjects` the nodes it is about (the layer moved, the page added; not every node it dirties), so the app can tell which page a step belongs to before running it (§9.4).
 - **A run ends on** a plain `commit`, `end_run()` (the caller's half), and **any undo or redo** (an undo that left the shape standing lets the next edit fold into the step before the undone one and discard its own inverse; a redo with nothing to redo still ends the run).
-- History lives in core and is shared by app and MCP: one timeline. Depth is unlimited; `DeleteNode` inverses hold full subtrees, so a size cap is a parked future knob.
+- History lives in core and is shared by app and MCP: one timeline. It is session-only and its depth is unlimited; `DeleteNode` inverses hold full subtrees, so a size cap is a parked future knob.
 
 ### 5.9 Resolved (derived layer)
 

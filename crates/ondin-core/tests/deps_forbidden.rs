@@ -80,6 +80,7 @@ const RULES: &[(&str, &[&str])] = &[
 const CORE_PERMITTED: &[&str] = &[
     "base64",
     "flo_curves",
+    "i_overlay",
     "kurbo",
     "parley",
     "peniko",

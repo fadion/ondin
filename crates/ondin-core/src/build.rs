@@ -1099,7 +1099,8 @@ pub const SIMPLIFY_ACCURACY: f64 = 0.5;
 /// corner, so a drawn polyline loses its jitter and a real corner survives.
 pub const SIMPLIFY_CORNER_DEG: f64 = 15.0;
 
-/// The miter limit of the joins *Offset path* draws; past it a corner is bevelled.
+/// The miter limit of the joins *Offset path* draws: a sharper corner's mitre is
+/// clipped square at this many times the distance from it.
 pub const OFFSET_MITER_LIMIT: f64 = 4.0;
 
 /// The outline the `Path` node `id` draws — its corner radii applied — or the error
@@ -1159,13 +1160,30 @@ pub fn offset_path(doc: &Document, id: NodeId, distance: f64) -> Result<Transact
     Ok(reshaped(id, offset_outline(&path, distance)?))
 }
 
-/// The outline `distance` outside `path`, or inside it when negative: the path
-/// united with the band `geometry::offset_band` lays along it (mitred joins), or
-/// less that band when shrinking.
+/// How finely *Offset path* flattens an outline into polygons, in units.
+const OFFSET_FLATTEN: f64 = 0.05;
+
+/// How far *Offset path*'s refit may stray from the offset polygon, in units.
+const OFFSET_REFIT_ACCURACY: f64 = 0.1;
+
+/// The sharpest turn, in degrees, *Offset path*'s refit runs a curve through. The
+/// flattened polygon turns a few degrees at each vertex, a mitre far more.
+const OFFSET_REFIT_CORNER_DEG: f64 = 20.0;
+
+/// The outline `distance` outside `path`, or inside it when negative, with corners
+/// mitred up to [`OFFSET_MITER_LIMIT`] and bevelled past it.
 ///
-/// An open subpath has no inside, so it grows into the band around it (round caps)
-/// and is left out of a shrink. A shrink that erodes everything is `EmptyGeometry`.
+/// The arithmetic is i_overlay's polygon offset over the flattened outline, read
+/// non-zero, refitted with curves after: an offset is all coincident and crossing
+/// edges, which a curve boolean gets wrong. An open subpath has no inside, so it
+/// grows into a round-capped stroke around it and is left out of a shrink. A
+/// shrink that erodes everything is `EmptyGeometry`.
 pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::BezPath, OpError> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::float::simplify::SimplifyShape;
+    use i_overlay::mesh::float::outline::offset::OutlineOffset;
+    use i_overlay::mesh::float::stroke::offset::StrokeOffset;
+    use i_overlay::mesh::float::style::{LineCap, LineJoin, OutlineStyle, StrokeStyle};
     if !distance.is_finite() {
         return Err(OpError::NonFinite);
     }
@@ -1175,45 +1193,176 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
     let (closed, open): (Vec<_>, Vec<_>) = crate::geometry::subpaths(path)
         .into_iter()
         .partition(|s| matches!(s.elements().last(), Some(kurbo::PathEl::ClosePath)));
-    let joined = |parts: &[kurbo::BezPath]| {
-        kurbo::BezPath::from_iter(parts.iter().flat_map(|p| p.elements().iter().copied()))
-    };
-    let closed = joined(&closed);
-    let band = crate::geometry::offset_band(&closed, distance, OFFSET_MITER_LIMIT);
-    use crate::boolean::evaluate;
-    use crate::node::BoolOp;
-    let result = if distance > 0.0 {
-        let mut operands = band;
-        operands.extend(crate::geometry::stroke_pieces(
-            &joined(&open),
-            2.0 * distance,
-            kurbo::Join::Miter,
-            kurbo::Cap::Round,
-            OFFSET_MITER_LIMIT,
-        ));
-        if !closed.elements().is_empty() {
-            operands.push(closed);
+    if distance < 0.0 && closed.is_empty() {
+        return Err(OpError::EmptyGeometry);
+    }
+    // The interior angle a mitre of `OFFSET_MITER_LIMIT` reaches: sharper is bevelled.
+    let mitre = LineJoin::Miter(2.0 * (1.0 / OFFSET_MITER_LIMIT).asin());
+    let h = distance.abs();
+    let rings: Vec<Vec<[f64; 2]>> = closed.iter().filter_map(|s| polyline(s, h, 3)).collect();
+    let lines: Vec<Vec<[f64; 2]>> = open.iter().filter_map(|s| polyline(s, h, 2)).collect();
+    // i_overlay asserts on bounds it cannot scale, so a panic is a refusal.
+    let contours = std::panic::catch_unwind(|| {
+        let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+        if !rings.is_empty() {
+            // Read non-zero first: the outline wants outer rings one way round and
+            // holes the other, which a drawn path does not promise.
+            let region = rings.simplify_shape(FillRule::NonZero);
+            let style = OutlineStyle::new(distance).line_join(mitre.clone());
+            out.extend(region.outline(&style).into_iter().flatten());
         }
-        evaluate(BoolOp::Union, &operands)
-    } else {
-        if closed.elements().is_empty() {
-            return Err(OpError::EmptyGeometry);
+        if distance > 0.0 && !lines.is_empty() {
+            let style = StrokeStyle::new(2.0 * distance)
+                .start_cap(LineCap::Round(0.1))
+                .end_cap(LineCap::Round(0.1))
+                .line_join(mitre);
+            for line in &lines {
+                out.extend(line.stroke(style.clone(), false).into_iter().flatten());
+            }
         }
-        // The band is united before it is taken away: subtracting the overlapping
-        // pieces one by one leaves slivers outside the path.
-        let band = evaluate(BoolOp::Union, &band).ok_or(OpError::EmptyGeometry)?;
-        evaluate(BoolOp::Subtract, &[closed, band])
+        // United, so a stroke over the grown outline does not overlap it.
+        out.simplify_shape(FillRule::NonZero)
+    })
+    .map_err(|_| OpError::EmptyGeometry)?;
+    let mut result = kurbo::BezPath::new();
+    for contour in contours.into_iter().flatten() {
+        // The polygon offset snaps to an integer grid, which leaves steps a fraction
+        // of the refit's accuracy long; their jitter in direction throws the fit.
+        let mut points: Vec<kurbo::Point> = Vec::with_capacity(contour.len());
+        for p in contour.iter().map(|p| kurbo::Point::new(p[0], p[1])) {
+            if points
+                .last()
+                .is_none_or(|q| (p - *q).hypot() >= 2.0 * OFFSET_REFIT_ACCURACY)
+            {
+                points.push(p);
+            }
+        }
+        // A sliver the polygon offset rounds to: nothing anyone could see or edit.
+        let area: f64 = (0..points.len())
+            .map(|i| {
+                points[i]
+                    .to_vec2()
+                    .cross(points[(i + 1) % points.len()].to_vec2())
+            })
+            .sum();
+        if points.len() < 3 || area.abs() < 2.0 {
+            continue;
+        }
+        result.extend(straightened(&crate::fit::fit_closed(
+            &points,
+            OFFSET_REFIT_ACCURACY,
+            OFFSET_REFIT_CORNER_DEG,
+        )));
+    }
+    if result.elements().is_empty() {
+        return Err(OpError::EmptyGeometry);
+    }
+    Ok(result)
+}
+
+/// `sub` flattened to its distinct points for an offset of `h`, if it has at least
+/// `min` of them.
+///
+/// The polygon offset joins every vertex, so a vertex where the polygon turns by θ
+/// sits `h·θ²/8` off the true offset: each curve is cut until both that and its own
+/// chords are within [`OFFSET_FLATTEN`], finer the further it is offset. And each
+/// curve starts and ends with a chord a twentieth of a unit long, so the polygon
+/// meets a corner along the curve's own tangent: the corner's mitre is built from
+/// those chords, and a long one would aim it off.
+fn polyline(sub: &kurbo::BezPath, h: f64, min: usize) -> Option<Vec<[f64; 2]>> {
+    use kurbo::{ParamCurve, ParamCurveArclen};
+    let mut points: Vec<[f64; 2]> = Vec::new();
+    let mut push = |p: kurbo::Point| {
+        if points
+            .last()
+            .is_none_or(|q| (p - kurbo::Point::new(q[0], q[1])).hypot() > 1e-9)
+        {
+            points.push([p.x, p.y]);
+        }
     };
-    // A shrink to nothing leaves specks where the band's far edges gather to a point.
-    let result = result.map(|p| {
-        let kept = crate::geometry::subpaths(&p)
-            .into_iter()
-            .filter(|s| kurbo::Shape::area(s).abs() >= 1.0);
-        kurbo::BezPath::from_iter(kept.flat_map(|s| s.into_elements()))
-    });
-    result
-        .filter(|p| p.segments().next().is_some())
-        .ok_or(OpError::EmptyGeometry)
+    if let Some(kurbo::PathEl::MoveTo(p)) = sub.elements().first() {
+        push(*p);
+    }
+    for seg in sub.segments() {
+        if let kurbo::PathSeg::Line(l) = seg {
+            push(l.p1);
+            continue;
+        }
+        let c = seg.to_cubic();
+        let e = (0.05 / seg.arclen(1e-3).max(1e-9)).min(0.01);
+        push(c.eval(e));
+        cut(&c, e, 1.0 - e, h, 0, &mut push);
+        push(c.end());
+    }
+    (points.len() >= min).then_some(points)
+}
+
+/// Push the points of `c` over `t0..t1` after its start, halving the span until
+/// it is flat within [`OFFSET_FLATTEN`] and turns little enough for an offset `h`.
+fn cut(
+    c: &kurbo::CubicBez,
+    t0: f64,
+    t1: f64,
+    h: f64,
+    depth: u32,
+    push: &mut impl FnMut(kurbo::Point),
+) {
+    use kurbo::{ParamCurve, ParamCurveDeriv};
+    let span = c.subsegment(t0..t1);
+    let chord = span.p3 - span.p0;
+    let len = chord.hypot();
+    let off = |p: kurbo::Point| match len > 1e-12 {
+        true => chord.cross(p - span.p0).abs() / len,
+        false => (p - span.p0).hypot(),
+    };
+    // A cubic lies within its control polygon: three quarters of the handles'
+    // distance from the chord bounds how far it strays.
+    let flat = 0.75 * off(span.p1).max(off(span.p2)) <= OFFSET_FLATTEN;
+    let d = c.deriv();
+    let (a, b) = (d.eval(t0).to_vec2(), d.eval(t1).to_vec2());
+    let turn = a.cross(b).atan2(a.dot(b)).abs();
+    let joined = h * turn * turn / 8.0 <= OFFSET_FLATTEN;
+    if depth >= 16 || (flat && joined) {
+        push(span.p3);
+        return;
+    }
+    let mid = 0.5 * (t0 + t1);
+    cut(c, t0, mid, h, depth + 1, push);
+    cut(c, mid, t1, h, depth + 1, push);
+}
+
+/// `path` with every cubic whose handles lie on its chord written as the line it is.
+/// Runs of lines along one line become one.
+fn straightened(path: &kurbo::BezPath) -> kurbo::BezPath {
+    // How far a point may sit off a chord and still count as on it: a quarter of
+    // the refit's accuracy, which a straight stretch fitted with a cubic is within.
+    const ON: f64 = OFFSET_REFIT_ACCURACY / 4.0;
+    let off = |a: kurbo::Point, b: kurbo::Point, p: kurbo::Point| {
+        (b - a).cross(p - a).abs() / (b - a).hypot().max(1e-12)
+    };
+    let mut out: Vec<kurbo::PathEl> = Vec::new();
+    for el in path.elements() {
+        let p0 = out.last().and_then(|e| e.end_point());
+        let el = match (*el, p0) {
+            (kurbo::PathEl::CurveTo(p1, p2, p3), Some(p0))
+                if off(p0, p3, p1).max(off(p0, p3, p2)) < ON =>
+            {
+                kurbo::PathEl::LineTo(p3)
+            }
+            (el, _) => el,
+        };
+        // A line carrying on along the one before replaces it.
+        if let kurbo::PathEl::LineTo(p) = el
+            && let Some(&kurbo::PathEl::LineTo(q)) = out.last()
+            && let Some(o) = out.len().checked_sub(2).and_then(|i| out[i].end_point())
+            && off(o, p, q) < ON
+            && (q - o).dot(p - q) > 0.0
+        {
+            out.pop();
+        }
+        out.push(el);
+    }
+    kurbo::BezPath::from_vec(out)
 }
 
 /// Whether *Outline stroke* has something to turn into a shape: a shape, path or

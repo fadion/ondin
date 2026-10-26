@@ -4790,17 +4790,17 @@ fn simplify_refits_a_polyline_and_keeps_real_corners() {
 }
 
 /// Offset grows a square by the distance with mitred corners, shrinks it, bands an
-/// open line with round caps, and refuses what has nothing left. flip: `Subtract`
-/// swapped for `Union` in `offset_path` → fails at the shrunk box.
+/// open line with round caps, and refuses what has nothing left.
 #[test]
 fn offset_grows_shrinks_and_bands() {
     use ondin_core::kurbo::{BezPath, Rect, Shape};
     let mut f = Fixture::new();
     let square = Rect::new(0.0, 0.0, 100.0, 100.0).to_path(0.1);
+    // Within the refit's accuracy, a tenth of a unit: a round cap is refitted.
     let near = |a: Rect, b: Rect| {
         [a.x0 - b.x0, a.y0 - b.y0, a.x1 - b.x1, a.y1 - b.y1]
             .iter()
-            .all(|d| d.abs() < 0.01)
+            .all(|d| d.abs() < 0.1)
     };
 
     let id = f.add(f.artboard, path_kind(square.clone()), (0.0, 0.0));
@@ -4840,8 +4840,7 @@ fn offset_grows_shrinks_and_bands() {
 }
 
 /// Shrinking a many-sided ring leaves only what is inside it, and nothing once the
-/// distance passes its middle. flip: the band subtracted piece by piece instead of
-/// united first → fails at "nothing left" (a sliver outside the ring survives).
+/// distance passes its middle.
 #[test]
 fn offset_shrinks_a_ring_without_slivers() {
     use ondin_core::kurbo::{BezPath, Shape};
@@ -4873,8 +4872,7 @@ fn offset_shrinks_a_ring_without_slivers() {
 }
 
 /// Offset fills the whole disk a circle grows to, at every distance, and a hole
-/// closes once the distance passes its radius. flip: `offset_outline` banding with
-/// `geometry::stroke_pieces` again → fails at "filled" (a quarter goes missing).
+/// closes once the distance passes its radius.
 #[test]
 fn offset_grows_a_circle_whole_at_any_distance() {
     use ondin_core::kurbo::{Ellipse, Point, Shape};

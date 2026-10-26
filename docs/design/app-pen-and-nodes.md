@@ -90,17 +90,22 @@ nothing the canvas does not already offer except the last two.
   within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units). Turns sharper than `SIMPLIFY_CORNER_DEG`
   (15°) stay corners, so a drawn polyline loses its jitter and a real corner survives. A refit with no
   fewer segments commits nothing.
-- **Offset** (`build::offset_outline`) is the drawn outline united with the band
-  `geometry::offset_band` lays on its outside, or less the band it lays inside for a negative
-  distance, mitred to `OFFSET_MITER_LIMIT` at corners. The band is one-sided, one piece per smooth run
-  of segments (a circle's is one ring), each starting a unit behind the outline: flo_curves drops or
-  inverts operands that share an edge, and a two-sided stroke wider than a curve's radius folds over
-  itself. Where a curve turns tighter than the distance, its piece reaches only to the centre of
-  curvature. A run whose piece would cross itself is halved until it does not; that happens once a
-  shrink passes the shape's width somewhere, and is where the result is least reliable. The band is
-  united before a shrink subtracts it, because subtracting the overlapping pieces one at a time leaves
-  slivers outside the path. An open subpath grows into a round-capped stroke around it and has no
-  inside to shrink. The bar's *Offset* opens a card with one scrubbable distance field through the
+- **Offset** (`build::offset_outline`) is the shape grown by the distance, or shrunk for a negative
+  one: everything within the distance of the outline, with corners mitred and the mitre clipped
+  square at `OFFSET_MITER_LIMIT` (4) times the distance from the corner (SVG 2's `miter-clip`), so a
+  sharp tip keeps more of itself than a bevel would leave. It is polygon arithmetic, not curve
+  booleans: the outline is flattened (`polyline`, each curve cut until both its chords and the join
+  the offset puts at each vertex are within `OFFSET_FLATTEN`, so finer the further it is offset; a
+  short chord at each end of a curve aims the corner mitres along the true tangent), read non-zero,
+  offset by i_overlay, and refitted with curves (`fit::fit_closed`, Schneider's algorithm: corners
+  where the polygon turns by more than `OFFSET_REFIT_CORNER_DEG`, every point within
+  `OFFSET_REFIT_ACCURACY`, a fitted cubic that lies along its chord written as a line). flo_curves,
+  which an earlier version used, drops or inverts operands that share an edge, and an offset built
+  from band pieces is all shared edges. An open subpath grows into a round-capped stroke around it
+  and has no inside to shrink. `ondin-core`'s `tests/offset_suite.rs` checks a catalogue of shapes at
+  sixteen distances against an independent point-by-point oracle (the shape and its mitred stroke),
+  and for specks, stray edges and runaway segment counts. A shape that misbehaves belongs in its
+  catalogue. The bar's *Offset* opens a card with one scrubbable distance field through the
   edit valve; every distance is measured from the outline the card opened on, and zero writes the
   stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.
 - Both write a new path with no corner radii, the radii baked into the curves, and clear the point

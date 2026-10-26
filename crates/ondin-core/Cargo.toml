@@ -62,6 +62,11 @@ thiserror.workspace = true
 # prevent it — and **no gate can see it**, because both the comment and the entry
 # are prose and the number resolves either way. Corrected at D782.
 flo_curves = "=0.8.1"
+# *Offset path* (`build::offset_outline`): the flattened outline offset as polygons
+# with mitre joins and non-zero fill. flo_curves drops or inverts operands that
+# share an edge, and an offset built from band pieces is all shared edges.
+# `=`-pinned for the same reason as flo_curves: its answers are the document.
+i_overlay = "=9.0.1"
 # Container layout — CSS flexbox and CSS grid (enabled since step 4, below) — §15 D867.
 # Chosen on a measured spike against core's own text layout: it implements the
 # specs from tests generated off real browsers, where the alternative was writing a

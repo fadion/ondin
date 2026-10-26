@@ -4871,3 +4871,46 @@ fn offset_shrinks_a_ring_without_slivers() {
         "nothing left"
     );
 }
+
+/// Offset fills the whole disk a circle grows to, at every distance, and a hole
+/// closes once the distance passes its radius. flip: `offset_outline` banding with
+/// `geometry::stroke_pieces` again → fails at "filled" (a quarter goes missing).
+#[test]
+fn offset_grows_a_circle_whole_at_any_distance() {
+    use ondin_core::kurbo::{Ellipse, Point, Shape};
+    let circle = |r: f64| {
+        let mut c = Ellipse::new((0.0, 0.0), (r, r), 0.0).to_path(0.1);
+        c.close_path();
+        c
+    };
+    let ring_at = |r: f64| {
+        (0..72).map(move |k| {
+            let a = k as f64 / 72.0 * std::f64::consts::TAU;
+            Point::new(r * a.cos(), r * a.sin())
+        })
+    };
+    for r in [50.0, 75.0, 115.0] {
+        for d in (1..=120).map(f64::from) {
+            let grown = build::offset_outline(&circle(r), d).unwrap();
+            for p in ring_at(0.0).chain(ring_at(r)).chain(ring_at(r + d - 0.5)) {
+                assert!(grown.winding(p) != 0, "filled: r {r} d {d} at {p:?}");
+            }
+            for p in ring_at(r + d + 0.5) {
+                assert!(grown.winding(p) == 0, "no further: r {r} d {d} at {p:?}");
+            }
+        }
+    }
+
+    let mut donut = circle(120.0);
+    donut.extend(circle(60.0).reverse_subpaths());
+    let grown = build::offset_outline(&donut, 30.0).unwrap();
+    assert!(grown.winding(Point::ZERO) == 0, "the hole shrinks");
+    assert!(grown.winding(Point::new(31.0, 0.0)) != 0, "to radius 30");
+    let grown = build::offset_outline(&donut, 70.0).unwrap();
+    assert!(grown.winding(Point::ZERO) != 0, "and closes");
+    let disk = 190.0f64.powi(2) * std::f64::consts::PI;
+    assert!(
+        (grown.area().abs() / disk - 1.0).abs() < 0.005,
+        "one disk, no specks"
+    );
+}

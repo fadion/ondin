@@ -1048,6 +1048,284 @@ fn cap_piece(p: Point, t: Vec2, h: f64, cap: Cap) -> Option<BezPath> {
     }
 }
 
+/// How far behind its segment an [`offset_band`] piece starts: twenty-five times
+/// flo_curves' accuracy, so the boolean sees an overlap rather than a shared edge.
+const SEAM: f64 = 1.0;
+
+/// The largest turn, as the cross product of unit tangents, at which [`offset_band`]
+/// treats a join as smooth and runs one piece through it — about a tenth of a degree.
+const SMOOTH_JOIN: f64 = 2e-3;
+
+/// The band *Offset path* adds to (`distance > 0`) or takes from the closed `path`:
+/// one piece per run of smoothly joined segments, on the side the offset moves into,
+/// plus a mitred wedge at each corner.
+///
+/// Not [`stroke_pieces`]: flo_curves drops or inverts pieces wherever two operands
+/// share an edge, and a butt-ended stroke wider than a curve's radius folds over
+/// itself. So a piece starts [`SEAM`] behind the outline, spans a whole smooth run
+/// (a circle's band is one ring, not four quarters abutting), and never folds.
+pub fn offset_band(path: &BezPath, distance: f64, miter_limit: f64) -> Vec<BezPath> {
+    let h = distance.abs();
+    let mut out = Vec::new();
+    if h.is_nan() || h <= 0.0 {
+        return out;
+    }
+    let b = path.bounding_box();
+    let eps = 1e-4 * b.width().max(b.height()).max(1.0);
+    let filled = |p: Point| path.winding(p) != 0;
+    for sub in subpaths(path) {
+        let segs: Vec<PathSeg> = sub
+            .segments()
+            .filter(|s| (s.end() - s.start()).hypot() > 1e-9 || s.arclen(1e-6) > 1e-9)
+            .collect();
+        let n = segs.len();
+        // The side each segment's piece goes on: outside the fill to grow, inside to
+        // shrink. `None` for an edge with the fill on both sides or neither.
+        let sides: Vec<Option<f64>> = segs
+            .iter()
+            .map(|seg| {
+                let c = seg.to_cubic();
+                let normal = c.deriv().eval(0.5).to_vec2().normalize().turn_90();
+                if !normal.is_finite() {
+                    return None;
+                }
+                let mid = c.eval(0.5);
+                let (left, right) = (filled(mid + normal * eps), filled(mid - normal * eps));
+                (left != right).then_some(if left == (distance > 0.0) { -1.0 } else { 1.0 })
+            })
+            .collect();
+        // Whether segment `i` runs on into the next as one piece.
+        let smooth: Vec<bool> = (0..n)
+            .map(|i| {
+                let (t_in, t_out) = (end_tangent(&segs[i]), start_tangent(&segs[(i + 1) % n]));
+                t_in.dot(t_out) > 0.0
+                    && t_in.cross(t_out).abs() < SMOOTH_JOIN
+                    && sides[i].is_some()
+                    && sides[i] == sides[(i + 1) % n]
+            })
+            .collect();
+        for i in (0..n).filter(|i| !smooth[*i]) {
+            out.extend(join_piece(
+                segs[i].end(),
+                end_tangent(&segs[i]),
+                start_tangent(&segs[(i + 1) % n]),
+                h,
+                kurbo::Join::Miter,
+                miter_limit,
+            ));
+        }
+        let Some(last) = (0..n).rev().find(|i| !smooth[*i]) else {
+            if let Some(Some(side)) = sides.first() {
+                let run: Vec<&PathSeg> = segs.iter().collect();
+                run_pieces(&run, h, *side, true, &mut out);
+            }
+            continue;
+        };
+        // Runs start after a corner; the last corner closes the run that wraps round.
+        let mut run = Vec::new();
+        for i in (1..=n).map(|k| (last + k) % n) {
+            run.push(&segs[i]);
+            if !smooth[i] {
+                if let Some(side) = sides[i] {
+                    run_pieces(&run, h, side, false, &mut out);
+                }
+                run.clear();
+            }
+        }
+    }
+    out
+}
+
+/// [`run_piece`] over `run`, halved until each piece is a contour that does not
+/// cross itself. A run's far edge crosses itself once the offset passes the width of
+/// the shape there; abutting halves are the lesser evil.
+fn run_pieces(run: &[&PathSeg], h: f64, side: f64, cyclic: bool, out: &mut Vec<BezPath>) {
+    let piece = run_piece(run, h, side, cyclic);
+    if run.len() == 1 || !crosses_itself(&piece) {
+        out.push(piece);
+        return;
+    }
+    let (a, b) = run.split_at(run.len() / 2);
+    run_pieces(a, h, side, false, out);
+    run_pieces(b, h, side, false, out);
+}
+
+/// Whether any two edges of `path`, flattened, cross — other than neighbours meeting
+/// at their shared point.
+fn crosses_itself(path: &BezPath) -> bool {
+    let mut edges: Vec<(Point, Point, usize)> = Vec::new();
+    let (mut at, mut start, mut sub) = (Point::ZERO, Point::ZERO, 0);
+    kurbo::flatten(path, 0.05, |el| match el {
+        PathEl::MoveTo(p) => {
+            (at, start) = (p, p);
+            sub += 1;
+        }
+        PathEl::LineTo(_) | PathEl::ClosePath => {
+            let p = if let PathEl::LineTo(p) = el { p } else { start };
+            // A zero-length edge would part two neighbours, which then touch as
+            // strangers.
+            if (p - at).hypot() > 1e-9 {
+                edges.push((at, p, sub));
+                at = p;
+            }
+        }
+        _ => {}
+    });
+    // Each subpath's first and last edge, which meet where it closes.
+    let mut ends = vec![(usize::MAX, 0); sub + 1];
+    for (i, e) in edges.iter().enumerate() {
+        ends[e.2].0 = ends[e.2].0.min(i);
+        ends[e.2].1 = i;
+    }
+    let adjacent = |i: usize, j: usize| {
+        let (lo, hi) = (i.min(j), i.max(j));
+        edges[i].2 == edges[j].2 && (hi - lo == 1 || (lo, hi) == ends[edges[i].2])
+    };
+    // Sweep in x: an edge is tested only against those whose x-span overlaps it.
+    let lo = |e: &(Point, Point, usize)| e.0.x.min(e.1.x);
+    let hi = |e: &(Point, Point, usize)| e.0.x.max(e.1.x);
+    let mut order: Vec<usize> = (0..edges.len()).collect();
+    order.sort_by(|i, j| lo(&edges[*i]).total_cmp(&lo(&edges[*j])));
+    for (k, &i) in order.iter().enumerate() {
+        for &j in &order[k + 1..] {
+            if lo(&edges[j]) > hi(&edges[i]) {
+                break;
+            }
+            if !adjacent(i, j) && segments_cross(edges[i], edges[j]) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether the segments `a` and `b` cross, touch or overlap.
+fn segments_cross(a: (Point, Point, usize), b: (Point, Point, usize)) -> bool {
+    let side = |p: Point, q: Point, r: Point| (q - p).cross(r - p);
+    let (d1, d2) = (side(b.0, b.1, a.0), side(b.0, b.1, a.1));
+    let (d3, d4) = (side(a.0, a.1, b.0), side(a.0, a.1, b.1));
+    if (d1, d2, d3, d4) == (0.0, 0.0, 0.0, 0.0) {
+        // Collinear: whether their spans along the line share a point.
+        let dir = a.1 - a.0;
+        let along = |p: Point| (p - a.0).dot(dir);
+        let (lo, hi) = (along(b.0).min(along(b.1)), along(b.0).max(along(b.1)));
+        return hi >= 0.0 && lo <= dir.hypot2();
+    }
+    d1 * d2 <= 0.0 && d3 * d4 <= 0.0
+}
+
+/// One piece of [`offset_band`]: the region `h` to one side of a run of smoothly
+/// joined segments — their left (by `turn_90`) for `side` 1, their right for -1 —
+/// from [`SEAM`] behind them. A `cyclic` run is a whole closed subpath, and its piece
+/// a ring.
+fn run_piece(run: &[&PathSeg], h: f64, side: f64, cyclic: bool) -> BezPath {
+    let (mut inner, mut outer) = (BezPath::new(), BezPath::new());
+    for seg in run.iter().copied() {
+        parallel(seg, -side * SEAM, &mut inner);
+        reach(seg, h, side, &mut outer);
+    }
+    let mut piece = inner;
+    if cyclic {
+        piece.close_path();
+        outer.close_path();
+        // The far edge of a hole the offset closes up gathers to a point, and that of
+        // a shape shrunk past its width turns inside out: either way the band covers
+        // everything inside the run.
+        let far = outer.area();
+        if far.abs() > SEAM * SEAM && far.signum() == piece.area().signum() {
+            piece.extend(outer.reverse_subpaths());
+        }
+    } else {
+        for el in outer.reverse_subpaths().elements() {
+            match el {
+                PathEl::MoveTo(q) => piece.line_to(*q),
+                el => piece.push(*el),
+            }
+        }
+        piece.close_path();
+    }
+    piece
+}
+
+/// Append the curve `d` to the left of `seg` (by `turn_90`) to `out`, a line in from
+/// where `out` stands.
+fn parallel(seg: &PathSeg, d: f64, out: &mut BezPath) {
+    let c = seg.to_cubic();
+    let mut off = BezPath::new();
+    if let Some(chord) = straight(seg) {
+        let n = chord.turn_90() * d;
+        off.move_to(c.p0 + n);
+        off.line_to(c.p3 + n);
+    } else {
+        kurbo::offset::offset_cubic(c, d, TOLERANCE, &mut off);
+    }
+    for el in off.elements() {
+        match el {
+            PathEl::MoveTo(q) if out.elements().is_empty() => out.move_to(*q),
+            PathEl::MoveTo(q) => out.line_to(*q),
+            el => out.push(*el),
+        }
+    }
+}
+
+/// `seg`'s unit direction when it is straight: a line, or a cubic whose handles lie
+/// on its chord, which `offset_cubic` cannot take.
+fn straight(seg: &PathSeg) -> Option<Vec2> {
+    let c = seg.to_cubic();
+    let chord = c.p3 - c.p0;
+    let flat = [c.p1, c.p2]
+        .iter()
+        .all(|p| chord.cross(*p - c.p0).abs() <= 1e-9 * chord.hypot2());
+    (chord.hypot() > 1e-9 && flat).then(|| chord.normalize())
+}
+
+/// Append the far edge of `seg`'s piece to `out`: its parallel curve `h` to `side`.
+///
+/// Where the segment curves into that side tighter than `h`, the parallel curve
+/// folds over, so the edge instead follows each normal only as far as the centre of
+/// curvature, sampled every two degrees of turn. Anything past that is nearer
+/// another part of the outline, whose own piece covers it.
+fn reach(seg: &PathSeg, h: f64, side: f64, out: &mut BezPath) {
+    if straight(seg).is_some() {
+        return parallel(seg, side * h, out);
+    }
+    let c = seg.to_cubic();
+    let (d1, d2) = (c.deriv(), c.deriv().deriv());
+    // Curvature into `side` times `h`: at 1 the parallel curve reaches the centre of
+    // curvature and starts to fold.
+    let bend = |t: f64| {
+        let v = d1.eval(t).to_vec2();
+        side * v.cross(d2.eval(t).to_vec2()) / v.hypot().powi(3) * h
+    };
+    const SAMPLES: usize = 64;
+    let at = |i: usize| i as f64 / SAMPLES as f64;
+    if (0..=SAMPLES).all(|i| bend(at(i)) < 0.9) {
+        return parallel(seg, side * h, out);
+    }
+    let tangent = |t: f64| d1.eval(t).to_vec2().normalize();
+    let turn: f64 = (0..SAMPLES)
+        .map(|i| {
+            let (a, b) = (tangent(at(i)), tangent(at(i + 1)));
+            a.cross(b).atan2(a.dot(b)).abs()
+        })
+        .sum();
+    let count = ((turn / 2f64.to_radians()).ceil() as usize).clamp(8, 512);
+    for i in 0..=count {
+        let t = i as f64 / count as f64;
+        let normal = tangent(t).turn_90() * side;
+        if !normal.is_finite() {
+            continue;
+        }
+        let k = bend(t);
+        let p = c.eval(t) + normal * if k > 1.0 { h / k } else { h };
+        if out.elements().is_empty() {
+            out.move_to(p);
+        } else {
+            out.line_to(p);
+        }
+    }
+}
+
 /// `dashes` scaled so a whole number of periods spans `length` exactly.
 ///
 /// Rounds to the *nearest* whole number of periods rather than the floor, so each

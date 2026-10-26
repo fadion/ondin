@@ -1155,11 +1155,11 @@ pub fn offset_path(doc: &Document, id: NodeId, distance: f64) -> Result<Transact
 }
 
 /// The outline `distance` outside `path`, or inside it when negative: the path
-/// united with its own stroke at twice the distance (mitred joins, round caps), or
-/// less that stroke when shrinking.
+/// united with the band `geometry::offset_band` lays along it (mitred joins), or
+/// less that band when shrinking.
 ///
-/// An open subpath has no inside, so it grows into the band around it and is left
-/// out of a shrink. A shrink that erodes everything is `EmptyGeometry`.
+/// An open subpath has no inside, so it grows into the band around it (round caps)
+/// and is left out of a shrink. A shrink that erodes everything is `EmptyGeometry`.
 pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::BezPath, OpError> {
     if !distance.is_finite() {
         return Err(OpError::NonFinite);
@@ -1174,20 +1174,18 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
         kurbo::BezPath::from_iter(parts.iter().flat_map(|p| p.elements().iter().copied()))
     };
     let closed = joined(&closed);
-    let band = |p: &kurbo::BezPath| {
-        crate::geometry::stroke_pieces(
-            p,
-            2.0 * distance.abs(),
-            kurbo::Join::Miter,
-            kurbo::Cap::Round,
-            OFFSET_MITER_LIMIT,
-        )
-    };
+    let band = crate::geometry::offset_band(&closed, distance, OFFSET_MITER_LIMIT);
     use crate::boolean::evaluate;
     use crate::node::BoolOp;
     let result = if distance > 0.0 {
-        let mut operands: Vec<kurbo::BezPath> = band(&closed);
-        operands.extend(band(&joined(&open)));
+        let mut operands = band;
+        operands.extend(crate::geometry::stroke_pieces(
+            &joined(&open),
+            2.0 * distance,
+            kurbo::Join::Miter,
+            kurbo::Cap::Round,
+            OFFSET_MITER_LIMIT,
+        ));
         if !closed.elements().is_empty() {
             operands.push(closed);
         }
@@ -1198,9 +1196,16 @@ pub fn offset_outline(path: &kurbo::BezPath, distance: f64) -> Result<kurbo::Bez
         }
         // The band is united before it is taken away: subtracting the overlapping
         // pieces one by one leaves slivers outside the path.
-        let band = evaluate(BoolOp::Union, &band(&closed)).ok_or(OpError::EmptyGeometry)?;
+        let band = evaluate(BoolOp::Union, &band).ok_or(OpError::EmptyGeometry)?;
         evaluate(BoolOp::Subtract, &[closed, band])
     };
+    // A shrink to nothing leaves specks where the band's far edges gather to a point.
+    let result = result.map(|p| {
+        let kept = crate::geometry::subpaths(&p)
+            .into_iter()
+            .filter(|s| kurbo::Shape::area(s).abs() >= 1.0);
+        kurbo::BezPath::from_iter(kept.flat_map(|s| s.into_elements()))
+    });
     result
         .filter(|p| p.segments().next().is_some())
         .ok_or(OpError::EmptyGeometry)

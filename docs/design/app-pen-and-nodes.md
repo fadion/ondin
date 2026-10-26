@@ -88,10 +88,16 @@ nothing the canvas does not already offer except the last two.
   within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units). Turns sharper than `SIMPLIFY_CORNER_DEG`
   (15°) stay corners, so a drawn polyline loses its jitter and a real corner survives. A refit with no
   fewer segments commits nothing.
-- **Offset** (`build::offset_outline`) is the drawn outline united with its own stroke at twice the
-  distance (mitred to `OFFSET_MITER_LIMIT`, round caps), or less that stroke for a negative distance.
-  The band is united before a shrink subtracts it, because subtracting the overlapping pieces one at a
-  time leaves slivers outside the path. An open subpath grows into the band around it and has no
+- **Offset** (`build::offset_outline`) is the drawn outline united with the band
+  `geometry::offset_band` lays on its outside, or less the band it lays inside for a negative
+  distance, mitred to `OFFSET_MITER_LIMIT` at corners. The band is one-sided, one piece per smooth run
+  of segments (a circle's is one ring), each starting a unit behind the outline: flo_curves drops or
+  inverts operands that share an edge, and a two-sided stroke wider than a curve's radius folds over
+  itself. Where a curve turns tighter than the distance, its piece reaches only to the centre of
+  curvature. A run whose piece would cross itself is halved until it does not; that happens once a
+  shrink passes the shape's width somewhere, and is where the result is least reliable. The band is
+  united before a shrink subtracts it, because subtracting the overlapping pieces one at a time leaves
+  slivers outside the path. An open subpath grows into a round-capped stroke around it and has no
   inside to shrink. The bar's *Offset* opens a card with one scrubbable distance field through the
   edit valve; every distance is measured from the outline the card opened on, and zero writes the
   stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.

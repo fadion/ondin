@@ -26,6 +26,10 @@ use std::collections::HashSet;
 /// and [`OndinApp::popover_left`] reserve the lane from it.
 pub(crate) const POPOVER_W: f32 = 272.0;
 
+/// Between the inspector's cards and anything opened beside them: a popover, or a
+/// fresh colour picker.
+pub(crate) const POPOVER_GAP: f32 = 10.0;
+
 /// The three faces of the typography popup. Tabs are scopes, spelled out so the user
 /// sees what a change will hit when the selection is partial.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -7256,11 +7260,9 @@ impl OndinApp {
 
     /// The x an inspector popover starts at.
     pub(crate) fn popover_left(ctx: &egui::Context, width: f32) -> f32 {
-        /// Between the popover and the inspector's cards, as the picker leaves.
-        const GAP: f32 = 10.0;
         const MARGIN: f32 = 12.0;
         let screen = ctx.input(|i| i.content_rect());
-        (Self::inspector_column(screen).left() - width - GAP).max(screen.min.x + MARGIN)
+        (Self::inspector_column(screen).left() - width - POPOVER_GAP).max(screen.min.x + MARGIN)
     }
 
     /// Where a panel's popover goes: clear of the inspector, to its left. Only `head`'s
@@ -7270,13 +7272,13 @@ impl OndinApp {
         egui::pos2(Self::popover_left(ctx, width), head.top())
     }
 
-    /// The rightmost x the detached picker may start at: left of any open popover, which
-    /// would cover it (`Foreground` over `Middle`).
-    pub(crate) fn picker_lane_right(&self, ctx: &egui::Context, anchor_x: f32) -> f32 {
+    /// What a new detached picker opens [`POPOVER_GAP`] left of: the inspector's cards,
+    /// or any open popover, which would cover it (`Foreground` over `Middle`).
+    pub(crate) fn picker_lane_right(&self, ctx: &egui::Context) -> f32 {
         if self.a_popover_is_open() {
-            return anchor_x.min(Self::popover_left(ctx, POPOVER_W));
+            return Self::popover_left(ctx, POPOVER_W);
         }
-        anchor_x
+        Self::inspector_column(ctx.input(|i| i.content_rect())).left()
     }
 
     /// Whether anything is occupying the popover lane; a new popover must join this list.
@@ -10421,7 +10423,6 @@ mod popover_lane_tests {
             |_| {},
         );
         let lane = OndinApp::popover_left(&ctx, POPOVER_W);
-        let anchor = lane + 300.0;
 
         type Arm = (&'static str, fn(&mut OndinApp));
         let open: [Arm; 5] = [
@@ -10441,17 +10442,18 @@ mod popover_lane_tests {
             let mut app = OndinApp::headless(&ctx);
             arm(&mut app);
             assert_eq!(
-                app.picker_lane_right(&ctx, anchor),
+                app.picker_lane_right(&ctx),
                 lane,
                 "{name} must reserve the lane"
             );
         }
 
         let clean = OndinApp::headless(&ctx);
+        let screen = ctx.input(|i| i.content_rect());
         assert_eq!(
-            clean.picker_lane_right(&ctx, anchor),
-            anchor,
-            "with nothing open the picker goes where its chip says"
+            clean.picker_lane_right(&ctx),
+            OndinApp::inspector_column(screen).left(),
+            "with nothing open the picker goes beside the cards"
         );
         let _ = TopMenu::None;
     }

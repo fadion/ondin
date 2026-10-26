@@ -9613,9 +9613,9 @@ impl OndinApp {
     }
     /// Open (or retarget) the detached picker on a slot.
     ///
-    /// A new picker lands just left of `anchor`, the top-left of the row it came
-    /// from; where it was last dragged is not remembered (`Picker::spawn`). An
-    /// already-open picker keeps its position and is retargeted.
+    /// A new picker lands in the popover lane, a little above `anchor`, the top-left
+    /// of the row it came from; where it was last dragged is not remembered
+    /// (`Picker::spawn`). An already-open picker keeps its position and is retargeted.
     pub(crate) fn open_picker(
         &mut self,
         ui: &egui::Ui,
@@ -9626,14 +9626,13 @@ impl OndinApp {
         match &mut self.picker {
             Some(p) => p.retarget(id, slot),
             None => {
-                const GAP: f32 = 22.0;
                 let screen = ui.ctx().input(|i| i.content_rect());
                 let left = screen.min.x + 12.0;
                 let top = screen.min.y + 12.0;
-                // Left of the row and of any open popover (`picker_lane_right`).
-                let from = self.picker_lane_right(ui.ctx(), anchor.x);
+                // Left of the cards and of any open popover, a popover's gap away.
+                let from = self.picker_lane_right(ui.ctx());
                 let spawn = egui::pos2(
-                    (from - super::picker::WIDTH - GAP).max(left),
+                    (from - super::picker::WIDTH - crate::app::POPOVER_GAP).max(left),
                     // A little above the row, clear of the bottom edge.
                     (anchor.y - 40.0)
                         .clamp(top, (screen.max.y - super::picker::HEIGHT_HINT).max(top)),

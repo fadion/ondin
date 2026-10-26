@@ -59,7 +59,7 @@ pub struct Picker {
     /// `default_pos`, because egui keeps an area's position under its id for the
     /// life of the process and ignores `default_pos` once shown. Moving the picker
     /// clears space for the artwork, not a preference, so every open starts beside
-    /// the swatch that opened it.
+    /// the cards, level with the swatch that opened it.
     spawn: egui::Pos2,
     placed: bool,
     /// The *Variables* face asked for over a paint that is not bound. A bound paint
@@ -1883,6 +1883,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A new picker keeps the popovers' gap from the inspector's cards, whatever row
+    /// opened it. flip: `open_picker` spawning left of `anchor.x` again → fails at the gap.
+    #[test]
+    fn a_new_picker_keeps_the_popovers_gap_from_the_cards() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0));
+        let column = crate::app::OndinApp::inspector_column(screen);
+        // A row's text inset inside its card, where `ui.cursor()` puts the anchor.
+        let anchor = egui::pos2(column.left() + crate::ui::CARD_MARGIN_X, 300.0);
+        let id = ondin_core::IdSource::new(0x6D2).mint();
+        let _ = ctx.run_ui(input(), |ui| {
+            app.open_picker(ui, id, PaintSlot::Fill(0), anchor);
+        });
+        let spawn = app.picker.as_ref().expect("opened").spawn;
+        let gap = column.left() - (spawn.x + WIDTH);
+        let popover_gap = column.left()
+            - (crate::app::OndinApp::popover_left(&ctx, crate::app::POPOVER_W)
+                + crate::app::POPOVER_W);
+        assert!(
+            (gap - popover_gap).abs() < 0.01,
+            "the picker is {gap} from the cards, a popover {popover_gap}"
+        );
     }
 
     /// A pick or a hex into a gradient writes the picker's selected stop, at that

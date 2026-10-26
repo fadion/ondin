@@ -560,6 +560,9 @@ pub struct OndinApp {
     pub(crate) field_overrides: Vec<(NodeId, Vec<Operation>)>,
     /// Rects whose Appearance panel shows the four per-corner radius fields; view state.
     pub(crate) per_corner_radius: HashSet<NodeId>,
+    /// Rects whose Appearance panel shows the corner smoothing field; view state. Never
+    /// shares a rect with `per_corner_radius`: opening either closes the other.
+    pub(crate) corner_smoothing_open: HashSet<NodeId>,
     /// The run of Ctrl+D duplicates in progress, if any.
     pub(crate) clones: Option<CloneChain>,
     /// The group the user has stepped into by double-clicking it. A selection scope
@@ -1276,6 +1279,7 @@ impl OndinApp {
             card_overrides: Vec::new(),
             field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
+            corner_smoothing_open: HashSet::new(),
             open_menu: TopMenu::None,
             zoom_entry: None,
             kit_picker: None,
@@ -5272,6 +5276,7 @@ impl OndinApp {
         self.guide_previews.clear();
         self.var_cell_preview = None;
         self.per_corner_radius.clear();
+        self.corner_smoothing_open.clear();
     }
 
     /// Whether the app may put a different document in front of the user: **save what
@@ -10653,7 +10658,7 @@ mod library_wiring_tests {
         app
     }
 
-    /// Opening a document drops the per-corner-radius disclosure, whose `NodeId`s
+    /// Opening a document drops the per-corner and smoothing disclosures, whose `NodeId`s
     /// belong to the document being left. flip: remove `self.per_corner_radius.clear()` from `reset_transient_state` →
     /// fails at the emptiness assertion
     #[test]
@@ -10664,6 +10669,7 @@ mod library_wiring_tests {
 
         let id = app.session.ids.mint();
         app.per_corner_radius.insert(id);
+        app.corner_smoothing_open.insert(app.session.ids.mint());
         assert_eq!(app.per_corner_radius.len(), 1, "fixture");
 
         let other = ondin_core::Document::new(app.session.ids.mint());
@@ -10675,6 +10681,11 @@ mod library_wiring_tests {
             app.per_corner_radius.is_empty(),
             "the disclosure set still holds {:?} from the document just left",
             app.per_corner_radius
+        );
+        assert!(
+            app.corner_smoothing_open.is_empty(),
+            "the smoothing disclosure still holds {:?}",
+            app.corner_smoothing_open
         );
         let _ = std::fs::remove_dir_all(&root);
     }

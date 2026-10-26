@@ -2636,7 +2636,7 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 // The single-layer panel's arithmetic, so fields do not shift.
                 let button_space = if has_rect {
-                    28.0 + ui::CARD_COL_GAP
+                    2.0 * (28.0 + ui::CARD_COL_GAP)
                 } else {
                     0.0
                 };
@@ -2714,7 +2714,7 @@ impl OndinApp {
                     let tx = ondin_core::set_corner_radius_all(&app.session.doc, ids, r.max(0.0));
                     app.edit_valve(&rr, tx);
                 }
-                // Present and inert: per-corner rows are keyed by node, and a
+                // Present and inert: the disclosures are keyed by node, and a
                 // vanishing button would move the fields.
                 ui::field_button(
                     ui,
@@ -2724,6 +2724,8 @@ impl OndinApp {
                     ui::FieldButton::Disabled,
                 )
                 .on_hover_text("One rectangle at a time: each corner is set on its own layer");
+                ui::field_button(ui, icon::CIRCLE, 28.0, 15.0, ui::FieldButton::Disabled)
+                    .on_hover_text("One rectangle at a time: smoothing is set on its own layer");
             });
         });
     }
@@ -4374,11 +4376,12 @@ impl OndinApp {
         let marks = self.appearance_marks(id);
         self.panel(ui, "Appearance", None, |app, ui| {
             let per_corner = app.per_corner_radius.contains(&id);
+            let smoothing = app.corner_smoothing_open.contains(&id);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                // Opacity always; radius and its toggle only on a rect.
+                // Opacity always; radius and its two toggles only on a rect.
                 let button_space = if corners0.is_some() {
-                    28.0 + ui::CARD_COL_GAP
+                    2.0 * (28.0 + ui::CARD_COL_GAP)
                 } else {
                     0.0
                 };
@@ -4433,11 +4436,19 @@ impl OndinApp {
                 .on_hover_text("Set each corner separately")
                 .clicked()
                 {
-                    if per_corner {
-                        app.per_corner_radius.remove(&id);
-                    } else {
-                        app.per_corner_radius.insert(id);
-                    }
+                    app.toggle_corner_disclosure(id, false);
+                }
+                if ui::field_button(
+                    ui,
+                    icon::CIRCLE,
+                    28.0,
+                    15.0,
+                    ui::FieldButton::on_if(smoothing),
+                )
+                .on_hover_text("Corner smoothing")
+                .clicked()
+                {
+                    app.toggle_corner_disclosure(id, true);
                 }
             });
             if let Some(vertices) = vertices0 {
@@ -4456,6 +4467,9 @@ impl OndinApp {
                 app.commit_edit(Transaction(vec![Operation::SetClip { id, clip: !clip }]));
             }
             let Some(corners) = corners0 else { return };
+            if smoothing {
+                app.corner_smoothing_field(ui, id);
+            }
             if !per_corner {
                 return;
             }
@@ -4512,10 +4526,22 @@ impl OndinApp {
                     }
                 });
             }
-            app.corner_smoothing_field(ui, id);
         });
     }
-    /// A rect's corner smoothing as a percentage, under the per-corner fields:
+    /// Toggles a rect's per-corner fields, or with `smoothing` its corner smoothing
+    /// field. One disclosure at a time: opening either closes the other.
+    pub(crate) fn toggle_corner_disclosure(&mut self, id: NodeId, smoothing: bool) {
+        let (this, other) = if smoothing {
+            (&mut self.corner_smoothing_open, &mut self.per_corner_radius)
+        } else {
+            (&mut self.per_corner_radius, &mut self.corner_smoothing_open)
+        };
+        if !this.remove(&id) {
+            this.insert(id);
+            other.remove(&id);
+        }
+    }
+    /// A rect's corner smoothing as a percentage, full width under the radius row:
     /// how far each rounded corner eases into its sides (`geometry::smoothed_rect`).
     fn corner_smoothing_field(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let Some(NodeKind::Rect {
@@ -4525,7 +4551,7 @@ impl OndinApp {
             return;
         };
         let mut pct = corner_smoothing * 100.0;
-        let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+        let fw = ui.available_width();
         ui.horizontal(|ui| {
             let (resp, _) = ui::value_field_marked(
                 ui,
@@ -11865,6 +11891,34 @@ mod stroke_row_tests {
 #[cfg(test)]
 mod polish_tests {
     use super::*;
+
+    /// The per-corner fields and the smoothing field are never open together on a
+    /// rect, and each button still closes its own. flip: dropping `other.remove` from
+    /// `toggle_corner_disclosure` → fails at "per-corner closes smoothing".
+    #[test]
+    fn the_corner_disclosures_are_one_at_a_time() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let id = ondin_core::IdSource::new(0x6D3).mint();
+        app.toggle_corner_disclosure(id, true);
+        assert!(app.corner_smoothing_open.contains(&id), "fixture");
+        app.toggle_corner_disclosure(id, false);
+        assert!(app.per_corner_radius.contains(&id), "per-corner opens");
+        assert!(
+            !app.corner_smoothing_open.contains(&id),
+            "per-corner closes smoothing"
+        );
+        app.toggle_corner_disclosure(id, true);
+        assert!(
+            !app.per_corner_radius.contains(&id),
+            "smoothing closes per-corner"
+        );
+        app.toggle_corner_disclosure(id, true);
+        assert!(
+            !app.corner_smoothing_open.contains(&id) && !app.per_corner_radius.contains(&id),
+            "a second click closes its own and opens nothing"
+        );
+    }
 
     /// A join is offered only where there is a corner to shape; gated on the kind, not the
     /// radii, so the control does not flicker while the radius is scrubbed.

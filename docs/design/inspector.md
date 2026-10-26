@@ -187,7 +187,7 @@ comes from the committed document.
 ### Appearance (multi-selection)
 
 - Opacity, and corner radius when any member is a rect; both absolute, *Mixed* on disagreement. Opacity is set on outermost members, radius on the whole subtree (§5.7a).
-- The per-corner button is present and inert; the fields keep single-card widths.
+- The per-corner and corner-smoothing buttons are present and inert; the fields keep single-card widths.
 - "Disagree" is a tolerance, `build::OPACITY_AGREEMENT`/`RADIUS_AGREEMENT`, read by `inspector::shared_opacity_shown`/`shared_radius_shown`.
 
 ### Fill and Stroke

@@ -1444,9 +1444,23 @@ pub fn paint_prefix(
     lead: std::sync::Arc<egui::Galley>,
     ink: egui::Color32,
 ) -> egui::Pos2 {
-    let at = egui::pos2(strip.left(), strip.center().y - lead.size().y / 2.0);
+    let at = egui::pos2(strip.left(), prefix_top(&lead, strip.center().y));
     painter.galley(at, lead, ink);
     at
+}
+
+/// The top of a prefix's run, centred down a field whose middle is `centre_y`.
+///
+/// Phosphor's circle inks one row lower than the square glyphs at the same size
+/// (its top row matches theirs, its bottom row does not), so it is lifted one
+/// physical pixel: text snaps to pixels, and less would round away.
+fn prefix_top(lead: &egui::Galley, centre_y: f32) -> f32 {
+    let lift = if lead.text() == icon::CIRCLE {
+        1.0 / lead.pixels_per_point
+    } else {
+        0.0
+    };
+    centre_y - lead.size().y / 2.0 - lift
 }
 
 impl Prefix {
@@ -1901,7 +1915,7 @@ pub fn badge_field(
     }
     // Painted after the value, so a selection block cannot land on the label.
     ui.painter().galley(
-        egui::pos2(strip.left(), rect.center().y - lead.size().y / 2.0),
+        egui::pos2(strip.left(), prefix_top(&lead, rect.center().y)),
         lead,
         theme::color::BADGE_INK,
     );
@@ -2119,7 +2133,7 @@ fn value_field_f64_marked(
                 resp.mark_changed();
             }
             // Painted after the value, so a selection block cannot land on the label.
-            let at = egui::pos2(strip.left(), resp.rect.center().y - lead.size().y / 2.0);
+            let at = egui::pos2(strip.left(), prefix_top(&lead, resp.rect.center().y));
             match mark {
                 None => {
                     ui.painter().galley(at, lead, theme::text::FAINT);
@@ -3853,6 +3867,66 @@ mod pulse_tests {
         assert_eq!(pulse_alpha(back + e), 1.0, "held whole");
         let period = 2.0 * (PULSE_RAMP + PULSE_HOLD);
         assert_eq!(pulse_alpha(period + PULSE_RAMP + e), 0.5, "and again");
+    }
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+
+    /// The rows a one-glyph run inks, top and bottom, in points within the run,
+    /// read from the font atlas rather than the glyph's padded quad.
+    fn ink_rows(ctx: &egui::Context, lead: &egui::Galley) -> (f32, f32) {
+        let img = ctx.fonts(|f| f.image());
+        let w = img.size[0];
+        let row = &lead.rows[0];
+        let vs = &row.visuals.mesh.vertices;
+        let fold = |f: fn(&egui::epaint::Vertex) -> f32| {
+            vs.iter()
+                .map(f)
+                .fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(v), b.max(v)))
+        };
+        let (p0, p1) = fold(|v| v.pos.y);
+        let (u0, u1) = fold(|v| v.uv.x);
+        let (v0, v1) = fold(|v| v.uv.y);
+        let (sx, sy) = if v1 <= 1.0 {
+            (img.size[0] as f32, img.size[1] as f32)
+        } else {
+            (1.0, 1.0)
+        };
+        let (tx0, tx1) = ((u0 * sx) as usize, (u1 * sx) as usize);
+        let (ty0, ty1) = ((v0 * sy) as usize, (v1 * sy) as usize);
+        let inked: Vec<usize> = (ty0..ty1)
+            .filter(|y| (tx0..tx1).any(|x| img.pixels[y * w + x].a() > 40))
+            .collect();
+        let k = (p1 - p0) / (ty1 - ty0) as f32;
+        let top = row.pos.y + p0 + (inked[0] - ty0) as f32 * k;
+        let bottom = row.pos.y + p0 + (inked[inked.len() - 1] + 1 - ty0) as f32 * k;
+        (top, bottom)
+    }
+
+    /// At 100% the circle prefix (corner smoothing) inks to the same bottom row as
+    /// the square prefix glyphs once [`prefix_top`] lifts it.
+    ///
+    /// flip: no lift in `prefix_top` → fails at the bottom-row assertion, a row low.
+    #[test]
+    fn the_circle_prefix_sits_level_with_the_others() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut bottoms = Vec::new();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            for g in [icon::CORNERS_OUT, icon::ARROW_CLOCKWISE, icon::CIRCLE] {
+                let lead = Prefix::Icon(g).galley(ui);
+                let top = prefix_top(&lead, 14.0).round();
+                bottoms.push(top + ink_rows(ui.ctx(), &lead).1);
+            }
+        });
+        assert_eq!(bottoms[0], bottoms[1], "fixture: the square glyphs agree");
+        assert_eq!(
+            bottoms[2], bottoms[0],
+            "the circle's bottom row: {bottoms:?}"
+        );
     }
 }
 

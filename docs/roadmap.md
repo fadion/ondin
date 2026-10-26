@@ -56,10 +56,9 @@ reads true.
   create. Import shows what is added, changed, removed and renamed, and applies as one transaction.
   A `tokens.json` can also be linked like a kit: `watch_kits`' pill offers its changes. Also
   `ondin tokens export`.
-- **Document diff.** `ondin diff a.ondin b.ondin` reports changes by node identity ("Button/Primary:
-  fill #2563EB → #1D4ED8; *Label* moved 4 px"), and a visual diff marks the changed regions over the
-  canvas. The same compare in the version history card (`versions.rs`), a git merge driver later. Rests
-  on deterministic serialization and stable ids.
+- **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
+  open is a visual diff marking the changed regions over the canvas, the same compare in the version
+  history card (`versions.rs`), and a git merge driver later.
 - **A fidelity report for code export.** Render the HTML output in a browser, as `code_fidelity.rs`
   does, and report to the user what did not translate (background blur in SVG, a property with no
   CSS) instead of drifting silently.

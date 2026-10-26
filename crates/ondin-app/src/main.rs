@@ -24,6 +24,9 @@
 //!                                feeding the property of its name (render_cli)
 //! ondin render <file> --all-modes [--page <name|n>] [--png|--svg] [size] [-o dir]
 //!                                every visible top-level frame once per mode
+//! ondin diff <a> <b> [--json]    what changed from document a to b, by layer;
+//!                                exit 0 when nothing did, 1 when something did,
+//!                                2 when either cannot be read
 //! ondin serve <file>             headless: MCP endpoint over a document (§8.2)
 //! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
 //! ```
@@ -131,6 +134,12 @@ enum Command {
     },
     /// `ondin render`: a component once per CSV row, or every frame once per mode.
     Render(render_cli::Render),
+    /// Compare two documents (`ondin_core::diff`), `a` the earlier.
+    Diff {
+        a: String,
+        b: String,
+        json: bool,
+    },
     McpProxy,
 }
 
@@ -215,6 +224,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
             .ok_or_else(|| "usage: ondin serve <file>".to_string()),
         Some("export") => parse_export(&args[1..]),
         Some("render") => render_cli::parse(&args[1..]).map(Command::Render),
+        Some("diff") => parse_diff(&args[1..]),
         Some("mcp-proxy") => Ok(Command::McpProxy),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
@@ -225,6 +235,28 @@ fn parse(args: &[String]) -> Result<Command, String> {
             }),
         },
         Some(other) => Err(format!("unknown command: {other}")),
+    }
+}
+
+fn parse_diff(args: &[String]) -> Result<Command, String> {
+    const USAGE: &str = "usage: ondin diff <a.ondin> <b.ondin> [--json]";
+    let mut files = Vec::new();
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            other if other.starts_with('-') => {
+                return Err(format!("unknown option {other}\n{USAGE}"));
+            }
+            other => files.push(other.to_string()),
+        }
+    }
+    match <[String; 2]>::try_from(files) {
+        Ok([a, b]) => Ok(Command::Diff { a, b, json }),
+        Err(files) => Err(format!(
+            "diff takes two documents; got {}\n{USAGE}",
+            files.len()
+        )),
     }
 }
 
@@ -446,6 +478,18 @@ fn main() {
             page.as_deref(),
         ),
         Ok(Command::Render(r)) => render_cli::run(&r),
+        // `diff`'s own exit codes: 1 is "they differ", so a failure is 2.
+        Ok(Command::Diff { a, b, json }) => match diff_files(&a, &b, json) {
+            Ok((report, differs)) => {
+                print!("{report}");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                std::process::exit(i32::from(differs));
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+        },
         Ok(Command::Serve { file }) => Err(format!("ondin serve {file}: not yet implemented (M6)")),
         Ok(Command::McpProxy) => Err("ondin mcp-proxy: not yet implemented (M6)".to_string()),
         Err(msg) => {
@@ -519,6 +563,23 @@ fn chosen_page(
             .collect();
         format!("no page {asked:?}; the pages are {}", names.join(", "))
     })
+}
+
+/// `ondin diff`'s output and whether the documents differ. The text says nothing
+/// when they do not, as `diff` does; the JSON is written either way.
+fn diff_files(a: &str, b: &str, json: bool) -> Result<(String, bool), String> {
+    let load = |file: &str| {
+        let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+        ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))
+    };
+    let d = ondin_core::diff::diff(&load(a)?, &load(b)?);
+    let report = if json {
+        serde_json::to_string_pretty(&d).map_err(|e| format!("cannot serialize the diff: {e}"))?
+            + "\n"
+    } else {
+        d.text()
+    };
+    Ok((report, !d.is_empty()))
 }
 
 /// Headless export (§7). Loads the document, resolves it, and writes one of the
@@ -920,6 +981,79 @@ mod tests {
     #[test]
     fn unknown_command_errors() {
         assert!(parse(&["frobnicate".into()]).is_err());
+    }
+
+    /// `diff` takes exactly two documents and one flag, and refuses the rest.
+    #[test]
+    fn diff_takes_two_documents_and_json() {
+        let diff = |s: &[&str]| {
+            let mut v = vec!["diff".to_string()];
+            v.extend(s.iter().map(|a| a.to_string()));
+            parse(&v)
+        };
+        assert_eq!(
+            diff(&["a.ondin", "--json", "b.ondin"]),
+            Ok(Command::Diff {
+                a: "a.ondin".into(),
+                b: "b.ondin".into(),
+                json: true,
+            })
+        );
+        for refused in [
+            &["a.ondin"][..],
+            &["a.ondin", "b.ondin", "c.ondin"],
+            &["a.ondin", "b.ondin", "--svg"],
+        ] {
+            assert!(diff(refused).is_err(), "{refused:?}");
+        }
+    }
+
+    /// Two saves of one document differ in nothing and print nothing; an edit
+    /// differs and names the layer; a missing file is an error, not a difference.
+    #[test]
+    fn diff_files_answers_whether_two_documents_differ() {
+        use ondin_core::{IdSource, NodeKind, Operation, Transaction};
+        let dir = std::env::temp_dir().join(format!("ondin-diff-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ids = IdSource::new(0xD2);
+        let root = ids.mint();
+        let rect = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: ondin_core::kurbo::Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: Some("Dot".into()),
+        }]))
+        .unwrap();
+        let a = dir.join("a.ondin");
+        std::fs::write(&a, ondin_core::io::save(&doc).unwrap()).unwrap();
+        doc.apply(&Transaction(vec![Operation::SetName {
+            id: rect,
+            name: "Spot".into(),
+        }]))
+        .unwrap();
+        let b = dir.join("b.ondin");
+        std::fs::write(&b, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let (a, b) = (a.to_str().unwrap(), b.to_str().unwrap());
+
+        assert_eq!(diff_files(a, a, false), Ok((String::new(), false)));
+        let (text, differs) = diff_files(a, b, false).unwrap();
+        assert!(differs);
+        assert!(
+            text.contains("~ Spot") && text.contains("name: “Dot” → “Spot”"),
+            "{text}"
+        );
+        let (json, _) = diff_files(a, b, true).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["pages"][0]["layers"][0]["status"], "changed");
+        let missing = dir.join("missing.ondin");
+        assert!(diff_files(a, missing.to_str().unwrap(), false).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn export(args: &[&str]) -> Result<Command, String> {

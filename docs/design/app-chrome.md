@@ -49,7 +49,7 @@ How `ondin-app` draws its window and panels: the toolkit choice, the shared widg
 
 ```
 ondin-app/src/
-├─ main.rs          CLI: gui (default) | <file> | export | serve | mcp-proxy; Velopack hook; eframe bootstrap
+├─ main.rs          CLI: gui (default) | <file> | export | render | diff | serve | mcp-proxy; Velopack hook; eframe bootstrap
 ├─ file_type.rs     Windows: the .ondin file type, registered by Velopack's install/update hooks
 ├─ bin/ondin-cli.rs console twin (ondin.com on Windows)
 ├─ chrome.rs        caption buttons, drag strip, resize edges per host; focus strip

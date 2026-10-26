@@ -51,6 +51,7 @@ How `ondin-app` draws its window and panels: the toolkit choice, the shared widg
 ondin-app/src/
 ├─ main.rs          CLI: gui (default) | <file> | export | render | diff | serve | mcp-proxy; Velopack hook; eframe bootstrap
 ├─ file_type.rs     Windows: the .ondin file type, registered by Velopack's install/update hooks
+├─ render_cli.rs    `ondin render`: a component per CSV row, every frame per mode
 ├─ bin/ondin-cli.rs console twin (ondin.com on Windows)
 ├─ chrome.rs        caption buttons, drag strip, resize edges per host; focus strip
 ├─ update.rs        Velopack updater and top-bar chip
@@ -70,6 +71,7 @@ ondin-app/src/
 ├─ input.rs         Mode + Action: mode-aware keyboard routing
 ├─ measure.rs       Axis + Measure: Alt-hover measure and spacing-snap gaps; pure Rect geometry
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
+├─ path_bar.rs      the path bar beside the rail while points are edited (app-pen-and-nodes.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
 ├─ present.rs       present mode: top-level frames one at a time, page by page, fullscreen (app-canvas-chrome.md)

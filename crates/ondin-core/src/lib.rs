@@ -24,6 +24,7 @@ pub mod boolean;
 pub mod build;
 pub mod component;
 pub mod container;
+pub mod diff;
 pub mod document;
 pub mod effect;
 pub mod export;

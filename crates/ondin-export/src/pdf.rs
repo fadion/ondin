@@ -40,35 +40,72 @@ pub fn pdf_of(
     origins: &[NodeId],
     text: ExportText,
 ) -> Option<Export> {
-    let svg = crate::svg::svg_with(doc, res, origins, text);
-    let shown = shown_nodes(doc, origins);
-    let approximated = approximations(doc, res, &shown, svg.approximated, text);
+    pdf_pages(doc, res, &[(String::new(), origins.to_vec())], text)
+}
 
-    let mut fonts = usvg::fontdb::Database::new();
-    for font in fonts_used(res, &shown) {
-        fonts.load_font_source(usvg::fontdb::Source::Binary(Arc::new(font.data)));
+/// Several pages in one PDF, each its subtrees framed as [`pdf_of`] frames one,
+/// at its own size. A page with a name gets a bookmark of that name, so a reader's
+/// sidebar lists the frames; unnamed pages get none.
+///
+/// `None` when `pages` is empty, a page has nothing to frame, or the converter
+/// refuses one. The notes are every page's, deduplicated.
+pub fn pdf_pages(
+    doc: &Document,
+    res: &Resolved,
+    pages: &[(String, Vec<NodeId>)],
+    text: ExportText,
+) -> Option<Export> {
+    if pages.is_empty() {
+        return None;
     }
-    let opts = usvg::Options {
-        // Core's own fallback, which a layout that missed its family already used.
-        font_family: "Inter".to_string(),
-        fontdb: Arc::new(fonts),
-        ..Default::default()
-    };
-    let tree = usvg::Tree::from_str(&svg.svg, &opts).ok()?;
-    let size = krilla::geom::Size::from_wh(tree.size().width(), tree.size().height())?;
     let mut document = krilla::Document::new();
-    let mut page = document.start_page_with(krilla::page::PageSettings::new(size));
-    let mut surface = page.surface();
-    surface.draw_svg(
-        &tree,
-        size,
-        krilla_svg::SvgSettings {
-            embed_text: true,
-            filter_scale: FILTER_SCALE,
-        },
-    );
-    surface.finish();
-    page.finish();
+    let mut outline = krilla::outline::Outline::new();
+    let mut approximated: Vec<String> = Vec::new();
+    for (index, (name, origins)) in pages.iter().enumerate() {
+        let svg = crate::svg::svg_with(doc, res, origins, text);
+        let shown = shown_nodes(doc, origins);
+        for note in approximations(doc, res, &shown, svg.approximated, text) {
+            if !approximated.contains(&note) {
+                approximated.push(note);
+            }
+        }
+
+        let mut fonts = usvg::fontdb::Database::new();
+        for font in fonts_used(res, &shown) {
+            fonts.load_font_source(usvg::fontdb::Source::Binary(Arc::new(font.data)));
+        }
+        let opts = usvg::Options {
+            // Core's own fallback, which a layout that missed its family already used.
+            font_family: "Inter".to_string(),
+            fontdb: Arc::new(fonts),
+            ..Default::default()
+        };
+        let tree = usvg::Tree::from_str(&svg.svg, &opts).ok()?;
+        let size = krilla::geom::Size::from_wh(tree.size().width(), tree.size().height())?;
+        let mut page = document.start_page_with(krilla::page::PageSettings::new(size));
+        let mut surface = page.surface();
+        surface.draw_svg(
+            &tree,
+            size,
+            krilla_svg::SvgSettings {
+                embed_text: true,
+                filter_scale: FILTER_SCALE,
+            },
+        );
+        surface.finish();
+        page.finish();
+        if !name.is_empty() {
+            let top = krilla::geom::Point::from_xy(0.0, 0.0);
+            outline.push_child(krilla::outline::OutlineNode::new(
+                name.clone(),
+                krilla::destination::XyzDestination::new(index, top),
+            ));
+        }
+    }
+    // Only with a bookmark in it, so a one-page export's bytes are what they were.
+    if pages.iter().any(|(name, _)| !name.is_empty()) {
+        document.set_outline(outline);
+    }
     let pdf = document.finish().ok()?;
     Some(Export { pdf, approximated })
 }

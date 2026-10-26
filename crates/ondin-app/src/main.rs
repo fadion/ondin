@@ -160,6 +160,8 @@ enum Command {
 enum ExportFormat {
     Svg,
     Pdf,
+    /// `--pdf --frames`: one PDF, a page per visible top-level frame.
+    PdfFrames,
     Png,
     Json,
     /// Code export's plain HTML/CSS, zipped.
@@ -174,7 +176,7 @@ impl ExportFormat {
     fn extension(self) -> &'static str {
         match self {
             ExportFormat::Svg => "svg",
-            ExportFormat::Pdf => "pdf",
+            ExportFormat::Pdf | ExportFormat::PdfFrames => "pdf",
             ExportFormat::Png => "png",
             ExportFormat::Json => "json",
             ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => "zip",
@@ -317,6 +319,7 @@ fn parse_tokens(args: &[String]) -> Result<Command, String> {
 fn parse_export(args: &[String]) -> Result<Command, String> {
     const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue] \
          [--outlines] [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
+         ondin export <file.ondin> --pdf --frames [--outlines] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] \
          [--page <name|n>] [-o <dir>]";
     let mut file = None;
@@ -326,6 +329,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
     let mut all = false;
     let mut folders = false;
     let mut outlines = false;
+    let mut frames = false;
     let mut scale: Option<(&str, ExportScale)> = None;
     let mut over = None;
     let mut i = 0;
@@ -341,6 +345,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--all" => all = true,
             "--folders" => folders = true,
             "--outlines" => outlines = true,
+            "--frames" => frames = true,
             // One value each and mutually exclusive: three ways of answering one
             // question. The typed flag is carried so the refusals can name it.
             flag @ ("--scale" | "--width" | "--height") => {
@@ -395,6 +400,12 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
         }
         i += 1;
     }
+    if frames && (all || format != Some(ExportFormat::Pdf)) {
+        return Err(format!("--frames applies only to a one-off --pdf\n{USAGE}"));
+    }
+    if frames {
+        format = Some(ExportFormat::PdfFrames);
+    }
     if all {
         // A different command, not a fourth format: `--all` writes many files at
         // the document's formats, so `-o` is a folder and `--png` has nowhere to apply.
@@ -448,7 +459,12 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--json describes every page, so it takes no --page\n{USAGE}"
         ));
     }
-    if outlines && !matches!(format, ExportFormat::Svg | ExportFormat::Pdf) {
+    if outlines
+        && !matches!(
+            format,
+            ExportFormat::Svg | ExportFormat::Pdf | ExportFormat::PdfFrames
+        )
+    {
         return Err(format!(
             "--outlines applies only to --svg and --pdf\n{USAGE}"
         ));
@@ -738,6 +754,28 @@ fn run_export(
             .into_bytes(),
         ExportFormat::Pdf => {
             let export = ondin_export::pdf::pdf_of(&doc, &res, &[page], text)
+                .ok_or_else(|| format!("cannot convert {file} to PDF"))?;
+            if !export.approximated.is_empty() {
+                eprintln!("drawn differently: {}", export.approximated.join(", "));
+            }
+            export.pdf
+        }
+        ExportFormat::PdfFrames => {
+            let pages: Vec<(String, Vec<ondin_core::NodeId>)> = doc
+                .get(page)
+                .map(|r| r.children().to_vec())
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|id| {
+                    let n = doc.get(id)?;
+                    (n.visible() && matches!(n.kind(), ondin_core::NodeKind::Artboard { .. }))
+                        .then(|| (n.name().to_string(), vec![id]))
+                })
+                .collect();
+            if pages.is_empty() {
+                return Err(format!("{file}: the page has no visible frames"));
+            }
+            let export = ondin_export::pdf::pdf_pages(&doc, &res, &pages, text)
                 .ok_or_else(|| format!("cannot convert {file} to PDF"))?;
             if !export.approximated.is_empty() {
                 eprintln!("drawn differently: {}", export.approximated.join(", "));
@@ -1128,6 +1166,33 @@ mod tests {
             &["a.ondin", "b.ondin", "--svg"],
         ] {
             assert!(diff(refused).is_err(), "{refused:?}");
+        }
+    }
+
+    /// `--frames` turns `--pdf` into a page per frame, takes `--outlines`, and is
+    /// refused anywhere else.
+    #[test]
+    fn frames_applies_only_to_a_one_off_pdf() {
+        let export = |s: &[&str]| {
+            let mut v = vec!["export".to_string(), "a.ondin".to_string()];
+            v.extend(s.iter().map(|a| a.to_string()));
+            parse(&v)
+        };
+        assert!(matches!(
+            export(&["--pdf", "--frames", "--outlines"]),
+            Ok(Command::Export {
+                format: ExportFormat::PdfFrames,
+                text: ExportText::Outlines,
+                ..
+            })
+        ));
+        for refused in [
+            &["--frames"][..],
+            &["--svg", "--frames"],
+            &["--all", "--frames"],
+            &["--pdf", "--frames", "--scale", "2"],
+        ] {
+            assert!(export(refused).is_err(), "{refused:?}");
         }
     }
 
@@ -1577,6 +1642,7 @@ mod tests {
         for (format, ext) in [
             (ExportFormat::Svg, "svg"),
             (ExportFormat::Pdf, "pdf"),
+            (ExportFormat::PdfFrames, "frames.pdf"),
             (ExportFormat::Png, "png"),
             (ExportFormat::Json, "json"),
             (ExportFormat::Html, "zip"),

@@ -333,6 +333,9 @@ pub enum Item {
     /// [`Self::ExportFrames`] for every page that is not a draft, a folder per
     /// page. Offered only when the document has more than one page.
     ExportFramesAllPages,
+    /// The current page's visible top-level frames as one PDF, a page and a
+    /// bookmark each.
+    ExportFramesPdf,
     ViewSwitch(ViewSwitch),
 
     // --- pages (`crate::pages`) --------------------------------------------
@@ -588,6 +591,7 @@ impl Item {
         Item::ExportAll,
         Item::ExportFrames,
         Item::ExportFramesAllPages,
+        Item::ExportFramesPdf,
         Item::ViewSwitch(ViewSwitch::Rulers),
         Item::ViewSwitch(ViewSwitch::Guides),
         Item::ViewSwitch(ViewSwitch::GuideLock),
@@ -908,6 +912,12 @@ impl Item {
             Item::ExportFrames => s("Export all frames…", icon::EXPORT, None, Group::Export),
             Item::ExportFramesAllPages => s(
                 "Export frames, all pages…",
+                icon::EXPORT,
+                None,
+                Group::Export,
+            ),
+            Item::ExportFramesPdf => s(
+                "Export frames as one PDF…",
                 icon::EXPORT,
                 None,
                 Group::Export,
@@ -1242,6 +1252,7 @@ impl Item {
             Item::CopyAsCss => &["css", "style", "code"],
             Item::CopyAsPng(_) => &["png", "bitmap", "raster", "image"],
             Item::ExportFrames | Item::ExportFramesAllPages => &["artboards", "png", "export"],
+            Item::ExportFramesPdf => &["artboards", "pdf", "pages", "deck", "export"],
             Item::ExportCode(_) => &["code", "html", "react", "vue", "zip"],
             Item::ToggleHidden => &["hide", "show", "visibility"],
             Item::ToggleLocked => &["lock", "unlock"],
@@ -1657,6 +1668,7 @@ fn canvas_menu(cx: &Context<'_>) -> Vec<Row> {
             "No layer in this document has export settings",
         ),
         Row::new(Item::ExportFrames).dim_if(!cx.any_frames, "No frames on the canvas"),
+        Row::new(Item::ExportFramesPdf).dim_if(!cx.any_frames, "No frames on the canvas"),
     ];
     if !cx.one_page {
         rows.push(Row::new(Item::ExportFramesAllPages));
@@ -2945,6 +2957,7 @@ impl OndinApp {
             Item::CopyAsPng(scale) => self.copy_as_png(scale),
             Item::ExportFrames => self.export_frames(),
             Item::ExportFramesAllPages => self.export_frames_all_pages(),
+            Item::ExportFramesPdf => self.export_frames_pdf(),
             Item::ReverseSubpaths => self.dispatch(ctx, Action::ReverseSubpaths),
 
             // --- the ones a keyboard cannot express ------------------------

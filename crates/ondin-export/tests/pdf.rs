@@ -7,7 +7,7 @@ use ondin_core::{
     Effect, EffectKind, ExportText, FeatureSetting, Operation, Resolved, Shadow, Tag, TextStyle,
     Transaction, keyed_by_position,
 };
-use ondin_export::pdf::{approximated, pdf_of};
+use ondin_export::pdf::{approximated, pdf_of, pdf_pages};
 
 /// The fixture with its text node restyled.
 fn styled(style: TextStyle) -> common::Fixture {
@@ -191,4 +191,34 @@ fn features_are_reported_for_live_text_only() {
     let outlined = approximated(&f.doc, &f.res, &[f.artboard], ExportText::Outlines);
     assert!(live.iter().any(|s| s == NOTE), "{live:?}");
     assert!(!outlined.iter().any(|s| s == NOTE), "{outlined:?}");
+}
+
+/// Two frames make one PDF of two pages, each at its own size, with a bookmark
+/// per page; a one-page export carries no outline.
+///
+/// flip: `pdf_pages` drawing only the first page → fails at the page count.
+#[test]
+fn several_frames_make_one_pdf_of_several_pages() {
+    let f = common::fixture();
+    let pages = [
+        ("Board".to_string(), vec![f.artboard]),
+        ("Card".to_string(), vec![f.rect]),
+    ];
+    let out = pdf_pages(&f.doc, &f.res, &pages, ExportText::Live).expect("a pdf");
+    let text = String::from_utf8_lossy(&out.pdf);
+    let page_count = text.matches("/Type/Page").count() - text.matches("/Type/Pages").count();
+    assert_eq!(page_count, 2, "{text}");
+    assert!(text.contains("/MediaBox[0 0 400 300]"), "the frame's page");
+    let rect = f.res.world_bounds(f.rect).unwrap();
+    let card = format!("/MediaBox[0 0 {} {}]", rect.width(), rect.height());
+    assert!(text.contains(&card), "the card's own page, {card}: {text}");
+    assert!(text.contains("/Outlines"), "a bookmark per page");
+    assert_eq!(text.matches("/Dest").count(), 2, "{text}");
+
+    let one = pdf_text(&f, ExportText::Live);
+    assert!(
+        !one.contains("/Outlines"),
+        "a one-page export has no outline"
+    );
+    assert!(pdf_pages(&f.doc, &f.res, &[], ExportText::Live).is_none());
 }

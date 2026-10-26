@@ -1940,6 +1940,65 @@ impl OndinApp {
         self.run_export(files, false);
     }
 
+    /// The pages *Export frames as one PDF…* writes: each of the current page's
+    /// visible top-level frames, named for its bookmark.
+    pub(crate) fn frames_pdf_pages(&self) -> Vec<(String, Vec<NodeId>)> {
+        self.exported_frames()
+            .into_iter()
+            .filter_map(|id| {
+                let name = self.session.doc.get(id)?.name().to_string();
+                Some((name, vec![id]))
+            })
+            .collect()
+    }
+
+    /// *Export frames as one PDF…* — the current page's visible top-level frames
+    /// as one PDF, a page and a bookmark each, into a file the person names.
+    pub(crate) fn export_frames_pdf(&mut self) {
+        let pages = self.frames_pdf_pages();
+        if pages.is_empty() {
+            self.session.info("No frames to export");
+            return;
+        }
+        let Some(export) = ondin_export::pdf::pdf_pages(
+            &self.session.doc,
+            &self.session.resolved,
+            &pages,
+            ondin_core::ExportText::Live,
+        ) else {
+            self.session.fail("Could not make the PDF");
+            return;
+        };
+        let stem = self
+            .session
+            .path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.page_name(self.session.page));
+        let Some(path) = rfd::FileDialog::new()
+            .set_directory(self.export_start_dir())
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}.pdf"))
+            .save_file()
+        else {
+            return;
+        };
+        if let Err(e) = std::fs::write(&path, &export.pdf) {
+            self.session.fail(format!("Could not write: {e}"));
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            self.prefs.export_dir = Some(dir.into());
+            self.prefs.save();
+        }
+        let n = pages.len();
+        self.session.info(match export.approximated.len() {
+            0 => format!("Exported {n} frames as one PDF"),
+            k => format!("Exported {n} frames as one PDF — {k} drawn differently"),
+        });
+    }
+
     /// Where a dialog opens: the last export's folder, else the document's own,
     /// else wherever the OS would have chosen.
     fn export_start_dir(&self) -> std::path::PathBuf {
@@ -3167,6 +3226,57 @@ mod export_all_scope_tests {
         let paths: Vec<String> = app.frames_plan().into_iter().map(|f| f.path).collect();
         // `Frame 1` is the new document's own frame, now last.
         assert_eq!(paths, ["Home.png", "Icons.svg", "Frame 1.png"]);
+    }
+
+    /// *Export frames as one PDF…* takes the frames *Export all frames…* takes, a
+    /// page each named for its bookmark, and the PDF has that many pages.
+    #[test]
+    fn the_frames_pdf_is_a_page_per_visible_top_level_frame() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let root = app.session.doc.first_page();
+        let ids: Vec<_> = (0..2).map(|_| app.session.ids.mint()).collect();
+        let ops = vec![
+            ondin_core::Operation::CreateNode {
+                id: ids[0],
+                parent: root,
+                index: 0,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                },
+                transform: None,
+                name: Some("Home".into()),
+            },
+            ondin_core::Operation::CreateNode {
+                id: ids[1],
+                parent: root,
+                index: 1,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                },
+                transform: None,
+                name: Some("Hidden".into()),
+            },
+            ondin_core::Operation::SetVisible {
+                id: ids[1],
+                visible: false,
+            },
+        ];
+        assert!(app.session.commit(ondin_core::Transaction(ops)));
+        let pages = app.frames_pdf_pages();
+        let names: Vec<&str> = pages.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Home", "Frame 1"]);
+        let pdf = ondin_export::pdf::pdf_pages(
+            &app.session.doc,
+            &app.session.resolved,
+            &pages,
+            ondin_core::ExportText::Live,
+        )
+        .expect("a pdf");
+        let text = String::from_utf8_lossy(&pdf.pdf);
+        let count = text.matches("/Type/Page").count() - text.matches("/Type/Pages").count();
+        assert_eq!(count, 2);
     }
 
     /// Export on save never opens a modal (§15 D626); the remembered-folder arm is

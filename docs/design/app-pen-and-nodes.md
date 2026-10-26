@@ -39,7 +39,9 @@ two path layers, and per-anchor corner radii. Part of §9.4.
 ## The node tool (`A`)
 
 - A tool, not a mode. Subject: the layer selection when it is a single `Path`. Ways in: `A` with one
-  selected, a click with the tool armed, or a double-click.
+  selected, a click with the tool armed, a double-click, `Enter`, or the context menu's *Edit points*.
+  It has no button on the tool rail: like image editing it is entered on a subject, and the path bar
+  is its chrome.
 - Anchors draw as markers (square = corner, round = smooth); the selection box is hidden while they
   are up (`canvas::chrome_hidden`, also covering a pen gesture).
 - Click selects an anchor, `Shift` adds, a drag from empty canvas marquees points (`Shift` toggles, `Alt` removes, as the layer

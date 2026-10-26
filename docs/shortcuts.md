@@ -473,8 +473,8 @@ not in that set**: it is a tool, and leaving it is the ladder's last rung.
 as does the **Done** pill (`choose_tool`, §15 D270). **All three `Enter` targets refuse on a locked
 layer** (§15 D320, D321) through `query::is_effectively_locked`, so a locked *group* shuts the door
 on its contents: `OndinApp::begin_image_edit`, `canvas::begin_edit_text` and the `Path` arm of
-`enter_action` each refuse, so chord and menu row agree. `A` and the rail's node button arm with no
-check and are shut in `canvas::edited_path`.
+`enter_action` each refuse, so chord and menu row agree. `A` arms with no check and is shut in
+`canvas::edited_path`.
 
 ⚠️ `Delete`/`Backspace` have **no modifier gate** (`normal_mode`, the selection block), so
 `Ctrl+Backspace` and `Alt+Delete` also delete; know this before binding a chord ending in either.

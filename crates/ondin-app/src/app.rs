@@ -6908,11 +6908,9 @@ impl OndinApp {
             E::Btn(icon::LINE_SEGMENT, Some(Tool::Line), "Line (L)"),
             E::Sep,
             E::Btn(icon::PEN_NIB, Some(Tool::Pen), "Pen (P)"),
-            E::Btn(
-                icon::BEZIER_CURVE,
-                Some(Tool::Node),
-                "Edit points — drag anchors and handles of a path (A; or double-click one)",
-            ),
+            // No points button: like `Tool::ImageEdit`, `Tool::Node` is entered on a
+            // subject (double-click, `Enter`, the context menu), and the path bar is
+            // its chrome.
             E::Btn(icon::TEXT_T, Some(Tool::Text), "Text (T)"),
             E::Btn(
                 icon::IMAGE,

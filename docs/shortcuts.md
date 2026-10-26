@@ -185,6 +185,7 @@ gated on `!m.shift` (`shift_r_toggles_rulers_without_stealing_the_rect_tool` is 
 | `Alt+W` / `Alt+S` | align top / bottom | ✅ Figma |
 | `Alt+H` / `Alt+V` | align centres horizontally / vertically | ✅ Figma |
 | `Alt+Shift+H` / `V` | distribute horizontally / vertically | ✅ **invented** |
+| `Alt+Shift+T` | tidy up | ✅ **invented** — Figma's `Ctrl+Alt+T` is the boolean namespace here |
 
 Figma's distributes (`Ctrl+Alt+H`/`V`) collide with paste-properties (§7), and `Ctrl+Alt` is this
 keymap's **boolean namespace**. Illustrator has no align shortcuts. `Alt+S` does not collide with

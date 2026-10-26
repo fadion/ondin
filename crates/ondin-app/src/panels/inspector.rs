@@ -9855,6 +9855,22 @@ impl OndinApp {
             self.session.info("Distributed");
         }
     }
+    /// Lay the selection out as the grid it is roughly in (`build::tidy_up`).
+    pub(crate) fn tidy_up(&mut self) {
+        let ids = self.session.selection.ids().to_vec();
+        if ids.len() < 2 {
+            self.session.info("Select two or more layers to tidy");
+            return;
+        }
+        let tx = build::tidy_up(&self.session.doc, &self.session.resolved, &ids);
+        if tx.0.is_empty() {
+            self.session.info("Already tidy");
+            return;
+        }
+        if self.commit_edit(tx) {
+            self.session.info("Tidied up");
+        }
+    }
     /// The transaction one numeric-spacing edit produces for the layer subject
     /// (`build::distribute_spacing`, held at the key layer).
     ///

@@ -402,6 +402,7 @@ pub enum Item {
     ZoomReset,
     Align(build::Axis, build::Edge),
     Distribute(build::Axis),
+    TidyUp,
     InsertPicker,
     VariablesBrowser,
     PublishKit,
@@ -1109,6 +1110,12 @@ impl Item {
                 Some("Alt+Shift+V"),
                 Group::Transform,
             ),
+            Item::TidyUp => s(
+                "Tidy up",
+                icon::SQUARES_FOUR,
+                Some("Alt+Shift+T"),
+                Group::Transform,
+            ),
             Item::InsertPicker => s("Insert", icon::HEXAGON, Some("Shift+I"), Group::Kits),
             Item::VariablesBrowser => s(
                 "Styles and variables",
@@ -1305,6 +1312,7 @@ impl Item {
             Item::ZoomReset => Action::ZoomReset,
             Item::Align(axis, edge) => Action::Align(axis, edge),
             Item::Distribute(axis) => Action::Distribute(axis),
+            Item::TidyUp => Action::TidyUp,
             Item::InsertPicker => Action::InsertPicker,
             Item::VariablesBrowser => Action::VariablesBrowser,
             Item::PublishKit => Action::PublishKit,
@@ -3051,6 +3059,7 @@ impl OndinApp {
             | Item::ZoomReset
             | Item::Align(..)
             | Item::Distribute(_)
+            | Item::TidyUp
             | Item::InsertPicker
             | Item::VariablesBrowser
             | Item::PublishKit

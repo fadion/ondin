@@ -5272,6 +5272,175 @@ pub fn distribute(doc: &Document, res: &Resolved, ids: &[NodeId], axis: Axis) ->
     Transaction(ops)
 }
 
+/// *Tidy up*: lay `ids` out as the grid they are roughly in, with even gaps.
+/// The outermost members with bounds move; [`tidy_moves`] is the arithmetic.
+pub fn tidy_up(doc: &Document, res: &Resolved, ids: &[NodeId]) -> Transaction {
+    let boxes: Vec<(NodeId, kurbo::Rect)> = outermost(doc, ids)
+        .into_iter()
+        .filter_map(|id| res.world_bounds(id).map(|b| (id, b)))
+        .collect();
+    let rects: Vec<kurbo::Rect> = boxes.iter().map(|(_, b)| *b).collect();
+    let mut ops = Vec::new();
+    for ((id, _), delta) in boxes.iter().zip(tidy_moves(&rects)) {
+        push_offset(doc, res, *id, delta, &mut ops);
+    }
+    Transaction(ops)
+}
+
+/// How far each of `boxes` moves to tidy them into a grid, in the same order.
+///
+/// Rows and columns are clusters of box centres ([`tidy_bands`]). When no two
+/// boxes share a row and a column, and some row spans every column, each box
+/// keeps its cell and an empty cell stays empty; otherwise the rows are refilled
+/// in reading order. A column is as wide
+/// as its widest box and a row as tall as its tallest, each box centred in its
+/// cell. The gaps are the median of the gaps already there between neighbouring
+/// columns and rows, never negative, one axis borrowing the other's when it has
+/// none. The grid's
+/// top-left is the union's, so a tidy set does not move and tidying twice is
+/// tidying once.
+pub fn tidy_moves(boxes: &[kurbo::Rect]) -> Vec<Vec2> {
+    let n = boxes.len();
+    if n < 2 {
+        return vec![Vec2::ZERO; n];
+    }
+    let rows = tidy_bands(boxes, Axis::Y);
+    let cols = tidy_bands(boxes, Axis::X);
+    // Cells are kept only when one row already spans every column: bricks, whose
+    // rows sit between each other's columns, find twice the columns a row has.
+    let longest_row = (0..n)
+        .map(|i| rows.iter().filter(|r| **r == rows[i]).count())
+        .max()
+        .unwrap_or(0);
+    let col_bands = cols.iter().max().map_or(0, |c| c + 1);
+    let mut taken = std::collections::HashSet::new();
+    let fits = col_bands <= longest_row && (0..n).all(|i| taken.insert((rows[i], cols[i])));
+    let cell: Vec<(usize, usize)> = if fits {
+        (0..n).map(|i| (rows[i], cols[i])).collect()
+    } else {
+        let mut cell = vec![(0, 0); n];
+        for r in 0..=rows.iter().copied().max().unwrap_or(0) {
+            let mut members: Vec<usize> = (0..n).filter(|i| rows[*i] == r).collect();
+            members.sort_by(|a, b| boxes[*a].center().x.total_cmp(&boxes[*b].center().x));
+            for (c, i) in members.into_iter().enumerate() {
+                cell[i] = (r, c);
+            }
+        }
+        cell
+    };
+    // Every band holds a box, so no row or column of the grid is empty.
+    let row_count = cell.iter().map(|c| c.0 + 1).max().unwrap_or(0);
+    let col_count = cell.iter().map(|c| c.1 + 1).max().unwrap_or(0);
+
+    let mut widths = vec![0.0f64; col_count];
+    let mut heights = vec![0.0f64; row_count];
+    for (i, (r, c)) in cell.iter().enumerate() {
+        widths[*c] = widths[*c].max(boxes[i].width());
+        heights[*r] = heights[*r].max(boxes[i].height());
+    }
+
+    // The gaps there are now, between successive columns and successive rows:
+    // the far edge of one band to the near edge of the next. Between bands rather
+    // than boxes, so a box narrower than its column, inset once tidied, does not
+    // read as a wider gap the next time.
+    let band_gaps = |count: usize,
+                     of: &dyn Fn(usize) -> usize,
+                     near: fn(&kurbo::Rect) -> f64,
+                     far: fn(&kurbo::Rect) -> f64| {
+        let mut gaps = Vec::new();
+        for k in 1..count {
+            let end = (0..n).filter(|i| of(*i) == k - 1).map(|i| far(&boxes[i]));
+            let start = (0..n).filter(|i| of(*i) == k).map(|i| near(&boxes[i]));
+            let (end, start) = (
+                end.fold(f64::NEG_INFINITY, f64::max),
+                start.fold(f64::INFINITY, f64::min),
+            );
+            gaps.push(start - end);
+        }
+        gaps
+    };
+    let mut h_gaps = band_gaps(col_count, &|i| cell[i].1, |b| b.x0, |b| b.x1);
+    let mut v_gaps = band_gaps(row_count, &|i| cell[i].0, |b| b.y0, |b| b.y1);
+    let (h, v) = (median(&mut h_gaps), median(&mut v_gaps));
+    let (h, v) = match (h, v) {
+        (Some(h), Some(v)) => (h, v),
+        (Some(h), None) => (h, h),
+        (None, Some(v)) => (v, v),
+        (None, None) => (0.0, 0.0),
+    };
+    let (h, v) = (h.max(0.0), v.max(0.0));
+
+    let x0 = boxes.iter().map(|b| b.x0).fold(f64::INFINITY, f64::min);
+    let y0 = boxes.iter().map(|b| b.y0).fold(f64::INFINITY, f64::min);
+    let starts = |sizes: &[f64], from: f64, gap: f64| {
+        let mut at = from;
+        sizes
+            .iter()
+            .map(|s| {
+                let here = at;
+                at += s + gap;
+                here
+            })
+            .collect::<Vec<f64>>()
+    };
+    // The first column's widest box lands on `x0` and the first row's tallest on
+    // `y0`, so the union's top-left holds still.
+    let (xs, ys) = (starts(&widths, x0, h), starts(&heights, y0, v));
+    (0..n)
+        .map(|i| {
+            let (r, c) = cell[i];
+            let b = boxes[i];
+            let x = xs[c] + (widths[c] - b.width()) / 2.0;
+            let y = ys[r] + (heights[r] - b.height()) / 2.0;
+            Vec2::new(x - b.x0, y - b.y0)
+        })
+        .collect()
+}
+
+/// Which band along `axis` each box falls in, numbered from the top or left.
+///
+/// Boxes are taken in order of their centre; one joins the band being built
+/// while its centre is within half the band's tallest (or widest) box of the
+/// band's mean centre, else it starts the next band. Half a box, so a row of
+/// cards jittered by a few pixels is one row, and two rows touching are two.
+fn tidy_bands(boxes: &[kurbo::Rect], axis: Axis) -> Vec<usize> {
+    let centre = |b: &kurbo::Rect| match axis {
+        Axis::X => b.center().x,
+        Axis::Y => b.center().y,
+    };
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|a, b| centre(&boxes[*a]).total_cmp(&centre(&boxes[*b])));
+    let mut band = vec![0usize; boxes.len()];
+    let (mut current, mut sum, mut count, mut size) = (0usize, 0.0f64, 0usize, 0.0f64);
+    for i in order {
+        let c = centre(&boxes[i]);
+        let s = extent(&boxes[i], axis);
+        if count > 0 && (c - sum / count as f64).abs() > size.max(s) / 2.0 {
+            current += 1;
+            (sum, count, size) = (0.0, 0, 0.0);
+        }
+        band[i] = current;
+        sum += c;
+        count += 1;
+        size = size.max(s);
+    }
+    band
+}
+
+/// The median of `xs`, `None` when empty. Sorts in place.
+fn median(xs: &mut [f64]) -> Option<f64> {
+    if xs.is_empty() {
+        return None;
+    }
+    xs.sort_by(f64::total_cmp);
+    let mid = xs.len() / 2;
+    Some(if xs.len() % 2 == 1 {
+        xs[mid]
+    } else {
+        (xs[mid - 1] + xs[mid]) / 2.0
+    })
+}
+
 /// The gap between each neighbouring pair of these boxes along `axis`, sorting
 /// them by where they sit first.
 ///

@@ -1901,6 +1901,7 @@ impl OndinApp {
             Action::Flip(axis) => self.flip(axis),
             Action::Align(axis, edge) => self.align(axis, edge),
             Action::Distribute(axis) => self.distribute(axis),
+            Action::TidyUp => self.tidy_up(),
             Action::OpacityDigit(d) => self.opacity_digit(ctx, d),
             Action::TextStyle(chord) => self.text_chord(chord),
         }

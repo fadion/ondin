@@ -245,6 +245,7 @@ fn sections(lead: Lead) -> Vec<Section> {
                 Item::Align(Axis::Y, Edge::Max),
                 Item::Distribute(Axis::X),
                 Item::Distribute(Axis::Y),
+                Item::TidyUp,
                 Item::Flip(Axis::X),
                 Item::Flip(Axis::Y),
             ],

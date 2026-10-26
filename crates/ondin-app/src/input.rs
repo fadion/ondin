@@ -278,6 +278,8 @@ pub enum Action {
     /// Figma's `Ctrl+Alt+H`/`V` would collide with paste-properties and the
     /// boolean namespace (`docs/shortcuts.md` §5).
     Distribute(build::Axis),
+    /// Lay the selection out as the grid it is roughly in — `Alt+Shift+T`.
+    TidyUp,
     /// A plain digit, which sets the selection's opacity (`docs/shortcuts.md` §2).
     ///
     /// The digit, not the percentage: two digits within 600 ms mean one value, but
@@ -1210,6 +1212,13 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
                 &mut out,
             );
         }
+        // Figma's `Ctrl+Alt+T` is the boolean namespace here; `Alt+Shift` is
+        // arrangement's.
+        on(
+            alt_only && m.shift && i.key_pressed(egui::Key::T),
+            Action::TidyUp,
+            &mut out,
+        );
 
         // --- selection ---
         on(
@@ -2850,6 +2859,24 @@ mod consolidated_chord_tests {
             vec![Action::Boolean(ondin_core::BoolOp::Subtract)],
             "Ctrl+Alt+S is subtract alone — an align that only asked for Alt \
              would bottom-align the selection on every subtract"
+        );
+    }
+
+    /// `Alt+Shift+T` is tidy up alone: not the Text tool's `T`, and `Ctrl` added
+    /// takes it out of arrangement's namespace.
+    #[test]
+    fn alt_shift_t_tidies_and_nothing_else() {
+        assert_eq!(
+            actions(
+                Mode::Normal,
+                vec![key(egui::Key::T, alt_shift())],
+                alt_shift()
+            ),
+            vec![Action::TidyUp]
+        );
+        assert!(
+            !actions(Mode::Normal, vec![key(egui::Key::T, cmd_alt())], cmd_alt())
+                .contains(&Action::TidyUp)
         );
     }
 

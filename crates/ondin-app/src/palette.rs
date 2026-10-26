@@ -553,6 +553,13 @@ impl OndinApp {
                 ),
             );
         }
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::TidyUp,
+                (sel.len() < 2).then_some("Needs two or more layers"),
+            ),
+        );
         for sw in SWITCHES {
             let mut cmd = Cmd::verb(Item::ViewSwitch(sw), None);
             cmd.checked = Some(self.view_switch(sw));

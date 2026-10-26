@@ -13,7 +13,12 @@ resize, drop outlines and the transform origin (pivot).
 - **Shapes**: frame, rect, ellipse, polygon, star, line. **Text**: edit on the canvas with a real caret.
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
-- **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key).
+- **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key). **Tidy up** (2+ layers, `Alt+Shift+T`) lays the selection out as the grid it is roughly in (`build::tidy_moves`):
+  - **Rows and columns** are clusters of box centres. A box joins a band while it is within half the band's largest box of the band's mean centre.
+  - **Cells** are kept, holes included, when no cell holds two boxes and some row spans every column. Otherwise each row is refilled from the left, which is what happens to bricks.
+  - **Sizes**: a column is as wide as its widest box and a row as tall as its tallest, and each box is centred in its cell.
+  - **Gaps** are the median of the current gaps between neighbouring bands, never negative; an axis with no gaps takes the other's. They are measured band to band rather than box to box, so a box inset in its cell does not read as a wider gap next time.
+  - **Stability**: the union's top-left holds still, and tidying twice moves nothing. `tidy_suite.rs` checks these properties over hand cases and seeded random layouts.
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).

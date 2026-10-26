@@ -94,8 +94,8 @@ pub enum NodeKind {
     Group,
     Rect    { size: kurbo::Size, corner_radii: kurbo::RoundedRectRadii },
     Ellipse { size: kurbo::Size },
-    Polygon { size: kurbo::Size, sides: u32 },                    // regular, first vertex up
-    Star    { size: kurbo::Size, points: u32, inner_ratio: f64 },
+    Polygon { size: kurbo::Size, sides: u32, corner_radius: f64 },  // regular, first vertex up
+    Star    { size: kurbo::Size, points: u32, inner_ratio: f64, corner_radius: f64 },
     Line    { end: kurbo::Point },          // start is always the local origin
     Path    { path: kurbo::BezPath },
     Text    { content: String, style: TextStyle, sizing: TextSizing },
@@ -156,7 +156,7 @@ Rules and reasons:
 - **`dashes`** is the only dash state; `Stroke::dash_style` classifies it from the *shape* (invariant under width), so no stored mode can drift. A dot is a zero-length dash `[0, s]`, making `s` the centre-to-centre spacing. Zero-length dashes drawing nothing under two of three caps and fitting a pattern to an outline length are resolved at the render boundary (§6.3). `dash_fit` is a flag: writing fitted numbers back would read "on" while true only until the shape resizes. (§15 D69)
 - **`miter_limit` is the ratio** (1/sin(θ/2); default 4 ≈ 28.955°). The panel shows degrees; `node::miter_ratio_of_degrees`/`miter_degrees_of_ratio` convert at that one edge, and the panel converts back only when the angle moved (a non-bit-exact round trip would write a ratio a few ulps off past `strokes_tx`'s equality guard on every blur). `MIN_MITER_DEGREES` = 1°. `join` is kind-gated (`geometry::stroke_join_applies`); `miter_limit` is not.
 - **Rect corners are always four radii**, never a scalar with an override. `GeometryPatch::CornerRadius(f64)` is a convenience over the same field; its inverse is a `CornerRadii`. Flattening is a real edit and must be asked for: the inspector's single field shows `largest(corners)` over a mixed set and writes only where the field differs from its seed. The per-corner disclosure is app view state. Radii over half the shorter side are clamped where the outline is built (`geometry::local_path`), not on the way in, so shrink-then-grow keeps the typed number.
-- **`Polygon` and `Star` fill their box.** Vertices are placed on a circle then stretched so the outline's bounding box is exactly `0,0..w,h` (keeps `local_bounds`, selection, snaps and handles honest). One builder `geometry::star_path` (polygon = star with no inner ring), first vertex up. `sides`/`points` (3..=64) and `inner_ratio` are clamped where the outline is built.
+- **`Polygon` and `Star` fill their box.** Vertices are placed on a circle then stretched so the outline's bounding box is exactly `0,0..w,h` (keeps `local_bounds`, selection, snaps and handles honest). One builder `geometry::star_path` (polygon = star with no inner ring), first vertex up. `sides`/`points` (3..=64) and `inner_ratio` are clamped where the outline is built. `corner_radius` rounds every vertex, inner and outer, through the path fillet (`geometry::round_corners`), so it is clamped to half of each side as a path's anchor radius is; the rounded outline pulls in from the box, which stays the bounds. It is one scalar (`GeometryPatch::CornerRadius`, its own inverse), absent from the file at 0, scaled by the Scale tool, and written to SVG as a `<path>` rather than a `<polygon>`. It takes no variable, and the multi-selection radius field reaches rects only.
 
 ### 5.5 Document
 

@@ -1785,6 +1785,15 @@ fn write_element(
                 let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
             }
         },
+        // A rounded one has curves a `<polygon>` cannot carry.
+        NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. }
+            if *corner_radius > 0.0 =>
+        {
+            let d = geometry::local_path(kind)
+                .map(|p| path_d(&p))
+                .unwrap_or_default();
+            let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
+        }
         // `<polygon>` keeps both editable as polygons; the points come from
         // `local_path`.
         NodeKind::Polygon { .. } | NodeKind::Star { .. } => {

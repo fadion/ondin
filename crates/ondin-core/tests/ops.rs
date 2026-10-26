@@ -217,6 +217,71 @@ fn set_geometry_rejects_mismatched_kind() {
     assert!(matches!(err, OpError::WrongKindForOp));
 }
 
+/// A polygon's and a star's corner radius is set and undone by `CornerRadius`,
+/// which inverts to itself rather than to a rect's `CornerRadii`.
+#[test]
+fn a_polygon_and_star_corner_radius_applies_and_reverses() {
+    let (mut doc, mut ids, ab) = base();
+    let mut hist = History::new();
+    let size = Size::new(60.0, 60.0);
+    for kind in [
+        NodeKind::Polygon {
+            size,
+            sides: 6,
+            corner_radius: 2.0,
+        },
+        NodeKind::Star {
+            size,
+            points: 5,
+            inner_ratio: 0.4,
+            corner_radius: 2.0,
+        },
+    ] {
+        let id = ids.mint();
+        create(&mut hist, &mut doc, id, ab, kind.clone());
+        hist.commit(
+            &mut doc,
+            Transaction(vec![Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::CornerRadius(7.5),
+            }]),
+        )
+        .unwrap();
+        let radius = |doc: &Document| match doc.get(id).unwrap().kind() {
+            NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. } => {
+                *corner_radius
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(radius(&doc), 7.5);
+        assert!(hist.undo(&mut doc).unwrap().is_some());
+        assert_eq!(doc.get(id).unwrap().kind(), &kind);
+    }
+}
+
+/// A square-cornered polygon saves without the field, so files written before it
+/// and after read the same; a rounded one round-trips its radius.
+#[test]
+fn a_polygon_radius_is_saved_only_when_set() {
+    let sharp = NodeKind::Polygon {
+        size: Size::new(10.0, 10.0),
+        sides: 5,
+        corner_radius: 0.0,
+    };
+    let json = serde_json::to_string(&sharp).unwrap();
+    assert!(!json.contains("corner_radius"), "{json}");
+    assert_eq!(serde_json::from_str::<NodeKind>(&json).unwrap(), sharp);
+
+    let rounded = NodeKind::Star {
+        size: Size::new(10.0, 10.0),
+        points: 5,
+        inner_ratio: 0.5,
+        corner_radius: 1.25,
+    };
+    let json = serde_json::to_string(&rounded).unwrap();
+    assert_eq!(serde_json::from_str::<NodeKind>(&json).unwrap(), rounded);
+}
+
 #[test]
 fn set_text_and_style_on_text_only() {
     let (mut doc, mut ids, ab) = base();

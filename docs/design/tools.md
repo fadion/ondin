@@ -17,7 +17,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
-- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius, polygon sides, star points and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
+- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius, polygon sides, star points and ratio, a polygon's or star's radius, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
 
 ### The wheel

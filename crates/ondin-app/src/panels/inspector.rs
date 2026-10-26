@@ -163,6 +163,8 @@ pub(super) struct AppearanceMarks {
     pub(super) corners: [Option<Mark>; 4],
     pub(super) count: Option<Mark>,
     pub(super) ratio: Option<Mark>,
+    /// A polygon's or star's one radius; a rect's is `radius`.
+    pub(super) vertex_radius: Option<Mark>,
     pub(super) clip: Option<Mark>,
 }
 
@@ -249,8 +251,23 @@ impl Corner {
 /// What a vertex-counted shape puts in the Appearance panel.
 #[derive(Clone, Copy)]
 enum Vertices {
-    Polygon { sides: u32 },
-    Star { points: u32, inner_ratio: f64 },
+    Polygon {
+        sides: u32,
+        radius: f64,
+    },
+    Star {
+        points: u32,
+        inner_ratio: f64,
+        radius: f64,
+    },
+}
+impl Vertices {
+    /// The one corner radius every vertex is rounded by.
+    fn radius(self) -> f64 {
+        match self {
+            Vertices::Polygon { radius, .. } | Vertices::Star { radius, .. } => radius,
+        }
+    }
 }
 /// The radius all four corners share, or `None` when they differ.
 fn uniform(r: RoundedRectRadii) -> Option<f64> {
@@ -1321,14 +1338,23 @@ impl OndinApp {
             _ => None,
         };
         let vertices0 = match node.kind() {
-            NodeKind::Polygon { sides, .. } => Some(Vertices::Polygon { sides: *sides }),
+            NodeKind::Polygon {
+                sides,
+                corner_radius,
+                ..
+            } => Some(Vertices::Polygon {
+                sides: *sides,
+                radius: *corner_radius,
+            }),
             NodeKind::Star {
                 points,
                 inner_ratio,
+                corner_radius,
                 ..
             } => Some(Vertices::Star {
                 points: *points,
                 inner_ratio: *inner_ratio,
+                radius: *corner_radius,
             }),
             _ => None,
         };
@@ -4168,6 +4194,16 @@ impl OndinApp {
             NodeKind::Star { inner_ratio, .. } => Some(*inner_ratio),
             _ => None,
         };
+        let vertex_radius = patch(|g| match g {
+            GeometryPatch::CornerRadius(r) => Some(*r),
+            _ => None,
+        });
+        let my_vertex_radius = |n: &ondin_core::Node| match n.kind() {
+            NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. } => {
+                Some(*corner_radius)
+            }
+            _ => None,
+        };
         AppearanceMarks {
             // The binding first: a bound literal is 0, so a copy can differ by it alone.
             opacity: Mark::and(
@@ -4263,6 +4299,18 @@ impl OndinApp {
                 },
                 |v| format!("{}%", mark_num(*v * 100.0)),
             ),
+            vertex_radius: self.sub_mark(
+                s,
+                vertex_radius,
+                my_vertex_radius,
+                |v| *v,
+                |c, v| *c = v,
+                |id, r| Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::CornerRadius(r),
+                },
+                |v| mark_num(*v),
+            ),
             clip: self.sub_mark(
                 s,
                 |op| match op {
@@ -4337,6 +4385,12 @@ impl OndinApp {
                 let fields = if corners0.is_some() { 2.0 } else { 1.0 };
                 let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP * (fields - 1.0))
                     / fields;
+                if let Some(vertices) = vertices0 {
+                    let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+                    app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
+                    app.vertex_radius_field(ui, id, vertices.radius(), fw, &marks.vertex_radius);
+                    return;
+                }
                 app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
                 let Some(corners) = corners0 else { return };
                 // Bound, the field is a chip.
@@ -4460,6 +4514,36 @@ impl OndinApp {
             }
         });
     }
+    /// A polygon's or star's corner radius, one value for every vertex. Unlike a
+    /// rect's it takes no variable, so it has no binding doors.
+    fn vertex_radius_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        radius0: f64,
+        fw: f32,
+        mark: &Option<Mark>,
+    ) {
+        let mut r = radius0;
+        let (rr, hit) = ui::value_field_marked(
+            ui,
+            egui::vec2(fw, 28.0),
+            Prefix::Icon(icon::CORNERS_OUT),
+            mark.as_ref().map(Mark::field),
+            &mut r,
+            Scrub::whole(0.5).range(0.0..=f64::MAX),
+            |d| d.custom_formatter(ui::number(2)),
+        );
+        let rr = tip_unless_marked(rr, mark, "Corner radius");
+        self.reset_marked(hit, mark);
+        self.edit_valve(
+            &rr,
+            Transaction(vec![Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::CornerRadius(r.max(0.0)),
+            }]),
+        );
+    }
     /// The vertex-count row inside Appearance: a polygon's sides, or a star's
     /// points and inner ratio.
     ///
@@ -4477,7 +4561,7 @@ impl OndinApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
             let (glyph, count, tip) = match vertices {
-                Vertices::Polygon { sides } => (icon::TRIANGLE, sides, "Sides"),
+                Vertices::Polygon { sides, .. } => (icon::TRIANGLE, sides, "Sides"),
                 Vertices::Star { points, .. } => (icon::ASTERISK, points, "Points"),
             };
             let mut n = f64::from(count);
@@ -11752,12 +11836,14 @@ mod polish_tests {
         );
         assert!(stroke_join_applies(&NodeKind::Polygon {
             size: Size::new(10.0, 10.0),
-            sides: 3
+            sides: 3,
+            corner_radius: 0.0,
         }));
         assert!(stroke_join_applies(&NodeKind::Star {
             size: Size::new(10.0, 10.0),
             points: 5,
-            inner_ratio: 0.382
+            inner_ratio: 0.382,
+            corner_radius: 0.0,
         }));
         assert!(stroke_join_applies(&NodeKind::Path {
             path: BezPath::new(),

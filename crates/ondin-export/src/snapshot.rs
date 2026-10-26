@@ -168,6 +168,9 @@ pub enum Geometry {
         width: f64,
         height: f64,
         sides: u32,
+        /// One radius on every vertex; absent when square-cornered.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_radius: f64,
     },
     Star {
         width: f64,
@@ -175,6 +178,8 @@ pub enum Geometry {
         points: u32,
         /// Inner radius as a fraction of the outer one, 0..=1.
         inner_ratio: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_radius: f64,
     },
     Line {
         end_x: f64,
@@ -206,6 +211,10 @@ pub enum Geometry {
         width: f64,
         height: f64,
     },
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -501,20 +510,27 @@ fn geometry(kind: &NodeKind) -> Geometry {
             width: size.width,
             height: size.height,
         },
-        NodeKind::Polygon { size, sides } => Geometry::Polygon {
+        NodeKind::Polygon {
+            size,
+            sides,
+            corner_radius,
+        } => Geometry::Polygon {
             width: size.width,
             height: size.height,
             sides: *sides,
+            corner_radius: *corner_radius,
         },
         NodeKind::Star {
             size,
             points,
             inner_ratio,
+            corner_radius,
         } => Geometry::Star {
             width: size.width,
             height: size.height,
             points: *points,
             inner_ratio: *inner_ratio,
+            corner_radius: *corner_radius,
         },
         NodeKind::Line { end } => Geometry::Line {
             end_x: end.x,

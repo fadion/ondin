@@ -1395,6 +1395,7 @@ fn only_a_box_takes_a_per_side_stroke() {
         NodeKind::Polygon {
             size: Size::new(10.0, 10.0),
             sides: 3,
+            corner_radius: 0.0,
         },
         NodeKind::Line {
             end: Point::new(10.0, 0.0),

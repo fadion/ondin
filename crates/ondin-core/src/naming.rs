@@ -198,11 +198,13 @@ mod tests {
             NodeKind::Polygon {
                 size: one,
                 sides: 3,
+                corner_radius: 0.0,
             },
             NodeKind::Star {
                 size: one,
                 points: 5,
                 inner_ratio: 0.5,
+                corner_radius: 0.0,
             },
             NodeKind::Line {
                 end: crate::kurbo::Point::new(1.0, 0.0),

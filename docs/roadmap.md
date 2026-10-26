@@ -15,7 +15,8 @@ reads true.
 - **More than one open document** — `OndinApp` holds one `session`.
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Tools**: pencil (freehand), slices.
-- **Shapes**: ellipse arcs and donuts, corner smoothing, a polygon's and star's corner radius.
+- **Shapes**: ellipse arcs and donuts, corner smoothing. A polygon's and star's corner radius takes no
+  variable yet, and the multi-selection radius field skips them.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Canvas**: lasso, tidy up, spacing handles on a loose multi-selection (`spacing.rs` covers
   containers).

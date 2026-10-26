@@ -1249,7 +1249,8 @@ impl Transaction {
 #[derive(Clone, Debug, PartialEq)]
 pub enum GeometryPatch {
     Size(Size),
-    /// The same radius on all four corners.
+    /// The same radius on all four corners of a rect, or on every vertex of a
+    /// polygon or star.
     CornerRadius(f64),
     /// Per-corner radii. The inverse of *either* corner patch is always this one,
     /// so a uniform set can be undone to four unequal values.

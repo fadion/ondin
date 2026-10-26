@@ -1234,6 +1234,14 @@ fn scale_scalars(
                 });
             }
         }
+        NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. }
+            if *corner_radius > 0.0 =>
+        {
+            ops.push(Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::CornerRadius(corner_radius * s),
+            });
+        }
         // A path's per-anchor radii are absolute lengths like a rect's four:
         // the Scale tool multiplies them and a resize leaves them alone.
         NodeKind::Path { path, corner_radii } if corner_radii.iter().any(|r| *r > 0.0) => {
@@ -1938,6 +1946,7 @@ pub fn create_polygon(
         NodeKind::Polygon {
             size,
             sides: sides.clamp(geometry::MIN_SIDES, geometry::MAX_SIDES),
+            corner_radius: 0.0,
         },
         fill,
     )
@@ -1967,6 +1976,7 @@ pub fn create_star(
             size,
             points: points.clamp(geometry::MIN_SIDES, geometry::MAX_SIDES),
             inner_ratio: STAR_DEFAULT_RATIO,
+            corner_radius: 0.0,
         },
         fill,
     )
@@ -6809,6 +6819,54 @@ mod tests {
                 .any(|op| matches!(op, Operation::SetStrokes { .. })),
             "an unstroked layer needs no stroke patch: {tx:?}"
         );
+    }
+
+    /// A photographic scale takes a polygon's corner radius with it, and a geometry
+    /// resize leaves it, as it does a rect's.
+    #[test]
+    fn scaling_takes_a_polygons_radius_that_a_resize_leaves_alone() {
+        for (scaling, want) in [(Scaling::Geometry, 5.0), (Scaling::Photographic, 10.0)] {
+            let mut ids = IdSource::new(1);
+            let root = ids.mint();
+            let mut doc = Document::new(root);
+            let poly = ids.mint();
+            doc.apply(&Transaction(vec![Operation::CreateNode {
+                id: poly,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Polygon {
+                    size: Size::new(50.0, 50.0),
+                    sides: 6,
+                    corner_radius: 5.0,
+                },
+                transform: Some(Affine::translate((100.0, 100.0))),
+                name: None,
+            }]))
+            .unwrap();
+            let res = Resolved::rebuild(&doc);
+            doc.apply(&resize_to_handle(
+                &doc,
+                &res,
+                poly,
+                Handle::BottomRight,
+                Point::new(200.0, 200.0),
+                Resize {
+                    scaling,
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
+            let NodeKind::Polygon {
+                size,
+                corner_radius,
+                ..
+            } = doc.get(poly).unwrap().kind()
+            else {
+                panic!()
+            };
+            assert_eq!(size, &Size::new(100.0, 100.0), "{scaling:?}: the box");
+            assert_eq!(*corner_radius, want, "{scaling:?}: the radius");
+        }
     }
 
     /// A non-uniform scale moves the scalars by the geometric mean of the two factors.

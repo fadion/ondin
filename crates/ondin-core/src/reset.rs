@@ -232,15 +232,25 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
         NodeKind::Rect { size, corner_radii } => {
             vec![geo(G::Size(*size)), geo(G::CornerRadii(*corner_radii))]
         }
-        NodeKind::Polygon { size, sides } => vec![geo(G::Size(*size)), geo(G::Sides(*sides))],
+        NodeKind::Polygon {
+            size,
+            sides,
+            corner_radius,
+        } => vec![
+            geo(G::Size(*size)),
+            geo(G::Sides(*sides)),
+            geo(G::CornerRadius(*corner_radius)),
+        ],
         NodeKind::Star {
             size,
             points,
             inner_ratio,
+            corner_radius,
         } => vec![
             geo(G::Size(*size)),
             geo(G::Sides(*points)),
             geo(G::InnerRatio(*inner_ratio)),
+            geo(G::CornerRadius(*corner_radius)),
         ],
         NodeKind::Line { end } => vec![geo(G::LineEnd(*end))],
         NodeKind::Path { path, corner_radii } => vec![geo(G::Path {

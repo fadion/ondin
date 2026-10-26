@@ -566,18 +566,23 @@ pub enum NodeKind {
     /// A regular polygon inscribed in `size`, first vertex at the top. `sides`
     /// below 3 is not a shape; the outline builder clamps rather than the model,
     /// so dragging the field through 2 and back does not lose the count.
+    /// `corner_radius` rounds every vertex alike, as a path's anchor radius does.
     Polygon {
         size: Size,
         sides: u32,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_radius: f64,
     },
     /// A star inscribed in `size`, first point at the top. `points` outer
     /// vertices alternate with inner ones at `inner_ratio` of the radius, so
     /// 0.5 is the familiar five-pointed star and 1.0 degenerates to a polygon
-    /// with twice the vertices.
+    /// with twice the vertices. `corner_radius` rounds inner and outer vertices.
     Star {
         size: Size,
         points: u32,
         inner_ratio: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_radius: f64,
     },
     /// Start is always the local origin; only the endpoint is stored (§5.3).
     Line {
@@ -784,9 +789,12 @@ impl NodeKind {
         }
         match self {
             NodeKind::Root | NodeKind::Group | NodeKind::Boolean { .. } => true,
-            NodeKind::Artboard { size: s }
-            | NodeKind::Ellipse { size: s }
-            | NodeKind::Polygon { size: s, .. } => size(s),
+            NodeKind::Artboard { size: s } | NodeKind::Ellipse { size: s } => size(s),
+            NodeKind::Polygon {
+                size: s,
+                corner_radius,
+                ..
+            } => size(s) && corner_radius.is_finite(),
             NodeKind::Rect {
                 size: s,
                 corner_radii,
@@ -804,8 +812,9 @@ impl NodeKind {
             NodeKind::Star {
                 size: s,
                 inner_ratio,
+                corner_radius,
                 ..
-            } => size(s) && inner_ratio.is_finite(),
+            } => size(s) && inner_ratio.is_finite() && corner_radius.is_finite(),
             NodeKind::Line { end } => end.x.is_finite() && end.y.is_finite(),
             NodeKind::Path { path, corner_radii } => {
                 path_is_finite(path) && corner_radii.iter().all(|r| r.is_finite())
@@ -1372,11 +1381,13 @@ pub(crate) mod kind_fixture {
             NodeKind::Polygon {
                 size: one,
                 sides: 3,
+                corner_radius: 0.0,
             },
             NodeKind::Star {
                 size: one,
                 points: 5,
                 inner_ratio: 0.5,
+                corner_radius: 0.0,
             },
             NodeKind::Line {
                 end: Point::new(1.0, 0.0),

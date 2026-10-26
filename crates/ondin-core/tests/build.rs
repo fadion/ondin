@@ -2841,6 +2841,7 @@ fn stroke_ink_covers_what_a_non_zero_expansion_fills() {
         size: Size::new(100.0, 100.0),
         points: 5,
         inner_ratio: 0.4,
+        corner_radius: 0.0,
     })
     .unwrap();
     let ellipse = ondin_core::geometry::local_path(&ellipse(100.0, 60.0)).unwrap();
@@ -3042,11 +3043,16 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
     for yes in [
         rect(10.0, 10.0),
         NodeKind::Ellipse { size },
-        NodeKind::Polygon { size, sides: 5 },
+        NodeKind::Polygon {
+            size,
+            sides: 5,
+            corner_radius: 0.0,
+        },
         NodeKind::Star {
             size,
             points: 5,
             inner_ratio: 0.5,
+            corner_radius: 0.0,
         },
         NodeKind::Line {
             end: Point::new(10.0, 0.0),

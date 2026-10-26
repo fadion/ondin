@@ -3284,6 +3284,10 @@ pub(crate) fn apply_geometry_patch(
         (NodeKind::Rect { corner_radii, .. }, G::CornerRadii(new)) => {
             Ok(G::CornerRadii(std::mem::replace(corner_radii, *new)))
         }
+        (NodeKind::Polygon { corner_radius, .. }, G::CornerRadius(new))
+        | (NodeKind::Star { corner_radius, .. }, G::CornerRadius(new)) => {
+            Ok(G::CornerRadius(std::mem::replace(corner_radius, *new)))
+        }
         (NodeKind::Line { end }, G::LineEnd(new)) => Ok(G::LineEnd(std::mem::replace(end, *new))),
         (
             NodeKind::Path {

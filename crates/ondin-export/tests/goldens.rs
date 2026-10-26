@@ -165,6 +165,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Polygon {
                 size: Size::new(60.0, 60.0),
                 sides: 6,
+                corner_radius: 0.0,
             },
             transform: Some(Affine::translate((240.0, 20.0))),
             name: None,
@@ -177,6 +178,7 @@ fn golden_document() -> (Document, Resolved) {
                 size: Size::new(60.0, 60.0),
                 points: 5,
                 inner_ratio: 0.382,
+                corner_radius: 0.0,
             },
             transform: Some(Affine::translate((310.0, 20.0))),
             name: None,

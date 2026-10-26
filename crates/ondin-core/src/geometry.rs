@@ -439,12 +439,20 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
             path.close_path();
             Some(path)
         }
-        NodeKind::Polygon { size, sides } => Some(star_path(*size, *sides, None)),
+        NodeKind::Polygon {
+            size,
+            sides,
+            corner_radius,
+        } => Some(rounded_star(star_path(*size, *sides, None), *corner_radius)),
         NodeKind::Star {
             size,
             points,
             inner_ratio,
-        } => Some(star_path(*size, *points, Some(*inner_ratio))),
+            corner_radius,
+        } => Some(rounded_star(
+            star_path(*size, *points, Some(*inner_ratio)),
+            *corner_radius,
+        )),
         NodeKind::Line { end } => Some(BezPath::from_vec(vec![
             PathEl::MoveTo(Point::ZERO),
             PathEl::LineTo(*end),
@@ -529,6 +537,17 @@ fn star_path(size: Size, n: u32, inner: Option<f64>) -> BezPath {
     }
     path.close_path();
     path
+}
+
+/// A polygon's or star's outline with every vertex rounded by `radius`, through
+/// [`round_corners`], so its clamp to half of each side holds here too. The
+/// rounded outline pulls in from the box; the box stays the node's bounds.
+fn rounded_star(path: BezPath, radius: f64) -> BezPath {
+    if radius.is_nan() || radius <= 0.0 {
+        return path;
+    }
+    let vertices = path.elements().len().saturating_sub(1);
+    round_corners(&path, &vec![radius; vertices])
 }
 
 /// Whether a rect's radii round nothing — every corner at or below zero.
@@ -1413,6 +1432,7 @@ mod tests {
             let kind = NodeKind::Polygon {
                 size: Size::new(100.0, 100.0),
                 sides,
+                corner_radius: 0.0,
             };
             let path = local_path(&kind).unwrap();
             let pts = corners_of(&path);
@@ -1443,6 +1463,7 @@ mod tests {
                 size: Size::new(120.0, 80.0),
                 points: 5,
                 inner_ratio: ratio,
+                corner_radius: 0.0,
             })
             .unwrap();
             let b = path.bounding_box();
@@ -1467,6 +1488,7 @@ mod tests {
                 size,
                 points: 5,
                 inner_ratio: ratio,
+                corner_radius: 0.0,
             })
             .unwrap()
         };
@@ -1487,7 +1509,12 @@ mod tests {
         // The ratio is the control it claims to be.
         assert!(star_at(0.2).area().abs() < star_at(0.7).area().abs());
 
-        let pentagon = local_path(&NodeKind::Polygon { size, sides: 5 }).unwrap();
+        let pentagon = local_path(&NodeKind::Polygon {
+            size,
+            sides: 5,
+            corner_radius: 0.0,
+        })
+        .unwrap();
         assert!(
             star.area().abs() < pentagon.area().abs(),
             "a star should not be fatter than its pentagon"
@@ -1502,6 +1529,7 @@ mod tests {
             let path = local_path(&NodeKind::Polygon {
                 size: Size::new(80.0, 80.0),
                 sides,
+                corner_radius: 0.0,
             })
             .unwrap();
             assert_eq!(corners_of(&path).len(), MIN_SIDES as usize, "{sides} sides");
@@ -1511,9 +1539,113 @@ mod tests {
         let path = local_path(&NodeKind::Polygon {
             size: Size::new(80.0, 80.0),
             sides: 10_000,
+            corner_radius: 0.0,
         })
         .unwrap();
         assert_eq!(corners_of(&path).len(), MAX_SIDES as usize);
+    }
+
+    /// A rounded polygon or star keeps inside its box, pulls its top point in, and
+    /// keeps its winding however large the radius is, at every vertex count and
+    /// inner ratio; a polygon, being convex, also loses area as the radius grows (a
+    /// star's rounded notches gain it). flip: `rounded_star` returning `path` →
+    /// fails at the top-point assertion.
+    #[test]
+    fn a_rounded_polygon_or_star_shrinks_inside_its_box_and_never_inverts() {
+        let size = Size::new(120.0, 90.0);
+        let kinds = |r: f64| {
+            let mut out = Vec::new();
+            for n in [3u32, 4, 5, 8, 24] {
+                out.push(NodeKind::Polygon {
+                    size,
+                    sides: n,
+                    corner_radius: r,
+                });
+                for ratio in [MIN_INNER_RATIO, 0.382, 0.7, 1.0] {
+                    out.push(NodeKind::Star {
+                        size,
+                        points: n,
+                        inner_ratio: ratio,
+                        corner_radius: r,
+                    });
+                }
+            }
+            out
+        };
+        let sharp = kinds(0.0);
+        let mut last: Vec<f64> = sharp
+            .iter()
+            .map(|k| local_path(k).unwrap().area().abs())
+            .collect();
+        for r in [0.5, 4.0, 15.0, 1e3, f64::INFINITY] {
+            for (i, kind) in kinds(r).iter().enumerate() {
+                let path = local_path(kind).unwrap();
+                let b = path.bounding_box();
+                assert!(
+                    b.x0 >= -1e-6
+                        && b.y0 >= -1e-6
+                        && b.x1 <= size.width + 1e-6
+                        && b.y1 <= size.height + 1e-6,
+                    "{kind:?}: {b:?} leaves the box"
+                );
+                let area = path.area();
+                let sharp_area = local_path(&sharp[i]).unwrap().area();
+                assert!(
+                    area.signum() == sharp_area.signum() && area.abs() > 0.0,
+                    "{kind:?}: area {area} turned over from {sharp_area}"
+                );
+                // Tiny on a 48-gon at r = 0.5, whose vertices barely turn.
+                assert!(b.y0 > 1e-9, "{kind:?}: the top point was not rounded");
+                if matches!(kind, NodeKind::Polygon { .. }) {
+                    assert!(
+                        area.abs() <= last[i] + 1e-6 && area.abs() < sharp_area.abs(),
+                        "{kind:?}: area {} did not shrink from {}",
+                        area.abs(),
+                        last[i]
+                    );
+                }
+                last[i] = area.abs();
+            }
+        }
+    }
+
+    /// A radius of zero, a negative one or `NaN` leaves the sharp outline as it is.
+    #[test]
+    fn a_polygon_radius_at_or_below_zero_rounds_nothing() {
+        let size = Size::new(80.0, 80.0);
+        let sharp = local_path(&NodeKind::Polygon {
+            size,
+            sides: 6,
+            corner_radius: 0.0,
+        })
+        .unwrap();
+        for r in [-3.0, f64::NAN] {
+            let path = local_path(&NodeKind::Polygon {
+                size,
+                sides: 6,
+                corner_radius: r,
+            })
+            .unwrap();
+            assert_eq!(path, sharp, "radius {r}");
+        }
+    }
+
+    /// Between two straight sides the fillet is a circular arc of the radius
+    /// asked for: on a square-sided polygon (a diamond), the rounded corner's
+    /// midpoint sits `r / sin(θ/2) - r` in from the sharp vertex.
+    #[test]
+    fn a_rounded_polygon_vertex_is_an_arc_of_the_radius() {
+        let r = 10.0;
+        let path = local_path(&NodeKind::Polygon {
+            size: Size::new(100.0, 100.0),
+            sides: 4,
+            corner_radius: r,
+        })
+        .unwrap();
+        // The top vertex of the diamond is at (50, 0) and turns through 90°.
+        let inset = r / std::f64::consts::FRAC_PI_4.sin() - r;
+        let top = path.bounding_box().y0;
+        assert!((top - inset).abs() < 1e-3, "top at {top}, want {inset}");
     }
 
     /// The picking allowance reaches a few units outward from the edge, not far

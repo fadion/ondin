@@ -206,6 +206,62 @@ fn the_four_shape_emitters_round_trip_with_their_arrangement() {
     ));
 }
 
+/// A rounded polygon and star come back with their rounding: they are written as
+/// a `<path>`, since a `<polygon>`'s point list would drop every fillet. Compared
+/// by area, which a sharp outline overshoots.
+///
+/// flip: the writer's rounded arm removed → fails at the no-`<polygon>` assertion.
+#[test]
+fn a_rounded_polygon_and_star_round_trip_with_their_rounding() {
+    let mut ids = IdSource::new(0x5151);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let shapes = [
+        NodeKind::Polygon {
+            size: Size::new(80.0, 80.0),
+            sides: 6,
+            corner_radius: 12.0,
+        },
+        NodeKind::Star {
+            size: Size::new(90.0, 90.0),
+            points: 5,
+            inner_ratio: 0.45,
+            corner_radius: 6.0,
+        },
+    ];
+    let mut made = Vec::new();
+    for (i, kind) in shapes.iter().enumerate() {
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: i,
+            kind: kind.clone(),
+            transform: Some(Affine::translate((10.0 + 120.0 * i as f64, 10.0))),
+            name: None,
+        }]))
+        .unwrap();
+        made.push(id);
+    }
+    let res = Resolved::rebuild(&doc);
+    let out = svg_of(&doc, &res, &made);
+    assert!(!out.contains("<polygon"), "{out}");
+    let (back, got) = reimport(&out);
+    assert_eq!(got.len(), 2, "{out}");
+    for (kind, id) in shapes.iter().zip(&got) {
+        use ondin_core::kurbo::Shape;
+        let want = ondin_core::geometry::local_path(kind).unwrap().area().abs();
+        let NodeKind::Path { path, .. } = back.get(*id).unwrap().kind() else {
+            panic!("{kind:?} came back as {:?}", back.get(*id).unwrap().kind());
+        };
+        let area = path.area().abs();
+        assert!(
+            (area - want).abs() < want * 1e-3,
+            "{kind:?}: area {area}, want {want}"
+        );
+    }
+}
+
 /// A group's opacity survives as the group's: `opacity` on a `<g>` composites the
 /// group as a unit, and flattening it would draw the overlap twice as dark.
 #[test]

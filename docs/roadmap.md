@@ -60,9 +60,6 @@ reads true.
   fill #2563EB → #1D4ED8; *Label* moved 4 px"), and a visual diff marks the changed regions over the
   canvas. The same compare in the version history card (`versions.rs`), a git merge driver later. Rests
   on deterministic serialization and stable ids.
-- **Data-driven renders** — `ondin render` of a component once per row of a CSV, its rows feeding
-  component properties, and export of every frame under every mode in one command. The CLI has
-  `gui`, `serve`, `export` and `mcp-proxy` (`main.rs` `parse`).
 - **A fidelity report for code export.** Render the HTML output in a browser, as `code_fidelity.rs`
   does, and report to the user what did not translate (background blur in SVG, a property with no
   CSS) instead of drifting silently.

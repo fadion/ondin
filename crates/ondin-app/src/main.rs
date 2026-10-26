@@ -18,6 +18,12 @@
 //!                                run the document's own export settings (§7) on
 //!                                every page that is not a draft, or on one page,
 //!                                optionally forcing every row to one size
+//! ondin render <file> --component <name> --data <rows.csv> [--name-by <column>]
+//!            [--png|--svg] [--scale <n> | --width <px> | --height <px>] [-o dir]
+//!                                the component once per CSV row, each column
+//!                                feeding the property of its name (render_cli)
+//! ondin render <file> --all-modes [--page <name|n>] [--png|--svg] [size] [-o dir]
+//!                                every visible top-level frame once per mode
 //! ondin serve <file>             headless: MCP endpoint over a document (§8.2)
 //! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
 //! ```
@@ -70,6 +76,7 @@ mod path_bar;
 mod prefs;
 mod present;
 mod preview;
+mod render_cli;
 mod rulers;
 mod session;
 mod settings;
@@ -122,6 +129,8 @@ enum Command {
         /// `--page`: run only this page's settings, draft or not.
         page: Option<String>,
     },
+    /// `ondin render`: a component once per CSV row, or every frame once per mode.
+    Render(render_cli::Render),
     McpProxy,
 }
 
@@ -205,6 +214,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
             .map(|file| Command::Serve { file: file.clone() })
             .ok_or_else(|| "usage: ondin serve <file>".to_string()),
         Some("export") => parse_export(&args[1..]),
+        Some("render") => render_cli::parse(&args[1..]).map(Command::Render),
         Some("mcp-proxy") => Ok(Command::McpProxy),
         // Absolute, so the session's save path and `prefs.last_document` survive a
         // different working directory next launch.
@@ -247,26 +257,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             flag @ ("--scale" | "--width" | "--height") => {
                 i += 1;
                 let text = args.get(i).ok_or_else(|| USAGE.to_string())?;
-                // Zero and negative are rejected here, not left to `factor`'s floor,
-                // which would turn `--scale 0` into a one-pixel file.
-                let asked = match flag {
-                    "--width" => text
-                        .parse()
-                        .ok()
-                        .filter(|px| *px > 0)
-                        .map(ExportScale::Width),
-                    "--height" => text
-                        .parse()
-                        .ok()
-                        .filter(|px| *px > 0)
-                        .map(ExportScale::Height),
-                    _ => text
-                        .parse()
-                        .ok()
-                        .filter(|n: &f32| n.is_finite() && *n > 0.0)
-                        .map(ExportScale::Times),
-                }
-                .ok_or_else(|| format!("{flag} wants a positive number, not {text:?}\n{USAGE}"))?;
+                let asked = size_flag(flag, text, USAGE)?;
                 if let Some((had, _)) = scale {
                     return Err(format!(
                         "{had} and {flag} are two answers to one question — pick one\n{USAGE}"
@@ -372,6 +363,30 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
     })
 }
 
+/// The value of `--scale`, `--width` or `--height`, shared by `export` and
+/// `render`. Zero and negative are refused here, not left to `factor`'s floor,
+/// which would turn `--scale 0` into a one-pixel file.
+fn size_flag(flag: &str, text: &str, usage: &str) -> Result<ExportScale, String> {
+    match flag {
+        "--width" => text
+            .parse()
+            .ok()
+            .filter(|px| *px > 0)
+            .map(ExportScale::Width),
+        "--height" => text
+            .parse()
+            .ok()
+            .filter(|px| *px > 0)
+            .map(ExportScale::Height),
+        _ => text
+            .parse()
+            .ok()
+            .filter(|n: &f32| n.is_finite() && *n > 0.0)
+            .map(ExportScale::Times),
+    }
+    .ok_or_else(|| format!("{flag} wants a positive number, not {text:?}\n{usage}"))
+}
+
 fn main() {
     let args = match unicode_args(std::env::args_os().skip(1)) {
         Ok(args) => args,
@@ -430,6 +445,7 @@ fn main() {
             scale_override,
             page.as_deref(),
         ),
+        Ok(Command::Render(r)) => render_cli::run(&r),
         Ok(Command::Serve { file }) => Err(format!("ondin serve {file}: not yet implemented (M6)")),
         Ok(Command::McpProxy) => Err("ondin mcp-proxy: not yet implemented (M6)".to_string()),
         Err(msg) => {

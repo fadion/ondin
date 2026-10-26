@@ -315,7 +315,7 @@ pub fn sanitize_segment(s: &str) -> String {
 /// Scoped to the plan: `taken` never reads the filesystem, so a file already on
 /// disk at a planned path is replaced by the writer. Disclosing that belongs to
 /// the door that writes without a save dialog (§15 D636).
-fn de_collide(wanted: String, taken: &mut Vec<String>) -> String {
+pub fn de_collide(wanted: String, taken: &mut Vec<String>) -> String {
     let key = |s: &str| s.to_lowercase();
     if !taken.iter().any(|t| key(t) == key(&wanted)) {
         taken.push(wanted.clone());

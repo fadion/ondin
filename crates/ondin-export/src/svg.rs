@@ -10,14 +10,15 @@
 //!
 //! Text is one `<text>` per line with one `<tspan>` per run, so a viewer re-shapes
 //! with its own fonts; line breaks and baselines are ours, from
-//! `text::export_lines`.
+//! `text::export_lines`. Asked for outlines ([`svg_with`]), text is instead the
+//! glyph outlines the canvas draws, which no viewer can re-shape.
 
 use ondin_core::kurbo::{Affine, BezPath, Insets, Rect, Shape};
 use ondin_core::peniko::{Color, Extend, GradientKind};
 use ondin_core::{Brush, Keyed};
 use ondin_core::{
-    Decoration, Document, Effect, EffectKind, Fill, Framing, LineStyle, MaskMode, Node, NodeId,
-    NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign, geometry,
+    Decoration, Document, Effect, EffectKind, ExportText, Fill, Framing, LineStyle, MaskMode, Node,
+    NodeId, NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign, geometry,
 };
 use std::fmt::Write;
 
@@ -79,16 +80,23 @@ pub fn svg_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> String {
 /// [`svg_of`], and what it could not say exactly — see [`Export`]. [`svg_of`] is
 /// the markup-only shim; the export panel and *Copy as SVG* ask for the report.
 pub fn svg_of_reported(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Export {
-    svg_linking(doc, res, origins, Default::default())
+    svg_with(doc, res, origins, ExportText::Live)
 }
 
-/// [`svg_of_reported`], each picture in `linked` written as a link to its path
-/// there rather than embedded: code export's pages share one file per picture.
+/// [`svg_of_reported`] with text written as `text` asks: `<text>` elements, or the
+/// glyph outlines the canvas draws.
+pub fn svg_with(doc: &Document, res: &Resolved, origins: &[NodeId], text: ExportText) -> Export {
+    svg_linking(doc, res, origins, Default::default(), text)
+}
+
+/// [`svg_with`], each picture in `linked` written as a link to its path there
+/// rather than embedded: code export's pages share one file per picture.
 pub(crate) fn svg_linking(
     doc: &Document,
     res: &Resolved,
     origins: &[NodeId],
     linked: std::collections::HashMap<ondin_core::ImageId, String>,
+    text: ExportText,
 ) -> Export {
     // `crate::extent`, shared with the PNG writer so the two frame the same box.
     let view = crate::extent(res, origins).unwrap_or_else(|| Rect::new(0.0, 0.0, 100.0, 100.0));
@@ -96,6 +104,7 @@ pub(crate) fn svg_linking(
     // Defs first so the header can carry them; ids follow document order.
     let mut defs = Defs {
         linked,
+        text,
         ..Default::default()
     };
     for id in origins {
@@ -157,6 +166,9 @@ struct Defs {
     seen: std::collections::HashSet<DefKey>,
     /// Pictures written as a link to this path, not embedded ([`svg_linking`]).
     linked: std::collections::HashMap<ondin_core::ImageId, String>,
+    /// Not a def: the pass's text mode, kept here because every emitter is
+    /// handed the defs.
+    text: ExportText,
 }
 
 /// A def's id: a `String` whose equality is counted in tests. Blind spot: a
@@ -516,11 +528,13 @@ fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs:
     }
     // A rail is a def because `<textPath>` can name nothing else; it is in the
     // text node's own space, as the referencing element carries the transform.
+    // Outlined glyphs are already bent and name none.
     if let NodeKind::Text {
         on_path: Some(rail),
         on_path_flip,
         ..
     } = node.kind()
+        && defs.text == ExportText::Live
     {
         // A flip is a reversed rail, not SVG 2's unevenly implemented
         // `side="right"`: our flip *is* traversing backwards (`PathWarp::flip`).
@@ -996,6 +1010,8 @@ fn report_node(
     node: &Node,
     effects: &[ondin_core::Keyed<Effect>],
     filter_written: bool,
+    // Text goes out as outlines ([`ExportText::Outlines`]).
+    outlined: bool,
     report: &mut Report,
 ) {
     // `gradient_def` writes a sweep as a radial rather than dropping the paint.
@@ -1034,6 +1050,10 @@ fn report_node(
         })
     {
         report.approximate("a shadow's spread, drawn with a square kernel");
+    }
+    // Everything below is about `<text>`; outlined text is our own glyphs, placed.
+    if outlined {
+        return;
     }
     if let NodeKind::Text {
         on_path: Some(_),
@@ -1097,7 +1117,14 @@ fn emit_node(
     let drawn_fx = doc.resolved_effects(id, node.effects());
     let fx = ondin_render::effects::any_ink(&drawn_fx) && defs.has(&effect_id(id));
     // Under the visibility guard: the report is a claim about the file.
-    report_node(res, node, &drawn_fx, fx, report);
+    report_node(
+        res,
+        node,
+        &drawn_fx,
+        fx,
+        defs.text == ExportText::Outlines,
+        report,
+    );
     let paint = doc.resolved_paint(id, node.paint());
     if visible_fills(&paint).any(|(_, f)| crops_past_picture(doc, node, res, id, f.brush.drawn())) {
         report
@@ -1339,6 +1366,10 @@ fn emit_shape(
     if emit_failed_boolean(out, doc, res, id, pad) {
         return;
     }
+    if defs.text == ExportText::Outlines && matches!(node.kind(), NodeKind::Text { .. }) {
+        emit_outlined_text(out, doc, node, res, id, transform, opacity, defs, pad);
+        return;
+    }
     let paint = ondin_core::paint_box::node_paint(doc, res, id)
         .unwrap_or_else(|| doc.resolved_paint(id, node.paint()));
     let fills: Vec<(usize, &Fill)> = visible_fills(&paint).collect();
@@ -1413,6 +1444,89 @@ fn emit_shape(
         &stroke,
         &op,
     );
+}
+
+/// A text node as the glyph outlines the canvas draws ([`ExportText::Outlines`]),
+/// in `scene::paint_shape`'s text order: each run in its own colour or under every
+/// fill, the strokes along the whole outline, then the decoration bands.
+#[allow(clippy::too_many_arguments)]
+fn emit_outlined_text(
+    out: &mut String,
+    doc: &Document,
+    node: &Node,
+    res: &Resolved,
+    id: NodeId,
+    transform: Affine,
+    opacity: f32,
+    defs: &Defs,
+    pad: &str,
+) {
+    let Some(layout) = res.text_layout(id) else {
+        return;
+    };
+    let paint = ondin_core::paint_box::node_paint(doc, res, id)
+        .unwrap_or_else(|| doc.resolved_paint(id, node.paint()));
+    let fills: Vec<(usize, &Fill)> = visible_fills(&paint).collect();
+    let strokes: Vec<(usize, &Stroke)> = visible_strokes(&paint).collect();
+    // Black only for text with no ink at all; with a stroke the letters stay hollow.
+    let black = Brush::Solid(Color::BLACK);
+    let inks: Vec<(String, &Brush)> = match fills.is_empty() && strokes.is_empty() {
+        true => vec![(String::new(), &black)],
+        false => fills
+            .iter()
+            .map(|(i, f)| (format!("fill-{i}"), f.brush.drawn()))
+            .collect(),
+    };
+    let inner = format!("{pad}  ");
+    let _ = writeln!(
+        out,
+        "{pad}<g{}{}{}>",
+        name_attr(node),
+        transform_attr(transform),
+        opacity_attr(opacity)
+    );
+    let fill_path = |out: &mut String, path: &BezPath, brush: &Brush, slot: &str| {
+        if path.is_empty() {
+            return;
+        }
+        let clip = framing_of(doc, node, res, id, brush).and_then(|f| f.clip);
+        with_image_clip(out, clip, id, slot, &inner, |out, pad| {
+            let _ = writeln!(
+                out,
+                r#"{pad}<path d="{d}"{fill}/>"#,
+                d = path_d(path),
+                fill = paint_attr("fill", brush, id, slot, defs),
+            );
+        });
+    };
+    for run in &layout.runs {
+        let glyphs = ondin_core::text::run_outline(run);
+        match run.color {
+            Some(c) => fill_path(out, &glyphs, &Brush::Solid(c), ""),
+            None => {
+                for (slot, brush) in &inks {
+                    fill_path(out, &glyphs, brush, slot);
+                }
+            }
+        }
+    }
+    emit_strokes(out, doc, node, res, id, &inner, &strokes, defs);
+    for ink in &layout.decorations {
+        let band = ondin_render::scene::decoration_path(ink);
+        let band = match &layout.warp {
+            Some(warp) => warp.warp(&band),
+            None => band,
+        };
+        // Its own colour, else the first ink only, as the canvas draws it.
+        match ink.color {
+            Some(c) => fill_path(out, &band, &Brush::Solid(c), ""),
+            None => {
+                let (slot, brush) = inks.first().map_or(("", &black), |(s, b)| (s.as_str(), *b));
+                fill_path(out, &band, brush, slot);
+            }
+        }
+    }
+    let _ = writeln!(out, "{pad}</g>");
 }
 
 /// The pieces a fitted dash pattern is laid along, or `None` when one pattern
@@ -1540,8 +1654,12 @@ fn emit_strokes(
     strokes: &[(usize, &Stroke)],
     defs: &Defs,
 ) {
-    let derived = res.boolean_path(id);
     let shape = outline(node, res, id);
+    // Outlined text strokes its glyphs as a `<path>`, as a boolean strokes its result.
+    let derived = match node.kind() {
+        NodeKind::Text { .. } if defs.text == ExportText::Outlines => shape.as_ref(),
+        _ => res.boolean_path(id),
+    };
     for (i, s) in strokes {
         // Unfilled, or it would paint over the fills beneath.
         const UNFILLED: &str = r#" fill="none""#;
@@ -1634,7 +1752,8 @@ fn write_element(
     node: &Node,
     // The node's used kind; every size and outline below is read from it.
     kind: &NodeKind,
-    // The outline `Resolved` computed for a `Boolean` node, `None` for any other kind.
+    // A path that stands in for the kind's own element: a `Boolean`'s result, or
+    // outlined text's glyphs. `None` for every other node.
     derived: Option<&BezPath>,
     pad: &str,
     t: &str,
@@ -1738,6 +1857,14 @@ fn write_element(
         // outlines would lose selectable text. Alignment survives as a
         // `startOffset` percentage.
         NodeKind::Text { on_path, .. } => {
+            if let Some(path) = derived {
+                let _ = writeln!(
+                    out,
+                    r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#,
+                    d = path_d(path),
+                );
+                return;
+            }
             let Some(parts) = ondin_core::TextRef::of(kind) else {
                 return;
             };

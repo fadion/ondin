@@ -1043,8 +1043,8 @@ fn draw_run(
 /// four styles share one path (§6.3). Periods are multiples of the thickness.
 /// Skip-ink is interval arithmetic on `DecorationInk::gaps`: dash and dot runs are
 /// generated over the whole band then clipped, and the ribbon's phase is the
-/// band's, so the rhythm survives a gap.
-fn decoration_path(ink: &ondin_core::DecorationInk) -> BezPath {
+/// band's, so the rhythm survives a gap. Public for the SVG writer's outlined text.
+pub fn decoration_path(ink: &ondin_core::DecorationInk) -> BezPath {
     use ondin_core::LineStyle;
     let band = ink.band;
     let t = band.height();

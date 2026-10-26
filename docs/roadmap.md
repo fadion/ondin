@@ -20,8 +20,8 @@ reads true.
 - **Canvas**: lasso, tidy up, spacing handles on a loose multi-selection (`spacing.rs` covers
   containers).
 - **Views and panels**: outline (wireframe) view, minimap, an undo history panel.
-- **PDF** export (through the SVG and a converter, with a text-as-outlines decision;
-  `export::ExportFormat`) and import.
+- **PDF import**, and a many-page PDF of several frames (export writes one page per file,
+  `export.md` § PDF).
 - **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
   Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when
   Figma changes it; the REST API is documented but needs a network and the user's token), then

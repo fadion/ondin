@@ -1,7 +1,7 @@
 # Ondin — Architecture
 
 Ondin is a native 2D design tool: a Rust workspace of `ondin-core` (the headless document
-model), `ondin-render` (vello on GPU and CPU), `ondin-export` (SVG, PNG, HTML/CSS, React, Vue, JSON), `ondin-mcp`
+model), `ondin-render` (vello on GPU and CPU), `ondin-export` (SVG, PDF, PNG, HTML/CSS, React, Vue, JSON), `ondin-mcp`
 (the agent adapter) and `ondin-app` (egui + wgpu). This file is the index. The design is in
 `docs/design/`, one file per subsystem. **Open only the file you need.** Headings keep the
 old section numbers, so a `§5.3d` cited from code is found by grepping `docs/design/` for
@@ -41,7 +41,7 @@ Read the file for the exact wording before relying on one.
 | `io.md` | 5.11, 5.11a | Save format, schema migration, clipboard envelope, the library block |
 | **Render, export, MCP** | | |
 | `render.md` | 6.1–6.3 | The render boundary, `RenderOverrides`, backends |
-| `export.md` | 7 | SVG, PNG, code export (HTML/CSS, React, Vue), JSON snapshot, the CLI, export doors |
+| `export.md` | 7 | SVG, PDF, PNG, code export (HTML/CSS, React, Vue), JSON snapshot, the CLI, export doors |
 | `mcp.md` | 8 | MCP topology, headless mode, concurrency, the tool list (a test parses §8.4) |
 | **App** | | |
 | `app-chrome.md` | 9.1, 9.2 | UI chrome and panel layout, the layers tree, the Pages section and the current page |

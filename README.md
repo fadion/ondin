@@ -41,7 +41,7 @@ on the [Releases](https://github.com/fadion/ondin/releases) page.
   from exposure to shadows.
 - **Layout.** Flexbox, CSS grid with its tracks drawn on the canvas, and
   absolute insets.
-- **Export.** SVG, PNG and JPEG, per-layer export settings saved in the file, to
+- **Export.** SVG, PDF, PNG, JPEG and WebP, per-layer export settings saved in the file, to
   a folder or a ZIP. Copy as SVG or PNG.
 - **SVG import.** Paste SVG and get real, editable layers.
 - **Library.** A home screen for your documents with search, stars, trash and

@@ -110,6 +110,14 @@ png = "0.18.1"
 zip = { version = "8.6.0", default-features = false, features = [
   "deflate-flate2",
 ] }
+# PDF export: our SVG, parsed by `usvg` and drawn into a PDF by `krilla` through
+# `krilla-svg`. Not `svg2pdf`, whose `usvg` 0.45 ignores `font-variation-settings`
+# and so embeds a variable font (Inter, the default) at its default weight. These
+# three move together: `krilla-svg` names the `krilla` and `usvg` it draws with.
+# They bring `skrifa` 0.42 beside our 0.43, a second copy of the font readers.
+krilla = { version = "0.8.2", default-features = false }
+krilla-svg = "0.8.1"
+usvg = "0.47.0"
 
 # --- ondin-app (UI chrome + windowing) — egui trio pinned exactly, moves together ---
 # eframe (default features) owns the window + wgpu device + event loop; it pulls

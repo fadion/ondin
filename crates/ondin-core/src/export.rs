@@ -61,6 +61,10 @@ pub struct ExportSpec {
     /// mixed sizes exports as one grid of squares.
     #[serde(default, skip_serializing_if = "is_false")]
     pub pad_square: bool,
+    /// How a vector file carries text. Inert for a raster but kept when the
+    /// format changes, as [`Self::quality`] is.
+    #[serde(default, skip_serializing_if = "ExportText::is_live")]
+    pub text: ExportText,
 }
 
 impl ExportSpec {
@@ -75,6 +79,7 @@ impl ExportSpec {
             quality: default_quality(),
             trim: false,
             pad_square: false,
+            text: ExportText::default(),
         }
     }
 
@@ -206,9 +211,6 @@ impl ExportScale {
 }
 
 /// What comes out of an export.
-///
-/// PDF is not built: it would go through our SVG and a converter, which is a
-/// dependency tree and a text-as-outlines decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExportFormat {
     #[default]
@@ -217,14 +219,17 @@ pub enum ExportFormat {
     /// Lossless WebP: `image`'s encoder writes VP8L only, so there is no quality.
     Webp,
     Svg,
+    /// Our SVG converted to one PDF page, one point per world unit.
+    Pdf,
 }
 
 impl ExportFormat {
-    pub const ALL: [ExportFormat; 4] = [
+    pub const ALL: [ExportFormat; 5] = [
         ExportFormat::Png,
         ExportFormat::Jpeg,
         ExportFormat::Webp,
         ExportFormat::Svg,
+        ExportFormat::Pdf,
     ];
 
     /// The extension, lowercase and without the dot.
@@ -234,6 +239,7 @@ impl ExportFormat {
             ExportFormat::Jpeg => "jpg",
             ExportFormat::Webp => "webp",
             ExportFormat::Svg => "svg",
+            ExportFormat::Pdf => "pdf",
         }
     }
 
@@ -244,6 +250,7 @@ impl ExportFormat {
             ExportFormat::Jpeg => "JPEG",
             ExportFormat::Webp => "WebP",
             ExportFormat::Svg => "SVG",
+            ExportFormat::Pdf => "PDF",
         }
     }
 
@@ -260,6 +267,34 @@ impl ExportFormat {
     /// [`ExportBackground::Transparent`] resolves to a matte for it.
     pub fn keeps_alpha(self) -> bool {
         !matches!(self, ExportFormat::Jpeg)
+    }
+}
+
+/// How a vector export carries text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ExportText {
+    /// Characters a reader can select and search: `<text>` in an SVG, embedded
+    /// font subsets in a PDF. The reader shapes them again with the fonts it has.
+    #[default]
+    Live,
+    /// The glyph outlines our own layout drew, so the file matches the canvas on a
+    /// machine without the fonts, and the text is no longer text.
+    Outlines,
+}
+
+impl ExportText {
+    fn is_live(&self) -> bool {
+        matches!(self, ExportText::Live)
+    }
+
+    /// What the settings card shows for it on `format`: a PDF's live text is its
+    /// embedded fonts.
+    pub fn label(self, format: ExportFormat) -> &'static str {
+        match (self, format) {
+            (ExportText::Outlines, _) => "Outlines",
+            (ExportText::Live, ExportFormat::Pdf) => "Embedded fonts",
+            (ExportText::Live, _) => "Text",
+        }
     }
 }
 
@@ -391,6 +426,21 @@ mod tests {
             json, r#"{"format":"Png"}"#,
             "every field but the format is skipped at its default"
         );
+        assert_eq!(
+            serde_json::from_str::<ExportSpec>(&json).expect("round trip"),
+            spec
+        );
+    }
+
+    /// Outlined text reaches the file and reads back; live text writes nothing.
+    #[test]
+    fn outlined_text_is_saved_and_live_text_is_not() {
+        let mut spec = ExportSpec::new(ExportFormat::Pdf, ExportScale::Times(1.0));
+        let live = serde_json::to_string(&spec).expect("serialize");
+        assert_eq!(live, r#"{"format":"Pdf"}"#);
+        spec.text = ExportText::Outlines;
+        let json = serde_json::to_string(&spec).expect("serialize");
+        assert_eq!(json, r#"{"format":"Pdf","text":"Outlines"}"#);
         assert_eq!(
             serde_json::from_str::<ExportSpec>(&json).expect("round trip"),
             spec

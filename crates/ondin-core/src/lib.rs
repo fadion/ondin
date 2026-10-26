@@ -87,7 +87,7 @@ pub use effect::{
     EFFECT_Y, Effect, EffectKind, EffectVars, FilterChannel, Filters, Shadow, deviation, reach,
     stack_escape,
 };
-pub use export::{ExportBackground, ExportFormat, ExportScale, ExportSpec};
+pub use export::{ExportBackground, ExportFormat, ExportScale, ExportSpec, ExportText};
 pub use guide::{
     DEFAULT_GUIDE_COLOR, Guide, GuideAxis, GuideId, guide_coord_of, guide_point, guide_span,
 };

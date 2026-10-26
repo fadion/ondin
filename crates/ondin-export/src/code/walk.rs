@@ -2179,7 +2179,13 @@ impl Walk<'_> {
             }
             under.extend(n.children());
         }
-        let svg = crate::svg::svg_linking(self.doc, self.res, &[id], linked);
+        let svg = crate::svg::svg_linking(
+            self.doc,
+            self.res,
+            &[id],
+            linked,
+            ondin_core::ExportText::Live,
+        );
         let mut pic = if svg.approximated.is_empty() {
             self.report.position(format!(
                 "{} {}: {why}, written as inline SVG",

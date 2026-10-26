@@ -1,7 +1,8 @@
-//! ondin-export — SVG, PNG, JPEG, WebP, the AI-handoff JSON snapshot, and code
+//! ondin-export — SVG, PDF, PNG, JPEG, WebP, the AI-handoff JSON snapshot, and code
 //! export's HTML/CSS ([`mod@code`]) (§7).
 //!
-//! SVG is a pure function of core state (also a model-completeness gate). PNG,
+//! SVG is a pure function of core state (also a model-completeness gate), and PDF
+//! is that SVG converted ([`mod@pdf`]). PNG,
 //! JPEG and WebP go through the CPU renderer (no GPU) and differ only in the
 //! encoder at the end. The snapshot is the stable public projection MCP read tools return,
 //! versioned independently of the save format.
@@ -39,6 +40,7 @@
 
 pub mod code;
 pub mod jpeg;
+pub mod pdf;
 pub mod plan;
 pub mod png;
 pub mod snapshot;

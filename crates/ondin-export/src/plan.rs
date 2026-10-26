@@ -46,7 +46,8 @@ pub struct PlannedFile {
     /// Where it goes under the destination, `/`-separated and already
     /// de-collided against every other file in the same plan.
     pub path: String,
-    /// The size a raster will come out at. `None` for SVG, which has no pixels.
+    /// The size a raster will come out at. `None` for SVG and PDF, which have no
+    /// pixels.
     pub pixels: Option<(u32, u32)>,
     /// Whether [`Self::pixels`] is smaller than the spec asked for, because the
     /// request was past what the CPU rasterizer can allocate.
@@ -140,7 +141,12 @@ pub fn raster_size(res: &Resolved, node: NodeId, spec: &ExportSpec) -> (Option<(
 pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<u8>> {
     let origins = [file.node];
     match file.spec.format {
-        ExportFormat::Svg => Some(crate::svg::svg_of(doc, res, &origins).into_bytes()),
+        ExportFormat::Svg => Some(
+            crate::svg::svg_with(doc, res, &origins, file.spec.text)
+                .svg
+                .into_bytes(),
+        ),
+        ExportFormat::Pdf => crate::pdf::pdf_of(doc, res, &origins, file.spec.text).map(|e| e.pdf),
         ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Webp => {
             let opts = raster_opts(doc, res, file.node, &file.spec);
             let r = crate::png::raster_of(doc, res, &origins, &opts)?;
@@ -150,13 +156,13 @@ pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<
 }
 
 /// A raster encoded in `spec`'s format. Public because the panel's preview
-/// rasterizes once and both encodes and draws the buffer. An SVG spec has no
+/// rasterizes once and both encodes and draws the buffer. A vector spec has no
 /// encoder and gets PNG bytes.
 pub fn encode(r: &crate::png::Raster, spec: &ExportSpec) -> Vec<u8> {
     match spec.format {
         ExportFormat::Jpeg => crate::jpeg::encode_rgba8(&r.rgba, r.width, r.height, spec.quality),
         ExportFormat::Webp => crate::webp::encode_rgba8(&r.rgba, r.width, r.height),
-        ExportFormat::Png | ExportFormat::Svg => {
+        ExportFormat::Png | ExportFormat::Svg | ExportFormat::Pdf => {
             crate::png::encode_rgba8(&r.rgba, r.width, r.height)
         }
     }
@@ -626,13 +632,14 @@ mod tests {
         );
     }
 
-    /// Three specs, three formats, three files in a readable zip.
+    /// Four specs, four formats, four files in a readable zip.
     #[test]
     fn a_plan_renders_to_bytes_and_packs() {
         let (doc, res, _, rect) = doc_with_rect(vec![
             ExportSpec::new(ExportFormat::Png, ExportScale::Times(2.0)),
             ExportSpec::new(ExportFormat::Jpeg, ExportScale::Times(1.0)),
             ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0)),
+            ExportSpec::new(ExportFormat::Pdf, ExportScale::Times(1.0)),
         ]);
         let files = plan(&doc, &res, &[rect], PlanOptions::default());
         let rendered: Vec<(String, Vec<u8>)> = files
@@ -642,10 +649,12 @@ mod tests {
         assert_eq!(&rendered[0].1[1..4], b"PNG");
         assert_eq!(&rendered[1].1[..2], &[0xFF, 0xD8]);
         assert!(rendered[2].1.starts_with(b"<svg"));
+        assert!(rendered[3].1.starts_with(b"%PDF-"));
+        assert_eq!(rendered[3].0, "Button.pdf");
 
         let archive = zip(&rendered).expect("zip");
         let mut r = zip::ZipArchive::new(std::io::Cursor::new(archive)).expect("readable archive");
-        assert_eq!(r.len(), 3);
+        assert_eq!(r.len(), 4);
         let names: Vec<String> = r.file_names().map(str::to_string).collect();
         for f in &files {
             assert!(names.contains(&f.path), "{} missing from {names:?}", f.path);

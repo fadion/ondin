@@ -667,3 +667,22 @@ fn exporting_the_same_document_twice_gives_the_same_bytes() {
         "SVG does not depend on which rebuild produced the layout"
     );
 }
+
+/// Every kind and effect converts to a PDF in both text modes, and the same
+/// document gives the same bytes, so a re-export does not churn a checked-in file.
+#[test]
+fn every_kind_converts_to_a_stable_pdf() {
+    use ondin_core::ExportText;
+    use ondin_export::pdf::pdf_of;
+    let (doc, res) = golden_document();
+    let page = [doc.first_page()];
+    for text in [ExportText::Live, ExportText::Outlines] {
+        let a = pdf_of(&doc, &res, &page, text).expect("the converter takes our SVG");
+        assert!(a.pdf.starts_with(b"%PDF-"), "{text:?}");
+        let b = pdf_of(&doc, &res, &page, text).expect("again");
+        assert!(
+            a.pdf == b.pdf,
+            "{text:?} PDF bytes differ between two exports"
+        );
+    }
+}

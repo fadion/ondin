@@ -4322,3 +4322,155 @@ fn a_hidden_mask_leaves_the_run_unwrapped_in_both_modes() {
         );
     }
 }
+
+/// The fixture's text node restyled, and its export with text as outlines.
+fn outlined(style: ondin_core::TextStyle, strokes: Vec<ondin_core::Stroke>) -> String {
+    use ondin_core::{ExportText, Resolved};
+    let mut f = common::fixture();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetTextStyle {
+                id: f.text,
+                spans: None,
+                style,
+            },
+            Operation::SetStrokes {
+                id: f.text,
+                strokes: keyed_by_position(strokes),
+            },
+        ]))
+        .expect("style the text");
+    f.res = Resolved::rebuild(&f.doc);
+    ondin_export::svg::svg_with(&f.doc, &f.res, &[f.text], ExportText::Outlines).svg
+}
+
+fn inter_16() -> ondin_core::TextStyle {
+    ondin_core::TextStyle {
+        font_family: "Inter".into(),
+        font_size: 16.0,
+        ..Default::default()
+    }
+}
+
+/// Outlined text is the glyph outlines the canvas draws: no `<text>`, and paths
+/// covering exactly the layout's ink.
+///
+/// flip: `emit_shape` not handing outlined text to `emit_outlined_text` → fails at
+/// the `<text` assertion.
+#[test]
+fn outlined_text_is_its_glyph_outlines() {
+    use ondin_core::ExportText;
+    use ondin_core::kurbo::{BezPath, Rect, Shape};
+    let f = common::fixture();
+    let out = ondin_export::svg::svg_with(&f.doc, &f.res, &[f.text], ExportText::Outlines).svg;
+    assert!(!out.contains("<text"), "{out}");
+    let got = out
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix(r#"<path d=""#))
+        .map(|d| {
+            BezPath::from_svg(&d[..d.find('"').unwrap()])
+                .expect("a valid d")
+                .bounding_box()
+        })
+        .reduce(|a: Rect, b| a.union(b))
+        .unwrap_or_else(|| panic!("glyph paths:\n{out}"));
+    let layout = f.res.text_layout(f.text).expect("laid out");
+    let want = ondin_core::text::outline(layout).bounding_box();
+    for (g, w) in [
+        (got.x0, want.x0),
+        (got.y0, want.y0),
+        (got.x1, want.x1),
+        (got.y1, want.y1),
+    ] {
+        assert!(
+            (g - w).abs() < 0.01,
+            "{got:?} against the layout's {want:?}"
+        );
+    }
+}
+
+/// A run's own colour and its decoration's colour both reach outlined text, the
+/// decoration as a filled band.
+///
+/// flip: `emit_outlined_text` skipping `layout.decorations` → fails at the red band.
+#[test]
+fn outlined_text_keeps_run_and_decoration_colours() {
+    use ondin_core::Decoration;
+    use ondin_core::peniko::Color;
+    let out = outlined(
+        ondin_core::TextStyle {
+            color: Some(Color::from_rgba8(0, 0, 255, 255)),
+            underline: Some(Decoration {
+                color: Some(Color::from_rgba8(255, 0, 0, 255)),
+                ..Decoration::default()
+            }),
+            ..inter_16()
+        },
+        vec![],
+    );
+    assert!(
+        out.contains(r##"fill="#0000ff""##),
+        "the run's glyphs:\n{out}"
+    );
+    assert!(out.contains(r##"fill="#ff0000""##), "the underline:\n{out}");
+    assert!(!out.contains("text-decoration"), "{out}");
+}
+
+/// A stroke on outlined text strokes the glyph path, not a `<text>`.
+///
+/// flip: `emit_strokes` taking `res.boolean_path` for outlined text → fails at the
+/// `<text` assertion.
+#[test]
+fn a_stroke_on_outlined_text_strokes_its_glyphs() {
+    use ondin_core::Stroke;
+    let red =
+        ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255));
+    let out = outlined(
+        inter_16(),
+        vec![Stroke {
+            brush: red.into(),
+            width: 2.0,
+            ..Default::default()
+        }],
+    );
+    assert!(!out.contains("<text"), "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l.contains("<path d=") && l.contains(r##"stroke="#ff0000""##)),
+        "{out}"
+    );
+}
+
+/// Outlined type on a path is our bent glyphs: no rail, no `<textPath>`, and no
+/// placement note, which `<text>` still earns.
+///
+/// flip: `report_node` ignoring `outlined` → fails at the outlined report.
+#[test]
+fn outlined_type_on_a_path_needs_no_rail_and_is_not_approximated() {
+    use ondin_core::kurbo::BezPath;
+    use ondin_core::{ExportText, GeometryPatch, Resolved};
+    const NOTE: &str = "type on a path, whose glyph placement is left to the viewer";
+    let mut rail = BezPath::new();
+    rail.move_to((0.0, 0.0));
+    rail.curve_to((60.0, -40.0), (140.0, 40.0), (200.0, 0.0));
+    let mut f = common::fixture();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetGeometry {
+            id: f.text,
+            geometry: GeometryPatch::TextPath(Some(rail)),
+        }]))
+        .expect("a text node takes a rail");
+    f.res = Resolved::rebuild(&f.doc);
+    let live = ondin_export::svg::svg_with(&f.doc, &f.res, &[f.text], ExportText::Live);
+    let out = ondin_export::svg::svg_with(&f.doc, &f.res, &[f.text], ExportText::Outlines);
+    assert!(live.approximated.iter().any(|s| s == NOTE));
+    assert!(
+        !out.approximated.iter().any(|s| s == NOTE),
+        "{:?}",
+        out.approximated
+    );
+    for absent in ["<textPath", "rail-"] {
+        assert!(!out.svg.contains(absent), "{absent}:\n{}", out.svg);
+    }
+    assert!(out.svg.contains("<path d="), "{}", out.svg);
+}

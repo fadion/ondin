@@ -93,7 +93,7 @@ mod update;
 mod versions;
 mod view;
 
-use ondin_core::ExportScale;
+use ondin_core::{ExportScale, ExportText};
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -116,6 +116,8 @@ enum Command {
         scale: ExportScale,
         /// `--page`: a page's number from 1, or its exact name.
         page: Option<String>,
+        /// `--outlines`: an SVG's or a PDF's text as glyph outlines.
+        text: ExportText,
     },
     /// Run the document's own export settings (§7) — every layer that carries any,
     /// at the formats and sizes the file says, into a folder.
@@ -146,6 +148,7 @@ enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExportFormat {
     Svg,
+    Pdf,
     Png,
     Json,
     /// Code export's plain HTML/CSS, zipped.
@@ -160,6 +163,7 @@ impl ExportFormat {
     fn extension(self) -> &'static str {
         match self {
             ExportFormat::Svg => "svg",
+            ExportFormat::Pdf => "pdf",
             ExportFormat::Png => "png",
             ExportFormat::Json => "json",
             ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => "zip",
@@ -261,8 +265,8 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--png|--json|--html|--react|--vue] \
-         [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
+    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue] \
+         [--outlines] [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] \
          [--page <name|n>] [-o <dir>]";
     let mut file = None;
@@ -271,12 +275,14 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
     let mut page = None;
     let mut all = false;
     let mut folders = false;
+    let mut outlines = false;
     let mut scale: Option<(&str, ExportScale)> = None;
     let mut over = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--svg" => format = Some(ExportFormat::Svg),
+            "--pdf" => format = Some(ExportFormat::Pdf),
             "--png" => format = Some(ExportFormat::Png),
             "--json" => format = Some(ExportFormat::Json),
             "--html" => format = Some(ExportFormat::Html),
@@ -284,6 +290,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--vue" => format = Some(ExportFormat::Vue),
             "--all" => all = true,
             "--folders" => folders = true,
+            "--outlines" => outlines = true,
             // One value each and mutually exclusive: three ways of answering one
             // question. The typed flag is carried so the refusals can name it.
             flag @ ("--scale" | "--width" | "--height") => {
@@ -354,6 +361,11 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
                  ({had} sets the size of a one-off export)\n{USAGE}"
             ));
         }
+        if outlines {
+            return Err(format!(
+                "--all takes each file's text setting from the document\n{USAGE}"
+            ));
+        }
         return Ok(Command::ExportAll {
             file: file.ok_or_else(|| USAGE.to_string())?,
             out,
@@ -386,12 +398,21 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--json describes every page, so it takes no --page\n{USAGE}"
         ));
     }
+    if outlines && !matches!(format, ExportFormat::Svg | ExportFormat::Pdf) {
+        return Err(format!(
+            "--outlines applies only to --svg and --pdf\n{USAGE}"
+        ));
+    }
     Ok(Command::Export {
         file: file.ok_or_else(|| USAGE.to_string())?,
         format,
         out,
         scale: scale.map_or(ExportScale::Times(1.0), |(_, s)| s),
         page,
+        text: match outlines {
+            true => ExportText::Outlines,
+            false => ExportText::Live,
+        },
     })
 }
 
@@ -463,7 +484,8 @@ fn main() {
             out,
             scale,
             page,
-        }) => run_export(&file, format, out.as_deref(), scale, page.as_deref()),
+            text,
+        }) => run_export(&file, format, out.as_deref(), scale, page.as_deref(), text),
         Ok(Command::ExportAll {
             file,
             out,
@@ -597,6 +619,7 @@ fn run_export(
     out: Option<&str>,
     scale: ExportScale,
     page: Option<&str>,
+    text: ExportText,
 ) -> Result<(), String> {
     use ondin_core::Resolved;
 
@@ -620,7 +643,17 @@ fn run_export(
     let replaced = out_path.exists();
 
     let data = match format {
-        ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, page, None).into_bytes(),
+        ExportFormat::Svg => ondin_export::svg::svg_with(&doc, &res, &[page], text)
+            .svg
+            .into_bytes(),
+        ExportFormat::Pdf => {
+            let export = ondin_export::pdf::pdf_of(&doc, &res, &[page], text)
+                .ok_or_else(|| format!("cannot convert {file} to PDF"))?;
+            if !export.approximated.is_empty() {
+                eprintln!("drawn differently: {}", export.approximated.join(", "));
+            }
+            export.pdf
+        }
         ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => {
             use ondin_export::code::Target;
             // The page holds the top-level layers, laid out as on the canvas.
@@ -1072,6 +1105,7 @@ mod tests {
                 out: None,
                 scale: ExportScale::Times(1.0),
                 page: None,
+                text: ExportText::Live,
             }
         );
     }
@@ -1086,6 +1120,7 @@ mod tests {
                 out: Some("out.png".into()),
                 scale: ExportScale::Times(1.0),
                 page: None,
+                text: ExportText::Live,
             }
         );
         assert_eq!(
@@ -1096,6 +1131,7 @@ mod tests {
                 out: None,
                 scale: ExportScale::Times(1.0),
                 page: None,
+                text: ExportText::Live,
             }
         );
         assert_eq!(
@@ -1106,6 +1142,7 @@ mod tests {
                 out: None,
                 scale: ExportScale::Times(1.0),
                 page: None,
+                text: ExportText::Live,
             }
         );
         for (flag, format) in [
@@ -1120,8 +1157,36 @@ mod tests {
                     out: None,
                     scale: ExportScale::Times(1.0),
                     page: None,
+                    text: ExportText::Live,
                 }
             );
+        }
+    }
+
+    /// `--outlines` outlines an SVG's or a PDF's text and is refused anywhere it
+    /// would do nothing.
+    #[test]
+    fn outlines_apply_to_the_vector_formats_only() {
+        assert_eq!(
+            export(&["a.ondin", "--pdf", "--outlines"]).unwrap(),
+            Command::Export {
+                file: "a.ondin".into(),
+                format: ExportFormat::Pdf,
+                out: None,
+                scale: ExportScale::Times(1.0),
+                page: None,
+                text: ExportText::Outlines,
+            }
+        );
+        assert!(
+            export(&["a.ondin", "--outlines"]).is_ok(),
+            "SVG is the default"
+        );
+        for refused in [
+            &["a.ondin", "--png", "--outlines"][..],
+            &["a.ondin", "--all", "--outlines"],
+        ] {
+            assert!(export(refused).is_err(), "{refused:?}");
         }
     }
 
@@ -1137,6 +1202,7 @@ mod tests {
                 out: None,
                 scale: ExportScale::Times(2.0),
                 page: None,
+                text: ExportText::Live,
             }
         );
         // Fractional, because Figma's ladder starts at 0.5×.
@@ -1148,6 +1214,7 @@ mod tests {
                 out: None,
                 scale: ExportScale::Times(0.5),
                 page: None,
+                text: ExportText::Live,
             }
         );
 
@@ -1198,6 +1265,7 @@ mod tests {
                     out: None,
                     scale: want,
                     page: None,
+                    text: ExportText::Live,
                 },
                 "{args:?}"
             );
@@ -1345,6 +1413,7 @@ mod tests {
 
         for (format, ext) in [
             (ExportFormat::Svg, "svg"),
+            (ExportFormat::Pdf, "pdf"),
             (ExportFormat::Png, "png"),
             (ExportFormat::Json, "json"),
             (ExportFormat::Html, "zip"),
@@ -1358,6 +1427,7 @@ mod tests {
                 Some(&out.to_string_lossy()),
                 ExportScale::Times(1.0),
                 None,
+                ExportText::Live,
             )
             .expect("export succeeds");
             let written = std::fs::read(&out).expect("output exists");
@@ -1429,6 +1499,7 @@ mod tests {
                 Some(&out.to_string_lossy()),
                 scale,
                 None,
+                ExportText::Live,
             )
             .expect("export succeeds");
             let png = std::fs::read(&out).unwrap();
@@ -1535,6 +1606,7 @@ mod tests {
             Some(&src),
             ExportScale::Times(1.0),
             None,
+            ExportText::Live,
         )
         .unwrap_err();
         assert!(err.contains("refusing"), "{err}");
@@ -1554,6 +1626,7 @@ mod tests {
             None,
             ExportScale::Times(1.0),
             None,
+            ExportText::Live,
         )
         .unwrap_err();
         assert!(err.contains("cannot read"), "{err}");

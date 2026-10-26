@@ -3828,7 +3828,7 @@ impl OndinApp {
         // quite the document.
         let out =
             ondin_export::svg::svg_of_reported(&self.session.doc, &self.session.resolved, &ids);
-        let note = crate::panels::fidelity_clauses(&out);
+        let note = crate::panels::fidelity_clauses(&out.approximated, &out.round_trip);
         ctx.copy_text(out.svg);
         let n = ids.len();
         self.session.info(match note {

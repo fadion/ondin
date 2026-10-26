@@ -14,7 +14,8 @@ use crate::app::OndinApp;
 use crate::theme::{self, icon};
 use crate::ui::{self, Prefix, Scrub, value_field};
 use ondin_core::{
-    ExportBackground, ExportFormat, ExportScale, ExportSpec, Keyed, NodeId, Operation, Transaction,
+    ExportBackground, ExportFormat, ExportScale, ExportSpec, ExportText, Keyed, NodeId, Operation,
+    Transaction,
 };
 use ondin_export::{PlanOptions, PlannedFile};
 
@@ -150,14 +151,14 @@ pub(crate) struct ExportPreview {
     summary: String,
 }
 
-/// What an SVG export could not say exactly, as a clause to hang off a message —
+/// What a vector export could not say exactly, as a clause to hang off a message —
 /// `None` when the file is the document (§15 D780).
 ///
 /// The same two-clause shape as the SVG paste message in `canvas.rs`, sorted because
 /// the order features are met is an accident of the document. Two clauses, not one:
 /// *approximated* means the drawing differs, *round-trip* means the drawing is right
-/// but re-opening the file gives a different document.
-pub(crate) fn fidelity_clauses(out: &ondin_export::svg::Export) -> Option<String> {
+/// but re-opening the file gives a different document. A PDF has only the first.
+pub(crate) fn fidelity_clauses(approximated: &[String], round_trip: &[String]) -> Option<String> {
     let mut parts = Vec::new();
     let mut say = |label: &str, list: &[String]| {
         if !list.is_empty() {
@@ -166,8 +167,8 @@ pub(crate) fn fidelity_clauses(out: &ondin_export::svg::Export) -> Option<String
             parts.push(format!("{label} {}", items.join(", ")));
         }
     };
-    say("approximated", &out.approximated);
-    say("will not re-import as drawn:", &out.round_trip);
+    say("approximated", approximated);
+    say("will not re-import as drawn:", round_trip);
     (!parts.is_empty()).then(|| parts.join("; "))
 }
 
@@ -549,17 +550,27 @@ impl OndinApp {
         key: PreviewKey,
     ) -> Option<ExportPreview> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
-        // No raster for an SVG: rasterizing it would preview something other than
-        // the file.
+        // No raster for a vector file: rasterizing it would preview something other
+        // than the file.
         if !key.spec.format.is_raster() {
             // The reported form (§15 D780): the card is read before exporting, when
-            // a fidelity note can still change what the user does.
-            let out = ondin_export::svg::svg_of_reported(doc, res, &[key.node]);
-            let note = fidelity_clauses(&out);
-            let bytes = out.svg.into_bytes();
+            // a fidelity note can still change what the user does. A PDF is not
+            // converted per edit, so its line has no size.
+            let (head, note) = match key.spec.format {
+                ExportFormat::Pdf => {
+                    let approximated =
+                        ondin_export::pdf::approximated(doc, res, &[key.node], key.spec.text);
+                    ("PDF".to_string(), fidelity_clauses(&approximated, &[]))
+                }
+                _ => {
+                    let out = ondin_export::svg::svg_with(doc, res, &[key.node], key.spec.text);
+                    let note = fidelity_clauses(&out.approximated, &out.round_trip);
+                    (format!("SVG · {}", human_bytes(out.svg.len())), note)
+                }
+            };
             let summary = match note {
-                None => format!("SVG · {}", human_bytes(bytes.len())),
-                Some(note) => format!("SVG · {} · {note}", human_bytes(bytes.len())),
+                None => head,
+                Some(note) => format!("{head} · {note}"),
             };
             return Some(ExportPreview {
                 key,
@@ -718,9 +729,12 @@ impl OndinApp {
                         combo
                             .show_ui(ui, |ui| {
                                 ui.label(
-                                    egui::RichText::new("SVG has no pixels to scale")
-                                        .size(11.0)
-                                        .color(theme::text::FAINT),
+                                    egui::RichText::new(format!(
+                                        "{} has no pixels to scale",
+                                        spec.format.label()
+                                    ))
+                                    .size(11.0)
+                                    .color(theme::text::FAINT),
                                 );
                             })
                             .response
@@ -930,6 +944,43 @@ impl OndinApp {
                         });
                     }
 
+                    // --- text, vector only ---------------------------------------
+                    if !spec.format.is_raster() {
+                        section(ui, "Text", |ui| {
+                            ui.scope(|ui| {
+                                ui.spacing_mut().interact_size.y = POP_CELL;
+                                ui.spacing_mut().button_padding.y = 0.0;
+                                let mut text = spec.text;
+                                egui::ComboBox::from_id_salt(("export-text", index))
+                                    .icon(ui::combo_chevron)
+                                    .width(POP_INNER)
+                                    .selected_text(ui::glyph_and_text(
+                                        icon::TEXT_T,
+                                        spec.text.label(spec.format),
+                                    ))
+                                    .show_ui(ui, |ui| {
+                                        ui::menu_rows(ui);
+                                        ui.spacing_mut().button_padding.y = 2.0;
+                                        for t in [ExportText::Live, ExportText::Outlines] {
+                                            ui.selectable_value(&mut text, t, t.label(spec.format));
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text(match spec.text {
+                                        ExportText::Live => {
+                                            "Selectable text, drawn with the fonts the reader has"
+                                        }
+                                        ExportText::Outlines => {
+                                            "The glyphs as shapes: exact everywhere, no longer text"
+                                        }
+                                    });
+                                if text != spec.text {
+                                    edit(&mut out, spec).text = text;
+                                }
+                            });
+                        });
+                    }
+
                     // --- background --------------------------------------------
                     //
                     // The row says what the setting is, not what it resolves to; the
@@ -1003,7 +1054,7 @@ impl OndinApp {
                         )
                         .on_hover_text(match spec.format.is_raster() {
                             true => "Drop the fully transparent rows and columns",
-                            false => "Trimming reads pixels, and SVG has none",
+                            false => "Trimming reads pixels, and a vector file has none",
                         });
                         if trim.clicked() && spec.format.is_raster() {
                             edit(&mut out, spec).trim = !spec.trim;
@@ -2236,7 +2287,10 @@ fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
         && spec.suffix.is_empty()
         && spec.background == ExportBackground::Transparent
         && !spec.trim
-        && !spec.pad_square;
+        && !spec.pad_square
+        // Outlines kept from a vector format are inert on a raster, as the
+        // popover hides them.
+        && (spec.format.is_raster() || spec.text == ExportText::Live);
     match (open, at_rest) {
         (true, _) => ui::FieldButton::On,
         (false, true) => ui::FieldButton::Off,
@@ -2397,6 +2451,23 @@ mod tests {
         let mut padded = at_rest;
         padded.pad_square = true;
         assert_eq!(settings_button_state(&padded, false), ui::FieldButton::Set);
+
+        // Outlined text marks a PDF, and not a PNG it was carried over to.
+        let mut outlined = spec(ExportFormat::Pdf, ExportScale::Times(1.0));
+        assert_eq!(
+            settings_button_state(&outlined, false),
+            ui::FieldButton::Off
+        );
+        outlined.text = ExportText::Outlines;
+        assert_eq!(
+            settings_button_state(&outlined, false),
+            ui::FieldButton::Set
+        );
+        outlined.format = ExportFormat::Png;
+        assert_eq!(
+            settings_button_state(&outlined, false),
+            ui::FieldButton::Off
+        );
     }
 
     /// The background chip goes muted over a multi-selection of differing frames

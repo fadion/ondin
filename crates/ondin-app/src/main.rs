@@ -982,7 +982,7 @@ fn run_export(
                 .into_iter()
                 .filter_map(|id| {
                     let n = doc.get(id)?;
-                    (n.visible() && matches!(n.kind(), ondin_core::NodeKind::Artboard { .. }))
+                    (doc.shown(id) && matches!(n.kind(), ondin_core::NodeKind::Artboard { .. }))
                         .then(|| (n.name().to_string(), vec![id]))
                 })
                 .collect();

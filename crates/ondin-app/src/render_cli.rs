@@ -193,6 +193,9 @@ pub(crate) fn run(r: &Render) -> Result<(), String> {
     Ok(())
 }
 
+/// The most characters a `--name-by` cell gives a file name.
+const NAME_CAP: usize = 200;
+
 /// A rendered file: its path under the destination and its bytes, `None` when
 /// the layer had nothing to frame.
 type Rendered = (String, Option<Vec<u8>>);
@@ -234,6 +237,9 @@ fn render_rows(
     let (header, rows) = table
         .split_first()
         .ok_or_else(|| "the CSV is empty; its first row names the properties".to_string())?;
+    if rows.is_empty() {
+        return Err("the CSV has no rows under its header; each row is one file".to_string());
+    }
     let name_col = match name_by {
         Some(name) => Some(
             header
@@ -265,7 +271,12 @@ fn render_rows(
         apply_row(s, inst, edit, header, n)?;
         let named = name_col
             .and_then(|c| row.get(c))
-            .map(|cell| ondin_export::plan::sanitize_segment(cell.trim()))
+            // Capped well under the 255 a file name may hold, with room for the
+            // extension and a de-collide suffix, so no row fails the write midway.
+            .map(|cell| {
+                let cell: String = cell.trim().chars().take(NAME_CAP).collect();
+                ondin_export::plan::sanitize_segment(&cell)
+            })
             .filter(|cell| !cell.is_empty());
         let name = named.unwrap_or_else(|| format!("{stem}-{n:0width$}"));
         let path = ondin_export::plan::de_collide(
@@ -301,6 +312,8 @@ fn render_modes(
         Some(_) => vec![crate::chosen_page(&s.doc, page)?],
         None => s.doc.gathered_pages().collect(),
     };
+    // Every top-level frame; whether it is shown is asked in each mode, since a
+    // visibility variable may hide it in one and show it in another.
     let frames: Vec<NodeId> = pages
         .iter()
         .filter_map(|p| s.doc.get(*p))
@@ -308,12 +321,9 @@ fn render_modes(
         .filter(|id| {
             s.doc
                 .get(*id)
-                .is_some_and(|n| n.visible() && matches!(n.kind(), NodeKind::Artboard { .. }))
+                .is_some_and(|n| matches!(n.kind(), NodeKind::Artboard { .. }))
         })
         .collect();
-    if frames.is_empty() {
-        return Err("no visible top-level frame to render".to_string());
-    }
     let base = s.history.undo_depth();
     let mut taken = Vec::new();
     let mut out = Vec::with_capacity(frames.len() * modes.len());
@@ -329,6 +339,10 @@ fn render_modes(
                 mode: Some(*mode),
             }]))
             .map_err(|e| format!("cannot set {name:?} to mode {mode_name:?}: {e}"))?;
+            if !s.doc.shown(frame) {
+                undo_to(s, base);
+                continue;
+            }
             let stem = format!(
                 "{}-{}",
                 ondin_export::plan::sanitize_segment(&name),
@@ -341,6 +355,9 @@ fn render_modes(
             out.push(render_one(s, frame, spec, path));
             undo_to(s, base);
         }
+    }
+    if out.is_empty() {
+        return Err("no visible top-level frame to render".to_string());
     }
     Ok(out)
 }
@@ -535,6 +552,8 @@ fn row_edits(
                 let Some(prop) = set.as_ref().and_then(|s| s.props.get(*pi)) else {
                     continue;
                 };
+                // Trimmed, as the headers are: `Size, Label` is a spreadsheet's habit.
+                let cell = cell.trim();
                 let value = prop
                     .values
                     .iter()
@@ -564,8 +583,8 @@ fn row_edits(
                     PropKind::Text => PropValue::Text(cell.clone()),
                     // A set shows its first variant, as a placed instance would.
                     PropKind::Swap => {
-                        let found =
-                            find_component(doc, cell).map_err(|e| format!("{}: {e}", at(c)))?;
+                        let found = find_component(doc, cell.trim())
+                            .map_err(|e| format!("{}: {e}", at(c)))?;
                         let main = match doc.get(found).and_then(|n| n.set()) {
                             Some(_) => variant::variants(doc, found)
                                 .first()
@@ -673,6 +692,15 @@ fn csv(text: &str) -> Result<Vec<Vec<String>>, String> {
                 cell.push('"');
             }
             (true, '"') => quoted = false,
+            // A line break inside a cell is one `\n`, whatever the file's line
+            // endings: a text layer draws `\r\n` as two breaks.
+            (true, '\r') => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                line += 1;
+                cell.push('\n');
+            }
             (true, ch) => {
                 if ch == '\n' {
                     line += 1;
@@ -682,7 +710,8 @@ fn csv(text: &str) -> Result<Vec<Vec<String>>, String> {
             (false, '"') if cell.is_empty() => quoted = true,
             (false, c) if c == sep => row.push(std::mem::take(&mut cell)),
             (false, '\r') if chars.peek() == Some(&'\n') => {}
-            (false, '\n') => {
+            // A lone `\r` ends a row too (classic Mac line endings).
+            (false, '\n' | '\r') => {
                 line += 1;
                 end_row(&mut row, &mut cell, &mut rows);
             }
@@ -1099,5 +1128,71 @@ mod tests {
         assert!(svg(&out[0]).contains("#fafafa"), "{}", svg(&out[0]));
         assert!(svg(&out[1]).contains("#141414"), "{}", svg(&out[1]));
         assert_eq!(s.doc.get(card).unwrap().mode(), None, "inherits again");
+
+        // Hidden by a variable in Dark, the frame renders in Light only.
+        let show = ids.mint_var();
+        assert!(s.commit(Transaction(vec![
+            Operation::AddVariable {
+                var: Variable {
+                    id: show,
+                    name: "show".into(),
+                    kind: VarKind::Boolean,
+                    cells: [(light, Cell::Boolean(true)), (dark, Cell::Boolean(false))]
+                        .into_iter()
+                        .collect(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetVisibleVar {
+                id: card,
+                var: Some(show),
+            },
+        ])));
+        let out = render_modes(&mut s, None, &svg_spec()).expect("one mode renders");
+        let names: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(
+            names,
+            ["Card-Light.svg"],
+            "shown in each mode, not by the literal"
+        );
+    }
+
+    /// A line break inside a quoted cell is one `\n` whatever the file's endings,
+    /// and a lone `\r` ends a row.
+    /// flip: `csv` keeping a quoted `\r` → fails at the cell.
+    #[test]
+    fn csv_line_endings_are_one_break() {
+        assert_eq!(
+            table("a,b\r\n\"one\r\ntwo\",x\r\n"),
+            vec![
+                vec!["a".to_string(), "b".into()],
+                vec!["one\ntwo".into(), "x".into()],
+            ]
+        );
+        assert_eq!(
+            table("a\rb\r"),
+            vec![vec!["a".to_string()], vec!["b".into()]],
+            "classic Mac rows"
+        );
+    }
+
+    /// A header with no rows is refused for what it is, and a variant cell is
+    /// trimmed as the headers are.
+    #[test]
+    fn rows_are_read_as_a_spreadsheet_writes_them() {
+        let mut s = button();
+        let err = render_rows(&mut s, "Button", &table("Size\n"), None, &svg_spec()).unwrap_err();
+        assert!(err.contains("no rows"), "{err}");
+        let out = render_rows(
+            &mut s,
+            "Button",
+            &table("Size\n Large \n"),
+            None,
+            &svg_spec(),
+        )
+        .expect("the trimmed value is a variant's");
+        assert!(svg(&out[0]).contains("width=\"120\""), "{}", svg(&out[0]));
     }
 }

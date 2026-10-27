@@ -1910,9 +1910,10 @@ impl OndinApp {
             .unwrap_or_default()
             .into_iter()
             .filter(|id| {
-                doc.get(*id).is_some_and(|n| {
-                    n.visible() && matches!(n.kind(), ondin_core::NodeKind::Artboard { .. })
-                })
+                doc.shown(*id)
+                    && doc
+                        .get(*id)
+                        .is_some_and(|n| matches!(n.kind(), ondin_core::NodeKind::Artboard { .. }))
             })
             .collect()
     }

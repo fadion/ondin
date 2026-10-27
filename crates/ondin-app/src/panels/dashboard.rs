@@ -2065,15 +2065,8 @@ impl OndinApp {
         if marks_kit(entry) {
             kit_chip(ui, corner);
         }
-        // A document already in a tab: a faint ring on the plate and the chip; a
-        // click brings that tab forward.
+        // A document already in a tab: a click brings that tab forward.
         if self.tab_of_path(&entry.path).is_some() {
-            ui.painter().rect_stroke(
-                thumb.shrink(1.0),
-                plate_radius,
-                egui::Stroke::new(1.0, theme::color::text_a(26)),
-                egui::StrokeKind::Inside,
-            );
             open_chip(
                 ui,
                 thumb.left_top() + egui::vec2(7.0, 7.0),

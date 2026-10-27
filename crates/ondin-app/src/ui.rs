@@ -1336,6 +1336,29 @@ fn scrub_speed_for<'a>(ctx: &egui::Context, value: egui::DragValue<'a>) -> egui:
     }
 }
 
+/// Apply a prefix strip's drag to `value`, as `DragValue` does its own: the
+/// unrounded value carries across the gesture and only what is shown is settled.
+///
+/// Settling each pass's delta on its own would drop a slow field's slivers: at
+/// 0.05 a point, a hand moving under ten points a frame never reaches a whole unit.
+fn scrub_strip(ctx: &egui::Context, strip: &egui::Response, scrub: &Scrub, value: &mut f64) {
+    let id = strip.id.with("precise");
+    // Only while it still settles to the shown value, so a value changed from
+    // elsewhere mid-gesture restarts the count from what is there.
+    let carried = match strip.drag_started() {
+        true => None,
+        false => ctx
+            .data(|d| d.get_temp::<f64>(id))
+            .filter(|p| scrub.settle(*p) == *value),
+    };
+    let speed = scrub_speed_for_value(ctx, scrub.speed);
+    // Clamped, so travel past a bound is not owed back before the value moves.
+    let precise = (carried.unwrap_or(*value) + f64::from(strip.drag_delta().x) * speed)
+        .clamp(*scrub.range.start(), *scrub.range.end());
+    ctx.data_mut(|d| d.insert_temp(id, precise));
+    *value = scrub.settle(precise);
+}
+
 /// Teleport the pointer to the far side of the window if a live scrub has run it into
 /// an edge, so the drag can carry on indefinitely.
 ///
@@ -1902,8 +1925,7 @@ pub fn badge_field(
     let before = *value;
     let mut nudged = false;
     if lead_resp.dragged() {
-        let speed = scrub_speed_for_value(ui.ctx(), scrub.speed);
-        *value = scrub.settle(*value + f64::from(lead_resp.drag_delta().x) * speed);
+        scrub_strip(ui.ctx(), &lead_resp, &scrub, value);
         nudged = true;
         wrap_scrub(ui.ctx());
     }
@@ -2114,8 +2136,7 @@ fn value_field_f64_marked(
             };
             let mut nudged = false;
             if lead_resp.dragged() {
-                let speed = scrub_speed_for_value(ui.ctx(), scrub.speed);
-                *value = scrub.settle(*value + f64::from(lead_resp.drag_delta().x) * speed);
+                scrub_strip(ui.ctx(), &lead_resp, &scrub, value);
                 nudged = true;
                 wrap_scrub(ui.ctx());
             }
@@ -6099,6 +6120,11 @@ mod scrub_tests {
 
     /// Drags `dx` horizontally from the prefix or the digits and returns the resulting value.
     fn drag(scrub: Scrub, start_in_prefix: bool, dx: f32) -> f64 {
+        drag_in_steps(scrub, start_in_prefix, dx, 1)
+    }
+
+    /// `drag`, with the travel split over `steps` passes, as a slow hand delivers it.
+    fn drag_in_steps(scrub: Scrub, start_in_prefix: bool, dx: f32, steps: u32) -> f64 {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
@@ -6147,7 +6173,10 @@ mod scrub_tests {
             &ctx,
             vec![egui::Event::PointerMoved(from), button(from, true)],
         );
-        field(&ctx, vec![egui::Event::PointerMoved(to)]);
+        for step in 1..=steps {
+            let at = egui::pos2(from.x + dx * step as f32 / steps as f32, from.y);
+            field(&ctx, vec![egui::Event::PointerMoved(at)]);
+        }
         field(&ctx, vec![button(to, false)]);
         v
     }
@@ -6166,6 +6195,20 @@ mod scrub_tests {
                  the number"
             );
         }
+    }
+
+    /// A slow hand on a slow field's prefix moves the value as far as on its digits, though no single pass makes a whole unit.
+    #[test]
+    fn a_slow_scrub_on_the_prefix_keeps_its_fraction_between_passes() {
+        // 0.05 a point: 2pt a pass is a tenth of a unit, 80pt is four units.
+        let scrub = Scrub::whole(0.1);
+        let digits = drag_in_steps(scrub.clone(), false, 80.0, 40);
+        let prefix = drag_in_steps(scrub.clone(), true, 80.0, 40);
+        assert_eq!(
+            digits, 104.0,
+            "the digits are the reference and moved {digits}"
+        );
+        assert_eq!(prefix, digits, "the prefix strip dropped its slivers");
     }
 
     /// Scrubbing a `Scrub::whole` field lands on whole units, while a fine field keeps its fraction.

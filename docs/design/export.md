@@ -114,15 +114,16 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 
 ### Design tokens (DTCG)
 
-- `dtcg::tokens(doc, mode) -> dtcg::Tokens` writes the document's own variables and styles as a W3C Design Tokens (2025.10) `tokens.json`, with `notes` for anything left out or changed. Kit variables are not written; an alias to one is written resolved and noted. Only the CLI reaches it (`ondin tokens export`); import, and linking a `tokens.json` like a kit, are not built.
-- **Paths**: a slash name is nested groups, and an alias is a `{a.b}` reference. A token whose path is also a group is that group's `$root`. `.`, `{`, `}` and a leading `$` become `_`, with a note.
-- **Modes**: one mode's values are the `$value`s (the default mode unless asked for another), and every mode's value, with the variable's id, sits under `$extensions["io.github.fadion.ondin"]`. The root's extension lists the modes, names the `$value` mode, and holds the string and boolean variables, which have no DTCG type.
+- `dtcg::tokens(doc, mode) -> dtcg::Tokens` writes the document's own variables and styles as a W3C Design Tokens (2025.10) `tokens.json`, with `notes` for anything left out or changed. Kit variables are not written; an alias to one is written resolved, in the mode each value is written for, and noted once. Only the CLI reaches it (`ondin tokens export`); import, and linking a `tokens.json` like a kit, are not built.
+- **Paths**: a slash name is nested groups, and an alias is a `{a.b}` reference. A token whose path is also a group is that group's `$root`, and is referenced as `{a.$root}`, since the format refuses a reference to a group. `.`, `{`, `}` and a leading `$` become `_`, with a note, for variables and styles alike. A variable whose legal path another already holds is numbered (`a_b_2`), noted, so an alias to either keeps its meaning.
+- **Modes**: one mode's values are the `$value`s (the default mode unless asked for another), and every mode's value, with the variable's id, sits under `$extensions["io.github.fadion.ondin"]`, keyed by the mode's name (numbered, `Dark 2`, when an earlier mode has the same name, noted). The root's extension lists the modes (with that `key` where it differs from the name), names the `$value` mode, and holds the string and boolean variables, which have no DTCG type.
 - **A number's type is what it binds** (`number_reads`): lengths alone (sizes, radii, gaps, padding, limits, stroke widths, effect numbers, px type lengths) make a px `dimension`, a font weight alone makes `fontWeight`, and anything else (opacity, em lengths, a mix, nothing) makes `number`. An alias and its target pool their reads both ways, since the format gives them one type.
-- **Styles** go under `styles` (`ondin-styles` if a variable group already takes that name), with one group per slot:
+- **Styles** go under `styles` (the first free of `ondin-styles`, `ondin-styles-2`, … if a variable group already takes that name), with one group per slot:
   - **Fill** is one visible fill: a `color` (a reference when it is bound at full opacity) or a `gradient` (stops only, noted).
   - **Stroke** is one solid stroke, written as a `border`.
   - **Effects** made only of shadows become a `shadow` (an inner one is `inset`). The blur number carries over unchanged, since the model's blur is CSS's blur radius.
-  - **Type** becomes `typography`. An em letter spacing becomes px at the style's size, and an Auto line height becomes 1.2, noted.
+  - A border's width and a shadow's numbers are `dimension` slots: a variable bound there is a reference only when its token is a `dimension`; otherwise its value is written in px, noted.
+  - **Type** becomes `typography`. An em letter spacing becomes px at the style's size, and an Auto line height becomes 1.2, noted. Italic, word spacing, decorations, case, baseline shift, features and variable axes have no place in the token and are left out, noted.
   - **Layout**, a layer blur, a filter, an image fill and several fills have no DTCG form; the style is left out and noted.
 
 ### PDF

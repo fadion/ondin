@@ -67,8 +67,10 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
         mode,
         reads: number_reads(doc),
         paths: BTreeMap::new(),
+        mode_keys: BTreeMap::new(),
         notes: Vec::new(),
     };
+    w.name_modes();
     w.name_variables();
 
     let mut root = Map::new();
@@ -90,16 +92,17 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
 
     let styles = w.styles(doc);
     if !styles.is_empty() {
-        let key = if root.contains_key("styles") {
-            w.notes.push(
-                "The styles are under `ondin-styles`: a variable group is already named `styles`."
-                    .to_string(),
-            );
-            "ondin-styles"
-        } else {
-            "styles"
-        };
-        root.insert(key.to_string(), Json::Object(styles));
+        let key = std::iter::once("styles".to_string())
+            .chain(std::iter::once("ondin-styles".to_string()))
+            .chain((2..).map(|n| format!("ondin-styles-{n}")))
+            .find(|k| !root.contains_key(k))
+            .expect("an unbounded run of names has a free one");
+        if key != "styles" {
+            w.notes.push(format!(
+                "The styles are under `{key}`: a variable group is already named `styles`."
+            ));
+        }
+        root.insert(key, Json::Object(styles));
     }
 
     let mut ext = Map::new();
@@ -108,7 +111,14 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
         Json::Array(
             t.modes()
                 .iter()
-                .map(|m| json!({ "id": m.id.0.to_wire(), "name": m.name }))
+                .map(|m| {
+                    let mut out = json!({ "id": m.id.0.to_wire(), "name": m.name });
+                    let key = &w.mode_keys[&m.id];
+                    if *key != m.name {
+                        out["key"] = Json::String(key.clone());
+                    }
+                    out
+                })
                 .collect(),
         ),
     );
@@ -135,27 +145,84 @@ struct Writer<'a> {
     t: &'a Variables,
     mode: Option<ModeId>,
     reads: BTreeMap<VarId, BTreeSet<Read>>,
-    /// Each exported variable's token path, its segments already made legal.
+    /// Each exported variable's token path, its segments already made legal, and
+    /// ending in `$root` when the token is its group's.
     paths: BTreeMap<VarId, Vec<String>>,
+    /// The key each mode's values are filed under in a token's extension: its
+    /// name, numbered when an earlier mode has the same one.
+    mode_keys: BTreeMap<ModeId, String>,
     notes: Vec<String>,
 }
 
 impl Writer<'_> {
-    /// A legal path for every colour and number variable of the document's own.
+    /// `note` unless it is already said: a variable read in every mode would say
+    /// it once per mode.
+    fn note(&mut self, note: String) {
+        if !self.notes.contains(&note) {
+            self.notes.push(note);
+        }
+    }
+
+    /// A key for every mode, unique although names need not be.
+    fn name_modes(&mut self) {
+        let mut taken = BTreeSet::new();
+        for m in self.t.modes() {
+            let key = std::iter::once(m.name.clone())
+                .chain((2..).map(|n| format!("{} {n}", m.name)))
+                .find(|k| !taken.contains(k))
+                .expect("an unbounded run of names has a free one");
+            if key != m.name {
+                self.notes.push(format!(
+                    "Two modes are named {}: one's values are under `{key}`.",
+                    m.name
+                ));
+            }
+            taken.insert(key.clone());
+            self.mode_keys.insert(m.id, key);
+        }
+    }
+
+    /// A legal path for every colour and number variable of the document's own,
+    /// one each: a name that becomes another's path is numbered. A path another
+    /// continues is that group's `$root`, which is how a reference has to name it.
     fn name_variables(&mut self) {
+        let mut taken: BTreeSet<Vec<String>> = BTreeSet::new();
         for v in self.t.local() {
             if !matches!(v.kind, VarKind::Color | VarKind::Number) {
                 continue;
             }
-            let path = token_path(&v.name);
-            if path.join("/") != v.name {
+            let legal = token_path(&v.name);
+            let mut path = legal.clone();
+            let mut n = 2;
+            while taken.contains(&path) {
+                let last = path.len() - 1;
+                path[last] = format!("{}_{n}", legal[last]);
+                n += 1;
+            }
+            if path != legal {
+                self.notes.push(format!(
+                    "{}: written as {}, since another variable is written at {}.",
+                    v.name,
+                    path.join("."),
+                    legal.join(".")
+                ));
+            } else if path.join("/") != v.name {
                 self.notes.push(format!(
                     "{}: written as {}, since a token name cannot hold `.`, `{{`, `}}` or a leading `$`.",
                     v.name,
                     path.join(".")
                 ));
             }
+            taken.insert(path.clone());
             self.paths.insert(v.id, path);
+        }
+        for path in self.paths.values_mut() {
+            if taken
+                .iter()
+                .any(|p| p.len() > path.len() && p.starts_with(path))
+            {
+                path.push("$root".to_string());
+            }
         }
     }
 
@@ -181,8 +248,8 @@ impl Writer<'_> {
         token.insert("$type".to_string(), Json::String(ty.to_string()));
         let value = self
             .mode
-            .and_then(|m| v.cells.get(&m))
-            .map(|c| self.cell(v, c, ty));
+            .and_then(|m| Some((m, v.cells.get(&m)?)))
+            .map(|(m, c)| self.cell(v, c, ty, m));
         token.insert("$value".to_string(), value.unwrap_or(Json::Null));
         if !v.description.is_empty() {
             token.insert(
@@ -193,7 +260,8 @@ impl Writer<'_> {
         let mut modes = Map::new();
         for m in self.t.modes() {
             if let Some(c) = v.cells.get(&m.id) {
-                modes.insert(m.name.clone(), self.cell(v, c, ty));
+                let value = self.cell(v, c, ty, m.id);
+                modes.insert(self.mode_keys[&m.id].clone(), value);
             }
         }
         let ext = json!({ "id": v.id.0.to_wire(), "modes": modes });
@@ -201,23 +269,18 @@ impl Writer<'_> {
         Json::Object(token)
     }
 
-    /// One cell as a `$value` of type `ty`: a literal, or a reference to the
-    /// token it aliases. An alias to a variable with no token here (a kit's) is
-    /// written as the value it resolves to.
-    fn cell(&mut self, v: &Variable, cell: &Cell, ty: &str) -> Json {
+    /// One cell, `mode`'s, as a `$value` of type `ty`: a literal, or a reference
+    /// to the token it aliases. An alias to a variable with no token here (a
+    /// kit's) is written as the value it resolves to in `mode`.
+    fn cell(&mut self, v: &Variable, cell: &Cell, ty: &str, mode: ModeId) -> Json {
         match cell {
             Cell::Color(c) => color(*c),
             Cell::Number(n) => number(*n, ty),
             Cell::Alias(to) => match self.paths.get(to) {
                 Some(path) => Json::String(reference(path)),
                 None => {
-                    let mode = self
-                        .t
-                        .modes()
-                        .iter()
-                        .find(|m| v.cells.get(&m.id) == Some(cell));
-                    let resolved = mode.and_then(|m| self.t.resolve(v.id, m.id));
-                    self.notes.push(format!(
+                    let resolved = self.t.resolve(v.id, mode);
+                    self.note(format!(
                         "{}: aliases a variable that is not exported (a kit's), so it is written resolved.",
                         v.name
                     ));
@@ -251,7 +314,7 @@ impl Writer<'_> {
                     Cell::String(s) => Json::String(s.clone()),
                     _ => Json::Null,
                 };
-                modes.insert(m.name.clone(), value);
+                modes.insert(self.mode_keys[&m.id].clone(), value);
             }
         }
         let mut out = json!({ "id": v.id.0.to_wire(), "kind": kind, "modes": modes });
@@ -287,13 +350,14 @@ impl Writer<'_> {
                     );
                 }
                 let label = format!("{} style {}", slot.title(), s.name);
-                insert(
-                    &mut group,
-                    &token_path(&s.name),
-                    token,
-                    &mut self.notes,
-                    &label,
-                );
+                let path = token_path(&s.name);
+                if path.join("/") != s.name {
+                    self.notes.push(format!(
+                        "{label}: written as {}, since a token name cannot hold `.`, `{{`, `}}` or a leading `$`.",
+                        path.join(".")
+                    ));
+                }
+                insert(&mut group, &path, token, &mut self.notes, &label);
             }
             if !group.is_empty() {
                 let key = match slot {
@@ -379,7 +443,7 @@ impl Writer<'_> {
                     }
                 };
                 let width = match stroke.width_var {
-                    Some(v) => self.reference_to(v)?,
+                    Some(v) => self.dimension_to(v, name)?,
                     None => px(stroke.width),
                 };
                 let style = if stroke.dashes.is_empty() {
@@ -407,7 +471,7 @@ impl Writer<'_> {
                     };
                     let mut slot = |k: usize, literal: f64| -> Option<Json> {
                         match e.vars[k] {
-                            Some(v) => self.reference_to(v),
+                            Some(v) => self.dimension_to(v, name),
                             None => Some(px(literal)),
                         }
                     };
@@ -450,6 +514,28 @@ impl Writer<'_> {
             Length::Px(v) => v,
             Length::Em(m) => m * s.font_size,
         };
+        let plain = TextStyle::default();
+        let lost: Vec<&str> = [
+            (s.italic, "italic"),
+            (s.word_spacing != plain.word_spacing, "word spacing"),
+            (
+                s.underline.is_some() || s.strikethrough.is_some(),
+                "decorations",
+            ),
+            (s.case != plain.case, "case"),
+            (s.baseline_shift != plain.baseline_shift, "baseline shift"),
+            (!s.features.is_empty(), "OpenType features"),
+            (!s.variations.is_empty(), "variable axes"),
+        ]
+        .into_iter()
+        .filter_map(|(set, what)| set.then_some(what))
+        .collect();
+        if !lost.is_empty() {
+            self.notes.push(format!(
+                "{name}: a typography token has no {}, so it is left out.",
+                lost.join(", ")
+            ));
+        }
         json!({
             "$type": "typography",
             "$value": {
@@ -460,6 +546,25 @@ impl Writer<'_> {
                 "lineHeight": line_height,
             }
         })
+    }
+
+    /// [`Self::reference_to`] for a slot the format types `dimension` (a border's
+    /// width, a shadow's offsets): a variable whose token is not a dimension is
+    /// written as its value in px, noted.
+    fn dimension_to(&mut self, var: VarId, style: &str) -> Option<Json> {
+        let t = self.t;
+        if let Some(target) = t.get(var)
+            && self.paths.contains_key(&var)
+            && self.type_of(target) != "dimension"
+            && let Some(variable::Value::Number(n)) = self.mode.and_then(|m| t.resolve(var, m))
+        {
+            self.note(format!(
+                "{style}: reads {}, a `number` token, so its value is written in px.",
+                target.name
+            ));
+            return Some(px(n));
+        }
+        self.reference_to(var)
     }
 
     /// A reference to `var`'s token, or `None` (noted) when it has none.
@@ -611,8 +716,8 @@ fn token_path(name: &str) -> Vec<String> {
     out
 }
 
-/// `{a.b.c}`, the format's reference to the token at `path`. A token that is
-/// its group's `$root` is referenced through it.
+/// `{a.b.c}`, the format's reference to the token at `path`; a group's `$root`
+/// token ends its path in `$root`, as the format requires.
 fn reference(path: &[String]) -> String {
     format!("{{{}}}", path.join("."))
 }

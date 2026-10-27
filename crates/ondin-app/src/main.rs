@@ -1635,7 +1635,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut ids = IdSource::new(0xD3);
         let mut doc = ondin_core::Document::new(ids.mint());
-        let (m, v) = (ids.mint_mode(), ids.mint_var());
+        let (m, dark, v) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
         doc.apply(&Transaction(vec![
             Operation::AddMode {
                 mode: Mode {
@@ -1645,12 +1645,20 @@ mod tests {
                 index: 0,
                 cells: vec![],
             },
+            Operation::AddMode {
+                mode: Mode {
+                    id: dark,
+                    name: "Dark".into(),
+                },
+                index: 1,
+                cells: vec![],
+            },
             Operation::AddVariable {
                 var: Variable {
                     id: v,
                     name: "space/4".into(),
                     kind: VarKind::Number,
-                    cells: [(m, Cell::Number(4.0))].into(),
+                    cells: [(m, Cell::Number(4.0)), (dark, Cell::Number(8.0))].into(),
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1663,9 +1671,14 @@ mod tests {
         let out = dir.join("t.json");
         let (src, out) = (src.to_str().unwrap(), out.to_str().unwrap());
 
-        run_tokens_export(src, Some("Light"), Some(out)).unwrap();
+        run_tokens_export(src, Some("Dark"), Some(out)).unwrap();
         let written = std::fs::read_to_string(out).unwrap();
-        assert_eq!(written, ondin_export::dtcg::tokens(&doc, None).json);
+        assert_eq!(written, ondin_export::dtcg::tokens(&doc, Some(dark)).json);
+        assert_ne!(
+            written,
+            ondin_export::dtcg::tokens(&doc, None).json,
+            "--mode is read"
+        );
         let err = run_tokens_export(src, Some("Dusk"), Some(out)).unwrap_err();
         assert!(err.contains("Dusk") && err.contains("Light"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);

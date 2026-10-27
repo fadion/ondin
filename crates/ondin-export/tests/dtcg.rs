@@ -41,6 +41,26 @@ fn parse(json: &str) -> Value {
     serde_json::from_str(json).expect("the writer writes JSON")
 }
 
+/// Every `{a.b}` string in `v` names an object carrying `$value`, as the format
+/// requires of a reference; a group is not a token.
+fn assert_references_resolve(v: &Value) {
+    fn walk(root: &Value, here: &Value) {
+        match here {
+            Value::String(s) if s.starts_with('{') && s.ends_with('}') => {
+                let target = s[1..s.len() - 1].split('.').try_fold(root, |v, k| v.get(k));
+                assert!(
+                    target.is_some_and(|t| t.get("$value").is_some()),
+                    "{s} names no token"
+                );
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(root, x)),
+            Value::Object(m) => m.values().for_each(|x| walk(root, x)),
+            _ => {}
+        }
+    }
+    walk(v, v);
+}
+
 /// The value at a dotted path, `$`-keys included.
 fn at<'a>(v: &'a Value, path: &str) -> &'a Value {
     path.split('.').fold(v, |v, k| {
@@ -110,6 +130,7 @@ fn variables_are_grouped_typed_and_carry_every_mode() {
     let d = doc();
     let out = tokens(&d.f.doc, None);
     let v = parse(&out.json);
+    assert_references_resolve(&v);
 
     assert_eq!(at(&v, "brand.500.$type"), "color");
     assert_eq!(at(&v, "brand.500.$value.hex"), "#ff0000");
@@ -224,8 +245,23 @@ fn awkward_names_and_untyped_kinds_find_a_place() {
             ),
         ]))
         .unwrap();
+    let link = ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![add_var(
+            link,
+            "link",
+            VarKind::Number,
+            vec![(m, Cell::Alias(a))],
+        )]))
+        .unwrap();
     let out = tokens(&f.doc, None);
     let v = parse(&out.json);
+    assert_references_resolve(&v);
+    assert_eq!(
+        at(&v, "link.$value"),
+        "{brand.$root}",
+        "a root token's reference"
+    );
     assert_eq!(at(&v, "brand.$root.$value"), 1.0);
     assert_eq!(at(&v, "brand.strong.$value"), 2.0);
     assert_eq!(at(&v, "v1_5.x.$value"), 3.0);
@@ -319,6 +355,272 @@ fn styles_become_composite_tokens_or_a_note() {
     assert!(v["styles"]["effect"].get("Frosted").is_none());
     assert!(
         out.notes.iter().any(|n| n.starts_with("Frosted")),
+        "{:?}",
+        out.notes
+    );
+}
+
+fn add_style(ids: &mut IdSource, name: &str, value: StyleValue) -> Operation {
+    Operation::AddStyle {
+        style: Style {
+            id: ids.mint_style(),
+            name: name.into(),
+            value,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }
+}
+
+/// An alias to a kit's variable is written resolved in each mode it is written
+/// for, and noted once.
+///
+/// flip: `cell` resolving in the first mode whose cell is equal → fails at the
+/// Dark `$value`.
+#[test]
+fn an_alias_to_a_kit_variable_resolves_in_each_mode() {
+    const KIT: &str = "5eed0000000000000000000000000022";
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA4);
+    let (light, dark, k_light, k_dark) = (
+        ids.mint_mode(),
+        ids.mint_mode(),
+        ids.mint_mode(),
+        ids.mint_mode(),
+    );
+    let (primary, bg) = (ids.mint_var(), ids.mint_var());
+    let kit_mode = |id, name: &str| ondin_core::variable::KitMode {
+        id,
+        name: name.into(),
+        from: id,
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(light, "Light", 0),
+            add_mode(dark, "Dark", 1),
+            Operation::SetKitModes {
+                kit: KIT.into(),
+                modes: Some(ondin_core::variable::KitModes {
+                    name: None,
+                    modes: vec![kit_mode(k_light, "Light"), kit_mode(k_dark, "Dark")],
+                    map: Default::default(),
+                }),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: primary,
+                    name: "k/primary".into(),
+                    kind: VarKind::Color,
+                    cells: [
+                        (k_light, Cell::Color(Color::from_rgba8(255, 0, 0, 255))),
+                        (k_dark, Cell::Color(Color::from_rgba8(0, 0, 128, 255))),
+                    ]
+                    .into(),
+                    origin: Some(ondin_core::variable::VarOrigin {
+                        kit: KIT.into(),
+                        var: primary,
+                        version: 1,
+                    }),
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            add_var(
+                bg,
+                "button/bg",
+                VarKind::Color,
+                vec![(light, Cell::Alias(primary)), (dark, Cell::Alias(primary))],
+            ),
+        ]))
+        .unwrap();
+    let out = tokens(&f.doc, Some(dark));
+    let v = parse(&out.json);
+    assert_eq!(at(&v, "button.bg.$value.hex"), "#000080");
+    let modes = &at(&v, "button.bg.$extensions")[EXTENSION]["modes"];
+    assert_eq!(modes["Light"]["hex"], "#ff0000");
+    assert_eq!(modes["Dark"]["hex"], "#000080");
+    assert_eq!(out.notes.len(), 1, "one note per variable: {:?}", out.notes);
+}
+
+/// Two names that are made legal alike both get a token, the second numbered, so
+/// an alias to either still means it.
+///
+/// flip: `name_variables` without its numbering → fails at "the alias keeps its
+/// colour".
+#[test]
+fn names_made_legal_alike_are_both_written() {
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA5);
+    let m = ids.mint_mode();
+    let [dotted, under, fg] = [(); 3].map(|_| ids.mint_var());
+    let colour = |r, g, b| vec![(m, Cell::Color(Color::from_rgba8(r, g, b, 255)))];
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(m, "Mode", 0),
+            add_var(dotted, "a.b", VarKind::Color, colour(255, 0, 0)),
+            add_var(under, "a_b", VarKind::Color, colour(0, 0, 255)),
+            add_var(fg, "fg", VarKind::Color, vec![(m, Cell::Alias(under))]),
+        ]))
+        .unwrap();
+    let out = tokens(&f.doc, None);
+    let v = parse(&out.json);
+    assert_references_resolve(&v);
+    let Value::String(r) = at(&v, "fg.$value") else {
+        panic!("a reference");
+    };
+    let target = at(&v, &r[1..r.len() - 1]);
+    assert_eq!(
+        target["$value"]["hex"], "#0000ff",
+        "the alias keeps its colour"
+    );
+    assert!(at(&v, "a_b_2.$value.hex").is_string());
+}
+
+/// The styles go under the first free key, so no variable group is written over.
+///
+/// flip: the styles key stopping at `ondin-styles` → fails at `ondin-styles.y`.
+#[test]
+fn styles_never_overwrite_a_variable_group() {
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA6);
+    let m = ids.mint_mode();
+    let [x, y] = [(); 2].map(|_| ids.mint_var());
+    let one = vec![(m, Cell::Number(1.0))];
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(m, "Mode", 0),
+            add_var(x, "styles/x", VarKind::Number, one.clone()),
+            add_var(y, "ondin-styles/y", VarKind::Number, one),
+            add_style(
+                &mut ids,
+                "Card",
+                StyleValue::Fills(keyed_by_position([ondin_core::Fill {
+                    brush: ondin_core::Brush::Solid(Color::WHITE).into(),
+                    visible: true,
+                }])),
+            ),
+        ]))
+        .unwrap();
+    let v = parse(&tokens(&f.doc, None).json);
+    assert_eq!(at(&v, "ondin-styles.y.$value"), 1.0);
+    assert_eq!(at(&v, "ondin-styles-2.fill.Card.$type"), "color");
+}
+
+/// Two modes of one name keep both their values, the second under a numbered key.
+///
+/// flip: the per-token modes keyed by name → fails at `Dark 2`.
+#[test]
+fn modes_of_one_name_keep_both_values() {
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA7);
+    let (one, two) = (ids.mint_mode(), ids.mint_mode());
+    let n = ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(one, "Dark", 0),
+            add_mode(two, "Dark", 1),
+            add_var(
+                n,
+                "n",
+                VarKind::Number,
+                vec![(one, Cell::Number(1.0)), (two, Cell::Number(2.0))],
+            ),
+        ]))
+        .unwrap();
+    let v = parse(&tokens(&f.doc, None).json);
+    let modes = &at(&v, "n.$extensions")[EXTENSION]["modes"];
+    assert_eq!(modes["Dark"], 1.0);
+    assert_eq!(modes["Dark 2"], 2.0);
+    assert_eq!(v["$extensions"][EXTENSION]["modes"][1]["key"], "Dark 2");
+}
+
+/// A border's width read from a variable that is not a dimension is written as
+/// its value in px, since the format types that slot `dimension`; one that is a
+/// dimension stays a reference.
+///
+/// flip: `dimension_to` always referencing → fails at the width's unit.
+#[test]
+fn a_border_width_is_always_a_dimension() {
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA8);
+    let m = ids.mint_mode();
+    let w = ids.mint_var();
+    let stroke = ondin_core::Stroke {
+        brush: ondin_core::Brush::Solid(Color::BLACK).into(),
+        width: 1.0,
+        width_var: Some(w),
+        join: ondin_core::kurbo::Join::Miter,
+        cap: ondin_core::kurbo::Cap::Butt,
+        dashes: vec![],
+        dash_offset: 0.0,
+        sides: Default::default(),
+        miter_limit: 4.0,
+        dash_fit: false,
+        align: ondin_core::StrokeAlign::Center,
+        visible: true,
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(m, "Mode", 0),
+            add_var(w, "w", VarKind::Number, vec![(m, Cell::Number(2.0))]),
+            add_style(
+                &mut ids,
+                "Hairline",
+                StyleValue::Strokes(keyed_by_position([stroke])),
+            ),
+        ]))
+        .unwrap();
+    let v = parse(&tokens(&f.doc, None).json);
+    assert_eq!(at(&v, "styles.stroke.Hairline.$type"), "border");
+    assert_eq!(at(&v, "styles.stroke.Hairline.$value.width"), "{w}");
+
+    // Read as an opacity as well, `w` is a plain number.
+    let ops = ondin_core::bind_opacity_ops(&f.doc, f.rect, w);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let out = tokens(&f.doc, None);
+    let v = parse(&out.json);
+    assert_eq!(at(&v, "w.$type"), "number");
+    assert_eq!(at(&v, "styles.stroke.Hairline.$value.width.unit"), "px");
+    assert_eq!(at(&v, "styles.stroke.Hairline.$value.width.value"), 2.0);
+    assert!(
+        out.notes.iter().any(|n| n.starts_with("Hairline")),
+        "{:?}",
+        out.notes
+    );
+}
+
+/// What a typography token cannot hold is noted, and so is a renamed style.
+///
+/// flip: `typography` without its losses → fails at the italic note.
+#[test]
+fn a_type_styles_losses_and_renames_are_noted() {
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA9);
+    f.doc
+        .apply(&Transaction(vec![add_style(
+            &mut ids,
+            "v1.5",
+            StyleValue::Text(Box::new(ondin_core::TextStyle {
+                font_family: "Inter".into(),
+                font_size: 16.0,
+                weight: 400,
+                italic: true,
+                line_height: Some(ondin_core::Length::Em(1.5)),
+                ..Default::default()
+            })),
+        )]))
+        .unwrap();
+    let out = tokens(&f.doc, None);
+    assert!(
+        out.notes
+            .iter()
+            .any(|n| n == "v1.5: a typography token has no italic, so it is left out."),
+        "{:?}",
+        out.notes
+    );
+    assert!(
+        out.notes.iter().any(|n| n.contains("written as v1_5")),
         "{:?}",
         out.notes
     );

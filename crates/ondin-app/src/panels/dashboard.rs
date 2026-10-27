@@ -2065,9 +2065,20 @@ impl OndinApp {
         if marks_kit(entry) {
             kit_chip(ui, corner);
         }
-        // A document already in a tab: a click brings that tab forward.
+        // A document already in a tab: a faint ring on the plate and the chip; a
+        // click brings that tab forward.
         if self.tab_of_path(&entry.path).is_some() {
-            open_chip(ui, thumb.left_top() + egui::vec2(7.0, 7.0));
+            ui.painter().rect_stroke(
+                thumb.shrink(1.0),
+                plate_radius,
+                egui::Stroke::new(1.0, theme::color::text_a(26)),
+                egui::StrokeKind::Inside,
+            );
+            open_chip(
+                ui,
+                thumb.left_top() + egui::vec2(7.0, 7.0),
+                egui::Align2::LEFT_TOP,
+            );
         }
         // The star sits on the cover (`top:7px;right:7px`) so a grid can be scanned for
         // it. Outline, as the bundled Phosphor has only Regular; the gold carries the state.
@@ -2465,9 +2476,15 @@ impl OndinApp {
             egui::vec2(cols[0] - 20.0, 22.0),
         );
         let renaming = self.rename_field(ui, entry, name_box, 12.0, act);
-        // The chip takes its width out of the *Name* column before the name is elided.
+        // The chips take their width out of the *Name* column before the name is elided.
         let chip = self.mark_of(entry).filter(|_| !renaming);
-        let chip_room = chip.map_or(0.0, |m| mark_chip_size(ui, m).x + 8.0);
+        let open = !renaming && self.tab_of_path(&entry.path).is_some();
+        let chip_room = chip.map_or(0.0, |m| mark_chip_size(ui, m).x + 8.0)
+            + if open {
+                open_chip_size(ui).x + 8.0
+            } else {
+                0.0
+            };
         let mut x = rect.left();
         for (i, (text, w)) in cells.iter().zip(cols).enumerate() {
             if i == 0 && renaming {
@@ -2487,7 +2504,7 @@ impl OndinApp {
                     theme::text::DIM
                 },
             );
-            if let (0, Some(mark)) = (i, chip) {
+            if i == 0 && (chip.is_some() || open) {
                 let name_w = ui
                     .ctx()
                     .fonts_mut(|f| {
@@ -2499,12 +2516,13 @@ impl OndinApp {
                     })
                     .size()
                     .x;
-                mark_chip(
-                    ui,
-                    egui::pos2(x + 18.0 + name_w, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    mark,
-                );
+                let mut at = egui::pos2(x + 18.0 + name_w, rect.center().y);
+                if let Some(mark) = chip {
+                    at.x = mark_chip(ui, at, egui::Align2::LEFT_CENTER, mark).right() + 8.0;
+                }
+                if open {
+                    open_chip(ui, at, egui::Align2::LEFT_CENTER);
+                }
             }
             x += w;
         }
@@ -4625,20 +4643,13 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
     rect
 }
 
-/// The *Open* chip, hung from `at` (its top left) on a card whose document is open
-/// in a tab: an accent chip, since a click on the card brings that tab forward
-/// rather than opening the document again.
-fn open_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
-    const H: f32 = 18.0;
-    const PAD: f32 = 7.0;
-    const GAP: f32 = 4.0;
-    const GLYPH: f32 = 11.0;
+/// The *Open* chip, anchored at `at` by `align`, on a card or row whose document is
+/// open in a tab: an accent chip, since a click brings that tab forward rather than
+/// opening the document again.
+fn open_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2) -> egui::Rect {
     let ink = color::ACCENT_100;
-    let word = ui
-        .ctx()
-        .fonts_mut(|f| f.layout_no_wrap("Open".into(), egui::FontId::proportional(10.5), ink));
-    let w = PAD + GLYPH + GAP + word.size().x + PAD;
-    let rect = egui::Rect::from_min_size(at, egui::vec2(w, H));
+    let word = open_word(ui);
+    let rect = align.anchor_size(at, open_chip_size(ui));
     let p = ui.painter();
     let r = egui::CornerRadius::same(4);
     p.rect_filled(rect, r, color::ACCENT_900);
@@ -4649,21 +4660,45 @@ fn open_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
         egui::StrokeKind::Inside,
     );
     p.text(
-        egui::pos2(rect.left() + PAD + GLYPH / 2.0, rect.center().y),
+        egui::pos2(rect.left() + OPEN_PAD + OPEN_GLYPH / 2.0, rect.center().y),
         egui::Align2::CENTER_CENTER,
         icon::BROWSERS,
-        theme::icon_font(GLYPH),
+        theme::icon_font(OPEN_GLYPH),
         ink,
     );
     p.galley(
         egui::pos2(
-            rect.left() + PAD + GLYPH + GAP,
+            rect.left() + OPEN_PAD + OPEN_GLYPH + OPEN_GAP,
             rect.center().y - word.size().y / 2.0,
         ),
         word,
         ink,
     );
     rect
+}
+
+const OPEN_PAD: f32 = 7.0;
+const OPEN_GAP: f32 = 4.0;
+const OPEN_GLYPH: f32 = 11.0;
+
+/// The *Open* chip's word, laid out once for both its size and its drawing.
+fn open_word(ui: &egui::Ui) -> std::sync::Arc<egui::Galley> {
+    ui.ctx().fonts_mut(|f| {
+        f.layout_no_wrap(
+            "Open".into(),
+            egui::FontId::proportional(10.5),
+            color::ACCENT_100,
+        )
+    })
+}
+
+/// How much room [`open_chip`] needs; the list view takes it out of the *Name*
+/// column before eliding.
+fn open_chip_size(ui: &egui::Ui) -> egui::Vec2 {
+    egui::vec2(
+        OPEN_PAD + OPEN_GLYPH + OPEN_GAP + open_word(ui).size().x + OPEN_PAD,
+        18.0,
+    )
 }
 
 /// What a card or a row can be marked with — at most one, most severe first
@@ -6804,6 +6839,52 @@ mod tests {
         assert_eq!(chips(&mut app, &ctx), 1, "exactly the broken one is marked");
         app.dash.list_view = true;
         assert_eq!(chips(&mut app, &ctx), 1, "and the list marks it too");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A document open in a tab wears the *Open* chip in both views, after its name
+    /// in a list row, and the document beside it does not.
+    /// flip: drop the `open_chip` call from the list row → fails at "the list".
+    #[test]
+    fn a_document_in_a_tab_wears_the_open_chip_in_both_views() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "open-chip");
+        let mut open = ondin_core::Document::new(app.session.ids.mint());
+        let path = store::file_document(&root, None, "Landing v4", &mut open).unwrap();
+        let mut shut = ondin_core::Document::new(app.session.ids.mint());
+        store::file_document(&root, None, "Pricing", &mut shut).unwrap();
+        app.library.refresh();
+        app.begin_open(&path);
+        app.settle_open();
+        app.show_library();
+        assert!(
+            app.tab_of_path(&path).is_some(),
+            "the fixture: one in a tab"
+        );
+        app.dash.nav = Nav::All;
+        let chips = |app: &mut OndinApp, ctx: &egui::Context| {
+            galleys(app, ctx)
+                .into_iter()
+                .filter(|(_, _, t)| t == "Open")
+                .collect::<Vec<_>>()
+        };
+        app.dash.list_view = false;
+        assert_eq!(chips(&mut app, &ctx).len(), 1, "the grid marks exactly one");
+        app.dash.list_view = true;
+        let runs = galleys(&mut app, &ctx);
+        let chip = chips(&mut app, &ctx);
+        assert_eq!(chip.len(), 1, "the list marks exactly one");
+        // The name is painted twice on the screen; one of them must be the chip's row.
+        assert!(
+            runs.iter()
+                .filter(|(_, _, t)| t == "Landing v4")
+                .any(|(at, size, _)| {
+                    (chip[0].0.y + chip[0].1.y / 2.0 - (at.y + size.y / 2.0)).abs() < 2.0
+                        && chip[0].0.x > at.x + size.x
+                }),
+            "on the open document's row, after its name"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

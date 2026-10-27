@@ -621,7 +621,7 @@ impl<'d> Differ<'d> {
                     };
                     match (x.get(&k), y.get(&k)) {
                         (Some(p), Some(q)) => self.compare(&here, &k, p, q, out),
-                        (None, Some(q)) => match skipped_default(q) {
+                        (None, Some(q)) => match self.skipped_default(&k, q) {
                             Some(p) => self.compare(&here, &k, &p, q, out),
                             None => out.push(Change::new(
                                 label(&here, &k),
@@ -629,7 +629,7 @@ impl<'d> Differ<'d> {
                                 Some(self.show(&k, q)),
                             )),
                         },
-                        (Some(p), None) => match skipped_default(p) {
+                        (Some(p), None) => match self.skipped_default(&k, p) {
                             Some(q) => self.compare(&here, &k, p, &q, out),
                             None => out.push(Change::new(
                                 label(&here, &k),
@@ -990,15 +990,47 @@ fn hex(v: &Value) -> String {
     s
 }
 
-/// What an absent key stood for, when the file skips it at a default of `v`'s
-/// type: an empty list, `false`, zero. `None` for a value an `Option` held,
-/// whose absence is nothing, so the value reads as added or removed.
-fn skipped_default(v: &Value) -> Option<Value> {
-    match v {
-        Value::Array(_) => Some(Value::Array(Vec::new())),
-        Value::Bool(_) => Some(Value::Bool(false)),
-        Value::Number(_) => Some(Value::from(0)),
-        _ => None,
+/// The keys the file skips at a default other than an empty list, `false` or
+/// zero, with that default as JSON. `skipped_keys_are_listed` holds every key
+/// skipped beside a `default = "…"` function to this list.
+const SKIPPED_AT: [(&str, &str); 10] = [
+    ("alpha", "1"),
+    ("crop", r#"{"x0":0.0,"y0":0.0,"x1":1.0,"y1":1.0}"#),
+    ("opacity", "1"),
+    ("quality", "90"),
+    ("scale", r#"{"Times":1.0}"#),
+    ("sharing", "true"),
+    ("shrink", "1"),
+    ("skip_ink", "true"),
+    ("tile_scale", "1"),
+    ("transform", "[1.0,0.0,0.0,1.0,0.0,0.0]"),
+];
+
+impl Differ<'_> {
+    /// What an absent `key` stood for beside `present` on the other side: the
+    /// default [`SKIPPED_AT`] lists, else that of `present`'s type — an empty
+    /// list, `false`, zero. `None` for a value an `Option` held, whose absence is
+    /// nothing, so the value reads as added or removed.
+    fn skipped_default(&self, key: &str, present: &Value) -> Option<Value> {
+        if let Some((_, default)) = SKIPPED_AT.iter().find(|(k, _)| *k == key) {
+            return serde_json::from_str(default).ok();
+        }
+        let guess = match present {
+            Value::Array(_) => Value::Array(Vec::new()),
+            Value::Bool(_) => Value::Bool(false),
+            Value::Number(_) => Value::from(0),
+            _ => return None,
+        };
+        if !self.same(&guess, present) {
+            return Some(guess);
+        }
+        // The file writes a key only off its default, so a value equal to the
+        // guess means the default is another: a flag's is the other value, and
+        // anything else reads as added or removed rather than as no change.
+        match present {
+            Value::Bool(b) => Some(Value::Bool(!b)),
+            _ => None,
+        }
     }
 }
 
@@ -1040,5 +1072,95 @@ fn singular(key: &str) -> String {
         "props" => "property".into(),
         "grids" => "layout grid".into(),
         other => other.strip_suffix('s').unwrap_or(other).replace('_', " "),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SKIPPED_AT;
+    use std::path::Path;
+
+    /// The fields in `src` whose serde attribute names both a `default = "…"`
+    /// function and a `skip_serializing_if`: skipped at a default the function
+    /// alone knows.
+    fn skipped_at_a_function(src: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut attr = String::new();
+        let mut open = false;
+        for line in src.lines() {
+            let t = line.trim();
+            if t.starts_with("#[serde(") {
+                open = true;
+                attr.clear();
+            }
+            if open {
+                attr.push_str(t);
+                if t.ends_with(")]") {
+                    open = false;
+                }
+                continue;
+            }
+            if !attr.is_empty() && !t.starts_with("///") && !t.starts_with("#[") {
+                if attr.contains("default = \"") && attr.contains("skip_serializing_if") {
+                    let field = t
+                        .trim_start_matches("pub(crate) ")
+                        .trim_start_matches("pub ");
+                    if let Some((name, _)) = field.split_once(':') {
+                        out.push(name.trim().to_string());
+                    }
+                }
+                attr.clear();
+            }
+        }
+        out
+    }
+
+    fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("a readable directory") {
+            let path = entry.expect("a readable entry").path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// The scan finds a field under a one-line and a multi-line attribute.
+    #[test]
+    fn the_scan_finds_a_field_skipped_at_a_function() {
+        let src = "#[serde(default = \"one\", skip_serializing_if = \"is_one\")]\n\
+                   pub shrink: f64,\n\
+                   #[serde(\n    default = \"q\",\n    skip_serializing_if = \"is_q\"\n)]\n\
+                   /// Doc.\n\
+                   pub quality: u8,\n\
+                   #[serde(default, skip_serializing_if = \"is_zero\")]\n\
+                   pub grow: f64,\n\
+                   #[serde(default = \"yes\")]\n\
+                   clip: bool,";
+        assert_eq!(skipped_at_a_function(src), ["shrink", "quality"]);
+    }
+
+    /// Every field in this crate skipped at a default its function knows is in
+    /// `SKIPPED_AT`, so its absence reads as that default.
+    ///
+    /// flip: `("shrink", "1")` taken out of `SKIPPED_AT` → fails naming `shrink`.
+    #[test]
+    fn skipped_keys_are_listed() {
+        let mut files = Vec::new();
+        rust_files(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let mut missing = Vec::new();
+        for file in files {
+            let src = std::fs::read_to_string(&file).expect("a readable source file");
+            for field in skipped_at_a_function(&src) {
+                if !SKIPPED_AT.iter().any(|(k, _)| *k == field) {
+                    missing.push(format!("{}: {field}", file.display()));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "not in SKIPPED_AT: {missing:?}");
     }
 }

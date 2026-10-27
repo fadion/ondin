@@ -1,7 +1,10 @@
 //! `ondin_core::diff`: what two states of one document report as changed.
 
+use ondin_core::container::LayoutItem;
 use ondin_core::diff::{Change, Diff, LayerDiff, Status, diff};
+use ondin_core::kit::Origin;
 use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+use ondin_core::meta::KitMark;
 use ondin_core::peniko::Color;
 use ondin_core::variable::{VarKind, Variable};
 use ondin_core::{
@@ -350,4 +353,170 @@ fn a_first_effect_reads_as_an_item_added() {
             after: Some("drop shadow".into()),
         }]
     );
+}
+
+/// A number the file skips at one reads from one: a flex child's shrink.
+///
+/// flip: `("shrink", "1")` taken out of `SKIPPED_AT` → 1 → 0 reads as `none → 0`
+/// and fails at the first `assert_eq`.
+#[test]
+fn a_number_skipped_at_one_reads_from_one() {
+    let f = fixture();
+    let item = |shrink| Operation::SetLayoutItem {
+        id: f.dot,
+        item: LayoutItem {
+            grow: 1.0,
+            shrink,
+            ..Default::default()
+        },
+    };
+    let a = edited(&f, vec![item(1.0)]);
+    let to = |shrink| {
+        let mut b = a.clone();
+        b.apply(&Transaction(vec![item(shrink)])).expect("the edit");
+        b
+    };
+    let d = diff(&a, &to(0.0));
+    let dot = layer(&d, &["Card", "Dot"]).expect("Dot is reported");
+    assert_eq!(dot.changes, [change("item shrink", "1", "0")]);
+    let d = diff(&a, &to(2.0));
+    let dot = layer(&d, &["Card", "Dot"]).expect("Dot is reported");
+    assert_eq!(dot.changes, [change("item shrink", "1", "2")]);
+}
+
+/// A kit that stops sharing is a change, though the file skips `sharing` at on.
+///
+/// flip: `("sharing", "true")` taken out of `SKIPPED_AT` → still reported, by
+/// the flag rule in `skipped_default`; flipping both is what makes it read as
+/// nothing.
+#[test]
+fn a_kit_that_stops_sharing_differs() {
+    let f = fixture();
+    let mut a = f.doc.clone();
+    let mut meta = a.meta().clone();
+    meta.kit = Some(KitMark::default());
+    a.set_meta(meta.clone());
+    let mut b = a.clone();
+    meta.kit.as_mut().expect("a kit").sharing = false;
+    b.set_meta(meta);
+    let d = diff(&a, &b);
+    assert!(!d.is_empty());
+    assert_eq!(d.document, [change("library kit sharing", "on", "off")]);
+}
+
+fn add_page(id: NodeId, index: usize, name: &str) -> Operation {
+    Operation::AddPage {
+        id,
+        index,
+        name: name.into(),
+        ground: Color::from_rgba8(255, 255, 255, 255),
+        draft: false,
+        mode: None,
+    }
+}
+
+/// A page added reads as one entry counting its layers, with none of them
+/// listed; the same page taken away reads as removed, counted alike.
+#[test]
+fn an_added_or_removed_page_counts_its_layers() {
+    let mut f = fixture();
+    let (page, frame_id, inner) = (f.ids.mint(), f.ids.mint(), f.ids.mint());
+    let b = edited(
+        &f,
+        vec![
+            add_page(page, 1, "Second"),
+            frame(frame_id, page, 0, "Hero"),
+            rect(inner, frame_id, 0, "Shape", (0.0, 0.0)),
+        ],
+    );
+    let d = diff(&f.doc, &b);
+    assert_eq!(d.pages.len(), 1, "{}", d.text());
+    let added = &d.pages[0];
+    assert_eq!(
+        (added.name.as_str(), added.status, added.inside),
+        ("Second", Status::Added, 2)
+    );
+    assert!(added.layers.is_empty());
+    let d = diff(&b, &f.doc);
+    assert_eq!(d.pages.len(), 1, "{}", d.text());
+    let removed = &d.pages[0];
+    assert_eq!(
+        (removed.name.as_str(), removed.status, removed.inside),
+        ("Second", Status::Removed, 2)
+    );
+}
+
+/// Two pages swapped are one order change, on the page that moved; a page's
+/// background reads as its colour.
+#[test]
+fn a_page_move_and_background_are_page_changes() {
+    let mut f = fixture();
+    let page = f.ids.mint();
+    let first = f.doc.first_page();
+    let a = edited(&f, vec![add_page(page, 1, "Second")]);
+    let mut b = a.clone();
+    b.apply(&Transaction(vec![
+        Operation::MovePage { id: page, index: 0 },
+        Operation::SetPageGround {
+            id: first,
+            ground: RED,
+        },
+    ]))
+    .expect("the edit");
+    let d = diff(&a, &b);
+    let orders: Vec<&Change> = d
+        .pages
+        .iter()
+        .flat_map(|p| &p.changes)
+        .filter(|c| c.what == "order")
+        .collect();
+    assert_eq!(orders.len(), 1, "{}", d.text());
+    let ground = d
+        .pages
+        .iter()
+        .find(|p| p.id == first.to_wire())
+        .expect("the first page is reported");
+    assert!(
+        ground
+            .changes
+            .iter()
+            .any(|c| c.what == "background" && c.after.as_deref() == Some("#FF0000")),
+        "{}",
+        d.text()
+    );
+}
+
+/// A main vendored into the vault reads under the vault, as a layer added.
+#[test]
+fn a_layer_added_in_the_vault_is_reported_under_it() {
+    let mut f = fixture();
+    let (vault, main, source) = (f.ids.mint(), f.ids.mint(), f.ids.mint());
+    let a = edited(&f, vec![Operation::OpenVault { id: vault }]);
+    let mut b = a.clone();
+    b.apply(&Transaction(vec![
+        frame(main, vault, 0, "Chip"),
+        Operation::SetComponent {
+            id: main,
+            component: true,
+        },
+        Operation::SetOrigin {
+            id: main,
+            origin: Some(Origin {
+                kit: "0123456789abcdef0123456789abcdef".into(),
+                node: source,
+                version: 1,
+                name: Some("Kit".into()),
+            }),
+        },
+    ]))
+    .expect("a vendored main");
+    let d = diff(&a, &b);
+    let block = d
+        .pages
+        .iter()
+        .find(|p| p.id == vault.to_wire())
+        .expect("the vault is reported");
+    assert_eq!(block.layers.len(), 1, "{}", d.text());
+    assert_eq!(block.layers[0].status, Status::Added);
+    assert_eq!(block.layers[0].trail, ["Chip"]);
 }

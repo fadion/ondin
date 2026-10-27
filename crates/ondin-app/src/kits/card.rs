@@ -99,19 +99,22 @@ impl OndinApp {
         let Some((path, name)) = self.kit_return.clone() else {
             return;
         };
-        let resp = ui
-            .add(
-                egui::Label::new(
-                    egui::RichText::new(format!("← {name}"))
-                        .size(11.5)
-                        .color(theme::text::MUTED),
-                )
-                .sense(egui::Sense::click()),
-            )
-            .on_hover_text(format!("Back to “{name}”"));
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
+        // Hand-painted so the text can light under the pointer: the cursor stays
+        // the arrow, so the ink is the only hover cue.
+        let galley = ui.painter().layout_no_wrap(
+            format!("← {name}"),
+            egui::FontId::proportional(11.5),
+            theme::text::MUTED,
+        );
+        let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
+        let ink = if resp.hovered() {
+            theme::color::TEXT
+        } else {
+            theme::text::MUTED
+        };
+        ui.painter()
+            .galley_with_override_text_color(rect.min, galley, ink);
+        let resp = resp.on_hover_text(format!("Back to “{name}”"));
         if resp.clicked() {
             self.open_path(&path);
         }

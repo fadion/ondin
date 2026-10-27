@@ -539,8 +539,8 @@ pub struct OndinApp {
     pub(crate) confirming_close: bool,
     /// The open documents' tabs (`crate::tabs`).
     pub(crate) tabs: crate::tabs::Tabs,
-    /// A tab whose close is waiting on the *Unsaved changes* card.
-    pub(crate) closing_tab: Option<crate::tabs::TabId>,
+    /// The tabs whose close is waiting on the *Unsaved changes* card.
+    pub(crate) closing_tabs: Vec<crate::tabs::TabId>,
     /// A set's value the user asked to delete while variants use it, until the
     /// confirmation modal is answered.
     pub(crate) deleting_value: Option<crate::panels::ValueDelete>,
@@ -1302,7 +1302,7 @@ impl OndinApp {
             // The starter document in a tab of its own; `open_at_launch` starts
             // the window with none.
             tabs: crate::tabs::Tabs::with_active(),
-            closing_tab: None,
+            closing_tabs: Vec::new(),
             deleting_value: None,
             inspector_hold: None,
             canvas_px: (1, 1),
@@ -1536,7 +1536,7 @@ impl eframe::App for OndinApp {
         if self.tabs.shown.is_some() && self.tabs.shown != self.tabs.active {
             self.palette = None;
             self.stop_presenting(ui.ctx());
-            self.tab_strip(ui, !self.modal_is_up());
+            self.tab_strip(ui, !self.modal_is_up(), false);
             if !self.modal_is_up() {
                 self.tab_placeholder(ui);
             }
@@ -1636,6 +1636,11 @@ impl eframe::App for OndinApp {
             } else {
                 nav = crate::menu::read_nav(&ctx);
             }
+        } else if self.tabs.menu.is_some() {
+            // The tab menu holds the keyboard; `Escape` closes only it.
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.tabs.menu = None;
+            }
         } else if self.modal_is_up() {
             // A modal owns every key; `input::resolve` is no second guard, since a modal
             // of buttons does not make egui want the keyboard.
@@ -1690,7 +1695,7 @@ impl eframe::App for OndinApp {
 
         // Focus mode overrides the chrome switches without changing them.
         if !self.focus {
-            self.tab_strip(ui, true);
+            self.tab_strip(ui, true, false);
             self.top_bar(ui);
             if self.show_layers {
                 self.layers_panel(ui);
@@ -1699,6 +1704,9 @@ impl eframe::App for OndinApp {
                 self.tool_rail(ui);
             }
         } else {
+            // No strip, so no tab menu, nor its latch for the canvas to read.
+            self.tabs.menu = None;
+            self.tabs.menu_was_up = false;
             // The tab strip is the title bar; this brings the window's buttons
             // back on hover at the top edge.
             crate::chrome::focus_strip(&ctx, crate::chrome::Chrome::current());
@@ -1912,7 +1920,12 @@ impl OndinApp {
             }
             Action::CloseDocument => {
                 if let Some(id) = self.front_tab() {
-                    self.close_tab(id);
+                    if self.tabs.is_pinned(id) {
+                        self.session
+                            .info("Pinned tabs stay open; unpin it to close it");
+                    } else {
+                        self.close_tab(id);
+                    }
                 }
             }
             Action::Tab(key) => self.tab_key(key),
@@ -5525,23 +5538,24 @@ impl OndinApp {
         }
         // A tab's own question gives way to the window's, which covers it.
         if self.any_unsaved() {
-            self.closing_tab = None;
+            self.closing_tabs.clear();
             self.confirming_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
     }
 
     /// The in-app confirmation shown after a cancelled close of the window, listing
-    /// every tab with unsaved changes, or of one tab ([`Self::closing_tab`]).
+    /// every tab with unsaved changes, or of the tabs being closed
+    /// ([`Self::closing_tabs`]).
     fn close_confirmation(&mut self, ctx: &egui::Context) {
-        if !self.confirming_close && self.closing_tab.is_none() {
+        if !self.confirming_close && self.closing_tabs.is_empty() {
             return;
         }
         let window = self.confirming_close;
         let asked: Vec<crate::tabs::TabInfo> = self
             .tab_infos()
             .into_iter()
-            .filter(|t| t.dirty && (window || self.closing_tab == Some(t.id)))
+            .filter(|t| t.dirty && (window || self.closing_tabs.contains(&t.id)))
             .collect();
         // A scratch session no tab holds has only its own name to give.
         let scratch = (window && self.tabs.active.is_none() && self.session.is_dirty())
@@ -5599,8 +5613,10 @@ impl OndinApp {
         let ids: Vec<crate::tabs::TabId> = asked.iter().map(|t| t.id).collect();
         match decision {
             Some(CloseChoice::Save) if !window => {
-                self.closing_tab = None;
-                if let Some(&id) = ids.first() {
+                self.closing_tabs.clear();
+                // Each in turn in front, since saving a never-filed one files it; one
+                // whose save fails stays open.
+                for id in ids {
                     self.activate_tab(id);
                     if self.save_file(false) {
                         self.discard_tab(id);
@@ -5629,7 +5645,7 @@ impl OndinApp {
                 }
             }
             Some(CloseChoice::Discard) if !window => {
-                self.closing_tab = None;
+                self.closing_tabs.clear();
                 for id in ids {
                     self.discard_tab(id);
                 }
@@ -5648,7 +5664,7 @@ impl OndinApp {
             }
             Some(CloseChoice::Cancel) => {
                 self.confirming_close = false;
-                self.closing_tab = None;
+                self.closing_tabs.clear();
                 // Or the next close for any reason would apply the update.
                 self.updater.restart_called_off();
             }
@@ -6930,7 +6946,7 @@ impl OndinApp {
     pub(crate) fn modal_is_up(&self) -> bool {
         self.settings.is_some()
             || self.confirming_close
-            || self.closing_tab.is_some()
+            || !self.closing_tabs.is_empty()
             || !self.recovery.pending.is_empty()
             || self.deleting_value.is_some()
             || self.pages.deleting.is_some()

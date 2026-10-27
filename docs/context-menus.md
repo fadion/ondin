@@ -380,6 +380,31 @@ Opened on a row of the layers pane's Pages section, without switching to that pa
 | *—* | | |
 | Delete page | — | destructive styling; dims *"A document keeps at least one page"* on the last page. A page with layers asks first (*Delete page?*); an empty one goes at once. Deletes its guides and layers, detaching instances elsewhere of a main on it, then the page; one undo step |
 
+### 6.9 A document tab (the tab menu)
+
+A separate `Area` (`OndinApp::tab_menu`, `tabs.rs`), opened by a right-click on a document's tab, at
+the press. The library's tab, `+` and the caret have none. Drawn with §8's row and frame functions,
+190pt wide.
+
+| Row | Chord | Shown / enabled |
+|---|---|---|
+| Pin tab / Unpin tab | — | `icon::PUSH_PIN` / `PUSH_PIN_SLASH`; pinned tabs lead the strip and only unpinning lets one close (`library.md`, *Document tabs*) |
+| *—* | | |
+| Close | `Ctrl+W` (shown on the front tab only) | dims *"Pinned tabs stay open; unpin it to close it"* on a pinned tab |
+| Close others | — | every unpinned tab but this one; dims *"No other unpinned tabs"* |
+| Close all | — | every unpinned tab; dims *"Every tab is pinned"* |
+
+The close rows go through `close_tabs`: filed work saves, and every tab whose work cannot be saved is
+asked about on one *Unsaved changes* card. The menu closes on a choice, on `Escape`, and on any click
+elsewhere but the release that opened it (it keeps the pass it opened on); a right-click elsewhere
+closes it too, so one floating menu is up at a time. A left-click that closes it is spent, as §0
+says, through `Tabs::menu_was_up`, latched as the strip begins: the strip's own left-button doors,
+the canvas, a layers row and the library (`menu_was_up`) all stand down for it. It holds the keyboard: the editor's key routing
+has a branch for it beside `context_menu`, and on the library `dashboard_ui` consumes `Escape`
+before the strip, with `library_keys_are_free` false while it is open. Only `Escape` is read; the
+arrows do not reach its rows. Opening it closes the editor's context menu, the library's ⋮ menu and
+project dropdown, and the caret's list.
+
 ---
 
 ## 7. Deliberately not in these menus

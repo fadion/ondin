@@ -1723,8 +1723,10 @@ impl OndinApp {
                 self.layer_rename_field(ui, id, rect, icon_x + NAME_GAP);
             }
 
-            // The click that dismisses an open menu is spent dismissing it (R4).
-            if resp.clicked() && !renaming && self.context_menu.is_none() {
+            // The click that dismisses an open menu is spent dismissing it (R4), the
+            // tab menu's included.
+            if resp.clicked() && !renaming && self.context_menu.is_none() && !self.tabs.menu_was_up
+            {
                 // `interact_pointer_pos`, not the hover-based `under`: they can
                 // differ on a touch or click-through frame.
                 match resp.interact_pointer_pos().and_then(|q| targets.at(q.x)) {

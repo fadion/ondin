@@ -928,8 +928,9 @@ impl OndinApp {
         self.autopan(ui, &resp, rect, ppp);
 
         // A click that dismisses a menu is spent doing so (`docs/context-menus.md`
-        // §0 R4); `context_menu_ui` handles the dismissal itself further down.
-        if self.context_menu.is_none() {
+        // §0 R4); `context_menu_ui` handles the dismissal itself further down, and
+        // the tab menu's was done by the strip, which latched `menu_was_up` first.
+        if self.context_menu.is_none() && !self.tabs.menu_was_up {
             match self.mode {
                 // A picker opened over a text session can pick too.
                 Mode::TextInsert if self.dropper_armed().is_some() => {

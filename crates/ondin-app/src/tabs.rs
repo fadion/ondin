@@ -48,6 +48,13 @@ pub(crate) struct Tabs {
     pub(crate) scroll: usize,
     /// Whether the caret's list of every open document is showing.
     pub(crate) overflow_open: bool,
+    /// The tab whose right-click menu is open, where the press was, and the pass
+    /// it opened on, whose click is the opener's and closes nothing.
+    pub(crate) menu: Option<(TabId, egui::Pos2, u64)>,
+    /// Whether [`Self::menu`] was open as the strip began this frame: the click
+    /// that closes it is spent, so the strip's and the canvas's left-button doors
+    /// stand down for it.
+    pub(crate) menu_was_up: bool,
     /// A window opened while another Ondin runs keeps its tabs to itself: it
     /// neither brings back the last quit's tabs, which the other window may hold
     /// open, nor writes its own over that window's list.
@@ -57,6 +64,9 @@ pub(crate) struct Tabs {
 pub(crate) struct Tab {
     pub(crate) id: TabId,
     pub(crate) body: Body,
+    /// Pinned tabs lead the strip, in the order they were pinned, and only an
+    /// unpin lets one close ([`Tabs::pin`]).
+    pub(crate) pinned: bool,
 }
 
 pub(crate) enum Body {
@@ -101,13 +111,45 @@ impl Tabs {
         self.insert(self.list.len(), body)
     }
 
-    /// Put a tab at `index`, or at the end when the strip is shorter.
+    /// Put an unpinned tab at `index`, kept after the pinned ones, or at the end
+    /// when the strip is shorter.
     pub(crate) fn insert(&mut self, index: usize, body: Body) -> TabId {
         self.next += 1;
         let id = self.next;
-        self.list
-            .insert(index.min(self.list.len()), Tab { id, body });
+        let at = index.clamp(self.pinned_count(), self.list.len());
+        self.list.insert(
+            at,
+            Tab {
+                id,
+                body,
+                pinned: false,
+            },
+        );
         id
+    }
+
+    /// How many tabs are pinned: they are always the first this many.
+    pub(crate) fn pinned_count(&self) -> usize {
+        self.list.iter().take_while(|t| t.pinned).count()
+    }
+
+    pub(crate) fn is_pinned(&self, id: TabId) -> bool {
+        self.get(id).is_some_and(|t| t.pinned)
+    }
+
+    /// Pin or unpin tab `id`. A pin goes to the right of the pinned tabs already
+    /// there; an unpin to the left of the unpinned ones, so the order stays put.
+    pub(crate) fn pin(&mut self, id: TabId, on: bool) {
+        let Some(from) = self.index(id) else {
+            return;
+        };
+        if self.list[from].pinned == on {
+            return;
+        }
+        let mut tab = self.list.remove(from);
+        tab.pinned = on;
+        let at = self.pinned_count();
+        self.list.insert(at, tab);
     }
 
     pub(crate) fn index(&self, id: TabId) -> Option<usize> {
@@ -122,13 +164,20 @@ impl Tabs {
         self.list.iter_mut().find(|t| t.id == id)
     }
 
-    /// Move tab `id` to `index`, the library's slot not counted.
+    /// Move tab `id` to `index`, the library's slot not counted, kept on its own
+    /// side of the pinned run.
     pub(crate) fn move_to(&mut self, id: TabId, index: usize) {
         let Some(from) = self.index(id) else {
             return;
         };
         let tab = self.list.remove(from);
-        self.list.insert(index.min(self.list.len()), tab);
+        let pins = self.pinned_count();
+        let at = if tab.pinned {
+            index.min(pins)
+        } else {
+            index.clamp(pins, self.list.len())
+        };
+        self.list.insert(at, tab);
     }
 }
 
@@ -145,6 +194,7 @@ pub(crate) struct TabInfo {
     pub dirty: bool,
     pub loading: bool,
     pub failed: Option<String>,
+    pub pinned: bool,
 }
 
 impl TabInfo {
@@ -202,6 +252,7 @@ impl OndinApp {
                 dirty: s.is_dirty(),
                 loading: false,
                 failed: None,
+                pinned: tab.pinned,
             }
         };
         match &tab.body {
@@ -227,6 +278,7 @@ impl OndinApp {
                     dirty: false,
                     loading: self.opening.as_ref().is_some_and(|o| o.tab == tab.id),
                     failed: failed.clone(),
+                    pinned: tab.pinned,
                 }
             }
         }
@@ -567,21 +619,62 @@ impl OndinApp {
 
     // --- closing ---------------------------------------------------------------
 
-    /// Close tab `id`: the ×, a middle-click, `Ctrl+W`. A document in the library
-    /// saves and closes without asking; only work that cannot be saved is asked
-    /// about, on the *Unsaved changes* card.
+    /// Close tab `id`: the ×, a middle-click, `Ctrl+W`, the tab menu's *Close*.
     pub(crate) fn close_tab(&mut self, id: TabId) {
-        if self.tabs.active == Some(id) {
+        self.close_tabs(&[id]);
+    }
+
+    /// Close every tab in `ids`. A document in the library saves and closes
+    /// without asking; work that cannot be saved stays open and is asked about,
+    /// all of it on one *Unsaved changes* card.
+    ///
+    /// Pins are not checked here: the doors that must spare a pinned tab leave it
+    /// out of `ids`.
+    pub(crate) fn close_tabs(&mut self, ids: &[TabId]) {
+        if let Some(active) = self.tabs.active
+            && ids.contains(&active)
+        {
             self.finish_text_first();
             if self.session.is_dirty() && self.session.path.is_some() {
                 self.save_file(false);
             }
         }
-        if self.dirty_tabs().contains(&id) {
-            self.closing_tab = Some(id);
-            return;
+        let dirty = self.dirty_tabs();
+        let (asked, mut rest): (Vec<TabId>, Vec<TabId>) =
+            ids.iter().partition(|id| dirty.contains(id));
+        // The front tab last, so no tab about to close is brought forward and read.
+        let front = self.front_tab();
+        rest.sort_by_key(|id| Some(*id) == front);
+        for id in rest {
+            self.discard_tab(id);
         }
-        self.discard_tab(id);
+        if !asked.is_empty() {
+            self.closing_tabs = asked;
+        }
+    }
+
+    /// The tab menu's *Close others*: every unpinned tab but `keep`.
+    pub(crate) fn close_other_tabs(&mut self, keep: TabId) {
+        let ids: Vec<TabId> = self
+            .tabs
+            .list
+            .iter()
+            .filter(|t| !t.pinned && t.id != keep)
+            .map(|t| t.id)
+            .collect();
+        self.close_tabs(&ids);
+    }
+
+    /// The tab menu's *Close all*: every unpinned tab.
+    pub(crate) fn close_all_tabs(&mut self) {
+        let ids: Vec<TabId> = self
+            .tabs
+            .list
+            .iter()
+            .filter(|t| !t.pinned)
+            .map(|t| t.id)
+            .collect();
+        self.close_tabs(&ids);
     }
 
     /// Close tab `id` whatever it holds: its snapshot is forgotten, and the next tab
@@ -689,14 +782,16 @@ impl OndinApp {
             self.prefs.front_tab = Some(0);
             paths.push(last);
         }
+        let pins = self.prefs.pinned_tabs;
         let mut gone = 0;
-        for path in paths {
+        for (i, path) in paths.into_iter().enumerate() {
             if !path.exists() {
                 gone += 1;
                 continue;
             }
             if self.tab_of_path(&path).is_none() {
-                self.tabs.add(Body::Unloaded { path, failed: None });
+                let id = self.tabs.add(Body::Unloaded { path, failed: None });
+                self.tabs.pin(id, i < pins);
             }
         }
         if gone > 0 {
@@ -731,17 +826,23 @@ impl OndinApp {
         let front = self.front_tab();
         let mut paths = Vec::with_capacity(self.tabs.list.len());
         let mut front_at = None;
+        let mut pins = 0;
         for tab in &self.tabs.list {
             if let Some(path) = self.tab_path(tab) {
                 if front == Some(tab.id) {
                     front_at = Some(paths.len());
                 }
+                pins += usize::from(tab.pinned);
                 paths.push(path.to_path_buf());
             }
         }
-        if paths != self.prefs.open_tabs || front_at != self.prefs.front_tab {
+        if paths != self.prefs.open_tabs
+            || front_at != self.prefs.front_tab
+            || pins != self.prefs.pinned_tabs
+        {
             self.prefs.open_tabs = paths;
             self.prefs.front_tab = front_at;
+            self.prefs.pinned_tabs = pins;
             self.prefs.save();
         }
     }
@@ -880,11 +981,16 @@ impl OndinApp {
     /// **The strip**: the library's tab, a tab per open document, `+`, the caret
     /// when they overflow, and — on the hosts that draw their own — the window's
     /// caption buttons and the drag strip, since it is the title bar. On both
-    /// screens. `act` false draws it inert for a frame, as the chrome's `act`.
+    /// screens. `act` false draws it inert for a frame, as the chrome's `act`;
+    /// `spent` (a menu elsewhere was up as the frame began) stands down its
+    /// left-button doors only, so a right-click on a tab can still replace that menu.
     ///
     /// Its widgets sense the pointer and never the keyboard focus, as the system's
     /// title bar is not in the Tab order; the tab keys are `read_keys`'.
-    pub(crate) fn tab_strip(&mut self, ui: &mut egui::Ui, act: bool) {
+    pub(crate) fn tab_strip(&mut self, ui: &mut egui::Ui, act: bool, spent: bool) {
+        // Latched before anything is drawn: the click that closes the tab menu is
+        // spent, here and on the canvas (`context-menus.md` §0).
+        self.tabs.menu_was_up = self.tabs.menu.is_some();
         // No separator: egui's default line across the foot would cut the front tab
         // off from the top bar it joins.
         egui::Panel::top("tab-strip")
@@ -892,19 +998,21 @@ impl OndinApp {
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::NONE.fill(STRIP))
-            .show(ui, |ui| self.strip_body(ui, act));
+            .show(ui, |ui| self.strip_body(ui, act, spent));
     }
 
-    fn strip_body(&mut self, ui: &mut egui::Ui, act: bool) {
+    fn strip_body(&mut self, ui: &mut egui::Ui, act: bool, spent: bool) {
         let chrome = crate::chrome::Chrome::current();
         let strip = ui.max_rect();
+        // What a left-button press may do this frame.
+        let live = act && !spent && !self.tabs.menu_was_up;
         // Laid first, under everything that answers a press.
-        crate::chrome::drag_strip(ui, strip, act);
+        crate::chrome::drag_strip(ui, strip, live);
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(strip)
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
-            |ui| crate::chrome::caption_buttons(ui, chrome, act),
+            |ui| crate::chrome::caption_buttons(ui, chrome, live),
         );
         let controls = if chrome.draws_own_controls() {
             3.0 * crate::chrome::CONTROL_W
@@ -918,7 +1026,7 @@ impl OndinApp {
         let mut x = strip.left() + chrome.leading_inset() + LEAD;
         let home =
             egui::Rect::from_min_size(egui::pos2(x, foot - TAB_H), egui::vec2(HOME_W, TAB_H));
-        self.home_tab(ui, home, act);
+        self.home_tab(ui, home, live);
         x += HOME_W + GAP;
 
         let room = strip.right() - controls - DRAG_ROOM - x - (BUTTON + GAP);
@@ -932,11 +1040,11 @@ impl OndinApp {
                 egui::pos2(x, foot - TAB_H),
                 egui::vec2(layout.width, TAB_H),
             );
-            self.doc_tab(ui, rect, info, front == Some(info.id), act);
+            self.doc_tab(ui, rect, info, front == Some(info.id), act, live);
             x += layout.width + GAP;
         }
         // A tab dragged along the strip takes the slot under the pointer.
-        if act && let Some((id, px)) = self.dragged_tab(ui) {
+        if live && let Some((id, px)) = self.dragged_tab(ui) {
             let slot = ((px - run_left) / (layout.width + GAP)).floor().max(0.0) as usize;
             let to = (first + slot).min(infos.len().saturating_sub(1));
             if self.tabs.index(id) != Some(to) {
@@ -949,7 +1057,7 @@ impl OndinApp {
         if strip_button(ui, plus, crate::theme::icon::PLUS, false, "tab-new")
             .on_hover_text("New file (Ctrl+N)")
             .clicked()
-            && act
+            && live
         {
             self.new_tab_document();
         }
@@ -963,7 +1071,7 @@ impl OndinApp {
                 "tab-overflow",
             )
             .on_hover_text("Every open document");
-            if resp.clicked() && act {
+            if resp.clicked() && live {
                 self.tabs.overflow_open = !self.tabs.overflow_open;
             }
             if self.tabs.overflow_open {
@@ -971,6 +1079,107 @@ impl OndinApp {
             }
         } else {
             self.tabs.overflow_open = false;
+        }
+        if act {
+            self.tab_menu(ui.ctx());
+        } else {
+            self.tabs.menu = None;
+        }
+    }
+
+    /// A tab's right-click menu: *Pin tab* or *Unpin tab*, then *Close*, *Close
+    /// others* and *Close all*, none of which closes a pinned tab. It opens at the
+    /// press and closes on a choice, a click elsewhere, or `Escape` (read with the
+    /// keys: the editor's routing and `dashboard_keys`).
+    fn tab_menu(&mut self, ctx: &egui::Context) {
+        use crate::theme::icon;
+        use crate::ui::{MenuRow, menu_row};
+        const W: f32 = 190.0;
+        const PAD: f32 = 5.0;
+        let Some((id, at, opened)) = self.tabs.menu else {
+            return;
+        };
+        let Some(pinned) = self.tabs.get(id).map(|t| t.pinned) else {
+            self.tabs.menu = None;
+            return;
+        };
+        let unpinned = |t: &&Tab| !t.pinned;
+        let others = self.tabs.list.iter().filter(unpinned).any(|t| t.id != id);
+        let any = self.tabs.list.iter().any(|t| !t.pinned);
+        let front = self.front_tab() == Some(id);
+
+        enum Pick {
+            Pin,
+            Close,
+            Others,
+            All,
+        }
+        let mut pick = None;
+        // Four rows and a rule, the 1 pt gaps between the five, the padding and border.
+        let h = 4.0 * crate::ui::MENU_ITEM_H + crate::ui::MENU_SEP_H + 4.0 + 2.0 * PAD + 2.0;
+        let pos = crate::ui::menu_place(ctx, at, egui::vec2(W, h));
+        let menu = egui::Area::new(egui::Id::new("tab-menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                crate::ui::menu_frame(PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(W, PAD));
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let row = |glyph, label| MenuRow::new(glyph, label);
+                    let h = crate::ui::MENU_ITEM_H;
+                    let (glyph, label) = if pinned {
+                        (icon::PUSH_PIN_SLASH, "Unpin tab")
+                    } else {
+                        (icon::PUSH_PIN, "Pin tab")
+                    };
+                    if menu_row(ui, row(glyph, label), h).clicked() {
+                        pick = Some(Pick::Pin);
+                    }
+                    crate::ui::menu_sep(ui);
+                    let close = menu_row(
+                        ui,
+                        row(icon::X, "Close")
+                            .accel(front.then_some("Ctrl+W"))
+                            .enabled(!pinned),
+                        h,
+                    );
+                    if pinned {
+                        close.on_hover_text("Pinned tabs stay open; unpin it to close it");
+                    } else if close.clicked() {
+                        pick = Some(Pick::Close);
+                    }
+                    let resp = menu_row(ui, row(icon::X, "Close others").enabled(others), h);
+                    if !others {
+                        resp.on_hover_text("No other unpinned tabs");
+                    } else if resp.clicked() {
+                        pick = Some(Pick::Others);
+                    }
+                    let resp = menu_row(ui, row(icon::X, "Close all").enabled(any), h);
+                    if !any {
+                        resp.on_hover_text("Every tab is pinned");
+                    } else if resp.clicked() {
+                        pick = Some(Pick::All);
+                    }
+                });
+            })
+            .response;
+        if let Some(pick) = pick {
+            self.tabs.menu = None;
+            match pick {
+                Pick::Pin => self.tabs.pin(id, !pinned),
+                Pick::Close => self.close_tab(id),
+                Pick::Others => self.close_other_tabs(id),
+                Pick::All => self.close_all_tabs(),
+            }
+            return;
+        }
+        // Any click but the opener's, a right-click too: another menu opening elsewhere
+        // takes the one floating slot.
+        let pass = ctx.cumulative_pass_nr();
+        let elsewhere =
+            pass != opened && ctx.input(|i| i.pointer.any_click()) && !menu.contains_pointer();
+        if elsewhere {
+            self.tabs.menu = None;
         }
     }
 
@@ -994,7 +1203,9 @@ impl OndinApp {
     }
 
     /// One document's tab: the kit glyph or the warning, the name, and at its end
-    /// the × on the front tab and the hovered one, else the unsaved dot.
+    /// the pin on a pinned tab, else the × on the front tab and the hovered one,
+    /// else the unsaved dot. A right-click opens [`Self::tab_menu`]; the left-button
+    /// doors wait on `live` (`strip_body`'s).
     fn doc_tab(
         &mut self,
         ui: &mut egui::Ui,
@@ -1002,6 +1213,7 @@ impl OndinApp {
         info: &TabInfo,
         front: bool,
         act: bool,
+        live: bool,
     ) {
         use crate::theme::{color, icon};
         let id = tab_widget_id(info.id);
@@ -1076,8 +1288,16 @@ impl OndinApp {
             shown,
         );
 
-        let show_x = front || hovered;
-        if show_x {
+        let show_x = (front || hovered) && !info.pinned;
+        if info.pinned {
+            p.text(
+                close.center(),
+                egui::Align2::CENTER_CENTER,
+                icon::PUSH_PIN,
+                crate::theme::icon_font(12.0),
+                crate::theme::text::MUTED,
+            );
+        } else if show_x {
             if close_resp.hovered() {
                 p.rect_filled(close, egui::CornerRadius::same(4), color::text_a(26));
             }
@@ -1095,15 +1315,30 @@ impl OndinApp {
         if !act {
             return;
         }
+        // The release opens it, at the press (`context-menus.md` §0 R1), and it
+        // replaces any other floating menu (§0 R4), so it is read even when `live`
+        // is false.
+        if resp.secondary_clicked() {
+            let at = resp.interact_pointer_pos().unwrap_or(rect.left_bottom());
+            let pass = ui.ctx().cumulative_pass_nr();
+            self.tabs.menu = Some((info.id, at, pass));
+            self.tabs.overflow_open = false;
+            self.context_menu = None;
+            self.dash.menu_for = None;
+            self.dash.filter_open = false;
+        }
+        let resp = resp.on_hover_text(info.full_path());
+        if !live {
+            return;
+        }
         if show_x && close_resp.clicked() {
             self.close_tab(info.id);
             return;
         }
-        if resp.clicked_by(egui::PointerButton::Middle) {
+        if resp.clicked_by(egui::PointerButton::Middle) && !info.pinned {
             self.close_tab(info.id);
             return;
         }
-        let resp = resp.on_hover_text(info.full_path());
         if (resp.clicked() || resp.drag_started()) && !front {
             self.activate_tab(info.id);
         }
@@ -1553,16 +1788,16 @@ mod tests {
         let starter = app.tabs.active.unwrap();
         edit(&mut app);
         app.close_tab(starter);
-        assert_eq!(app.closing_tab, Some(starter), "asks");
+        assert_eq!(app.closing_tabs, vec![starter], "asks");
         assert!(app.tabs.get(starter).is_some(), "and waits");
 
-        app.closing_tab = None;
+        app.closing_tabs.clear();
         let a = file(&root, "a");
         app.open_path(&a);
         edit(&mut app);
         let a_tab = app.front_tab().unwrap();
         app.close_tab(a_tab);
-        assert_eq!(app.closing_tab, None, "saved instead of asked");
+        assert!(app.closing_tabs.is_empty(), "saved instead of asked");
         assert!(app.tabs.get(a_tab).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1930,5 +2165,211 @@ mod tests {
             })
             .collect();
         assert!(seams.is_empty(), "no seam: {seams:?}");
+    }
+
+    /// A pin goes right of the tabs pinned before it, an unpin to the head of the
+    /// unpinned ones, and a drag cannot carry a tab across the boundary.
+    /// flip: `Tabs::pin` inserting at 0 → fails at "the last pinned stays right-most".
+    #[test]
+    fn pinned_tabs_lead_the_strip_in_the_order_they_were_pinned() {
+        let mut tabs = Tabs::default();
+        let body = || Body::Unloaded {
+            path: PathBuf::from("x.ondin"),
+            failed: None,
+        };
+        let [a, b, c, d] = [(); 4].map(|_| tabs.add(body()));
+        let order = |t: &Tabs| t.list.iter().map(|t| t.id).collect::<Vec<_>>();
+
+        tabs.pin(c, true);
+        assert_eq!(order(&tabs), vec![c, a, b, d]);
+        tabs.pin(d, true);
+        assert_eq!(
+            order(&tabs),
+            vec![c, d, a, b],
+            "the last pinned stays right-most"
+        );
+        assert_eq!(tabs.pinned_count(), 2);
+
+        tabs.move_to(a, 0);
+        assert_eq!(
+            order(&tabs),
+            vec![c, d, a, b],
+            "an unpinned tab stays after"
+        );
+        tabs.move_to(c, 3);
+        assert_eq!(
+            order(&tabs),
+            vec![d, c, a, b],
+            "a pinned one stays among them"
+        );
+        let e = tabs.insert(0, body());
+        assert_eq!(
+            tabs.index(e),
+            Some(2),
+            "a reopened tab lands after the pins"
+        );
+
+        tabs.pin(d, false);
+        assert_eq!(order(&tabs), vec![c, d, e, a, b], "unpinned to the head");
+        assert!(!tabs.is_pinned(d) && tabs.is_pinned(c));
+    }
+
+    /// *Close others*, *Close all* and `Ctrl+W` all spare a pinned tab; unsaved
+    /// work that cannot be saved is asked about rather than closed.
+    /// flip: `close_all_tabs` not filtering pins → fails at "the pinned tab stays".
+    #[test]
+    fn closing_in_bulk_spares_pinned_tabs() {
+        let ctx = egui::Context::default();
+        let root = temp_root("bulk-close");
+        let mut app = app_at(&ctx, &root);
+        let starter = app.tabs.active.unwrap();
+        let (a, b, c) = (file(&root, "a"), file(&root, "b"), file(&root, "c"));
+        app.open_path(&a);
+        app.open_path(&b);
+        app.open_path(&c);
+        let (a_tab, b_tab, c_tab) = (
+            app.tab_of_path(&a).unwrap(),
+            app.tab_of_path(&b).unwrap(),
+            app.tab_of_path(&c).unwrap(),
+        );
+        app.tabs.pin(b_tab, true);
+
+        app.close_other_tabs(c_tab);
+        assert!(app.tabs.get(a_tab).is_none() && app.tabs.get(starter).is_none());
+        assert!(app.tabs.get(b_tab).is_some() && app.tabs.get(c_tab).is_some());
+
+        app.activate_tab(b_tab);
+        app.dispatch(&ctx, crate::input::Action::CloseDocument);
+        assert!(app.tabs.get(b_tab).is_some(), "Ctrl+W spares a pinned tab");
+
+        app.activate_tab(c_tab);
+        edit(&mut app);
+        app.session.path = None;
+        app.close_all_tabs();
+        assert_eq!(
+            app.closing_tabs,
+            vec![c_tab],
+            "unsavable work is asked about"
+        );
+        assert!(app.tabs.get(b_tab).is_some(), "the pinned tab stays");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The pins come back at the next launch, as the first tabs of the list.
+    /// flip: `remember_tabs` not counting pins → fails at the saved count.
+    #[test]
+    fn pins_survive_a_restart() {
+        let ctx = egui::Context::default();
+        let root = temp_root("pins-restart");
+        let mut app = app_at(&ctx, &root);
+        let (a, b) = (file(&root, "a"), file(&root, "b"));
+        app.open_path(&a);
+        app.open_path(&b);
+        app.tabs.pin(app.tab_of_path(&b).unwrap(), true);
+        app.remember_tabs();
+        assert_eq!(app.prefs.pinned_tabs, 1);
+
+        let mut next = app_at(&ctx, &root);
+        next.tabs = Tabs::default();
+        next.prefs.open_tabs = app.prefs.open_tabs.clone();
+        next.prefs.pinned_tabs = app.prefs.pinned_tabs;
+        next.restore_tabs();
+        let b_tab = next.tab_of_path(&b).unwrap();
+        assert!(next.tabs.is_pinned(b_tab), "b comes back pinned");
+        assert_eq!(next.tabs.index(b_tab), Some(0));
+        assert!(!next.tabs.is_pinned(next.tab_of_path(&a).unwrap()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A right-click on a tab opens its menu at the press; *Pin tab* pins it, and
+    /// the pinned tab shows no × to close it by.
+    /// flip: `doc_tab` not reading `secondary_clicked` → fails at "the menu opens".
+    #[test]
+    fn a_tabs_menu_pins_it_and_a_pinned_tab_has_no_close_box() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("tab-menu");
+        let mut app = app_at(&ctx, &root);
+        let a = file(&root, "a");
+        app.open_path(&a);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let a_tab = app.tab_of_path(&a).unwrap();
+        let (body, close) = tab_points(1);
+        click(&ctx, &mut app, body, egui::PointerButton::Secondary);
+        assert!(
+            matches!(app.tabs.menu, Some((id, at, _)) if id == a_tab && at == body),
+            "the menu opens, at the press"
+        );
+
+        let rows = menu_rows(&ctx, &mut app);
+        let pin = rows
+            .iter()
+            .find(|(t, _)| t == "Pin tab")
+            .expect("a Pin row");
+        click(&ctx, &mut app, pin.1, egui::PointerButton::Primary);
+        assert!(app.tabs.is_pinned(a_tab), "pinned");
+        assert!(app.tabs.menu.is_none(), "and the menu closes");
+
+        click(&ctx, &mut app, close, egui::PointerButton::Primary);
+        assert!(app.tabs.get(a_tab).is_some(), "the pin is no close box");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The click that closes the tab menu is spent: it does not also bring the tab
+    /// it lands on forward, and the same click with no menu up does.
+    /// flip: `strip_body`'s `live` ignoring `menu_was_up` → fails at "spent".
+    #[test]
+    fn the_click_that_closes_the_tab_menu_is_spent() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("tab-menu-spent");
+        let mut app = app_at(&ctx, &root);
+        let (a, b) = (file(&root, "a"), file(&root, "b"));
+        app.open_path(&a);
+        app.open_path(&b);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let (starter, _) = tab_points(0);
+        let (on_a, _) = tab_points(1);
+        click(&ctx, &mut app, starter, egui::PointerButton::Secondary);
+        assert!(app.tabs.menu.is_some(), "fixture: the menu is up");
+
+        click(&ctx, &mut app, on_a, egui::PointerButton::Primary);
+        assert!(app.tabs.menu.is_none(), "the click closes the menu");
+        assert_eq!(front_path(&app).as_deref(), Some(b.as_path()), "spent");
+
+        click(&ctx, &mut app, on_a, egui::PointerButton::Primary);
+        assert_eq!(
+            front_path(&app).as_deref(),
+            Some(a.as_path()),
+            "control: with no menu up it brings a forward"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every label painted this frame and the centre of its run, for clicking a
+    /// menu row by name.
+    fn menu_rows(ctx: &egui::Context, app: &mut OndinApp) -> Vec<(String, egui::Pos2)> {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+        out.shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => {
+                    Some((t.galley.text().to_owned(), t.pos + t.galley.size() / 2.0))
+                }
+                _ => None,
+            })
+            .collect()
     }
 }

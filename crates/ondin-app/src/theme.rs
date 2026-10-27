@@ -525,6 +525,10 @@ pub mod icon {
     pub const PACKAGE: &str = "\u{e390}";
     /// A document open in a tab: the library card's *Open* chip.
     pub const BROWSERS: &str = "\u{e0f6}";
+    /// A pinned tab, in the place of its ×, and the tab menu's *Pin tab*.
+    pub const PUSH_PIN: &str = "\u{e3e2}";
+    /// The tab menu's *Unpin tab*.
+    pub const PUSH_PIN_SLASH: &str = "\u{e3e4}";
     /// The styles and variables browser's button (§5.3f).
     pub const SWATCHES: &str = "\u{e5b8}";
     /// A style card's *Create style…* (§15 D1063).
@@ -778,6 +782,8 @@ pub mod icon {
         ("hexagon", HEXAGON),
         ("package", PACKAGE),
         ("browsers", BROWSERS),
+        ("push-pin", PUSH_PIN),
+        ("push-pin-slash", PUSH_PIN_SLASH),
         ("swatches", SWATCHES),
         ("plus-square", PLUS_SQUARE),
         ("palette", PALETTE),

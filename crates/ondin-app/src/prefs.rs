@@ -258,6 +258,9 @@ pub struct Prefs {
     pub open_tabs: Vec<PathBuf>,
     /// Which of [`Self::open_tabs`] was in front, or `None` for the library.
     pub front_tab: Option<usize>,
+    /// How many of [`Self::open_tabs`], from the first, were pinned: pinned tabs
+    /// always lead the strip.
+    pub pinned_tabs: usize,
     /// The document opened last. Read at launch only when [`Self::open_tabs`] is
     /// empty, as a preferences file from before tabs has it.
     ///
@@ -324,6 +327,7 @@ impl Default for Prefs {
             reopen_last: false,
             open_tabs: Vec::new(),
             front_tab: None,
+            pinned_tabs: 0,
             last_document: None,
             palette_recent: Vec::new(),
             view: ViewPrefs::default(),

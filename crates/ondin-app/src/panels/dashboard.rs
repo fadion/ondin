@@ -520,8 +520,10 @@ impl OndinApp {
     pub(crate) fn dashboard_ui(&mut self, ui: &mut egui::Ui) {
         let mut act: Option<Act> = None;
 
-        // Before anything is drawn: the dismissals run from inside the cards.
-        self.dash.menu_was_up = self.library_menu_open();
+        // Before anything is drawn: the dismissals run from inside the cards. The tab
+        // menu counts, as its click-away is spent here too.
+        let library_menu = self.library_menu_open();
+        self.dash.menu_was_up = library_menu || self.tabs.menu.is_some();
 
         // Before any card asks: take the worker's finished answers and drop unwanted covers.
         self.covers.pass(ui.ctx());
@@ -535,8 +537,18 @@ impl OndinApp {
                 self.tab_key(key);
             }
         }
-        // A click that dismisses a library menu is spent doing so.
-        self.tab_strip(ui, !self.dash.menu_was_up);
+        // The tab menu holds the keyboard (`library_keys_are_free`); `Escape` closes
+        // only it, consumed so `dashboard_keys` does not also clear the cursor.
+        if self.tabs.menu.is_some()
+            && ui
+                .ctx()
+                .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.tabs.menu = None;
+        }
+        // A click that dismisses a library menu is spent doing so; the strip latches
+        // its own menu.
+        self.tab_strip(ui, true, library_menu);
         self.dashboard_top_bar(ui, &mut act);
         egui::Panel::left("library-sidebar")
             .exact_size(SIDEBAR_W)
@@ -2213,6 +2225,7 @@ impl OndinApp {
             && self.rename_entry.is_none()
             && self.unsharing_kit.is_none()
             && self.cheatsheet.is_none()
+            && self.tabs.menu.is_none()
     }
 
     /// The library's own keymap — arrows, `Enter`, `Delete`, `Escape`, `F2`,

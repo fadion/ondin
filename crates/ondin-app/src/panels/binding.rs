@@ -1315,7 +1315,13 @@ impl OndinApp {
     }
 
     /// The field menu (§6.7), open at a point on a bindable field.
+    ///
+    /// A right-click that cancelled a gesture opens none, as `open_context_menu`
+    /// refuses one: dropped here because every door sets it before this draws.
     pub(crate) fn field_menu_ui(&mut self, ctx: &egui::Context) {
+        if self.gesture_cancelled {
+            self.field_menu = None;
+        }
         let Some((key, at, under)) = self.field_menu else {
             return;
         };
@@ -2354,6 +2360,33 @@ mod tests {
         app.session.doc.get(rect).unwrap().paint().fills[0]
             .brush
             .clone()
+    }
+
+    /// A right-click that cancelled a scrub or a canvas drag opens no field menu under it.
+    ///
+    /// flip: `field_menu_ui`'s `gesture_cancelled` guard removed → fails at "the cancel".
+    #[test]
+    fn a_cancelling_right_click_opens_no_field_menu() {
+        let (ctx, mut app, rect, ..) = fixture();
+        let menu = (
+            FieldKey::Radius { id: rect },
+            egui::pos2(500.0, 200.0),
+            egui::Rect::from_min_size(egui::pos2(480.0, 190.0), egui::vec2(120.0, 28.0)),
+        );
+        for (cancelled, open) in [(false, true), (true, false)] {
+            app.field_menu = Some(menu);
+            app.gesture_cancelled = cancelled;
+            let _ = ctx.run_ui(Default::default(), |ui| app.field_menu_ui(ui.ctx()));
+            assert_eq!(
+                app.field_menu.is_some(),
+                open,
+                "{}",
+                match cancelled {
+                    true => "the cancel spent the right-click, yet the menu stayed",
+                    false => "a plain right-click's menu closed by itself",
+                }
+            );
+        }
     }
 
     fn key(k: egui::Key) -> egui::Event {

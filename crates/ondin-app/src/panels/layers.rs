@@ -1766,7 +1766,8 @@ impl OndinApp {
             // reaches a locked or hidden layer, so its menu carries the full set,
             // including *Unlock* (§5.9, C4). C6 needs no code: the press already
             // committed any live rename (`layer_rename_field`).
-            if resp.secondary_clicked() {
+            // Not after a cancelling right-click, which would reselect with no menu.
+            if resp.secondary_clicked() && !self.gesture_cancelled {
                 // C2, in the panel: a right-click on a row that is already part of
                 // the selection acts on all of it.
                 if !self.session.selection.contains(id) {

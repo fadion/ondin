@@ -1282,6 +1282,7 @@ impl OndinApp {
             job.wrap = egui::text::TextWrapping::truncate_at_width(room);
             f.layout_job(job)
         });
+        let cut = galley.elided;
         p.galley(
             egui::pos2(left, rect.center().y - galley.size().y / 2.0),
             galley,
@@ -1327,7 +1328,12 @@ impl OndinApp {
             self.dash.menu_for = None;
             self.dash.filter_open = false;
         }
-        let resp = resp.on_hover_text(info.full_path());
+        // Only over a name the tab had to cut: a whole one says it already.
+        let resp = if cut {
+            resp.on_hover_text(info.full_path())
+        } else {
+            resp
+        };
         if !live {
             return;
         }

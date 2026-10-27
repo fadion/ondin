@@ -250,10 +250,16 @@ pub struct Prefs {
     /// Which sort the dashboard opens on — one of `library::Sort`'s labels, with
     /// the same degrade-to-default rule as [`Self::dashboard_page`].
     pub dashboard_sort: String,
-    /// Reopen the last document on launch instead of showing the dashboard.
-    /// Off: the app opens on the library.
+    /// Put the tab that was in front at the last quit in front again on launch,
+    /// instead of the library. The tabs come back either way ([`Self::open_tabs`]).
     pub reopen_last: bool,
-    /// The document open when the app last closed, for [`Self::reopen_last`].
+    /// The documents open in tabs at the last quit, in strip order; a document
+    /// never filed has no path and is not among them.
+    pub open_tabs: Vec<PathBuf>,
+    /// Which of [`Self::open_tabs`] was in front, or `None` for the library.
+    pub front_tab: Option<usize>,
+    /// The document opened last. Read at launch only when [`Self::open_tabs`] is
+    /// empty, as a preferences file from before tabs has it.
     ///
     /// A path rather than a document id, since resolving an id means scanning the
     /// library and this is read before the first scan. A stale path opens the
@@ -316,6 +322,8 @@ impl Default for Prefs {
             dashboard_list_view: false,
             dashboard_sort: "edited".into(),
             reopen_last: false,
+            open_tabs: Vec::new(),
+            front_tab: None,
             last_document: None,
             palette_recent: Vec::new(),
             view: ViewPrefs::default(),

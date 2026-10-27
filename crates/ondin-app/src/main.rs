@@ -100,6 +100,7 @@ mod session;
 mod settings;
 mod snap;
 mod spacing;
+mod tabs;
 mod theme;
 mod thumbs;
 mod tools;

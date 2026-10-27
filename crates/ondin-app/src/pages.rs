@@ -46,6 +46,17 @@ pub(crate) struct PagesState {
     plus: Option<egui::Rect>,
 }
 
+impl PagesState {
+    /// The state of a document coming back to the front on `page`: nothing in
+    /// flight, and `page` already shown, so its return is not a page change.
+    pub(crate) fn showing(page: NodeId) -> Self {
+        Self {
+            shown: Some(page),
+            ..Default::default()
+        }
+    }
+}
+
 /// A page row's rename in flight.
 struct Renaming {
     page: NodeId,

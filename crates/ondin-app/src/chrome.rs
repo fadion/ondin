@@ -128,35 +128,6 @@ impl Chrome {
     }
 }
 
-/// A top bar's frame: `fill`, `margin` points of padding on the left plus
-/// [`Chrome::leading_inset`], and none on the right — the caption buttons sit
-/// flush against the edge and [`after_buttons`] puts the right margin back.
-pub(crate) fn bar_frame(fill: Color32, margin: f32, chrome: Chrome) -> egui::Frame {
-    let left = (margin + chrome.leading_inset()).round() as i8;
-    egui::Frame::NONE.fill(fill).inner_margin(egui::Margin {
-        left,
-        right: 0,
-        top: 0,
-        bottom: 0,
-    })
-}
-
-/// The whole of a top bar's rectangle, from inside its [`bar_frame`], for
-/// [`drag_strip`].
-pub(crate) fn bar_rect(ui: &egui::Ui, margin: f32, chrome: Chrome) -> Rect {
-    let inner = ui.max_rect();
-    Rect::from_min_max(
-        Pos2::new(inner.min.x - margin - chrome.leading_inset(), inner.min.y),
-        inner.max,
-    )
-}
-
-/// The bar's right margin, put back after the caption buttons in a
-/// `right_to_left` row: `margin` in all, of which `item_spacing` supplies `gap`.
-pub(crate) fn after_buttons(ui: &mut egui::Ui, margin: f32, gap: f32) {
-    ui.add_space((margin - gap).max(0.0));
-}
-
 /// Whether the window is maximized, as the last frame's viewport reported it.
 /// Read, not remembered: a snap or Win+↑ changes it without passing a button here.
 fn maximized(ctx: &egui::Context) -> bool {
@@ -407,7 +378,7 @@ fn three_buttons(ui: &mut egui::Ui, act: bool) {
 /// pointer is at the top edge and for as long as it stays on the strip. Call
 /// once a frame while focus mode is on.
 ///
-/// Focus mode hides the top bar, which on a host that draws its own controls
+/// Focus mode hides the tab strip, which on a host that draws its own controls
 /// is the title bar. Nothing on macOS ([`Chrome::draws_own_controls`]).
 ///
 /// Revealed only from the edge, and only with no button held: a drag carrying a
@@ -696,7 +667,7 @@ mod tests {
                     drag_strip(ui, BAR, act);
                     ui.spacing_mut().item_spacing.x = 5.0;
                     caption_buttons(ui, chrome, act);
-                    after_buttons(ui, 14.0, 5.0);
+                    ui.add_space(9.0);
                     let _ = ui.button("Settings");
                 },
             );

@@ -348,10 +348,14 @@ pub(crate) struct FrameIndex {
     walks: u64,
 }
 
-/// A library file on its way in ([`OndinApp::begin_open`]): which one, the
-/// worker's answer, and when it was asked for — the pulse's clock.
+/// A library file on its way in ([`OndinApp::begin_open`]): which one, the tab it
+/// goes into, the worker's answer, and when it was asked for — the pulse's clock.
 pub(crate) struct Opening {
     pub path: std::path::PathBuf,
+    pub tab: crate::tabs::TabId,
+    /// Whether the tab was made for this read, so a failure closes it again rather
+    /// than leaving a tab for a file the user never had open.
+    fresh: bool,
     rx: std::sync::mpsc::Receiver<Result<Opened, String>>,
     pub at: std::time::Instant,
 }
@@ -361,7 +365,7 @@ pub(crate) type Opened = (ondin_core::Document, Option<ondin_core::SavedHistory>
 
 /// Read `path` as a document, and the history kept for it under `root` when `keep`
 /// says histories are kept.
-fn read_opened(
+pub(crate) fn read_opened(
     path: &std::path::Path,
     root: &std::path::Path,
     keep: bool,
@@ -533,6 +537,10 @@ pub struct OndinApp {
     pub(crate) layers_edge: EdgeDwell,
     /// Set when the window manager asked to close and there are unsaved edits.
     pub(crate) confirming_close: bool,
+    /// The open documents' tabs (`crate::tabs`).
+    pub(crate) tabs: crate::tabs::Tabs,
+    /// A tab whose close is waiting on the *Unsaved changes* card.
+    pub(crate) closing_tab: Option<crate::tabs::TabId>,
     /// A set's value the user asked to delete while variants use it, until the
     /// confirmation modal is answered.
     pub(crate) deleting_value: Option<crate::panels::ValueDelete>,
@@ -1178,15 +1186,14 @@ impl OndinApp {
         ));
     }
 
-    /// Decide what the window shows on the first frame: `open` when the command line
-    /// named a document, else the library, unless `reopen_last` names a document that
-    /// still loads.
-    ///
-    /// The reopen deliberately skips `open_path`, which rewrites `last_document`; a
-    /// named document goes through it, so it is remembered and a failure is reported.
-    /// Nothing is open yet for its autosave, question or recovery drop to touch.
+    /// Decide what the window shows on the first frame. The tabs open at the last
+    /// quit come back, each only a path until it is shown, unless another Ondin is
+    /// running ([`crate::tabs::Tabs::private`]); in front goes `open` when
+    /// the command line named a document, else the tab that was in front when
+    /// `reopen_last` is on and its document still loads, else the library.
     fn open_at_launch(&mut self, open: Option<&std::path::Path>) {
         self.view = View::Dashboard;
+        self.tabs = crate::tabs::Tabs::default();
         self.report_unreadable_records();
         // Enforced at launch to reach users who reopen straight into a document.
         crate::library::store::purge_trash(&self.library.root, self.prefs.trash_keep_days);
@@ -1195,6 +1202,12 @@ impl OndinApp {
         // Collected before the reopen; a later frame's modal asks over whatever opens.
         self.recovery.pending =
             crate::library::recovery::pending(&self.library.root, &self.library.entries);
+        // Another window may hold the last quit's documents open, and two sessions
+        // saving one file overwrite each other.
+        self.tabs.private = crate::instances::others() > 0;
+        if !self.tabs.private {
+            self.restore_tabs();
+        }
         if let Some(path) = open {
             self.open_path(path);
             return;
@@ -1202,25 +1215,14 @@ impl OndinApp {
         if !self.prefs.reopen_last {
             return;
         }
-        let Some(path) = self.prefs.last_document.clone() else {
+        let Some(front) = self.restored_front() else {
             return;
         };
-        let Ok(bytes) = std::fs::read(&path) else {
-            return;
-        };
-        let Ok(doc) = ondin_core::io::load(&bytes) else {
-            return;
-        };
-        if let Some(id) = doc.meta().id.clone() {
-            self.library.local.mark_opened(&id);
-            self.library.local.save();
+        // A front document that no longer reads leaves the library in front, its
+        // tab saying why.
+        if !self.load_now(front) {
+            self.view = View::Dashboard;
         }
-        self.session.adopt_document(doc, Some(path));
-        self.reopen_last_page();
-        if self.prefs.collapse_groups_on_open {
-            self.collapse_all();
-        }
-        self.view = View::Editor;
     }
 
     /// An `OndinApp` with no GPU, font threads, preferences file or OS clipboard. The
@@ -1297,6 +1299,10 @@ impl OndinApp {
             layer_drag: None,
             layers_edge: EdgeDwell::default(),
             confirming_close: false,
+            // The starter document in a tab of its own; `open_at_launch` starts
+            // the window with none.
+            tabs: crate::tabs::Tabs::with_active(),
+            closing_tab: None,
             deleting_value: None,
             inspector_hold: None,
             canvas_px: (1, 1),
@@ -1478,6 +1484,7 @@ impl eframe::App for OndinApp {
         self.session.forget_step_name();
         self.history_pane.hover.clear();
         self.remember_view_switches();
+        self.remember_tabs();
 
         // Before any card: the editor's centre on the canvas, as the palette does.
         let canvas = (self.view != View::Dashboard && self.canvas_rect.is_positive())
@@ -1520,6 +1527,20 @@ impl eframe::App for OndinApp {
             // the end of this function).
             crate::chrome::above_modal(ui.ctx(), crate::chrome::Chrome::current());
             // Written here too, or the first editor frame would read a stale value.
+            self.chrome_focus = ui.ctx().memory(|m| m.focused()).is_some();
+            return;
+        }
+
+        // The tab in front is still being read, or could not be: its place, over the
+        // active tab's state, which nothing this frame may touch.
+        if self.tabs.shown.is_some() && self.tabs.shown != self.tabs.active {
+            self.palette = None;
+            self.stop_presenting(ui.ctx());
+            self.tab_strip(ui, !self.modal_is_up());
+            if !self.modal_is_up() {
+                self.tab_placeholder(ui);
+            }
+            crate::chrome::above_modal(ui.ctx(), crate::chrome::Chrome::current());
             self.chrome_focus = ui.ctx().memory(|m| m.focused()).is_some();
             return;
         }
@@ -1633,8 +1654,13 @@ impl eframe::App for OndinApp {
                 self.export_menu = false;
                 self.export_row_open = None;
             }
-            for action in input::resolve(&ctx, self.mode, self.prefs.nudge) {
-                self.dispatch(&ctx, action);
+            // Before the keymap: a tab key moves every key after it to another document.
+            if let Some(key) = crate::tabs::read_keys(&ctx) {
+                self.tab_key(key);
+            } else {
+                for action in input::resolve(&ctx, self.mode, self.prefs.nudge) {
+                    self.dispatch(&ctx, action);
+                }
             }
         }
 
@@ -1664,6 +1690,7 @@ impl eframe::App for OndinApp {
 
         // Focus mode overrides the chrome switches without changing them.
         if !self.focus {
+            self.tab_strip(ui, true);
             self.top_bar(ui);
             if self.show_layers {
                 self.layers_panel(ui);
@@ -1883,7 +1910,11 @@ impl OndinApp {
                 let project = self.open_document_project();
                 self.new_library_document(project);
             }
-            Action::CloseDocument => self.go_to_dashboard(),
+            Action::CloseDocument => {
+                if let Some(id) = self.front_tab() {
+                    self.close_tab(id);
+                }
+            }
             // The top bar's door; it cannot arrive with the modal already up.
             Action::OpenSettings => self.toggle_settings(ctx),
             Action::Palette => self.toggle_palette(ctx),
@@ -4953,7 +4984,7 @@ impl OndinApp {
     ///
     /// [`SNAPSHOT_SECS`]: crate::library::recovery::SNAPSHOT_SECS
     /// [`writer::Writer`]: crate::library::writer::Writer
-    fn recovery_tick(&mut self, ctx: &egui::Context) {
+    pub(crate) fn recovery_tick(&mut self, ctx: &egui::Context) {
         use crate::library::recovery;
         // The frame drains results ([`OndinApp::disk_results`]) first; a test driving this
         // directly has to drain them itself.
@@ -5064,8 +5095,8 @@ impl OndinApp {
     ///
     /// Recovering never writes the user's file: the snapshot loads with the original's
     /// path, marked unsaved ([`EditorSession::mark_unsaved`]), and is kept, adopted by
-    /// [`Self::recovery_tick`]. [`Self::recover`] drops the outgoing session's snapshot,
-    /// safe only behind [`Self::may_replace_current_document`], asked before `pending` pops.
+    /// [`Self::recovery_tick`]. [`Self::recover`] opens it in a tab of its own, so the
+    /// document in front keeps its work and its snapshot.
     fn recovery_modal(&mut self, ctx: &egui::Context) {
         let Some(pending) = self.recovery.pending.last().cloned() else {
             return;
@@ -5143,11 +5174,8 @@ impl OndinApp {
 
         match decision {
             Some(RecoverChoice::Recover) => {
-                // The guard runs before the pop: a *Recover* backed out of is not a *Later*.
-                if self.may_replace_current_document("recovering another document") {
-                    self.recovery.pending.pop();
-                    self.recover(&pending);
-                }
+                self.recovery.pending.pop();
+                self.recover(&pending);
             }
             Some(RecoverChoice::Discard) => {
                 self.recovery.pending.pop();
@@ -5161,8 +5189,9 @@ impl OndinApp {
         }
     }
 
-    /// Load a snapshot into the session, unsaved. Not an `open_path`: a recovery does
-    /// not touch *Recent*, `prefs.last_document` or `collapse_groups_on_open`.
+    /// Load a snapshot unsaved, in the tab already holding its file or a new one. Not
+    /// an `open_path`: a recovery does not touch *Recent*, `prefs.last_document` or
+    /// `collapse_groups_on_open`.
     fn recover(&mut self, pending: &crate::library::recovery::Pending) {
         let bytes = match std::fs::read(&pending.path) {
             Ok(b) => b,
@@ -5172,12 +5201,11 @@ impl OndinApp {
             Ok(d) => d,
             Err(e) => return self.session.fail(format!("Recovery failed: {e}")),
         };
-        // The outgoing snapshot, dropped before the adopt overwrites `recovery.key`, or it
-        // is offered at every launch forever. Safe only because the caller ran
-        // `may_replace_current_document`; otherwise a second queued *Recover* would delete
-        // the unsaved first one.
+        self.tab_for_adopting(pending.target.as_deref());
+        // The snapshot of the state being replaced, dropped before the adopt
+        // overwrites `recovery.key`, or it is offered at every launch forever. Only
+        // the same file's: `tab_for_adopting` parked any other document with its own.
         self.drop_recovery();
-        self.opening = None;
         self.session.adopt_document(doc, pending.target.clone());
         // After `adopt_document`, which sets it clean.
         self.session.mark_unsaved();
@@ -5207,7 +5235,7 @@ impl OndinApp {
 
     /// Delete the snapshot filed under `key` down the writer's queue, so an in-flight
     /// write cannot put it back. With no writer, the removal goes straight to disk.
-    fn forget_snapshot(&mut self, key: &str) {
+    pub(crate) fn forget_snapshot(&mut self, key: &str) {
         let root = self.library.root.clone();
         match self.writer.as_mut() {
             Some(writer) => writer.forget(&root, key),
@@ -5248,29 +5276,63 @@ impl OndinApp {
         self.confirming_close = false;
     }
 
-    /// Open a document from the library into the editor. Reports failure and stays where
-    /// it is, so the dashboard row can be tried again.
+    /// Open a document into the editor on this frame, in a new tab at the end of the
+    /// strip; a document already open has its tab brought forward instead. Reports
+    /// failure and stays where it is, so the dashboard row can be tried again.
     pub(crate) fn open_path(&mut self, path: &std::path::Path) {
-        if !self.may_replace_current_document("opening another document") {
+        if let Some(id) = self.tab_of_path(path) {
+            match self.tabs.get(id).map(|t| &t.body) {
+                Some(crate::tabs::Body::Unloaded { .. }) => {
+                    if self.load_now(id) {
+                        self.leave_library_for_editor();
+                    }
+                }
+                _ => self.activate_tab(id),
+            }
             return;
         }
-        // A card still loading loses to this one.
-        self.opening = None;
         match read_opened(path, &self.library.root, self.prefs.history_size > 0) {
             Ok(opened) => self.adopt_opened_with(path, opened),
             Err(why) => self.session.fail(why),
         }
     }
 
-    /// Open `path` with the read and the load on a worker, the library's card pulsing
-    /// until [`Self::poll_open`] adopts it; a second click replaces the first.
+    /// Open `path` with the read and the load on a worker: its tab comes to the front
+    /// at once, pulsing until [`Self::poll_open`] adopts the document. A document
+    /// already open has its tab brought forward instead.
     pub(crate) fn begin_open(&mut self, path: &std::path::Path) {
+        let found = self.tab_of_path(path);
+        if let Some(id) = found
+            && !matches!(
+                self.tabs.get(id).map(|t| &t.body),
+                Some(crate::tabs::Body::Unloaded { .. })
+            )
+        {
+            self.activate_tab(id);
+            return;
+        }
         if self.opening.as_ref().is_some_and(|o| o.path == path) {
             return;
         }
-        if !self.may_replace_current_document("opening another document") {
-            return;
-        }
+        let id = found.unwrap_or_else(|| {
+            self.tabs.add(crate::tabs::Body::Unloaded {
+                path: path.to_path_buf(),
+                failed: None,
+            })
+        });
+        self.read_into_tab(id, path, found.is_none());
+        self.tabs.shown = Some(id);
+        self.leave_library_for_editor();
+    }
+
+    /// Start the worker reading `path` for tab `id`; with no thread to be had, read
+    /// it on this one.
+    pub(crate) fn read_into_tab(
+        &mut self,
+        id: crate::tabs::TabId,
+        path: &std::path::Path,
+        fresh: bool,
+    ) {
         let (tx, rx) = std::sync::mpsc::channel();
         let at = path.to_path_buf();
         let root = self.library.root.clone();
@@ -5284,13 +5346,24 @@ impl OndinApp {
             Ok(_) => {
                 self.opening = Some(Opening {
                     path: path.to_path_buf(),
+                    tab: id,
+                    fresh,
                     rx,
                     at: std::time::Instant::now(),
                 });
             }
-            // No thread to be had: open on this one.
-            Err(_) => self.open_path(path),
+            Err(_) => {
+                self.load_now(id);
+            }
         }
+    }
+
+    /// The editor in front, from wherever the window was.
+    fn leave_library_for_editor(&mut self) {
+        if self.view == View::Dashboard {
+            self.leave_library();
+        }
+        self.view = View::Editor;
     }
 
     /// Adopt a document [`Self::begin_open`] finished loading, or report why it could not;
@@ -5301,18 +5374,36 @@ impl OndinApp {
         };
         match o.rx.try_recv() {
             Ok(loaded) => {
-                let path = o.path.clone();
-                self.opening = None;
-                match loaded {
-                    Ok(opened) => self.adopt_opened_with(&path, opened),
-                    Err(why) => self.session.fail(why),
-                }
+                let o = self.opening.take().expect("polled above");
+                self.land_open(o, loaded);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint(),
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.opening = None;
-                self.session.fail("Load error: the reader stopped");
+                let o = self.opening.take().expect("polled above");
+                self.land_open(o, Err("Load error: the reader stopped".into()));
             }
+        }
+    }
+
+    /// What a finished read does. A tab no longer in front stays only a path, read
+    /// again when it is shown, so a slow file never pulls the window away from what
+    /// the user went to. A failed read closes a tab made for it, back to the
+    /// library it came from, and leaves any other tab saying why.
+    fn land_open(&mut self, o: Opening, loaded: Result<Opened, String>) {
+        let in_front = self.front_tab() == Some(o.tab);
+        match loaded {
+            Ok(opened) if in_front => self.adopt_opened_with(&o.path, opened),
+            Ok(_) => {}
+            Err(why) if o.fresh => {
+                if in_front {
+                    self.view = View::Dashboard;
+                }
+                self.discard_tab(o.tab);
+                // Never open, so nothing for `Ctrl+Shift+T` to bring back.
+                self.tabs.closed.pop();
+                self.session.fail(why);
+            }
+            Err(why) => self.tab_failed(o.tab, why),
         }
     }
 
@@ -5322,15 +5413,14 @@ impl OndinApp {
         let Some(o) = self.opening.take() else {
             return;
         };
-        match o.rx.recv_timeout(std::time::Duration::from_secs(20)) {
-            Ok(Ok(opened)) => self.adopt_opened_with(&o.path, opened),
-            Ok(Err(why)) => self.session.fail(why),
-            Err(_) => self.session.fail("Load error: the reader stopped"),
-        }
+        let loaded =
+            o.rx.recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap_or_else(|_| Err("Load error: the reader stopped".into()));
+        self.land_open(o, loaded);
     }
 
     /// [`Self::adopt_opened`], then take up the undo history kept for the file read.
-    fn adopt_opened_with(&mut self, path: &std::path::Path, (doc, history): Opened) {
+    pub(crate) fn adopt_opened_with(&mut self, path: &std::path::Path, (doc, history): Opened) {
         self.adopt_opened(path, doc);
         if let Some(history) = history {
             self.session.resume_history(history);
@@ -5338,14 +5428,19 @@ impl OndinApp {
     }
 
     /// The half of an open after the bytes are a document: the library's bookkeeping, the
-    /// session, and the editor.
+    /// tab, the session, and the editor.
     pub(crate) fn adopt_opened(&mut self, path: &std::path::Path, doc: ondin_core::Document) {
         if let Some(id) = doc.meta().id.clone() {
             self.library.local.mark_opened(&id);
             self.library.local.save();
         }
-        // Before the adopt: past it the old snapshot's key cannot be named. Both callers
-        // asked `may_replace_current_document` first.
+        self.tab_for_adopting(Some(path));
+        if self.view == View::Dashboard {
+            self.leave_library();
+        }
+        // Before the adopt: past it the old snapshot's key cannot be named. Only a
+        // reload of the same file reaches one; any other document was parked with its
+        // own.
         self.drop_recovery();
         self.session.adopt_document(doc, Some(path.to_path_buf()));
         self.reset_transient_state();
@@ -5361,7 +5456,7 @@ impl OndinApp {
         self.prefs.save();
     }
 
-    fn reset_transient_state(&mut self) {
+    pub(crate) fn reset_transient_state(&mut self) {
         self.drag = Drag::None;
         // Fields holding the old document's ids are cleared by hand; one this list misses
         // dangles rather than collides (`NodeId` carries a random per-session actor).
@@ -5402,35 +5497,6 @@ impl OndinApp {
         self.corner_smoothing_open.clear();
     }
 
-    /// Whether the app may put a different document in front of the user: **save what
-    /// can be saved, then ask about what cannot**. `false` means the user declined and
-    /// the caller must change nothing.
-    ///
-    /// `is_dirty()` is read twice on purpose: `save_file` clears it, so only an unfiled
-    /// document reaches the (blocking, `rfd`) dialog.
-    fn may_replace_current_document(&mut self, what: &str) -> bool {
-        self.finish_text_first();
-        if self.session.is_dirty() && self.session.path.is_some() {
-            self.save_file(false);
-        }
-        !self.session.is_dirty() || self.confirm_discard(what)
-    }
-
-    /// A blocking yes/no dialog to discard unsaved work. Only
-    /// [`Self::may_replace_current_document`] calls it; the window close uses the in-app
-    /// [`Self::close_confirmation`] card.
-    fn confirm_discard(&self, what: &str) -> bool {
-        rfd::MessageDialog::new()
-            .set_title("Unsaved changes")
-            .set_description(format!(
-                "“{}” has unsaved changes. Discard them and continue {what}?",
-                self.session.document_title()
-            ))
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show()
-            == rfd::MessageDialogResult::Yes
-    }
-
     /// The update chip's click, from either screen's bar: ask the window to close and
     /// apply the update once it has, or say why not.
     pub(crate) fn restart_to_update(&mut self) {
@@ -5456,33 +5522,54 @@ impl OndinApp {
         if !requested {
             return;
         }
-        if self.session.is_dirty() {
+        // A tab's own question gives way to the window's, which covers it.
+        if self.any_unsaved() {
+            self.closing_tab = None;
             self.confirming_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
     }
 
-    /// The in-app confirmation shown after a cancelled close.
+    /// The in-app confirmation shown after a cancelled close of the window, listing
+    /// every tab with unsaved changes, or of one tab ([`Self::closing_tab`]).
     fn close_confirmation(&mut self, ctx: &egui::Context) {
-        if !self.confirming_close {
+        if !self.confirming_close && self.closing_tab.is_none() {
             return;
         }
+        let window = self.confirming_close;
+        let asked: Vec<crate::tabs::TabInfo> = self
+            .tab_infos()
+            .into_iter()
+            .filter(|t| t.dirty && (window || self.closing_tab == Some(t.id)))
+            .collect();
+        // A scratch session no tab holds has only its own name to give.
+        let scratch = (window && self.tabs.active.is_none() && self.session.is_dirty())
+            .then(|| self.session.document_title());
         let mut decision: Option<CloseChoice> = None;
         // The title's ✕ is *Cancel*: a reflex must not land in the destructive arm.
         let modal = crate::settings::card("confirm-close", ctx, |ui| {
-            ui.set_width(crate::ui::menu_inner_w(320.0, crate::settings::PAD));
+            ui.set_width(crate::ui::menu_inner_w(340.0, crate::settings::PAD));
             if crate::settings::modal_title(ui, "Unsaved changes") {
                 decision = Some(CloseChoice::Cancel);
             }
             ui.add_space(8.0);
+            let count = asked.len() + usize::from(scratch.is_some());
+            let sentence = match (asked.first(), &scratch) {
+                (Some(one), None) if count == 1 => {
+                    format!("“{}” has changes that have not been saved.", one.name)
+                }
+                (None, Some(name)) => format!("“{name}” has changes that have not been saved."),
+                _ => format!("{count} documents have changes that have not been saved."),
+            };
             ui.label(
-                egui::RichText::new(format!(
-                    "“{}” has changes that have not been saved.",
-                    self.session.document_title()
-                ))
-                .size(12.0)
-                .color(theme::text::MUTED),
+                egui::RichText::new(sentence)
+                    .size(12.0)
+                    .color(theme::text::MUTED),
             );
+            if count > 1 {
+                ui.add_space(8.0);
+                unsaved_list(ui, &asked);
+            }
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -5508,36 +5595,59 @@ impl OndinApp {
             decision = Some(CloseChoice::Cancel);
         }
 
+        let ids: Vec<crate::tabs::TabId> = asked.iter().map(|t| t.id).collect();
         match decision {
-            Some(CloseChoice::Save) => {
-                self.save_file(false);
-                self.confirming_close = false;
-                // Close only if the save went through; otherwise a chip-asked restart is
-                // called off as *Cancel* does.
-                if self.session.is_dirty() {
-                    self.updater.restart_called_off();
+            Some(CloseChoice::Save) if !window => {
+                self.closing_tab = None;
+                if let Some(&id) = ids.first() {
+                    self.activate_tab(id);
+                    if self.save_file(false) {
+                        self.discard_tab(id);
+                    }
                 }
-                if !self.session.is_dirty() {
+            }
+            Some(CloseChoice::Save) => {
+                self.confirming_close = false;
+                // Each in turn in front, since saving a never-filed one files it.
+                for id in ids {
+                    self.activate_tab(id);
+                    self.save_file(false);
+                }
+                if self.tabs.active.is_none() && self.session.is_dirty() {
+                    self.save_file(false);
+                }
+                // Close only if every save went through; otherwise a chip-asked
+                // restart is called off as *Cancel* does.
+                if self.any_unsaved() {
+                    self.updater.restart_called_off();
+                } else {
                     // Not in `recovery_tick`: there is no next frame.
                     self.drop_recovery();
                     self.disk_settle();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
+            Some(CloseChoice::Discard) if !window => {
+                self.closing_tab = None;
+                for id in ids {
+                    self.discard_tab(id);
+                }
+            }
             Some(CloseChoice::Discard) => {
                 self.confirming_close = false;
+                for id in ids {
+                    self.forget_tab_work(id);
+                }
                 self.drop_recovery();
                 self.disk_settle();
-                self.session.mark_saved(
-                    self.session
-                        .path
-                        .clone()
-                        .unwrap_or_else(|| std::path::PathBuf::from("Untitled.ondin")),
-                );
+                let path = self.session.path.clone();
+                self.session
+                    .mark_saved(path.unwrap_or_else(|| std::path::PathBuf::from("Untitled.ondin")));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Some(CloseChoice::Cancel) => {
                 self.confirming_close = false;
+                self.closing_tab = None;
                 // Or the next close for any reason would apply the update.
                 self.updater.restart_called_off();
             }
@@ -6296,6 +6406,40 @@ enum CloseChoice {
     Cancel,
 }
 
+/// The *Unsaved changes* card's list of documents: a dot, the name, and the project
+/// it is filed in, or *Not in the library*.
+fn unsaved_list(ui: &mut egui::Ui, tabs: &[crate::tabs::TabInfo]) {
+    egui::Frame::NONE
+        .fill(color::text_a(13))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 4.0;
+            for tab in tabs {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let (dot, _) =
+                        ui.allocate_exact_size(egui::vec2(6.0, 14.0), egui::Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 3.0, color::TEXT);
+                    ui.label(egui::RichText::new(&tab.name).size(12.0).color(color::TEXT));
+                    let place = match (&tab.project, &tab.path) {
+                        (Some(project), _) => project.clone(),
+                        (None, Some(_)) => "Unfiled".to_string(),
+                        (None, None) => "Not in the library".to_string(),
+                    };
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(place)
+                                .size(11.0)
+                                .color(theme::text::DIM),
+                        );
+                    });
+                });
+            }
+        });
+}
+
 /// What the user did with a crash snapshot (`OndinApp::recovery_modal`). `Later` is what
 /// the ✕, `Escape` and the backdrop mean, and must never collapse into `Discard`.
 enum RecoverChoice {
@@ -6330,7 +6474,15 @@ fn save_label(saving: bool, ago: Option<std::time::Duration>) -> String {
 // --- chrome ---------------------------------------------------------------
 
 /// Height of the top bar; the floating inspector positions itself below it.
-const TOP_BAR_H: f32 = 46.0;
+pub(crate) const TOP_BAR_H: f32 = 46.0;
+
+/// Either screen's top bar: the bar's ground and its 14pt margins. It is no longer
+/// the title bar, so it keeps clear of nothing the system draws.
+pub(crate) fn top_bar_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(color::TOPBAR)
+        .inner_margin(egui::Margin::symmetric(14, 0))
+}
 
 /// Inner padding of every top-bar dropdown.
 const MENU_PAD: f32 = 5.0;
@@ -6453,31 +6605,17 @@ impl OndinApp {
         }
     }
 
-    /// The top bar: brand mark, breadcrumb, save dot, edit actions, zoom readout and the
-    /// Settings button — and the window's own title bar: drag strip, caption buttons and
-    /// the update chip.
+    /// The top bar, under the tab strip: breadcrumb, save dot, edit actions, zoom
+    /// readout, the update chip and the Settings button. The library's tab is the way
+    /// back, and the strip is the title bar.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        let chrome = crate::chrome::Chrome::current();
         egui::Panel::top("topbar")
             .exact_size(TOP_BAR_H)
             .resizable(false)
-            .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
+            .frame(top_bar_frame())
             .show(ui, |ui| {
-                // Laid first so every control added below keeps its own clicks.
-                crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome), true);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-
-                    // Brand mark: the way back to the library. The 12pt gap to the crumb is
-                    // set before the mark is placed, since egui applies spacing at placement.
-                    ui.spacing_mut().item_spacing.x = 12.0;
-                    let (mark, mark_resp) =
-                        ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    crate::ui::logo(ui, mark, mark_resp.hovered());
-                    if mark_resp.on_hover_text("Library (Ctrl+O)").clicked() {
-                        self.go_to_dashboard();
-                    }
 
                     // `Project / Document`, the project half a link.
                     self.document_crumb(ui);
@@ -6497,11 +6635,6 @@ impl OndinApp {
                     // laid out `right_to_left`, so added in mirror order.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = TOP_GAP;
-
-                        // The window's own buttons hard against the right edge, then
-                        // the bar's 14pt margin.
-                        crate::chrome::caption_buttons(ui, chrome, true);
-                        crate::chrome::after_buttons(ui, 14.0, TOP_GAP);
 
                         self.settings_button(ui);
                         if crate::update::chip(ui, self.updater.state()) {
@@ -6796,6 +6929,7 @@ impl OndinApp {
     pub(crate) fn modal_is_up(&self) -> bool {
         self.settings.is_some()
             || self.confirming_close
+            || self.closing_tab.is_some()
             || !self.recovery.pending.is_empty()
             || self.deleting_value.is_some()
             || self.pages.deleting.is_some()
@@ -7431,7 +7565,7 @@ impl OndinApp {
         egui::Rect::from_min_max(
             egui::pos2(
                 screen.max.x - WIDTH - GUTTER,
-                screen.min.y + TOP_BAR_H + GUTTER,
+                screen.min.y + crate::tabs::STRIP_H + TOP_BAR_H + GUTTER,
             ),
             egui::pos2(screen.max.x - GUTTER, screen.max.y - GUTTER),
         )
@@ -12669,67 +12803,6 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The name sits 12 points from the logo mark on both screens. A gap belongs to
-    /// the item before it, so the spacing is set before the mark is allocated.
-    ///
-    /// flip: allocating the editor's mark at its row's 8 → fails at the equality
-    #[test]
-    fn the_mark_and_the_name_are_as_far_apart_on_both_screens() {
-        fn gap(shapes: &[egui::epaint::ClippedShape]) -> f32 {
-            let font_atlas = egui::TextureId::default();
-            let mut logo = None;
-            let mut texts = Vec::new();
-            fn walk(
-                s: &egui::Shape,
-                atlas: egui::TextureId,
-                logo: &mut Option<egui::Rect>,
-                texts: &mut Vec<egui::Pos2>,
-            ) {
-                match s {
-                    egui::Shape::Mesh(m) if m.texture_id != atlas => {
-                        *logo = Some(m.calc_bounds());
-                    }
-                    egui::Shape::Text(t) => texts.push(t.pos),
-                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, atlas, logo, texts)),
-                    _ => {}
-                }
-            }
-            for cs in shapes {
-                walk(&cs.shape, font_atlas, &mut logo, &mut texts);
-            }
-            let logo = logo.expect("the logo was painted");
-            // Only the logo's own row: the library's sidebar labels also sit right of it.
-            let first = texts
-                .into_iter()
-                .filter(|p| p.x >= logo.max.x && p.y < logo.max.y)
-                .map(|p| p.x)
-                .fold(f32::INFINITY, f32::min);
-            first - logo.max.x
-        }
-
-        let ctx = egui::Context::default();
-        crate::theme::install(&ctx);
-        let mut app = app_at(&ctx, temp_root("mark-gap"));
-        let mut editor = Vec::new();
-        let mut library = Vec::new();
-        // Several passes: the texture uploads on the first, row sizes settle after.
-        for _ in 0..3 {
-            editor = ctx.run_ui(Default::default(), |ui| app.top_bar(ui)).shapes;
-            library = ctx
-                .run_ui(Default::default(), |ui| app.dashboard_ui(ui))
-                .shapes;
-        }
-        let (editor, library) = (gap(&editor), gap(&library));
-        assert!(
-            (library - 12.0).abs() < 0.5,
-            "the library's gap is 12: {library}"
-        );
-        assert!(
-            (library - editor).abs() < 0.5,
-            "the library's gap {library} against the editor's {editor}"
-        );
-    }
-
     /// Settings sits `TOP_GAP` from the update pill on both screens, measured from
     /// the painted shapes (only the Ready pill is drawn here).
     ///
@@ -15757,11 +15830,13 @@ mod recover_snapshot_tests {
 
     use super::*;
 
-    /// `recover` drops the outgoing session's snapshot, which is safe only because
-    /// `may_replace_current_document` runs first. The fixture sets `recovery.key` by
-    /// hand, so the second press is covered by `a_second_recover_asks_before_it_spends_the_first`.
+    /// `recover` opens the snapshot in a tab of its own: the document in front is
+    /// parked with its unsaved work and its snapshot, and the recovered one adopts
+    /// the key it was filed under.
+    /// flip: `recover` calling `drop_recovery` before `tab_for_adopting` parks the
+    /// document → fails at "kept with its tab".
     #[test]
-    fn recovering_drops_the_outgoing_snapshot_now_that_the_guards_are_there() {
+    fn recovering_parks_the_document_in_front_with_its_snapshot() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
@@ -15780,6 +15855,8 @@ mod recover_snapshot_tests {
             crate::library::recovery::write(&root, &outgoing, &doc).expect("snapshot B");
         let offered_path =
             crate::library::recovery::write(&root, &offered, &doc).expect("the pending snapshot");
+        let starter = app.tabs.active.expect("the starter's tab");
+        app.session.mark_unsaved();
         app.recovery.key = Some(outgoing.clone());
 
         app.recover(&crate::library::recovery::Pending {
@@ -15790,15 +15867,19 @@ mod recover_snapshot_tests {
             written: Some(0),
         });
 
+        assert_ne!(app.tabs.active, Some(starter), "a tab of its own");
         assert!(
-            !outgoing_path.exists(),
-            "the outgoing snapshot was stranded — it is never named again after \
-             `recovery.key` is overwritten, so it would be offered at every launch \
-             for ever (§15 D768)"
+            outgoing_path.exists(),
+            "the parked document's snapshot is kept with its tab: it is all an \
+             unfiled document has"
+        );
+        assert!(
+            app.dirty_tabs().contains(&starter),
+            "its work is still there"
         );
         assert!(
             offered_path.exists(),
-            "and the one being recovered from is untouched either way"
+            "and the one recovered from is untouched"
         );
         assert_eq!(
             app.recovery.key.as_deref(),
@@ -15809,11 +15890,10 @@ mod recover_snapshot_tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// A second Recover press asks before it spends the first: the recovered session
-    /// is dirty and unfiled. `confirm_discard` raises a blocking `rfd` dialog, so this
-    /// asserts the state the guard reads and that the pending entry remains.
+    /// A second Recover press opens a second tab and spends nothing of the first:
+    /// both recovered documents stay, dirty, each with its snapshot.
     #[test]
-    fn a_second_recover_asks_before_it_spends_the_first() {
+    fn a_second_recover_keeps_the_first() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
@@ -15846,26 +15926,27 @@ mod recover_snapshot_tests {
 
         let pending = app.recovery.pending.pop().expect("one waiting");
         app.recover(&pending);
+        let first_tab = app.tabs.active.expect("recovered into a tab");
+        assert!(
+            app.session.is_dirty() && app.session.path.is_none(),
+            "fixture: unsaved by construction and unfiled, so its snapshot is all \
+             it has"
+        );
+        let pending = app.recovery.pending.pop().expect("the second");
+        app.recover(&pending);
 
-        // Dirty (`recover` marks it) and unfiled (no `target`).
-        assert!(
-            app.session.is_dirty(),
-            "a recovered document is unsaved by construction, or there would be \
-             nothing for the second press to spend"
+        assert_ne!(
+            app.tabs.active,
+            Some(first_tab),
+            "the second has its own tab"
         );
         assert!(
-            app.session.path.is_none(),
-            "and unfiled, so `may_replace_current_document` cannot save it away \
-             and must ask instead — this is the pair that makes the guard fire"
-        );
-        assert_eq!(
-            app.recovery.key.as_deref(),
-            Some(pending.key.as_str()),
-            "the key names the work the second press would drop"
+            app.dirty_tabs().contains(&first_tab),
+            "the first keeps its work"
         );
         assert!(
-            !app.recovery.pending.is_empty(),
-            "and there is still a card offering that second press"
+            first_path.exists() && second_path.exists(),
+            "and both snapshots stay"
         );
 
         std::fs::remove_dir_all(&root).ok();

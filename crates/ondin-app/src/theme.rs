@@ -523,6 +523,8 @@ pub mod icon {
     /// A **kit** (§5.3e, §15 D1011): the top bar's *Kit* tag, the document menu's
     /// kit rows, and the insert and swap pickers' kit headings.
     pub const PACKAGE: &str = "\u{e390}";
+    /// A document open in a tab: the library card's *Open* chip.
+    pub const BROWSERS: &str = "\u{e0f6}";
     /// The styles and variables browser's button (§5.3f).
     pub const SWATCHES: &str = "\u{e5b8}";
     /// A style card's *Create style…* (§15 D1063).
@@ -775,6 +777,7 @@ pub mod icon {
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
         ("package", PACKAGE),
+        ("browsers", BROWSERS),
         ("swatches", SWATCHES),
         ("plus-square", PLUS_SQUARE),
         ("palette", PALETTE),

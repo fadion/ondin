@@ -1878,14 +1878,13 @@ mod tests {
     /// **The kit doors end a live text session first** (`[X3.2-L5-01]`, the
     /// v0.5.0 release review's Critical). Typing into a text layer of the kit
     /// opened by *Go to main in the kit*, then leaving by the back link, lost the
-    /// typing: `open_path` saved `session.doc`, which holds none of it, and
-    /// `adopt_opened` dropped the session. The back link and *Kits used… → Open
-    /// kit* both call `open_path`, which is where this drives it — the seam the
-    /// fix is at, `may_replace_current_document`.
+    /// typing: the save on the way out wrote `session.doc`, which holds none of it.
+    /// The back link and *Kits used… → Open kit* both call `open_path`, which is
+    /// where this drives it; the seam is `OndinApp::park_active`, which every
+    /// change of tab passes.
     ///
-    /// Flip, run: the `finish_text_first` line out of
-    /// `may_replace_current_document` fails *"the kit on disk keeps the typing"*
-    /// with `Some("hello")`.
+    /// Flip, run: the `finish_text_first` line out of `park_active` fails *"the kit
+    /// on disk keeps the typing"* with `Some("hello")`.
     #[test]
     fn leaving_the_kit_keeps_what_was_typed_in_it() {
         let ctx = egui::Context::default();

@@ -83,8 +83,7 @@ const SEARCH_MIN_W: f32 = 120.0;
 /// The search field's rectangle in the top bar: [`SEARCH_W`] wide, centred on the
 /// window's `centre_x`, clear of the brand (`left`) and the right cluster (`right`) —
 /// slid off centre first, then narrowed to [`SEARCH_MIN_W`]. The centre is the
-/// window's, not the bar's `max_rect`, which [`crate::chrome::bar_frame`] leaves
-/// with a left margin and no right one.
+/// window's, not the bar's `max_rect`, which its margins narrow.
 fn search_rect(centre_x: f32, centre_y: f32, left: f32, right: f32) -> egui::Rect {
     const GAP: f32 = 12.0;
     let (lo, hi) = (left + GAP, right - GAP);
@@ -532,7 +531,12 @@ impl OndinApp {
         // `library_keys_are_free` gates it, not the editor's `modal_is_up`.
         if self.library_keys_are_free() {
             self.take_dropped_documents(ui.ctx());
+            if let Some(key) = crate::tabs::read_keys(ui.ctx()) {
+                self.tab_key(key);
+            }
         }
+        // A click that dismisses a library menu is spent doing so.
+        self.tab_strip(ui, !self.dash.menu_was_up);
         self.dashboard_top_bar(ui, &mut act);
         egui::Panel::left("library-sidebar")
             .exact_size(SIDEBAR_W)
@@ -558,18 +562,14 @@ impl OndinApp {
         }
     }
 
-    /// Brand mark, name, and the Settings door — and the window's title bar, as
-    /// the editor's is: drag strip, caption buttons and update chip.
+    /// Brand mark, name, search, the update chip and the Settings door, under the tab
+    /// strip, which is the window's title bar.
     fn dashboard_top_bar(&mut self, ui: &mut egui::Ui, act: &mut Option<Act>) {
-        let chrome = crate::chrome::Chrome::current();
         egui::Panel::top("library-topbar")
             .exact_size(TOP_H)
             .resizable(false)
-            .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
+            .frame(crate::app::top_bar_frame())
             .show(ui, |ui| {
-                let chrome_acts = !self.dash.menu_was_up;
-                let bar = crate::chrome::bar_rect(ui, 14.0, chrome);
-                crate::chrome::drag_strip(ui, bar, chrome_acts);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     // The editor's mark, at rest rather than as a control.
@@ -586,8 +586,6 @@ impl OndinApp {
 
                     let cluster = ui
                         .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            crate::chrome::caption_buttons(ui, chrome, chrome_acts);
-                            crate::chrome::after_buttons(ui, 14.0, 12.0);
                             // The gap to the update pill is `TOP_GAP`, set here because
                             // egui adds an item's gap when the item is placed; with no
                             // pill the status dot follows and keeps the row's 12.
@@ -2067,6 +2065,10 @@ impl OndinApp {
         if marks_kit(entry) {
             kit_chip(ui, corner);
         }
+        // A document already in a tab: a click brings that tab forward.
+        if self.tab_of_path(&entry.path).is_some() {
+            open_chip(ui, thumb.left_top() + egui::vec2(7.0, 7.0));
+        }
         // The star sits on the cover (`top:7px;right:7px`) so a grid can be scanned for
         // it. Outline, as the bundled Phosphor has only Regular; the gold carries the state.
         if self.is_starred(entry) {
@@ -2155,7 +2157,7 @@ impl OndinApp {
     /// Not gated: [`Self::file_menu_button`] (the ⋮ anchor both dismissals exempt),
     /// rows inside either menu, and `dashboard_act`, where gating would swallow the ⋮
     /// menu's own rows. The body background dismisses a menu on purpose.
-    fn library_menu_open(&self) -> bool {
+    pub(crate) fn library_menu_open(&self) -> bool {
         self.dash.menu_for.is_some() || self.dash.filter_open
     }
 
@@ -2194,7 +2196,7 @@ impl OndinApp {
     /// can intercept. `egui_wants_keyboard_input` is deliberately absent: it asks
     /// about a live text cursor, and `search_field` reads its chord before drawing
     /// its own `TextEdit`.
-    fn library_keys_are_free(&self) -> bool {
+    pub(crate) fn library_keys_are_free(&self) -> bool {
         // The recovery card is drawn by `OndinApp::ui` above the view branch, so
         // this file lists it by name.
         self.recovery.pending.is_empty()
@@ -2855,11 +2857,7 @@ impl OndinApp {
                 match store::trash(&root, entry) {
                     // Its file is in the trash now, so there is nowhere to save
                     // to — the same answer `trash_or_purge` gives.
-                    Ok(_) => {
-                        if self.session.path.as_deref() == Some(entry.path.as_path()) {
-                            self.session.path = None;
-                        }
-                    }
+                    Ok(_) => self.open_file_trashed(&entry.path),
                     Err(_) => failed += 1,
                 }
             }
@@ -3038,9 +3036,7 @@ impl OndinApp {
             Ok(_) => {
                 // The next autosave would otherwise write the open document back out
                 // of the trash.
-                if self.session.path.as_deref() == Some(path) {
-                    self.session.path = None;
-                }
+                self.open_file_trashed(path);
                 self.library.refresh();
             }
             Err(e) => self.session.fail(format!("Delete failed: {e}")),
@@ -3109,23 +3105,32 @@ impl OndinApp {
             .cloned()
     }
 
-    /// The open document follows a library file that has just moved — its path and
+    /// An open document follows a library file that has just moved — its path and
     /// the metadata the move wrote to disk, together: re-pointing the path alone
     /// would let the next save write the old `meta.name` or `meta.project` back. A
-    /// no-op when the moved file is not the one the session has open.
+    /// tab that only names the file follows by its path. A no-op when no tab holds it.
     fn open_document_follows(
         &mut self,
         was: &Path,
         now: PathBuf,
         patch: impl FnOnce(&mut ondin_core::meta::DocumentMeta),
     ) {
-        if self.session.path.as_deref() != Some(was) {
-            return;
+        for path in self.unloaded_paths() {
+            if path == was {
+                *path = now.clone();
+            }
         }
-        self.session.path = Some(now);
-        let mut meta = self.session.doc.meta().clone();
+        let Some(session) = self
+            .open_sessions()
+            .into_iter()
+            .find(|s| s.path.as_deref() == Some(was))
+        else {
+            return;
+        };
+        session.path = Some(now);
+        let mut meta = session.doc.meta().clone();
         patch(&mut meta);
-        self.session.doc.set_meta(meta);
+        session.doc.set_meta(meta);
     }
 
     pub(crate) fn commit_rename(&mut self) {
@@ -3226,10 +3231,21 @@ impl OndinApp {
         };
         if let (Some(old), Some(new)) = (before.folder.as_deref(), folder.as_deref())
             && old != new
-            && let Some(open) = self.session.path.clone()
-            && let Ok(rest) = open.strip_prefix(root.join(old))
         {
-            self.session.path = Some(root.join(new).join(rest));
+            let (from, to) = (root.join(old), root.join(new));
+            let rebase = |path: &mut PathBuf| {
+                if let Ok(rest) = path.strip_prefix(&from) {
+                    *path = to.join(rest);
+                }
+            };
+            for session in self.open_sessions() {
+                if let Some(path) = session.path.as_mut() {
+                    rebase(path);
+                }
+            }
+            for path in self.unloaded_paths() {
+                rebase(path);
+            }
         }
         if let Some(p) = self
             .library
@@ -3963,19 +3979,21 @@ impl OndinApp {
     /// map, not re-joined under the new root, as `relocate` renames into a
     /// collision. `prefs.last_document` travels with it. Shared by the retry.
     fn follow_moved_documents(&mut self, moved: &crate::library::relocate::Moved) {
-        for path in [self.session.path.clone(), self.prefs.last_document.clone()]
-            .into_iter()
-            .flatten()
-        {
-            let Some(now) = moved.destination_of(&path).map(Path::to_path_buf) else {
-                continue;
-            };
-            if self.session.path.as_deref() == Some(path.as_path()) {
-                self.session.path = Some(now.clone());
+        let follow = |path: &mut PathBuf| {
+            if let Some(now) = moved.destination_of(path) {
+                *path = now.to_path_buf();
             }
-            if self.prefs.last_document.as_deref() == Some(path.as_path()) {
-                self.prefs.last_document = Some(now);
+        };
+        for session in self.open_sessions() {
+            if let Some(path) = session.path.as_mut() {
+                follow(path);
             }
+        }
+        for path in self.unloaded_paths() {
+            follow(path);
+        }
+        if let Some(path) = self.prefs.last_document.as_mut() {
+            follow(path);
         }
     }
 
@@ -4593,6 +4611,47 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
         egui::pos2(rect.left() + PAD + GLYPH / 2.0, rect.center().y),
         egui::Align2::CENTER_CENTER,
         icon::PACKAGE,
+        theme::icon_font(GLYPH),
+        ink,
+    );
+    p.galley(
+        egui::pos2(
+            rect.left() + PAD + GLYPH + GAP,
+            rect.center().y - word.size().y / 2.0,
+        ),
+        word,
+        ink,
+    );
+    rect
+}
+
+/// The *Open* chip, hung from `at` (its top left) on a card whose document is open
+/// in a tab: an accent chip, since a click on the card brings that tab forward
+/// rather than opening the document again.
+fn open_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
+    const H: f32 = 18.0;
+    const PAD: f32 = 7.0;
+    const GAP: f32 = 4.0;
+    const GLYPH: f32 = 11.0;
+    let ink = color::ACCENT_100;
+    let word = ui
+        .ctx()
+        .fonts_mut(|f| f.layout_no_wrap("Open".into(), egui::FontId::proportional(10.5), ink));
+    let w = PAD + GLYPH + GAP + word.size().x + PAD;
+    let rect = egui::Rect::from_min_size(at, egui::vec2(w, H));
+    let p = ui.painter();
+    let r = egui::CornerRadius::same(4);
+    p.rect_filled(rect, r, color::ACCENT_900);
+    p.rect_stroke(
+        rect,
+        r,
+        egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.45)),
+        egui::StrokeKind::Inside,
+    );
+    p.text(
+        egui::pos2(rect.left() + PAD + GLYPH / 2.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon::BROWSERS,
         theme::icon_font(GLYPH),
         ink,
     );
@@ -8433,10 +8492,13 @@ mod tests {
                 run(app, vec![]);
             };
 
-            // The field is the one stroked 28-point-high rect in the bar.
+            // The field is the one stroked 28-point-high rect in the bar, under the
+            // tab strip.
+            let bar = crate::tabs::STRIP_H..crate::tabs::STRIP_H + TOP_H;
             let field = out.shapes.iter().find_map(|cs| match &cs.shape {
                 egui::Shape::Rect(r)
-                    if (r.rect.height() - 28.0).abs() < 0.01 && r.rect.center().y < 46.0 =>
+                    if (r.rect.height() - 28.0).abs() < 0.01
+                        && bar.contains(&r.rect.center().y) =>
                 {
                     Some(r.rect)
                 }

@@ -1699,7 +1699,7 @@ impl eframe::App for OndinApp {
                 self.tool_rail(ui);
             }
         } else {
-            // The top bar is the title bar too; this brings the window's buttons
+            // The tab strip is the title bar; this brings the window's buttons
             // back on hover at the top edge.
             crate::chrome::focus_strip(&ctx, crate::chrome::Chrome::current());
         }

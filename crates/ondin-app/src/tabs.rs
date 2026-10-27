@@ -269,7 +269,8 @@ impl OndinApp {
         out
     }
 
-    /// The file of every tab not read yet, for the same re-pointing.
+    /// The file of every tab not read yet, and of every tab `Ctrl+Shift+T` may bring
+    /// back, for the same re-pointing.
     pub(crate) fn unloaded_paths(&mut self) -> Vec<&mut PathBuf> {
         self.tabs
             .list
@@ -278,6 +279,7 @@ impl OndinApp {
                 Body::Unloaded { path, .. } => Some(path),
                 _ => None,
             })
+            .chain(self.tabs.closed.iter_mut().map(|(path, _)| path))
             .collect()
     }
 

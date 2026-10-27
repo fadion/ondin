@@ -41,7 +41,7 @@ const MAC_LIGHTS: f32 = 72.0;
 /// What the chrome senses: the pointer, **never the keyboard focus**. The
 /// system's caption and frame are not in the Tab order, and
 /// `Sense::click_and_drag` would add `FOCUSABLE`, letting Tab land on the drag
-/// strip that both top bars draw under one id.
+/// strip the tab strip draws on both screens under one id.
 const POINTER_ONLY: Sense = Sense::CLICK.union(Sense::DRAG);
 
 /// The close button's hover fill — Windows' caption red, under a white glyph.

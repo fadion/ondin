@@ -454,7 +454,9 @@ fn run_merge(base: &str, ours: &str, theirs: &str, out: Option<&str>) -> Result<
     let merged = ondin_core::merge::merge(&read(base)?, &read(ours)?, &read(theirs)?)
         .map_err(|e| format!("cannot merge: {e}"))?;
     let out = out.unwrap_or(ours);
-    std::fs::write(out, &merged.bytes).map_err(|e| format!("cannot write {out}: {e}"))?;
+    // Atomic: the default target is `ours` itself, the only copy of that side.
+    atomic::write(std::path::Path::new(out), &merged.bytes)
+        .map_err(|e| format!("cannot write {out}: {e}"))?;
     for c in &merged.conflicts {
         eprintln!("conflict: {c}");
     }

@@ -656,6 +656,8 @@ impl OndinApp {
             c.at.and_then(|a| fails.iter().position(|f| *f == a))
                 .map(|i| i + 1);
         let scope_name = c.scope_name.clone();
+        // What the chip's click would check: `contrast_target`'s first question.
+        let selected = !self.session.selection.ids().is_empty();
         // Below the top ruler, which is drawn over the canvas's top edge.
         let ruler = if self.rulers_on() {
             crate::rulers::THICKNESS
@@ -676,7 +678,7 @@ impl OndinApp {
                         ui.label(theme::icon_text(icon::CIRCLE_HALF, 15.0, color::ACCENT_300));
                         match &scope_name {
                             Some(name) => {
-                                if scope_chip(ui, name) {
+                                if scope_chip(ui, name, selected) {
                                     act = Some(BarAct::Retarget);
                                 }
                             }
@@ -1420,9 +1422,9 @@ fn separator(ui: &mut egui::Ui) {
 }
 
 /// The bar's scope chip: a pill naming what is checked, clear of the bar's edges.
-/// A click checks the selection, or the frame in view, instead; answers whether
-/// it was clicked.
-fn scope_chip(ui: &mut egui::Ui, name: &str) -> bool {
+/// A click checks again, on the selection when there is one (`selected`), else on
+/// the frame in view, and the tooltip says which; answers whether it was clicked.
+fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
     const H: f32 = 20.0;
     const PAD: f32 = 8.0;
     const GAP: f32 = 5.0;
@@ -1454,8 +1456,12 @@ fn scope_chip(ui: &mut egui::Ui, name: &str) -> bool {
         galley,
         color::TEXT,
     );
-    resp.on_hover_text("Check the selection, or the frame in view, instead")
-        .clicked()
+    resp.on_hover_text(if selected {
+        "Retry on the selection"
+    } else {
+        "Retry on the frame in view"
+    })
+    .clicked()
 }
 
 /// A left-aligned cell of fixed width in the bar's row.

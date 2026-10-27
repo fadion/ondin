@@ -1272,7 +1272,9 @@ pub fn insert_carrying(
 /// of the first page, last, with its own transform — where an insert of it
 /// lands, with no ancestor's transform or layout, and a vault main among them
 /// resolved like any other (the picker's tiles and drag picture, and code export
-/// writing a kit's mains as components). A node already there stays put.
+/// writing a kit's mains as components). A node already there stays put. The
+/// page's own mode is cleared, so the nodes read the default mode, as the vault
+/// they come from does.
 ///
 /// 🚨 **Not a document anything may keep**: the move is applied unchecked, and
 /// a vault node on a page breaks the vault's rules. That is nothing to a
@@ -1281,7 +1283,7 @@ pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
     let mut scratch = doc.clone();
     let root = doc.first_page();
     let end = doc.get(root).map_or(0, |r| r.children.len());
-    let ops: Vec<Operation> = nodes
+    let mut ops: Vec<Operation> = nodes
         .iter()
         .filter(|n| doc.get(**n).is_some_and(|x| x.parent != Some(root)))
         .enumerate()
@@ -1291,6 +1293,12 @@ pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
             index: end + i,
         })
         .collect();
+    if doc.get(root).is_some_and(|r| r.mode().is_some()) {
+        ops.push(Operation::SetMode {
+            id: root,
+            mode: None,
+        });
+    }
     if !ops.is_empty() {
         let _ = scratch.apply_unchecked(&Transaction(ops));
     }

@@ -242,6 +242,48 @@ fn a_frame_reads_its_pages_mode_unless_it_sets_one() {
     assert_eq!(doc.mode_at(a), Some(light), "the frame's own wins");
 }
 
+/// A main placed for drawing (`kit::as_placed`) reads the default mode, as it does
+/// where it sits, even when the first page, where it is placed, sets another.
+///
+/// flip: `as_placed` without clearing the page's mode → fails at the mode.
+#[test]
+fn a_main_placed_for_drawing_reads_the_default_mode() {
+    let (mut doc, mut ids, [first, _, _, b]) = two_pages();
+    let (light, dark) = (
+        ondin_core::variable::ModeId(ids.mint()),
+        ondin_core::variable::ModeId(ids.mint()),
+    );
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: ondin_core::variable::Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: Vec::new(),
+    };
+    doc.apply(&Transaction(vec![
+        mode(light, "Light", 0),
+        mode(dark, "Dark", 1),
+        Operation::SetMode {
+            id: first,
+            mode: Some(dark),
+        },
+    ]))
+    .unwrap();
+    assert_eq!(
+        doc.mode_at(b),
+        Some(light),
+        "fixture: page 2 reads the default"
+    );
+    let placed = ondin_core::kit::as_placed(&doc, &[b]);
+    assert_eq!(
+        placed.get(b).unwrap().parent(),
+        Some(first),
+        "fixture: moved"
+    );
+    assert_eq!(placed.mode_at(b), Some(light));
+}
+
 /// Several pages, a draft, a page mode and a page-wide guide save and load
 /// byte-identically (invariant 9).
 #[test]

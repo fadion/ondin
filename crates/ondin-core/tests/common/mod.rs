@@ -16,7 +16,8 @@ use ondin_core::kurbo::{
     Point, Rect, Shape, Vec2,
 };
 
-/// The oracle's blind band either side of an edge it expects, in units.
+/// The oracle's blind band either side of an edge it expects, in units, unless a
+/// case narrows it (`Band::tol`, `Fill::tol`).
 pub const TOL: f64 = 0.6;
 /// Grid points per side of the sampled box.
 pub const GRID: usize = 56;
@@ -46,6 +47,7 @@ pub struct Band {
     boxes: Vec<Rect>,
     pieces: Vec<Piece>,
     h: f64,
+    tol: f64,
 }
 
 impl Band {
@@ -80,23 +82,30 @@ impl Band {
             boxes,
             pieces,
             h,
+            tol: TOL,
         }
     }
 
-    /// Whether `p` is in the ink, or `None` within [`TOL`] of its edge.
+    /// The band with a blind band of `tol` either side of its edge.
+    pub fn tol(self, tol: f64) -> Self {
+        Self { tol, ..self }
+    }
+
+    /// Whether `p` is in the ink, or `None` within the blind band of its edge.
     pub fn contains(&self, p: Point) -> Option<bool> {
+        let tol = self.tol;
         let mut inside = false;
         for (seg, b) in self.segs.iter().zip(&self.boxes) {
-            if box_dist(b, p) > self.h + TOL {
+            if box_dist(b, p) > self.h + tol {
                 continue;
             }
-            if seg.nearest(p, 1e-7).distance_sq.sqrt() > self.h + TOL {
+            if seg.nearest(p, 1e-7).distance_sq.sqrt() > self.h + tol {
                 continue;
             }
             // The slab ends on the normals through the segment's ends.
             let a0 = (p - seg.start()).dot(start_dir(seg));
             let a1 = (p - seg.end()).dot(end_dir(seg));
-            if a0.abs() < TOL || a1.abs() < TOL {
+            if a0.abs() < tol || a1.abs() < tol {
                 return None;
             }
             // The slab is swept by the segment's normals: `p` is in it where some
@@ -104,7 +113,7 @@ impl Band {
             // `p` is stationary, not only at its nearest point. Where a curve turns
             // tighter than `h` those differ, and the stroke covers both.
             for dist in normal_feet(seg, p) {
-                if (dist - self.h).abs() < TOL {
+                if (dist - self.h).abs() < tol {
                     return None;
                 }
                 inside |= dist < self.h;
@@ -115,7 +124,7 @@ impl Band {
                 Piece::Poly(poly) => poly_dist(poly, p),
                 Piece::Disk(c) => (p - *c).hypot() - self.h,
             };
-            if s.abs() < TOL {
+            if s.abs() < tol {
                 return None;
             }
             inside |= s < 0.0;
@@ -215,11 +224,13 @@ fn cap_piece(p: Point, t: Vec2, h: f64, cap: kurbo::Cap) -> Option<Piece> {
     }
 }
 
-/// A closed shape's fill, read non-zero.
+/// A closed shape's fill, read non-zero unless it says even-odd.
 pub struct Fill {
     segs: Vec<PathSeg>,
     boxes: Vec<Rect>,
     edges: Vec<(Point, Point)>,
+    even_odd: bool,
+    tol: f64,
 }
 
 impl Fill {
@@ -229,17 +240,31 @@ impl Fill {
             boxes: segs.iter().map(hull).collect(),
             segs,
             edges: flat(shape),
+            even_odd: false,
+            tol: TOL,
         }
     }
 
-    /// Whether `p` is in the fill, or `None` within [`TOL`] of its outline.
+    /// The fill read even-odd where `even_odd` says so.
+    pub fn even_odd(self, even_odd: bool) -> Self {
+        Self { even_odd, ..self }
+    }
+
+    /// The fill with a blind band of `tol` either side of its outline.
+    pub fn tol(self, tol: f64) -> Self {
+        Self { tol, ..self }
+    }
+
+    /// Whether `p` is in the fill, or `None` within the blind band of its outline.
     pub fn contains(&self, p: Point) -> Option<bool> {
+        let tol = self.tol;
         let near = self
             .segs
             .iter()
             .zip(&self.boxes)
-            .any(|(s, b)| box_dist(b, p) < TOL && s.nearest(p, 1e-7).distance_sq < TOL * TOL);
-        (!near).then(|| winding(&self.edges, p) != 0)
+            .any(|(s, b)| box_dist(b, p) < tol && s.nearest(p, 1e-7).distance_sq < tol * tol);
+        let w = winding(&self.edges, p);
+        (!near).then_some(if self.even_odd { w % 2 != 0 } else { w != 0 })
     }
 }
 

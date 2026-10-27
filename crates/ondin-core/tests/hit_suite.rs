@@ -98,7 +98,7 @@ fn point_in_path_matches_the_flattened_count() {
     for (name, p) in common::closed_shapes() {
         add(name.into(), p.clone());
         for d in [-9.0, 17.0, 70.0] {
-            if let Ok(r) = ondin_core::build::offset_outline(&p, d) {
+            if let Ok(r) = ondin_core::build::offset_outline(&p, d, FillRule::NonZero) {
                 add(format!("{name} offset {d}"), r);
             }
         }

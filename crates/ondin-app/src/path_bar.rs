@@ -36,6 +36,8 @@ pub(crate) struct OffsetCard {
     stored: (BezPath, Vec<f64>),
     /// What every distance offsets: the stored path with its radii applied.
     drawn: Arc<BezPath>,
+    /// The fill rule `drawn` is read with.
+    rule: ondin_core::FillRule,
     distance: f64,
     /// The newest offset to land: its distance, and the outline, `None` where that
     /// distance left nothing (a shrink past the path's middle).
@@ -62,9 +64,9 @@ impl OffsetCard {
             }
         }
         if self.working.is_none() && self.distance != 0.0 && !self.done() {
-            let (drawn, d) = (Arc::clone(&self.drawn), self.distance);
+            let (drawn, d, rule) = (Arc::clone(&self.drawn), self.distance, self.rule);
             let job = Job::spawn("ondin-offset", ctx, move || {
-                build::offset_outline(&drawn, d).ok()
+                build::offset_outline(&drawn, d, rule).ok()
             });
             self.working = Some((d, job));
         }
@@ -86,7 +88,7 @@ impl OffsetCard {
         }
         let path = match self.working.take() {
             Some((d, job)) if d == self.distance => job.wait().flatten(),
-            _ => build::offset_outline(&self.drawn, self.distance).ok(),
+            _ => build::offset_outline(&self.drawn, self.distance, self.rule).ok(),
         };
         self.landed = Some((self.distance, path));
     }
@@ -392,10 +394,17 @@ impl OndinApp {
             return;
         };
         let drawn = ondin_core::geometry::round_corners(&path, &corner_radii);
+        let rule = self
+            .session
+            .doc
+            .get(id)
+            .map(ondin_core::Node::fill_rule)
+            .unwrap_or_default();
         self.offset_card = Some(OffsetCard {
             id,
             stored: (path, corner_radii),
             drawn: Arc::new(drawn),
+            rule,
             distance: 0.0,
             landed: None,
             working: None,

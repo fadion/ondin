@@ -147,14 +147,20 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
   limit. An inside or outside stroke is laid at twice the width, then intersected with or subtracted
   from the shape.
 - **It is polygon arithmetic, as *Offset path* is** (`build::stroke_polygons`, then `refit`): each
-  laid path flattened finer the wider the stroke, stroked by i_overlay with bevels at the
-  flattening's vertices, round joins and caps as asked, and each real corner's mitre added as its own
-  wedge while it is within the limit. i_overlay's own mitre clips past the limit where a rendered
-  stroke bevels, and flo_curves, which an earlier version united band pieces with, drops or inverts
-  pieces that share an edge (a 50-radius circle stroked 110 wide lost a quarter). The union and the
-  inside or outside cut are i_overlay's, read non-zero.
+  laid path flattened finer the wider the stroke, and finer for a thin one, stroked by i_overlay with
+  bevels at the flattening's vertices, round joins and caps as asked, and each real corner's mitre
+  added as its own wedge while it is within the limit. i_overlay's own mitre clips past the limit
+  where a rendered stroke bevels, and flo_curves, which an earlier version united band pieces with,
+  drops or inverts pieces that share an edge (a 50-radius circle stroked 110 wide lost a quarter).
+  The union and the inside or outside cut are i_overlay's, read non-zero. The refit keeps every piece
+  of ink, each dot of a half-unit dotted stroke included, down to a hundredth of the half-width
+  squared.
+- **A stroke that leaves no ink is refused, not removed.** If any visible stroke with a width yields
+  nothing (a butt-capped stroke of a dot), the whole operation is `EmptyGeometry`, rather than the
+  layer losing that stroke with nothing drawn in its place.
   `ondin-core`'s `tests/stroke_suite.rs` checks the closed shapes and open paths of
-  `tests/common` at three widths with each join, cap and alignment, dashed too, against an
+  `tests/common` at three widths with each join, cap and alignment, dashed (centred, inside and
+  outside), dotted and thin on the catalogue shrunk, and per side on a rectangle, against an
   independent oracle.
 - **Result shape.** A layer with no visible fill and one stroke is replaced by the path
   (`replace_with_path`, then the stroke's brush as its one fill, no strokes, non-zero). Otherwise the

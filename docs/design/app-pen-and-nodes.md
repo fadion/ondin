@@ -98,17 +98,28 @@ nothing the canvas does not already offer except the last two.
   one: everything within the distance of the outline, with corners mitred and the mitre clipped
   square at `OFFSET_MITER_LIMIT` (4) times the distance from the corner (SVG 2's `miter-clip`), so a
   sharp tip keeps more of itself than a bevel would leave. It is polygon arithmetic, not curve
-  booleans: the outline is flattened (`polyline`, each curve cut until both its chords and the join
-  the offset puts at each vertex are within `OFFSET_FLATTEN`, so finer the further it is offset; a
-  short chord at each end of a curve aims the corner mitres along the true tangent), read non-zero,
-  offset by i_overlay, and refitted with curves (`fit::fit_closed`, Schneider's algorithm: corners
-  where the polygon turns by more than `OFFSET_REFIT_CORNER_DEG`, every point within
-  `OFFSET_REFIT_ACCURACY`, a fitted cubic that lies along its chord written as a line). flo_curves,
-  which an earlier version used, drops or inverts operands that share an edge, and an offset built
-  from band pieces is all shared edges. An open subpath grows into a round-capped stroke around it
-  and has no inside to shrink. `ondin-core`'s `tests/offset_suite.rs` checks the shapes of
-  `tests/common` at sixteen distances against an independent point-by-point oracle (the shape and
-  its mitred stroke), and for specks, stray edges and runaway segment counts. A shape that misbehaves
+  booleans: the outline is flattened (`polyline`, chords within `OFFSET_FLATTEN` or an eighth of the
+  distance if less, no vertex turning more than `OFFSET_MAX_TURN_DEG` except on a curve tighter than
+  the distance, whose inner side the offset swallows), read with the node's fill rule, offset by
+  i_overlay with round joins, which are true to the curves however coarsely they are cut, and then
+  each real corner's clipped mitre is added as a wedge outside the shape, or cut from inside it on a
+  shrink. The offset runs in steps (`offset_stages`: a first of `OFFSET_STAGE` or an eighth of the
+  distance, each after it as long as all before): growing by two distances is growing by one and then
+  the other, and the short first step swallows the dense detail that, offset in one long step, has
+  every vertex's join overlap thousands of others. The result is
+  refitted with curves (`fit::fit_closed`, Schneider's algorithm: corners where the polygon turns by
+  more than `OFFSET_REFIT_CORNER_DEG`, every point within `OFFSET_REFIT_ACCURACY`, or a quarter of
+  the distance or a two-hundredth of the contour if less, a fitted cubic that lies along its chord
+  written as a line). A grow keeps every contour, its smallest dot included, and drops only a hole it
+  nearly closed; a shrink drops the crumbs it erodes to, under a hundredth of the shape's size
+  squared. flo_curves, which an earlier version used, drops or inverts operands that share an edge,
+  and an offset built from band pieces is all shared edges. An open subpath grows into a
+  round-capped stroke around it, a dot into a disc, and has no inside to shrink.
+  `ondin-core`'s `tests/offset_suite.rs` checks the shapes of `tests/common` at sixteen distances,
+  and even-odd and crossing shapes, tiny shapes and distances, open paths and dots, against an
+  independent point-by-point oracle (the shape and its mitred stroke) whose blind band narrows with
+  the distance, and for specks, stray edges and runaway segment counts; the areas of a square and a
+  circle at every distance hold the distance and the mitres exactly. A shape that misbehaves
   belongs in that catalogue. The bar's *Offset* opens a card with one scrubbable distance field through the
   edit valve; every distance is measured from the outline the card opened on, and zero writes the
   stored path back, radii included. A press outside the card, `Escape`, or the edit ending closes it.

@@ -2945,6 +2945,63 @@ fn outline_stroke_groups_a_filled_layer_with_its_stroke() {
     );
 }
 
+/// *Outline stroke* keeps every dot of a thin dotted stroke, and refuses a stroke
+/// that leaves no ink — a butt-capped stroke of a dot, beside a round one that
+/// does — rather than taking it off the layer.
+/// flip: `stroke_ink` dropping pieces under a square unit → fails at "dots";
+/// `outline_stroke` skipping a stroke with no ink → fails at "refused".
+#[test]
+fn outline_stroke_keeps_thin_dotted_ink() {
+    use ondin_core::kurbo::{BezPath, Cap, Shape};
+    let line = BezPath::from_svg("M0,0 L20,0").unwrap();
+    let dotted = ondin_core::Stroke {
+        width: 1.0,
+        cap: Cap::Round,
+        dashes: vec![0.0, 3.0],
+        ..Default::default()
+    };
+    let ink = build::stroke_ink(&path_kind(line.clone()), &line, &dotted).expect("dots");
+    let dots = ondin_core::geometry::subpaths(&ink);
+    assert!(dots.len() >= 6, "every dot: {}", dots.len());
+    for dot in &dots {
+        let area = dot.area().abs();
+        assert!(
+            (area - 0.25 * std::f64::consts::PI).abs() < 0.03,
+            "a disc: {area}"
+        );
+    }
+
+    let mut f = Fixture::new();
+    let dot = BezPath::from_svg("M5,5 L5,5").unwrap();
+    let id = f.add(f.artboard, path_kind(dot), (0.0, 0.0));
+    let round = ondin_core::Stroke {
+        width: 4.0,
+        cap: Cap::Round,
+        ..Default::default()
+    };
+    let butt = ondin_core::Stroke {
+        cap: Cap::Butt,
+        ..round.clone()
+    };
+    f.commit(Transaction(vec![
+        Operation::SetFills {
+            id,
+            fills: Vec::new(),
+        },
+        Operation::SetStrokes {
+            id,
+            strokes: keyed_by_position([round, butt]),
+        },
+    ]));
+    assert!(
+        matches!(
+            build::outline_stroke(&f.doc, &f.resolved(), &mut f.ids, id),
+            Err(OpError::EmptyGeometry)
+        ),
+        "refused"
+    );
+}
+
 /// **A grouped outline keeps the layer's look**: a hidden filled layer stays
 /// hidden, strokes and all; a bound opacity moves to the group with its binding;
 /// and a filled mask is refused rather than made to mask its own strokes.
@@ -4853,6 +4910,72 @@ fn offset_grows_shrinks_and_bands() {
     assert!(near(b, Rect::new(-5.0, -5.0, 105.0, 5.0)), "{b:?}");
 }
 
+/// Offset reads a path with the node's fill rule: two circles wound the same way
+/// are a ring under even-odd, and a grow and a shrink both keep its hole.
+/// flip: `offset_path` reading every path non-zero → fails at "the hole stays".
+#[test]
+fn offset_keeps_an_even_odd_hole() {
+    use ondin_core::kurbo::{Circle, Point, Shape};
+    let mut f = Fixture::new();
+    let mut ring = Circle::new((0.0, 0.0), 100.0).to_path(0.01);
+    ring.extend(Circle::new((0.0, 0.0), 50.0).to_path(0.01));
+    for d in [5.0, -5.0] {
+        let id = f.add(f.artboard, path_kind(ring.clone()), (0.0, 0.0));
+        f.commit(Transaction(vec![Operation::SetFillRule {
+            id,
+            rule: ondin_core::FillRule::EvenOdd,
+        }]));
+        let tx = build::offset_path(&f.doc, id, d).unwrap();
+        let out = path_after(&mut f, id, tx);
+        assert_eq!(out.winding(Point::ZERO), 0, "the hole stays at {d}");
+        assert_ne!(out.winding(Point::new(75.0, 0.0)), 0, "the ring at {d}");
+    }
+}
+
+/// A grow keeps every subpath however small, a small square grown a fraction of a
+/// unit comes back grown rather than as nothing, and a dot grows into a disc.
+/// flip: `refit` dropping outer contours under a square unit → fails at "two
+/// subpaths"; `offset_outline` leaving dots out → fails at "a disc".
+#[test]
+fn offset_grows_small_subpaths_rather_than_dropping_them() {
+    use ondin_core::FillRule;
+    use ondin_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
+    let mut path = Circle::new((0.0, 0.0), 10.0).to_path(0.01);
+    path.extend(Circle::new((14.0, 0.0), 0.4).to_path(0.01));
+    let grown = build::offset_outline(&path, 0.1, FillRule::NonZero).unwrap();
+    assert_eq!(
+        ondin_core::geometry::subpaths(&grown).len(),
+        2,
+        "two subpaths"
+    );
+    assert_ne!(grown.winding(Point::new(14.0, 0.0)), 0, "the dot grew");
+
+    let square = Rect::new(0.0, 0.0, 0.5, 0.5).to_path(0.1);
+    let b = build::offset_outline(&square, 0.2, FillRule::NonZero)
+        .expect("a grow leaves something")
+        .bounding_box();
+    assert!(
+        (b.width() - 0.9).abs() < 1e-3 && (b.height() - 0.9).abs() < 1e-3,
+        "{b:?}"
+    );
+
+    let dot = BezPath::from_svg("M10,10 L10,10").unwrap();
+    let disc = build::offset_outline(&dot, 5.0, FillRule::NonZero).expect("a disc");
+    let b = disc.bounding_box();
+    let want = Rect::new(5.0, 5.0, 15.0, 15.0);
+    assert!(
+        [
+            b.x0 - want.x0,
+            b.y0 - want.y0,
+            b.x1 - want.x1,
+            b.y1 - want.y1
+        ]
+        .iter()
+        .all(|d| d.abs() < 0.05),
+        "a disc: {b:?}"
+    );
+}
+
 /// Shrinking a many-sided ring leaves only what is inside it, and nothing once the
 /// distance passes its middle.
 #[test]
@@ -4869,7 +4992,8 @@ fn offset_shrinks_a_ring_without_slivers() {
         }
     }
     ring.close_path();
-    let inner = build::offset_outline(&ring, -10.0).unwrap();
+    let nonzero = ondin_core::FillRule::NonZero;
+    let inner = build::offset_outline(&ring, -10.0, nonzero).unwrap();
     let b = inner.bounding_box();
     assert!(
         b.x0 > 9.0 && b.y0 > 9.0 && b.x1 < 91.0 && b.y1 < 91.0,
@@ -4878,7 +5002,7 @@ fn offset_shrinks_a_ring_without_slivers() {
     assert!((b.width() - 80.0).abs() < 0.5, "{b:?}");
     assert!(
         matches!(
-            build::offset_outline(&ring, -80.0),
+            build::offset_outline(&ring, -80.0, nonzero),
             Err(OpError::EmptyGeometry)
         ),
         "nothing left"
@@ -4889,6 +5013,7 @@ fn offset_shrinks_a_ring_without_slivers() {
 /// closes once the distance passes its radius.
 #[test]
 fn offset_grows_a_circle_whole_at_any_distance() {
+    use ondin_core::FillRule;
     use ondin_core::kurbo::{Ellipse, Point, Shape};
     let circle = |r: f64| {
         let mut c = Ellipse::new((0.0, 0.0), (r, r), 0.0).to_path(0.1);
@@ -4903,7 +5028,7 @@ fn offset_grows_a_circle_whole_at_any_distance() {
     };
     for r in [50.0, 75.0, 115.0] {
         for d in (1..=120).map(f64::from) {
-            let grown = build::offset_outline(&circle(r), d).unwrap();
+            let grown = build::offset_outline(&circle(r), d, FillRule::NonZero).unwrap();
             for p in ring_at(0.0).chain(ring_at(r)).chain(ring_at(r + d - 0.5)) {
                 assert!(grown.winding(p) != 0, "filled: r {r} d {d} at {p:?}");
             }
@@ -4915,10 +5040,10 @@ fn offset_grows_a_circle_whole_at_any_distance() {
 
     let mut donut = circle(120.0);
     donut.extend(circle(60.0).reverse_subpaths());
-    let grown = build::offset_outline(&donut, 30.0).unwrap();
+    let grown = build::offset_outline(&donut, 30.0, FillRule::NonZero).unwrap();
     assert!(grown.winding(Point::ZERO) == 0, "the hole shrinks");
     assert!(grown.winding(Point::new(31.0, 0.0)) != 0, "to radius 30");
-    let grown = build::offset_outline(&donut, 70.0).unwrap();
+    let grown = build::offset_outline(&donut, 70.0, FillRule::NonZero).unwrap();
     assert!(grown.winding(Point::ZERO) != 0, "and closes");
     let disk = 190.0f64.powi(2) * std::f64::consts::PI;
     assert!(

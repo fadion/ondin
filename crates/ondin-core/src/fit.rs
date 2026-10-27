@@ -29,7 +29,7 @@ pub fn fit_closed(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
     out.move_to(at(starts[0]));
     for (k, &s) in starts.iter().enumerate() {
         let e = starts.get(k + 1).copied().unwrap_or(starts[0] + n);
-        let run = densified(&(s..=e).map(at).collect::<Vec<_>>(), SPACING);
+        let run = densified(&(s..=e).map(at).collect::<Vec<_>>(), spacing(accuracy));
         let (t1, t2) = if smooth {
             let reach = (10.0 * accuracy).min(length(points, true) / 12.0);
             let behind = (1..n)
@@ -44,8 +44,8 @@ pub fn fit_closed(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
             (t, -t)
         } else {
             (
-                lead(&run),
-                lead(&run.iter().rev().copied().collect::<Vec<_>>()),
+                lead(&run, accuracy),
+                lead(&run.iter().rev().copied().collect::<Vec<_>>(), accuracy),
             )
         };
         fit_run(&run, t1, t2, accuracy, 0, &mut out);
@@ -72,9 +72,16 @@ pub fn fit_open(points: &[Point], accuracy: f64, corner_deg: f64) -> BezPath {
     stops.push(n - 1);
     out.move_to(points[0]);
     for w in stops.windows(2) {
-        let run = densified(&points[w[0]..=w[1]], SPACING);
+        let run = densified(&points[w[0]..=w[1]], spacing(accuracy));
         let back: Vec<Point> = run.iter().rev().copied().collect();
-        fit_run(&run, lead(&run), lead(&back), accuracy, 0, &mut out);
+        fit_run(
+            &run,
+            lead(&run, accuracy),
+            lead(&back, accuracy),
+            accuracy,
+            0,
+            &mut out,
+        );
     }
     out
 }
@@ -162,6 +169,13 @@ fn length(points: &[Point], closed: bool) -> f64 {
 /// The longest stretch of a run the fit checks no point along, in units.
 const SPACING: f64 = 2.0;
 
+/// The spacing a fit within `accuracy` checks a run at: [`SPACING`], or twenty
+/// accuracies where that is less, so a fit of something small is checked as
+/// closely for its size.
+fn spacing(accuracy: f64) -> f64 {
+    SPACING.min(20.0 * accuracy)
+}
+
 /// `run` with points added along each edge longer than `spacing`, so a curve
 /// fitted across a long straight stretch is checked along it rather than only at
 /// its ends, where it could bulge unseen.
@@ -193,13 +207,14 @@ fn through(a: Point, b: Point, c: Point) -> Vec2 {
     if t.dot(chord) < 0.0 { -t } else { t }
 }
 
-/// The direction a run leaves its first point in: towards the first point a few
-/// steps along, which averages out the polygon's jitter.
-fn lead(run: &[Point]) -> Vec2 {
+/// The direction a run leaves its first point in: towards the first point half a
+/// unit along, or five `accuracy`s where that is less, which averages out the
+/// polygon's jitter.
+fn lead(run: &[Point], accuracy: f64) -> Vec2 {
     let reach = run
         .iter()
         .skip(1)
-        .find(|p| (**p - run[0]).hypot() >= 0.5)
+        .find(|p| (**p - run[0]).hypot() >= (5.0 * accuracy).min(0.5))
         .unwrap_or(&run[run.len() - 1]);
     (*reach - run[0]).normalize()
 }

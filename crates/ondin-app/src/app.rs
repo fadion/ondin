@@ -172,6 +172,9 @@ pub(crate) struct InFlight {
     /// writes its own draft, not `RenderOverrides`). Also keeps the cancel gate armed
     /// after egui clears `ctx.dragged_id()` on any button's release.
     pub(crate) settings_scrub: Option<crate::input::NudgeStep>,
+    /// The batch rename box's numbering as it was when a From or Step scrub began,
+    /// for the same reasons as [`Self::settings_scrub`].
+    pub(crate) rename_scrub: Option<ondin_core::rename::Numbering>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
     /// An Effects row being dragged up or down its card.
@@ -229,6 +232,13 @@ mod in_flight_tests {
                 "settings_scrub",
                 InFlight {
                     settings_scrub: Some(crate::input::NudgeStep::default()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "rename_scrub",
+                InFlight {
+                    rename_scrub: Some(ondin_core::rename::Numbering::default()),
                     ..Default::default()
                 },
             ),
@@ -1785,6 +1795,7 @@ impl eframe::App for OndinApp {
             // only on a frame the field changed.
             self.in_flight.session_scrub = None;
             self.in_flight.settings_scrub = None;
+            self.in_flight.rename_scrub = None;
         }
 
         // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
@@ -2278,6 +2289,12 @@ impl OndinApp {
             && let Some(settings) = &mut self.settings
         {
             settings.set_nudge(nudge);
+        }
+        // And the batch rename box's numbering.
+        if let Some(n) = self.in_flight.rename_scrub.take()
+            && let Some(b) = &mut self.batch_rename
+        {
+            b.s.numbering = n;
         }
         // Dropped here, not by the panel: the canvas draws them before the panels run.
         self.in_flight.grid_scrub = None;

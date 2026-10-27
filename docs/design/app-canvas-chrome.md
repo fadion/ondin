@@ -352,7 +352,9 @@ document. The preview keeps the previous plan until the new one's first part lan
   case leaves it as typed.
 - **Rename to** draws each token as a pill: the canonical `[Word]` text with its brackets hidden, so
   the caret walks real characters, at the text's own size so pill and words share a line. The
-  edit is `put` into the field's whole height, as Find is, which centres its text. A typed short form is rewritten to the canonical token;
+  edit is `put` into the field's whole height, as Find is, which centres its text. Two pills side by
+  side keep a 2pt gap. A caret the arrow keys move into a pill leaves it on the side it was heading
+  for, so Left and Right step pill by pill; one a click puts inside goes after it. A typed short form is rewritten to the canonical token;
   Backspace and Delete take a pill out whole; *+ Name*, *+ Number* and one *+ Group k* per pattern
   group insert at the caret. The field opens holding the last template (one *Name* pill the first
   time), all selected, so typing replaces it. An empty template with Find filled shows *Empty:
@@ -361,6 +363,8 @@ document. The preview keeps the previous plan until the new one's first part lan
   *From* and *Step* as the inspector's scrubbable value fields (`ui::value_field`, the word inside
   the field) and the digits *1 · 01 · 001* (zero-padded; a negative step counts down); Order, under
   it, is a dropdown as the Settings modal's are. All are 28 tall, the Settings modal's field height.
+  A right-click mid-scrub puts the numbering back as the scrub found it (`InFlight::rename_scrub`,
+  wound back in `cancel_gesture`).
   The orders: *Layers order*
   (tree top to bottom, the default), *Layers order, reversed*, *Left to right* (rows: a layer joins
   the first band its centre falls in, bands taken top to bottom, each read left to right by left
@@ -373,7 +377,9 @@ document. The preview keeps the previous plan until the new one's first part lan
   unchanged ones dim; elsewhere only matches, and *All pages* heads each page's rows with its name
   and count. The count reads *N of M change* at *Selection*, *N of M match* on a page, plus *· K
   pages* for all pages. A name that would come out empty keeps its own (*Would be empty · kept*,
-  amber) and takes no number. Nothing on the canvas changes until Rename.
+  amber) and takes no number. An empty preview reads *Matching…* only until the first plan lands,
+  and *No layer matches* after it, also while a later keystroke's plan is in flight. Nothing on the
+  canvas changes until Rename.
 - **Renaming.** One transaction of `SetName`, one undo step named *Rename* with `TEXT_AA`; the
   status line says *Renamed N layers · Ctrl+Z to undo*. New names are cleaned as any typed name
   (`naming::usable`). Renaming a main reaches its copies by propagation; renaming inside an instance

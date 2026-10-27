@@ -36,6 +36,8 @@ const NUM_H: f32 = 28.0;
 const ROW_H: f32 = 26.0;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 8.0;
+/// The air between two pills side by side in the template.
+const PILL_GAP: f32 = 2.0;
 /// The layers the worker plans between two parts it sends.
 const PART: usize = 500;
 
@@ -232,6 +234,10 @@ pub(crate) struct BatchRename {
     fresh: bool,
     /// Whether `plan` is whole for the newest settings.
     done: bool,
+    /// Whether any plan has been whole since the box opened: until then an empty
+    /// preview is still matching, after it one says nothing matches, which a
+    /// keystroke's plan in flight must not flicker away.
+    landed: bool,
     /// The template's caret, in characters, while the field had it: where an
     /// insert button puts its token.
     caret: Option<usize>,
@@ -615,6 +621,7 @@ impl BatchRename {
                         self.plan = Plan::default();
                     }
                     self.done = true;
+                    self.landed = true;
                 }
                 _ => {}
             }
@@ -676,6 +683,14 @@ fn token_at(text: &str, at: usize, ending: bool) -> Option<Range<usize>> {
         })
 }
 
+/// Where a caret at char index `at`, inside a pill, goes: before the pill when it
+/// was moving `leftward`, else after it (a right arrow, or a click). `None` when it
+/// is not inside one.
+fn out_of_pill(text: &str, at: usize, leftward: bool) -> Option<usize> {
+    let r = token_at(text, at, false).filter(|r| r.start < at)?;
+    Some(if leftward { r.start } else { r.end })
+}
+
 fn char_to_byte(text: &str, at: usize) -> usize {
     text.char_indices().nth(at).map_or(text.len(), |(b, _)| b)
 }
@@ -713,8 +728,16 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
     let plain = egui::TextFormat::simple(font.clone(), color::TEXT);
     let mut job = egui::text::LayoutJob::default();
     let mut at = 0;
+    let mut last_end = None;
     for (r, _) in ondin_core::rename::tokens(text) {
         job.append(&text[at..r.start], 0.0, plain.clone());
+        // Two pills side by side keep a gap, or they read as one pill of two words.
+        let gap = if last_end == Some(r.start) {
+            PILL_GAP
+        } else {
+            0.0
+        };
+        last_end = Some(r.end);
         let pill = |ink| egui::TextFormat {
             color: ink,
             background: pill_fill(),
@@ -723,7 +746,7 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
         // The galley must hold exactly the text's characters, or the caret lands
         // between the wrong ones: the word is the text's own, the brackets hidden.
         let bracket = pill(egui::Color32::TRANSPARENT);
-        job.append("[", 0.0, bracket.clone());
+        job.append("[", gap, bracket.clone());
         job.append(&text[r.start + 1..r.end - 1], 0.0, pill(color::ACCENT_200));
         job.append("]", 0.0, bracket);
         at = r.end;
@@ -792,6 +815,7 @@ impl OndinApp {
             plan: Plan::default(),
             fresh: false,
             done: false,
+            landed: false,
             caret: None,
             focus: Some(Caret::All),
         });
@@ -859,6 +883,10 @@ impl OndinApp {
             false => Some("Still matching…".to_string()),
         };
         let mut act = Act::None;
+        // Before the fields: `value_field` applies a drag's first delta inside the
+        // call that reports it.
+        let numbering = b.s.numbering;
+        let mut scrubbing = false;
         let modal = egui::Modal::new(id)
             .area(area)
             .backdrop_color(egui::Color32::TRANSPARENT)
@@ -893,19 +921,24 @@ impl OndinApp {
                         find_row(ui, &mut b.s, b.plan.error.as_deref());
                         template_row(ui, &mut b);
                         if Template::parse(&b.s.template).has_number() {
-                            number_row(ui, &mut b.s.numbering);
+                            scrubbing = number_row(ui, &mut b.s.numbering);
                             order_row(ui, &mut b.s.order);
                         }
                         checks(ui, &mut b.s, b.plan.skipped);
                     });
                 ui.add_space(8.0);
                 divider(ui);
-                preview(ui, b.s.scope, &b.plan, b.done);
+                preview(ui, b.s.scope, &b.plan, b.landed);
                 divider(ui);
                 if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
                     act = a;
                 }
             });
+        // Armed after a right-click's cancel is answered, so the frame it lands on
+        // cannot re-arm it.
+        if scrubbing && !self.gesture_cancelled && self.in_flight.rename_scrub.is_none() {
+            self.in_flight.rename_scrub = Some(numbering);
+        }
         if modal.backdrop_response.clicked() && !popup {
             return;
         }
@@ -1178,6 +1211,9 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
             if focused {
                 take_pill(ui, id, &mut b.s.template);
             }
+            // Which way the keys move the caret this frame, read before the field
+            // moves it, so a caret landing inside a pill leaves it on that side.
+            let leftward = focused && ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
             let text = text_rect(rect, 24.0);
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 template_galley(ui, buf.as_str())
@@ -1207,13 +1243,11 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
             }
             if resp.has_focus() {
                 b.caret = caret;
-                // A caret inside a pill steps out of it, to its far side.
                 if let Some(c) = cursor
                     && c.primary.index == c.secondary.index
-                    && let Some(r) = token_at(&b.s.template, c.primary.index.0, false)
-                    && r.start < c.primary.index.0
+                    && let Some(at) = out_of_pill(&b.s.template, c.primary.index.0, leftward)
                 {
-                    b.focus = Some(Caret::At(r.end));
+                    b.focus = Some(Caret::At(at));
                 }
             }
             if let Some(f) = b.focus.take() {
@@ -1343,12 +1377,14 @@ fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
 }
 
 /// *From* and *Step* as the inspector's scrubbable fields, then the digits.
-fn number_row(ui: &mut egui::Ui, n: &mut Numbering) {
+/// Returns whether either field is being dragged, so the caller can keep the
+/// numbering for a right-click cancel (`InFlight::rename_scrub`).
+fn number_row(ui: &mut egui::Ui, n: &mut Numbering) -> bool {
     row(ui, "Number", NUM_H, |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let size = egui::vec2(96.0, NUM_H);
         // 0.5, the rate every other whole-unit field scrubs at.
-        ui::value_field(
+        let from = ui::value_field(
             ui,
             size,
             Prefix::Text("From"),
@@ -1357,7 +1393,7 @@ fn number_row(ui: &mut egui::Ui, n: &mut Numbering) {
             |d| d.custom_formatter(ui::number(0)),
         )
         .on_hover_text("The first layer's number");
-        ui::value_field(
+        let step = ui::value_field(
             ui,
             size,
             Prefix::Text("Step"),
@@ -1379,7 +1415,8 @@ fn number_row(ui: &mut egui::Ui, n: &mut Numbering) {
                 }
             }
         });
-    });
+        from.dragged() || step.dragged()
+    })
 }
 
 /// Which layer of the run is first, as the Settings modal's dropdowns.
@@ -1479,7 +1516,7 @@ fn checks(ui: &mut egui::Ui, s: &mut Settings, skipped: usize) {
 
 /// The preview: every layer at Selection, the matches elsewhere. Only the rows in
 /// view are laid out, so a run of thousands costs what eight do.
-fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, done: bool) {
+fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 30.0), egui::Sense::hover());
     let p = ui.painter();
     let y = rect.bottom() - 10.0;
@@ -1511,7 +1548,7 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, done: bool) {
                 ui.painter().text(
                     rect.left_center() + egui::vec2(8.0, 0.0),
                     egui::Align2::LEFT_CENTER,
-                    if done {
+                    if landed {
                         "No layer matches"
                     } else {
                         "Matching…"
@@ -2229,5 +2266,177 @@ mod tests {
             (text.center().y - field.center().y).abs() < 1.0,
             "text {text:?} in field {field:?}"
         );
+    }
+
+    /// A caret the keys move into a pill leaves it on the side it was heading for;
+    /// one put there any other way goes after it.
+    #[test]
+    fn a_caret_leaves_a_pill_the_way_it_was_going() {
+        let t = "[Name][Number]";
+        assert_eq!(out_of_pill(t, 13, true), Some(6));
+        assert_eq!(out_of_pill(t, 5, true), Some(0));
+        assert_eq!(out_of_pill(t, 1, false), Some(6));
+        assert_eq!(out_of_pill(t, 7, false), Some(14));
+        assert_eq!(out_of_pill(t, 6, true), None, "between pills is a place");
+        assert_eq!(out_of_pill("a [Name]", 1, true), None);
+    }
+
+    /// Through real frames: the arrows walk the caret pill by pill, so a
+    /// separator can be typed between two of them.
+    ///
+    /// flip: `out_of_pill` ignoring `leftward` → fails at the first Left, the
+    /// caret put back after the pill.
+    #[test]
+    fn the_arrows_step_between_pills() {
+        let (ctx, mut app) = app();
+        let none = egui::Modifiers::NONE;
+        let a = named(&mut app, "Rectangle 1");
+        app.session.selection.set_one(a);
+        pass(&ctx, &mut app, Vec::new(), none);
+        app.open_batch_rename(&ctx, None);
+        pass(&ctx, &mut app, Vec::new(), none);
+        pass(
+            &ctx,
+            &mut app,
+            vec![egui::Event::Text("[name][number]".into())],
+            none,
+        );
+        pass(&ctx, &mut app, Vec::new(), none);
+        assert_eq!(
+            app.batch_rename.as_ref().unwrap().s.template,
+            "[Name][Number]"
+        );
+        let id = egui::Id::new(TEMPLATE_ID);
+        let mut press = |key: egui::Key| {
+            pass(&ctx, &mut app, vec![super::tests::key(key, none)], none);
+            // The step out of a pill is placed on the frame after the press.
+            pass(&ctx, &mut app, Vec::new(), none);
+            egui::TextEdit::load_state(&ctx, id)
+                .and_then(|s| s.cursor.char_range())
+                .map(|c| c.primary.index.0)
+        };
+        assert_eq!(press(egui::Key::ArrowLeft), Some(6), "between the pills");
+        assert_eq!(press(egui::Key::ArrowLeft), Some(0), "before Name");
+        assert_eq!(press(egui::Key::ArrowRight), Some(6), "between again");
+        assert_eq!(press(egui::Key::ArrowRight), Some(14), "after Number");
+        press(egui::Key::ArrowLeft);
+        pass(&ctx, &mut app, vec![egui::Event::Text("_".into())], none);
+        assert_eq!(
+            app.batch_rename.as_ref().unwrap().s.template,
+            "[Name]_[Number]"
+        );
+    }
+
+    /// Two pills side by side keep a gap; a pill after text does not.
+    #[test]
+    fn pills_side_by_side_keep_a_gap() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut widths = (0.0, 0.0);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let one = template_galley(ui, "[Name]").size().x;
+            widths = (
+                template_galley(ui, "[Name][Name]").size().x - 2.0 * one,
+                template_galley(ui, "x[Name]").size().x - template_galley(ui, "x").size().x - one,
+            );
+        });
+        // Within a tenth: glyph positions round to 1/64 of a point.
+        assert!((widths.0 - PILL_GAP).abs() < 0.1, "{widths:?}");
+        assert!(widths.1.abs() < 0.1, "{widths:?}");
+    }
+
+    /// A right-click mid-scrub puts From back where the scrub began, as on any
+    /// scrubbable field.
+    ///
+    /// flip: dropping the box from `cancel_gesture`'s wind-backs → fails at "From is
+    /// back".
+    #[test]
+    fn a_right_click_winds_a_numbering_scrub_back() {
+        let (ctx, mut app) = app();
+        let none = egui::Modifiers::NONE;
+        let a = named(&mut app, "Rectangle 1");
+        app.session.selection.set_one(a);
+        app.prefs.batch_rename.template = "[Number]".into();
+        pass(&ctx, &mut app, Vec::new(), none);
+        app.open_batch_rename(&ctx, None);
+        let mut out = pass(&ctx, &mut app, Vec::new(), none);
+        for _ in 0..10 {
+            out = pass(&ctx, &mut app, Vec::new(), none);
+        }
+        let from = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == "From" => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()).center())
+                }
+                _ => None,
+            })
+            .expect("the From field");
+        let ev = |e| vec![e];
+        let button = |pressed, at, button| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: none,
+        };
+        pass(&ctx, &mut app, ev(egui::Event::PointerMoved(from)), none);
+        pass(
+            &ctx,
+            &mut app,
+            ev(button(true, from, egui::PointerButton::Primary)),
+            none,
+        );
+        for dx in [10.0, 30.0, 60.0, 90.0] {
+            pass(
+                &ctx,
+                &mut app,
+                ev(egui::Event::PointerMoved(from + egui::vec2(dx, 0.0))),
+                none,
+            );
+        }
+        let scrubbed = app.batch_rename.as_ref().unwrap().s.numbering.from;
+        assert!(scrubbed > 1, "the drag scrubbed From, to {scrubbed}");
+        assert!(app.in_flight.rename_scrub.is_some(), "the scrub is armed");
+        let at = from + egui::vec2(90.0, 0.0);
+        pass(
+            &ctx,
+            &mut app,
+            ev(button(true, at, egui::PointerButton::Secondary)),
+            none,
+        );
+        assert_eq!(
+            app.batch_rename.as_ref().unwrap().s.numbering.from,
+            1,
+            "From is back"
+        );
+        assert!(app.batch_rename.is_some(), "the right-click closed nothing");
+    }
+
+    /// While a keystroke's plan is in flight, an empty preview keeps saying
+    /// nothing matches rather than flashing *Matching…*. Racy in the passing
+    /// direction only: the frame after the keystroke almost never has the
+    /// worker's answer, which is the case the flip needs.
+    ///
+    /// flip: `preview` reading `done` instead of `landed` → fails at "no flash".
+    #[test]
+    fn an_empty_preview_does_not_flash_while_matching() {
+        let (ctx, mut app) = app();
+        let none = egui::Modifiers::NONE;
+        // Nothing selected, so the box opens on the page, which lists only matches.
+        named(&mut app, "Rectangle 1");
+        app.prefs.batch_rename.find = "zz".into();
+        pass(&ctx, &mut app, Vec::new(), none);
+        app.open_batch_rename(&ctx, None);
+        settle(&ctx, &mut app);
+        let painted = |out: &egui::FullOutput, s: &str| {
+            out.shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == s))
+        };
+        app.batch_rename.as_mut().unwrap().s.find = "zzz".into();
+        let out = pass(&ctx, &mut app, Vec::new(), none);
+        assert!(!painted(&out, "Matching…"), "no flash");
+        assert!(painted(&out, "No layer matches"));
     }
 }

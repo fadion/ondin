@@ -39,9 +39,6 @@ reads true.
   recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
   colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
   eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
-- **Tab steps the contrast check's failures.** Tab / Shift+Tab while the bar has focus, beside its
-  arrows (`app-canvas-chrome.md`). The bar never takes keyboard focus, and Tab is egui's focus key
-  and steps points on an edited path (`shortcuts.md`), so this needs a way to give the bar focus.
 - **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
   `Item::Rename`, one layer, exists.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).

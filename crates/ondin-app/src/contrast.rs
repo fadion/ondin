@@ -23,6 +23,8 @@ use crate::theme::{self, color, icon};
 /// How long the document must sit still after an edit before it is measured
 /// again, so a run of nudges measures once.
 const SETTLE: f64 = 0.15;
+/// How many layers one worker job measures.
+const CHUNK: usize = 6;
 /// A failure's ink: its badge's ground and its outline. Red is never alone: the
 /// badge carries the warning glyph and the layer the outline.
 const FAIL: egui::Color32 = egui::Color32::from_rgb(0xd2, 0x3f, 0x45);
@@ -198,19 +200,73 @@ impl OndinApp {
             self.end_contrast();
             return;
         }
-        let scope: Vec<NodeId> = self.session.selection.ids().to_vec();
-        let doc = &self.session.doc;
-        let scope_name = match scope.as_slice() {
-            [] => None,
-            [one] => doc.get(*one).map(|n| n.name().to_string()),
-            many => Some(format!("{} layers", many.len())),
-        };
+        let (scope, scope_name) = self.contrast_target();
         self.contrast = Some(Contrast::new(
             self.session.page,
             scope,
             scope_name,
             self.prefs.contrast.options(),
         ));
+    }
+
+    /// What a check covers, and its name for the bar: the selection, cut to the
+    /// top-level frame of its first layer; with nothing selected, the top-level
+    /// frame filling most of the view, else the page's first in reading order.
+    /// One frame at most, since measuring renders every layer's box twice. An
+    /// empty scope (a page with no frame) is the whole page.
+    pub(crate) fn contrast_target(&self) -> (Vec<NodeId>, Option<String>) {
+        let doc = &self.session.doc;
+        let page = self.session.page;
+        let name = |id: NodeId| doc.get(id).map(|n| n.name().to_string());
+        let sel = self.session.selection.ids();
+        if let Some(&first) = sel.first() {
+            let top = top_level(doc, page, first);
+            let scope: Vec<NodeId> = sel
+                .iter()
+                .copied()
+                .filter(|id| top_level(doc, page, *id) == top)
+                .collect();
+            let label = match scope.as_slice() {
+                [one] => name(*one),
+                many => Some(format!("{} layers", many.len())),
+            };
+            return (scope, label);
+        }
+        let res = &self.session.resolved;
+        let frames: Vec<(NodeId, Rect)> = doc
+            .get(page)
+            .map(|p| p.children().to_vec())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| {
+                doc.get(*id)
+                    .is_some_and(|n| matches!(n.kind(), ondin_core::NodeKind::Artboard { .. }))
+            })
+            .filter_map(|id| Some((id, res.world_bounds(id)?)))
+            .collect();
+        let view = self.session.camera.viewport(self.canvas_px).view;
+        let in_view = |b: Rect| {
+            if b.overlaps(view) {
+                b.intersect(view).area()
+            } else {
+                0.0
+            }
+        };
+        let pick = frames
+            .iter()
+            .map(|(id, b)| (*id, in_view(*b)))
+            .filter(|(_, a)| *a > 0.0)
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(id, _)| id)
+            .or_else(|| {
+                crate::present::reading_order(frames.clone())
+                    .first()
+                    .copied()
+            });
+        match pick {
+            Some(id) => (vec![id], name(id)),
+            None => (Vec::new(), None),
+        }
     }
 
     /// Take an Enter for the open fix card before the keymap reads it. Runs at the
@@ -242,7 +298,8 @@ impl OndinApp {
             if c.fix.as_ref().is_some_and(|f| f.previewing.is_some()) {
                 self.session.clear_gesture_preview();
             }
-            c = Contrast::new(self.session.page, Vec::new(), None, c.options);
+            let (scope, name) = self.contrast_target();
+            c = Contrast::new(self.session.page, scope, name, c.options);
         }
         let options = self.prefs.contrast.options();
         if options != c.options {
@@ -273,7 +330,24 @@ impl OndinApp {
             c.changed_at = now;
         }
         if c.job.is_none() && !c.queue.is_empty() && now - c.changed_at >= SETTLE {
-            let ids: Vec<NodeId> = c.queue.drain().collect();
+            // The next few in reading order, so badges arrive top down as they are
+            // measured rather than all at once at the end.
+            let ids: Vec<NodeId> = c
+                .subjects
+                .iter()
+                .copied()
+                .filter(|id| c.queue.contains(id))
+                .take(CHUNK)
+                .collect();
+            for id in &ids {
+                c.queue.remove(id);
+            }
+            // What is left queued is no longer a subject.
+            if ids.is_empty() {
+                c.queue.clear();
+                self.contrast = Some(c);
+                return;
+            }
             let doc = self.session.doc.clone();
             let (page, options) = (c.page, c.options);
             let only = ids.clone();
@@ -555,6 +629,8 @@ impl OndinApp {
         let fails = c.failures();
         let measured = c.measured();
         let waiting = !c.stale.is_empty() || c.job.is_some();
+        let total = c.subjects.len();
+        let pending = c.subjects.iter().filter(|id| c.stale.contains(id)).count();
         let at =
             c.at.and_then(|a| fails.iter().position(|f| *f == a))
                 .map(|i| i + 1);
@@ -580,7 +656,7 @@ impl OndinApp {
                         match &scope_name {
                             Some(name) => {
                                 if scope_chip(ui, name) {
-                                    act = Some(BarAct::ClearScope);
+                                    act = Some(BarAct::Retarget);
                                 }
                             }
                             None => {
@@ -592,14 +668,7 @@ impl OndinApp {
                             }
                         }
                         separator(ui);
-                        let lr = ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(format!("{} ▾", level.label()))
-                                    .size(12.0)
-                                    .color(theme::text::MUTED),
-                            )
-                            .sense(egui::Sense::click()),
-                        );
+                        let lr = level_head(ui, level.label());
                         if lr.clicked() {
                             act = Some(BarAct::LevelMenu(lr.rect.left_bottom()));
                         }
@@ -609,35 +678,43 @@ impl OndinApp {
                         } else {
                             color::TEXT
                         };
-                        if measured == 0 {
-                            ui.label(
-                                egui::RichText::new("Measuring…")
-                                    .size(12.0)
-                                    .color(theme::text::DIM),
-                            );
-                        } else if fails.is_empty() {
-                            ui.label(theme::icon_text(icon::CHECK_CIRCLE, 13.0, PASS));
-                            ui.add_space(-5.0);
-                            ui.label(
-                                egui::RichText::new(format!("All {measured} pass"))
-                                    .size(12.0)
-                                    .color(ink),
-                            );
-                        } else {
-                            ui.label(theme::icon_text(icon::WARNING, 13.0, FAIL_LINE));
-                            ui.add_space(-5.0);
-                            ui.label(
-                                egui::RichText::new(format!("{} failing", fails.len()))
-                                    .size(12.0)
-                                    .color(ink),
-                            );
-                            if let Some(at) = at {
+                        // Fixed cells, so stepping (which changes the numbers) never
+                        // moves the arrows under the pointer.
+                        cell(ui, COUNT_W, |ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            if waiting && fails.is_empty() {
+                                let done = total.saturating_sub(pending);
                                 ui.label(
-                                    egui::RichText::new(format!("{at} / {}", fails.len()))
+                                    egui::RichText::new(format!("Measuring {done} / {total}"))
                                         .size(12.0)
                                         .color(theme::text::DIM),
                                 );
+                            } else if fails.is_empty() {
+                                ui.label(theme::icon_text(icon::CHECK_CIRCLE, 13.0, PASS));
+                                ui.label(
+                                    egui::RichText::new(format!("All {measured} pass"))
+                                        .size(12.0)
+                                        .color(ink),
+                                );
+                            } else {
+                                ui.label(theme::icon_text(icon::WARNING, 13.0, FAIL_LINE));
+                                ui.label(
+                                    egui::RichText::new(format!("{} failing", fails.len()))
+                                        .size(12.0)
+                                        .color(ink),
+                                );
                             }
+                        });
+                        if !fails.is_empty() {
+                            cell(ui, AT_W, |ui| {
+                                if let Some(at) = at {
+                                    ui.label(
+                                        egui::RichText::new(format!("{at} / {}", fails.len()))
+                                            .size(12.0)
+                                            .color(theme::text::DIM),
+                                    );
+                                }
+                            });
                             ui.spacing_mut().item_spacing.x = 2.0;
                             if crate::ui::icon_button(ui, icon::CARET_LEFT, 24.0, 13.0, false, true)
                                 .on_hover_text("Previous failure")
@@ -679,10 +756,11 @@ impl OndinApp {
                     c.menu_opening = c.level_menu;
                 }
             }
-            Some(BarAct::ClearScope) => {
+            Some(BarAct::Retarget) => {
                 self.close_fix();
+                let (scope, name) = self.contrast_target();
                 if let Some(c) = &mut self.contrast {
-                    *c = Contrast::new(c.page, Vec::new(), None, c.options);
+                    *c = Contrast::new(c.page, scope, name, c.options);
                 }
             }
         }
@@ -944,6 +1022,18 @@ fn overlaps(a: Rect, b: Rect) -> bool {
     a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
 }
 
+/// The page's top-level layer at or above `id`.
+fn top_level(doc: &Document, page: NodeId, id: NodeId) -> NodeId {
+    let mut at = id;
+    while let Some(p) = doc.get(at).and_then(|n| n.parent()) {
+        if p == page {
+            break;
+        }
+        at = p;
+    }
+    at
+}
+
 /// The check's subjects at or under a layer of `scope` (every one, for an empty
 /// scope), in reading order: the page's top-level layers as a page is read, and
 /// each one's subjects the same way within it.
@@ -964,16 +1054,7 @@ pub(crate) fn subjects_in_scope(
         }
         false
     };
-    let top = |id: NodeId| {
-        let mut at = id;
-        while let Some(p) = doc.get(at).and_then(|n| n.parent()) {
-            if p == page {
-                break;
-            }
-            at = p;
-        }
-        at
-    };
+    let top = |id: NodeId| top_level(doc, page, id);
     let mut groups: Vec<(NodeId, Vec<(NodeId, Rect)>)> = Vec::new();
     for id in contrast::subjects(doc, res, page, non_text) {
         if !scope.is_empty() && !inside(id) {
@@ -1277,32 +1358,91 @@ fn separator(ui: &mut egui::Ui) {
     ui.painter().rect_filled(r, 0.0, color::text_a(30));
 }
 
-/// The bar's scope chip: the selection's name and an × that clears it. Answers
-/// whether the × was clicked.
+/// The bar's scope chip: a pill naming what is checked, clear of the bar's edges.
+/// A click checks the selection, or the frame in view, instead; answers whether
+/// it was clicked.
 fn scope_chip(ui: &mut egui::Ui, name: &str) -> bool {
-    let mut cleared = false;
-    egui::Frame::NONE
-        .fill(color::text_a(20))
-        .corner_radius(egui::CornerRadius::same(4))
-        .inner_margin(egui::Margin {
-            left: 8,
-            right: 2,
-            top: 2,
-            bottom: 2,
-        })
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
-            ui.label(theme::icon_text(
-                icon::FRAME_CORNERS,
-                12.0,
-                color::ACCENT_400,
-            ));
-            ui.label(egui::RichText::new(name).size(12.0).color(color::TEXT));
-            cleared = crate::ui::icon_button(ui, icon::X, 18.0, 11.0, false, true)
-                .on_hover_text("Check the whole page")
-                .clicked();
-        });
-    cleared
+    const H: f32 = 20.0;
+    const PAD: f32 = 8.0;
+    const GAP: f32 = 5.0;
+    let font = egui::FontId::proportional(12.0);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(name.to_string(), font, color::TEXT);
+    let w = PAD + 12.0 + GAP + galley.size().x + PAD + 2.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, H), egui::Sense::click());
+    let p = ui.painter();
+    let ground = if resp.hovered() {
+        color::text_a(32)
+    } else {
+        color::text_a(20)
+    };
+    p.rect_filled(rect, H / 2.0, ground);
+    p.text(
+        egui::pos2(rect.left() + PAD + 6.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon::FRAME_CORNERS,
+        theme::icon_font(12.0),
+        color::ACCENT_400,
+    );
+    p.galley(
+        egui::pos2(
+            rect.left() + PAD + 12.0 + GAP,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        color::TEXT,
+    );
+    resp.on_hover_text("Check the selection, or the frame in view, instead")
+        .clicked()
+}
+
+/// The level head: the level's name and a caret, one click target.
+fn level_head(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        egui::FontId::proportional(12.0),
+        theme::text::MUTED,
+    );
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 4.0 + 11.0, 20.0),
+        egui::Sense::click(),
+    );
+    let ink = if resp.hovered() {
+        color::TEXT
+    } else {
+        theme::text::MUTED
+    };
+    let p = ui.painter();
+    p.galley(
+        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+    p.text(
+        egui::pos2(rect.right() - 5.5, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon::CARET_DOWN,
+        theme::icon_font(11.0),
+        theme::text::DIM,
+    );
+    resp
+}
+
+/// The count's width: room for `Measuring 120 / 120` and `999 failing`.
+const COUNT_W: f32 = 116.0;
+/// The step position's width: room for `99 / 99`.
+const AT_W: f32 = 44.0;
+
+/// A left-aligned cell of fixed width in the bar's row.
+fn cell(ui: &mut egui::Ui, w: f32, add: impl FnOnce(&mut egui::Ui)) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, BAR_H - 2.0), egui::Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    add(&mut child);
 }
 
 /// What the bar asked for this frame, acted on after it is drawn.
@@ -1310,7 +1450,7 @@ enum BarAct {
     Close,
     Step(bool),
     LevelMenu(egui::Pos2),
-    ClearScope,
+    Retarget,
 }
 
 /// The card on screen whole: shifted left and up when its anchor is near the
@@ -1680,19 +1820,20 @@ mod tests {
         }
     }
 
-    /// The mode measures the page's text and lists its failures in reading order;
-    /// it edits nothing.
+    /// With nothing selected the mode measures the frame in view, lists its
+    /// failures in reading order, and edits nothing; the far frame is left out.
     #[test]
-    fn the_check_lists_the_page_s_failures_in_reading_order() {
+    fn the_check_lists_the_frame_in_view_s_failures_in_reading_order() {
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         let revision = f.app.session.revision();
         f.app.dispatch(&ctx, crate::input::Action::CheckContrast);
         settle(&ctx, &mut f.app);
         let c = f.app.contrast.as_ref().expect("on");
-        assert_eq!(c.subjects, [f.black, f.grey, f.other], "reading order");
-        assert_eq!(c.failures(), [f.grey, f.other]);
-        assert_eq!(c.measured(), 3);
+        assert_eq!(c.scope, [f.card]);
+        assert_eq!(c.subjects, [f.black, f.grey], "reading order");
+        assert_eq!(c.failures(), [f.grey]);
+        assert_eq!(c.measured(), 2);
         assert!(c.stale.is_empty());
         assert_eq!(passes(&f.app, f.black), Some(true));
         assert_eq!(f.app.session.revision(), revision, "no edit");
@@ -1717,11 +1858,36 @@ mod tests {
         assert_eq!(f.app.contrast.as_ref().unwrap().subjects, [f.black, f.grey]);
     }
 
+    /// A selection across frames is cut to its first layer's frame, and with
+    /// nothing selected the frame filling the view is checked.
+    ///
+    /// flip: `contrast_target` keeping the whole selection → fails at "cut to
+    /// one frame".
+    #[test]
+    fn the_target_is_one_frame_at_most() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set(vec![f.grey, f.other]);
+        assert_eq!(f.app.contrast_target().0, [f.grey], "cut to one frame");
+        f.app.session.selection.clear();
+        f.app.zoom_to(Some(Rect::new(1980.0, -20.0, 2320.0, 220.0)));
+        let (scope, name) = f.app.contrast_target();
+        assert_eq!(name.as_deref(), Some("Far"));
+        assert_eq!(scope.len(), 1);
+        assert!(
+            f.app
+                .session
+                .doc
+                .get(scope[0])
+                .is_some_and(|n| n.name() == "Far")
+        );
+    }
+
     /// An edit queues the layers it could have changed and no others: darkening
-    /// the caption remeasures it, and the far frame's note keeps its mark.
+    /// the caption remeasures it, and the title above it keeps its mark.
     ///
     /// flip: `contrast_edited` treating every edit as touching everything
-    /// (`everything` always true) → fails at "the far note is not touched".
+    /// (`everything` always true) → fails at "the title is not touched".
     #[test]
     fn an_edit_remeasures_what_it_touched() {
         let ctx = egui::Context::default();
@@ -1739,7 +1905,7 @@ mod tests {
             c.stale.contains(&f.grey),
             "the caption waits on a remeasure"
         );
-        assert!(!c.stale.contains(&f.other), "the far note is not touched");
+        assert!(!c.stale.contains(&f.black), "the title is not touched");
         settle(&ctx, &mut f.app);
         assert_eq!(passes(&f.app, f.grey), Some(true));
     }

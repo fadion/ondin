@@ -92,18 +92,23 @@ them with `ondin_export::contrast::check_with`, the measurement `ondin check con
 (`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
 document opens, it is never saved or exported, and present mode's own branch never draws it.
 
-- **Scope.** The selection when the mode starts, the page when that is empty, fixed for the mode's
-  life: selecting other layers afterwards does not move it. The bar names it in a chip whose ×
-  resets it to the whole page. Switching pages starts over on the new page, page-wide. Subjects
-  are in reading order: `present::reading_order` over the page's top-level layers, then within each.
+- **Scope: one frame at most** (`contrast_target`), since measuring renders every layer's box
+  twice and a page of several frames can take minutes. The selection when the mode starts, cut to
+  the top-level frame of its first layer; with nothing selected, the top-level frame filling most
+  of the view, else the page's first frame in reading order; a page with no frame is checked
+  whole. The scope is fixed for the mode's life: selecting other layers afterwards does not move
+  it. The bar names it in a pill; a click on the pill re-targets to the selection or the frame in
+  view. Switching pages re-targets on the new page. Subjects are in reading order:
+  `present::reading_order` over the page's top-level layers, then within each.
 - **Measuring** runs on a worker (`job::Job`) over a clone of the document, one job at a time.
   `contrast_tick`, before the canvas, compares the document with a snapshot whenever
   `session.revision()` moves. A layer has changed when its stored node differs or its world box
   moved; a subject is queued, and drawn stale, when it changed or its box overlaps the old or new
   box of a changed or removed layer. A change to variables, styles or the page ground, or of the
   level or *Non-text*, queues everything. The queue goes once the document has been still for
-  `SETTLE` (0.15 s), so a run of nudges measures once. A layer queued again while its job is in
-  flight stays stale when that answer lands.
+  `SETTLE` (0.15 s), so a run of nudges measures once, `CHUNK` (6) layers a job in reading order,
+  so badges arrive top down as they are measured. A layer queued again while its job is in flight
+  stays stale when that answer lands.
 - **Badges** (`contrast_badges`) keep one screen size, above the layer's top left; a badge that
   overlaps an earlier one moves down below it. They are painted in the canvas panel's own layer
   after `canvas_ui`, so every floating card covers them.
@@ -118,9 +123,11 @@ document opens, it is never saved or exported, and present mode's own branch nev
   gesture preview that is not the fix card's own) the badges of the selected layers and their
   descendants hide.
 - **The bar** (`contrast_bar`), an `Area` at the canvas's top centre, 12pt down: circle-half glyph,
-  *Contrast* or the scope chip, the level head (`AA ▾`), then *Measuring…*, *All N pass* or
-  *N failing* with `k / N` once stepped and prev/next arrows, then × to end the mode. The count dims
-  while anything is stale. The arrows step through failures in reading order, selecting each and
+  the scope pill (*Contrast* on a page with no frame), the level head (the level and a caret
+  glyph), then *Measuring k / N*, *All N pass* or *N failing* with `k / N` once stepped and
+  prev/next arrows, then × to end the mode. The count and the step position sit in fixed-width
+  cells, so stepping never moves the arrows under the pointer. The count dims while anything is
+  stale. The arrows step through failures in reading order, selecting each and
   moving the camera only when the layer is not wholly in view: centred if it fits, else `zoom_to`.
 - **The level menu**, from the head: AA (4.5 / 3), AAA (7 / 4.5), APCA (Lc), then *Show passing*
   and *Non-text (3 : 1)*, kept in `prefs.contrast` (`ContrastPrefs`; AA, passing shown, text only).

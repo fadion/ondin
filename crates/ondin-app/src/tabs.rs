@@ -752,7 +752,7 @@ impl OndinApp {
 /// The strip's height. On Windows and Linux it is the window's title bar.
 pub(crate) const STRIP_H: f32 = 36.0;
 /// A tab's height, standing on the strip's foot so the front one joins the top bar.
-const TAB_H: f32 = 27.0;
+const TAB_H: f32 = 29.0;
 /// How wide a tab grows, and how far the tabs shrink together before the strip
 /// stops shrinking them and the caret lists the rest.
 const TAB_MAX_W: f32 = 200.0;
@@ -762,8 +762,8 @@ const HOME_W: f32 = 40.0;
 const GAP: f32 = 4.0;
 /// Before the library's tab.
 const LEAD: f32 = 8.0;
-/// The `+` and the caret.
-const BUTTON: f32 = 28.0;
+/// The `+` and the caret, small tabs of their own.
+const BUTTON: f32 = 30.0;
 /// Empty strip kept beside the caption buttons, so the window can always be
 /// dragged however many tabs are open.
 const DRAG_ROOM: f32 = 56.0;
@@ -885,9 +885,12 @@ impl OndinApp {
     /// Its widgets sense the pointer and never the keyboard focus, as the system's
     /// title bar is not in the Tab order; the tab keys are `read_keys`'.
     pub(crate) fn tab_strip(&mut self, ui: &mut egui::Ui, act: bool) {
+        // No separator: egui's default line across the foot would cut the front tab
+        // off from the top bar it joins.
         egui::Panel::top("tab-strip")
             .exact_size(STRIP_H)
             .resizable(false)
+            .show_separator_line(false)
             .frame(egui::Frame::NONE.fill(STRIP))
             .show(ui, |ui| self.strip_body(ui, act));
     }
@@ -941,10 +944,8 @@ impl OndinApp {
             }
         }
 
-        let plus = egui::Rect::from_center_size(
-            egui::pos2(x + BUTTON / 2.0, strip.center().y),
-            egui::vec2(BUTTON, BUTTON),
-        );
+        let plus =
+            egui::Rect::from_min_size(egui::pos2(x, foot - TAB_H), egui::vec2(BUTTON, TAB_H));
         if strip_button(ui, plus, crate::theme::icon::PLUS, false, "tab-new")
             .on_hover_text("New file (Ctrl+N)")
             .clicked()
@@ -973,19 +974,18 @@ impl OndinApp {
         }
     }
 
-    /// The library's tab: the brand mark, bare until it is in front or hovered.
+    /// The library's tab: the brand mark on a tab's ground, so the mark is seen
+    /// centred in its tab rather than against the taller strip.
     fn home_tab(&mut self, ui: &mut egui::Ui, rect: egui::Rect, act: bool) {
         let resp = ui.interact(rect, egui::Id::new("tab-library"), egui::Sense::CLICK);
         let ground = if self.view == View::Dashboard {
-            Some(crate::theme::color::TOPBAR)
+            crate::theme::color::TOPBAR
         } else if resp.hovered() {
-            Some(LIFTED)
+            LIFTED
         } else {
-            None
+            BEHIND
         };
-        if let Some(ground) = ground {
-            ui.painter().rect_filled(rect, tab_corners(), ground);
-        }
+        ui.painter().rect_filled(rect, tab_corners(), ground);
         let mark = egui::Rect::from_center_size(rect.center(), egui::vec2(18.0, 18.0));
         crate::ui::logo(ui, mark, false);
         if resp.on_hover_text("Library (Ctrl+O)").clicked() && act {
@@ -1337,8 +1337,8 @@ fn tab_corners() -> egui::CornerRadius {
     }
 }
 
-/// The strip's `+` and caret: a glyph on a ground that shows on hover and while
-/// what it opens is open.
+/// The strip's `+` and caret: a glyph on a small tab of its own, lifted on hover
+/// and while what it opens is open.
 fn strip_button(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -1349,10 +1349,8 @@ fn strip_button(
     use crate::theme::color;
     let resp = ui.interact(rect, egui::Id::new(id), egui::Sense::CLICK);
     let lit = open || resp.hovered();
-    if lit {
-        ui.painter()
-            .rect_filled(rect, egui::CornerRadius::same(5), color::text_a(26));
-    }
+    ui.painter()
+        .rect_filled(rect, tab_corners(), if lit { LIFTED } else { BEHIND });
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -1889,5 +1887,48 @@ mod tests {
         );
         assert_eq!(app.view, View::Dashboard, "the library's tab");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Nothing is drawn across the strip's foot, so the front tab runs into the top
+    /// bar without a seam.
+    /// flip: `tab_strip` keeping egui's separator line → fails at "no seam".
+    #[test]
+    fn the_front_tab_meets_the_top_bar_without_a_seam() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            ..Default::default()
+        };
+        let mut out = None;
+        for _ in 0..3 {
+            out = Some(ctx.run_ui(input.clone(), |ui| {
+                eframe::App::ui(&mut app, ui, &mut frame)
+            }));
+        }
+        assert!(app.front_tab().is_some(), "fixture: a tab in front");
+        let seams: Vec<_> = out
+            .unwrap()
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                // egui still emits a hidden separator, with `Stroke::NONE`.
+                egui::Shape::LineSegment { points, stroke }
+                    if !stroke.is_empty()
+                        && (points[0].y - STRIP_H).abs() <= 1.0
+                        && (points[1].y - STRIP_H).abs() <= 1.0
+                        && (points[1].x - points[0].x).abs() > 200.0 =>
+                {
+                    Some(*points)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(seams.is_empty(), "no seam: {seams:?}");
     }
 }

@@ -1393,13 +1393,14 @@ fn number_row(ui: &mut egui::Ui, n: &mut Numbering) -> bool {
         const SPACE: f32 = 8.0;
         ui.spacing_mut().item_spacing.x = SPACE;
         let size = egui::vec2((ui.available_width() - SPACE * 2.0) / 3.0, NUM_H);
-        // 0.5, the rate every other whole-unit field scrubs at.
+        // Slow, as a grid's column count is: a step here is one number in every
+        // name, so each wants 20pt of travel rather than the usual 4.
         let from = ui::value_field(
             ui,
             size,
             Prefix::Text("From"),
             &mut n.from,
-            Scrub::whole(0.5),
+            Scrub::whole(0.1),
             |d| d.custom_formatter(ui::number(0)),
         )
         .on_hover_text("The first layer's number");
@@ -1408,7 +1409,7 @@ fn number_row(ui: &mut egui::Ui, n: &mut Numbering) -> bool {
             size,
             Prefix::Text("Step"),
             &mut n.step,
-            Scrub::whole(0.5),
+            Scrub::whole(0.1),
             |d| d.custom_formatter(ui::number(0)),
         )
         .on_hover_text("Added for each layer after it; below zero counts down");
@@ -1417,7 +1418,8 @@ fn number_row(ui: &mut egui::Ui, n: &mut Numbering) -> bool {
             size,
             Prefix::Text("Pad"),
             &mut n.pad,
-            Scrub::whole(0.5).range(0.0..=f64::from(Numbering::MAX_PAD)),
+            // Six values, at a polygon's side count's 25pt each.
+            Scrub::whole(0.08).range(0.0..=f64::from(Numbering::MAX_PAD)),
             |d| d.custom_formatter(ui::number(0)),
         )
         .on_hover_text("Zeros in front up to this many digits: 3 writes 001");

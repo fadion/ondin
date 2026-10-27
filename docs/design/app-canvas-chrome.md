@@ -362,7 +362,8 @@ document. The preview keeps the previous plan until the new one's first part lan
   removes the match*.
 - **Numbering.** The Number and Order rows show once the template has a Number token. Number holds
   *From*, *Step* and *Pad* as the inspector's scrubbable value fields (`ui::value_field`, the word
-  inside the field), sharing the row. A negative step counts down; Pad, 0 to 5 and 0 by default,
+  inside the field), sharing the row, and scrubbed slowly for control: 20pt of travel a unit for
+  From and Step, 25pt for Pad (the usual is 4). A negative step counts down; Pad, 0 to 5 and 0 by default,
   zero-pads to at least that many digits (`Numbering::pad`; 3 writes `001`). Order, under
   it, is a dropdown as the Settings modal's are. All are 28 tall, the Settings modal's field height.
   A right-click mid-scrub puts the numbering back as the scrub found it (`InFlight::rename_scrub`,

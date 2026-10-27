@@ -613,8 +613,9 @@ fn nudge_field(ui: &mut egui::Ui, size: egui::Vec2, label: &'static str, value: 
             tooltip: "",
         }),
         value,
-        // 0.5, the rate every other whole-unit field scrubs at.
-        Scrub::whole(0.5).range(crate::input::NudgeStep::MIN..=crate::input::NudgeStep::MAX),
+        // Slow, as a grid's column count is: a nudge is set to the pixel, so each
+        // wants 20pt of travel rather than the usual 4.
+        Scrub::whole(0.1).range(crate::input::NudgeStep::MIN..=crate::input::NudgeStep::MAX),
         |d| d.custom_formatter(ui::number(0)),
     );
     // Only the draft: this keeps the control from showing a fraction. What protects

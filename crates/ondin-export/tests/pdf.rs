@@ -222,3 +222,101 @@ fn several_frames_make_one_pdf_of_several_pages() {
     );
     assert!(pdf_pages(&f.doc, &f.res, &[], ExportText::Live).is_none());
 }
+
+/// A linked picture is never read: the PDF of a fill linked to a file on disk is
+/// the PDF of one linked to nothing, so a received document cannot make the export
+/// open a path, or an SMB share, of its choosing.
+///
+/// flip: `pdf_pages` keeping usvg's default `resolve_string` → the two PDFs differ.
+#[test]
+fn a_linked_picture_is_never_read() {
+    use ondin_core::peniko::Brush;
+    use ondin_core::{Fill, ImageBrush, ImageEntry, ImageFormat, ImageId, ImageRef, ImageSource};
+    let dir = std::env::temp_dir().join(format!("ondin-pdf-link-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let on_disk = dir.join("picture.png");
+    image::RgbaImage::from_pixel(64, 64, image::Rgba([200, 30, 30, 255]))
+        .save(&on_disk)
+        .unwrap();
+    let linked_to = |path: String| {
+        let mut f = common::fixture();
+        let id = ImageId("linked".into());
+        f.doc
+            .apply(&Transaction(vec![
+                Operation::AddImage {
+                    id: id.clone(),
+                    entry: ImageEntry {
+                        source: ImageSource::Linked(path),
+                        format: ImageFormat::Png,
+                        width: 64,
+                        height: 64,
+                    },
+                },
+                Operation::SetFills {
+                    id: f.rect,
+                    fills: keyed_by_position([Fill {
+                        brush: Brush::Image(ImageBrush {
+                            image: ImageRef::new(id),
+                            sampler: Default::default(),
+                        })
+                        .into(),
+                        visible: true,
+                    }]),
+                },
+            ]))
+            .expect("link the picture");
+        f.res = Resolved::rebuild(&f.doc);
+        pdf_of(&f.doc, &f.res, &[f.artboard], ExportText::Live)
+            .expect("a pdf")
+            .pdf
+    };
+    let existing = linked_to(on_disk.to_string_lossy().into_owned());
+    let missing = linked_to(dir.join("absent.png").to_string_lossy().into_owned());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(existing, missing, "the linked file was read into the PDF");
+}
+
+/// Text in a family the page's fonts do not hold is drawn in Inter, the face the
+/// layout fell back to, and noted; usvg's own fallback would leave it out.
+///
+/// flip: `select_font` returning `named(font, db)` on a miss → no font program.
+#[test]
+fn a_missing_family_is_drawn_in_inter_and_noted() {
+    let f = styled(TextStyle {
+        font_family: "No Such Family Xyz".into(),
+        ..inter(400)
+    });
+    let out = pdf_of(&f.doc, &f.res, &[f.artboard], ExportText::Live).expect("a pdf");
+    let text = String::from_utf8_lossy(&out.pdf);
+    assert!(text.contains("/FontFile2"), "the text has a font program");
+    let cmap = inflated_streams(&out.pdf)
+        .into_iter()
+        .find(|s| s.contains("begincmap"))
+        .expect("a ToUnicode map");
+    assert!(cmap.contains(&format!("{:04X}", 'H' as u32)), "{cmap}");
+    assert_eq!(
+        out.approximated,
+        vec!["No Such Family Xyz, which is not available, drawn in Inter".to_string()]
+    );
+}
+
+/// A subject with nothing to draw is no PDF, as it is no SVG or PNG.
+///
+/// flip: `pdf_pages` without its `extent` check → a blank 100×100 page.
+#[test]
+fn a_subject_with_nothing_to_draw_is_no_pdf() {
+    let mut f = common::fixture();
+    let group = ondin_core::IdSource::new(0xE11E).mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: group,
+            parent: f.artboard,
+            index: 0,
+            kind: ondin_core::NodeKind::Group,
+            transform: None,
+            name: None,
+        }]))
+        .expect("an empty group");
+    f.res = Resolved::rebuild(&f.doc);
+    assert!(pdf_of(&f.doc, &f.res, &[group], ExportText::Live).is_none());
+}

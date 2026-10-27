@@ -62,6 +62,7 @@ pub fn pdf_pages(
     let mut outline = krilla::outline::Outline::new();
     let mut approximated: Vec<String> = Vec::new();
     for (index, (name, origins)) in pages.iter().enumerate() {
+        crate::extent(res, origins)?;
         let svg = crate::svg::svg_with(doc, res, origins, text);
         let shown = shown_nodes(doc, origins);
         for note in approximations(doc, res, &shown, svg.approximated, text) {
@@ -74,13 +75,30 @@ pub fn pdf_pages(
         for font in fonts_used(res, &shown) {
             fonts.load_font_source(usvg::fontdb::Source::Binary(Arc::new(font.data)));
         }
+        let missed = std::sync::Mutex::new(Vec::new());
         let opts = usvg::Options {
-            // Core's own fallback, which a layout that missed its family already used.
-            font_family: "Inter".to_string(),
+            font_family: FALLBACK_FAMILY.to_string(),
             fontdb: Arc::new(fonts),
+            font_resolver: usvg::FontResolver {
+                select_font: select_font(&missed),
+                ..Default::default()
+            },
+            // Only our own `data:` pictures are read. A linked picture's path names a
+            // file, or an SMB share, that a received document chose.
+            image_href_resolver: usvg::ImageHrefResolver {
+                resolve_string: Box::new(|_, _| None),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let tree = usvg::Tree::from_str(&svg.svg, &opts).ok()?;
+        drop(opts);
+        for family in missed.into_inner().unwrap_or_default() {
+            let note = format!("{family}, which is not available, drawn in {FALLBACK_FAMILY}");
+            if !approximated.contains(&note) {
+                approximated.push(note);
+            }
+        }
         let size = krilla::geom::Size::from_wh(tree.size().width(), tree.size().height())?;
         let mut page = document.start_page_with(krilla::page::PageSettings::new(size));
         let mut surface = page.surface();
@@ -108,6 +126,57 @@ pub fn pdf_pages(
     }
     let pdf = document.finish().ok()?;
     Some(Export { pdf, approximated })
+}
+
+/// Core's own fallback family, which a layout that missed its family drew in.
+const FALLBACK_FAMILY: &str = "Inter";
+
+/// usvg's face lookup, falling back to [`FALLBACK_FAMILY`] when no face of the
+/// named families is in the page's database, and noting the family in `missed`.
+/// usvg's own fallback asks for a serif the database never holds, and then skips
+/// the run, so the text would be absent from the page.
+fn select_font(missed: &std::sync::Mutex<Vec<String>>) -> usvg::FontSelectionFn<'_> {
+    let named = usvg::FontResolver::default_font_selector();
+    Box::new(move |font, db| {
+        let wanted = |name: &str| {
+            font.families()
+                .iter()
+                .any(|f| matches!(f, usvg::FontFamily::Named(n) if n.eq_ignore_ascii_case(name)))
+        };
+        if db
+            .faces()
+            .any(|face| face.families.iter().any(|(name, _)| wanted(name)))
+        {
+            return named(font, db);
+        }
+        if let Ok(mut missed) = missed.lock() {
+            let family = font
+                .families()
+                .iter()
+                .map(|f| match f {
+                    usvg::FontFamily::Named(name) => name.clone(),
+                    generic => generic.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            if !missed.contains(&family) {
+                missed.push(family);
+            }
+        }
+        let italic = font.style() != usvg::FontStyle::Normal;
+        let fallback = db
+            .faces()
+            .filter(|face| {
+                face.families
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(FALLBACK_FAMILY))
+            })
+            .min_by_key(|face| {
+                let slanted = face.style != usvg::fontdb::Style::Normal;
+                (slanted != italic, face.weight.0.abs_diff(font.weight()))
+            });
+        fallback.or_else(|| db.faces().next()).map(|face| face.id)
+    })
 }
 
 /// What [`pdf_of`] would report, without converting: the export card's note, read

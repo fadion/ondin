@@ -1691,14 +1691,32 @@ impl OndinApp {
     /// when the export was asked for.
     fn write_export(&mut self, files: Vec<PlannedFile>, destination: Destination) {
         let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
-        let ctx = self.egui_ctx.clone();
-        self.session.info(EXPORTING);
-        let job = crate::job::Job::spawn("ondin-export", &ctx, move || {
+        let turn = self.export_turns.ticket();
+        let asker = self.session.path.clone();
+        self.spawn_export(move || {
             // SVG and PDF shape live text again, with the faces the canvas used.
             ondin_core::text::register_font_data(&resolved.text_fonts());
-            deliver(&doc, &resolved, &files, destination)
+            Delivered {
+                asker,
+                ..deliver(&doc, &resolved, &files, destination, &turn)
+            }
         });
-        self.exports.push(job);
+    }
+
+    /// Run `work` on an export worker, with *Exporting…* until it lands.
+    fn spawn_export(&mut self, work: impl FnOnce() -> Delivered + Send + 'static) {
+        let ctx = self.egui_ctx.clone();
+        self.session.info(EXPORTING);
+        self.exports
+            .push(crate::job::Job::spawn("ondin-export", &ctx, work));
+    }
+
+    /// Wait for every export still running: quitting mid-write would leave a
+    /// file torn. Their reports have nowhere left to go.
+    pub(crate) fn drain_exports(&mut self) {
+        for job in std::mem::take(&mut self.exports) {
+            let _ = job.wait();
+        }
     }
 
     /// Report the exports that have landed, and keep *Exporting…* on the status
@@ -1753,10 +1771,21 @@ impl OndinApp {
             to_folder,
             failed,
             where_,
+            head,
+            asker,
         } = d;
+        // A report landing on another tab says which document it was for.
+        let whose = match &asker {
+            Some(path) if self.session.path.as_ref() != Some(path) => path
+                .file_stem()
+                .map(|s| format!("{}: ", s.to_string_lossy()))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
         if written == 0 && failed.is_none() {
-            self.session
-                .fail("Nothing to export — none of that has any size");
+            self.session.fail(format!(
+                "{whose}Nothing to export — none of that has any size"
+            ));
             return;
         }
         // Remembered for the next export, and for *Show in folder*. Saved eagerly:
@@ -1767,17 +1796,18 @@ impl OndinApp {
         }
         // The count first, the loss next, the path last: `OndinApp::status_bar`
         // truncates, and the folder can be re-derived from *Show in folder*.
-        let head = match (to_folder, replaced) {
-            (false, _) => export_count(written),
-            (true, 0) => export_count(written),
-            (true, n) => format!("{} ({n} replaced)", export_count(written)),
+        let head = match (head, to_folder, replaced) {
+            (Some(head), ..) => head,
+            (None, false, _) | (None, true, 0) => export_count(written),
+            (None, true, n) => format!("{} ({n} replaced)", export_count(written)),
         };
+        let head = format!("{whose}{head}");
         let head = match skipped {
             0 => head,
             n => format!("{head} — {n} had no size"),
         };
         match failed {
-            Some(e) => self.session.fail(format!("Could not write: {e}")),
+            Some(e) => self.session.fail(format!("{whose}Could not write: {e}")),
             None if to_folder => self.session.info(format!("{head} → {}", where_.display())),
             None => self.session.info(head),
         }
@@ -1971,15 +2001,6 @@ impl OndinApp {
             self.session.info("No frames to export");
             return;
         }
-        let Some(export) = ondin_export::pdf::pdf_pages(
-            &self.session.doc,
-            &self.session.resolved,
-            &pages,
-            ondin_core::ExportText::Live,
-        ) else {
-            self.session.fail("Could not make the PDF");
-            return;
-        };
         let stem = self
             .session
             .path
@@ -1995,18 +2016,39 @@ impl OndinApp {
         else {
             return;
         };
-        if let Err(e) = std::fs::write(&path, &export.pdf) {
-            self.session.fail(format!("Could not write: {e}"));
-            return;
-        }
-        if let Some(dir) = path.parent() {
-            self.prefs.export_dir = Some(dir.into());
-            self.prefs.save();
-        }
-        let n = pages.len();
-        self.session.info(match export.approximated.len() {
-            0 => format!("Exported {n} frames as one PDF"),
-            k => format!("Exported {n} frames as one PDF — {k} drawn differently"),
+        // On the worker, as every image export: a busy page takes seconds.
+        let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
+        let turn = self.export_turns.ticket();
+        let asker = self.session.path.clone();
+        self.spawn_export(move || {
+            ondin_core::text::register_font_data(&resolved.text_fonts());
+            let mut out = Delivered {
+                written: 0,
+                skipped: 0,
+                replaced: 0,
+                to_folder: false,
+                failed: None,
+                where_: path.parent().map(Into::into).unwrap_or_default(),
+                head: None,
+                asker,
+            };
+            let made =
+                ondin_export::pdf::pdf_pages(&doc, &resolved, &pages, ondin_core::ExportText::Live);
+            turn.wait();
+            let Some(export) = made else {
+                out.failed = Some("the PDF could not be made".into());
+                return out;
+            };
+            match std::fs::write(&path, &export.pdf) {
+                Ok(()) => out.written = 1,
+                Err(e) => out.failed = Some(e.to_string()),
+            }
+            let n = pages.len();
+            out.head = Some(match export.approximated.len() {
+                0 => format!("Exported {n} frames as one PDF"),
+                k => format!("Exported {n} frames as one PDF — {k} drawn differently"),
+            });
+            out
         });
     }
 
@@ -2278,6 +2320,60 @@ enum Destination {
 /// The status line's word while an export runs.
 const EXPORTING: &str = "Exporting…";
 
+/// The order export workers write in: the order they were asked for. They render
+/// side by side, but each writes only once every earlier one has, so two
+/// re-exports on save leave the later save's files, never a mix.
+#[derive(Default)]
+pub(crate) struct ExportTurns {
+    /// The ticket whose turn it is to write.
+    now: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
+    /// The next ticket to hand out.
+    next: u64,
+}
+
+impl ExportTurns {
+    fn ticket(&mut self) -> Turn {
+        self.next += 1;
+        Turn {
+            now: self.now.clone(),
+            n: self.next - 1,
+        }
+    }
+}
+
+/// One export's place in [`ExportTurns`]. Dropped, it passes the turn on, after
+/// waiting for its own, so a worker that fails early still keeps the order.
+struct Turn {
+    now: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
+    n: u64,
+}
+
+impl Turn {
+    /// Block until every earlier export has written.
+    fn wait(&self) {
+        let (lock, ready) = &*self.now;
+        let mut now = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *now < self.n {
+            now = ready
+                .wait(now)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        self.wait();
+        let (lock, ready) = &*self.now;
+        *lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self.n + 1;
+        ready.notify_all();
+    }
+}
+
 /// What an export worker did: the files written, those with no size, how many a
 /// folder export replaced, and the first write error. `written` and `failed` both
 /// empty means nothing had a size.
@@ -2288,9 +2384,15 @@ pub(crate) struct Delivered {
     to_folder: bool,
     failed: Option<String>,
     where_: std::path::PathBuf,
+    /// The status line's report when the export words its own.
+    head: Option<String>,
+    /// The file of the document that asked, so a report landing on another tab
+    /// names it.
+    asker: Option<std::path::PathBuf>,
 }
 
-/// Render `files` and write them to `destination`, off the UI thread.
+/// Render `files` and write them to `destination`, off the UI thread, writing
+/// when `turn` comes.
 ///
 /// A failure stops nothing that has already succeeded, and is reported rather
 /// than raised.
@@ -2299,6 +2401,7 @@ fn deliver(
     resolved: &ondin_core::Resolved,
     files: &[PlannedFile],
     destination: Destination,
+    turn: &Turn,
 ) -> Delivered {
     let mut rendered: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
     let mut skipped = 0usize;
@@ -2317,10 +2420,13 @@ fn deliver(
         to_folder: false,
         failed: None,
         where_: Default::default(),
+        head: None,
+        asker: None,
     };
     if rendered.is_empty() {
         return out;
     }
+    turn.wait();
     // The folder arm owes a replacement count (§15 D636): a File or Archive was
     // named in a save dialog, but a Folder export can arrive with no dialog
     // (`export_all` takes `prefs.export_dir`, and *Re-export on save* fires it
@@ -3086,6 +3192,27 @@ mod export_all_scope_tests {
     //! What *Export all* collects and how it writes (§15 D516).
 
     use super::*;
+
+    /// An export writes only once every export asked before it has written, even
+    /// when it finishes rendering first.
+    ///
+    /// flip: `Turn::wait` returning at once → fails at "held behind the earlier".
+    #[test]
+    fn exports_write_in_the_order_asked() {
+        let mut turns = ExportTurns::default();
+        let (first, second, third) = (turns.ticket(), turns.ticket(), turns.ticket());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            third.wait();
+            tx.send(()).unwrap();
+        });
+        let held = rx.recv_timeout(std::time::Duration::from_millis(200));
+        assert!(held.is_err(), "held behind the earlier");
+        drop(first);
+        drop(second);
+        rx.recv().expect("its turn came");
+        worker.join().unwrap();
+    }
 
     /// *Export frames, all pages…* names each page's folder legally: no `..` that
     /// climbs out of the chosen folder, no `:`, and two names one apart only in

@@ -56,8 +56,8 @@ reads true.
     variables. Hover previews, applying is one undo step on the failing runs. When no colour at that
     hue passes, it offers only variables. It never offers to change the backdrop.
   - **Options:** AA (default), AAA, APCA (Lc values), a pref; *Non-text (3 : 1)* measures strokes and
-    shapes under 24 pt across (icons, borders, outlines) and skips larger blocks. APCA and non-text
-    are not built in `contrast::check` either. Never saved, never exported, hidden in present mode.
+    shapes under 24 pt across (icons, borders, outlines) and skips larger blocks; `contrast::check_with`
+    measures both. Never saved, never exported, hidden in present mode.
 - **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
   `Item::Rename`, one layer, exists.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).

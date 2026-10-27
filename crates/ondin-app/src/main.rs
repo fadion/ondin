@@ -27,10 +27,10 @@
 //! ondin diff <a> <b> [--json]    what changed from document a to b, by layer;
 //!                                exit 0 when nothing did, 1 when something did,
 //!                                2 when either cannot be read
-//! ondin check contrast <file> [--page <name|n>] [--aaa]
-//!                                every text layer against what is drawn behind
-//!                                it, in every mode; exit 0 all pass, 1 some fail,
-//!                                2 unreadable
+//! ondin check contrast <file> [--page <name|n>] [--aaa|--apca] [--non-text]
+//!                                every text layer (and small shape) against what
+//!                                is drawn behind it, in every mode; exit 0 all
+//!                                pass, 1 some fail, 2 unreadable
 //! ondin merge <base> <ours> <theirs> [-o out]
 //!                                three-way merge, written over ours unless -o;
 //!                                exit 0 clean, 1 with conflicts (ours kept at
@@ -161,7 +161,7 @@ enum Command {
     CheckContrast {
         file: String,
         page: Option<String>,
-        aaa: bool,
+        options: ondin_export::contrast::Options,
     },
     /// Three-way merge of a document (`ondin_core::merge`), the result written to
     /// `out`, by default over `ours` as git's merge driver expects.
@@ -306,15 +306,27 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_check(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin check contrast <file.ondin> [--page <name|n>] [--aaa]";
+    use ondin_export::contrast::{Level, Options};
+    const USAGE: &str =
+        "usage: ondin check contrast <file.ondin> [--page <name|n>] [--aaa|--apca] [--non-text]";
     if args.first().map(String::as_str) != Some("contrast") {
         return Err(USAGE.to_string());
     }
-    let (mut file, mut page, mut aaa) = (None, None, false);
+    let (mut file, mut page, mut options) = (None, None, Options::default());
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--aaa" => aaa = true,
+            level @ ("--aaa" | "--apca") => {
+                if options.level != Level::Aa {
+                    return Err(format!("one level at a time\n{USAGE}"));
+                }
+                options.level = if level == "--aaa" {
+                    Level::Aaa
+                } else {
+                    Level::Apca
+                };
+            }
+            "--non-text" => options.non_text = true,
             "--page" => {
                 i += 1;
                 let value = args.get(i).filter(|v| !v.starts_with('-'));
@@ -339,19 +351,23 @@ fn parse_check(args: &[String]) -> Result<Command, String> {
     Ok(Command::CheckContrast {
         file: file.ok_or_else(|| USAGE.to_string())?,
         page,
-        aaa,
+        options,
     })
 }
 
 /// `ondin check contrast`: the report as text, and whether every measured layer
 /// passed.
-fn run_check_contrast(file: &str, page: Option<&str>, aaa: bool) -> Result<(String, bool), String> {
-    use ondin_export::contrast::{Level, check};
+fn run_check_contrast(
+    file: &str,
+    page: Option<&str>,
+    options: ondin_export::contrast::Options,
+) -> Result<(String, bool), String> {
+    use ondin_export::contrast::{Level, check_with};
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
     let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
     let page = chosen_page(&doc, page)?;
-    let level = if aaa { Level::Aaa } else { Level::Aa };
-    let report = check(&doc, page, level);
+    let level = options.level;
+    let report = check_with(&doc, page, options, None);
     let mut out = String::new();
     let mut failed = 0;
     for f in &report.findings {
@@ -364,10 +380,13 @@ fn run_check_contrast(file: &str, page: Option<&str>, aaa: bool) -> Result<(Stri
             .as_ref()
             .map(|m| format!(" in {m}"))
             .unwrap_or_default();
+        let score = match level {
+            Level::Apca => format!("Lc {:.1}", f.ratio),
+            Level::Aa | Level::Aaa => format!("{:.2} : 1", f.ratio),
+        };
         out.push_str(&format!(
-            "fail  {}: {:.2} : 1, needs {}{mode}\n",
+            "fail  {}: {score}, needs {}{mode}\n",
             f.trail.join(" / "),
-            f.ratio,
             f.needs
         ));
     }
@@ -375,10 +394,15 @@ fn run_check_contrast(file: &str, page: Option<&str>, aaa: bool) -> Result<(Stri
         out.push_str(&format!("skip  {}: {}\n", s.trail.join(" / "), s.why));
     }
     out.push_str(&format!(
-        "{} of {} text layers pass {}\n",
+        "{} of {} {} pass {}\n",
         report.findings.len() - failed,
         report.findings.len(),
-        if aaa { "AAA" } else { "AA" }
+        if options.non_text {
+            "layers"
+        } else {
+            "text layers"
+        },
+        level.label()
     ));
     Ok((out, failed == 0))
 }
@@ -735,19 +759,21 @@ fn main() {
             }
         },
         // `diff`'s codes: 1 is "a layer fails", so an unreadable file is 2.
-        Ok(Command::CheckContrast { file, page, aaa }) => {
-            match run_check_contrast(&file, page.as_deref(), aaa) {
-                Ok((report, passed)) => {
-                    print!("{report}");
-                    let _ = std::io::Write::flush(&mut std::io::stdout());
-                    std::process::exit(i32::from(!passed));
-                }
-                Err(msg) => {
-                    eprintln!("{msg}");
-                    std::process::exit(2);
-                }
+        Ok(Command::CheckContrast {
+            file,
+            page,
+            options,
+        }) => match run_check_contrast(&file, page.as_deref(), options) {
+            Ok((report, passed)) => {
+                print!("{report}");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                std::process::exit(i32::from(!passed));
             }
-        }
+            Err(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+        },
         // `diff`'s codes: 1 is "conflicts", so a failure is 2.
         Ok(Command::Merge {
             base,
@@ -1392,7 +1418,21 @@ mod tests {
             Ok(Command::CheckContrast {
                 file: "a.ondin".into(),
                 page: Some("2".into()),
-                aaa: true,
+                options: ondin_export::contrast::Options {
+                    level: ondin_export::contrast::Level::Aaa,
+                    non_text: false,
+                },
+            })
+        );
+        assert_eq!(
+            check(&["contrast", "a.ondin", "--apca", "--non-text"]),
+            Ok(Command::CheckContrast {
+                file: "a.ondin".into(),
+                page: None,
+                options: ondin_export::contrast::Options {
+                    level: ondin_export::contrast::Level::Apca,
+                    non_text: true,
+                },
             })
         );
         for refused in [
@@ -1401,6 +1441,7 @@ mod tests {
             &["contrast", "a.ondin", "b.ondin"],
             &["contrast", "a.ondin", "--page"],
             &["contrast", "a.ondin", "--aa"],
+            &["contrast", "a.ondin", "--aaa", "--apca"],
         ] {
             assert!(check(refused).is_err(), "{refused:?}");
         }
@@ -1472,7 +1513,8 @@ mod tests {
         .unwrap();
         let file = dir.join("c.ondin");
         std::fs::write(&file, ondin_core::io::save(&doc).unwrap()).unwrap();
-        let (report, passed) = run_check_contrast(file.to_str().unwrap(), None, false).unwrap();
+        let (report, passed) =
+            run_check_contrast(file.to_str().unwrap(), None, Default::default()).unwrap();
         assert!(!passed, "{report}");
         assert!(report.contains("fail  Card / Caption"), "{report}");
         assert!(report.contains("0 of 1 text layers pass AA"), "{report}");

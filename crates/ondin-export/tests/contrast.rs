@@ -7,7 +7,7 @@ use ondin_core::{
     Brush, Cell, Document, Fill, IdSource, Mode, NodeId, NodeKind, Operation, TextSizing,
     TextStyle, Transaction, VarKind, Variable, keyed_by_position,
 };
-use ondin_export::contrast::{Level, Report, check, luminance, ratio};
+use ondin_export::contrast::{self, Level, Report, check, luminance, ratio};
 
 fn solid(r: u8, g: u8, b: u8) -> Vec<ondin_core::Keyed<Fill>> {
     keyed_by_position([Fill {
@@ -253,4 +253,145 @@ fn a_gradient_fill_is_skipped() {
     let r = check(&d.doc, d.page, Level::Aa);
     assert!(r.findings.is_empty(), "{r:?}");
     assert_eq!(r.skipped.len(), 1);
+    assert_eq!(r.skipped[0].why, "gradient fill");
+}
+
+/// A layer drawn in two modes keeps a sample for each, in mode order, with the
+/// ink and the backdrop it was found at; only a variable passing in both is
+/// offered.
+///
+/// flip: `check_with` keeping only the worst mode's sample → fails at the
+/// sample count.
+#[test]
+fn every_mode_keeps_its_sample() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let (ink, both, light_only) = (d.ids.mint_var(), d.ids.mint_var(), d.ids.mint_var());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    let var = |id, name: &str, l: (u8, u8, u8), k: (u8, u8, u8)| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::Color,
+            cells: [
+                (light, Cell::Color(Color::from_rgba8(l.0, l.1, l.2, 255))),
+                (dark, Cell::Color(Color::from_rgba8(k.0, k.1, k.2, 255))),
+            ]
+            .into(),
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    };
+    d.doc
+        .apply(&Transaction(vec![
+            mode(light, "Light", 0),
+            mode(dark, "Dark", 1),
+            var(ink, "ink", (0, 0, 0), (240, 240, 240)),
+            var(both, "text/primary", (10, 10, 10), (20, 20, 20)),
+            var(light_only, "text/faint", (30, 30, 30), (250, 250, 250)),
+        ]))
+        .unwrap();
+    let tx =
+        ondin_core::bind_brush_at_all(&d.doc, &[d.text], ondin_core::PaintTarget::Fill, 0, ink);
+    d.doc.apply(&tx).unwrap();
+    let f = only(&check(&d.doc, d.page, Level::Aa)).clone();
+    let names: Vec<_> = f.samples.iter().map(|s| s.name.as_deref()).collect();
+    assert_eq!(names, [Some("Light"), Some("Dark")]);
+    assert!(
+        f.samples[0].score > 15.0 && f.samples[1].score < 1.5,
+        "{f:?}"
+    );
+    let worst = f.worst().unwrap();
+    assert_eq!(worst.name.as_deref(), Some("Dark"));
+    assert_eq!(worst.ink.to_rgba8().to_u8_array(), [240, 240, 240, 255]);
+    assert_eq!(
+        worst.backdrop.to_rgba8().to_u8_array(),
+        [255, 255, 255, 255]
+    );
+
+    let offered = contrast::passing_variables(&d.doc, &f, Level::Aa, worst.ink);
+    assert_eq!(offered.iter().map(|(v, _)| *v).collect::<Vec<_>>(), [both]);
+    // Both modes draw the text on white, so a darker raw colour passes both.
+    assert!(contrast::nearest(&f, Level::Aa, worst.ink).is_some());
+}
+
+/// APCA scores Lc and holds body text to 75: `#767676` on white passes AA's
+/// 4.5 : 1 and fails APCA.
+#[test]
+fn apca_scores_lc() {
+    let d = doc((118, 118, 118), 16.0, false);
+    let options = contrast::Options {
+        level: Level::Apca,
+        non_text: false,
+    };
+    let r = contrast::check_with(&d.doc, d.page, options, None);
+    let f = only(&r);
+    assert_eq!(f.needs, 75.0);
+    assert!((60.0..75.0).contains(&f.ratio), "{f:?}");
+}
+
+/// The non-text check measures a small shape at 3 : 1 and leaves a large one,
+/// a surface, alone.
+#[test]
+fn non_text_measures_marks_not_surfaces() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let (icon, card) = (d.ids.mint(), d.ids.mint());
+    let rect = |id, w, h, name: &str| Operation::CreateNode {
+        id,
+        parent: d.frame,
+        index: 0,
+        kind: NodeKind::Rect {
+            size: Size::new(w, h),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        // Side by side, so neither covers the other.
+        transform: Some(Affine::translate((200.0 + w, 100.0))),
+        name: Some(name.into()),
+    };
+    d.doc
+        .apply(&Transaction(vec![
+            rect(icon, 16.0, 16.0, "Icon"),
+            Operation::SetFills {
+                id: icon,
+                fills: solid(200, 200, 200),
+            },
+            rect(card, 80.0, 60.0, "Card"),
+            Operation::SetFills {
+                id: card,
+                fills: solid(200, 200, 200),
+            },
+        ]))
+        .unwrap();
+    let options = contrast::Options {
+        level: Level::Aa,
+        non_text: true,
+    };
+    let r = contrast::check_with(&d.doc, d.page, options, None);
+    let icon_f = r.findings.iter().find(|f| f.id == icon).expect("measured");
+    assert!(icon_f.non_text && icon_f.needs == 3.0 && !icon_f.passes());
+    assert!(r.findings.iter().all(|f| f.id != card), "{r:?}");
+    let plain = check(&d.doc, d.page, Level::Aa);
+    assert!(
+        plain.findings.iter().all(|f| f.id != icon),
+        "off by default"
+    );
+}
+
+/// `only` limits the measuring to the layers named.
+#[test]
+fn only_measures_the_layers_named() {
+    let d = doc((0, 0, 0), 16.0, false);
+    let r = contrast::check_with(&d.doc, d.page, Default::default(), Some(&[d.frame]));
+    assert!(r.findings.is_empty(), "{r:?}");
+    let r = contrast::check_with(&d.doc, d.page, Default::default(), Some(&[d.text]));
+    assert_eq!(r.findings.len(), 1);
 }

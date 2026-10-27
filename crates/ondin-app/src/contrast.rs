@@ -28,6 +28,8 @@ const CHUNK: usize = 6;
 /// A failure's ink: its badge's ground and its outline. Red is never alone: the
 /// badge carries the warning glyph and the layer the outline.
 const FAIL: egui::Color32 = egui::Color32::from_rgb(0xd2, 0x3f, 0x45);
+/// A failing badge's ground under the pointer.
+const FAIL_HOVER: egui::Color32 = egui::Color32::from_rgb(0xe4, 0x52, 0x58);
 const FAIL_LINE: egui::Color32 = egui::Color32::from_rgb(0xf0, 0x6a, 0x6f);
 const PASS: egui::Color32 = egui::Color32::from_rgb(0x5c, 0xc0, 0x8a);
 /// A pass or skip chip's ground: the canvas's dark, mostly opaque, so the chip
@@ -63,6 +65,10 @@ pub(crate) struct Contrast {
     seen: Option<Snapshot>,
     /// When the document last changed, in egui's clock.
     changed_at: f64,
+    /// When the whole run under way (the first look, or a level change) began,
+    /// in egui's clock; the bar says "Measuring…" until it ends. An edit's
+    /// remeasure is not one: its badges spin instead.
+    measuring: Option<f64>,
     options: Options,
     /// The failure the arrows last stepped to.
     at: Option<NodeId>,
@@ -135,6 +141,7 @@ impl Contrast {
             job: None,
             seen: None,
             changed_at: f64::NEG_INFINITY,
+            measuring: None,
             options,
             at: None,
             fix: None,
@@ -326,8 +333,16 @@ impl OndinApp {
             }
         }
         if c.seen.as_ref().map(|s| s.revision) != Some(self.session.revision()) {
+            // No snapshot is the first look or a level change: everything is queued.
+            let whole = c.seen.is_none();
             self.contrast_edited(&mut c);
             c.changed_at = now;
+            if whole {
+                c.measuring.get_or_insert(now);
+            }
+        }
+        if c.job.is_none() && c.queue.is_empty() && c.stale.is_empty() {
+            c.measuring = None;
         }
         if c.job.is_none() && !c.queue.is_empty() && now - c.changed_at >= SETTLE {
             // The next few in reading order, so badges arrive top down as they are
@@ -502,19 +517,19 @@ impl OndinApp {
             placed.push(r);
             #[cfg(test)]
             seen.push((id, r));
-            paint_badge(&painter, r, kind, galley, stale, now);
+            let mut hovered = false;
             if kind == Kind::Fail {
-                let resp = ui
-                    .interact(
-                        r,
-                        ui.id().with(("contrast-badge", id)),
-                        egui::Sense::click(),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                let resp = ui.interact(
+                    r,
+                    ui.id().with(("contrast-badge", id)),
+                    egui::Sense::click(),
+                );
+                hovered = resp.hovered();
                 if resp.clicked() {
                     clicked = Some((id, r.right_top() + egui::vec2(6.0, 0.0)));
                 }
             }
+            paint_badge(&painter, r, kind, galley, stale, hovered, now);
         }
         if spinning {
             ui.ctx().request_repaint();
@@ -629,8 +644,14 @@ impl OndinApp {
         let fails = c.failures();
         let measured = c.measured();
         let waiting = !c.stale.is_empty() || c.job.is_some();
-        let total = c.subjects.len();
-        let pending = c.subjects.iter().filter(|id| c.stale.contains(id)).count();
+        let now = ctx.input(|i| i.time);
+        let pulse = c
+            .measuring
+            .map(|since| crate::ui::pulse_alpha((now - since) as f32));
+        let level_open = c.level_menu;
+        if pulse.is_some() {
+            ctx.request_repaint();
+        }
         let at =
             c.at.and_then(|a| fails.iter().position(|f| *f == a))
                 .map(|i| i + 1);
@@ -667,46 +688,71 @@ impl OndinApp {
                                 );
                             }
                         }
+                        // The spacing in force when an item is allocated is the gap
+                        // after it. The head's ground carries its own inset, so the
+                        // gaps either side of it are short by that much.
+                        ui.spacing_mut().item_spacing.x = 10.0 - crate::ui::HEAD_LEAD;
                         separator(ui);
-                        let lr = level_head(ui, level.label());
+                        ui.spacing_mut().item_spacing.x = 10.0 - crate::ui::HEAD_PAD;
+                        let lr = crate::ui::menu_head(
+                            ui,
+                            egui::RichText::new(level.label())
+                                .size(12.0)
+                                .color(theme::text::MUTED),
+                            4.0,
+                            level_open,
+                        );
                         if lr.clicked() {
                             act = Some(BarAct::LevelMenu(lr.rect.left_bottom()));
                         }
+                        ui.spacing_mut().item_spacing.x = 10.0;
                         separator(ui);
                         let ink = if waiting {
                             theme::text::DIM
                         } else {
                             color::TEXT
                         };
-                        // Fixed cells, so stepping (which changes the numbers) never
-                        // moves the arrows under the pointer.
-                        cell(ui, COUNT_W, |ui| {
+                        // A count's glyph sits 5 from its words.
+                        let glyph = |ui: &mut egui::Ui, text: egui::RichText| {
                             ui.spacing_mut().item_spacing.x = 5.0;
-                            if waiting && fails.is_empty() {
-                                let done = total.saturating_sub(pending);
-                                ui.label(
-                                    egui::RichText::new(format!("Measuring {done} / {total}"))
-                                        .size(12.0)
-                                        .color(theme::text::DIM),
-                                );
-                            } else if fails.is_empty() {
-                                ui.label(theme::icon_text(icon::CHECK_CIRCLE, 13.0, PASS));
-                                ui.label(
-                                    egui::RichText::new(format!("All {measured} pass"))
-                                        .size(12.0)
-                                        .color(ink),
-                                );
-                            } else {
-                                ui.label(theme::icon_text(icon::WARNING, 13.0, FAIL_LINE));
-                                ui.label(
-                                    egui::RichText::new(format!("{} failing", fails.len()))
-                                        .size(12.0)
-                                        .color(ink),
-                                );
-                            }
-                        });
-                        if !fails.is_empty() {
-                            cell(ui, AT_W, |ui| {
+                            ui.label(text);
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                        };
+                        if let Some(alpha) = pulse {
+                            ui.label(
+                                egui::RichText::new("Measuring…")
+                                    .size(12.0)
+                                    .color(theme::text::MUTED.gamma_multiply(alpha)),
+                            );
+                        } else if fails.is_empty() {
+                            glyph(ui, theme::icon_text(icon::CHECK_CIRCLE, 13.0, PASS));
+                            ui.label(
+                                egui::RichText::new(format!("All {measured} pass"))
+                                    .size(12.0)
+                                    .color(ink),
+                            );
+                        } else {
+                            glyph(ui, theme::icon_text(icon::WARNING, 13.0, FAIL_LINE));
+                            ui.label(
+                                egui::RichText::new(format!("{} failing", fails.len()))
+                                    .size(12.0)
+                                    .color(ink),
+                            );
+                        }
+                        if pulse.is_none() && !fails.is_empty() {
+                            // Room for the widest position, so stepping (which changes
+                            // it) never moves the arrows under the pointer.
+                            let n = fails.len();
+                            let at_w = ui
+                                .painter()
+                                .layout_no_wrap(
+                                    format!("{n} / {n}"),
+                                    egui::FontId::proportional(12.0),
+                                    theme::text::DIM,
+                                )
+                                .size()
+                                .x;
+                            cell(ui, at_w.ceil() + 2.0, |ui| {
                                 if let Some(at) = at {
                                     ui.label(
                                         egui::RichText::new(format!("{at} / {}", fails.len()))
@@ -1277,10 +1323,12 @@ fn paint_badge(
     kind: Kind,
     galley: std::sync::Arc<egui::Galley>,
     stale: bool,
+    hovered: bool,
     now: f64,
 ) {
     let radius = egui::CornerRadius::same(4);
     let (ground, ink, glyph) = match kind {
+        Kind::Fail if hovered => (FAIL_HOVER, egui::Color32::WHITE, icon::WARNING),
         Kind::Fail => (FAIL, egui::Color32::WHITE, icon::WARNING),
         Kind::Pass => (CHIP, egui::Color32::from_white_alpha(209), icon::CHECK),
         Kind::Skip => (CHIP, egui::Color32::from_white_alpha(178), icon::PROHIBIT),
@@ -1297,6 +1345,16 @@ fn paint_badge(
         );
     }
     painter.rect_filled(r, radius, fade(ground, stale));
+    if hovered {
+        // A ring as well as the lighter ground: the badge is the one click target
+        // on the canvas, and the arrow cursor does not say so.
+        painter.rect_stroke(
+            r.expand(1.5),
+            5.0,
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(140)),
+            egui::StrokeKind::Middle,
+        );
+    }
     if kind == Kind::Skip {
         let stroke = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(89));
         let c = [
@@ -1353,9 +1411,12 @@ fn bar_frame() -> egui::Frame {
         })
 }
 
+/// A hairline between the bar's groups, with 3 points of its own on each side
+/// beyond the row's spacing.
 fn separator(ui: &mut egui::Ui) {
-    let (r, _) = ui.allocate_exact_size(egui::vec2(1.0, 16.0), egui::Sense::hover());
-    ui.painter().rect_filled(r, 0.0, color::text_a(30));
+    let (r, _) = ui.allocate_exact_size(egui::vec2(7.0, 16.0), egui::Sense::hover());
+    let line = egui::Rect::from_center_size(r.center(), egui::vec2(1.0, 16.0));
+    ui.painter().rect_filled(line, 0.0, color::text_a(30));
 }
 
 /// The bar's scope chip: a pill naming what is checked, clear of the bar's edges.
@@ -1396,43 +1457,6 @@ fn scope_chip(ui: &mut egui::Ui, name: &str) -> bool {
     resp.on_hover_text("Check the selection, or the frame in view, instead")
         .clicked()
 }
-
-/// The level head: the level's name and a caret, one click target.
-fn level_head(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let galley = ui.painter().layout_no_wrap(
-        label.to_string(),
-        egui::FontId::proportional(12.0),
-        theme::text::MUTED,
-    );
-    let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + 4.0 + 11.0, 20.0),
-        egui::Sense::click(),
-    );
-    let ink = if resp.hovered() {
-        color::TEXT
-    } else {
-        theme::text::MUTED
-    };
-    let p = ui.painter();
-    p.galley(
-        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
-        galley,
-        ink,
-    );
-    p.text(
-        egui::pos2(rect.right() - 5.5, rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        icon::CARET_DOWN,
-        theme::icon_font(11.0),
-        theme::text::DIM,
-    );
-    resp
-}
-
-/// The count's width: room for `Measuring 120 / 120` and `999 failing`.
-const COUNT_W: f32 = 116.0;
-/// The step position's width: room for `99 / 99`.
-const AT_W: f32 = 44.0;
 
 /// A left-aligned cell of fixed width in the bar's row.
 fn cell(ui: &mut egui::Ui, w: f32, add: impl FnOnce(&mut egui::Ui)) {
@@ -1639,7 +1663,7 @@ fn fix_row(ui: &mut egui::Ui, swatch: Color, name: &str, score: &str) -> egui::R
         egui::FontId::proportional(11.5),
         theme::text::MUTED,
     );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    resp
 }
 
 fn eyebrow(ui: &mut egui::Ui, label: &str) {
@@ -1818,6 +1842,36 @@ mod tests {
             Mark::Measured(f) => Some(f.passes()),
             Mark::Skipped(_) => None,
         }
+    }
+
+    /// The bar says "Measuring…" through a whole run (the first look, a level
+    /// change) and not through an edit's remeasure.
+    /// flip: `contrast_tick` starting a run on any edit (`whole` always true) →
+    /// fails at "an edit's remeasure is not a run".
+    #[test]
+    fn measuring_spans_a_whole_run_only() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.toggle_contrast();
+        frame(&ctx, &mut f.app, Vec::new());
+        let measuring = |app: &OndinApp| app.contrast.as_ref().unwrap().measuring.is_some();
+        assert!(measuring(&f.app), "the first look is a run");
+        settle(&ctx, &mut f.app);
+        assert!(!measuring(&f.app), "the run ends once all is measured");
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetFills {
+            id: f.grey,
+            fills: solid(40, 40, 40),
+        }])));
+        frame(&ctx, &mut f.app, Vec::new());
+        assert!(
+            f.app.contrast.as_ref().unwrap().stale.contains(&f.grey),
+            "fixture: the caption waits on a remeasure"
+        );
+        assert!(!measuring(&f.app), "an edit's remeasure is not a run");
+        settle(&ctx, &mut f.app);
+        f.app.prefs.contrast.set_level(Level::Aaa);
+        frame(&ctx, &mut f.app, Vec::new());
+        assert!(measuring(&f.app), "a level change is a run");
     }
 
     /// With nothing selected the mode measures the frame in view, lists its

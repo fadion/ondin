@@ -6753,23 +6753,24 @@ impl OndinApp {
                         _ => &ViewSwitch::SNAP_MENU,
                     };
                     for sw in rows {
+                        // The contrast check heads the modes (Outline, Focus, then
+                        // Present): ticked while on, but view state rather than a
+                        // remembered switch.
+                        if *sw == ViewSwitch::Outline
+                            && crate::ui::menu_check(
+                                ui,
+                                crate::menu::Item::CheckContrast.spec().label,
+                                app.contrast.is_some(),
+                                ITEM_H,
+                            )
+                        {
+                            app.open_menu = TopMenu::None;
+                            app.toggle_contrast();
+                        }
                         let on = app.view_switch(*sw);
                         if crate::ui::menu_check(ui, sw.label(), on, ITEM_H) {
                             app.set_view_switch(*sw, !on);
                         }
-                    }
-                    // The contrast check is a mode, ticked while on, but view state
-                    // rather than a remembered switch.
-                    if which == TopMenu::View
-                        && crate::ui::menu_check(
-                            ui,
-                            crate::menu::Item::CheckContrast.spec().label,
-                            app.contrast.is_some(),
-                            ITEM_H,
-                        )
-                    {
-                        app.open_menu = TopMenu::None;
-                        app.toggle_contrast();
                     }
                     // A verb after the switches, in their column: no tick, ever.
                     if which == TopMenu::View

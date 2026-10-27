@@ -123,17 +123,20 @@ document opens, it is never saved or exported, and present mode's own branch nev
   gesture preview that is not the fix card's own) the badges of the selected layers and their
   descendants hide.
 - **The bar** (`contrast_bar`), an `Area` at the canvas's top centre, 12pt down: circle-half glyph,
-  the scope pill (*Contrast* on a page with no frame), the level head (the level and a caret
-  glyph), then *Measuring k / N*, *All N pass* or *N failing* with `k / N` once stepped and
-  prev/next arrows, then × to end the mode. The count and the step position sit in fixed-width
-  cells, so stepping never moves the arrows under the pointer. The count dims while anything is
-  stale. The arrows step through failures in reading order, selecting each and
+  the scope pill (*Contrast* on a page with no frame), the level head (`ui::menu_head`, as the top
+  bar's dropdowns), then *Measuring…*, *All N pass* or *N failing* with `k / N` once stepped and
+  prev/next arrows, then × to end the mode; groups part at hairlines. *Measuring…* pulses
+  (`ui::pulse_alpha`) through a whole run — the first look or a level change — and the count
+  shows only once it ends; an edit's remeasure keeps the count, dimmed. The step position's cell
+  is as wide as `N / N`, so stepping never moves the arrows under the pointer. The arrows step
+  through failures in reading order, selecting each and
   moving the camera only when the layer is not wholly in view: centred if it fits, else `zoom_to`.
 - **The level menu**, from the head: AA (4.5 / 3), AAA (7 / 4.5), APCA (Lc), then *Show passing*
   and *Non-text (3 : 1)*, kept in `prefs.contrast` (`ContrastPrefs`; AA, passing shown, text only).
 - **The fix card** (`contrast_fix_card`, a 270pt `Area` beside the badge) opens on a click on a
   failing badge, which also selects the layer; the badge is a widget registered after the canvas's,
-  so it wins the pointer. Header (layer name; *body text*, *large text* or *non-text*; the level),
+  so it wins the pointer, and lights (a lighter ground and a ring) under it, since the cursor stays
+  the arrow. Header (layer name; *body text*, *large text* or *non-text*; the level),
   the worst sample's ink and backdrop as a split swatch with both hexes and the score in red, a row
   per mode when there are several, then *Nearest* (`contrast::nearest`; *No colour at this hue
   passes*), noting *Unbinds ‹var›* when the text draws in a bound fill that fails, then *Variables*
@@ -163,8 +166,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
-  layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*,
-  *Check contrast* (a mode, ticked while on and never remembered), then *Present mode* — a verb,
+  layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, then the modes: *Check
+  contrast* (ticked while on and never remembered), *Outline mode*, *Focus mode*, then *Present mode* — a verb,
   not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
   *Show minimap* follows *Show history* so the two rows about the layers pane stay together.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to

@@ -124,10 +124,12 @@ struct MenuOutcome {
     dismissed: bool,
 }
 
-/// A floating menu hung under `anchor`: the panel, its rows, their hover ground
-/// and the click-away test. `paint` draws a row's contents into the rect it is
-/// given. Escape is handled in `dashboard_keys` behind `library_menu_open()`, since
-/// a keyboard rule in a drawing helper only runs on frames the menu is drawn.
+/// A floating menu hung under `anchor`, right edges together, or opened at it
+/// when `anchor` is a point (a right-click's press, flipped off the screen's
+/// edges): the panel, its rows, their hover ground and the click-away test. `paint`
+/// draws a row's contents into the rect it is given. Escape is handled in
+/// `dashboard_keys` behind `library_menu_open()`, since a keyboard rule in a
+/// drawing helper only runs on frames the menu is drawn.
 fn anchored_menu(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -137,9 +139,14 @@ fn anchored_menu(
     paint: impl Fn(&egui::Painter, usize, egui::Rect),
 ) -> MenuOutcome {
     let h = rows as f32 * FILTER_ROW_H + 10.0;
+    let pos = if anchor.size() == egui::Vec2::ZERO {
+        ui::menu_place(ui.ctx(), anchor.min, egui::vec2(w, h))
+    } else {
+        egui::pos2(anchor.right() - w, anchor.bottom() + 4.0)
+    };
     let area = egui::Area::new(id)
         .order(egui::Order::Foreground)
-        .fixed_pos(egui::pos2(anchor.right() - w, anchor.bottom() + 4.0));
+        .fixed_pos(pos);
     let inner = area.show(ui.ctx(), |ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::empty());
         let p = ui.painter();
@@ -302,6 +309,8 @@ pub(crate) struct DashboardState {
     pub(crate) scroll_to_selected: bool,
     /// The document whose ⋮ menu is open, by path.
     pub(crate) menu_for: Option<PathBuf>,
+    /// Where a right-click opened that menu; `None` hangs it under the ⋮.
+    pub(crate) menu_at: Option<egui::Pos2>,
     /// Whether either floating menu was on screen when this frame began.
     ///
     /// Latched at the top of `dashboard_ui`, because the live flags are cleared
@@ -2141,10 +2150,20 @@ impl OndinApp {
             })
     }
 
-    /// What a click on a card or a row means: it opens the document. A click does not
-    /// select and no card reads a double-click. The keyboard's cursor is separate:
-    /// arrows move it, `Enter` opens it, `Delete` asks, `Escape` clears it.
+    /// What a click on a card or a row means: it opens the document, and a
+    /// right-click opens the ⋮ menu at the press. A click does not select and no
+    /// card reads a double-click. The keyboard's cursor is separate: arrows move it,
+    /// `Enter` opens it, `Delete` asks, `Escape` clears it.
     fn pick_or_open(&mut self, resp: &egui::Response, entry: &Entry, act: &mut Option<Act>) {
+        // Above the gate: a second right-click replaces the menu (§0 R4).
+        if resp.secondary_clicked() {
+            self.dash.menu_for = Some(entry.path.clone());
+            self.dash.menu_at = resp.interact_pointer_pos();
+            self.dash.moving = None;
+            self.dash.filter_open = false;
+            self.tabs.menu = None;
+            return;
+        }
         // A click that dismisses a menu is spent doing so (`context-menus.md` §0 R4), as
         // in `canvas_ui`. Reads the latched `menu_was_up`: `library_menu_open()` is
         // already false for cards drawn after the anchor's.
@@ -2638,11 +2657,18 @@ impl OndinApp {
             },
         );
         if resp.clicked() {
-            self.dash.menu_for = if open { None } else { Some(entry.path.clone()) };
+            // Open from a right-click, the dots move the menu under them.
+            let shut = open && self.dash.menu_at.is_none();
+            self.dash.menu_for = (!shut).then(|| entry.path.clone());
+            self.dash.menu_at = None;
             self.dash.moving = None;
         }
-        if open {
-            self.file_menu_popup(ui, entry, hit, act);
+        if self.dash.menu_for.as_ref() == Some(&entry.path) {
+            let anchor = match self.dash.menu_at {
+                Some(at) => egui::Rect::from_min_size(at, egui::Vec2::ZERO),
+                None => hit,
+            };
+            self.file_menu_popup(ui, entry, anchor, act);
         }
     }
 
@@ -5232,6 +5258,16 @@ mod tests {
 
     /// Drive one full click at `at`, press and release on separate frames.
     fn click_at(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) {
+        click_with(app, ctx, at, egui::PointerButton::Primary);
+    }
+
+    /// [`click_at`] with `button`.
+    fn click_with(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        at: egui::Pos2,
+        button: egui::PointerButton,
+    ) {
         let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
@@ -5242,7 +5278,7 @@ mod tests {
         };
         let button = |pressed| egui::Event::PointerButton {
             pos: at,
-            button: egui::PointerButton::Primary,
+            button,
             pressed,
             modifiers: Default::default(),
         };
@@ -5260,6 +5296,64 @@ mod tests {
             .find(|(_, _, t)| t == name)
             .unwrap_or_else(|| panic!("no card named {name:?}"));
         pos + size / 2.0
+    }
+
+    /// A right-click on a card or a row opens the ⋮ menu's rows at the press, opens
+    /// no document, and a row chosen from it runs; a second right-click moves the
+    /// menu to its own card.
+    /// flip: `pick_or_open` not reading `secondary_clicked` → fails at "the menu opens".
+    #[test]
+    fn a_right_click_opens_the_file_menu_at_the_press() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "right-click");
+        let mut alpha_doc = ondin_core::Document::new(app.session.ids.mint());
+        let alpha = store::file_document(&root, None, "Alpha", &mut alpha_doc).unwrap();
+        let mut bravo_doc = ondin_core::Document::new(app.session.ids.mint());
+        let bravo = store::file_document(&root, None, "Bravo", &mut bravo_doc).unwrap();
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+
+        for list in [false, true] {
+            app.dash.list_view = list;
+            app.dash.menu_for = None;
+            let on_alpha = card_centre(&mut app, &ctx, "Alpha");
+            click_with(&mut app, &ctx, on_alpha, egui::PointerButton::Secondary);
+            assert_eq!(app.dash.menu_for.as_ref(), Some(&alpha), "the menu opens");
+            assert_eq!(app.session.path, None, "and opens no document");
+            let (rename, _, _) = galleys(&mut app, &ctx)
+                .into_iter()
+                .find(|(_, _, t)| t == "Rename")
+                .expect("the ⋮ menu's rows");
+            assert!(
+                rename.x > on_alpha.x && rename.y > on_alpha.y,
+                "at the press, not under the dots (list: {list})"
+            );
+
+            // Clear of the menu, which hangs over Bravo's name: its cover, or its row's
+            // far side.
+            let on_bravo = card_centre(&mut app, &ctx, "Bravo")
+                + if list {
+                    egui::vec2(250.0, 0.0)
+                } else {
+                    egui::vec2(0.0, -40.0)
+                };
+            click_with(&mut app, &ctx, on_bravo, egui::PointerButton::Secondary);
+            assert_eq!(
+                app.dash.menu_for.as_ref(),
+                Some(&bravo),
+                "a second one moves it"
+            );
+        }
+
+        let rename = card_centre(&mut app, &ctx, "Rename");
+        click_at(&mut app, &ctx, rename);
+        assert_eq!(
+            app.rename_entry.as_ref().map(|r| &r.0),
+            Some(&bravo),
+            "a row chosen from it runs"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A click that dismisses a floating library menu (⋮ popup, project dropdown) at

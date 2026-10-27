@@ -23,7 +23,8 @@ variable*).
   press that cancelled spends the click, so no menu opens. An armed eyedropper counts as a gesture:
   the click disarms it and opens no menu, on the canvas or off it. The menu opens at the press position.
 - **R2** — A menu is claimed per region: the canvas, a layers row, the layers panel's background,
-  a row of the Pages section (§6.8), and an inspector field (§6.7). Widgets that already use the secondary button keep it (gradient
+  a row of the Pages section (§6.8), an inspector field (§6.7), a document's tab (§6.9), and a
+  library file card or list row (its ⋮ file menu, at the press; `library.md`). Widgets that already use the secondary button keep it (gradient
   stop bar and the edited gradient's canvas handles, ruler).
 - **R3** — An open menu is `Escape`'s first rung, above focus mode: one press closes only the
   menu. While open the menu holds the keyboard (`input::resolve` does not run). The same

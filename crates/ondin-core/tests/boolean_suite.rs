@@ -127,12 +127,37 @@ fn sets() -> Vec<(&'static str, Vec<BezPath>)> {
             "disjoint",
             vec![circle((0.0, 0.0), 30.0), circle((100.0, 0.0), 30.0)],
         ),
+        (
+            // Open, as a pen path is: each fills as if closed back to its start.
+            // flip: `exclude_of` leaving them open → its Exclude fails at "points
+            // on the wrong side".
+            "open triangles sharing an edge",
+            vec![
+                BezPath::from_svg("M0,0 L100,0 L100,100").unwrap(),
+                BezPath::from_svg("M100,0 L0,0 L0,-100").unwrap(),
+            ],
+        ),
     ]
+}
+
+/// `path` with every open subpath closed, as a fill reads it.
+fn closed(path: &BezPath) -> BezPath {
+    let mut out = BezPath::new();
+    for mut sub in ondin_core::geometry::subpaths(path) {
+        if !matches!(
+            sub.elements().last(),
+            Some(ondin_core::kurbo::PathEl::ClosePath)
+        ) {
+            sub.close_path();
+        }
+        out.extend(sub.iter());
+    }
+    out
 }
 
 /// Everything wrong with `op` over `operands`.
 fn boolean_case(operands: &[BezPath], op: BoolOp) -> Vec<String> {
-    let fills: Vec<Fill> = operands.iter().map(Fill::new).collect();
+    let fills: Vec<Fill> = operands.iter().map(|p| Fill::new(&closed(p))).collect();
     let expected = |p| -> Option<bool> {
         let inside: Vec<Option<bool>> = fills.iter().map(|f| f.contains(p)).collect();
         match op {
@@ -165,8 +190,14 @@ fn boolean_case(operands: &[BezPath], op: BoolOp) -> Vec<String> {
 /// What still fails, and why. `Exclude` does no arithmetic (`boolean::exclude_of`
 /// concatenates the outlines for an even-odd read), so where operands share only
 /// part of an edge, or nearly share one, the edge stays in the result: the fill is
-/// right and a stroke draws a line along it.
-const KNOWN: [(&str, &str); 3] = [
+/// right and a stroke draws a line along it. flo_curves hands back a union of two
+/// open operands wound the same way, so their shared edge is never walked both
+/// ways and `spliced` keeps it, with the same effect.
+const KNOWN: [(&str, &str); 4] = [
+    (
+        "open triangles sharing an edge Union",
+        "edges with the fill on both sides",
+    ),
     (
         "part of a side Exclude",
         "edges with the fill on both sides",
@@ -198,4 +229,29 @@ fn booleans_match_the_oracle() {
         })
         .collect();
     common::run_all_known(&cases, &KNOWN, |(operands, op)| boolean_case(operands, *op));
+}
+
+/// Exclude over sixty by sixty adjacent tiles, every inner edge shared, splices
+/// them into one outline in a moment in a release build, where re-indexing every
+/// segment after each splice takes seconds; the bound is generous for a loaded
+/// machine.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "timed in a release build")]
+fn exclude_of_many_tiles_is_quick() {
+    let tiles: Vec<BezPath> = (0..60)
+        .flat_map(|i| (0..60).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            let (x, y) = (10.0 * f64::from(i), 10.0 * f64::from(j));
+            rect(x, y, x + 10.0, y + 10.0)
+        })
+        .collect();
+    let start = std::time::Instant::now();
+    let out = ondin_core::boolean::evaluate(BoolOp::Exclude, &tiles).expect("an outline");
+    let took = start.elapsed();
+    assert!(took.as_secs_f64() < 1.0, "{took:?}");
+    assert_eq!(
+        ondin_core::geometry::subpaths(&out).len(),
+        1,
+        "one outline round all the tiles"
+    );
 }

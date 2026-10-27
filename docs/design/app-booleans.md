@@ -38,11 +38,14 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
   the result, so two contours walking one edge in opposite directions become one. Ends must match
   within `SEAM_EPS` (10⁻⁶), well under the thinnest sliver a boolean keeps, so a sliver's two sides
   are never taken for one edge; handles within `SEAM_HANDLE_EPS`, since flo_curves hands a split edge
-  back with handles off by around 10⁻⁶. A contour of no area (two touching circles' intersection)
+  back with handles off by around 10⁻⁶. Segments are indexed once by their ends and linked round
+  their loops, so each splice is a relink and a grid of thousands of tiles splices in linear time. A
+  contour of no area (two touching circles' intersection)
   is dropped; a thin one is a shape and is kept.
 - `Exclude` is `exclude_of`: all operand outlines concatenated and read **even-odd** (via
   `Node::fill_rule` deriving even-odd for an `Exclude`). It is not `sub(add(a,b), intersect(a,b))`,
-  which returns the operands unchanged. Each contour is turned one way first, so two that share a
+  which returns the operands unchanged. An open contour is closed first, as its fill closes it, and
+  each is turned one way, so two that share a
   whole edge walk it oppositely and are spliced, and a contour that appears twice is dropped, as the
   even-odd read cancels it. An edge shared only in part stays, since no arithmetic splits it: the
   fill is right and a stroke draws along it.

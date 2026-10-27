@@ -156,7 +156,8 @@ without it); the `!m.shift` sits on `Equals` only.
 |---|---|---|
 | `Ctrl+Shift+H` | hide / show | ✅ Figma, Sketch |
 | `Ctrl+Shift+L` | lock / unlock | ✅ Figma, Sketch |
-| `Ctrl+R` · `F2` | **rename** | ✅ Figma · Windows alias |
+| `Ctrl+R` · `F2` | **rename** | ✅ Figma · Windows alias. With two or more layers selected, opens batch rename |
+| `Ctrl+Shift+R` | **batch rename…** | ✅ `Action::BatchRename`; live with any selection or none (`app-canvas-chrome.md`, *Batch rename*) |
 | `Shift+H` / `Shift+V` | flip horizontal / vertical | ✅ Figma |
 
 **Hide and lock are one switch for the whole selection, and a mixed selection hides / locks**:
@@ -168,8 +169,10 @@ Both commit through `session.commit`, not `commit_edit`, whose one extra (arming
 selection-chrome hide) a visibility switch has nothing to look at.
 
 Rename opens the same `renaming_layer` field as a layers-panel double-click, showing the panel if
-hidden and unfolding its Layers section. It **refuses a multi-selection** and **refuses in focus mode** (no panels are drawn, so
-it would arm against a field that never renders).
+hidden and unfolding its Layers section. With **two or more layers selected it opens the batch
+rename box** instead, the verb that fits them (`OndinApp::rename_selection`). Otherwise it **refuses
+in focus mode** (no panels are drawn, so it would arm against a field that never renders); the box
+is not in a panel and opens there.
 
 **`Ctrl+R` is rename, not rulers** (Illustrator/Photoshop). Rulers keep `Shift+R` and `Ctrl+R` is
 not aliased to them. It means the same on the library screen (§8a): a chord spent on rename
@@ -522,8 +525,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 
 - **Select same… and Select inverse** — no convention; built as palette verbs (*Select same fill /
   stroke / font / effects*), since the palette can enumerate *which* "same".
-- **Paste to replace** — a layer-menu row (and so a palette row), no chord. `Ctrl+Shift+R` is not spent on it: `Ctrl+R` is
-  rename.
+- **Paste to replace** — a layer-menu row (and so a palette row), no chord. `Ctrl+Shift+R` is not spent on it: it is
+  batch rename, beside `Ctrl+R`'s rename.
 - **Outline shape** — built, in the context menu (§15 D230), no chord: a one-way structural
   conversion no reference app binds. `Ctrl+E` is *Flatten*, a different verb, and must not cover
   this one by having the only key. The third reason an `Item` is not an `Action`: "no key was spent".

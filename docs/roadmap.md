@@ -38,8 +38,6 @@ reads true.
   recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
   colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
   eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
-- **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
-  `Item::Rename`, one layer, exists.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).
   Import of the same file matches by the id in `$extensions`, then by path, so a rename made in code
   is not a delete plus a create. It shows what is added, changed, removed and renamed, and applies it
@@ -163,7 +161,7 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **Components: five unruled questions** — a group instance's canvas label; a main-scoped guide not
   copied; a linked node moved into a nested instance losing its link; instance roots exempt from
   membership (§15 D978); a moved-out layer previewed on copies (§15 D979 (xiv)).
-- **Is a 32/33-row context menu past the ceiling?** (`context-menus.md` *Undecided* 7, §15 D981, D1003 (9)).
+- **Is a 38-row context menu past the ceiling?** (`context-menus.md` *Open*, §15 D981, D1003 (9)).
 - **`Ctrl+Alt` is `AltGr`** on many European layouts (`shortcuts.md` §12, §15 D987).
 - **Is the chrome meant to be keyboard-traversable?** (§15 D747) — deferred by the maintainer.
 - **One font-availability question for panel and snapshot** — only worth it if the snapshot ever

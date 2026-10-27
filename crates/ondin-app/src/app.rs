@@ -830,6 +830,8 @@ pub struct OndinApp {
     /// *View ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
     /// document opens with it off.
     pub(crate) contrast: Option<crate::contrast::Contrast>,
+    /// The batch rename box, while it is open (`batch_rename.rs`).
+    pub(crate) batch_rename: Option<crate::batch_rename::BatchRename>,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1372,6 +1374,7 @@ impl OndinApp {
             show_minimap: view.minimap,
             minimap: Default::default(),
             contrast: None,
+            batch_rename: None,
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -1764,6 +1767,8 @@ impl eframe::App for OndinApp {
         self.context_menu_ui(&ctx, nav);
         // Unguarded: its chord works in focus mode, over the canvas alone.
         self.palette_ui(&ctx, canvas, palette_keys);
+        // Unguarded: it is not in a panel, so it works in focus mode.
+        self.batch_rename_ui(&ctx, canvas);
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
         self.settings_ui(&ctx);
         self.cheatsheet_ui(&ctx);
@@ -2036,6 +2041,7 @@ impl OndinApp {
             Action::ToggleHidden => self.toggle_hidden(),
             Action::ToggleLocked => self.toggle_locked(),
             Action::Rename => self.rename_selection(),
+            Action::BatchRename => self.open_batch_rename(None),
             Action::Flip(axis) => self.flip(axis),
             Action::Align(axis, edge) => self.align(axis, edge),
             Action::Distribute(axis) => self.distribute(axis),
@@ -2129,8 +2135,13 @@ impl OndinApp {
     ///
     /// The same field a double-click in the layers panel opens (`renaming_layer`, drawn
     /// by `layers::layer_rename_field`). The panel is shown if hidden; with several
-    /// layers selected it renames nothing and says so.
+    /// layers selected it opens the batch rename box instead.
     fn rename_selection(&mut self) {
+        // Two or more: the chord falls through to the verb that fits them.
+        if self.session.selection.ids().len() > 1 {
+            self.open_batch_rename(None);
+            return;
+        }
         // Focus mode draws no layers panel: the field would never render.
         if self.focus {
             self.session.info("Leave focus mode to rename");
@@ -2138,9 +2149,6 @@ impl OndinApp {
         }
         let ids = self.session.selection.ids();
         let [id] = ids else {
-            if !ids.is_empty() {
-                self.session.info("Select one layer to rename");
-            }
             return;
         };
         let Some(name) = self.session.doc.get(*id).map(|n| n.name().to_string()) else {
@@ -6959,6 +6967,7 @@ impl OndinApp {
             || self.making_all_local.is_some()
             || self.unsharing_kit.is_some()
             || self.cheatsheet.is_some()
+            || self.batch_rename.is_some()
     }
 
     /// Write the View and Snap switches to `prefs` when one has changed, so the next
@@ -7413,6 +7422,14 @@ impl OndinApp {
                                                 self.layer_filter = Some(String::new());
                                                 ui.ctx().memory_mut(|m| m.request_focus(field));
                                             }
+                                        }
+                                        // Batch rename, finding what the search shows.
+                                        if icon_button(ui, icon::TEXT_AA, 20.0, 15.0, false, true)
+                                            .on_hover_text("Batch rename (Ctrl+Shift+R)")
+                                            .clicked()
+                                        {
+                                            let search = self.layer_filter.clone();
+                                            self.open_batch_rename(search);
                                         }
                                         // Fold or unfold the whole tree.
                                         let folded = self.tree_is_all_collapsed();

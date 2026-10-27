@@ -98,6 +98,37 @@ impl Default for ContrastPrefs {
     }
 }
 
+/// What the batch rename box last renamed with (`crate::batch_rename`), for the
+/// next time it opens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BatchRenamePrefs {
+    pub find: String,
+    /// *Rename to*, its tokens spelled `[Name]`, `[Number]`, `[Group k]`; empty
+    /// reads as one Name token.
+    pub template: String,
+    pub from: i64,
+    pub step: i64,
+    /// 1 to 3.
+    pub digits: u8,
+    /// `layers`, `reversed`, `left-to-right` or `top-to-bottom`.
+    pub order: String,
+}
+
+impl Default for BatchRenamePrefs {
+    /// No find, the name kept, numbered 1, 2, 3 in layers order.
+    fn default() -> Self {
+        Self {
+            find: String::new(),
+            template: String::new(),
+            from: 1,
+            step: 1,
+            digits: 1,
+            order: "layers".into(),
+        }
+    }
+}
+
 /// Everything the Settings modal writes, plus the export habits the export
 /// panel's popover writes.
 ///
@@ -285,6 +316,8 @@ pub struct Prefs {
     pub recent_colours: Vec<[f32; 3]>,
     /// The contrast check's level and switches.
     pub contrast: ContrastPrefs,
+    /// The batch rename box's last Find, template and numbering.
+    pub batch_rename: BatchRenamePrefs,
 }
 
 impl Default for Prefs {
@@ -334,6 +367,7 @@ impl Default for Prefs {
             colour_format: "hex".into(),
             recent_colours: Vec::new(),
             contrast: ContrastPrefs::default(),
+            batch_rename: BatchRenamePrefs::default(),
         }
     }
 }

@@ -112,7 +112,8 @@ plain click or marquee replaces the selection and clears it.
 - **Rename**: double-click, `Ctrl+R`, `F2` and the context menu's *Rename* all set `renaming_layer`;
   the field requests focus itself on the first frame it draws, detected with
   `ui::widget_rect(id).is_none()`. One undo step; `Escape` discards. The chord shows the layers panel if
-  hidden, unfolds its Layers section and refuses a multi-selection.
+  hidden and unfolds its Layers section; with two or more layers selected it opens the batch rename
+  box instead (`app-canvas-chrome.md`, *Batch rename*).
 
 ## Traps
 

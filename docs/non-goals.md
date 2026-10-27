@@ -28,7 +28,9 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Middle-button pan over the origin fields** (§15 D254).
 - **One insertion line for the layers tree and the paint panels' reorder** — a gap cannot name a parent (§15 D306).
 - **A resizable inspector column** — its width is a function of the design (§15 D351).
-- **Unique layer names** — names only need to be displayable (§15 D127).
+- **Unique layer names** — names only need to be displayable (§15 D127). Batch rename makes no name unique, and its preview does not flag duplicates.
+- **Batch renaming pages, styles or variables** — the box renames layers only.
+- **Letter-case switches in batch rename** (*Title Case*, *UPPER*, …) — *Keep case* carries a match's case, and nothing else changes it.
 - **A grid's `baseline` alignment in the cards** (§15 D919).
 
 ## Booleans and paths

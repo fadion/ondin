@@ -262,8 +262,12 @@ pub enum Action {
     /// panel opens, so there is one rename rather than a second one.
     ///
     /// `Ctrl+R` is rename here, not rulers: rulers keep Figma's `Shift+R`
-    /// (`docs/shortcuts.md` §4 and its *Unresolvable* list).
+    /// (`docs/shortcuts.md` §4 and its *Unresolvable* list). With two or more
+    /// layers selected it opens [`Self::BatchRename`] rather than refusing.
     Rename,
+    /// Open the batch rename box — `Ctrl+Shift+R`. Live with any selection or
+    /// none.
+    BatchRename,
     /// Mirror the selection across the centreline of the box it occupies —
     /// `Shift+H` and `Shift+V`, Figma's.
     ///
@@ -1180,6 +1184,11 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             (cmd_only && !m.shift && i.key_pressed(egui::Key::R))
                 || (plain && i.key_pressed(egui::Key::F2)),
             Action::Rename,
+            &mut out,
+        );
+        on(
+            cmd_only && m.shift && i.key_pressed(egui::Key::R),
+            Action::BatchRename,
             &mut out,
         );
         // Flip, on Figma's pair. `plain` keeps these off `Alt+H`/`Alt+V` (align

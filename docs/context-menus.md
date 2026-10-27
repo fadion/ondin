@@ -82,7 +82,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions · Join paths · Move to page ▸ |
 | 5 | Order | four restack rows |
 | 6 | Transform | Flip H · Flip V · Reset origin |
-| 7 | State | Hide/Show · Lock/Unlock · Rename |
+| 7 | State | Hide/Show · Lock/Unlock · Rename · Batch rename… |
 | 8 | Navigate | Zoom to selection |
 | 9 | Export | Copy as SVG · Copy as CSS · Copy as PNG · Copy as PNG 2× |
 | 10 | View | the canvas menu's view switches (§6.1, §6.3 only) |
@@ -94,8 +94,9 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 29 rows, text 32, a boolean 35, railed text 34; component roles reach
-  37, a linked boolean in an instance (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
+- **Length**: a primitive is 30 rows, text 33, a boolean 36, railed text 35, a main frame 29, an
+  instance frame 30; component roles reach 38, a linked boolean in an instance
+  (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
   Navigate goes first, then Export.
 
 ---
@@ -109,7 +110,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | Cut | `Ctrl+X` | dims on lock |
 | Copy | `Ctrl+C` | always live |
 | Paste here (canvas) / Paste (panel) | `Ctrl+V` | dims *"Nothing has been copied yet"* unless the OS clipboard has a picture, the app's own payload is still current, or the OS clipboard has text. Canvas: at the pointer; a picture is aimed like a drop |
-| Paste to replace | — | dims *"No layers have been copied"* unless the app's own layers are on the clipboard and current (`Context::can_replace`); dims on lock. Each selected layer gives way to a copy of the whole clipboard, centred on it, in its slot (`app-frames-and-copies.md`). `Ctrl+Shift+R` is not spent on it: `Ctrl+R` is rename |
+| Paste to replace | — | dims *"No layers have been copied"* unless the app's own layers are on the clipboard and current (`Context::can_replace`); dims on lock. Each selected layer gives way to a copy of the whole clipboard, centred on it, in its slot (`app-frames-and-copies.md`). `Ctrl+Shift+R` is not spent on it: it is *Batch rename…* |
 | Duplicate | `Ctrl+D` | dims on lock |
 | Delete | `Del` | dims on lock; destructive styling |
 
@@ -183,6 +184,7 @@ and *Duplicate as component* draw the filled hexagon.
 | Hide / Show | `Ctrl+Shift+H` | *Show* only when every selected layer is hidden, as the action shows only then (a mixed selection hides); never dims |
 | Lock / Unlock | `Ctrl+Shift+L` | *Unlock* only when every selected layer's **own** flag is set, as the action unlocks only then; never dims |
 | Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer, and *"Leave focus mode to rename"* in focus mode, where the panel that holds the field is hidden; live on a lock |
+| Batch rename… | `Ctrl+Shift+R` | never dims: the box takes any selection and is not in a panel (`app-canvas-chrome.md`, *Batch rename*) |
 
 ### Navigate
 
@@ -241,7 +243,7 @@ The four operations stay in Structure as checkable rows (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-No head. The baseline menu, 29 rows.
+No head. The baseline menu, 30 rows.
 
 ### 5.6 Text
 
@@ -273,7 +275,7 @@ needs a single layer.
 ### 5.9 Locked and hidden layers (panel only, per C4)
 
 The whole menu is present and every editing row dims. Live over a lock: *Copy*, *Paste*, *Copy
-properties*, *Unlock*, *Show*/*Hide*, *Rename*, *Zoom to selection*, *Copy as SVG/CSS/PNG*, *Enter
+properties*, *Unlock*, *Show*/*Hide*, *Rename*, *Batch rename…*, *Zoom to selection*, *Copy as SVG/CSS/PNG*, *Enter
 group/boolean*, *Make this the key layer*, *Go to main*, *Select all instances*. A layer inside a
 locked group is treated as locked, with the group's sentence; *Lock/Unlock* reads the layer's own
 flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
@@ -461,6 +463,6 @@ The inspector field menu (§6.7) is drawn with the same row and frame functions 
 
 ## Open
 
-- Whether a 37-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
+- Whether a 38-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
 - Whether the canvas menu should carry *Canvas background…* (a second door to the inspector's
   no-selection field).

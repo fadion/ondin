@@ -142,7 +142,7 @@ pub(crate) const DEFAULT_W: f32 = 300.0;
 /// The other reading, a four-deep row's hovered name room reaching zero, crosses at
 /// 194.5; 210 is left above it on purpose. Below this a nested row's name is drawn
 /// underneath the eye. The header is not binding: the search field flexes and the
-/// eyebrow plus its two 20pt buttons want well under the 198pt of content.
+/// eyebrow plus its three 20pt buttons want well under the 198pt of content.
 pub(crate) const MIN_W: f32 = 210.0;
 
 /// How wide the drag may take the panel: twice the default, so a panel dragged

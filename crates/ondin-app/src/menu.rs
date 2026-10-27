@@ -304,6 +304,8 @@ pub enum Item {
     ToggleHidden,
     ToggleLocked,
     Rename,
+    /// `Action::BatchRename`: the box that renames many layers at once.
+    BatchRename,
     ZoomSelection,
 
     // --- export (§3's ninth group) ----------------------------------------
@@ -589,6 +591,7 @@ impl Item {
         Item::ToggleHidden,
         Item::ToggleLocked,
         Item::Rename,
+        Item::BatchRename,
         Item::ZoomSelection,
         Item::CopyAsSvg,
         Item::CopyAsCss,
@@ -898,6 +901,12 @@ impl Item {
                 Group::State,
             ),
             Item::Rename => s("Rename", icon::TEXT_AA, Some("Ctrl+R"), Group::State),
+            Item::BatchRename => s(
+                "Batch rename…",
+                icon::TEXT_AA,
+                Some("Ctrl+Shift+R"),
+                Group::State,
+            ),
 
             Item::ZoomSelection => s(
                 "Zoom to selection",
@@ -1299,6 +1308,7 @@ impl Item {
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
             Item::CheckContrast => &["accessibility", "a11y", "wcag", "apca", "legibility"],
+            Item::BatchRename => &["find", "replace", "number", "bulk"],
             Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
             Item::MoveTo(_) => &["page", "send"],
             Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
@@ -1344,6 +1354,7 @@ impl Item {
             Item::ToggleHidden => Action::ToggleHidden,
             Item::ToggleLocked => Action::ToggleLocked,
             Item::Rename => Action::Rename,
+            Item::BatchRename => Action::BatchRename,
             Item::Undo => Action::Undo,
             Item::Redo => Action::Redo,
             Item::Save => Action::Save,
@@ -2131,6 +2142,8 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         Row::new(Item::Rename)
             .dim_if(!one, "Pick one layer to rename it")
             .dim_if(cx.focus, "Leave focus mode to rename"),
+        // Always live: the box is not in a panel, and takes any selection.
+        Row::new(Item::BatchRename),
     ]);
 
     // --- navigate ---------------------------------------------------------
@@ -3038,6 +3051,7 @@ impl OndinApp {
             Item::ToggleHidden => self.dispatch(ctx, Action::ToggleHidden),
             Item::ToggleLocked => self.dispatch(ctx, Action::ToggleLocked),
             Item::Rename => self.dispatch(ctx, Action::Rename),
+            Item::BatchRename => self.dispatch(ctx, Action::BatchRename),
             Item::ZoomSelection => self.dispatch(ctx, Action::ZoomSelection),
             Item::ZoomFit => self.dispatch(ctx, Action::ZoomFit),
             Item::SelectAll => self.dispatch(ctx, Action::SelectAll),
@@ -3558,11 +3572,11 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 29 rows in the canonical group order, with the empty
+    /// A primitive's menu is 30 rows in the canonical group order, with the empty
     /// head collapsed. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_twenty_nine_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_thirty_rows_in_canonical_group_order() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let groups = build(&open(
@@ -3573,7 +3587,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 30, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 8, "the head is empty and must collapse");
 
         assert_eq!(
@@ -3603,6 +3617,7 @@ mod tests {
                 "Hide",
                 "Lock",
                 "Rename",
+                "Batch rename…",
                 "Zoom to selection",
                 "Copy as SVG",
                 "Copy as CSS",
@@ -3652,7 +3667,7 @@ mod tests {
     }
 
     /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 6 ·
-    /// Properties 2 · Structure 10 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
+    /// Properties 2 · Structure 10 · Order 4 · Transform 2 · State 4 · Navigate 1 ·
     /// Export 4.
     #[test]
     fn a_booleans_menu_is_the_long_end_of_the_range() {
@@ -3666,11 +3681,11 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 35, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 36, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
-    /// arithmetic in each case's message. The linked boolean is the long end, at 37.
+    /// arithmetic in each case's message. The linked boolean is the long end, at 38.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -3687,9 +3702,9 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 32, plus *Flip to other side* and \
+                "text on a rail: the plain 33, plus *Flip to other side* and \
                  *Detach from path*",
-                34,
+                35,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3699,29 +3714,29 @@ mod tests {
                 "a main frame: head 1 · Clipboard 6 · Properties 2 · Structure 5 \
                  (*Group selection*, *Frame selection*, *Duplicate as component*, \
                  *Select all instances*, *Move to page*) · Order 4 · Transform 2 · \
-                 State 3 · Navigate 1 · Export 4",
-                28,
+                 State 4 · Navigate 1 · Export 4",
+                29,
                 count(Kind::Frame, &|cx| cx.role = Role::Main),
             ),
             (
                 "an instance frame: a main's, with *Go to main component*, *Reset \
                  all* and *Detach instance* for its two",
-                29,
+                30,
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 29, with *Go to \
+                "a linked shape in an instance: the primitive's 30, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                30,
+                31,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
                 }),
             ),
             (
-                "a bound text child: text's 32, with *Go to main component*, \
+                "a bound text child: text's 33, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                34,
+                35,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -3730,9 +3745,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 34, with the bound \
+                "a bound text child on a rail: the railed 35, with the bound \
                  child's three rows for *Create component*",
-                36,
+                37,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3743,9 +3758,9 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 35, with the bound child's three rows for *Create component* — \
+                 36, with the bound child's three rows for *Create component* — \
                  the long end",
-                37,
+                38,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3798,11 +3813,11 @@ mod tests {
         assert_eq!(hexagons(false), 0, "an ordinary row paints its glyph");
     }
 
-    /// A text layer's menu is 32 rows: head 4 · Clipboard 6 · Properties 2 ·
-    /// Structure 6 · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 4. The
+    /// A text layer's menu is 33 rows: head 4 · Clipboard 6 · Properties 2 ·
+    /// Structure 6 · Order 4 · Transform 2 · State 4 · Navigate 1 · Export 4. The
     /// fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_thirty_two_rows() {
+    fn a_text_layers_menu_is_thirty_three_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -3818,7 +3833,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 32, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 33, "{:?}", labels(&groups));
     }
 
     /// The component rows sit in Structure directly after *Frame selection*, one
@@ -3938,7 +3953,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 30, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             groups
@@ -3953,6 +3968,7 @@ mod tests {
             Item::Copy,
             Item::CopyProperties,
             Item::Rename,
+            Item::BatchRename,
             Item::ToggleHidden,
             Item::ToggleLocked,
             Item::ZoomSelection,
@@ -4512,7 +4528,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 29, "{:?}", labels(&groups));
+        assert_eq!(all, 30, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",

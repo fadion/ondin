@@ -1,8 +1,9 @@
-# Canvas chrome, the top bar's menus, the command palette, the cheatsheet, focus and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, the cheatsheet, focus and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the top bar's View/Snap menus and Settings button,
-the command palette, the shortcut cheatsheet, focus mode and present mode. Part of §9.4.
+the command palette, the batch rename box, the shortcut cheatsheet, focus mode and present mode.
+Part of §9.4.
 
 ## 9.4 Gesture chrome
 
@@ -301,6 +302,71 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   the palette's `/` would take it too) swaps the palette for the sheet. It works in focus mode.
 - **Not listed:** nudge, size step, point stepping, opacity digits, Escape and Enter, text chords
   outside a text session, `PasteRelease`.
+
+## Batch rename (`batch_rename.rs`)
+
+A box that renames many layers at once: the selection, the page or every page. The text rule is
+`ondin_core::rename`'s; `batch_rename::plan` picks, orders and numbers the layers.
+
+- **Two verbs.** *Rename* (`Ctrl+R`, `F2`) is the layers tree's one-layer field (`app-selection.md`).
+  *Batch rename…* (`Ctrl+Shift+R`, `Action::BatchRename`, `Item::BatchRename`, State group,
+  `TEXT_AA`) opens the box and is always live. With two or more layers selected, `Ctrl+R` and `F2`
+  open the box rather than refusing.
+- **Doors.** The chord; the palette, offered with any target (aliases *find*, *replace*, *number*,
+  *bulk*); every layer menu's State group, after *Rename*, never dimmed; a `TEXT_AA` button in the
+  Layers header between collapse-all and search (*Batch rename (Ctrl+Shift+R)*); the cheatsheet's
+  Layer section.
+- **Placement and keys.** The palette's place: an `egui::Modal` with a transparent backdrop, 520
+  wide, centred over the canvas column, its top 56pt below the canvas's top, so selection outlines
+  stay visible. Opening it closes the palette, the context menu, the top-bar menu and the colour
+  picker. Enter or the *Rename* button renames; Escape, *Cancel*, ✕ or a click outside closes it and renames nothing
+  (with the order menu open, each closes the menu first). It counts in `modal_is_up`, so editor
+  chords are off, and is drawn outside the `!focus` guard, so it works in focus mode.
+- **Scope**, the *In* row: *Selection · This page · All pages*. It opens on *Selection* when
+  something is selected, else on *This page*. *Selection* is the selection at open, and is disabled
+  with nothing selected. One selected layer with children opens with *Include layers inside*
+  ticked. The Layers header button, with text in the tree's search, opens on *This page* with Find
+  holding that text. *Keep case* is on at page and document scope and off at *Selection*; switching
+  scope resets it.
+- **Which layers.** *Selection*: the selected layers, and every layer under them with *Include
+  layers inside*. *This page* and *All pages*: every layer except those inside an instance (an
+  instance root is included); *Include layers inside instances* takes them in, and while it is off
+  *· N skipped* counts the matches it leaves out. Locked and hidden layers are renamed. A variant in
+  a set is never renamed, since its name comes from its property values; it is listed with *Named by
+  its properties* in amber.
+- **The rule** (`rename::Find`, `Template`, `Numbering`). An empty Find replaces the whole name and
+  `[Name]` is that name; a filled one replaces every match and `[Name]` is the matched text. Matching
+  ignores case unless *Aa*; *.\** reads Find as a regex (a literal Find is an escaped one). A pattern
+  that does not parse shows its one-line reason under Find (*Not a pattern: …*) and renames nothing.
+  The template's tokens are `[Name]`, `[Number]` and `[Group k]`; `[n]` and `[k]` are short forms,
+  and every token reads in any case. *Keep case* (*Ab*, with Find filled) writes a replacement's new
+  text in its match's case — `BUTTON` upper, `button` lower, `Button` a capital then lower; a mixed
+  case leaves it as typed.
+- **Rename to** draws each token as a pill: the canonical `[Word]` text with its brackets hidden, so
+  the caret walks real characters. A typed short form is rewritten to the canonical token;
+  Backspace and Delete take a pill out whole; *+ Name*, *+ Number* and one *+ Group k* per pattern
+  group insert at the caret. The field opens holding the last template (one *Name* pill the first
+  time), all selected, so typing replaces it. An empty template with Find filled shows *Empty:
+  removes the match*.
+- **Numbering.** The Number row shows once the template has a Number token: *From*, *Step*, digits
+  *1 · 01 · 001* (zero-padded; a negative step counts down) and the order menu — *Layers order*
+  (tree top to bottom, the default), *Layers order, reversed*, *Left to right* (rows: a layer joins
+  the first band its centre falls in, bands taken top to bottom, each read left to right by left
+  edge) and *Top to bottom* (columns, the same way). Each page's run is ordered and the pages follow
+  the Pages list; the number runs on across pages. Only a layer that changes takes a number, so a
+  skipped one leaves no gap.
+- **Preview**, in run order: glyph, old name with its matches underlined, arrow, new name with its
+  new runs in `ACCENT_300`; it scrolls past eight rows. At *Selection* every layer is listed and the
+  unchanged ones dim; elsewhere only matches, and *All pages* heads each page's rows with its name
+  and count. The count reads *N of M change* at *Selection*, *N of M match* on a page, plus *· K
+  pages* for all pages. A name that would come out empty keeps its own (*Would be empty · kept*,
+  amber) and takes no number. Nothing on the canvas changes until Rename.
+- **Renaming.** One transaction of `SetName`, one undo step named *Rename* with `TEXT_AA`; the
+  status line says *Renamed N layers · Ctrl+Z to undo*. New names are cleaned as any typed name
+  (`naming::usable`). Renaming a main reaches its copies by propagation; renaming inside an instance
+  is an override, as in the tree. It does not switch page. The button reads *Rename N layers* and
+  dims when nothing changes. Find, template, from, step, digits and order are kept in
+  `prefs.batch_rename` when a rename runs.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)
 

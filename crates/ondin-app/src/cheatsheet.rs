@@ -147,7 +147,12 @@ fn sections(lead: Lead) -> Vec<Section> {
     .collect();
     let mut layer = items_section(
         "Layer",
-        &[Item::ToggleHidden, Item::ToggleLocked, Item::Rename],
+        &[
+            Item::ToggleHidden,
+            Item::ToggleLocked,
+            Item::Rename,
+            Item::BatchRename,
+        ],
     );
     // Opacity digits are a value, not a verb; no registry row names them.
     layer.rows.push(hand_row("Opacity 10–100%", &["0–9"]));

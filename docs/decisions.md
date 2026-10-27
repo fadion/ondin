@@ -153,6 +153,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Focus mode and present mode are separate modes**: focus mode is for editing with the chrome hidden; present mode is view-only.
 - **Present mode is its own branch of `OndinApp::ui`**, which reads only its own keys and returns, not a flag the overlays and commands check.
 - **A contrast fix passes in every mode or is not offered.** A raw colour is the same in all modes, so the nearest colour must pass every mode's worst backdrop and only variables passing in every mode are listed; when no lightness at the hue passes everywhere, only variables are offered.
+- **Renaming is two verbs**: *Rename* (`Ctrl+R`, `F2`) is the layers tree's field for one layer, *Batch rename…* (`Ctrl+Shift+R`) a box for many. With two or more layers selected `Ctrl+R` opens the box rather than refusing, the verb that fits them.
 - **D749** The dashboard's default page is set only in Settings.
 - **Which page is current is view state, never saved in the file**: switching pages is no edit and no undo step, each page's camera and selection are kept for the sitting only, and the library remembers per machine the page a document was left on.
 - **D768** Open and Recover never replace an open document: each opens in a tab of its own, or brings forward the tab already holding that file. A document is never open twice, since two sessions saving one file would overwrite each other.

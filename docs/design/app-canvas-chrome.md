@@ -56,11 +56,17 @@ design canvas's *Minimap* artboard is the mockup; these rules are the spec.
   follows the page content's aspect, the card clamped to 90–160pt; an empty page keeps the last
   height. The floating status bar moves right by the card's width + 8pt
   (`OndinApp::minimap_clearance`), so the two share the bottom line.
-- **What it draws**, the current page flat: each shown top-level layer and each shown layer directly
-  inside a top-level frame, nothing deeper, so it stays legible small and costs one pass over two
-  levels. Each is a box of its preview world bounds (a live drag shows) in its first visible fill: a
-  bound colour resolved, a gradient as its first stop, an image as grey, no fill as a faint neutral
-  box. A text layer is a rounded bar through the middle 60% of its box. The selection's bounds are outlined in `color::SELECT`; the viewport is an accent box.
+- **What it draws**, the current page flat. The walk goes down through frames and groups while a
+  container's shorter side is at least 6pt on the map (at most 8 levels), so detail follows what
+  the map can show rather than a fixed depth — a page built of unfilled section groups shows their
+  contents, not blank boxes. Anything under 1pt on its longer side is left out, and a clipping frame
+  cuts its children to its box. Each layer is a box of its preview world bounds (a live drag shows),
+  except a frame, which is always its own rectangle: a layer being dragged out is still its child
+  until the drop, and must not widen it. The colour is the topmost visible fill, else the topmost
+  visible stroke: a bound colour resolved, a gradient as its first stop, an image as grey. An
+  opened group with no paint draws nothing itself; an unfilled frame, or a container too small to
+  open, is a faint neutral box. A text layer is a rounded bar through the middle 60% of its box.
+  The selection's bounds are outlined in `color::SELECT`; the viewport is an accent box.
 - **The fit** is the page content ∪ the viewport, padded 4% of the larger side, so the viewport box
   never leaves the map; an empty page fits the viewport at 2.4× its size.
 - **Input.** A press outside the box centres the camera there and carries on as a drag; a press

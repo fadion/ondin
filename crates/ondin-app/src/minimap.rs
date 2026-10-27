@@ -32,6 +32,16 @@ const FIT_PAD: f64 = 0.04;
 const FIRST_MAP_H: f32 = 132.0;
 /// An image fill reads as a grey box, not as its picture.
 const IMAGE_GREY: egui::Color32 = egui::Color32::from_rgb(0x8d, 0x8f, 0x96);
+/// A layer that paints nothing of its own and is drawn anyway: an unfilled frame, a
+/// container too small to open, or a gradient with no stops.
+const UNFILLED: egui::Color32 = crate::theme::color::text_a(28);
+/// The smallest a container's shorter side may be on the map, in points, for the
+/// walk to open it and draw its contents instead.
+const DESCEND: f64 = 6.0;
+/// Below this, on its longer side in points, a layer is not drawn at all.
+const SMALLEST: f64 = 1.0;
+/// How deep the walk goes at most, so a deeply nested file costs a bounded pass.
+const MAX_DEPTH: usize = 8;
 
 /// The minimap's state between frames.
 #[derive(Default)]
@@ -259,7 +269,7 @@ impl OndinApp {
         let view = self.session.camera.viewport(self.canvas_px).view;
         let painter = ui.painter_at(map);
         painter.rect_filled(map, 4.0, color::BG);
-        let boxes = self.minimap_boxes();
+        let boxes = self.minimap_boxes(fit.scale);
         for b in &boxes {
             let r = fit.rect(b.bounds);
             if b.text {
@@ -335,74 +345,121 @@ impl OndinApp {
         }
     }
 
-    /// The boxes the map draws, in paint order: each shown top-level layer, and each
-    /// shown layer directly inside a top-level frame. Nothing deeper, so the map
-    /// stays legible small and costs one pass over two levels of the tree.
-    fn minimap_boxes(&self) -> Vec<MapBox> {
-        let doc = &self.session.doc;
-        let Some(page) = doc.get(self.session.page) else {
+    /// The boxes the map draws at `scale` map points per world unit, in paint order.
+    ///
+    /// The walk goes down through frames and groups while a container is at least
+    /// [`DESCEND`] on the map, so detail follows what the map can show rather than a
+    /// fixed depth; anything under [`SMALLEST`] is left out. A layout's sections are
+    /// often unfilled groups, which draw nothing themselves and show through their
+    /// contents.
+    fn minimap_boxes(&self, scale: f64) -> Vec<MapBox> {
+        let Some(page) = self.session.doc.get(self.session.page) else {
             return Vec::new();
         };
         let mut out = Vec::new();
         for &top in page.children() {
-            if !self.shown_visible(top) {
-                continue;
-            }
-            self.push_minimap_box(top, &mut out);
-            if let Some(node) = doc.get(top)
-                && matches!(node.kind(), NodeKind::Artboard { .. })
-            {
-                for &kid in node.children() {
-                    if self.shown_visible(kid) {
-                        self.push_minimap_box(kid, &mut out);
-                    }
-                }
-            }
+            self.walk_minimap(top, 0, None, scale, &mut out);
         }
         out
     }
 
-    fn push_minimap_box(&self, id: NodeId, out: &mut Vec<MapBox>) {
-        if let Some(bounds) = self.session.preview_world_bounds(id) {
-            out.push(MapBox {
+    /// One layer of [`Self::minimap_boxes`]'s walk, its box cut to `clip`, the box of
+    /// the nearest clipping frame above it.
+    fn walk_minimap(
+        &self,
+        id: NodeId,
+        depth: usize,
+        clip: Option<Rect>,
+        scale: f64,
+        out: &mut Vec<MapBox>,
+    ) {
+        let Some(node) = self.session.display_node(id).filter(|n| n.visible()) else {
+            return;
+        };
+        let Some(own) = self.minimap_box_of(id) else {
+            return;
+        };
+        let bounds = match clip {
+            Some(c) => own.intersect(c),
+            None => own,
+        };
+        if clip.is_some() && (bounds.width() <= 0.0 || bounds.height() <= 0.0) {
+            // Wholly outside the frame that clips it.
+            return;
+        }
+        let (w, h) = (bounds.width() * scale, bounds.height() * scale);
+        if w.max(h) < SMALLEST {
+            return;
+        }
+        let kind = node.kind();
+        let text = matches!(kind, NodeKind::Text { .. });
+        let fill = self.minimap_fill(id);
+        let frame = matches!(kind, NodeKind::Artboard { .. });
+        let container = frame || matches!(kind, NodeKind::Group);
+        let descend = container && depth < MAX_DEPTH && w.min(h) >= DESCEND;
+        match fill {
+            Some(fill) => out.push(MapBox { bounds, fill, text }),
+            // A frame always marks its box, and a container too small to open marks
+            // where its contents are.
+            None if frame || !descend => out.push(MapBox {
                 bounds,
-                fill: self.minimap_fill(id),
-                text: self
-                    .session
-                    .doc
-                    .get(id)
-                    .is_some_and(|n| matches!(n.kind(), NodeKind::Text { .. })),
-            });
+                fill: UNFILLED,
+                text,
+            }),
+            None => {}
+        }
+        if descend {
+            let clip = match self.session.doc.get(id) {
+                Some(n) if n.clip() && kind.clips_children() => Some(bounds),
+                _ => clip,
+            };
+            for &kid in self.session.doc.get(id).map_or(&[][..], |n| n.children()) {
+                self.walk_minimap(kid, depth + 1, clip, scale, out);
+            }
         }
     }
 
-    /// A layer's colour on the map: its first visible fill, with a bound colour
-    /// resolved, a gradient as its first stop and a picture as grey. A layer with no
-    /// fill (a group, a stroke-only shape) is a faint box, so it still shows.
-    fn minimap_fill(&self, id: NodeId) -> egui::Color32 {
-        const NONE: egui::Color32 = crate::theme::color::text_a(28);
+    /// A layer's box on the map: a frame's own rectangle, not its contents' union
+    /// (a layer dragged out of it is still its child until the drop), and every
+    /// other layer's preview world bounds, so a live drag shows.
+    fn minimap_box_of(&self, id: NodeId) -> Option<Rect> {
         let doc = &self.session.doc;
-        let Some(node) = doc.get(id) else {
-            return NONE;
-        };
+        if matches!(doc.get(id)?.kind(), NodeKind::Artboard { .. }) {
+            let world = self.session.preview_world_transform(id)?;
+            let local = self.session.preview_local_box(id)?;
+            return Some(ondin_core::geometry::transform_rect(world, local));
+        }
+        self.session.preview_world_bounds(id)
+    }
+
+    /// A layer's colour on the map: its topmost visible fill, else its topmost visible
+    /// stroke; a bound colour resolved, a gradient as its first stop, a picture as
+    /// grey. `None` for a layer that paints neither, a group among them.
+    fn minimap_fill(&self, id: NodeId) -> Option<egui::Color32> {
+        let doc = &self.session.doc;
+        let node = doc.get(id)?;
         let paint = doc.resolved_paint(id, node.paint());
-        let Some(brush) = paint
+        let brush = paint
             .fills
             .iter()
+            .rev()
             .filter(|f| f.visible)
             .find_map(|f| f.brush.literal())
-        else {
-            return NONE;
-        };
-        match brush {
+            .or_else(|| {
+                paint
+                    .strokes
+                    .iter()
+                    .rev()
+                    .filter(|s| s.visible)
+                    .find_map(|s| s.brush.literal())
+            })?;
+        Some(match brush {
             ondin_core::Brush::Solid(c) => crate::ui::color_to_egui(*c),
-            ondin_core::Brush::Gradient(g) => g
-                .gradient
-                .stops
-                .first()
-                .map_or(NONE, |s| crate::ui::color_to_egui(s.color.to_alpha_color())),
+            ondin_core::Brush::Gradient(g) => g.gradient.stops.first().map_or(UNFILLED, |s| {
+                crate::ui::color_to_egui(s.color.to_alpha_color())
+            }),
             ondin_core::Brush::Image(_) => IMAGE_GREY,
-        }
+        })
     }
 
     /// The name of the topmost top-level frame at `world`, for the map's tooltip.
@@ -412,11 +469,7 @@ impl OndinApp {
             .into_iter()
             .rev()
             .filter(|id| self.shown_visible(*id))
-            .find(|id| {
-                self.session
-                    .preview_world_bounds(*id)
-                    .is_some_and(|b| b.contains(world))
-            })
+            .find(|id| self.minimap_box_of(*id).is_some_and(|b| b.contains(world)))
             .and_then(|id| doc.get(id).map(|n| n.name().to_string()))
     }
 }
@@ -644,6 +697,146 @@ mod tests {
         assert_eq!(round, 3.0);
         let thin = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(5.0, 1.0));
         assert_eq!(text_bar(thin).0.height(), 1.0);
+    }
+
+    /// A frame at (20000, 0), 1000 × 2000, holding an unfilled group around a red
+    /// 400 × 200 rect, and a second red rect at x 1200 that overhangs the frame.
+    fn app_with_sections(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId, NodeId) {
+        use ondin_core::kurbo::{Affine, Size};
+        use ondin_core::{Brush, Fill, Operation, Transaction, keyed_by_position};
+        let mut app = OndinApp::headless(ctx);
+        let page = app.session.doc.first_page();
+        let ids = &mut app.session.ids;
+        let (frame, group, inner, over) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let index = app.session.doc.get(page).map_or(0, |p| p.children().len());
+        let rect = |id, parent, index, x: f64| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(400.0, 200.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((x, 100.0))),
+            name: None,
+        };
+        let red = |id| Operation::SetFills {
+            id,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255)).into(),
+                visible: true,
+            }]),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: page,
+                index,
+                kind: NodeKind::Artboard {
+                    size: Size::new(1000.0, 2000.0),
+                },
+                transform: Some(Affine::translate((20_000.0, 0.0))),
+                name: Some("Home".into()),
+            },
+            Operation::CreateNode {
+                id: group,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            rect(inner, group, 0, 100.0),
+            red(inner),
+            rect(over, frame, 1, 1200.0),
+            red(over),
+        ])));
+        (app, frame, group, inner)
+    }
+
+    /// The map opens a frame through the unfilled group inside it and draws what the
+    /// group holds, not a blank box for the group; a clipping frame cuts off a child
+    /// that overhangs it; and mid-drag the frame stays its own rectangle, not widened
+    /// by the child being dragged out.
+    ///
+    /// flip: `minimap_box_of` returning `preview_world_bounds` for a frame → fails
+    /// at "mid-drag"; `descend` always false → at "the group's rect is drawn"; the
+    /// clipping frame not passed down → at "cut off".
+    #[test]
+    fn a_frame_opens_through_its_groups_and_keeps_its_own_box() {
+        let ctx = egui::Context::default();
+        let (mut app, frame, group, inner) = app_with_sections(&ctx);
+        let clip = |app: &mut OndinApp, clip| {
+            assert!(app.session.commit(ondin_core::Transaction(vec![
+                ondin_core::Operation::SetClip { id: frame, clip }
+            ])));
+        };
+        clip(&mut app, false);
+        let own = Rect::new(20_000.0, 0.0, 21_000.0, 2000.0);
+        let boxes = app.minimap_boxes(0.05);
+        assert!(boxes.iter().any(|b| b.bounds == own), "the frame's own box");
+        let rect = app.session.preview_world_bounds(inner).expect("bounds");
+        assert!(
+            boxes
+                .iter()
+                .any(|b| b.bounds == rect && b.fill == egui::Color32::RED),
+            "the group's rect is drawn"
+        );
+        let group = app.session.preview_world_bounds(group).expect("bounds");
+        assert!(
+            !boxes
+                .iter()
+                .any(|b| b.bounds == group && b.fill == UNFILLED),
+            "the opened group draws nothing of its own"
+        );
+        let past = |boxes: &[MapBox]| boxes.iter().any(|b| b.bounds.max_x() > own.max_x());
+        assert!(
+            past(&boxes),
+            "the overhang shows past a frame that does not clip"
+        );
+        clip(&mut app, true);
+        assert!(
+            !past(&app.minimap_boxes(0.05)),
+            "and is cut off by one that does"
+        );
+
+        // A live drag of the group's rect off to the left, not yet dropped: still
+        // the frame's child, so the frame's preview bounds take it in.
+        app.session.set_preview(&ondin_core::Transaction(vec![
+            ondin_core::Operation::SetTransform {
+                id: inner,
+                transform: ondin_core::kurbo::Affine::translate((-3000.0, 100.0)),
+            },
+        ]));
+        let union = app.session.preview_world_bounds(frame).expect("bounds");
+        assert!(
+            union.min_x() < own.min_x(),
+            "fixture: the drag widens the union"
+        );
+        assert!(
+            app.minimap_boxes(0.05).iter().any(|b| b.bounds == own),
+            "the frame's own box, mid-drag"
+        );
+    }
+
+    /// A frame too small on the map to open is drawn alone, nothing inside it.
+    ///
+    /// flip: `descend` ignoring `DESCEND` → fails at "not its contents".
+    #[test]
+    fn a_frame_too_small_to_open_draws_alone() {
+        let ctx = egui::Context::default();
+        let (app, _, _, inner) = app_with_sections(&ctx);
+        let rect = app.session.preview_world_bounds(inner).expect("bounds");
+        // 1000 × 2000 at 0.004 is 4 × 8 pt, under `DESCEND`.
+        let boxes = app.minimap_boxes(0.004);
+        assert!(
+            boxes
+                .iter()
+                .any(|b| b.bounds == Rect::new(20_000.0, 0.0, 21_000.0, 2000.0)),
+            "the frame"
+        );
+        assert!(!boxes.iter().any(|b| b.bounds == rect), "not its contents");
     }
 
     /// The card's height follows the page's shape and stays in 90–160 pt.

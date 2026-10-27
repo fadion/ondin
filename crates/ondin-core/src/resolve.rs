@@ -20,6 +20,7 @@ use crate::node::{Node, NodeKind};
 use crate::op::DirtySet;
 use crate::text::{self, TextLayout};
 use kurbo::{Affine, BezPath, Rect};
+use peniko::FontData;
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -934,6 +935,19 @@ impl Resolved {
     /// `None` for every other kind.
     pub fn text_layout(&self, id: NodeId) -> Option<&TextLayout> {
         self.text.get(&id)
+    }
+
+    /// Every font file a text layout here drew from, once each: what a worker
+    /// that shapes this document's text again hands to
+    /// [`crate::text::register_font_data`] first.
+    pub fn text_fonts(&self) -> Vec<FontData> {
+        let mut seen = FxHashSet::default();
+        self.text
+            .values()
+            .flat_map(|layout| &layout.runs)
+            .filter(|run| seen.insert(run.font.data.id()))
+            .map(|run| run.font.clone())
+            .collect()
     }
 
     /// The combined outline of a `Boolean` node, in its own local space. `None`

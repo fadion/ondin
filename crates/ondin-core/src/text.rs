@@ -96,6 +96,20 @@ pub fn register_fonts(bytes: Vec<u8>) -> Vec<String> {
     })
 }
 
+/// [`register_fonts`] for faces a layout already holds, sharing their bytes.
+///
+/// A worker thread's engine holds only Inter, so one that shapes a document's
+/// text again registers the document's faces (`Resolved::text_fonts`) first, or
+/// every other family is laid out in Inter.
+pub fn register_font_data(fonts: &[FontData]) {
+    ENGINE.with(|engine| {
+        let collection = &mut engine.borrow_mut().font_cx.collection;
+        for font in fonts {
+            collection.register_fonts(font.data.clone(), None);
+        }
+    });
+}
+
 /// Un-register every face of `family` from this thread's shaping engine; returns
 /// whether anything was removed.
 ///

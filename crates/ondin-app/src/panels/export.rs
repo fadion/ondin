@@ -1694,6 +1694,8 @@ impl OndinApp {
         let ctx = self.egui_ctx.clone();
         self.session.info(EXPORTING);
         let job = crate::job::Job::spawn("ondin-export", &ctx, move || {
+            // SVG and PDF shape live text again, with the faces the canvas used.
+            ondin_core::text::register_font_data(&resolved.text_fonts());
             deliver(&doc, &resolved, &files, destination)
         });
         self.exports.push(job);

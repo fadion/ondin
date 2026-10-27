@@ -4003,3 +4003,53 @@ fn a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it() {
         );
     }
 }
+
+/// A worker that registers `text_fonts` first lays a document's text out as the
+/// thread that resolved it did; a fresh engine holds only Inter.
+///
+/// flip: `register_font_data` registering nothing → fails at "with the fonts".
+#[test]
+fn a_worker_given_the_text_fonts_lays_text_out_alike() {
+    let bytes = include_bytes!("../../ondin-app/assets/fonts/Phosphor.ttf");
+    let family = ondin_core::text::register_fonts(bytes.to_vec())
+        .pop()
+        .expect("a family");
+    let mut ids = IdSource::new(0xF047);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let id = ids.mint();
+    let mut kind = text("\u{eaf0}\u{eaf0}", 40.0);
+    if let NodeKind::Text { style, .. } = &mut kind {
+        style.font_family = family;
+    }
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind,
+        transform: None,
+        name: None,
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let lines = move |doc: &Document| -> Vec<(f64, f64)> {
+        let parts = ondin_core::TextRef::of(doc.get(id).unwrap().kind()).unwrap();
+        ondin_core::text::export_lines(parts)
+            .iter()
+            .map(|l| (l.x, l.baseline))
+            .collect()
+    };
+    let here = lines(&doc);
+    let bare = std::thread::scope(|s| s.spawn(|| lines(&doc)).join().unwrap());
+    assert_ne!(bare, here, "fixture: a fresh engine lays it out in Inter");
+    let fonts = res.text_fonts();
+    let given = std::thread::scope(|s| {
+        s.spawn(|| {
+            ondin_core::text::register_font_data(&fonts);
+            lines(&doc)
+        })
+        .join()
+        .unwrap()
+    });
+    assert_eq!(given, here, "with the fonts");
+}

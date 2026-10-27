@@ -366,8 +366,11 @@ impl OndinApp {
             let doc = self.session.doc.clone();
             let (page, options) = (c.page, c.options);
             let only = ids.clone();
+            // The check lays the text out again, with the faces the canvas used.
+            let fonts = self.session.resolved.text_fonts();
             c.job = Some(Running {
                 job: Job::spawn("contrast", ctx, move || {
+                    ondin_core::text::register_font_data(&fonts);
                     contrast::check_with(&doc, page, options, Some(&only))
                 }),
                 ids,

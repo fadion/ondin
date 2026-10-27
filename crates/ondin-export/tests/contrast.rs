@@ -395,3 +395,293 @@ fn only_measures_the_layers_named() {
     let r = contrast::check_with(&d.doc, d.page, Default::default(), Some(&[d.text]));
     assert_eq!(r.findings.len(), 1);
 }
+
+/// A text layer reading "Label" under `parent`, at `at`, in `size` px.
+fn text_op(id: NodeId, parent: NodeId, index: usize, at: (f64, f64), size: f64) -> Operation {
+    Operation::CreateNode {
+        id,
+        parent,
+        index,
+        kind: NodeKind::Text {
+            content: "Label".into(),
+            style: Box::new(TextStyle {
+                font_family: "Inter".into(),
+                font_size: size,
+                weight: 400,
+                ..Default::default()
+            }),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        transform: Some(Affine::translate(at)),
+        name: Some("Label".into()),
+    }
+}
+
+/// A layer in an auto layout is measured where it sits: its backdrop is not the
+/// sibling that would slide into its place were it hidden, even an identical one.
+///
+/// flip: `measure` building the backdrop with `SetVisible { visible: false }`
+/// → fails at the first label's score.
+#[test]
+fn a_layer_in_an_auto_layout_keeps_its_place_while_measured() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let (a, b) = (d.ids.mint(), d.ids.mint());
+    d.doc
+        .apply(&Transaction(vec![
+            Operation::DeleteNode { id: d.text },
+            text_op(a, d.frame, 0, (0.0, 0.0), 16.0),
+            Operation::SetFills {
+                id: a,
+                fills: solid(0, 0, 0),
+            },
+            text_op(b, d.frame, 1, (0.0, 0.0), 16.0),
+            Operation::SetFills {
+                id: b,
+                fills: solid(0, 0, 0),
+            },
+            Operation::SetDisplay {
+                id: d.frame,
+                display: Some(ondin_core::container::Display::Flex(
+                    ondin_core::container::Flex {
+                        column_gap: 8.0,
+                        padding: [20.0; 4],
+                        ..Default::default()
+                    },
+                )),
+            },
+        ]))
+        .unwrap();
+    let r = check(&d.doc, d.page, Level::Aa);
+    for id in [a, b] {
+        let f = r.findings.iter().find(|f| f.id == id).expect("measured");
+        assert!(f.ratio > 15.0, "{f:?}");
+    }
+}
+
+/// Ink the colour of its backdrop is measured, at 1 : 1, not left out as a
+/// layer that draws nothing.
+///
+/// flip: `measure` reading coverage from the white ink against the backdrop
+/// instead of against the black ink → fails at `only`.
+#[test]
+fn ink_the_colour_of_its_backdrop_scores_one() {
+    let d = doc((255, 255, 255), 16.0, false);
+    let f = only(&check(&d.doc, d.page, Level::Aa)).clone();
+    assert!(f.ratio < 1.01 && !f.passes(), "{f:?}");
+}
+
+/// A faded group's opacity is counted once: white type over a black panel, both
+/// in a group at 50% on white, draws white on mid grey (4 : 1), which passes for
+/// large text.
+///
+/// flip: `measure` laying the ink over the backdrop (`under` always the
+/// backdrop) → fails at `passes`.
+#[test]
+fn an_ancestor_s_opacity_is_counted_once() {
+    let mut d = doc((255, 255, 255), 30.0, false);
+    let (group, panel, label) = (d.ids.mint(), d.ids.mint(), d.ids.mint());
+    d.doc
+        .apply(&Transaction(vec![
+            Operation::DeleteNode { id: d.text },
+            Operation::CreateNode {
+                id: group,
+                parent: d.frame,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: Some("Group".into()),
+            },
+            Operation::CreateNode {
+                id: panel,
+                parent: group,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(400.0, 200.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Panel".into()),
+            },
+            Operation::SetFills {
+                id: panel,
+                fills: solid(0, 0, 0),
+            },
+            text_op(label, group, 1, (20.0, 20.0), 30.0),
+            Operation::SetFills {
+                id: label,
+                fills: solid(255, 255, 255),
+            },
+            Operation::SetOpacity {
+                id: group,
+                opacity: 0.5,
+            },
+        ]))
+        .unwrap();
+    let f = only(&check(&d.doc, d.page, Level::Aa)).clone();
+    assert_eq!(f.needs, 3.0);
+    assert!(f.passes() && (3.5..4.5).contains(&f.ratio), "{f:?}");
+}
+
+/// A mark is scored by the colour it draws at each pixel: a white box with a
+/// dark border on white passes on its border, which its white fill never
+/// changes.
+///
+/// flip: `measure` giving every pixel the first colour → fails at `passes`.
+#[test]
+fn a_bordered_mark_is_scored_by_the_colour_it_draws() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let check_box = d.ids.mint();
+    d.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: check_box,
+                parent: d.frame,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(16.0, 16.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((300.0, 120.0))),
+                name: Some("Box".into()),
+            },
+            Operation::SetFills {
+                id: check_box,
+                fills: solid(255, 255, 255),
+            },
+            Operation::SetStrokes {
+                id: check_box,
+                strokes: keyed_by_position([ondin_core::Stroke {
+                    brush: Brush::Solid(Color::from_rgba8(0x40, 0x40, 0x40, 255)).into(),
+                    width: 1.5,
+                    align: ondin_core::StrokeAlign::Inside,
+                    ..Default::default()
+                }]),
+            },
+        ]))
+        .unwrap();
+    let options = contrast::Options {
+        level: Level::Aa,
+        non_text: true,
+    };
+    let r = contrast::check_with(&d.doc, d.page, options, Some(&[check_box]));
+    let f = only(&r);
+    assert!(f.passes() && f.ratio > 8.0, "{f:?}");
+}
+
+/// A layer shown in one mode only is checked in that mode.
+///
+/// flip: `check_with` choosing the subjects once, in the document as saved →
+/// fails at `only`.
+#[test]
+fn a_layer_shown_in_one_mode_only_is_checked_there() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    let (light, dark, shown) = (d.ids.mint_mode(), d.ids.mint_mode(), d.ids.mint_var());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    d.doc
+        .apply(&Transaction(vec![
+            mode(light, "Light", 0),
+            mode(dark, "Dark", 1),
+            Operation::AddVariable {
+                var: Variable {
+                    id: shown,
+                    name: "dark-only".into(),
+                    kind: VarKind::Boolean,
+                    cells: [(light, Cell::Boolean(false)), (dark, Cell::Boolean(true))].into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetVisibleVar {
+                id: d.text,
+                var: Some(shown),
+            },
+        ]))
+        .unwrap();
+    let f = only(&check(&d.doc, d.page, Level::Aa)).clone();
+    let names: Vec<_> = f.samples.iter().map(|s| s.name.as_deref()).collect();
+    assert_eq!(names, [Some("Dark")]);
+}
+
+/// A mask's paint is never drawn, so a text mask is not measured.
+///
+/// Pins the result, not `subjects`' mask filter: with the filter gone the mask
+/// is still left out, since its ink covers nothing for `measure` to read.
+#[test]
+fn a_mask_is_not_measured() {
+    let mut d = doc((150, 150, 150), 16.0, true);
+    d.doc
+        .apply(&Transaction(vec![Operation::SetMask {
+            id: d.text,
+            mask: true,
+        }]))
+        .unwrap();
+    let r = check(&d.doc, d.page, Level::Aa);
+    assert!(
+        r.findings.iter().all(|f| f.id != d.text),
+        "no finding: {r:?}"
+    );
+}
+
+/// The size and weight edges of every level's thresholds.
+#[test]
+fn the_size_thresholds() {
+    let table = [
+        // (px, weight, AA, AAA, APCA)
+        (18.65, 700, 4.5, 7.0, 60.0),
+        (18.66, 700, 3.0, 4.5, 60.0),
+        (18.66, 400, 4.5, 7.0, 75.0),
+        (23.99, 400, 4.5, 7.0, 75.0),
+        (24.0, 400, 3.0, 4.5, 60.0),
+        (24.0, 700, 3.0, 4.5, 45.0),
+        (16.0, 700, 4.5, 7.0, 60.0),
+        (15.99, 700, 4.5, 7.0, 75.0),
+        (36.0, 400, 3.0, 4.5, 45.0),
+    ];
+    for (px, weight, aa, aaa, apca) in table {
+        assert_eq!(Level::Aa.needs(px, weight), aa, "AA {px} {weight}");
+        assert_eq!(Level::Aaa.needs(px, weight), aaa, "AAA {px} {weight}");
+        assert_eq!(Level::Apca.needs(px, weight), apca, "APCA {px} {weight}");
+    }
+}
+
+/// The strictest run's threshold is the layer's: large type with one small run
+/// needs body text's 4.5 : 1.
+///
+/// flip: `check_one` folding the runs' thresholds with `min` → fails at the
+/// threshold.
+#[test]
+fn the_strictest_run_sets_the_threshold() {
+    let mut d = doc((0, 0, 0), 30.0, false);
+    let style = TextStyle {
+        font_family: "Inter".into(),
+        font_size: 30.0,
+        weight: 400,
+        ..Default::default()
+    };
+    let mut spans = ondin_core::CharSpans::default();
+    spans.set(0..5, ondin_core::CharAttr::Size(12.0), &style);
+    d.doc
+        .apply(&Transaction(vec![Operation::SetTextSpans {
+            id: d.text,
+            spans,
+        }]))
+        .unwrap();
+    assert_eq!(only(&check(&d.doc, d.page, Level::Aa)).needs, 4.5);
+}

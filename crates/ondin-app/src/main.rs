@@ -365,7 +365,7 @@ fn run_check_contrast(
     page: Option<&str>,
     options: ondin_export::contrast::Options,
 ) -> Result<(String, bool), String> {
-    use ondin_export::contrast::{Level, check_with};
+    use ondin_export::contrast::check_with;
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
     let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
     let page = chosen_page(&doc, page)?;
@@ -383,14 +383,12 @@ fn run_check_contrast(
             .as_ref()
             .map(|m| format!(" in {m}"))
             .unwrap_or_default();
-        let score = match level {
-            Level::Apca => format!("Lc {:.1}", f.ratio),
-            Level::Aa | Level::Aaa => format!("{:.2} : 1", f.ratio),
-        };
+        // Rounded down, so a fail never prints as its threshold.
         out.push_str(&format!(
-            "fail  {}: {score}, needs {}{mode}\n",
+            "fail  {}: {}, needs {}{mode}\n",
             f.trail.join(" / "),
-            f.needs
+            level.format(f.ratio),
+            level.format_needs(f.needs)
         ));
     }
     for s in &report.skipped {

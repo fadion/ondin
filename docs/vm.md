@@ -333,7 +333,7 @@ Luau's type checker is a separate C++ analysis library that `mlua` is believed n
 **unverified**. A `.d.luau` definitions file generated from the same source gives an outside editor
 completion through luau-lsp at nearly no cost — an extra, not a replacement. Agents are expected to
 write most scripts (§11), so the editor's first job is reading, tweaking and running: highlighting and
-errors come before completion. Its UI waits on a Claude Design pass.
+errors come before completion. Its UI is not designed yet.
 
 **Parameters are designed for, not in the first build.** A script may declare its inputs in a header,
 and Ondin draws them as a small form when it is run — Blender's operator properties. It is still a run

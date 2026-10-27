@@ -440,9 +440,6 @@ project dropdown, and the caret's list.
 
 ## 8. Chrome
 
-The design canvas's Editor artboard's canvas menu is normative for style only; this file decides content and
-order.
-
 | | Value |
 |---|---|
 | Card | `ui::menu_frame`: `color::CARD`, 1pt `text_a(15)` hairline, shadow `[0,10]` blur 24 α 82, corner 5, padding 5 |

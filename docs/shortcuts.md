@@ -9,8 +9,7 @@ the library.
 renders the editor's bindings from the command registry, plus hand-kept Mouse and Library
 sections. Its tests check every registry chord it shows against `input::resolve`, and every
 action `input::resolve` binds against the sheet; the hand-kept sections and this file are not
-checked. Not kept on the design canvas: its artboards are
-mockups, not specs.
+checked.
 
 **Sources.** Figma and Sketch agree with each other far more than with Adobe, so take their
 binding where they disagree with Adobe about a concept both have, and Adobe's where Figma has no

@@ -20,11 +20,6 @@ git.
 | `docs/vm.md` | The Command Mode language. Nothing of it is built. |
 | `todo.md` | The maintainer's private scratchpad, untracked. Never record anything there. |
 
-The mockups live on a claude.ai Design canvas,
-`https://claude.ai/artifact/5crMbaHmNpm78vSLrhDf3D`, one artboard per feature. Others may edit
-it, so read an artboard with the Artifact tool rather than trusting an earlier look, and never
-keep a spec only there. The untracked `design/` folder is a stale export; don't read it.
-
 ### Keeping the record
 
 - **Docs state what is true now.** Write the current rule and the reason for it. No session
@@ -57,6 +52,9 @@ rule as the docs: state what is true now.
   only when the flip is what proves the test.
 - **No history**: no session stories, no "found by", no ledger trails, no measurements kept
   only as history, no counts. Don't cite a D-number in a new comment; give the reason.
+- **No references outside git.** A comment or doc never points at a mockup, a design file or
+  any document the repository does not track: the reader cannot open it, and it may not exist
+  next year. State the value or rule itself.
 - When you edit an item whose comment breaks this rule, trim it in the same change.
 
 ## Editing files

@@ -48,8 +48,7 @@ marks the original that stays. Toggles live with the key.
 ## The minimap (`minimap.rs`)
 
 *View ▸ Show minimap* (`ViewSwitch::Minimap`, `Ctrl+Shift+M`, `prefs.view.minimap`, off by default).
-In the View menu and the palette, not the canvas menu: it is chrome-wide, like *Show layers*. The
-design canvas's *Minimap* artboard is the mockup; these rules are the spec.
+In the View menu and the palette, not the canvas menu: it is chrome-wide, like *Show layers*.
 
 - **The card.** An `egui::Area` at `Order::Middle`, pivoted at the canvas's bottom left, 12pt in
   (the status bar's margin): a `ui::menu_frame` 220pt wide with 6pt padding. The map's height
@@ -221,7 +220,7 @@ and the floating popovers.
 file search, and the library screen clears an open palette. `input::discovery_chord` reads the
 chord in both `normal_mode` and `text_insert_mode`. With a modal up the chord does nothing, and a
 modal that opens closes the palette. App actions only; typed syntax belongs to Command Mode
-(`vm.md`). The design canvas's *Command Palette* artboard is the mockup; these rules are the spec.
+(`vm.md`).
 
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,

@@ -122,7 +122,7 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   does not expose, and the `.app`'s `Info.plist` (written by `vpk`) declares no
   `CFBundleDocumentTypes`. Windows and Linux are built (`app-chrome.md`, *Opening a document from
   the OS*); `ondin <file>` works everywhere. Trigger: a Mac to test on, or a winit that delivers it.
-- **Eyedropper: sampling outside the window** with the same loupe (design canvas, *Eyedropper*).
+- **Eyedropper: sampling outside the window** with the same loupe.
   Needs a capture path per OS (Windows has no system picker), and an off-window sample needs
   converting from the display's space to sRGB. Inside the window is built (`tools.md`, *The
   eyedropper*).

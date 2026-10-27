@@ -36,8 +36,10 @@ const NUM_H: f32 = 28.0;
 const ROW_H: f32 = 26.0;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 8.0;
-/// The air between two pills side by side in the template.
-const PILL_GAP: f32 = 2.0;
+/// The space before a pill that follows another: 2 of air painted between them,
+/// once each ground has grown by `TextFormat::expand_bg` and been rounded to whole
+/// pixels (`pills_side_by_side_keep_a_gap` measures it).
+const PILL_GAP: f32 = 3.0;
 /// The layers the worker plans between two parts it sends.
 const PART: usize = 500;
 
@@ -729,7 +731,7 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();
     let mut at = 0;
     let mut last_end = None;
-    for (r, _) in ondin_core::rename::tokens(text) {
+    for (i, (r, _)) in ondin_core::rename::tokens(text).into_iter().enumerate() {
         job.append(&text[at..r.start], 0.0, plain.clone());
         // Two pills side by side keep a gap, or they read as one pill of two words.
         let gap = if last_end == Some(r.start) {
@@ -738,9 +740,16 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
             0.0
         };
         last_end = Some(r.end);
+        // egui paints neighbouring glyphs of one background as one rectangle,
+        // across the gap; every other pill's ground is a unit of alpha lighter,
+        // which no eye sees and which ends the rectangle at each pill.
+        let ground = match i % 2 {
+            0 => pill_fill(),
+            _ => egui::Color32::from_rgba_unmultiplied(109, 140, 217, 65),
+        };
         let pill = |ink| egui::TextFormat {
             color: ink,
-            background: pill_fill(),
+            background: ground,
             ..egui::TextFormat::simple(font.clone(), ink)
         };
         // The galley must hold exactly the text's characters, or the caret lands
@@ -793,7 +802,7 @@ impl OndinApp {
             numbering: Numbering {
                 from: remembered.from,
                 step: remembered.step,
-                digits: remembered.digits.clamp(1, 3),
+                pad: remembered.pad.min(Numbering::MAX_PAD),
             },
             order: Order::from_key(&remembered.order),
             inside,
@@ -830,7 +839,7 @@ impl OndinApp {
         br.template = b.s.template.clone();
         br.from = b.s.numbering.from;
         br.step = b.s.numbering.step;
-        br.digits = b.s.numbering.digits;
+        br.pad = b.s.numbering.pad;
         br.order = b.s.order.key().to_string();
         self.prefs.save();
         let tx = Transaction(
@@ -1376,13 +1385,14 @@ fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     resp.on_hover_text(format!("Insert {label} at the caret"))
 }
 
-/// *From* and *Step* as the inspector's scrubbable fields, then the digits.
-/// Returns whether either field is being dragged, so the caller can keep the
-/// numbering for a right-click cancel (`InFlight::rename_scrub`).
+/// *From*, *Step* and *Pad* as the inspector's scrubbable fields, sharing the row.
+/// Returns whether one is being dragged, so the caller can keep the numbering for
+/// a right-click cancel (`InFlight::rename_scrub`).
 fn number_row(ui: &mut egui::Ui, n: &mut Numbering) -> bool {
     row(ui, "Number", NUM_H, |ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        let size = egui::vec2(96.0, NUM_H);
+        const SPACE: f32 = 8.0;
+        ui.spacing_mut().item_spacing.x = SPACE;
+        let size = egui::vec2((ui.available_width() - SPACE * 2.0) / 3.0, NUM_H);
         // 0.5, the rate every other whole-unit field scrubs at.
         let from = ui::value_field(
             ui,
@@ -1402,20 +1412,18 @@ fn number_row(ui: &mut egui::Ui, n: &mut Numbering) -> bool {
             |d| d.custom_formatter(ui::number(0)),
         )
         .on_hover_text("Added for each layer after it; below zero counts down");
-        well(ui, |ui| {
-            for (digits, label) in [(1u8, "1"), (2, "01"), (3, "001")] {
-                if segment(ui, label, "", n.digits == digits, NUM_H - 4.0)
-                    .on_hover_text(match digits {
-                        1 => "No padding".to_string(),
-                        d => format!("Pad to {d} digits"),
-                    })
-                    .clicked()
-                {
-                    n.digits = digits;
-                }
-            }
-        });
-        from.dragged() || step.dragged()
+        let pad = ui::value_field(
+            ui,
+            size,
+            Prefix::Text("Pad"),
+            &mut n.pad,
+            Scrub::whole(0.5).range(0.0..=f64::from(Numbering::MAX_PAD)),
+            |d| d.custom_formatter(ui::number(0)),
+        )
+        .on_hover_text("Zeros in front up to this many digits: 3 writes 001");
+        // The scrub's range settles a drag but leaves typing alone.
+        n.pad = n.pad.min(Numbering::MAX_PAD);
+        from.dragged() || step.dragged() || pad.dragged()
     })
 }
 
@@ -2327,22 +2335,34 @@ mod tests {
         );
     }
 
-    /// Two pills side by side keep a gap; a pill after text does not.
+    /// Two pills side by side are painted as two grounds with the gap between
+    /// them, not one ground across both.
+    ///
+    /// flip: giving every pill the same ground → fails at "two grounds", egui
+    /// joining them into one rectangle over the gap.
     #[test]
     fn pills_side_by_side_keep_a_gap() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        let mut widths = (0.0, 0.0);
+        let mut grounds = Vec::new();
         let _ = ctx.run_ui(Default::default(), |ui| {
-            let one = template_galley(ui, "[Name]").size().x;
-            widths = (
-                template_galley(ui, "[Name][Name]").size().x - 2.0 * one,
-                template_galley(ui, "x[Name]").size().x - template_galley(ui, "x").size().x - one,
-            );
+            let galley = template_galley(ui, "[Name][Number]");
+            let mesh = &galley.rows[0].visuals.mesh;
+            // A ground is a quad of one translucent colour; ink is opaque.
+            for quad in mesh.vertices.chunks(4) {
+                let c = quad[0].color;
+                if quad.len() == 4 && quad.iter().all(|v| v.color == c) && (1..128).contains(&c.a())
+                {
+                    let xs = quad.iter().map(|v| v.pos.x);
+                    let lo = xs.clone().fold(f32::INFINITY, f32::min);
+                    let hi = xs.fold(f32::NEG_INFINITY, f32::max);
+                    grounds.push((lo, hi));
+                }
+            }
         });
-        // Within a tenth: glyph positions round to 1/64 of a point.
-        assert!((widths.0 - PILL_GAP).abs() < 0.1, "{widths:?}");
-        assert!(widths.1.abs() < 0.1, "{widths:?}");
+        assert_eq!(grounds.len(), 2, "two grounds: {grounds:?}");
+        let gap = grounds[1].0 - grounds[0].1;
+        assert_eq!(gap, 2.0, "the gap painted, in {grounds:?}");
     }
 
     /// A right-click mid-scrub puts From back where the scrub began, as on any

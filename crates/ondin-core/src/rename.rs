@@ -154,12 +154,13 @@ fn reason(e: &regex::Error) -> String {
 }
 
 /// How a run is numbered: `from`, then `from + step` and on, each padded with
-/// zeros to `digits`.
+/// zeros to at least `pad` digits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Numbering {
     pub from: i64,
     pub step: i64,
-    pub digits: u8,
+    /// 0 to [`Numbering::MAX_PAD`]; 0 and 1 pad nothing.
+    pub pad: u8,
 }
 
 impl Default for Numbering {
@@ -167,12 +168,15 @@ impl Default for Numbering {
         Self {
             from: 1,
             step: 1,
-            digits: 1,
+            pad: 0,
         }
     }
 }
 
 impl Numbering {
+    /// The widest padding offered.
+    pub const MAX_PAD: u8 = 5;
+
     /// The number of the run's `i`th layer, counted from 0.
     pub fn nth(&self, i: usize) -> String {
         let i = i64::try_from(i).unwrap_or(i64::MAX);
@@ -181,7 +185,7 @@ impl Numbering {
         format!(
             "{sign}{:0width$}",
             n.unsigned_abs(),
-            width = usize::from(self.digits)
+            width = usize::from(self.pad.min(Self::MAX_PAD))
         )
     }
 }
@@ -451,14 +455,14 @@ mod tests {
         assert!(Find::new("(abc", false, false).is_ok());
     }
 
-    /// Numbers pad to the digits asked for, and a negative step counts down
-    /// through zero.
+    /// Numbers pad to the digits asked for, never past the widest, and a negative
+    /// step counts down through zero.
     #[test]
     fn numbering_pads_and_counts_down() {
         let n = Numbering {
             from: 1,
             step: 1,
-            digits: 2,
+            pad: 2,
         };
         assert_eq!(
             (0..3).map(|i| n.nth(i)).collect::<Vec<_>>(),
@@ -467,12 +471,17 @@ mod tests {
         let down = Numbering {
             from: 1,
             step: -1,
-            digits: 3,
+            pad: 3,
         };
         assert_eq!(
             (0..3).map(|i| down.nth(i)).collect::<Vec<_>>(),
             ["001", "000", "-001"]
         );
         assert_eq!(Numbering::default().nth(9), "10");
+        let wide = Numbering {
+            pad: 9,
+            ..Numbering::default()
+        };
+        assert_eq!(wide.nth(0), "00001", "capped at five");
     }
 }

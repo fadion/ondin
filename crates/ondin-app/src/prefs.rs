@@ -109,8 +109,10 @@ pub struct BatchRenamePrefs {
     pub template: String,
     pub from: i64,
     pub step: i64,
-    /// 1 to 3.
-    pub digits: u8,
+    /// Zero-pad to at least this many digits, 0 to 5. Read from `digits`, its
+    /// name when it was 1 to 3, which means the same.
+    #[serde(alias = "digits")]
+    pub pad: u8,
     /// `layers`, `reversed`, `left-to-right` or `top-to-bottom`.
     pub order: String,
 }
@@ -123,7 +125,7 @@ impl Default for BatchRenamePrefs {
             template: String::new(),
             from: 1,
             step: 1,
-            digits: 1,
+            pad: 0,
             order: "layers".into(),
         }
     }

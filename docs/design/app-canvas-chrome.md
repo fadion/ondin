@@ -353,15 +353,17 @@ document. The preview keeps the previous plan until the new one's first part lan
 - **Rename to** draws each token as a pill: the canonical `[Word]` text with its brackets hidden, so
   the caret walks real characters, at the text's own size so pill and words share a line. The
   edit is `put` into the field's whole height, as Find is, which centres its text. Two pills side by
-  side keep a 2pt gap. A caret the arrow keys move into a pill leaves it on the side it was heading
+  side keep 2pt of air painted between them; egui joins neighbouring glyphs of one background into
+  one rectangle, so every other pill's ground is a unit of alpha lighter. A caret the arrow keys move into a pill leaves it on the side it was heading
   for, so Left and Right step pill by pill; one a click puts inside goes after it. A typed short form is rewritten to the canonical token;
   Backspace and Delete take a pill out whole; *+ Name*, *+ Number* and one *+ Group k* per pattern
   group insert at the caret. The field opens holding the last template (one *Name* pill the first
   time), all selected, so typing replaces it. An empty template with Find filled shows *Empty:
   removes the match*.
 - **Numbering.** The Number and Order rows show once the template has a Number token. Number holds
-  *From* and *Step* as the inspector's scrubbable value fields (`ui::value_field`, the word inside
-  the field) and the digits *1 · 01 · 001* (zero-padded; a negative step counts down); Order, under
+  *From*, *Step* and *Pad* as the inspector's scrubbable value fields (`ui::value_field`, the word
+  inside the field), sharing the row. A negative step counts down; Pad, 0 to 5 and 0 by default,
+  zero-pads to at least that many digits (`Numbering::pad`; 3 writes `001`). Order, under
   it, is a dropdown as the Settings modal's are. All are 28 tall, the Settings modal's field height.
   A right-click mid-scrub puts the numbering back as the scrub found it (`InFlight::rename_scrub`,
   wound back in `cancel_gesture`).
@@ -387,7 +389,7 @@ document. The preview keeps the previous plan until the new one's first part lan
   Settings modal's footer buttons (`settings::text_button`). Rename dims, its tooltip saying why,
   while the plan is still matching, when the pattern does not parse (its reason), when nothing
   matches Find, when every match would come out empty, when every match is a variant, or when
-  nothing would change. Find, template, from, step, digits and order are kept in
+  nothing would change. Find, template, from, step, pad and order are kept in
   `prefs.batch_rename` when a rename runs.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)

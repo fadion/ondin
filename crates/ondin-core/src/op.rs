@@ -1192,6 +1192,8 @@ impl Transaction {
     /// old and new parents). Table-only operations name none.
     pub fn subjects(&self) -> Vec<NodeId> {
         let mut out: Vec<NodeId> = Vec::new();
+        // Every commit names its step from this, so the dedupe is a set, not a scan.
+        let mut seen = FxHashSet::default();
         for op in &self.0 {
             let named = match op {
                 Operation::CreateNode { id, .. }
@@ -1213,7 +1215,7 @@ impl Transaction {
                     .map(Node::id),
                 other => other.overwrites(),
             };
-            if let Some(id) = named.filter(|id| !out.contains(id)) {
+            if let Some(id) = named.filter(|id| seen.insert(*id)) {
                 out.push(id);
             }
         }

@@ -2052,6 +2052,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Making a file a kit from the library while its tab is parked marks that
+    /// tab's copy too, so the tab's next save keeps the mark.
+    /// flip: `set_kit_at` patching only the session in front → fails at "the mark
+    /// survives the parked tab's save".
+    #[test]
+    fn a_kit_made_while_its_tab_is_parked_survives_that_tabs_save() {
+        let ctx = egui::Context::default();
+        let root = temp_root("kit-parked");
+        let mut app = app_at(&ctx, &root);
+        let (a, b) = (file(&root, "a"), file(&root, "b"));
+        app.open_path(&a);
+        app.open_path(&b);
+        app.library.refresh();
+        app.set_kit_at(&a, true);
+        let read = |path: &Path| ondin_core::io::load(&std::fs::read(path).unwrap()).unwrap();
+        assert!(read(&a).meta().kit.is_some(), "fixture: the file is a kit");
+
+        app.activate_tab(app.tab_of_path(&a).unwrap());
+        edit(&mut app);
+        assert!(app.save_file(false), "fixture: the save lands");
+        assert!(
+            read(&a).meta().kit.as_ref().is_some_and(|k| k.sharing),
+            "the mark survives the parked tab's save"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The tabs share the room down to their least width; past it the strip shows
     /// what fits and the caret lists the rest.
     #[test]

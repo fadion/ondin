@@ -244,14 +244,11 @@ impl OndinApp {
     /// (`library::store::set_kit`). Stopping is confirmed first (1D) — this is
     /// what the confirmation runs.
     ///
-    /// 🚨 **On the dashboard every file is closed** (§15 D1036 (6), the v0.5.0
-    /// release review's `[X3.1-L5-01]`), the one the session still holds
-    /// included: that copy is the editor's, behind the library, and saving it
-    /// here wrote it over whatever had reached the disk since — another
-    /// window's or a synced machine's publish — so a re-made kit could publish a
-    /// version its consumers already held. The file is changed on disk, and the
-    /// held copy's mark patched to match, as the dashboard's rename and move
-    /// patch it.
+    /// **On the dashboard every file is closed**, the one the session holds
+    /// included: saving that copy here would write it over whatever reached the
+    /// disk since (another window's publish). The file is changed on disk, and
+    /// every open tab's copy has its mark patched to match, as the dashboard's
+    /// rename and move patch them.
     pub(crate) fn set_kit_at(&mut self, path: &std::path::Path, sharing: bool) {
         if self.view != crate::app::View::Dashboard && self.session.path.as_deref() == Some(path) {
             if sharing {
@@ -271,13 +268,18 @@ impl OndinApp {
             return;
         }
         self.library.refresh();
-        if self.session.path.as_deref() == Some(path)
-            && let Some(on_disk) = self.library.entry_at(path).map(|e| e.meta.clone())
-        {
-            let mut meta = self.session.doc.meta().clone();
-            meta.id = on_disk.id;
-            meta.kit = on_disk.kit;
-            self.session.doc.set_meta(meta);
+        // Every tab holding the file, parked ones included: a stale mark would go
+        // back to disk with that tab's next save.
+        if let Some(on_disk) = self.library.entry_at(path).map(|e| e.meta.clone()) {
+            for session in self.open_sessions() {
+                if session.path.as_deref() != Some(path) {
+                    continue;
+                }
+                let mut meta = session.doc.meta().clone();
+                meta.id = on_disk.id.clone();
+                meta.kit = on_disk.kit.clone();
+                session.doc.set_meta(meta);
+            }
         }
         let name = entry.display_name();
         self.session.info(if sharing {

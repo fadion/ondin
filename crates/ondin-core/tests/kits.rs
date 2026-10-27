@@ -741,6 +741,28 @@ fn a_v8_kit_loads_and_saves_as_the_current_version() {
     assert_eq!(saved["published"]["document"]["schema_version"], current);
 }
 
+/// A v9 kit, its published document in the v9 shape too (one `root`, a
+/// `canvas_background`, no `pages`), loads as the kit it was.
+///
+/// flip: `migrate_9_to_10` without its published-document arm → fails at `load`.
+#[test]
+fn a_v9_kit_reshapes_its_published_document() {
+    let k = kit();
+    let mut v: serde_json::Value = serde_json::from_slice(&io::save(&k.doc).unwrap()).unwrap();
+    fn to_v9(doc: &mut serde_json::Value) {
+        let o = doc.as_object_mut().unwrap();
+        let pages = o.remove("pages").expect("a v10 save lists its pages");
+        assert_eq!(pages.as_array().unwrap().len(), 1, "fixture: one page");
+        o.insert("root".into(), pages[0]["id"].clone());
+        o.insert("canvas_background".into(), pages[0]["ground"].clone());
+        o.insert("schema_version".into(), 9.into());
+    }
+    to_v9(&mut v);
+    to_v9(&mut v["published"]["document"]);
+    let back = io::load(&serde_json::to_vec(&v).unwrap()).unwrap();
+    assert_eq!(back, k.doc);
+}
+
 /// Copy a kit instance out of `from` through the clipboard's text form — the
 /// door another window reads — and paste it into `to`'s root.
 fn paste_across(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSource) -> NodeId {

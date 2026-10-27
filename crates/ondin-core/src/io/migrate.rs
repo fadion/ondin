@@ -297,9 +297,11 @@ fn one_page(doc: &mut Value) {
             .expect("a colour serializes")
     });
     if let Some(guides) = obj.get_mut("guides").and_then(Value::as_array_mut) {
-        for guide in guides {
+        // A guide that is not an object is left for the parse to refuse; indexing
+        // into it would panic.
+        for guide in guides.iter_mut().filter_map(Value::as_object_mut) {
             if guide.get("owner").is_none_or(Value::is_null) {
-                guide["owner"] = root.clone();
+                guide.insert("owner".into(), root.clone());
             }
         }
     }

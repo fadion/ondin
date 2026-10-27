@@ -307,6 +307,23 @@ fn a_v9_file_opens_as_one_page() {
     );
 }
 
+/// A v9 file whose `guides` holds something other than an object is refused with
+/// an error, not a panic in the migration.
+///
+/// flip: `one_page` indexing every guide as an object → panics at `load`.
+#[test]
+fn a_v9_file_with_a_malformed_guide_is_refused_not_a_panic() {
+    let root = IdSource::new(0x7E58).mint();
+    let doc = Document::new(root);
+    let mut v: serde_json::Value = serde_json::from_slice(&io::save(&doc).unwrap()).unwrap();
+    let o = v.as_object_mut().unwrap();
+    o.remove("pages");
+    o.insert("schema_version".into(), 9.into());
+    o.insert("root".into(), root.to_wire().into());
+    o.insert("guides".into(), serde_json::json!([1]));
+    assert!(io::load(&serde_json::to_vec(&v).unwrap()).is_err());
+}
+
 /// Publishing leaves a draft page's mains out — unless a published main uses
 /// one, which then goes with it and is named.
 #[test]

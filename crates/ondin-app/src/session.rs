@@ -28,6 +28,17 @@ use std::time::{Duration, Instant};
 /// ([`EditorSession::commit_run`]).
 const RUN_WINDOW: Duration = Duration::from_millis(600);
 
+/// The source of every session's revisions, shared so no two sessions ever hold the
+/// same one: an app-side cache keyed on a revision alone (the frame index, the
+/// Component card's drift) would otherwise answer for one tab's document with
+/// another's.
+static NEXT_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// A revision no session has held before ([`EditorSession::revision`]).
+fn next_revision() -> u64 {
+    NEXT_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A step just undone or redone: its subjects, and the pages they were on before it
 /// (`EditorSession::follow_step`'s two arguments).
 type Followed = (Vec<NodeId>, Vec<NodeId>);
@@ -472,7 +483,8 @@ pub struct EditorSession {
     /// Bumped by every change to the document — a commit, an undo, a redo, a
     /// document adopted — and what a cache of something *derived from* the
     /// document keys on. **Not `dirty`**: this only goes up, because a save changes
-    /// nothing a render would produce.
+    /// nothing a render would produce. Drawn from [`next_revision`], so it is also
+    /// unique across sessions.
     revision: u64,
     /// How many commits this session has seen — `revision` without undo and redo.
     /// [`FlexReceipt`] and a cut's move (`OndinApp::cut_move`, through
@@ -557,7 +569,7 @@ impl EditorSession {
             resumed: false,
             style_edit: None,
             saved_at,
-            revision: 0,
+            revision: next_revision(),
             commits: 0,
             flex_receipt: None,
             last_detached: Default::default(),
@@ -1371,7 +1383,7 @@ impl EditorSession {
         // through this door and bump it themselves; every reader keyed on it
         // (`FrameIndex`, the Export preview, the recovery gate, `finish_save`)
         // depends on that.
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = next_revision();
         self.commits = self.commits.wrapping_add(1);
         // Recorded after the bump, so the receipt names this commit; a run's
         // merged commit has no single step to undo and leaves none.
@@ -1503,7 +1515,7 @@ impl EditorSession {
         // `finish_save` above all must see it, or it marks the session clean over a
         // save queued before the undo. `commits` stays put, so a redo brings the
         // step's receipt back.
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = next_revision();
         Ok(Some((subjects, before)))
     }
 
@@ -1604,7 +1616,7 @@ impl EditorSession {
         self.path = path;
         self.dirty = false;
         // A different document, so anything derived from the old one is stale.
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = next_revision();
     }
 
     /// Re-shape every text node and refresh dependent bounds. Called when the
@@ -2195,6 +2207,20 @@ mod tests {
             name: None,
         }])));
         id
+    }
+
+    /// No two sessions hold the same revision, so a cache keyed on one cannot answer
+    /// for another tab's document.
+    /// flip: `from_parts` starting every session at 0 → fails at "fresh sessions differ".
+    #[test]
+    fn no_two_sessions_share_a_revision() {
+        let mut a = EditorSession::new();
+        let b = EditorSession::new();
+        assert_ne!(a.revision(), b.revision(), "fresh sessions differ");
+        let before = a.revision();
+        add_rect(&mut a);
+        assert!(a.revision() > before, "a commit still moves it on");
+        assert_ne!(a.revision(), b.revision());
     }
 
     /// A message after a refusal in the same frame joins it instead of hiding it, once

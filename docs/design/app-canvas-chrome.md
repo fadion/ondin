@@ -1,8 +1,8 @@
 # Canvas chrome, the top bar's menus, the command palette, the cheatsheet, focus and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the minimap, the top bar's View/Snap menus and Settings button, the command palette, the shortcut
-cheatsheet, focus mode and present mode. Part of §9.4.
+pixel grid, the minimap, the contrast check mode, the top bar's View/Snap menus and Settings button,
+the command palette, the shortcut cheatsheet, focus mode and present mode. Part of §9.4.
 
 ## 9.4 Gesture chrome
 
@@ -83,6 +83,69 @@ design canvas's *Minimap* artboard is the mockup; these rules are the spec.
   frame's `canvas_rect`, so a pan it makes reaches this frame's render. It is outside the `!focus`
   guard, so focus mode keeps it; present mode's early return hides it.
 
+## The contrast check mode (`contrast.rs`)
+
+*View ▸ Check contrast* (`Action::CheckContrast`, `menu::Item::CheckContrast`, `Group::View`, no
+chord): a ticked row in the View menu, and a palette row reading *Stop checking contrast* while on.
+It measures the shown text layers, and with *Non-text* small shapes, against what is drawn behind
+them with `ondin_export::contrast::check_with`, the measurement `ondin check contrast` runs
+(`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
+document opens, it is never saved or exported, and present mode's own branch never draws it.
+
+- **Scope.** The selection when the mode starts, the page when that is empty, fixed for the mode's
+  life: selecting other layers afterwards does not move it. The bar names it in a chip whose ×
+  resets it to the whole page. Switching pages starts over on the new page, page-wide. Subjects
+  are in reading order: `present::reading_order` over the page's top-level layers, then within each.
+- **Measuring** runs on a worker (`job::Job`) over a clone of the document, one job at a time.
+  `contrast_tick`, before the canvas, compares the document with a snapshot whenever
+  `session.revision()` moves. A layer has changed when its stored node differs or its world box
+  moved; a subject is queued, and drawn stale, when it changed or its box overlaps the old or new
+  box of a changed or removed layer. A change to variables, styles or the page ground, or of the
+  level or *Non-text*, queues everything. The queue goes once the document has been still for
+  `SETTLE` (0.15 s), so a run of nudges measures once. A layer queued again while its job is in
+  flight stays stale when that answer lands.
+- **Badges** (`contrast_badges`) keep one screen size, above the layer's top left; a badge that
+  overlaps an earlier one moves down below it. They are painted in the canvas panel's own layer
+  after `canvas_ui`, so every floating card covers them.
+
+  | Mark | Badge |
+  | --- | --- |
+  | Fail | red ground, warning glyph, `2.3 : 1 · needs 4.5` (`Dark · ` before *needs* when the worst mode is named), and a red outline 3pt outside the layer: red never stands alone |
+  | Pass | dark chip, tick, the bare score (`12.7`, `Lc 78`), ` · large` when only the text's size makes it pass; hidden with *Show passing* off |
+  | Skipped | dashed chip, `Not measured · gradient fill` or `picture fill` |
+
+  A stale badge dims to 45% with a spinning circle-notch in place of its glyph. During a drag (a
+  gesture preview that is not the fix card's own) the badges of the selected layers and their
+  descendants hide.
+- **The bar** (`contrast_bar`), an `Area` at the canvas's top centre, 12pt down: circle-half glyph,
+  *Contrast* or the scope chip, the level head (`AA ▾`), then *Measuring…*, *All N pass* or
+  *N failing* with `k / N` once stepped and prev/next arrows, then × to end the mode. The count dims
+  while anything is stale. The arrows step through failures in reading order, selecting each and
+  moving the camera only when the layer is not wholly in view: centred if it fits, else `zoom_to`.
+- **The level menu**, from the head: AA (4.5 / 3), AAA (7 / 4.5), APCA (Lc), then *Show passing*
+  and *Non-text (3 : 1)*, kept in `prefs.contrast` (`ContrastPrefs`; AA, passing shown, text only).
+- **The fix card** (`contrast_fix_card`, a 270pt `Area` beside the badge) opens on a click on a
+  failing badge, which also selects the layer; the badge is a widget registered after the canvas's,
+  so it wins the pointer. Header (layer name; *body text*, *large text* or *non-text*; the level),
+  the worst sample's ink and backdrop as a split swatch with both hexes and the score in red, a row
+  per mode when there are several, then *Nearest* (`contrast::nearest`; *No colour at this hue
+  passes*), noting *Unbinds ‹var›* when the text draws in a bound fill that fails, then *Variables*
+  (`contrast::passing_variables`, at most six; *No colour variable passes*). Hovering a row
+  previews it (`session.set_preview`); a click, or Enter (the hovered row, else the first),
+  applies it as one undo step, *Fix contrast*. Escape or a click away closes it. A remeasure redoes
+  the rows, and closes the card when the layer now passes or is gone. The card and the level menu
+  own Escape through `a_popover_owns_escape` and `popover_heard`.
+- **Every fix passes in every mode.** A raw colour is the same in all modes, so a fix for one mode
+  that breaks another is no fix: *Nearest* must pass every mode's worst backdrop, and *Variables*
+  lists only variables that pass in every mode, nearest the ink first. When no lightness at the
+  hue passes everywhere the card offers only variables, the case modes exist for.
+- **What a fix edits** (`fix_transaction`): the runs and paints whose colour fails the finding,
+  never the backdrop. A run's own colour is replaced in the spans; runs drawing in the fill change
+  the top visible fill. A run's colour cannot be bound, so a variable goes through the fill: a
+  failing run's own colour is cleared onto the fill and the fill bound, and passing runs that drew
+  in the fill are given its old colour so they keep their look. On a shape the failing visible
+  solid fills and strokes are replaced or bound.
+
 ## The top bar's right cluster
 
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
@@ -93,7 +156,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
-  layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*, then *Present mode* — a verb,
+  layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, *Outline mode*, *Focus mode*,
+  *Check contrast* (a mode, ticked while on and never remembered), then *Present mode* — a verb,
   not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
   *Show minimap* follows *Show history* so the two rows about the layers pane stay together.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
@@ -114,7 +178,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   walk itself is unchanged, and `RenderOverrides::set_outline` carries the ink, installed every frame
   by `draw_canvas` (present mode clears it). Hit testing and selection are unchanged. The eyedropper
   samples the canvas as drawn, so in outline view it picks up the ink.
-- All are **view state**, not document state. All but focus mode and outline view are kept in `prefs.view`
+- The switches are **view state**, not document state. All but focus mode and outline view are kept in `prefs.view`
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
@@ -151,7 +215,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new and
-  close document, the library, settings, *Export as …*, *Present*, tools, place image, zoom, align,
+  close document, the library, settings, *Export as …*, *Present*, *Check contrast*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -352,6 +416,11 @@ runs (`pages` names each frame's page, index for index).
 - `minimap_ui` sits before the canvas and outside the `!focus` guard. Moving it beside
   `status_bar` lags every pan it makes by a frame; moving it into the guard drops it from focus
   mode (`focus_mode_keeps_the_map`).
+- `contrast_claim_keys` takes the fix card's Enter at the top of the frame, before `input::resolve`,
+  which would otherwise open the selected text layer for editing
+  (`enter_applies_the_card_s_first_fix`). `contrast_badges` runs after `canvas_ui` in the same
+  panel; called before it, the canvas takes the badge's press
+  (`a_click_on_a_failing_badge_opens_the_card`).
 - Deriving the escape clip from overrides makes resized children pop out of their frame.
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
   frame's input; `just_opened` is all that stops the opening press closing it.

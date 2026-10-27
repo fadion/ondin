@@ -638,6 +638,11 @@ impl OndinApp {
             &mut out,
             Cmd::verb(Item::Present, no_frames.then_some("No frames to present")),
         );
+        let mut contrast = Cmd::verb(Item::CheckContrast, None);
+        if self.contrast.is_some() {
+            contrast.label = "Stop checking contrast".into();
+        }
+        push(&mut out, contrast);
         // The cards the inspector drew last frame, then the ones it can draw for
         // another selection.
         let focus = self

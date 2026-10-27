@@ -39,25 +39,9 @@ reads true.
   recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
   colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
   eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
-- **Contrast check mode** (design canvas, *Contrast Check*). *View › Check contrast* or the palette, no
-  chord; view state, off when a document opens. A bar at the canvas's top centre holds the level menu,
-  the failure count and arrows stepping through failures in reading order (selecting each, zooming
-  only when it is off screen); closing it ends the mode. It checks the page's shown text layers, or
-  those inside the selection the mode started with: that scope is fixed, named in the bar, and
-  cleared only from the bar.
-  - **Measuring** is `contrast::check`'s (`export.md`), off the main thread. An edit remeasures the
-    edited layers and the text they overlap; a badge waiting on that dims with a spinner, and a
-    dragged layer's badge hides until release. Every mode is checked and the badge names the worst.
-  - **Badges** keep one size at every zoom. A failure gets a red outline and a warning badge, `2.3 : 1
-    · needs 4.5`; a pass a quiet chip (`3.8 · large` when only size makes it pass), hidden by *Show
-    passing*; an unmeasurable layer a dashed chip saying why.
-  - **The fix card** opens from a failing badge: the text and worst backdrop colours, the ratio, one
-    row per mode, the nearest passing lightness at the same hue and chroma, then the passing colour
-    variables. Hover previews, applying is one undo step on the failing runs. When no colour at that
-    hue passes, it offers only variables. It never offers to change the backdrop.
-  - **Options:** AA (default), AAA, APCA (Lc values), a pref; *Non-text (3 : 1)* measures strokes and
-    shapes under 24 pt across (icons, borders, outlines) and skips larger blocks; `contrast::check_with`
-    measures both. Never saved, never exported, hidden in present mode.
+- **Tab steps the contrast check's failures.** Tab / Shift+Tab while the bar has focus, beside its
+  arrows (`app-canvas-chrome.md`). The bar never takes keyboard focus, and Tab is egui's focus key
+  and steps points on an edited path (`shortcuts.md`), so this needs a way to give the bar focus.
 - **Batch rename** of the selected layers: find and replace, and numbering patterns. Only
   `Item::Rename`, one layer, exists.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).

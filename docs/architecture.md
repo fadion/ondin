@@ -55,7 +55,7 @@ Read the file for the exact wording before relying on one.
 | `app-snapping.md` | 9.4 | Snapping |
 | `app-rulers-guides.md` | 9.4 | Rulers and guides |
 | `app-autopan.md` | 9.4 | Auto-pan |
-| `app-canvas-chrome.md` | 9.4 | Canvas chrome, the minimap, top-bar menus, the command palette, the shortcut cheatsheet, focus mode, present mode |
+| `app-canvas-chrome.md` | 9.4 | Canvas chrome, the minimap, the contrast check mode, top-bar menus, the command palette, the shortcut cheatsheet, focus mode, present mode |
 | `app-image-editing.md` | 9.4 | Image fills and image editing |
 | `inspector.md` | 9.4 | The inspector cards |
 | `type-panel.md` | 9.4 | The Type panel and typography popup |

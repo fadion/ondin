@@ -243,7 +243,7 @@ pub fn check_with(
     options: Options,
     only: Option<&[NodeId]>,
 ) -> Report {
-    let subjects: Vec<NodeId> = subjects(doc, page, options.non_text)
+    let subjects: Vec<NodeId> = subjects(doc, &Resolved::rebuild(doc), page, options.non_text)
         .into_iter()
         .filter(|id| only.is_none_or(|o| o.contains(id)))
         .collect();
@@ -450,9 +450,8 @@ fn not_solid(b: &Brush) -> &'static str {
 
 /// The layers a check measures on `page`, in document order: the shown text
 /// layers and, with `non_text`, the shown shapes under [`NON_TEXT_MAX`] across.
-/// A boolean's operands are its shape, not marks of their own.
-pub fn subjects(doc: &Document, page: NodeId, non_text: bool) -> Vec<NodeId> {
-    let res = non_text.then(|| Resolved::rebuild(doc));
+/// A boolean's operands are its shape, not marks of their own. `res` is `doc`'s.
+pub fn subjects(doc: &Document, res: &Resolved, page: NodeId, non_text: bool) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut stack = vec![page];
     while let Some(id) = stack.pop() {
@@ -470,10 +469,9 @@ pub fn subjects(doc: &Document, page: NodeId, non_text: bool) -> Vec<NodeId> {
             | NodeKind::Path { .. }
             | NodeKind::Boolean { .. } => {
                 let small = res
-                    .as_ref()
-                    .and_then(|r| r.world_bounds(id))
+                    .world_bounds(id)
                     .is_some_and(|b| b.width().min(b.height()) < NON_TEXT_MAX);
-                if small {
+                if non_text && small {
                     out.push(id);
                 }
                 continue;

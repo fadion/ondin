@@ -245,6 +245,13 @@ pub mod icon {
     /// pair every disclosure draws, and nothing points a caret up yet.
     #[allow(dead_code)]
     pub const CARET_UP: &str = "\u{e13c}";
+    pub const CARET_LEFT: &str = "\u{e138}";
+    // The contrast check's glyphs: a passing count, a layer it could not measure,
+    // a badge waiting on a remeasure, and a non-text finding.
+    pub const CHECK_CIRCLE: &str = "\u{e184}";
+    pub const PROHIBIT: &str = "\u{e3de}";
+    pub const CIRCLE_NOTCH: &str = "\u{eb44}";
+    pub const SHAPES: &str = "\u{ec5e}";
     pub const MAGNIFYING_GLASS: &str = "\u{e30c}";
     pub const MAGNIFYING_GLASS_PLUS: &str = "\u{e310}";
     pub const FRAME_CORNERS: &str = "\u{e626}";
@@ -629,6 +636,11 @@ pub mod icon {
         ("caret-down", CARET_DOWN),
         ("caret-right", CARET_RIGHT),
         ("caret-up", CARET_UP),
+        ("caret-left", CARET_LEFT),
+        ("check-circle", CHECK_CIRCLE),
+        ("prohibit", PROHIBIT),
+        ("circle-notch", CIRCLE_NOTCH),
+        ("shapes", SHAPES),
         ("magnifying-glass", MAGNIFYING_GLASS),
         ("magnifying-glass-plus", MAGNIFYING_GLASS_PLUS),
         ("frame-corners", FRAME_CORNERS),

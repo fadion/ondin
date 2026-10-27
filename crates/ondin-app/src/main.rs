@@ -66,6 +66,7 @@ mod canvas;
 mod cheatsheet;
 mod chrome;
 mod colour_text;
+mod contrast;
 mod cursor;
 mod expr;
 mod eyedropper;

@@ -88,6 +88,9 @@ pub enum Action {
     /// Show the top-level frames one at a time, fullscreen (`present.rs`).
     /// `Ctrl+Alt+Enter`.
     Present,
+    /// *View ▸ Check contrast*: start or end the contrast check (`contrast.rs`). No
+    /// chord.
+    CheckContrast,
     /// *Export as HTML / React / Vue…*: the selection's code export, one zip
     /// through a save dialog (`OndinApp::export_code`). No chord and no menu row:
     /// the command palette is its door.

@@ -819,6 +819,9 @@ pub struct OndinApp {
     pub(crate) show_minimap: bool,
     /// The minimap's drag and remembered shape (`minimap.rs`).
     pub(crate) minimap: crate::minimap::Minimap,
+    /// *View ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
+    /// document opens with it off.
+    pub(crate) contrast: Option<crate::contrast::Contrast>,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1362,6 +1365,7 @@ impl OndinApp {
             show_history: view.history,
             show_minimap: view.minimap,
             minimap: Default::default(),
+            contrast: None,
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -1597,6 +1601,8 @@ impl eframe::App for OndinApp {
         // (`docs/context-menus.md` §0 R3): Escape closes only the menu, and its
         // navigation keys travel to it as a value.
         let mut nav = None;
+        // Before the keymap, which would read the fix card's Enter as "edit the text".
+        self.contrast_claim_keys(&ctx);
         let mut palette_keys = crate::palette::Keys::default();
         let popover_heard = std::mem::take(&mut self.popover_heard);
         if self.palette.is_some() && !self.modal_is_up() {
@@ -1680,16 +1686,20 @@ impl eframe::App for OndinApp {
         // makes reaches this frame's render. Outside the `focus` guard: focus mode keeps
         // it.
         self.minimap_ui(&ctx);
+        self.contrast_tick(&ctx);
 
         // The canvas takes the remaining area; the inspector and picker float over it.
         let canvas = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(color::BG))
             .show(ui, |ui| {
                 self.canvas_ui(ui);
+                // After the canvas's own widget, so a badge wins the pointer over it.
+                self.contrast_badges(ui);
             })
             .response
             .rect;
         self.status_bar(&ctx, canvas);
+        self.contrast_chrome(&ctx);
 
         self.watch_kits(&ctx);
         self.poll_simplify();
@@ -1881,6 +1891,7 @@ impl OndinApp {
             // No dialog once a destination is known this session.
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::Present => self.start_presenting(ctx),
+            Action::CheckContrast => self.toggle_contrast(),
             Action::ExportCode(target) => self.export_code(target),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
@@ -5355,6 +5366,8 @@ impl OndinApp {
         // Fields holding the old document's ids are cleared by hand; one this list misses
         // dangles rather than collides (`NodeId` carries a random per-session actor).
         self.alt_clone = None;
+        // A document opens with the contrast check off.
+        self.contrast = None;
         self.pen = None;
         self.text = None;
         self.mode = Mode::Normal;
@@ -6716,7 +6729,10 @@ impl OndinApp {
                 TopMenu::View => ViewSwitch::VIEW_MENU
                     .iter()
                     .map(|s| s.label())
-                    .chain([crate::menu::Item::Present.spec().label])
+                    .chain([
+                        crate::menu::Item::CheckContrast.spec().label,
+                        crate::menu::Item::Present.spec().label,
+                    ])
                     .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
             };
@@ -6741,6 +6757,19 @@ impl OndinApp {
                         if crate::ui::menu_check(ui, sw.label(), on, ITEM_H) {
                             app.set_view_switch(*sw, !on);
                         }
+                    }
+                    // The contrast check is a mode, ticked while on, but view state
+                    // rather than a remembered switch.
+                    if which == TopMenu::View
+                        && crate::ui::menu_check(
+                            ui,
+                            crate::menu::Item::CheckContrast.spec().label,
+                            app.contrast.is_some(),
+                            ITEM_H,
+                        )
+                    {
+                        app.open_menu = TopMenu::None;
+                        app.toggle_contrast();
                     }
                     // A verb after the switches, in their column: no tick, ever.
                     if which == TopMenu::View
@@ -7451,6 +7480,7 @@ impl OndinApp {
             || self.effect_menu.is_some()
             || self.export_menu
             || self.export_row_open.is_some()
+            || self.contrast.as_ref().is_some_and(|c| c.owns_escape())
     }
 
     /// The inspector: a column of individually floating panels over the right of the

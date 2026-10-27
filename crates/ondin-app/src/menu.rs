@@ -398,6 +398,8 @@ pub enum Item {
     ExportCode(ondin_export::code::Target),
     /// `Action::Present`: the top-level frames one at a time, fullscreen.
     Present,
+    /// `Action::CheckContrast`: the contrast check mode, on or off.
+    CheckContrast,
     Tool(Tool),
     PlaceImage,
     ZoomIn,
@@ -1236,6 +1238,7 @@ impl Item {
                 Some("Ctrl+Alt+Enter"),
                 Group::View,
             ),
+            Item::CheckContrast => s("Check contrast", icon::CIRCLE_HALF, None, Group::View),
         }
     }
 
@@ -1276,6 +1279,7 @@ impl Item {
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
+            Item::CheckContrast => &["accessibility", "a11y", "wcag", "apca", "legibility"],
             Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
             Item::MoveTo(_) => &["page", "send"],
             Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
@@ -1352,6 +1356,7 @@ impl Item {
             Item::Palette => Action::Palette,
             Item::Cheatsheet => Action::Cheatsheet,
             Item::Present => Action::Present,
+            Item::CheckContrast => Action::CheckContrast,
             Item::ViewSwitch(sw) => Action::ToggleView(sw),
             Item::ZoomFit => Action::ZoomFit,
             Item::ZoomSelection => Action::ZoomSelection,
@@ -3124,6 +3129,7 @@ impl OndinApp {
             | Item::Settings
             | Item::ExportCode(_)
             | Item::Present
+            | Item::CheckContrast
             | Item::Tool(_)
             | Item::PlaceImage
             | Item::ZoomIn

@@ -74,6 +74,30 @@ impl Default for ViewPrefs {
     }
 }
 
+/// The contrast check's level menu, as last set (`crate::contrast`). The mode
+/// itself is view state and never stored.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContrastPrefs {
+    /// `aa`, `aaa` or `apca`; anything else reads as AA.
+    pub level: String,
+    /// Whether passing layers get their quiet chip.
+    pub show_passing: bool,
+    /// Whether small shapes are measured too, at 3 : 1.
+    pub non_text: bool,
+}
+
+impl Default for ContrastPrefs {
+    /// AA, passing chips shown, text only.
+    fn default() -> Self {
+        Self {
+            level: "aa".into(),
+            show_passing: true,
+            non_text: false,
+        }
+    }
+}
+
 /// Everything the Settings modal writes, plus the export habits the export
 /// panel's popover writes.
 ///
@@ -250,6 +274,8 @@ pub struct Prefs {
     /// the colour and the paint keeps its own opacity. The person's, not the
     /// document's, so they carry from one file to the next.
     pub recent_colours: Vec<[f32; 3]>,
+    /// The contrast check's level and switches.
+    pub contrast: ContrastPrefs,
 }
 
 impl Default for Prefs {
@@ -295,6 +321,7 @@ impl Default for Prefs {
             view: ViewPrefs::default(),
             colour_format: "hex".into(),
             recent_colours: Vec::new(),
+            contrast: ContrastPrefs::default(),
         }
     }
 }

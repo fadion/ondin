@@ -124,7 +124,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **The format stays git-friendly**: pretty JSON (line-level diffs), an id-sorted node list, stable string ids, byte-stable output (invariant 9), the camera in `EditorSession` rather than the DTO, and `skip_serializing_if`. A modified-at stamp or view state in `DocumentDto` would break all of it, so an edit time is read off the directory entry. An edit touches only its node and its parent, with no cascade across unrelated nodes.
 - **Autosave is debounced**: writing on every op into a synced folder thrashes the sync client.
 - **Leaving a tab saves it**, as leaving for the library does, instead of an autosave tick running for tabs behind: a tab behind is clean unless it cannot be saved, and nothing is written behind the user's back while it waits.
-- **Undo history is kept per document in the library** (`.history/<document id>.json`), never beside the file, so it does not travel with a copy. It is read back only for byte-identical file contents written by the same build: a history replayed onto any other document would corrupt it.
+- **Undo history is kept per document in the library** (`.history/<document id>.json`), never beside the file, so it does not travel with a copy. It is read back only for byte-identical file contents written by the same version (`CARGO_PKG_VERSION`): a history replayed onto any other document would corrupt it. Two development builds of one version share the check; released versions never do.
 
 ## Workspace and build
 

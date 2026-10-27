@@ -69,7 +69,7 @@ pub fn write(root: &Path, id: &str, file: &str, history: SavedHistory) -> io::Re
 }
 
 /// The history kept for the document `id` whose bytes have `file` as their
-/// [`digest`], if one was written for exactly those bytes by this build.
+/// [`digest`], if one was written for exactly those bytes by this version.
 pub fn read(root: &Path, id: &str, file: &str) -> Option<SavedHistory> {
     let bytes = std::fs::read(path(root, id)?).ok()?;
     let record: Record = serde_json::from_slice(&bytes).ok()?;
@@ -104,6 +104,18 @@ pub fn for_opened(root: &Path, doc: &ondin_core::Document, bytes: &[u8]) -> Opti
     read(root, doc.meta().id.as_deref()?, &digest(bytes))
 }
 
+/// Forget the history of a trashed document `id` deleted for good — unless a
+/// live document carries the same id (a sync client's conflict copy, a file
+/// copied by hand), since the record is keyed by id and is that one's too.
+pub fn forget_purged(root: &Path, id: &str) {
+    let live = super::scan::scan(root)
+        .iter()
+        .any(|e| e.meta.id.as_deref() == Some(id));
+    if !live {
+        remove(root, id);
+    }
+}
+
 /// Forget the history of the document `id`.
 pub fn remove(root: &Path, id: &str) {
     if let Some(at) = path(root, id) {
@@ -111,13 +123,23 @@ pub fn remove(root: &Path, id: &str) {
     }
 }
 
-/// `history` cut to at most `max` bytes as serialised: the oldest undo steps go
-/// first, then the farthest redo steps.
+/// `history` cut to at most `max` bytes as serialised: a step that alone is over
+/// `max` goes first, with every step beyond it that needs it (older undo steps,
+/// farther redo steps); then the oldest undo steps, then the farthest redo steps.
+/// Without the first cut, one undone large picture would drain every small step.
 fn within(mut history: SavedHistory, max: usize) -> SavedHistory {
     let size =
         |step: &ondin_core::SavedStep| serde_json::to_vec(step).map_or(usize::MAX, |b| b.len());
-    let undo: Vec<usize> = history.undo.iter().map(size).collect();
-    let redo: Vec<usize> = history.redo.iter().map(size).collect();
+    let mut undo: Vec<usize> = history.undo.iter().map(size).collect();
+    let mut redo: Vec<usize> = history.redo.iter().map(size).collect();
+    if let Some(at) = undo.iter().rposition(|s| *s > max) {
+        history.undo.drain(..=at);
+        undo.drain(..=at);
+    }
+    if let Some(at) = redo.iter().position(|s| *s > max) {
+        history.redo.truncate(at);
+        redo.truncate(at);
+    }
     let mut total: usize = undo
         .iter()
         .chain(&redo)
@@ -181,8 +203,42 @@ mod tests {
         assert_eq!(read(root, ID, &file), Some(saved));
         assert_eq!(read(root, ID, &digest(b"other bytes")), None, "other bytes");
 
+        // Written by another version, the same bytes' record is not read.
+        let at = root.join(HISTORY_DIR).join(format!("{ID}.json"));
+        let mut record: Record = serde_json::from_slice(&std::fs::read(&at).unwrap()).unwrap();
+        record.build = "0.0.0-another".into();
+        std::fs::write(&at, serde_json::to_vec(&record).unwrap()).unwrap();
+        assert_eq!(read(root, ID, &file), None, "another version");
+
         write(root, ID, &file, SavedHistory::default()).unwrap();
         assert!(!root.join(HISTORY_DIR).join(format!("{ID}.json")).exists());
+    }
+
+    /// Purging a trashed document keeps the record while a live document carries
+    /// the same id, and forgets it once none does.
+    /// flip: `forget_purged` without its live check → fails at "kept".
+    #[test]
+    fn a_purge_keeps_the_record_a_live_copy_shares() {
+        let dir = temp_root("purge");
+        let root = dir.as_path();
+        let mut doc = ondin_core::Document::new(ondin_core::IdSource::new(3).mint());
+        let mut meta = doc.meta().clone();
+        meta.id = Some(ID.into());
+        doc.set_meta(meta);
+        let live = root.join("Copy.ondin");
+        crate::library::store::write_document(&live, &doc).unwrap();
+        let saved = SavedHistory {
+            undo: vec![step("Fill")],
+            redo: Vec::new(),
+        };
+        write(root, ID, &digest(b"x"), saved).unwrap();
+        let record = root.join(HISTORY_DIR).join(format!("{ID}.json"));
+        forget_purged(root, ID);
+        assert!(record.exists(), "kept");
+        std::fs::remove_file(&live).unwrap();
+        forget_purged(root, ID);
+        assert!(!record.exists(), "forgotten");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// An id that is not one the library mints is never joined into a path.
@@ -210,6 +266,31 @@ mod tests {
         assert_eq!(labels(&cut.redo), ["D", "E"]);
         let cut = within(history, one);
         assert!(cut.undo.is_empty());
+        assert_eq!(labels(&cut.redo), ["D"]);
+    }
+
+    /// A step that alone is over the ceiling goes with the steps that need it,
+    /// and takes none of the small ones that fit.
+    ///
+    /// flip: `within` without its oversized-step cut → fails at the undo steps.
+    #[test]
+    fn one_oversized_step_drains_nothing_else() {
+        let big = "x".repeat(1000);
+        let history = SavedHistory {
+            undo: vec![step("A"), step("B"), step("C")],
+            redo: vec![step("D"), step(&big), step("F")],
+        };
+        let one = serde_json::to_vec(&step("A")).unwrap().len();
+        let cut = within(history, one * 5);
+        assert_eq!(labels(&cut.undo), ["A", "B", "C"]);
+        assert_eq!(labels(&cut.redo), ["D"], "the redo past it needs it");
+
+        let history = SavedHistory {
+            undo: vec![step("A"), step(&big), step("C")],
+            redo: vec![step("D")],
+        };
+        let cut = within(history, one * 5);
+        assert_eq!(labels(&cut.undo), ["C"], "the undo before it needs it");
         assert_eq!(labels(&cut.redo), ["D"]);
     }
 }

@@ -288,7 +288,7 @@ pub fn purge_trash(root: &Path, keep_days: u64) -> usize {
     for entry in trashed(root) {
         if clock::since(entry.modified) >= cutoff && std::fs::remove_file(&entry.path).is_ok() {
             if let Some(id) = &entry.meta.id {
-                super::history::remove(root, id);
+                super::history::forget_purged(root, id);
             }
             removed += 1;
         }

@@ -3110,7 +3110,7 @@ impl OndinApp {
             match std::fs::remove_file(path) {
                 Ok(()) => {
                     if let Some(id) = id {
-                        crate::library::history::remove(&root, &id);
+                        crate::library::history::forget_purged(&root, &id);
                     }
                 }
                 Err(e) => self.session.fail(format!("Delete failed: {e}")),

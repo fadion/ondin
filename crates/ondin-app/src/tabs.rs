@@ -51,6 +51,12 @@ pub(crate) struct Tabs {
     /// The tab whose right-click menu is open, where the press was, and the pass
     /// it opened on, whose click is the opener's and closes nothing.
     pub(crate) menu: Option<(TabId, egui::Pos2, u64)>,
+    /// The tab menu's keyboard highlight, a row's position; `None` leaves the
+    /// pointer's hover to paint.
+    pub(crate) menu_highlight: Option<usize>,
+    /// The menu key read with the frame's keys, for `tab_menu` to act on when it
+    /// draws.
+    pub(crate) menu_nav: Option<crate::menu::Nav>,
     /// Whether [`Self::menu`] was open as the strip began this frame: the click
     /// that closes it is spent, so the strip's and the canvas's left-button doors
     /// stand down for it.
@@ -1092,6 +1098,7 @@ impl OndinApp {
     /// press and closes on a choice, a click elsewhere, or `Escape` (read with the
     /// keys: the editor's routing and `dashboard_keys`).
     fn tab_menu(&mut self, ctx: &egui::Context) {
+        use crate::menu::{Nav, navigate_index, pointer_moved};
         use crate::theme::icon;
         use crate::ui::{MenuRow, menu_row};
         const W: f32 = 190.0;
@@ -1108,13 +1115,59 @@ impl OndinApp {
         let any = self.tabs.list.iter().any(|t| !t.pinned);
         let front = self.front_tab() == Some(id);
 
+        #[derive(Clone, Copy, PartialEq)]
         enum Pick {
             Pin,
             Close,
             Others,
             All,
         }
+        let (pin_glyph, pin_label) = if pinned {
+            (icon::PUSH_PIN_SLASH, "Unpin tab")
+        } else {
+            (icon::PUSH_PIN, "Pin tab")
+        };
+        // Each row: what it does, its glyph and label, and why it is dim, if it is.
+        let rows = [
+            (Pick::Pin, pin_glyph, pin_label, None),
+            (
+                Pick::Close,
+                icon::X,
+                "Close",
+                pinned.then_some("Pinned tabs stay open; unpin it to close it"),
+            ),
+            (
+                Pick::Others,
+                icon::X,
+                "Close others",
+                (!others).then_some("No other unpinned tabs"),
+            ),
+            (
+                Pick::All,
+                icon::X,
+                "Close all",
+                (!any).then_some("Every tab is pinned"),
+            ),
+        ];
+        // The rows' positions a press could run.
+        let live: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].3.is_none()).collect();
+
+        // The keyboard half (`context-menus.md` §8), as the canvas menu's: an arrow
+        // moves the highlight over the live rows, `Enter` runs it, a pointer move
+        // hands it back to the pointer.
+        let mut highlight = self.tabs.menu_highlight.filter(|i| live.contains(i));
         let mut pick = None;
+        match self.tabs.menu_nav.take() {
+            Some(Nav::Move(step)) => {
+                let at = highlight.and_then(|h| live.iter().position(|i| *i == h));
+                highlight = navigate_index(live.len(), at, step).map(|i| live[i]);
+            }
+            Some(Nav::Activate) => pick = highlight.map(|i| rows[i].0),
+            None if pointer_moved(ctx) => highlight = None,
+            None => {}
+        }
+        self.tabs.menu_highlight = highlight;
+
         // Four rows and a rule, the 1 pt gaps between the five, the padding and border.
         let h = 4.0 * crate::ui::MENU_ITEM_H + crate::ui::MENU_SEP_H + 4.0 + 2.0 * PAD + 2.0;
         let pos = crate::ui::menu_place(ctx, at, egui::vec2(W, h));
@@ -1125,40 +1178,26 @@ impl OndinApp {
                 crate::ui::menu_frame(PAD).show(ui, |ui| {
                     ui.set_width(crate::ui::menu_inner_w(W, PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let row = |glyph, label| MenuRow::new(glyph, label);
-                    let h = crate::ui::MENU_ITEM_H;
-                    let (glyph, label) = if pinned {
-                        (icon::PUSH_PIN_SLASH, "Unpin tab")
-                    } else {
-                        (icon::PUSH_PIN, "Pin tab")
-                    };
-                    if menu_row(ui, row(glyph, label), h).clicked() {
-                        pick = Some(Pick::Pin);
-                    }
-                    crate::ui::menu_sep(ui);
-                    let close = menu_row(
-                        ui,
-                        row(icon::X, "Close")
-                            .accel(front.then_some("Ctrl+W"))
-                            .enabled(!pinned),
-                        h,
-                    );
-                    if pinned {
-                        close.on_hover_text("Pinned tabs stay open; unpin it to close it");
-                    } else if close.clicked() {
-                        pick = Some(Pick::Close);
-                    }
-                    let resp = menu_row(ui, row(icon::X, "Close others").enabled(others), h);
-                    if !others {
-                        resp.on_hover_text("No other unpinned tabs");
-                    } else if resp.clicked() {
-                        pick = Some(Pick::Others);
-                    }
-                    let resp = menu_row(ui, row(icon::X, "Close all").enabled(any), h);
-                    if !any {
-                        resp.on_hover_text("Every tab is pinned");
-                    } else if resp.clicked() {
-                        pick = Some(Pick::All);
+                    for (i, (which, glyph, label, why)) in rows.into_iter().enumerate() {
+                        let mut row = MenuRow::new(glyph, label).enabled(why.is_none());
+                        if which == Pick::Close {
+                            row = row.accel(front.then_some("Ctrl+W"));
+                        }
+                        // On every row once on any, so no hover paints beside it.
+                        if let Some(hl) = highlight {
+                            row = row.highlight(i == hl);
+                        }
+                        let resp = menu_row(ui, row, crate::ui::MENU_ITEM_H);
+                        match why {
+                            Some(why) => {
+                                resp.on_hover_text(why);
+                            }
+                            None if resp.clicked() => pick = Some(which),
+                            None => {}
+                        }
+                        if which == Pick::Pin {
+                            crate::ui::menu_sep(ui);
+                        }
                     }
                 });
             })
@@ -1323,6 +1362,7 @@ impl OndinApp {
             let at = resp.interact_pointer_pos().unwrap_or(rect.left_bottom());
             let pass = ui.ctx().cumulative_pass_nr();
             self.tabs.menu = Some((info.id, at, pass));
+            self.tabs.menu_highlight = None;
             self.tabs.overflow_open = false;
             self.context_menu = None;
             self.dash.menu_for = None;
@@ -2353,6 +2393,50 @@ mod tests {
             Some(a.as_path()),
             "control: with no menu up it brings a forward"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The tab menu answers the keyboard: `↓` walks the live rows, `End` lands on
+    /// the last, `Enter` runs the highlighted one. On a pinned tab the dim *Close*
+    /// is stepped over.
+    /// flip: `tab_menu` walking every row, dim ones too → fails at "past the dim Close".
+    #[test]
+    fn the_tab_menu_answers_the_arrows_and_enter() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("tab-menu-keys");
+        let mut app = app_at(&ctx, &root);
+        let a = file(&root, "a");
+        app.open_path(&a);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        let key = |k| egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let a_tab = app.tab_of_path(&a).unwrap();
+        let (on_a, _) = tab_points(1);
+
+        click(&ctx, &mut app, on_a, egui::PointerButton::Secondary);
+        frame(&ctx, &mut app, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(app.tabs.menu_highlight, Some(0), "Pin tab, the first row");
+        frame(&ctx, &mut app, vec![key(egui::Key::Enter)]);
+        assert!(app.tabs.is_pinned(a_tab), "Enter runs it");
+        assert!(app.tabs.menu.is_none());
+
+        // Pinned, a leads the strip now.
+        let (on_a, _) = tab_points(0);
+        click(&ctx, &mut app, on_a, egui::PointerButton::Secondary);
+        assert!(matches!(app.tabs.menu, Some((id, ..)) if id == a_tab));
+        frame(&ctx, &mut app, vec![key(egui::Key::ArrowDown)]);
+        frame(&ctx, &mut app, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(app.tabs.menu_highlight, Some(2), "past the dim Close");
+        frame(&ctx, &mut app, vec![key(egui::Key::End)]);
+        assert_eq!(app.tabs.menu_highlight, Some(3), "End: Close all");
         let _ = std::fs::remove_dir_all(&root);
     }
 

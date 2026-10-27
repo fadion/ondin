@@ -14,6 +14,7 @@ use crate::app::OndinApp;
 use crate::library::scan::Entry;
 use crate::library::state::Sort;
 use crate::library::{clock, ids, naming, project, store};
+use crate::menu::{Nav as MenuNav, navigate_index, pointer_moved};
 use crate::settings;
 use crate::theme;
 use crate::theme::{color, icon};
@@ -115,9 +116,17 @@ const FILTER_ROW_H: f32 = 28.0;
 /// A project's colour chip, in the filter and its menu — the design's 7×7.
 const DOT: f32 = 7.0;
 
+/// A library menu's keyboard state: the highlighted row and the key read with the
+/// frame's keys (`OndinApp::dashboard_keys`), for [`anchored_menu`] to act on.
+#[derive(Default)]
+pub(crate) struct MenuKeys {
+    pub(crate) highlight: Option<usize>,
+    pub(crate) nav: Option<MenuNav>,
+}
+
 /// What one frame of an [`anchored_menu`] came to.
 struct MenuOutcome {
-    /// The row clicked, if one was.
+    /// The row chosen, by a click or `Enter`, if one was.
     chosen: Option<usize>,
     /// Whether a click landed outside both the menu and the control it hangs
     /// from — i.e. whether the caller should close it.
@@ -130,14 +139,29 @@ struct MenuOutcome {
 /// draws a row's contents into the rect it is given. Escape is handled in
 /// `dashboard_keys` behind `library_menu_open()`, since a keyboard rule in a
 /// drawing helper only runs on frames the menu is drawn.
+///
+/// `keys` is the menu's keyboard half (`context-menus.md` §8): the key read with
+/// the frame's keys moves the highlight or runs it, and a pointer move hands the
+/// highlight back to the pointer.
 fn anchored_menu(
     ui: &mut egui::Ui,
     id: egui::Id,
     anchor: egui::Rect,
     w: f32,
     rows: usize,
+    keys: &mut MenuKeys,
     paint: impl Fn(&egui::Painter, usize, egui::Rect),
 ) -> MenuOutcome {
+    let mut chosen = None;
+    match keys.nav.take() {
+        Some(MenuNav::Move(step)) => {
+            keys.highlight = navigate_index(rows, keys.highlight.filter(|i| *i < rows), step);
+        }
+        Some(MenuNav::Activate) => chosen = keys.highlight.filter(|i| *i < rows),
+        None if pointer_moved(ui.ctx()) => keys.highlight = None,
+        None => {}
+    }
+    let highlight = keys.highlight;
     let h = rows as f32 * FILTER_ROW_H + 10.0;
     let pos = if anchor.size() == egui::Vec2::ZERO {
         ui::menu_place(ui.ctx(), anchor.min, egui::vec2(w, h))
@@ -157,7 +181,7 @@ fn anchored_menu(
             egui::Stroke::new(1.0, color::FIELD_BORDER),
             egui::StrokeKind::Inside,
         );
-        let mut chosen = None;
+        let mut clicked = None;
         for i in 0..rows {
             let row = egui::Rect::from_min_size(
                 egui::pos2(
@@ -167,7 +191,12 @@ fn anchored_menu(
                 egui::vec2(w - 8.0, FILTER_ROW_H),
             );
             let r = ui.interact(row, ui.id().with(i), egui::Sense::click());
-            if r.hovered() {
+            // One ground: the keyboard's while it holds a highlight, else the hover.
+            let lit = match highlight {
+                Some(hl) => hl == i,
+                None => r.hovered(),
+            };
+            if lit {
                 ui.painter().rect_filled(
                     row,
                     egui::CornerRadius::same(6),
@@ -176,12 +205,13 @@ fn anchored_menu(
             }
             paint(ui.painter(), i, row);
             if r.clicked() {
-                chosen = Some(i);
+                clicked = Some(i);
             }
         }
-        (rect, chosen)
+        (rect, clicked)
     });
-    let (rect, chosen) = inner.inner;
+    let (rect, clicked) = inner.inner;
+    let chosen = chosen.or(clicked);
     let at = |r: egui::Rect| ui.ctx().pointer_interact_pos().unwrap_or(r.center());
     MenuOutcome {
         chosen,
@@ -311,6 +341,9 @@ pub(crate) struct DashboardState {
     pub(crate) menu_for: Option<PathBuf>,
     /// Where a right-click opened that menu; `None` hangs it under the ⋮.
     pub(crate) menu_at: Option<egui::Pos2>,
+    /// The keyboard half of whichever floating menu is up: the ⋮ menu or the
+    /// project dropdown, never both. Cleared by each door that opens one.
+    pub(crate) menu_keys: MenuKeys,
     /// Whether either floating menu was on screen when this frame began.
     ///
     /// Latched at the top of `dashboard_ui`, because the live flags are cleared
@@ -548,12 +581,15 @@ impl OndinApp {
         }
         // The tab menu holds the keyboard (`library_keys_are_free`); `Escape` closes
         // only it, consumed so `dashboard_keys` does not also clear the cursor.
-        if self.tabs.menu.is_some()
-            && ui
+        if self.tabs.menu.is_some() {
+            if ui
                 .ctx()
                 .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.tabs.menu = None;
+            {
+                self.tabs.menu = None;
+            } else {
+                self.tabs.menu_nav = crate::menu::read_nav(ui.ctx());
+            }
         }
         // A click that dismisses a library menu is spent doing so; the strip latches
         // its own menu.
@@ -1605,6 +1641,7 @@ impl OndinApp {
         );
         if resp.clicked() {
             self.dash.filter_open = !self.dash.filter_open;
+            self.dash.menu_keys = MenuKeys::default();
         }
         if self.dash.filter_open {
             self.project_filter_menu(ui, rect);
@@ -1631,6 +1668,7 @@ impl OndinApp {
             anchor,
             w,
             rows.len(),
+            &mut self.dash.menu_keys,
             |p, i, row| {
                 let (id, name, dot) = &rows[i];
                 let on = &current == id;
@@ -2159,6 +2197,7 @@ impl OndinApp {
         if resp.secondary_clicked() {
             self.dash.menu_for = Some(entry.path.clone());
             self.dash.menu_at = resp.interact_pointer_pos();
+            self.dash.menu_keys = MenuKeys::default();
             self.dash.moving = None;
             self.dash.filter_open = false;
             self.tabs.menu = None;
@@ -2264,6 +2303,9 @@ impl OndinApp {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.dash.menu_for = None;
                 self.dash.filter_open = false;
+            } else {
+                // For the menu to act on as it draws, later this frame.
+                self.dash.menu_keys.nav = crate::menu::read_nav(ctx);
             }
             return;
         }
@@ -2661,6 +2703,7 @@ impl OndinApp {
             let shut = open && self.dash.menu_at.is_none();
             self.dash.menu_for = (!shut).then(|| entry.path.clone());
             self.dash.menu_at = None;
+            self.dash.menu_keys = MenuKeys::default();
             self.dash.moving = None;
         }
         if self.dash.menu_for.as_ref() == Some(&entry.path) {
@@ -2733,6 +2776,7 @@ impl OndinApp {
             anchor,
             w,
             rows.len(),
+            &mut self.dash.menu_keys,
             |p, i, row| {
                 let label = rows[i].0;
                 // *Delete* alone is not the ordinary ink: it cannot be undone.
@@ -6228,6 +6272,36 @@ mod tests {
         };
         let _ = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
         app.settle_open();
+    }
+
+    /// The ⋮ menu answers the keyboard: `↓` walks its rows from the first, `Enter`
+    /// runs the highlighted one, and neither reaches the library's own keys.
+    /// flip: `anchored_menu` ignoring `MenuNav::Activate` → fails at "Enter runs it".
+    #[test]
+    fn the_file_menu_answers_the_arrows_and_enter() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "menu-keys");
+        let mut doc = ondin_core::Document::new(app.session.ids.mint());
+        let path = store::file_document(&root, None, "Alpha", &mut doc).unwrap();
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+        let _ = galleys(&mut app, &ctx);
+        app.dash.menu_for = Some(path.clone());
+
+        press(&mut app, &ctx, egui::Key::ArrowDown);
+        assert_eq!(app.dash.menu_keys.highlight, Some(0), "Open, the first row");
+        press(&mut app, &ctx, egui::Key::ArrowDown);
+        assert_eq!(app.dash.menu_keys.highlight, Some(1), "then Rename");
+        press(&mut app, &ctx, egui::Key::Enter);
+        assert_eq!(
+            app.rename_entry.as_ref().map(|r| &r.0),
+            Some(&path),
+            "Enter runs it"
+        );
+        assert!(app.dash.menu_for.is_none(), "and the menu closes");
+        assert_eq!(app.session.path, None, "the library's Enter opened nothing");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The arithmetic behind the arrow keys. flip: replace the `clamp` with a range

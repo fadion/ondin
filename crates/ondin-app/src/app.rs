@@ -1640,6 +1640,8 @@ impl eframe::App for OndinApp {
             // The tab menu holds the keyboard; `Escape` closes only it.
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.tabs.menu = None;
+            } else {
+                self.tabs.menu_nav = crate::menu::read_nav(&ctx);
             }
         } else if self.modal_is_up() {
             // A modal owns every key; `input::resolve` is no second guard, since a modal

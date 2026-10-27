@@ -2374,16 +2374,44 @@ pub fn navigate(groups: &[Vec<Row>], from: Option<Item>, step: Step) -> Option<I
         .filter(|r| r.enabled)
         .map(|r| r.item)
         .collect();
-    let last = live.len().checked_sub(1)?;
     let at = from.and_then(|item| live.iter().position(|i| *i == item));
+    navigate_index(live.len(), at, step).map(|i| live[i])
+}
+
+/// [`navigate`] over `count` live rows by position, for the menus drawn outside
+/// the registry (the tab menu, the library's). `None` when there is no live row.
+pub fn navigate_index(count: usize, at: Option<usize>, step: Step) -> Option<usize> {
+    let last = count.checked_sub(1)?;
     Some(match (step, at) {
-        (Step::First, _) => live[0],
-        (Step::Last, _) => live[last],
+        (Step::First, _) => 0,
+        (Step::Last, _) => last,
         // A highlight the rebuild left behind restarts at the end the key was heading for.
-        (Step::Next, None) => live[0],
-        (Step::Prev, None) => live[last],
-        (Step::Next, Some(i)) => live[if i == last { 0 } else { i + 1 }],
-        (Step::Prev, Some(i)) => live[if i == 0 { last } else { i - 1 }],
+        (Step::Next, None) => 0,
+        (Step::Prev, None) => last,
+        (Step::Next, Some(i)) => {
+            if i == last {
+                0
+            } else {
+                i + 1
+            }
+        }
+        (Step::Prev, Some(i)) => {
+            if i == 0 {
+                last
+            } else {
+                i - 1
+            }
+        }
+    })
+}
+
+/// Whether a pointer moved this frame, which hands a keyboard highlight back to
+/// the pointer (`docs/context-menus.md` §8).
+pub(crate) fn pointer_moved(ctx: &egui::Context) -> bool {
+    ctx.input(|i| {
+        i.events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerMoved(_)))
     })
 }
 
@@ -2533,11 +2561,7 @@ impl OndinApp {
         // The keyboard half (§8): an arrow moves the highlight, `Enter` runs it, a
         // pointer move gives it back to the pointer. The keyboard wins a frame
         // carrying both.
-        let moved = ctx.input(|i| {
-            i.events
-                .iter()
-                .any(|e| matches!(e, egui::Event::PointerMoved(_)))
-        });
+        let moved = pointer_moved(ctx);
         match nav {
             Some(Nav::Move(step)) => highlight = navigate(&groups, highlight, step),
             // Re-checked against this frame's build in case the row went dim.

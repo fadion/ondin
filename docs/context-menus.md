@@ -402,8 +402,10 @@ closes it too, so one floating menu is up at a time. A left-click that closes it
 says, through `Tabs::menu_was_up`, latched as the strip begins: the strip's own left-button doors,
 the canvas, a layers row and the library (`menu_was_up`) all stand down for it. It holds the keyboard: the editor's key routing
 has a branch for it beside `context_menu`, and on the library `dashboard_ui` consumes `Escape`
-before the strip, with `library_keys_are_free` false while it is open. Only `Escape` is read; the
-arrows do not reach its rows. Opening it closes the editor's context menu, the library's ⋮ menu and
+before the strip, with `library_keys_are_free` false while it is open. Both read §8's keys with
+`read_nav` into `Tabs::menu_nav`, which `tab_menu` spends as it draws (`navigate_index` over the
+live rows). The library's ⋮ menu, opened by the dots or a right-click, and its project dropdown
+answer the same keys (`dashboard::MenuKeys`, read in `dashboard_keys`). Opening it closes the editor's context menu, the library's ⋮ menu and
 project dropdown, and the caret's list.
 
 ---

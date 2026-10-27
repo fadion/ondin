@@ -796,6 +796,7 @@ impl OndinApp {
         let mut paths = self.prefs.open_tabs.clone();
         // From before tabs, the one document `reopen_last` named.
         if paths.is_empty()
+            && !self.prefs.tabs_remembered
             && self.prefs.reopen_last
             && let Some(last) = self.prefs.last_document.clone()
         {
@@ -832,7 +833,11 @@ impl OndinApp {
             .open_tabs
             .get(self.prefs.front_tab?)
             .cloned()
-            .or_else(|| self.prefs.last_document.clone())?;
+            .or_else(|| {
+                (!self.prefs.tabs_remembered)
+                    .then(|| self.prefs.last_document.clone())
+                    .flatten()
+            })?;
         self.tab_of_path(&path)
     }
 
@@ -859,7 +864,9 @@ impl OndinApp {
         if paths != self.prefs.open_tabs
             || front_at != self.prefs.front_tab
             || pins != self.prefs.pinned_tabs
+            || !self.prefs.tabs_remembered
         {
+            self.prefs.tabs_remembered = true;
             self.prefs.open_tabs = paths;
             self.prefs.front_tab = front_at;
             self.prefs.pinned_tabs = pins;
@@ -1924,6 +1931,40 @@ mod tests {
             "and the gone one is reported: {:?}",
             next.session.status().text
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With *reopen last* on, closing every tab means none comes back: the empty
+    /// list was written, so the document opened last is not read in its place.
+    /// A preferences file from before tabs still reopens that document.
+    /// flip: `restore_tabs` without its `tabs_remembered` test → fails at "none".
+    #[test]
+    fn closing_every_tab_brings_none_back() {
+        let ctx = egui::Context::default();
+        let root = temp_root("none-back");
+        let mut app = app_at(&ctx, &root);
+        let a = file(&root, "a");
+        let starter = app.tabs.active.unwrap();
+        app.discard_tab(starter);
+        app.open_path(&a);
+        app.remember_tabs();
+        app.close_tab(app.tab_of_path(&a).unwrap());
+        app.remember_tabs();
+        assert!(app.prefs.open_tabs.is_empty(), "fixture: nothing open");
+        assert_eq!(app.prefs.last_document.as_deref(), Some(a.as_path()));
+
+        let restore = |prefs: crate::prefs::Prefs| {
+            let mut next = app_at(&ctx, &root);
+            next.tabs = Tabs::default();
+            next.prefs = prefs;
+            next.prefs.reopen_last = true;
+            next.restore_tabs();
+            (next.tabs.list.len(), next.restored_front().is_some())
+        };
+        assert_eq!(restore(app.prefs.clone()), (0, false), "none");
+        let mut old = app.prefs.clone();
+        old.tabs_remembered = false;
+        assert_eq!(restore(old), (1, true), "control: from before tabs");
         let _ = std::fs::remove_dir_all(&root);
     }
 

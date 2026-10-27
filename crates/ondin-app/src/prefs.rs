@@ -294,8 +294,11 @@ pub struct Prefs {
     /// How many of [`Self::open_tabs`], from the first, were pinned: pinned tabs
     /// always lead the strip.
     pub pinned_tabs: usize,
-    /// The document opened last. Read at launch only when [`Self::open_tabs`] is
-    /// empty, as a preferences file from before tabs has it.
+    /// Whether [`Self::open_tabs`] has been written, so an empty list means every
+    /// tab was closed, not a preferences file from before tabs.
+    pub tabs_remembered: bool,
+    /// The document opened last. Read at launch only when [`Self::open_tabs`] was
+    /// never written, as in a preferences file from before tabs.
     ///
     /// A path rather than a document id, since resolving an id means scanning the
     /// library and this is read before the first scan. A stale path opens the
@@ -363,6 +366,7 @@ impl Default for Prefs {
             open_tabs: Vec::new(),
             front_tab: None,
             pinned_tabs: 0,
+            tabs_remembered: false,
             last_document: None,
             palette_recent: Vec::new(),
             view: ViewPrefs::default(),

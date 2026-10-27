@@ -224,8 +224,9 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 (`vm.md`). The design canvas's *Command Palette* artboard is the mockup; these rules are the spec.
 
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
-  dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new and
-  close document, the library, settings, *Export as …*, *Present*, *Check contrast*, tools, place image, zoom, align,
+  dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
+  close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
+  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -315,9 +316,11 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   `resolve` does not run under a modal, and not on the frame that opened it (`just_opened`).
 - **Rows** are the registry's items with an accel: label and spelling from `Item::spec` (*Hide /
   Show*, *Lock / Unlock* and *Paste* name the verb rather than one state), alternatives from
-  `Item::alt_accel` joined by "or". A row is never dimmed for availability and never runs.
+  `Item::alt_accel` joined by "or". A row is never dimmed for availability and never runs. Mouse,
+  Tabs and Library are hand-written rows: `tabs::read_keys` reads the tab chords before the keymap,
+  so the chord test, which drives the keymap, cannot cover them.
 - **Sections** (`sections`): Tools, Zoom, Pages, Edit, Structure, Arrange, Layer, View, Components and
-  kits, File, Text editing, Mouse, Library, dealt in order into three columns, each filled to about
+  kits, File, Tabs, Text editing, Mouse, Library, dealt in order into three columns, each filled to about
   its share; a section is never split. A narrow window deals into two or one, so no column is under
   220 wide (`column_count`). Opened from the library, its section leads, followed by an *In a
   file* divider; opened in a text session, the text keys lead.

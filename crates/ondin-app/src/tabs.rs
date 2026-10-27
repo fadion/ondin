@@ -1692,6 +1692,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The palette's tab rows reach the tabs through `dispatch`, as their chords do.
+    /// flip: `Item::PreviousTab` mapping to `Step(1)` → fails at "back to a".
+    #[test]
+    fn the_palettes_tab_rows_step_and_reopen() {
+        use crate::menu::Item;
+        let ctx = egui::Context::default();
+        let root = temp_root("palette-rows");
+        let mut app = app_at(&ctx, &root);
+        let (a, b) = (file(&root, "a"), file(&root, "b"));
+        app.open_path(&a);
+        app.open_path(&b);
+        app.activate_tab(app.tab_of_path(&a).unwrap());
+        let run = |app: &mut OndinApp, item: Item| {
+            app.dispatch(&ctx, item.action().expect("an app verb"));
+            app.settle_open();
+        };
+
+        run(&mut app, Item::NextTab);
+        assert_eq!(front_path(&app).as_deref(), Some(b.as_path()), "on to b");
+        run(&mut app, Item::PreviousTab);
+        assert_eq!(front_path(&app).as_deref(), Some(a.as_path()), "back to a");
+        app.close_tab(app.tab_of_path(&b).unwrap());
+        run(&mut app, Item::ReopenTab);
+        assert!(app.tab_of_path(&b).is_some(), "b is open again");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A document opened from the library gets its tab at once, in front and
     /// pulsing, and lands in it; one that cannot be read takes the tab away again.
     /// flip: `land_open` keeping a failed fresh tab → fails at "the tab goes".

@@ -1915,6 +1915,7 @@ impl OndinApp {
                     self.close_tab(id);
                 }
             }
+            Action::Tab(key) => self.tab_key(key),
             // The top bar's door; it cannot arrive with the modal already up.
             Action::OpenSettings => self.toggle_settings(ctx),
             Action::Palette => self.toggle_palette(ctx),

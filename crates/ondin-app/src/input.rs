@@ -69,12 +69,12 @@ pub enum Action {
     /// project it lands in is computed at the door: the dashboard reads the nav
     /// being viewed, this reads the open document's own project.
     NewDocument,
-    /// `Ctrl+W` — close the document and go back to the library.
-    ///
-    /// Lands where `OndinApp::go_to_dashboard` lands (autosaved, snapshot dropped,
-    /// library re-scanned); it is a second door onto the screen `Action::Open`
-    /// opens, for the user who means "I am done with this".
+    /// `Ctrl+W` — close the tab in front (`OndinApp::close_tab`); the next tab
+    /// comes forward, else the library.
     CloseDocument,
+    /// A tab key, from the palette. [`resolve`] never yields it: the chords are read
+    /// by `tabs::read_keys` before the keymap, on both screens.
+    Tab(crate::tabs::TabKey),
     /// `Ctrl+,` — the Settings modal (`crate::settings`).
     ///
     /// Open, not toggle: while the modal is up [`resolve`] is not called, so the

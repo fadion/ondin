@@ -277,6 +277,18 @@ fn sections(lead: Lead) -> Vec<Section> {
                 Item::Cheatsheet,
             ],
         ),
+        // Hand rows: `tabs::read_keys` reads these chords, not the keymap the chord
+        // test drives.
+        Section {
+            title: "Tabs",
+            rows: vec![
+                hand_row("Next tab", &["Ctrl+Tab"]),
+                hand_row("Previous tab", &["Ctrl+Shift+Tab"]),
+                hand_row("Reopen closed tab", &["Ctrl+Shift+T"]),
+                hand_row("Go to tab 1–8", &["Alt+1…8"]),
+                hand_row("Go to the last tab", &["Alt+9"]),
+            ],
+        },
         items_section("Text editing", &text),
         Section {
             title: "Mouse",

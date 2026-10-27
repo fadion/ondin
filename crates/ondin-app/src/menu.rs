@@ -392,6 +392,10 @@ pub enum Item {
     Save,
     NewDocument,
     CloseDocument,
+    /// `Action::Tab`: the next tab, the previous, the last closed back.
+    NextTab,
+    PreviousTab,
+    ReopenTab,
     /// `Action::Open`, the library.
     Library,
     Settings,
@@ -1030,7 +1034,20 @@ impl Item {
                 Group::File,
             ),
             Item::NewDocument => s("New file", icon::PLUS_SQUARE, Some("Ctrl+N"), Group::File),
-            Item::CloseDocument => s("Close file", icon::X, Some("Ctrl+W"), Group::File),
+            Item::CloseDocument => s("Close tab", icon::X, Some("Ctrl+W"), Group::File),
+            Item::NextTab => s("Next tab", icon::BROWSERS, Some("Ctrl+Tab"), Group::File),
+            Item::PreviousTab => s(
+                "Previous tab",
+                icon::BROWSERS,
+                Some("Ctrl+Shift+Tab"),
+                Group::File,
+            ),
+            Item::ReopenTab => s(
+                "Reopen closed tab",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                Some("Ctrl+Shift+T"),
+                Group::File,
+            ),
             Item::Library => s(
                 "Go to the library",
                 icon::SQUARES_FOUR,
@@ -1270,6 +1287,8 @@ impl Item {
             Item::ToggleLocked => &["lock", "unlock"],
             Item::Delete => &["remove"],
             Item::Library => &["open", "files", "dashboard", "home"],
+            Item::NextTab | Item::PreviousTab => &["switch", "document", "file"],
+            Item::ReopenTab => &["restore", "undo close", "document", "file"],
             Item::Settings => &["preferences", "options"],
             Item::Save => &["version", "pin"],
             Item::CreateComponent => &["main", "symbol"],
@@ -1330,6 +1349,9 @@ impl Item {
             Item::Save => Action::Save,
             Item::NewDocument => Action::NewDocument,
             Item::CloseDocument => Action::CloseDocument,
+            Item::NextTab => Action::Tab(crate::tabs::TabKey::Step(1)),
+            Item::PreviousTab => Action::Tab(crate::tabs::TabKey::Step(-1)),
+            Item::ReopenTab => Action::Tab(crate::tabs::TabKey::Reopen),
             Item::Library => Action::Open,
             Item::Settings => Action::OpenSettings,
             Item::ExportCode(t) => Action::ExportCode(t),
@@ -3125,6 +3147,9 @@ impl OndinApp {
             | Item::Save
             | Item::NewDocument
             | Item::CloseDocument
+            | Item::NextTab
+            | Item::PreviousTab
+            | Item::ReopenTab
             | Item::Library
             | Item::Settings
             | Item::ExportCode(_)

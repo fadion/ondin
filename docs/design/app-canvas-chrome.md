@@ -198,7 +198,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 ### Settings
 
 - Rightmost: Phosphor `sliders`, 28pt, ten points clear of the document's controls. The update chip
-  sits between it and that gap. On Windows/Linux the window caption buttons are to its right.
+  sits between it and that gap. The window's caption buttons are in the tab strip above.
 - Opens `settings.rs`'s modal: nudge step, *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
   its glyph `WARN` with a tooltip when the family is `Missing`, §5.4a), the web-font switch and
@@ -346,13 +346,13 @@ Focus mode (`OndinApp::focus`, `ViewSwitch::Focus`, `Ctrl+\`, the palette's *foc
 a normal editing mode with the panels out of the way. Present mode is a separate, view-only mode and
 none of the rules below are its.
 
-- Hides exactly: top bar, layers pane, tool rail, inspector, and the inspector's popups (picker,
+- Hides exactly: tab strip, top bar, layers pane, tool rail, inspector, and the inspector's popups (picker,
   kit picker, var browser, field menu, var autocomplete, mode menu, style popups). Everything edited
   *with* stays — ruler bars, guides, layout grids, selection box, handles, size badge, hover outline,
   frame tags — and the canvas works normally, so a guide can be pulled out of a ruler. The rulers
   are an editing aid like guides and layout grids, not app chrome. The **floating status bar stays**
   (it carries *"Focus mode — Escape to leave"*), and so does the minimap.
-- On Windows/Linux the top bar is the title bar, so caption buttons go too; `chrome::focus_strip`
+- It hides the tab strip too, which is the title bar on Windows/Linux, so caption buttons go; `chrome::focus_strip`
   shows them in a 32pt strip when the pointer reaches the window's top edge with no button held, keeps
   it while hovered or a button is down. Approaching from the canvas below shows nothing.
 - It **overrides** the switches it reads (layers, toolbar) without changing them, so leaving

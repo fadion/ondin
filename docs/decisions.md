@@ -123,6 +123,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Filesystem is truth.** Every action writes to disk and re-scans. Nothing about a document lives only in the app's memory, and no fact lives only in a cache.
 - **The format stays git-friendly**: pretty JSON (line-level diffs), an id-sorted node list, stable string ids, byte-stable output (invariant 9), the camera in `EditorSession` rather than the DTO, and `skip_serializing_if`. A modified-at stamp or view state in `DocumentDto` would break all of it, so an edit time is read off the directory entry. An edit touches only its node and its parent, with no cascade across unrelated nodes.
 - **Autosave is debounced**: writing on every op into a synced folder thrashes the sync client.
+- **Leaving a tab saves it**, as leaving for the library does, instead of an autosave tick running for tabs behind: a tab behind is clean unless it cannot be saved, and nothing is written behind the user's back while it waits.
 - **Undo history is kept per document in the library** (`.history/<document id>.json`), never beside the file, so it does not travel with a copy. It is read back only for byte-identical file contents written by the same build: a history replayed onto any other document would corrupt it.
 
 ## Workspace and build
@@ -154,7 +155,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **A contrast fix passes in every mode or is not offered.** A raw colour is the same in all modes, so the nearest colour must pass every mode's worst backdrop and only variables passing in every mode are listed; when no lightness at the hue passes everywhere, only variables are offered.
 - **D749** The dashboard's default page is set only in Settings.
 - **Which page is current is view state, never saved in the file**: switching pages is no edit and no undo step, each page's camera and selection are kept for the sitting only, and the library remembers per machine the page a document was left on.
-- **D768** Open and Recover ask or save before replacing the open document.
+- **D768** Open and Recover never replace an open document: each opens in a tab of its own, or brings forward the tab already holding that file. A document is never open twice, since two sessions saving one file would overwrite each other.
 - **The colour picker's tabs are Solid · Gradient · Variables**; the gradient kind (Linear, Radial, Angular) is a menu on the geometry row's preview chip. A tab per kind does not fit beside *Variables* at 10pt, and a menu adds no row, so every face keeps one height and another kind costs one menu row.
 - **The open picker is the gradient editing mode**: no tool of its own. While it shows a gradient fill or stroke of the one selected layer, the canvas draws that gradient's handles in place of the selection box.
 - **The eyedropper picks what is seen**, anywhere in the window: on the canvas the rendered pixel, composited over the ground, with egui's overlays never in it; elsewhere a frame of the window frozen while armed, chrome included. Hovering previews nothing on the canvas, since the next sample would read the preview.

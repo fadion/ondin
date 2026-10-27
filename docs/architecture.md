@@ -44,7 +44,7 @@ Read the file for the exact wording before relying on one.
 | `export.md` | 7 | SVG, PDF, PNG, code export (HTML/CSS, React, Vue), JSON snapshot, the CLI, export doors |
 | `mcp.md` | 8 | MCP topology, headless mode, concurrency, the tool list (a test parses §8.4) |
 | **App** | | |
-| `app-chrome.md` | 9.1, 9.2 | UI chrome and panel layout, the layers tree, the Pages section and the current page, the History section |
+| `app-chrome.md` | 9.1, 9.2 | UI chrome and panel layout, the title bar and the tab strip, the layers tree, the Pages section and the current page, the History section |
 | `app-dataflow.md` | 9.3 | The one-way valve: gestures, previews, the commit door |
 | `tools.md` | 9.4 | The v1 tools and canvas interaction |
 | `app-selection.md` | 9.4 | Selection on the canvas and in the layers panel |
@@ -60,7 +60,7 @@ Read the file for the exact wording before relying on one.
 | `inspector.md` | 9.4 | The inspector cards |
 | `type-panel.md` | 9.4 | The Type panel and typography popup |
 | `font-picker.md` | 9.4 | The font picker |
-| `library.md` | 9.5 | The library: dashboard, projects, versions, trash |
+| `library.md` | 9.5 | The library: dashboard, projects, versions, trash; document tabs (open, park, close, next launch) |
 
 Also in `docs/`: `shortcuts.md` (the keymap), `context-menus.md` (the menus), `vm.md` (the
 Command Mode language, unbuilt).

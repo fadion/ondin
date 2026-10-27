@@ -12,7 +12,6 @@ reads true.
 - **Blend modes**, per layer and per effect. `shortcuts.md` §2 reserves `Shift+3`…`Shift+9`.
 - **Background blur.** Canvas and raster draw the backdrop; SVG cannot express it and the code export
   has `backdrop-filter`, so the SVG writer owes an answer (a reported approximation, at least).
-- **More than one open document** — `OndinApp` holds one `session`.
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Tools**: pencil (freehand), slices.
 - **Shapes**: ellipse arcs and donuts; corner smoothing on frames, polygons, stars and paths (a rect

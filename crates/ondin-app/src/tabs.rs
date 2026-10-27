@@ -342,11 +342,23 @@ impl OndinApp {
 
     /// A library file has gone to the trash: an open document it backed keeps its
     /// tab with nowhere to save to, and a tab that only named it closes.
+    ///
+    /// The kept document gives up the file's id, so saving it files a new
+    /// document rather than a second one with the trashed file's id (its kept
+    /// history, crash snapshot and kit identity are keyed by it).
     pub(crate) fn open_file_trashed(&mut self, path: &Path) {
+        let front = self.session.path.as_deref() == Some(path);
         for s in self.open_sessions() {
             if s.path.as_deref() == Some(path) {
                 s.path = None;
+                let mut meta = s.doc.meta().clone();
+                meta.id = None;
+                s.doc.set_meta(meta);
             }
+        }
+        if front {
+            // The next tick snapshots under a key of its own.
+            self.drop_recovery();
         }
         let gone: Vec<TabId> = self
             .tabs
@@ -468,6 +480,9 @@ impl OndinApp {
             // A failed read waits for *Try again*.
             Body::Unloaded { failed, .. } => {
                 let failed = failed.is_some();
+                // The tab left is saved and parked now, not when the read lands:
+                // the ticks that save it run only for the tab in front.
+                self.park_active();
                 self.tabs.shown = Some(id);
                 self.view = View::Editor;
                 if !failed {
@@ -1583,10 +1598,16 @@ impl OndinApp {
                     });
                 });
             });
+        // The tab menu, open or closed by this frame's press, holds the keys and
+        // spends the click.
+        if self.tabs.menu.is_some() || self.tabs.menu_was_up {
+            return;
+        }
         let (close_key, library_key) = ui.ctx().input(|i| {
             let cmd = i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift;
             (
-                cmd && i.key_pressed(egui::Key::W),
+                // `Ctrl+W` spares a pinned tab, as in the editor; the button does not.
+                cmd && i.key_pressed(egui::Key::W) && !info.pinned,
                 cmd && i.key_pressed(egui::Key::O),
             )
         });
@@ -2052,6 +2073,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A trashed file's tab, saved again, files a document with an id of its own,
+    /// not a second one with the trashed file's.
+    /// flip: `open_file_trashed` keeping `meta.id` → fails at "an id of its own".
+    #[test]
+    fn a_trashed_files_tab_saves_under_a_new_id() {
+        let ctx = egui::Context::default();
+        let root = temp_root("trashed-id");
+        let mut app = app_at(&ctx, &root);
+        let mut doc = ondin_core::Document::new(ondin_core::IdSource::new(7).mint());
+        let a = crate::library::store::file_document(&root, None, "a", &mut doc).unwrap();
+        app.open_path(&a);
+        edit(&mut app);
+        let was = app.session.doc.meta().id.clone();
+        assert!(was.is_some(), "fixture: the file has an id");
+        app.open_file_trashed(&a);
+        assert!(app.save_file(false), "the tab files again");
+        let now = app.session.doc.meta().id.clone();
+        assert!(now.is_some() && now != was, "an id of its own");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Making a file a kit from the library while its tab is parked marks that
     /// tab's copy too, so the tab's next save keeps the mark.
     /// flip: `set_kit_at` patching only the session in front → fails at "the mark
@@ -2075,6 +2117,99 @@ mod tests {
         assert!(
             read(&a).meta().kit.as_ref().is_some_and(|k| k.sharing),
             "the mark survives the parked tab's save"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Switching to a tab not read yet saves the tab left, as any switch does,
+    /// whatever the read then does.
+    /// flip: `activate_tab`'s unread arm without `park_active` → fails at "saved".
+    #[test]
+    fn switching_to_an_unread_tab_saves_the_one_left() {
+        let ctx = egui::Context::default();
+        let root = temp_root("unread-switch");
+        let mut app = app_at(&ctx, &root);
+        let a = file(&root, "a");
+        app.open_path(&a);
+        edit(&mut app);
+        let missing = app.tabs.add(Body::Unloaded {
+            path: root.join("missing.ondin"),
+            failed: None,
+        });
+        app.activate_tab(missing);
+        app.settle_open();
+        let on_disk = ondin_core::io::load(&std::fs::read(&a).unwrap()).unwrap();
+        assert_eq!(
+            on_disk.get(on_disk.first_page()).unwrap().children().len(),
+            1,
+            "saved"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// On a tab that could not be read, the tab menu holds the keys (`Escape`
+    /// closes only it), and `Ctrl+W` spares the tab when it is pinned.
+    /// flip: the placeholder branch without its menu routing → fails at "the
+    /// menu closes"; `tab_placeholder`'s `Ctrl+W` ignoring the pin → fails at
+    /// "spared".
+    #[test]
+    fn a_failed_tabs_placeholder_keeps_the_tab_rules() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("placeholder");
+        let mut app = app_at(&ctx, &root);
+        let failed = app.tabs.add(Body::Unloaded {
+            path: root.join("gone.ondin"),
+            failed: Some("not found".into()),
+        });
+        app.tabs.pin(failed, true);
+        app.tabs.shown = Some(failed);
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            app.tabs.shown,
+            Some(failed),
+            "fixture: the placeholder is up"
+        );
+
+        app.tabs.menu = Some((failed, egui::pos2(40.0, 20.0), 0));
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(app.tabs.menu.is_none(), "the menu closes");
+
+        frame(&ctx, &mut app, Vec::new());
+        // The chord's modifiers are the frame's, not the event's.
+        let mut f = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            modifiers: egui::Modifiers::COMMAND,
+            events: vec![key(egui::Key::W, egui::Modifiers::COMMAND)],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut f));
+        assert!(app.tabs.get(failed).is_some(), "spared");
+        app.tabs.pin(failed, false);
+        let input = egui::RawInput {
+            modifiers: egui::Modifiers::COMMAND,
+            events: vec![key(egui::Key::W, egui::Modifiers::COMMAND)],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut f));
+        assert!(
+            app.tabs.get(failed).is_none(),
+            "control: unpinned, it closes"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

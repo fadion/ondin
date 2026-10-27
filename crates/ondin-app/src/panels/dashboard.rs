@@ -2270,9 +2270,11 @@ impl OndinApp {
     /// about a live text cursor, and `search_field` reads its chord before drawing
     /// its own `TextEdit`.
     pub(crate) fn library_keys_are_free(&self) -> bool {
-        // The recovery card is drawn by `OndinApp::ui` above the view branch, so
-        // this file lists it by name.
+        // The recovery and *Unsaved changes* cards are drawn by `OndinApp::ui`
+        // above the view branch, so this file lists them by name.
         self.recovery.pending.is_empty()
+            && !self.confirming_close
+            && self.closing_tabs.is_empty()
             && self.dash.moving.is_none()
             && self.dash.deleting.is_none()
             && self.dash.deleting_project.is_none()
@@ -6604,6 +6606,27 @@ mod tests {
             "control: Ctrl+K still opens the search when nothing else wants the \
              keyboard"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The *Unsaved changes* cards, drawn above the library, own its keys too.
+    /// flip: `library_keys_are_free` without `closing_tabs` → fails at "the tab
+    /// card".
+    #[test]
+    fn the_unsaved_changes_cards_hold_the_librarys_keys() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "closing-keys");
+        app.dash.nav = Nav::All;
+        let cmd = egui::Modifiers::COMMAND;
+        app.confirming_close = true;
+        press_with(&mut app, &ctx, egui::Key::K, cmd);
+        assert_eq!(app.dash.search, None, "the quit card");
+        app.confirming_close = false;
+        app.closing_tabs = app.tabs.list.iter().map(|t| t.id).take(1).collect();
+        assert!(!app.closing_tabs.is_empty(), "fixture: a tab to close");
+        press_with(&mut app, &ctx, egui::Key::K, cmd);
+        assert_eq!(app.dash.search, None, "the tab card");
         let _ = std::fs::remove_dir_all(&root);
     }
 

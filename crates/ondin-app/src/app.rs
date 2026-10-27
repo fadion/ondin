@@ -1556,6 +1556,14 @@ impl eframe::App for OndinApp {
         if self.tabs.shown.is_some() && self.tabs.shown != self.tabs.active {
             self.palette = None;
             self.stop_presenting(ui.ctx());
+            // The tab menu holds the keyboard here as in the editor.
+            if self.tabs.menu.is_some() && !self.modal_is_up() {
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.tabs.menu = None;
+                } else {
+                    self.tabs.menu_nav = crate::menu::read_nav(&ctx);
+                }
+            }
             self.tab_strip(ui, !self.modal_is_up(), false);
             if !self.modal_is_up() {
                 self.tab_placeholder(ui);

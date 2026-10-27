@@ -741,6 +741,15 @@ impl EditorSession {
         }
     }
 
+    /// [`Self::switch_page`] for a document just opened: the page it opened on
+    /// was never shown, so nothing is parked for it and it is framed when first
+    /// gone to.
+    pub fn open_on_page(&mut self, page: NodeId) {
+        let left = self.page;
+        self.switch_page(page);
+        self.parked.remove(&left);
+    }
+
     /// Whether the page just switched to has never been shown this sitting —
     /// once: the flag clears as it is read.
     pub fn take_first_visit(&mut self) -> bool {

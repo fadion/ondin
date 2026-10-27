@@ -55,6 +55,16 @@ impl PagesState {
             ..Default::default()
         }
     }
+
+    /// Whether a page row is being dragged.
+    pub(crate) fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    /// Drop a page row's drag, so its release moves nothing (Escape).
+    pub(crate) fn cancel_drag(&mut self) {
+        self.drag = None;
+    }
 }
 
 /// A page row's rename in flight.
@@ -113,7 +123,7 @@ impl OndinApp {
             .get(&id)
             .and_then(|w| NodeId::from_wire(w));
         if let Some(page) = page {
-            self.session.switch_page(page);
+            self.session.open_on_page(page);
         }
     }
 
@@ -428,6 +438,10 @@ impl OndinApp {
         let leaving = page == self.session.page;
         self.name_step_as(crate::menu::Item::DeletePage);
         if self.session.commit(Transaction(ops)) {
+            // The step's subject is the page, which its first-named layer is not.
+            if let Some(note) = self.session.history.current_note_mut() {
+                note.subject = Some(name.clone());
+            }
             if leaving {
                 self.go_to_page(above);
             }
@@ -1208,5 +1222,63 @@ mod tests {
         assert_eq!(app.page_name(copy), "Pricing v2");
         assert!(app.session.undo());
         assert!(!app.session.doc.is_page(copy), "one step takes both away");
+    }
+
+    /// Selecting a missing family's layers selects those on this page only.
+    ///
+    /// flip: `select_font_users` without its page filter → fails at the selection.
+    #[test]
+    fn a_missing_fonts_layers_are_selected_on_this_page_only() {
+        let ctx = egui::Context::default();
+        let (mut app, [_, _, a, b]) = two_pages(&ctx);
+        app.select_font_users(vec![a, b]);
+        assert_eq!(app.session.selection.ids(), &[a]);
+        assert_eq!(app.session.status().text, "1 more on other pages");
+    }
+
+    /// Escape during a page row's drag drops it, so the release moves nothing.
+    ///
+    /// flip: `cancel_gesture` without `pages.cancel_drag` → fails at "dropped".
+    #[test]
+    fn escape_drops_a_page_rows_drag() {
+        let ctx = egui::Context::default();
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        app.pages.drag = Some((second, Some(0)));
+        assert!(app.cancel_gesture(&ctx), "a gesture was in flight");
+        assert!(app.pages.drag.is_none(), "dropped");
+    }
+
+    /// A document opened on its remembered page frames the first page when it is
+    /// first gone to, since that page was never shown.
+    ///
+    /// flip: `open_on_page` keeping the left page parked → fails at "framed".
+    #[test]
+    fn a_document_opened_on_another_page_frames_the_first_when_shown() {
+        let ctx = egui::Context::default();
+        let (mut app, [first, second, ..]) = two_pages(&ctx);
+        app.canvas_px = (800, 600);
+        app.session.open_on_page(second);
+        app.go_to_page(first);
+        assert_eq!(
+            app.session.camera.center,
+            Point::new(50.0, 50.0),
+            "framed on the frame at 0"
+        );
+    }
+
+    /// *Delete page*'s History row names the page, not its first layer.
+    ///
+    /// flip: `delete_page_now` leaving the note's subject → fails at the subject.
+    #[test]
+    fn deleting_a_page_names_the_page_in_history() {
+        let ctx = egui::Context::default();
+        let (mut app, [_, second, _, b]) = two_pages(&ctx);
+        app.session.commit(Transaction(vec![Operation::SetName {
+            id: b,
+            name: "Hero".into(),
+        }]));
+        app.delete_page_now(second);
+        let note = app.session.history.current_note_mut().expect("a step");
+        assert_eq!(note.subject.as_deref(), Some("Pricing"));
     }
 }

@@ -2255,7 +2255,7 @@ impl OndinApp {
             || self.in_flight.any()
             // A component carried out of the insert picker: its drag is egui's too.
             || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
-        if self.drag.is_none() && self.layer_drag.is_none() && !field {
+        if self.drag.is_none() && self.layer_drag.is_none() && !self.pages.dragging() && !field {
             return false;
         }
         // A live marquee has been selecting as it went; put back what it started from.
@@ -2266,6 +2266,7 @@ impl OndinApp {
         self.guide_previews.clear();
         self.var_cell_preview = None;
         self.layer_drag = None;
+        self.pages.cancel_drag();
         self.in_flight.paint_drag = None;
         self.in_flight.effect_drag = None;
         // `gesture_cancelled` stops the release placing it.

@@ -87,8 +87,8 @@ impl OndinApp {
             return;
         }
         if self.session.doc.contains(origin.node) {
-            self.session.selection.set_one(origin.node);
-            self.reveal_selection();
+            // On the main's own page, which the kit need not have opened on.
+            self.select_main(origin.node);
         }
         self.kit_return = back;
     }

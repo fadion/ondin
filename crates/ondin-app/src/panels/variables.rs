@@ -270,6 +270,17 @@ fn group_key(kit: Option<&str>, path: &str) -> String {
     }
 }
 
+/// The key a document's collapsed groups are kept under in
+/// `OndinApp::var_collapsed`: its lowest page id, which a file keeps across saves
+/// and loads and a page reorder does not move, as it moves the first page.
+fn collapsed_key(doc: &ondin_core::Document) -> NodeId {
+    doc.pages()
+        .iter()
+        .map(|p| p.id)
+        .min()
+        .unwrap_or_else(|| doc.first_page())
+}
+
 impl OndinApp {
     /// Open the browser with its search taking the keyboard, or close it
     /// (`Shift+S`, the swatches button). Opening it closes the insert picker:
@@ -281,7 +292,7 @@ impl OndinApp {
                 self.kit_picker = None;
                 // Loaded at the open, not on the first frame, so nothing done
                 // before that frame is overwritten by the load (§15 D1054).
-                let root = self.session.doc.first_page();
+                let root = collapsed_key(&self.session.doc);
                 Some(Browser {
                     focus: true,
                     collapsed: self.var_collapsed.get(&root).cloned().unwrap_or_default(),
@@ -303,11 +314,10 @@ impl OndinApp {
             return;
         };
         // **Collapsed groups are the document's, not the panel's** (D1038
-        // G-series, §15 D1054): loaded from the app's per-document sets — keyed
-        // by the first page's id, which a file keeps across saves and loads —
+        // G-series): loaded from the app's per-document sets ([`collapsed_key`])
         // whenever the document under the browser is not the one it loaded for,
         // and written back after the frame's acts.
-        let root = self.session.doc.first_page();
+        let root = collapsed_key(&self.session.doc);
         if b.root != Some(root) {
             b.collapsed = self.var_collapsed.get(&root).cloned().unwrap_or_default();
             b.root = Some(root);
@@ -575,7 +585,7 @@ impl OndinApp {
         }
         // The collapsed groups written through to the document's own set, so
         // they outlive the browser and follow the document (§15 D1054).
-        let root = self.session.doc.first_page();
+        let root = collapsed_key(&self.session.doc);
         if let Some(b) = &self.var_browser
             && self.var_collapsed.get(&root) != Some(&b.collapsed)
         {
@@ -4672,5 +4682,34 @@ mod tests {
             [rect],
             "though it has a user"
         );
+    }
+
+    /// The key a document's collapsed groups are kept under survives a page
+    /// reorder, which changes the first page.
+    ///
+    /// flip: `collapsed_key` answering `first_page` → fails at the reorder.
+    #[test]
+    fn the_collapse_key_survives_a_page_reorder() {
+        let mut ids = ondin_core::IdSource::new(0xC011);
+        let first = ids.mint();
+        let mut doc = ondin_core::Document::new(first);
+        let second = ids.mint();
+        doc.apply(&Transaction(vec![Operation::AddPage {
+            id: second,
+            index: 1,
+            name: "Two".into(),
+            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            draft: false,
+            mode: None,
+        }]))
+        .unwrap();
+        let before = collapsed_key(&doc);
+        doc.apply(&Transaction(vec![Operation::MovePage {
+            id: second,
+            index: 0,
+        }]))
+        .unwrap();
+        assert_eq!(doc.first_page(), second, "fixture: the first page changed");
+        assert_eq!(collapsed_key(&doc), before);
     }
 }

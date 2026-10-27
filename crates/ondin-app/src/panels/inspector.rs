@@ -973,7 +973,7 @@ impl OndinApp {
     /// Remove, and Remove all Guides — the guide card's action row, in two glyph
     /// families so the pair is not told apart only by tooltip.
     fn guide_actions(&mut self, ui: &mut egui::Ui, guides: &[ondin_core::Guide]) {
-        let total = self.session.doc.guides().len();
+        let total = self.page_guides().count();
         let mut remove = false;
         let mut remove_all = false;
         ui.horizontal(|ui| {
@@ -995,7 +995,7 @@ impl OndinApp {
                 false,
                 true,
             )
-            .on_hover_text(format!("Remove all {total} guides in this document"))
+            .on_hover_text(format!("Remove all {total} guides on this page"))
             .clicked();
         });
         // After the row, so the borrow of `guides` is over first.
@@ -1099,6 +1099,21 @@ impl OndinApp {
             .collect()
     }
 
+    /// Select the text layers set in a missing family: those on this page, since
+    /// a selection never spans pages, with the rest counted on the status line.
+    pub(crate) fn select_font_users(&mut self, mut ids: Vec<NodeId>) {
+        ids.retain(|id| self.may_select_in_bulk(*id));
+        let page = self.session.page;
+        let before = ids.len();
+        ids.retain(|id| self.session.doc.page_of(*id) == Some(page));
+        match before - ids.len() {
+            0 => {}
+            1 => self.session.info("1 more on other pages"),
+            n => self.session.info(format!("{n} more on other pages")),
+        }
+        self.session.selection.set(ids);
+    }
+
     /// *Missing fonts*, on the canvas's inspector while the document has any: a
     /// row per family — its name selects the layers set in it — and a dropdown
     /// that replaces it everywhere (`families::replace_family`), one undo step.
@@ -1171,9 +1186,8 @@ impl OndinApp {
                 }
             },
         );
-        if let Some(mut ids) = select {
-            ids.retain(|id| self.may_select_in_bulk(*id));
-            self.session.selection.set(ids);
+        if let Some(ids) = select {
+            self.select_font_users(ids);
         }
         if let Some((from, to)) = pick {
             self.fonts.ensure_loaded(&to);

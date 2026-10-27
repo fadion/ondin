@@ -1914,11 +1914,15 @@ impl OndinApp {
         let mut folders: Vec<String> = Vec::new();
         let mut out = Vec::new();
         for page in doc.gathered_pages() {
-            // A slash in a page's name would make a folder of its own.
-            let base = self.page_name(page).replace(['/', '\\'], "-");
+            // A legal folder name (no separator, no `..`), else the page's number;
+            // `Home` and `home` are one folder on Windows and macOS.
+            let mut base = ondin_export::plan::sanitize_segment(&self.page_name(page));
+            if base.is_empty() {
+                base = format!("Page {}", doc.page_index(page).map_or(0, |i| i + 1));
+            }
             let folder = std::iter::once(base.clone())
                 .chain((2..).map(|n| format!("{base} {n}")))
-                .find(|f| !folders.contains(f))
+                .find(|f| !folders.iter().any(|t| t.to_lowercase() == f.to_lowercase()))
                 .expect("an unbounded range finds a free name");
             for mut file in self.plan_frames(&self.frames_on(page)) {
                 file.path = format!("{folder}/{}", file.path);
@@ -3082,6 +3086,61 @@ mod export_all_scope_tests {
     //! What *Export all* collects and how it writes (§15 D516).
 
     use super::*;
+
+    /// *Export frames, all pages…* names each page's folder legally: no `..` that
+    /// climbs out of the chosen folder, no `:`, and two names one apart only in
+    /// case get two folders.
+    ///
+    /// flip: `all_pages_frames_plan` without `sanitize_segment` → fails at "`..`".
+    #[test]
+    fn page_folders_are_legal_and_distinct() {
+        let ctx = egui::Context::default();
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xF01D);
+        let first = ids.mint();
+        let mut doc = ondin_core::Document::new(first);
+        let pages = [first, ids.mint(), ids.mint(), ids.mint()];
+        let mut ops = Vec::new();
+        for (i, (page, name)) in pages.iter().zip(["..", "a:b", "Home", "home"]).enumerate() {
+            if i > 0 {
+                ops.push(Operation::AddPage {
+                    id: *page,
+                    index: i,
+                    name: name.into(),
+                    ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+                    draft: false,
+                    mode: None,
+                });
+            } else {
+                ops.push(Operation::SetName {
+                    id: *page,
+                    name: name.into(),
+                });
+            }
+            ops.push(Operation::CreateNode {
+                id: ids.mint(),
+                parent: *page,
+                index: 0,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                },
+                transform: None,
+                name: Some("Frame".into()),
+            });
+        }
+        doc.apply(&ondin_core::Transaction(ops)).unwrap();
+        app.session.adopt_document(doc, None);
+        let (files, _) = app.all_pages_frames_plan();
+        let folders: Vec<String> = files
+            .iter()
+            .map(|f| f.path.split('/').next().unwrap().to_lowercase())
+            .collect();
+        assert_eq!(folders.len(), 4, "a frame per page: {folders:?}");
+        assert!(!folders.iter().any(|f| f == ".."), "`..`: {folders:?}");
+        assert!(!folders.iter().any(|f| f.contains(':')), "{folders:?}");
+        let distinct: std::collections::HashSet<_> = folders.iter().collect();
+        assert_eq!(distinct.len(), 4, "{folders:?}");
+    }
 
     /// A layer with export settings inside another with export settings is exported
     /// too: its spec is a deliberate instruction, and the group is a different file.

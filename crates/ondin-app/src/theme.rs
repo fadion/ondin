@@ -66,7 +66,7 @@ pub mod color {
     pub const ACCENT_900: Color32 = Color32::from_rgb(33, 44, 70);
 
     /// Text at a given opacity over the dark ground. Used for the muted label
-    /// tiers the design leans on (38% / 45% / 62% / 88%).
+    /// tiers (38% / 45% / 62% / 88%).
     pub const fn text_a(alpha: u8) -> Color32 {
         Color32::from_rgba_premultiplied(
             (233 * alpha as u32 / 255) as u8,
@@ -202,7 +202,7 @@ pub mod color {
     pub const POINT: Color32 = Color32::from_rgb(0xf2, 0xf4, 0xf8);
 }
 
-/// Muted text tiers (named for how the design uses them).
+/// Muted text tiers, named for what each is used for.
 pub mod text {
     use super::color::text_a;
     use eframe::egui::Color32;
@@ -257,7 +257,7 @@ pub mod icon {
     pub const FRAME_CORNERS: &str = "\u{e626}";
     pub const SELECTION: &str = "\u{e69a}";
     /// The identity row's three actions, beside the boolean dropdown (§9.4).
-    /// Also the Effects panel's **Layer blur** row glyph, as the design draws it.
+    /// Also the Effects panel's **Layer blur** row glyph.
     pub const CIRCLE_HALF: &str = "\u{e18c}"; // mask
     pub const SELECTION_PLUS: &str = "\u{e69c}"; // group
     pub const SELECTION_SLASH: &str = "\u{e69e}"; // ungroup
@@ -299,7 +299,7 @@ pub mod icon {
     /// The dashboard's per-file overflow menu.
     ///
     /// Vertical where the editor's overflow is horizontal: a row's own menu reads
-    /// as belonging to the row, and the design draws it that way.
+    /// as belonging to the row.
     pub const DOTS_THREE_VERTICAL: &str = "\u{e208}";
     /// The dashboard's *Recent*, and the picker's recent-colours row.
     pub const CLOCK_COUNTER_CLOCKWISE: &str = "\u{e1a0}";
@@ -330,20 +330,20 @@ pub mod icon {
     pub const FLIP_VERTICAL: &str = "\u{ed6c}";
     pub const ARROWS_CLOCKWISE: &str = "\u{e094}"; // reverse a gradient's stops
     /// The dashboard's sort control, which is one button carrying whichever order
-    /// is in force (the design canvas's *Dashboard* artboard, `ph-arrows-down-up`).
+    /// is in force (`ph-arrows-down-up`).
     ///
     /// Not [`ARROWS_CLOCKWISE`], which means *reverse*: the button steps to the
     /// next key, and arrows passing each other read as "ordered by".
     pub const ARROWS_DOWN_UP: &str = "\u{e098}";
-    /// Opacity, and the **inner shadow**'s row glyph (the design's `ph-drop-half`).
+    /// Opacity, and the **inner shadow**'s row glyph (`ph-drop-half`).
     /// The two never share a card. It is the same droplet as [`DROP_HALF_BOTTOM`],
     /// split vertically rather than horizontally, so the inner and drop shadow read
     /// as two states of one picture.
     pub const DROP_HALF: &str = "\u{e566}";
-    /// The **drop shadow**'s row glyph, from the design (`ph-drop-half-bottom`).
+    /// The **drop shadow**'s row glyph (`ph-drop-half-bottom`).
     /// See [`DROP_HALF`], which is its pair.
     pub const DROP_HALF_BOTTOM: &str = "\u{eb40}";
-    /// The **Filters** row's glyph, from the design (`ph-sun`).
+    /// The **Filters** row's glyph (`ph-sun`).
     pub const SUN: &str = "\u{e472}";
     pub const SQUARE_HALF: &str = "\u{e462}"; // stroke alignment
     // Per-corner radius: each elbow points into the corner it sets.
@@ -357,14 +357,13 @@ pub mod icon {
     /// *Bring to front*; [`ARROW_LINE_DOWN`] is *Send to back* (§15 D761). The
     /// arrow-to-a-bar pair is the *all the way* family against the plain
     /// `ARROW_UP`/`ARROW_DOWN` one-step pair, and `ARROW_LINE_LEFT`/`ARROW_LINE_RIGHT`
-    /// carry the same *against a wall* reading. The design's mockup draws
-    /// `ph-stack` / `ph-stack-simple` here, a recorded deviation because
+    /// carry the same *against a wall* reading. Not `ph-stack` / `ph-stack-simple`:
     /// `ph-stack-simple` is *Flatten* and the rows co-occur.
     pub const ARROW_LINE_UP: &str = "\u{e066}";
     /// *Send to back*; see [`ARROW_LINE_UP`].
     pub const ARROW_LINE_DOWN: &str = "\u{e05c}";
-    // Distribute: equal gaps along an axis. The design draws these as the
-    // column/row glyphs, which read as "even columns" rather than "push apart".
+    // Distribute: equal gaps along an axis. Not the column/row glyphs, which read
+    // as "even columns" rather than "push apart".
     pub const ARROWS_OUT_LINE_HORIZONTAL: &str = "\u{e534}";
     pub const ARROWS_OUT_LINE_VERTICAL: &str = "\u{e536}";
     /// Fold and unfold the whole layer tree. The pair reads as "gather these
@@ -410,12 +409,12 @@ pub mod icon {
     /// opens the rest of one control's properties where this opens the app's own.
     /// Not a `GEAR`: nothing else in the app wears one.
     pub const SLIDERS: &str = "\u{e432}";
-    // Undo/redo in the top bar. The design uses the U-turn arrows rather than
+    // Undo/redo in the top bar: the U-turn arrows rather than
     // the circular ones (`ARROW_COUNTER_CLOCKWISE`), which read as "rotate".
     pub const ARROW_U_UP_LEFT: &str = "\u{e08a}";
     pub const ARROW_U_UP_RIGHT: &str = "\u{e08c}";
     /// `flex-wrap: wrap` in the Container card — a line running on and turning back
-    /// under itself, the design's picture (§15 D878); `wrap-reverse` is
+    /// under itself (§15 D878); `wrap-reverse` is
     /// [`ARROW_U_UP_LEFT`], turning back over.
     pub const ARROW_U_DOWN_LEFT: &str = "\u{e07e}";
     /// The Scale tool, in the rail and — rasterized by `cursor.rs` — as its
@@ -545,14 +544,13 @@ pub mod icon {
     /// *Detach instance* — "no longer from the main" (§15 D981).
     pub const LINK_BREAK: &str = "\u{e2e4}";
     /// *Go to main component*, everywhere it is offered — the menu row, the
-    /// Component card's main link and its *Go to main* button — as the accepted
-    /// mockups draw it (§15 D981).
+    /// Component card's main link and its *Go to main* button (§15 D981).
     pub const ARROW_UP_RIGHT: &str = "\u{e092}";
     /// A variant clash's *Select it* — go to the other layer.
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
     /// *Select all instances*.
     pub const SELECTION_ALL: &str = "\u{e746}";
-    /// A variant clash — two variants on one combination (§15 D982): the design's
+    /// A variant clash — two variants on one combination (§15 D982): a
     /// warning glyph, in neutral ink, no new hue.
     pub const WARNING: &str = "\u{e4e0}";
     /// A component property's binding mark — `{}`, used only inside mains (§15
@@ -560,7 +558,7 @@ pub mod icon {
     pub const BRACKETS_CURLY: &str = "\u{e860}";
     /// A stack seen from the side. Drawn by nothing since *Bring to front* and
     /// *Send to back* took [`ARROW_LINE_UP`]/[`ARROW_LINE_DOWN`] (§15 D761). Kept
-    /// under its own `allow` because the design's mockup uses it for *Bring to
+    /// under its own `allow` because it is the other candidate for *Bring to
     /// front*, so a reversal of that ruling reaches for it.
     #[allow(dead_code)]
     pub const STACK: &str = "\u{e466}";
@@ -584,7 +582,7 @@ pub mod icon {
     /// adds a mark that is noise at icon size.
     pub const EXPORT: &str = "\u{eaf0}";
     /// The Export panel's format dropdown — a picture in a sheet, saying "this row
-    /// makes a file" (§7, the design canvas's *Editor* artboard's export rows).
+    /// makes a file" (§7).
     ///
     /// One glyph for all three formats: Phosphor's `file-png`/`file-jpg`/`file-svg`
     /// are illegible micro-text at 15pt, and the word beside the glyph already
@@ -886,7 +884,7 @@ fn install_style(ctx: &egui::Context) {
 fn install_style_into(style: &mut egui::Style) {
     use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
-    // Compact type scale (design body is 13px; egui points ≈ CSS px here).
+    // Compact type scale: body is 13pt.
     style.text_styles = [
         (
             TextStyle::Heading,

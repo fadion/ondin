@@ -39,7 +39,7 @@ const NO_CARET_ROOM: f32 = 2.0;
 /// Half the kind glyph's 15pt box — `icon_x` is a *centre*.
 const ICON_HALF: f32 = 8.0;
 /// From the kind glyph's centre to where the name starts: half the glyph's 15pt
-/// advance already sits to the right, leaving the design's 7px gap.
+/// advance already sits to the right, leaving a 7pt gap.
 const NAME_GAP: f32 = 15.0;
 /// The lock glyph's centre, in from the row's right edge.
 const LOCK_INSET: f32 = 14.0;
@@ -165,12 +165,11 @@ const THUMB_RADIUS: u8 = 3;
 /// The indent added per tree level. See [`indent_of`], where the arithmetic lives,
 /// and [`caret_column`], which the guides hang off.
 ///
-/// 31pt, not the design's 22 (§15 D331): at 16 a nested row was one caret-width
+/// 31pt (§15 D331): at 16 a nested row was one caret-width
 /// right of its parent and nothing told "inside" from "next to". Settled; the guides
 /// are drawn from [`caret_column`] at whatever this says.
 const INDENT: f32 = 31.0;
-/// The tree guides' dash: 1.5pt of ink to every 2.5pt of gap — the design's
-/// `repeating-linear-gradient(… 0 1.5px, transparent 1.5px 4px)`.
+/// The tree guides' dash: 1.5pt of ink to every 2.5pt of gap.
 ///
 /// Every run starts with a dash: `Shape::dashed_line` opens with ink, so a run
 /// beginning at a junction (the elbow, or a row's top) puts ink through it. Phasing
@@ -182,11 +181,11 @@ const GUIDE_GAP: f32 = 2.5;
 /// own ink (half a point either side of its column), so the corner reads as the
 /// pattern turning.
 const ELBOW_CLEAR: f32 = 0.5 + GUIDE_GAP;
-/// A tree guide at rest — the design's 8.5% of the text colour. Below
+/// A tree guide at rest — 8.5% of the text colour. Below
 /// [`theme::text`]'s dimmest tier (38%) so the gutter does not compete with names.
 const GUIDE_REST: egui::Color32 = theme::color::text_a(22);
 /// [`GUIDE_REST`] lit: the trunk from the hovered row's parent down to its elbow,
-/// at the design's 34%.
+/// at 34%.
 const GUIDE_HOVER: egui::Color32 = theme::color::text_a(87);
 /// How close to a row's edge counts as "drop between" rather than "drop into".
 const EDGE_FRACTION: f32 = 0.3;
@@ -869,9 +868,8 @@ fn trunks_below(rows: &[TreeRow]) -> Vec<u64> {
 /// level's [`caret_column`]), the connector (the parent's trunk above this row's
 /// elbow) and the elbow (a horizontal run out to `lead`).
 ///
-/// A trunk whose branch has already closed is not drawn, which departs from the
-/// design's markup: a stub for every level would leave a fragment under a line that
-/// stopped a row earlier.
+/// A trunk whose branch has already closed is not drawn: a stub for every level
+/// would leave a fragment under a line that stopped a row earlier.
 ///
 /// Hovering lights only the path from the parent to the row's elbow, not the whole
 /// ancestry, and a selection lights the same path in `color::SELECT`. Where the two
@@ -961,7 +959,7 @@ fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f
     for seg in tree_guide_segments(rows, gap) {
         let vertical = seg.from.x == seg.to.x;
         let across = if vertical { seg.from.x } else { seg.from.y };
-        // 1pt, the design's 1px gradient.
+        // 1pt wide.
         let (across, width) = snap_across(across, 1.0, ppp);
         let (from, to) = if vertical {
             (egui::pos2(across, seg.from.y), egui::pos2(across, seg.to.y))

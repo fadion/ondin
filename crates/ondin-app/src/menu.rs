@@ -3822,7 +3822,7 @@ mod tests {
     }
 
     /// The component rows sit in Structure directly after *Frame selection*, one
-    /// role at a time in the mockups' order (`context-menus.md` §4).
+    /// role at a time in `context-menus.md` §4's order.
     ///
     /// flip: filing *Go to main component* under `Group::Navigate` → fails at "an
     /// instance"; dropping the `holds_main` guard → fails at "several mains:

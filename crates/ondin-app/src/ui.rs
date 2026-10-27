@@ -312,7 +312,7 @@ pub const MENU_SEP_H: f32 = 1.0 + SEP_AIR * 2.0;
 pub const MENU_BORDER: f32 = 1.0;
 
 /// The width to give the `Ui` inside a [`menu_frame`] card that is to paint `card`
-/// points wide, with `pad` of inner margin. The design's widths are the outer
+/// points wide, with `pad` of inner margin. Card widths are stated as the outer
 /// card, which `menu_place`, [`OndinApp::popover_left`] and the right-aligning
 /// anchors are all handed.
 ///
@@ -422,8 +422,7 @@ pub fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
     );
 }
 
-/// Height of a top-bar dropdown's head, and so of its hit target: the design's
-/// control height.
+/// Height of a top-bar dropdown's head, and so of its hit target.
 const HEAD_H: f32 = 26.0;
 
 /// Empty space a head keeps after its caret, `(HEAD_H - 16) / 2`, the inset an
@@ -522,7 +521,7 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
 
 /// [`menu_check`]'s row geometry, shared with [`menu_check_width`].
 mod menu_check_row {
-    /// The design's row: 8px inset, a 13px glyph column, 7px to the label.
+    /// The row: an 8pt inset, a 13pt glyph column, 7pt to the label.
     pub const PAD_X: f32 = 8.0;
     pub const TICK_W: f32 = 13.0;
     pub const GAP: f32 = 7.0;
@@ -1398,7 +1397,7 @@ pub enum Prefix {
 
 /// Type size of a [`Prefix::Text`].
 ///
-/// 13, not the design's 10.5: at 10.5 a capital inks 8pt tall against a Phosphor
+/// 13: at 10.5 a capital inks 8pt tall against a Phosphor
 /// glyph's 11; 13 inks 10pt, and matching fully would out-shout the value.
 const PREFIX_PT: f32 = 13.0;
 /// Type size of a [`Prefix::Icon`].
@@ -1665,7 +1664,7 @@ pub fn glyph_and_text_tinted(
     job.into()
 }
 
-/// A numeric field with a dimmed prefix: the design's 28px recessed row holding
+/// A numeric field with a dimmed prefix: a 28pt recessed row holding
 /// a small label or glyph and the value beside it. The prefix is painted by hand
 /// because `DragValue::prefix` renders it in the number's colour and font.
 ///
@@ -2455,7 +2454,7 @@ fn is_tab(event: &egui::Event) -> bool {
 
 /// A square button that sits *in* a field row rather than floating on the card:
 /// the recessed ground and hairline of [`field_frame`], sized to match the value
-/// fields beside it (the design's flip and per-corner buttons, 28×28).
+/// fields beside it (the flip and per-corner buttons, 28×28).
 pub fn field_button(
     ui: &mut egui::Ui,
     glyph: &str,
@@ -2713,7 +2712,7 @@ pub fn toggle_row(
     state: FieldButton,
     size: egui::Vec2,
 ) -> egui::Response {
-    /// The design's inset, and the gap after the leading glyph.
+    /// The inset, and the gap after the leading glyph.
     const PAD_X: f32 = 8.0;
     const GAP: f32 = 8.0;
     const GLYPH_PT: f32 = 14.0;
@@ -3173,7 +3172,7 @@ pub const SLIDER_H: f32 = 11.0;
 const SLIDER_RAIL_H: f32 = 3.0;
 
 /// A value between two bounds: a hairline rail, filled in accent to the knob.
-/// Hand-painted: the design's rail and knob are out of reach of `Spacing` and
+/// Hand-painted: this rail and knob are out of reach of `Spacing` and
 /// `Visuals` without restyling every `egui::Slider`. The knob's centre travels
 /// between `half..width - half` so a knob touching the end never reads as short.
 pub fn slider(
@@ -5686,7 +5685,7 @@ mod segment_border_tests {
         assert_eq!(
             hairline.stroke.color,
             theme::color::text_a(20),
-            "the design's `text 8%`, and translucent so it works on a card, in a \
+            "a translucent text ink, so it works on a card, in a \
              popover and in the dashboard header alike"
         );
 
@@ -6461,7 +6460,7 @@ mod combo_chevron_tests {
         out.shapes.into_iter().map(|c| c.shape).collect()
     }
 
-    /// A closed dropdown paints one chevron glyph at the design's size and ink, and not egui's filled triangle.
+    /// A closed dropdown paints one chevron glyph at `COMBO_CHEVRON_PT` in `COMBO_CHEVRON`, and not egui's filled triangle.
     #[test]
     fn a_dropdown_closes_with_a_chevron_and_not_egui_s_triangle() {
         let painted = shapes(true);
@@ -7454,7 +7453,7 @@ mod slider_ink_tests {
 
     use super::*;
 
-    /// The knob's shadow bleeds exactly one point below the row (the design's `box-shadow: 0 1px 3px`) and the other three sides are tight.
+    /// The knob's shadow bleeds exactly one point below the row and the other three sides are tight.
     ///
     /// flip: shadow offset `center().y + 1.0` to `+ 2.0` → the bottom assertion fails (`2` against `1`); to `center().y` → it fails the other way.
     #[test]

@@ -83,8 +83,7 @@ pub(crate) struct SampleKey {
     pub pick: u64,
 }
 
-/// The canvas's rendered pixels round the eyedropper's hotspot (the design's
-/// rule 2): composited over the canvas ground and opaque, overlays never in it,
+/// The canvas's rendered pixels round the eyedropper's hotspot: composited over the canvas ground and opaque, overlays never in it,
 /// since egui paints those over this texture.
 pub(crate) struct Sample {
     pub key: SampleKey,

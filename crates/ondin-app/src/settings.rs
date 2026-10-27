@@ -30,9 +30,9 @@ use crate::prefs::Prefs;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 
-/// Width of the card, border and padding included (the design's `width:376px`).
+/// Width of the card, border and padding included.
 pub(crate) const CARD_W: f32 = 376.0;
-/// The card's inner margin (the design's `padding:18px`).
+/// The card's inner margin.
 pub(crate) const PAD: f32 = 18.0;
 /// Clear air above and below a section header — the same number both sides.
 ///
@@ -49,7 +49,7 @@ pub(crate) const TITLE_GAP: f32 = 26.0;
 /// Above the footer's two buttons — the same standoff the title gets, and the whole
 /// of it, since nothing below adds air of its own.
 pub(crate) const FOOTER_GAP: f32 = TITLE_GAP;
-/// Between two rows inside one section (the design's `gap:11px`/`13px`).
+/// Between two rows inside one section.
 pub(crate) const ROW_GAP: f32 = 11.0;
 /// A switch row. [`crate::panels`]' feature lists use the same height, and these
 /// are the same control in a column.
@@ -61,7 +61,7 @@ pub(crate) const FIELD_H: f32 = 28.0;
 const BUTTON_H: f32 = FIELD_H;
 /// What a button's label keeps clear of its own corners, per side.
 const BUTTON_PAD_X: f32 = 14.0;
-/// Between two controls on one row (the design's `gap:10px` / the field gap).
+/// Between two controls on one row.
 pub(crate) const COL_GAP: f32 = 10.0;
 /// The *Default font* dropdown: room for a long family name beside its label.
 const DEFAULT_FONT_W: f32 = 200.0;
@@ -411,8 +411,7 @@ pub(crate) fn card<R>(
 }
 
 /// The card every settings-shaped modal is drawn on: the ground, the hairline,
-/// the corner, the shadow, [`PAD`] of inner margin, and a backdrop at the design's
-/// weight.
+/// the corner, the shadow, [`PAD`] of inner margin, and a half-black backdrop.
 ///
 /// Shared so every settings-shaped modal is the same object. The caller sets its
 /// own width: [`CARD_W`] is this file's, and a modal with a wider row may be wider.
@@ -435,7 +434,7 @@ pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
         });
     egui::Modal::new(id)
         .area(egui::Modal::default_area(id).anchor(egui::Align2::CENTER_CENTER, offset))
-        // The design's `rgba(0,0,0,.5)`: a modal over a canvas must dim more than
+        // Half black: a modal over a canvas must dim more than
         // egui's default 100/255, or a light document still reads as in focus.
         .backdrop_color(egui::Color32::from_black_alpha(128))
         .frame(
@@ -814,7 +813,7 @@ mod tests {
         assert!(
             caption <= 27.0,
             "the caption wrapped to {caption:.0}pt, which is more than the two lines \
-             the design gives it"
+             it is given"
         );
     }
 

@@ -24,7 +24,7 @@ use crate::theme::{self, color, icon};
 use eframe::egui;
 use ondin_core::meta::KitMark;
 
-/// The document menu's width, from the mockup (1A).
+/// The document menu's width.
 const MENU_W: f32 = 232.0;
 
 /// *Make this a kit*'s tooltip, in the menu and the palette alike.
@@ -55,8 +55,8 @@ impl OndinApp {
     /// The document's title as the **document menu's head** (§5.3e, 1A) — the
     /// caret beside the name.
     ///
-    /// ⚠️ **The menu holds only rows whose verbs exist**: the mockup's *Rename*,
-    /// *Duplicate* and *Export…* have no editor verb behind them yet, and a row that
+    /// ⚠️ **The menu holds only rows whose verbs exist**: *Rename*, *Duplicate* and
+    /// *Export…* are left out, with no editor verb behind them yet, and a row that
     /// does nothing is worse than a short menu. *Version history…* leads, as the
     /// document's own verb above a separator; on a kit, *Publish kit…* heads the kit
     /// rows, disabled with *No changes* when there is nothing to publish; *Kits
@@ -86,7 +86,7 @@ impl OndinApp {
             return;
         }
 
-        // Left-aligned under the name, as the mockup's menu hangs from it.
+        // Left-aligned under the name, hanging from it.
         let anchor = egui::pos2(head.rect.left(), head.rect.bottom() + crate::ui::MENU_GAP);
         let shared = self.shared_kit().is_some();
         let publishable = self.kit_changes().is_some_and(|c| c.any());

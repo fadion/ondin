@@ -754,7 +754,7 @@ pub fn with_linear_angle(brush: &Brush, degrees: f64, box_size: Size) -> Brush {
 }
 
 /// Reverse a gradient's stops in place (`0.3 → 0.7`), leaving its geometry
-/// alone. The design's flip control; also what "reverse" means for a radial,
+/// alone. The flip control; also what "reverse" means for a radial,
 /// where re-aiming makes no sense.
 pub fn reverse_stops(brush: &Brush) -> Brush {
     let stops = stops_of(brush)

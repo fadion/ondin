@@ -22,7 +22,7 @@ use crate::ui::{self, FieldButton, icon_button};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
-/// The sidebar's width, from the design.
+/// The sidebar's width.
 const SIDEBAR_W: f32 = 266.0;
 /// The top bar's height — the same as the editor's, so the two screens do not
 /// shift their chrome when you move between them.
@@ -39,19 +39,19 @@ const CARD_THUMB_H: f32 = 116.0;
 /// The caption band under the thumbnail: name centred 15 below it, date 31, the
 /// rest padding the date to match the name.
 const CARD_CAPTION_H: f32 = 46.0;
-/// The design's mosaic: 118 tall, two rows, a 7pt gutter, and at most five of the
+/// A project card's mosaic: 118 tall, two rows, a 7pt gutter, and at most five of the
 /// project's files in it.
 const MOSAIC_H: f32 = 118.0;
 const MOSAIC_GAP: f32 = 7.0;
-/// Five: the largest layout the design draws and the largest the three-column rule
-/// in [`OndinApp::project_mosaic`] fills without a column growing a third row.
+/// Five: the largest the three-column rule in [`OndinApp::project_mosaic`] fills
+/// without a column growing a third row.
 const MOSAIC_MAX: usize = 5;
 /// How many stranded filenames the Settings modal lists before "and N more": that
 /// card has no scroll area, so an uncapped list would push *Save changes* off screen.
 const STRANDED_ROWS: usize = 6;
-/// What a project card keeps clear of its own edges (the design's `padding:10px`).
+/// What a project card keeps clear of its own edges.
 const PROJECT_PAD: f32 = 10.0;
-/// Between the mosaic, the name and the two facts under it (the design's `gap:9px`).
+/// Between the mosaic, the name and the two facts under it.
 const PROJECT_ROW_GAP: f32 = 9.0;
 /// A project card on *Recent*: taller than a file card, carrying a picture of up to
 /// five documents.
@@ -74,7 +74,7 @@ fn card_width(width: f32) -> f32 {
     let cols = grid_cols(width) as f32;
     ((width - GRID_GAP * (cols - 1.0)) / cols).max(1.0)
 }
-/// The search field, from the design.
+/// The search field's width.
 const SEARCH_W: f32 = 340.0;
 
 /// The narrowest the search field is squeezed to before it is allowed to
@@ -108,12 +108,12 @@ const FIELD_LABEL_H: f32 = 12.0;
 const ALL_PROJECTS: &str = "All projects";
 /// The project filter's closed button; longer project names elide.
 const FILTER_W: f32 = 132.0;
-/// The filter's dropdown (the design's `width:190px`), wider than the button.
+/// The filter's dropdown, wider than the button.
 const FILTER_MENU_W: f32 = 190.0;
-/// A row of either floating menu on this screen (the design's 26, plus two); one
-/// constant so the two menus' rows cannot come apart.
+/// A row of either floating menu on this screen; one constant so the two menus'
+/// rows cannot come apart.
 const FILTER_ROW_H: f32 = 28.0;
-/// A project's colour chip, in the filter and its menu — the design's 7×7.
+/// A project's colour chip, in the filter and its menu: 7×7.
 const DOT: f32 = 7.0;
 
 /// A library menu's keyboard state: the highlighted row and the key read with the
@@ -225,10 +225,9 @@ fn anchored_menu(
 }
 /// What the filter button's content keeps clear of its own corners.
 const FILTER_PAD_X: f32 = 10.0;
-/// A Settings dropdown's closed width (the design's `min-width:132px`), so the three
-/// rows line up as a column.
+/// A Settings dropdown's closed width, so the three rows line up as a column.
 const PICKER_W: f32 = 132.0;
-/// Between a [`field_label`] and the box it names (the design's `gap:4px`).
+/// Between a [`field_label`] and the box it names.
 const FIELD_LABEL_GAP: f32 = 4.0;
 /// How many projects and how many documents a search offers, so a query matching
 /// thirty files still shows the project it probably meant.
@@ -244,7 +243,7 @@ const VIEW_CELL_H: f32 = HEADER_CONTROL_H - 4.0;
 /// The grid/list track: two 26pt cells, the 2pt gap and 2pt padding at each end,
 /// because [`ui::segmented`] takes the outer width.
 const VIEW_TRACK_W: f32 = 26.0 * 2.0 + 2.0 + 4.0;
-/// *Delete project*, the design's 32 — wider than [`HEADER_CONTROL_H`] so the one
+/// *Delete project*, 32 wide — wider than [`HEADER_CONTROL_H`] so the one
 /// wordless control still reads as a button.
 const DELETE_W: f32 = 32.0;
 
@@ -432,7 +431,7 @@ impl LibrarySettings {
 
 /// The Delete project modal's own state.
 ///
-/// `keep_files` defaults to true and the design's toggle ("Delete files too") is its
+/// `keep_files` defaults to true and the modal's toggle ("Delete files too") is its
 /// inverse, so the field reads in the direction the code has to be safe in.
 pub(crate) struct DeleteProject {
     pub(crate) id: String,
@@ -1275,7 +1274,7 @@ impl OndinApp {
         painter.circle_filled(
             egui::pos2(rect.left() + 18.0, rect.center().y),
             4.0,
-            // The design's `opacity:.45` on the archived dot.
+            // An archived project's dot at 45% opacity.
             if archived {
                 swatch(&p.color).gamma_multiply(0.45)
             } else {
@@ -1807,8 +1806,8 @@ impl OndinApp {
         }
     }
 
-    /// One project card: a mosaic of its files, then its name, then its two facts
-    /// — the design's shape. Returns whether it was clicked.
+    /// One project card: a mosaic of its files, then its name, then its two facts.
+    /// Returns whether it was clicked.
     fn project_card(
         &mut self,
         ui: &mut egui::Ui,
@@ -2137,7 +2136,7 @@ impl OndinApp {
         if self.is_starred(entry) {
             let at = egui::pos2(thumb.right() - 14.0, thumb.top() + 14.0);
             let p = ui.painter();
-            // The design's drop shadow, as a second pass one point down.
+            // A drop shadow, as a second pass one point down.
             p.add(star_shape(
                 at + egui::vec2(0.0, 1.0),
                 STAR_R,
@@ -2426,7 +2425,7 @@ impl OndinApp {
         act: &mut Option<Act>,
     ) {
         let full = ui.available_width();
-        // The design's `1fr 170px 120px 120px 90px`.
+        // The name takes what the four fixed columns leave.
         let cols = [full - 500.0, 170.0, 120.0, 120.0, 90.0];
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(full, 26.0), egui::Sense::empty());
@@ -2448,7 +2447,7 @@ impl OndinApp {
         for entry in entries {
             self.file_row(ui, entry, &cols, act);
         }
-        // The row says only *New file*, where the card says *New file in X*, as the design has it.
+        // The row says only *New file*, where the card says *New file in X*.
         if new_file.is_some() && self.new_file_row(ui) && !self.dash.menu_was_up {
             *act = Some(Act::NewFile);
         }
@@ -2471,7 +2470,7 @@ impl OndinApp {
         if lit {
             p.rect_filled(rect, egui::CornerRadius::same(6), theme::color::text_a(10));
         }
-        // The design's 20pt plate under the glyph keeps the left edge in line with the names.
+        // The 20pt plate under the glyph keeps the left edge in line with the names.
         let badge = egui::Rect::from_center_size(
             egui::pos2(rect.left() + 16.0, rect.center().y),
             egui::Vec2::splat(20.0),
@@ -2510,7 +2509,7 @@ impl OndinApp {
         let lit = resp.hovered();
         let picked = self.dash.selected.as_deref() == Some(entry.path.as_path());
         self.follow_selection(ui, picked, rect);
-        // A wash rather than a border, the design's answer for a row (`rowBg: accent 12%`).
+        // A wash rather than a border marks a row.
         if picked || lit {
             ui.painter().rect_filled(
                 rect,
@@ -7749,11 +7748,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The mosaic reproduces the design's four layouts from one rule; the
+    /// The mosaic's one-, two-, three- and five-file layouts come from one rule; the
     /// full-height assertions carry the weight. flip: drop the `2 * col >= n` arm →
     /// fails at two files (the second cell comes back half height).
     #[test]
-    fn a_project_mosaic_lays_out_the_designs_four_shapes_from_one_rule() {
+    fn a_project_mosaic_lays_out_four_shapes_from_one_rule() {
         // 200 × 118 with a 7pt gutter: a two-column split is 96.5, three is 62.
         let box_ = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 118.0));
         let half = (118.0 - MOSAIC_GAP) / 2.0;
@@ -7768,12 +7767,12 @@ mod tests {
         assert_eq!(
             shape(1),
             [(0.0, 0.0, 200.0, 118.0)],
-            "one file fills the box — the design's `kestrel`"
+            "one file fills the box"
         );
         assert_eq!(
             shape(2),
             [(0.0, 0.0, 96.5, 118.0), (103.5, 0.0, 96.5, 118.0)],
-            "two are two tall columns, not one tall and one half — `harbor`"
+            "two are two tall columns, not one tall and one half"
         );
         assert_eq!(
             shape(3),
@@ -7782,11 +7781,11 @@ mod tests {
                 (103.5, 0.0, 96.5, half),
                 (103.5, half + MOSAIC_GAP, 96.5, half),
             ],
-            "three is one tall and two stacked — `atlas`"
+            "three is one tall and two stacked"
         );
         let five = shape(5);
         assert_eq!(five.len(), 5);
-        assert_eq!(five[0], (0.0, 0.0, 62.0, 118.0), "`field`'s big cell");
+        assert_eq!(five[0], (0.0, 0.0, 62.0, 118.0), "five files' big cell");
         assert_eq!(
             five.iter().filter(|c| c.3 == 118.0).count(),
             1,
@@ -7798,7 +7797,7 @@ mod tests {
             "two per column, left to right"
         );
 
-        // Four has no design layout: three columns, the last full height.
+        // Four: three columns, the last full height.
         let four = shape(4);
         assert_eq!(four[3], (138.0, 0.0, 62.0, 118.0));
     }

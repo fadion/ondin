@@ -1,5 +1,4 @@
-//! The rulers, and the guides pulled out of them (the design canvas's *Editor*
-//! artboard).
+//! The rulers, and the guides pulled out of them.
 //!
 //! Two 20pt bars along the top and left of the canvas, ticked and labelled in
 //! world units, plus the guides dragged off them. The guides are document
@@ -29,7 +28,7 @@ const TICK_W: f32 = 1.0;
 /// The label beside a tick, and its offset along the ruler from that tick.
 const LABEL_SIZE: f32 = 7.5;
 const LABEL_GAP: f32 = 3.0;
-/// Inset of a label from the ruler's outer edge (the design's `top:3px`).
+/// Inset of a label from the ruler's outer edge.
 const LABEL_INSET: f32 = 3.0;
 
 /// The narrowest gap between two labelled ticks; below it the ruler picks a
@@ -1625,7 +1624,7 @@ impl OndinApp {
 mod tests {
     use super::*;
 
-    /// The step is 100 at the design's 51.94% zoom.
+    /// The step is 100 at 51.94% zoom.
     #[test]
     fn the_step_matches_the_design_at_the_designs_zoom() {
         assert_eq!(nice_step(0.5194), 100.0);
@@ -1710,7 +1709,7 @@ mod tests {
         // The measurements the fallback exists for.
         assert!(
             width(&ctx, "-100", LABEL_SIZE) <= room,
-            "the design's widest"
+            "the widest three-character label must fit"
         );
         assert!(
             width(&ctx, "1000", LABEL_SIZE) > room,
@@ -1834,7 +1833,7 @@ mod tests {
         let design = width(&ctx, "332", CHIP_TEXT);
         assert!(
             (design + CHIP_PAD_X * 2.0).max(THICKNESS) == THICKNESS,
-            "the design's own chip must still be {THICKNESS}pt, not {design}+pad"
+            "a three-digit chip must still be {THICKNESS}pt, not {design}+pad"
         );
         for position in [0.0, 12.5, 332.0, -100.0, 1000.0, -1024.75, 20000.0] {
             let text = chip_label(position);

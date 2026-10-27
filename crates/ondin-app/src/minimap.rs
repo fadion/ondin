@@ -27,8 +27,7 @@ const GAP: f32 = 8.0;
 /// The share of the fitted extent left clear around it, so a box at the edge of
 /// the work is not cut by the map's edge.
 const FIT_PAD: f64 = 0.04;
-/// The map's height when nothing has given it a shape yet: the design's 132pt at
-/// a 208pt map.
+/// The map's height when nothing has given it a shape yet: 132pt at a 208pt map.
 const FIRST_MAP_H: f32 = 132.0;
 /// An image fill reads as a grey box, not as its picture.
 const IMAGE_GREY: egui::Color32 = egui::Color32::from_rgb(0x8d, 0x8f, 0x96);

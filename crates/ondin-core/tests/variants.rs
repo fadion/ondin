@@ -411,7 +411,7 @@ fn renaming_a_value_renames_its_variants_and_their_instances() {
 }
 
 /// Deleting a value deletes the variants holding it, and **their instances
-/// detach** (§15 D979 (c), held over the mockup's relink) — and keep their
+/// detach** (§15 D979 (c)) — and keep their
 /// layers (`[X6.2-L6-09]`): the check of the children was an `all()`, which an
 /// emptied instance satisfies. Flip, run: `propagate_structure`'s deleted-parent
 /// `partition` made `true || …` (the D984 defect, a deleted main's children read
@@ -637,8 +637,8 @@ fn editing_a_property_touches_only_its_item() {
     assert_eq!(names(&f), vec![(text_item, "Caption".into())]);
 }
 
-/// `Ctrl+D` on a variant makes an **instance** of it (§15 D979 (e), held over the
-/// mockup's next-free-combination), which sits in the set as a plain layer.
+/// `Ctrl+D` on a variant makes an **instance** of it (§15 D979 (e)), not a new
+/// combination, which sits in the set as a plain layer.
 #[test]
 fn a_copy_of_a_variant_is_an_instance_of_it() {
     let mut f = fixture();
@@ -802,7 +802,7 @@ fn a_switch_carries_a_fill_override_between_variants_made_apart() {
 }
 
 /// A counterpart with no match in the new variant that the instance changed is
-/// kept as the instance's own layer, its edit with it — the design's 4I.
+/// kept as the instance's own layer, its edit with it.
 #[test]
 fn an_unmatched_layer_the_instance_changed_is_kept_as_its_own() {
     let mut f = fixture();

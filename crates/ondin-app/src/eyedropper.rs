@@ -1,4 +1,4 @@
-//! The eyedropper (design canvas, *Eyedropper*): picks a colour off anything in
+//! The eyedropper: picks a colour off anything in
 //! the window — onto the selection from the rail (`I`), or into one slot from a
 //! colour picker's pick button.
 //!
@@ -10,7 +10,7 @@
 //! always read the loupe, which sits under the pointer.
 //!
 //! Nothing is previewed on the canvas: a preview would change the very pixels
-//! the next sample reads (the design's rule 4).
+//! the next sample reads.
 
 use crate::app::OndinApp;
 use crate::canvas::{LOUPE_SIDE, Sample, SampleKey};
@@ -525,7 +525,7 @@ fn loupe_painter(ctx: &egui::Context) -> egui::Painter {
 }
 
 /// The loupe centred on the hotspot `at`, with its hex chip under it — above it
-/// where the chip would leave `screen` (the design's L1, L2). `pixels` are
+/// where the chip would leave `screen`. `pixels` are
 /// [`LOUPE_SIDE`]² row-major; before the first sample lands it is an empty
 /// frame with no chip.
 ///

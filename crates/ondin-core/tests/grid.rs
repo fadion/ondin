@@ -1339,7 +1339,7 @@ fn an_auto_width_label_stretched_narrower_keeps_its_line() {
     assert_eq!(width(&s, t), line, "flex: one line");
 }
 
-/// **A track list reads and writes as CSS** (§15 D920) — the mockup's own line,
+/// **A track list reads and writes as CSS** (§15 D920) —
 /// `200px 1fr minmax(100px, 2fr) repeat(3, auto)`, parses to its four entries and
 /// writes back the same; keywords in any case, no space after a comma, a unitless
 /// `0`, a percentage and the two content keywords all read; `none` and nothing

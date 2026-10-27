@@ -1,4 +1,4 @@
-//! The detached colour picker (the design canvas's *Editor* artboard).
+//! The detached colour picker.
 //!
 //! One picker, three faces — solid, linear, radial — that differ only in the
 //! geometry controls above the ramp. It floats over the canvas and is dragged
@@ -116,7 +116,7 @@ impl Picker {
         }
     }
 }
-/// Geometry from the design: a card of 11px-padded rows.
+/// Geometry: a card of 11px-padded rows.
 ///
 /// The width is **pinned**, not derived from the contents: the faces do not need
 /// the same room, and an auto-sized window would jump every time the user changed
@@ -427,7 +427,7 @@ impl OndinApp {
             return;
         };
         // **The eyedropper's hovered colour stands in for the edited stop's**, for
-        // the eye only: nothing is written until the click (the design's rule 4).
+        // the eye only: nothing is written until the click.
         let preview = self
             .picker
             .as_ref()
@@ -1103,7 +1103,7 @@ impl OndinApp {
         let left = (ROW_H - ui::FIELD_BORDER_H - 20.0) / 2.0;
         ui::field_row_inset(ui, egui::vec2(width, ROW_H), left, ROW_PAD_R, |ui| {
             ui.spacing_mut().item_spacing.x = ROW_GAP;
-            // The eyedropper's door into this one slot (the design's P1).
+            // The eyedropper's door into this one slot.
             let picking = self.picker.as_ref().is_some_and(|p| p.picking);
             let pick = icon_button(ui, icon::EYEDROPPER, 20.0, 14.0, picking, true)
                 .on_hover_text("Pick a colour from anywhere in the window");

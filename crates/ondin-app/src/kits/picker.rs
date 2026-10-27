@@ -20,11 +20,11 @@ use ondin_core::{Document, NodeId, Operation, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, mpsc};
 
-/// The panel's width, padding and corner, from the mockup (3A).
+/// The panel's width, padding and corner.
 const W: f32 = 340.0;
 const PAD: f32 = 12.0;
 const RADIUS: u8 = 8;
-/// The panel's height — the mockup's — whatever it holds: it does not grow as
+/// The panel's height, whatever it holds: it does not grow as
 /// a kit opens or shrink as a search narrows, so nothing under the pointer jumps.
 /// Shorter only when the canvas has less room above the button than this.
 const H: f32 = 460.0;

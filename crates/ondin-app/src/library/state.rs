@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 /// How the dashboard orders what it shows.
 ///
-/// The four the design's sort control cycles. Stored in preferences by
+/// The four the dashboard's sort control cycles. Stored in preferences by
 /// [`Sort::id`] rather than by index, so inserting one cannot change what an
 /// existing install opens on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -30,7 +30,7 @@ pub enum Sort {
 }
 
 impl Sort {
-    /// The order the control cycles through, which is the design's.
+    /// The order the control cycles through.
     pub const ALL: [Sort; 4] = [Sort::Edited, Sort::Name, Sort::Created, Sort::Size];
 
     /// The stable key written to preferences.

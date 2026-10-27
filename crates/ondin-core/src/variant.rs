@@ -12,7 +12,7 @@
 //! [`settle`], the commit-time pass, so a rename of a value renames every variant
 //! holding it, and through the compare rule every instance that still carries the
 //! variant's name (an instance's name is copied verbatim — §5.3d's rule under §15
-//! D979 (e), held by the maintainer over the mockup's set-name label, §15 D982).
+//! D979 (e), held by the maintainer, §15 D982).
 //!
 //! **A component property is a view over fields** (the session's): a boolean is
 //! the visibility of the layers it is bound to, a text property their content.
@@ -55,7 +55,7 @@ pub enum PropKind {
     /// The main they show — an **instance swap** (§15 D983), bound to nested
     /// instances inside the main; on an instance, the copies of those swap.
     Swap,
-    /// Not a value but a **showing** (§15 D988, the design canvas's *Variants* artboard, 4K–4S):
+    /// Not a value but a **showing** (§15 D988):
     /// the nested instances inside the main whose own properties an instance's
     /// card shows under a sub-heading of their own, without selecting them. At
     /// most one per owner, bound to every shown slot in every variant, and
@@ -968,7 +968,7 @@ pub fn add_variant(
 }
 
 /// A variant's values set to `values` — the variant card's dropdowns. A taken
-/// combination is not refused: the clash shows instead (the design's rule).
+/// combination is not refused: the clash shows instead.
 pub fn set_values(doc: &Document, variant: NodeId, values: Vec<String>) -> Option<Transaction> {
     let set = doc.get(set_of(doc, variant)?)?.set.clone()?;
     let fits = values.len() == set.props.len()
@@ -1170,7 +1170,7 @@ pub fn using_value(doc: &Document, set: NodeId, prop: usize, value: usize) -> Ve
 
 /// Delete value `value` of property `prop`, and **the variants holding it with
 /// it** — their instances detaching, as any main's deletion detaches them (§15
-/// D979 (c), held over the mockup's relink by the maintainer, §15 D982).
+/// D979 (c), held by the maintainer, §15 D982).
 /// Refused for a property's last value.
 pub fn delete_value(doc: &Document, set: NodeId, prop: usize, value: usize) -> Option<Transaction> {
     let mut next = doc.get(set)?.set.clone()?;
@@ -2035,7 +2035,7 @@ fn own_property_fields(doc: &Document, root: NodeId) -> FxHashSet<(NodeId, PropK
         .collect()
 }
 
-// ── Nested properties (§15 D988, the design canvas's *Variants* artboard, 4K–4S) ──
+// ── Nested properties (§15 D988) ──
 
 /// A nested instance whose own properties an instance's card shows, under a
 /// sub-heading of its own.

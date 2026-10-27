@@ -40,8 +40,7 @@ pub(crate) struct Waiting {
 
 /// How often the kits a document uses are looked at on disk while it is open —
 /// within the half-minute to minute the maintainer ruled (§15 D1020): every few
-/// seconds would be nearer the design's *"the moment a kit publishes"*, and was
-/// ruled too often.
+/// seconds would be nearer the moment a kit publishes, and was ruled too often.
 pub(crate) const WATCH_EVERY: f64 = 45.0;
 
 /// When the kits a document uses were last looked at (§15 D1020).
@@ -69,10 +68,9 @@ fn on_disk(path: &std::path::Path) -> Option<(u64, u64)> {
 }
 
 impl OndinApp {
-    /// Bring the update pill (5A) when a kit this document uses publishes while
-    /// it is open — the design's *"the moment a kit publishes"*, met every
-    /// [`WATCH_EVERY`] seconds and whenever the window regains the focus (§15
-    /// D1020; until then it waited for the library's next rescan, D1016).
+    /// Bring the update pill when a kit this document uses publishes while
+    /// it is open: checked every [`WATCH_EVERY`] seconds and whenever the window
+    /// regains the focus (§15 D1020).
     ///
     /// **A look is a `stat` of the used kits' files, not a scan**: the library is
     /// rescanned only when one of them changed size or modification time, or has

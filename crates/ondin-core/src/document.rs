@@ -25,7 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The ground a document is drawn on until someone changes it.
 ///
-/// Near-black, from the design. A file written before the ground was part of
+/// Near-black. A file written before the ground was part of
 /// the format was drawn on exactly this, so it is also what such a file means
 /// (`io::schema`, §5.11).
 pub const DEFAULT_CANVAS_BACKGROUND: Color = Color::from_rgba8(23, 23, 24, 255);

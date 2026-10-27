@@ -26,8 +26,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 
-/// The largest a tile picture is rendered, in pixels — twice the mockup's tile
-/// (about 100×52), so it stays sharp at 200% display scaling.
+/// The largest a tile picture is rendered, in pixels — twice the tile (about
+/// 100×52), so it stays sharp at 200% display scaling.
 const TILE_W: f64 = 200.0;
 const TILE_H: f64 = 104.0;
 

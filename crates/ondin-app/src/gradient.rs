@@ -1,5 +1,4 @@
-//! The gradient handles on the canvas (the design canvas's *Gradient Editing*
-//! artboard).
+//! The gradient handles on the canvas.
 //!
 //! **The open picker is the mode.** While it edits a gradient fill or stroke of the
 //! one selected layer under a selecting tool, the canvas draws the gradient's guide

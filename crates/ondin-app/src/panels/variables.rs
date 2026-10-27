@@ -2957,8 +2957,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
             );
         }
         // A boolean (§15 D1059): a 12-point box where the colour cell has its
-        // swatch, checked when true, then the word. The session's chrome — the
-        // mockup draws no boolean cell.
+        // swatch, checked when true, then the word.
         Cell::Boolean(b) => {
             let bx = egui::Rect::from_center_size(
                 egui::pos2(cell.left() + 6.0 + 6.0, y),
@@ -3007,9 +3006,9 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
     }
 }
 
-/// G3's sideways bar under the mode columns, past three modes (§15 D1055): 4
+/// The sideways bar under the mode columns, past three modes (§15 D1055): 4
 /// points tall from the name column's edge to 12 short of the panel's right, 6
-/// above its bottom — the mockup's — a 6% track and a 22% thumb as wide as the
+/// above its bottom — a 6% track and a 22% thumb as wide as the
 /// share of the columns on show, where `scroll_x` puts it. Its thumb drags; the
 /// wheel scrolls as before.
 fn scroll_bar(ctx: &egui::Context, panel: egui::Rect, modes: usize, b: &mut Browser) {
@@ -3866,7 +3865,7 @@ mod tests {
         frame(&mut app, &ctx);
         frame(&mut app, &ctx);
         // The panel's box, without its hairline: the frame strokes a point
-        // outside it on each side, where the mockup's `0 0 0 1px` ring sits.
+        // outside it on each side.
         let w = |app: &OndinApp| app.var_browser.as_ref().unwrap().panel.unwrap().width() - 2.0;
         assert_eq!(w(&app), 340.0, "empty");
         app.var_act(Act::NewVar(VarKind::Color));

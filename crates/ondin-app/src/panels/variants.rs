@@ -1,26 +1,24 @@
 //! Variants and component properties in the inspector (§5.3d build step 7, §15
-//! D982, from the design canvas's *Variants* artboard with the maintainer's three rulings held
-//! over it): a set's **Variants** card, a variant's face inside the Component card,
+//! D982): a set's **Variants** card, a variant's face inside the Component card,
 //! an instance's variant dropdowns and property rows between the card's heading (the
 //! main's name, its *Instance of* caption gone since §15 D993) and *Reset all*, the
 //! **Properties** card on a main or a set, and the binding line on
 //! a layer inside a main.
 //!
-//! **A variant choice is never an override** (the design's rule): its dropdowns
+//! **A variant choice is never an override**: its dropdowns
 //! carry no dot, and choosing a value *switches* the instance to another variant
 //! (`variant::switch`) rather than writing a field. A component property is a view
 //! over fields, so its row's dot is the bound field's override and its ↺ that
 //! field's reset.
 //!
-//! ⚠️ **Where the session departs from the mockup, accepted by the maintainer on
-//! 2026-10-06 (§15 D982):** a value
+//! ⚠️ **Settled by the maintainer (§15 D982):** a value
 //! is renamed, moved and deleted from a popup on its chip rather than edited in
-//! place and dragged (3B); a layer is bound from one line on the Component card —
+//! place and dragged; a layer is bound from one line on the Component card —
 //! *Visibility* and *Content*, each a dropdown of the owner's properties — rather
-//! than from a `{}` button in the layers row, the Appearance card and the Type card
-//! (3J–3L), so no other card had to learn about properties; and a property's
+//! than from a `{}` button in the layers row, the Appearance card and the Type card,
+//! so no other card had to learn about properties; and a property's
 //! default is the main's own bound field, edited where that field is, so the define
-//! popover (3I) has no *Default* row; and a set's property name is a text field
+//! popover has no *Default* row; and a set's property name is a text field
 //! with a ×.
 
 use crate::app::OndinApp;
@@ -979,9 +977,9 @@ impl OndinApp {
                                 }
                             }
                             ui::menu_sep(ui);
-                            // 3C: confirm only when variants use it, with exact
+                            // Confirm only when variants use it, with exact
                             // counts — and the instances **detach** (§15 D982,
-                            // D979 (c)), where the mockup relinked them. **In a
+                            // D979 (c)). **In a
                             // modal, not in the menu** (§15 D996, the maintainer's
                             // look): the warning was a sentence inside the menu
                             // over a row that did it, so one click deleted
@@ -1698,8 +1696,7 @@ impl OndinApp {
                     })
                     .flatten();
                 // **A nested copy's choice is a swap, so an override, and its
-                // dropdown draws the dot** (§15 D988, the mockup's departure,
-                // reversing D983's build — its answer to (6)'s unasked question,
+                // dropdown draws the dot** (§15 D988, reversing D983's build,
                 // which drew none): against the slot's own main's value for
                 // the property of that name, reset within the set the copy shows
                 // now. A root linked straight to a main has none — *"a variant
@@ -2298,10 +2295,9 @@ impl OndinApp {
                 }
             }
         });
-        // **The `+` menu** (§15 D1005, 3H), overturning D995's *Bool* / *Text* /
-        // *Var* buttons on the card — the maintainer's call, the mockup's way of
-        // adding. Each row's kind in full, and in the accelerator column what it
-        // binds: the row is wide enough for both, where a third of the card was not
+        // **The `+` menu** (§15 D1005), overturning D995's *Bool* / *Text* /
+        // *Var* buttons on the card — the maintainer's call. Each row's kind in
+        // full, and in the accelerator column what it binds: the row is wide enough for both, where a third of the card was not
         // (D995's reason for the short words).
         let mut add = None;
         if let Some(anchor) = clicks.action_rect {
@@ -2473,7 +2469,7 @@ impl OndinApp {
         };
         // **Rows of the identity card, not a card of their own** (§15 D995): the
         // heading has no curly-brace glyph, and the rows sit under the layer's name
-        // and its boolean row, where the card the mockup drew had no title.
+        // and its boolean row.
         ui.scope(|ui| {
             ui.label(
                 egui::RichText::new("Bind to a component property")

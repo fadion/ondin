@@ -1817,7 +1817,7 @@ impl EditorSession {
 pub const STATUS_JOIN: &str = " · ";
 
 /// The canvas ground a document starts on, and the one the Appearance panel's
-/// reset button returns to: the design's near-black `#171718`.
+/// reset button returns to: near-black `#171718`.
 ///
 /// Lives in core because it is also what a file written before the ground was
 /// saved means (`io::schema`); re-exported for the panels.

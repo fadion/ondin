@@ -361,7 +361,7 @@ const SWITCHES: [ViewSwitch; 16] = [
     ViewSwitch::SnapBaselines,
 ];
 
-/// The highlighted row's ground: the accent at the design's 18%.
+/// The highlighted row's ground: the accent at 18%.
 fn highlight_fill() -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(109, 140, 217, 46)
 }

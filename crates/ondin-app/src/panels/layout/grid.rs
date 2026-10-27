@@ -1,5 +1,4 @@
-//! Grid's rows of the **Container** and **Item** cards (§15 D920), from the
-//! mockup's screen 04 (the design canvas's *Layout Cards* artboard).
+//! Grid's rows of the **Container** and **Item** cards (§15 D920).
 //!
 //! **Container**, under `display: grid`: `grid-auto-flow`, the two track lists —
 //! each track a row leading with its kind, a function's arguments as fields of
@@ -14,7 +13,7 @@
 //! - **`Start` and `End` read *Start* and *End***, not *Flex start*: a grid has no
 //!   reversal for `flex-start` to follow, and CSS treats the two alike there (§15
 //!   D913's session call).
-//! - **`justify-items`, and `normal`**: the first is not in the mockup, and is
+//! - **`justify-items`, and `normal`**: the first is
 //!   the one way to stop every item stretching sideways (§15 D914); the second is
 //!   CSS's default for both items rows, holding a shape at the start of its cell
 //!   (§15 D915).
@@ -503,7 +502,7 @@ impl OndinApp {
         })
     }
 
-    /// The rows under `display: grid` — the mockup's order, with `justify-items`
+    /// The rows under `display: grid` — in this order, with `justify-items`
     /// after `justify-content` (§15 D914): the flow, the two track lists, the four
     /// alignments, the gaps, the padding. Not `grid_rows`, which is the layout
     /// grids' (§5.3b's chrome) in `panels::inspector` — the name "grid" is two
@@ -674,8 +673,7 @@ impl OndinApp {
         self.padding_rows(ui, subjects, laid, full);
     }
 
-    /// One track list — `grid-template-columns`, or `-rows` when `rows` — as the
-    /// mockup draws it: a head with the property's name, how many tracks it makes
+    /// One track list — `grid-template-columns`, or `-rows` when `rows`: a head with the property's name, how many tracks it makes
     /// and a `+`; a row per entry while the selection agrees on the list; and the
     /// whole list as CSS under it, which is also how a selection that disagrees is
     /// edited (it reads *Mixed* and takes a typed or pasted list for all of them).
@@ -878,7 +876,7 @@ impl OndinApp {
         let row = ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             let grip = ui::grip(ui, list.len() > 1, side);
-            // The kind menu, the mockup's leading chip.
+            // The kind menu, the row's leading chip.
             let mut picked = None;
             ui.scope(|ui| {
                 ui.spacing_mut().interact_size.y = side;

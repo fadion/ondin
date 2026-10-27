@@ -19,16 +19,16 @@ use ondin_core::{
 };
 use ondin_export::{PlanOptions, PlannedFile};
 
-/// The scale cell of the design's `74px 1fr 28px 28px` row (7pt pitch, 256pt card).
+/// The scale cell of the export row (7pt pitch, 256pt card).
 ///
 /// A `ComboBox` spends 35pt beside its text and lays it out in `TextStyle::Button`,
 /// so `0.75x` wants 67 and `1024h` wants 71. A combo asked for less comes out wider
 /// than asked and squeezes its neighbours (`the_export_row_fits_the_card`). The
-/// format cell is `1fr`, computed from what is left.
+/// format cell takes what is left.
 const SCALE_W: f32 = 74.0;
 /// The height of everything on the row, and the side of its two square buttons.
 const CELL: f32 = 28.0;
-/// Between two controls side by side — the design's card gap, which the settings
+/// Between two controls side by side — the card gap, which the settings
 /// popover matches (`typography::COL_GAP`).
 const PITCH: f32 = 7.0;
 /// An instance's row's trailing slot, `component::item_slot`'s width (§15 D981).
@@ -49,7 +49,7 @@ const ROW_UNIT_GAP: f32 = 6.0;
 /// An export's two halves sit closer than one export sits to the next, or the size
 /// line reads as belonging to the row below it.
 const _: () = assert!(ROW_LINE_GAP < ROW_UNIT_GAP);
-/// The size line's ink — the design's 34%, quieter than `text::FAINT` (38%),
+/// The size line's ink — 34%, quieter than `text::FAINT` (38%),
 /// because it annotates a control rather than labelling one.
 const SIZE_INK: egui::Color32 = theme::color::text_a(87);
 /// The collapse key the Preview section shares with the panel list.
@@ -76,7 +76,7 @@ const POP_INNER: f32 = ui::menu_inner_w(POP_W, POP_PAD);
 const POP_CELL: f32 = 26.0;
 /// Between one labelled section and the next — the shared one.
 const SECTION_GAP: f32 = ui::POPOVER_SECTION_GAP;
-/// Between a section's label and its control — the design's, for both popovers.
+/// Between a section's label and its control, in both popovers.
 const LABEL_GAP: f32 = 5.0;
 /// The ✕ beside the card's eyebrow, shared with the type popup's.
 const CLOSE_W: f32 = 18.0;
@@ -520,7 +520,7 @@ impl OndinApp {
                 let avail = ui.available_width();
                 let scale = (avail / w).min(1.0);
                 let shown = egui::vec2(w * scale, h * scale);
-                // On the checkerboard, inset from it (the design's frame): the only
+                // On the checkerboard, inset from it: the only
                 // way a transparent export differs from a white one.
                 let (ground, _) = ui.allocate_exact_size(
                     egui::vec2(avail, shown.y + PREVIEW_INSET * 2.0),
@@ -752,7 +752,7 @@ impl OndinApp {
                         });
                     }
 
-                    // The format cell takes what is left (the design's `1fr`).
+                    // The format cell takes what is left.
                     let mut format = spec.format;
                     let format_w = ui.available_width() - CELL * 2.0 - PITCH * 2.0 - slot;
                     egui::ComboBox::from_id_salt(("export-format", index))
@@ -1504,7 +1504,7 @@ impl OndinApp {
                     let on_save = self.prefs.export_on_save;
                     if ui::menu_row(
                         ui,
-                        // `ARROW_CLOCKWISE` (the design's) also prefixes Transform's
+                        // `ARROW_CLOCKWISE` also prefixes Transform's
                         // rotation, but the two never appear together; it must not
                         // be `FLOPPY_DISK`, which is *Save as a preset* above.
                         ui::MenuRow::new(icon::ARROW_CLOCKWISE, "Re-export on save")

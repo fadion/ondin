@@ -49,7 +49,7 @@ enum MaskAction {
     Release(Vec<NodeId>),
 }
 
-/// One slot in the Align row. The design's 24×22 button, or the hairline
+/// One slot in the Align row. A 24×22 button, or the hairline
 /// between two groups of them.
 enum AlignCell {
     /// Align to an edge of the target box.
@@ -327,8 +327,7 @@ impl AngleScrub {
 /// How far a hidden paint row is faded.
 ///
 /// Faded rather than moved or struck through: the row is still what you edit to
-/// bring the paint back. 0.6 rather than the design's 0.7, which read too close
-/// to a live row.
+/// bring the paint back. 0.6: at 0.7 it read too close to a live row.
 const HIDDEN_OPACITY: f32 = 0.6;
 
 /// How far an effect's blur may be scrubbed or typed: core's cap, which the
@@ -467,7 +466,7 @@ struct EffectRowOut {
     /// Its grip began a drag: the row is being carried to a new place in the stack.
     grabbed: bool,
 }
-/// The glyph an effect row wears; the design's four read as one set.
+/// The glyph an effect row wears; the four read as one set.
 fn effect_glyph(kind: &EffectKind) -> &'static str {
     match kind {
         EffectKind::DropShadow(_) => icon::DROP_HALF_BOTTOM,
@@ -689,8 +688,8 @@ const IDENTITY_ICON: f32 = 18.0;
 /// `interact_size.y`, not set. Test-only: nothing in the layout reads it.
 #[cfg(test)]
 const IDENTITY_ROW_H: f32 = 24.0;
-/// The identity card's second row, from the design: a 46pt dropdown then **three**
-/// 28×28 action cells, `gap:7px`, everything 28pt tall.
+/// The identity card's second row: a 46pt dropdown then **three** 28×28 action
+/// cells, everything 28pt tall.
 const BOOL_COMBO_W: f32 = 46.0;
 const BOOL_ROW_H: f32 = 28.0;
 const BOOL_ROW_GAP: f32 = ui::CARD_COL_GAP;
@@ -2352,7 +2351,7 @@ impl OndinApp {
         }
     }
 
-    /// Align and distribute, in the design's single row: three horizontal
+    /// Align and distribute, in a single row: three horizontal
     /// alignments, a rule, three vertical, a rule, then the two distributes.
     ///
     /// [`Self::align_target`] picks the box; a lone top-level layer has none, and
@@ -2373,7 +2372,7 @@ impl OndinApp {
         let on_points = points.is_some();
         self.panel(ui, "Align", None, |app, ui| {
             ui.horizontal(|ui| {
-                // Spread across the row, as the design's `space-between`; 3px floor.
+                // Spread evenly across the row, with a 3pt floor.
                 let ink = 8.0 * ALIGN_CELL.x + 2.0;
                 ui.spacing_mut().item_spacing.x = ((ui.available_width() - ink) / 9.0).max(3.0);
                 for cell in [
@@ -4440,7 +4439,7 @@ impl OndinApp {
         );
         self.field_doors(ui, key, &ro);
     }
-    /// Opacity, corner radius, and the vertex counts — the design's Appearance panel.
+    /// The Appearance panel: opacity, corner radius, and the vertex counts.
     #[allow(clippy::too_many_arguments)]
     fn inspector_appearance(
         &mut self,
@@ -5196,7 +5195,7 @@ impl OndinApp {
     }
     /// The width the position dropdown takes in either stroke row.
     ///
-    /// The design's `1.2fr 1fr 28px 28px`: a 1.2 : 1 split of what the two buttons leave.
+    /// The dropdown's 1.2 of a 1.2 : 1 split of what the two 28pt buttons leave.
     fn align_combo_width(ui: &egui::Ui) -> f32 {
         let free = ui.available_width() - 28.0 * 2.0 - ui::CARD_COL_GAP * 3.0;
         free * 1.2 / 2.2
@@ -21990,7 +21989,7 @@ mod inset_card_tests {
     ///
     /// flip: the `auto` formatter off, or the top never held → fails at "left and bottom, unpinned"; the badge's `laid` dropped → fails at "no badge in a plain frame".
     #[test]
-    fn the_card_is_laid_out_as_the_mockup() {
+    fn unpinned_edges_read_auto_and_a_plain_frame_has_no_badge() {
         let (mut app, _frame, rect) = app_with_pinnable();
         app.toggle_pin(&[rect], Pin::Right, true);
         let ctx = egui::Context::default();

@@ -1,5 +1,4 @@
-//! **Document tabs**: more than one open document in one window (design canvas,
-//! *Document Tabs*). Each open document is a tab in the strip along the top of the
+//! **Document tabs**: more than one open document in one window. Each open document is a tab in the strip along the top of the
 //! window, after the library's, which is always first.
 //!
 //! **One tab's editor state lives in `OndinApp`'s own fields** — `session` and the

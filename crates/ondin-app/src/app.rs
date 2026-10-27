@@ -2040,8 +2040,8 @@ impl OndinApp {
             Action::ToggleView(sw) => self.set_view_switch(sw, !self.view_switch(sw)),
             Action::ToggleHidden => self.toggle_hidden(),
             Action::ToggleLocked => self.toggle_locked(),
-            Action::Rename => self.rename_selection(),
-            Action::BatchRename => self.open_batch_rename(None),
+            Action::Rename => self.rename_selection(ctx),
+            Action::BatchRename => self.open_batch_rename(ctx, None),
             Action::Flip(axis) => self.flip(axis),
             Action::Align(axis, edge) => self.align(axis, edge),
             Action::Distribute(axis) => self.distribute(axis),
@@ -2136,10 +2136,10 @@ impl OndinApp {
     /// The same field a double-click in the layers panel opens (`renaming_layer`, drawn
     /// by `layers::layer_rename_field`). The panel is shown if hidden; with several
     /// layers selected it opens the batch rename box instead.
-    fn rename_selection(&mut self) {
+    fn rename_selection(&mut self, ctx: &egui::Context) {
         // Two or more: the chord falls through to the verb that fits them.
         if self.session.selection.ids().len() > 1 {
-            self.open_batch_rename(None);
+            self.open_batch_rename(ctx, None);
             return;
         }
         // Focus mode draws no layers panel: the field would never render.
@@ -7429,7 +7429,8 @@ impl OndinApp {
                                             .clicked()
                                         {
                                             let search = self.layer_filter.clone();
-                                            self.open_batch_rename(search);
+                                            let ctx = ui.ctx().clone();
+                                            self.open_batch_rename(&ctx, search);
                                         }
                                         // Fold or unfold the whole tree.
                                         let folded = self.tree_is_all_collapsed();

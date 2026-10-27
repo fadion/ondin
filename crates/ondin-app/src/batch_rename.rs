@@ -2,16 +2,25 @@
 //! that renames many layers at once — the selection, the page or every page.
 //!
 //! The text rule is `ondin_core::rename`'s; this module picks the layers, orders
-//! and numbers them ([`plan`]), draws the box with its preview, and commits every
-//! new name as one undo step. Nothing changes on the canvas until then.
+//! and numbers them ([`plan_into`]), draws the box with its preview, and commits
+//! every new name as one undo step. Nothing changes on the canvas until then.
+//!
+//! The document cannot change while the box is up, so what the plan reads of it
+//! is taken once, at open ([`Snapshot`]), and a worker plans from that copy each
+//! time a setting changes, sending the rows back in parts as it goes.
 
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
+use crate::ui::{self, FieldButton, Prefix, Scrub};
 use eframe::egui;
+use ondin_core::kurbo;
 use ondin_core::rename::{Find, Numbering, Piece, Rule, Span, Template};
 use ondin_core::{Document, NodeId, Operation, Resolved, Transaction};
 use std::collections::HashSet;
 use std::ops::Range;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// The box's width, and the gap between the top of the canvas and the box: the
 /// palette's place.
@@ -22,10 +31,13 @@ const LABEL_W: f32 = 72.0;
 const GAP: f32 = 10.0;
 const PAD: f32 = 14.0;
 const FIELD_H: f32 = 30.0;
+/// The numbering controls, as tall as the Settings modal's fields.
+const NUM_H: f32 = 28.0;
 const ROW_H: f32 = 26.0;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 8.0;
-const PILL_FONT: f32 = 11.0;
+/// The layers the worker plans between two parts it sends.
+const PART: usize = 500;
 
 /// What the box renames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +103,112 @@ impl Order {
     }
 }
 
+/// One layer as the plan reads it, taken when the box opens.
+#[derive(Clone, Debug)]
+struct Layer {
+    id: NodeId,
+    name: String,
+    /// A variant in a set, whose name is made from its property values.
+    variant: bool,
+    /// Inside an instance, and not its root.
+    in_instance: bool,
+    /// Selected when the box opened.
+    selected: bool,
+    /// Under a layer that was.
+    under_selected: bool,
+    bounds: Option<kurbo::Rect>,
+    glyph: &'static str,
+    tint: egui::Color32,
+}
+
+/// One page's layers, in the layers tree's order.
+#[derive(Debug)]
+struct SnapPage {
+    id: NodeId,
+    name: String,
+    layers: Vec<Layer>,
+}
+
+/// What the plan reads of the document, every page in the Pages list's order.
+#[derive(Debug)]
+pub(crate) struct Snapshot {
+    pages: Vec<SnapPage>,
+}
+
+impl Snapshot {
+    /// Read every page of `doc`, marking `selection` and the layers under it.
+    pub(crate) fn take(doc: &Document, res: &Resolved, selection: &[NodeId]) -> Self {
+        let chosen: HashSet<NodeId> = selection.iter().copied().collect();
+        let pages = doc
+            .page_ids()
+            .map(|page| {
+                let mut layers = Vec::new();
+                // `(id, under a selected layer)`, pushed in child order so the last
+                // child, the tree's top row, pops first.
+                let mut stack = vec![(page, false)];
+                while let Some((id, under)) = stack.pop() {
+                    let Some(node) = doc.get(id) else { continue };
+                    let selected = chosen.contains(&id);
+                    if id != page {
+                        let (glyph, tint) = crate::panels::layers::node_icon(node.kind());
+                        layers.push(Layer {
+                            id,
+                            name: node.name().to_string(),
+                            variant: !node.variant().is_empty(),
+                            in_instance: node.parent().is_some_and(|p| {
+                                ondin_core::component::instance_root(doc, p).is_some()
+                            }),
+                            selected,
+                            under_selected: under,
+                            bounds: res.world_bounds(id),
+                            glyph,
+                            tint,
+                        });
+                    }
+                    let under = under || selected;
+                    stack.extend(node.children().iter().map(|c| (*c, under)));
+                }
+                SnapPage {
+                    id: page,
+                    name: doc
+                        .get(page)
+                        .map_or_else(String::new, |n| n.name().to_string()),
+                    layers,
+                }
+            })
+            .collect();
+        Self { pages }
+    }
+}
+
+/// Everything the plan depends on besides the snapshot.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Settings {
+    pub(crate) scope: Scope,
+    /// The current page, which *This page* means.
+    page: NodeId,
+    pub(crate) find: String,
+    /// *Rename to*, with its tokens spelled `[Name]`, `[Number]`, `[Group k]`.
+    pub(crate) template: String,
+    pub(crate) match_case: bool,
+    pub(crate) pattern: bool,
+    pub(crate) keep_case: bool,
+    pub(crate) numbering: Numbering,
+    pub(crate) order: Order,
+    /// *Include layers inside*, at Selection.
+    pub(crate) inside: bool,
+    /// *Include layers inside instances*, at page and document scope.
+    pub(crate) inside_instances: bool,
+}
+
+impl Settings {
+    pub(crate) fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+        // Away from the selection, the case of what matches is out of view.
+        self.keep_case = scope != Scope::Selection;
+    }
+}
+
 /// Where the template field's caret goes on its next frame.
 #[derive(Clone, Copy, Debug)]
 enum Caret {
@@ -101,37 +219,23 @@ enum Caret {
 
 /// The open box.
 pub(crate) struct BatchRename {
-    pub(crate) scope: Scope,
-    /// The selection at open. Nothing can change it while the box is up.
-    selection: Vec<NodeId>,
-    pub(crate) find: String,
-    /// *Rename to*, with its tokens spelled `[Name]`, `[Number]`, `[Group k]`.
-    pub(crate) template: String,
-    pub(crate) match_case: bool,
-    pub(crate) pattern: bool,
-    pub(crate) keep_case: bool,
-    pub(crate) numbering: Numbering,
-    /// From and Step as typed; the last whole number each held is in `numbering`.
-    from_text: String,
-    step_text: String,
-    pub(crate) order: Order,
-    /// *Include layers inside*, at Selection.
-    pub(crate) inside: bool,
-    /// *Include layers inside instances*, at page and document scope.
-    pub(crate) inside_instances: bool,
-    order_open: bool,
+    pub(crate) s: Settings,
+    /// How many layers were selected at open; zero leaves *Selection* off.
+    selected: usize,
+    matcher: Matcher,
+    /// The settings last handed to the worker.
+    asked: Option<Settings>,
+    /// What the preview draws: the newest plan, as far as its parts have come.
+    plan: Plan,
+    /// Whether `plan` has had a part for the newest settings yet; until then it
+    /// still shows the previous plan.
+    fresh: bool,
+    /// Whether `plan` is whole for the newest settings.
+    done: bool,
     /// The template's caret, in characters, while the field had it: where an
     /// insert button puts its token.
     caret: Option<usize>,
     focus: Option<Caret>,
-}
-
-impl BatchRename {
-    fn set_scope(&mut self, scope: Scope) {
-        self.scope = scope;
-        // Away from the selection, the case of what matches is out of view.
-        self.keep_case = scope != Scope::Selection;
-    }
 }
 
 /// One row of the preview.
@@ -169,7 +273,8 @@ pub(crate) enum New {
     Variant,
 }
 
-/// What the box would do with its current settings.
+/// What the box would do with its settings — or one part of it, as the worker
+/// sends it, which [`Plan::absorb`] adds to the whole.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Plan {
     pub(crate) rows: Vec<Row>,
@@ -177,7 +282,7 @@ pub(crate) struct Plan {
     pub(crate) searched: usize,
     /// The layer rows listed.
     pub(crate) listed: usize,
-    /// The pages with a listed row.
+    /// The page headings: all pages' pages with a listed row.
     pub(crate) pages: usize,
     /// Each layer that changes, and its new name, in the run's order.
     pub(crate) changes: Vec<(NodeId, String)>,
@@ -187,63 +292,107 @@ pub(crate) struct Plan {
     pub(crate) groups: usize,
     /// Why Find renames nothing: a pattern that does not parse.
     pub(crate) error: Option<String>,
+    /// The row of the newest page heading, which the rows after it count into.
+    head: Option<usize>,
 }
 
-/// The layers under `page` in the layers tree's order, the page itself left out.
-fn tree_order(doc: &Document, page: NodeId) -> Vec<NodeId> {
-    let mut out = Vec::new();
-    let mut stack = vec![page];
-    while let Some(id) = stack.pop() {
-        let Some(node) = doc.get(id) else { continue };
-        if id != page {
-            out.push(id);
+impl Plan {
+    /// Add `part`'s rows and counts to this plan.
+    pub(crate) fn absorb(&mut self, part: Plan) {
+        for row in part.rows {
+            match &row {
+                Row::Page { .. } => {
+                    self.pages += 1;
+                    self.head = Some(self.rows.len());
+                }
+                Row::Layer(_) => {
+                    self.listed += 1;
+                    if let Some(Row::Page { count, .. }) =
+                        self.head.and_then(|h| self.rows.get_mut(h))
+                    {
+                        *count += 1;
+                    }
+                }
+            }
+            self.rows.push(row);
         }
-        // Pushed in child order so the last child, the tree's top row, pops first.
-        stack.extend(node.children().iter().copied());
+        self.changes.extend(part.changes);
+        self.searched += part.searched;
+        self.skipped += part.skipped;
+        self.groups = self.groups.max(part.groups);
+        if part.error.is_some() {
+            self.error = part.error;
+        }
     }
-    out
-}
 
-/// Whether `id` sits inside an instance — not one that is an instance's root.
-fn in_instance(doc: &Document, id: NodeId) -> bool {
-    doc.get(id)
-        .and_then(|n| n.parent())
-        .is_some_and(|p| ondin_core::component::instance_root(doc, p).is_some())
+    /// Why Rename has nothing to do, when it has not.
+    fn why_not(&self, find: &str) -> Option<String> {
+        if let Some(e) = &self.error {
+            return Some(e.clone());
+        }
+        if !self.changes.is_empty() {
+            return None;
+        }
+        let matched: Vec<&New> = self
+            .rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Layer(l) if !l.matched.is_empty() => Some(&l.new),
+                _ => None,
+            })
+            .collect();
+        Some(
+            if matched.is_empty() {
+                if find.is_empty() {
+                    "No layers to rename"
+                } else {
+                    "No layer matches Find"
+                }
+            } else if matched.iter().all(|n| **n == New::Empty) {
+                "Every new name would be empty"
+            } else if matched.iter().all(|n| **n == New::Variant) {
+                "Variants are named by their properties"
+            } else {
+                "Nothing would change"
+            }
+            .to_string(),
+        )
+    }
 }
 
 /// `ids` in reading order: rows (or columns, `!rows`) gathered by bands — a layer
 /// joins the first band its centre falls in — then each band read along. Layers
 /// with no bounds keep their order at the end.
-fn by_bands(ids: Vec<NodeId>, res: &Resolved, rows: bool) -> Vec<NodeId> {
-    let (mut boxed, mut rest) = (Vec::new(), Vec::new());
-    for id in ids {
-        match res.world_bounds(id) {
-            Some(r) if rows => boxed.push((id, (r.y0, r.y1), r.x0)),
-            Some(r) => boxed.push((id, (r.x0, r.x1), r.y0)),
-            None => rest.push(id),
-        }
-    }
+fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
     /// A row or column: the span of the layer that started it, and its layers
     /// with where each starts along it.
-    struct Band {
+    struct Band<'a> {
         lo: f64,
         hi: f64,
-        members: Vec<(NodeId, f64)>,
+        members: Vec<(&'a Layer, f64)>,
+    }
+    let (mut boxed, mut rest) = (Vec::new(), Vec::new());
+    for l in layers {
+        match l.bounds {
+            Some(r) if rows => boxed.push((l, (r.y0, r.y1), r.x0)),
+            Some(r) => boxed.push((l, (r.x0, r.x1), r.y0)),
+            None => rest.push(l),
+        }
     }
     boxed.sort_by(|a, b| a.1.0.total_cmp(&b.1.0));
-    let mut bands: Vec<Band> = Vec::new();
-    for (id, (lo, hi), along) in boxed {
+    let mut bands: Vec<Band<'a>> = Vec::new();
+    for (l, (lo, hi), along) in boxed {
         let centre = (lo + hi) / 2.0;
         match bands.iter_mut().find(|b| b.lo <= centre && centre <= b.hi) {
-            Some(band) => band.members.push((id, along)),
+            Some(band) => band.members.push((l, along)),
             None => bands.push(Band {
                 lo,
                 hi,
-                members: vec![(id, along)],
+                members: vec![(l, along)],
             }),
         }
     }
-    let mut out: Vec<NodeId> = Vec::new();
+    let mut out = Vec::new();
     for mut band in bands {
         band.members.sort_by(|a, b| a.1.total_cmp(&b.1));
         out.extend(band.members.into_iter().map(|m| m.0));
@@ -252,122 +401,225 @@ fn by_bands(ids: Vec<NodeId>, res: &Resolved, rows: bool) -> Vec<NodeId> {
     out
 }
 
-/// What the box would rename from `page` with `b`'s settings: the layers in scope,
-/// each page's in the run's order and the pages in the Pages list's, numbered
-/// as they change.
-pub(crate) fn plan(doc: &Document, res: &Resolved, page: NodeId, b: &BatchRename) -> Plan {
-    let mut plan = Plan::default();
-    let find = Find::new(&b.find, b.match_case, b.pattern);
-    let rule = match find {
+/// Plan the rename `s` describes over `snap`: the layers in scope, each page's in
+/// the run's order and the pages in the Pages list's, numbered as they change.
+/// The plan goes to `emit` in parts, every [`PART`] layers; `emit` answering false
+/// stops it.
+pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan) -> bool) {
+    let mut part = Plan::default();
+    let rule = match Find::new(&s.find, s.match_case, s.pattern) {
         Ok(find) => {
-            plan.groups = find.groups();
+            part.groups = find.groups();
             Some(Rule {
                 find,
-                template: Template::parse(&b.template),
-                keep_case: b.keep_case,
+                template: Template::parse(&s.template),
+                keep_case: s.keep_case,
             })
         }
         Err(e) => {
-            plan.error = Some(e);
+            part.error = Some(e);
             None
         }
     };
-
-    // Each page's layers, in tree order; the selection keeps only its own.
-    let pages: Vec<NodeId> = match b.scope {
-        Scope::Page => vec![page],
-        Scope::Selection | Scope::Document => doc.page_ids().collect(),
-    };
-    let chosen: Option<HashSet<NodeId>> = (b.scope == Scope::Selection).then(|| {
-        let mut set: HashSet<NodeId> = b.selection.iter().copied().collect();
-        if b.inside {
-            for id in &b.selection {
-                set.extend(tree_order(doc, *id));
-            }
-        }
-        set
-    });
-    let mut runs: Vec<(NodeId, Vec<NodeId>)> = Vec::new();
-    for p in pages {
-        let mut ids = Vec::new();
-        for id in tree_order(doc, p) {
-            match &chosen {
-                Some(set) if !set.contains(&id) => {}
-                Some(_) => ids.push(id),
-                None if !b.inside_instances && in_instance(doc, id) => {
-                    let name = doc.get(id).map_or("", |n| n.name());
-                    if rule.as_ref().is_some_and(|r| r.apply(name, "").is_some()) {
-                        plan.skipped += 1;
-                    }
-                }
-                None => ids.push(id),
-            }
-        }
-        let ids = match b.order {
-            Order::Layers => ids,
-            Order::Reversed => ids.into_iter().rev().collect(),
-            Order::LeftToRight => by_bands(ids, res, true),
-            Order::TopToBottom => by_bands(ids, res, false),
-        };
-        if !ids.is_empty() {
-            runs.push((p, ids));
-        }
-    }
+    let matches = |name: &str| rule.as_ref().is_some_and(|r| r.apply(name, "").is_some());
 
     // Only layers that change take a number, so a skipped one leaves no gap.
     let mut taken = 0usize;
-    let every = b.scope == Scope::Selection;
-    let many_pages = b.scope == Scope::Document;
-    for (p, ids) in runs {
-        plan.searched += ids.len();
-        let mut rows = Vec::new();
-        for id in ids {
-            let Some(node) = doc.get(id) else { continue };
-            let old = node.name().to_string();
+    let mut since = 0usize;
+    let every = s.scope == Scope::Selection;
+    for page in &snap.pages {
+        if s.scope == Scope::Page && page.id != s.page {
+            continue;
+        }
+        let mut run = Vec::new();
+        for l in &page.layers {
+            match s.scope {
+                Scope::Selection if l.selected || (s.inside && l.under_selected) => run.push(l),
+                Scope::Selection => {}
+                _ if !s.inside_instances && l.in_instance => {
+                    if matches(&l.name) {
+                        part.skipped += 1;
+                    }
+                }
+                _ => run.push(l),
+            }
+        }
+        let run = match s.order {
+            Order::Layers => run,
+            Order::Reversed => run.into_iter().rev().collect(),
+            Order::LeftToRight => by_bands(run, true),
+            Order::TopToBottom => by_bands(run, false),
+        };
+        let mut headed = false;
+        for l in run {
+            part.searched += 1;
             let applied = rule
                 .as_ref()
-                .and_then(|r| r.apply(&old, &b.numbering.nth(taken)));
+                .and_then(|r| r.apply(&l.name, &s.numbering.nth(taken)));
             let (matched, new) = match applied {
                 None => (Vec::new(), New::Unchanged),
-                Some(r) if !node.variant().is_empty() => (r.matched, New::Variant),
+                Some(r) if l.variant => (r.matched, New::Variant),
                 Some(r) => match ondin_core::naming::usable(&r.text()) {
                     None => (r.matched, New::Empty),
-                    Some(name) if name == old => (r.matched, New::Unchanged),
+                    Some(name) if name == l.name => (r.matched, New::Unchanged),
                     Some(name) => {
                         taken += 1;
-                        plan.changes.push((id, name));
+                        part.changes.push((l.id, name));
                         (r.matched, New::Name(r.spans))
                     }
                 },
             };
             if every || !matched.is_empty() {
-                let (glyph, tint) = crate::panels::layers::node_icon(node.kind());
-                rows.push(Row::Layer(LayerRow {
-                    id,
-                    glyph,
-                    tint,
-                    old,
+                if s.scope == Scope::Document && !headed {
+                    headed = true;
+                    part.rows.push(Row::Page {
+                        name: page.name.clone(),
+                        count: 0,
+                    });
+                }
+                part.rows.push(Row::Layer(LayerRow {
+                    id: l.id,
+                    glyph: l.glyph,
+                    tint: l.tint,
+                    old: l.name.clone(),
                     matched,
                     new,
                 }));
             }
+            since += 1;
+            if since == PART {
+                since = 0;
+                if !emit(std::mem::take(&mut part)) {
+                    return;
+                }
+            }
         }
-        if rows.is_empty() {
-            continue;
-        }
-        plan.pages += 1;
-        plan.listed += rows.len();
-        if many_pages {
-            plan.rows.push(Row::Page {
-                name: doc
-                    .get(p)
-                    .map_or_else(String::new, |n| n.name().to_string()),
-                count: rows.len(),
-            });
-        }
-        plan.rows.extend(rows);
     }
-    plan
+    emit(part);
+}
+
+/// The whole plan at once.
+pub(crate) fn plan(snap: &Snapshot, s: &Settings) -> Plan {
+    let mut whole = Plan::default();
+    plan_into(snap, s, &mut |part| {
+        whole.absorb(part);
+        true
+    });
+    whole
+}
+
+/// What the worker sends: a part of the plan for one request, or that the
+/// request's plan is whole.
+enum Sent {
+    Part(u64, Plan),
+    Done(u64),
+}
+
+/// The thread that plans while the box is open. It takes the newest request,
+/// skipping any it was sent while busy, and abandons a plan as soon as a newer
+/// request is made. It ends when the box drops its sender.
+struct Matcher {
+    tx: Sender<(u64, Settings)>,
+    rx: Receiver<Sent>,
+    /// The newest request, which the thread reads between parts.
+    latest: Arc<AtomicU64>,
+    /// No thread could start: plans run on the UI thread.
+    inline: Option<Arc<Snapshot>>,
+}
+
+impl Matcher {
+    fn start(ctx: &egui::Context, snap: Arc<Snapshot>) -> Self {
+        let (tx, requests) = channel::<(u64, Settings)>();
+        let (sent, rx) = channel();
+        let latest = Arc::new(AtomicU64::new(0));
+        let (ctx, newest, thread_snap) = (ctx.clone(), latest.clone(), snap.clone());
+        let spawned = std::thread::Builder::new()
+            .name("batch-rename".into())
+            .spawn(move || {
+                while let Ok(mut req) = requests.recv() {
+                    while let Ok(newer) = requests.try_recv() {
+                        req = newer;
+                    }
+                    let (n, s) = req;
+                    let current = || newest.load(Ordering::Relaxed) == n;
+                    plan_into(&thread_snap, &s, &mut |part| {
+                        let ok = current() && sent.send(Sent::Part(n, part)).is_ok();
+                        ctx.request_repaint();
+                        ok
+                    });
+                    if current() && sent.send(Sent::Done(n)).is_err() {
+                        return;
+                    }
+                    ctx.request_repaint();
+                }
+            });
+        let inline = match spawned {
+            Ok(_) => None,
+            Err(e) => {
+                log::warn!(target: "ondin", "no thread for batch rename: {e}");
+                Some(snap)
+            }
+        };
+        Self {
+            tx,
+            rx,
+            latest,
+            inline,
+        }
+    }
+
+    /// Ask for the plan of `s`; its parts come back through [`Self::rx`] under the
+    /// returned number.
+    fn ask(&mut self, s: Settings) -> u64 {
+        let n = self.latest.load(Ordering::Relaxed) + 1;
+        self.latest.store(n, Ordering::Relaxed);
+        match &self.inline {
+            Some(snap) => {
+                let whole = plan(snap, &s);
+                // Sent to ourselves, so the frame reads it as it would the thread's.
+                let (tx, rx) = channel();
+                let _ = tx.send(Sent::Part(n, whole));
+                let _ = tx.send(Sent::Done(n));
+                self.rx = rx;
+            }
+            None => {
+                let _ = self.tx.send((n, s));
+            }
+        }
+        n
+    }
+}
+
+impl BatchRename {
+    /// Ask for a plan when the settings changed, and take in what the worker sent.
+    fn take_parts(&mut self) {
+        if self.asked.as_ref() != Some(&self.s) {
+            self.matcher.ask(self.s.clone());
+            self.asked = Some(self.s.clone());
+            self.fresh = false;
+            self.done = false;
+        }
+        let newest = self.matcher.latest.load(Ordering::Relaxed);
+        while let Ok(sent) = self.matcher.rx.try_recv() {
+            match sent {
+                Sent::Part(n, part) if n == newest => {
+                    if !self.fresh {
+                        self.fresh = true;
+                        self.plan = Plan::default();
+                    }
+                    self.plan.absorb(part);
+                }
+                Sent::Done(n) if n == newest => {
+                    if !self.fresh {
+                        self.fresh = true;
+                        self.plan = Plan::default();
+                    }
+                    self.done = true;
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 /// `n` with thousands separated: `1,204`.
@@ -454,7 +706,8 @@ fn pill_fill() -> egui::Color32 {
 }
 
 /// The template field's text: each token a pill, its brackets drawn as the pill's
-/// padding so the caret still steps through real characters.
+/// padding so the caret still steps through real characters. The pill keeps the
+/// text's size: a smaller font sits on the line's baseline, low against its words.
 fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
     let font = egui::FontId::proportional(12.0);
     let plain = egui::TextFormat::simple(font.clone(), color::TEXT);
@@ -463,11 +716,9 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
     for (r, _) in ondin_core::rename::tokens(text) {
         job.append(&text[at..r.start], 0.0, plain.clone());
         let pill = |ink| egui::TextFormat {
-            font_id: egui::FontId::proportional(PILL_FONT),
             color: ink,
             background: pill_fill(),
-            valign: egui::Align::Center,
-            ..Default::default()
+            ..egui::TextFormat::simple(font.clone(), ink)
         };
         // The galley must hold exactly the text's characters, or the caret lands
         // between the wrong ones: the word is the text's own, the brackets hidden.
@@ -486,7 +737,7 @@ impl OndinApp {
     /// *Batch rename…*: open the box over the canvas. It opens on the selection
     /// when there is one and on the page when not; `search` is the layers tree's
     /// filter, which opens it on the page finding what the tree shows.
-    pub(crate) fn open_batch_rename(&mut self, search: Option<String>) {
+    pub(crate) fn open_batch_rename(&mut self, ctx: &egui::Context, search: Option<String>) {
         self.palette = None;
         self.context_menu = None;
         self.open_menu = crate::app::TopMenu::None;
@@ -501,16 +752,12 @@ impl OndinApp {
             .filter(|id| !doc.is_page(*id) && doc.get(*id).is_some())
             .collect();
         let remembered = self.prefs.batch_rename.clone();
-        let numbering = Numbering {
-            from: remembered.from,
-            step: remembered.step,
-            digits: remembered.digits.clamp(1, 3),
-        };
         // One layer with children: renaming the layer alone is Rename's job.
-        let inside = matches!(selection.as_slice(), [id] if doc.get(*id).is_some_and(|n| !n.children().is_empty()));
-        let mut b = BatchRename {
+        let inside = matches!(selection.as_slice(), [id]
+            if doc.get(*id).is_some_and(|n| !n.children().is_empty()));
+        let mut s = Settings {
             scope: Scope::Selection,
-            selection,
+            page: self.session.page,
             find: remembered.find,
             template: if remembered.template.is_empty() {
                 "[Name]".to_string()
@@ -520,40 +767,51 @@ impl OndinApp {
             match_case: false,
             pattern: false,
             keep_case: false,
-            numbering,
-            from_text: numbering.from.to_string(),
-            step_text: numbering.step.to_string(),
+            numbering: Numbering {
+                from: remembered.from,
+                step: remembered.step,
+                digits: remembered.digits.clamp(1, 3),
+            },
             order: Order::from_key(&remembered.order),
             inside,
             inside_instances: false,
-            order_open: false,
-            caret: None,
-            focus: Some(Caret::All),
         };
         let search = search.filter(|s| !s.trim().is_empty());
-        if b.selection.is_empty() || search.is_some() {
-            b.set_scope(Scope::Page);
+        if selection.is_empty() || search.is_some() {
+            s.set_scope(Scope::Page);
         }
-        if let Some(s) = search {
-            b.find = s.trim().to_string();
+        if let Some(text) = search {
+            s.find = text.trim().to_string();
         }
-        self.batch_rename = Some(b);
+        let snap = Arc::new(Snapshot::take(doc, &self.session.resolved, &selection));
+        self.batch_rename = Some(BatchRename {
+            s,
+            selected: selection.len(),
+            matcher: Matcher::start(ctx, snap),
+            asked: None,
+            plan: Plan::default(),
+            fresh: false,
+            done: false,
+            caret: None,
+            focus: Some(Caret::All),
+        });
     }
 
     /// Rename every layer the plan changes, as one undo step, and remember the
     /// box's Find, template and numbering for next time. Called only when the plan
-    /// changes something.
-    fn commit_batch_rename(&mut self, b: &BatchRename, plan: &Plan) {
+    /// is whole and changes something.
+    fn commit_batch_rename(&mut self, b: &BatchRename) {
         let br = &mut self.prefs.batch_rename;
-        br.find = b.find.clone();
-        br.template = b.template.clone();
-        br.from = b.numbering.from;
-        br.step = b.numbering.step;
-        br.digits = b.numbering.digits;
-        br.order = b.order.key().to_string();
+        br.find = b.s.find.clone();
+        br.template = b.s.template.clone();
+        br.from = b.s.numbering.from;
+        br.step = b.s.numbering.step;
+        br.digits = b.s.numbering.digits;
+        br.order = b.s.order.key().to_string();
         self.prefs.save();
         let tx = Transaction(
-            plan.changes
+            b.plan
+                .changes
                 .iter()
                 .map(|(id, name)| Operation::SetName {
                     id: *id,
@@ -565,7 +823,7 @@ impl OndinApp {
         if self.session.commit(tx) {
             self.session.info(format!(
                 "Renamed {} · Ctrl+Z to undo",
-                layers(plan.changes.len())
+                layers(b.plan.changes.len())
             ));
         }
     }
@@ -577,22 +835,15 @@ impl OndinApp {
         let Some(mut b) = self.batch_rename.take() else {
             return;
         };
+        // The order list, open last frame, takes Escape, Enter and the click
+        // outside that closes it.
+        let popup = egui::Popup::is_any_open(ctx);
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        if escape && b.order_open {
-            b.order_open = false;
-            self.batch_rename = Some(b);
+        if escape && !popup {
             return;
         }
-        if escape {
-            return;
-        }
-        let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
-        let plan = plan(
-            &self.session.doc,
-            &self.session.resolved,
-            self.session.page,
-            &b,
-        );
+        let enter = !popup && ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        b.take_parts();
 
         let screen = ctx.content_rect();
         let id = egui::Id::new("batch-rename");
@@ -603,8 +854,11 @@ impl OndinApp {
                 canvas.top() - screen.top() + TOP_GAP,
             ),
         );
+        let why_not = match b.done {
+            true => b.plan.why_not(&b.s.find),
+            false => Some("Still matching…".to_string()),
+        };
         let mut act = Act::None;
-        let mut order_button = egui::Rect::NOTHING;
         let modal = egui::Modal::new(id)
             .area(area)
             .backdrop_color(egui::Color32::TRANSPARENT)
@@ -635,44 +889,33 @@ impl OndinApp {
                     })
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = GAP;
-                        scope_row(ui, &mut b);
-                        find_row(ui, &mut b, plan.error.as_deref());
-                        template_row(ui, &mut b, plan.groups);
-                        if Template::parse(&b.template).has_number() {
-                            order_button = number_row(ui, &mut b);
+                        scope_row(ui, &mut b.s, b.selected);
+                        find_row(ui, &mut b.s, b.plan.error.as_deref());
+                        template_row(ui, &mut b);
+                        if Template::parse(&b.s.template).has_number() {
+                            number_row(ui, &mut b.s.numbering);
+                            order_row(ui, &mut b.s.order);
                         }
-                        checks(ui, &mut b, plan.skipped);
+                        checks(ui, &mut b.s, b.plan.skipped);
                     });
                 ui.add_space(8.0);
                 divider(ui);
-                preview(ui, b.scope, &plan);
+                preview(ui, b.s.scope, &b.plan, b.done);
                 divider(ui);
-                if let Some(a) = foot(ui, plan.changes.len()) {
+                if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
                     act = a;
                 }
             });
-        // The Number row goes when its token does, and its menu with it.
-        b.order_open &= order_button != egui::Rect::NOTHING;
-        if b.order_open
-            && let Some(o) = order_menu(ctx, order_button, b.order)
-        {
-            b.order = o;
-            b.order_open = false;
+        if modal.backdrop_response.clicked() && !popup {
+            return;
         }
-        // A click outside closes the order menu first, then the box.
-        if modal.backdrop_response.clicked() {
-            if !b.order_open {
-                return;
-            }
-            b.order_open = false;
-        }
-        if enter && !b.order_open {
+        if enter {
             act = Act::Rename;
         }
         match act {
             Act::Cancel => {}
-            Act::Rename if !plan.changes.is_empty() => {
-                self.commit_batch_rename(&b, &plan);
+            Act::Rename if why_not.is_none() => {
+                self.commit_batch_rename(&b);
                 ctx.request_repaint();
             }
             _ => self.batch_rename = Some(b),
@@ -715,7 +958,7 @@ fn head(ui: &mut egui::Ui) -> bool {
         egui::vec2(26.0, 26.0),
     );
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(close));
-    crate::ui::icon_button(&mut child, icon::X, 26.0, 13.0, false, true)
+    ui::icon_button(&mut child, icon::X, 26.0, 13.0, false, true)
         .on_hover_text("Cancel")
         .clicked()
 }
@@ -738,28 +981,13 @@ fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui
     .inner
 }
 
-/// A segment of a segmented control, or a toggle in a field: lit when `on`.
-fn segment(
-    ui: &mut egui::Ui,
-    text: &str,
-    sub: &str,
-    on: bool,
-    h: f32,
-    mono: bool,
-) -> egui::Response {
-    let font = match mono {
-        true => egui::FontId::monospace(11.0),
-        false => egui::FontId::proportional(11.5),
-    };
+/// A segment of a segmented control: lit when `on`, with an optional count after
+/// its word.
+fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::Response {
+    let font = egui::FontId::proportional(11.5);
     let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color::TEXT));
     let sub_g = (!sub.is_empty()).then(|| {
-        ui.fonts_mut(|f| {
-            f.layout_no_wrap(
-                sub.to_string(),
-                egui::FontId::proportional(11.5),
-                theme::text::DIM,
-            )
-        })
+        ui.fonts_mut(|f| f.layout_no_wrap(sub.to_string(), font.clone(), theme::text::DIM))
     });
     let w = galley.size().x + sub_g.as_ref().map_or(0.0, |g| g.size().x + 5.0) + 18.0;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
@@ -791,7 +1019,7 @@ fn segment(
     resp
 }
 
-/// A rounded well holding segments.
+/// A rounded well holding segments `h` tall.
 fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::NONE
         .fill(color::FIELD)
@@ -804,10 +1032,10 @@ fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
         .inner
 }
 
-fn scope_row(ui: &mut egui::Ui, b: &mut BatchRename) {
+fn scope_row(ui: &mut egui::Ui, s: &mut Settings, selected: usize) {
     row(ui, "In", ROW_H, |ui| {
         well(ui, |ui| {
-            let n = match b.selection.len() {
+            let n = match selected {
                 0 => String::new(),
                 n => n.to_string(),
             };
@@ -816,18 +1044,19 @@ fn scope_row(ui: &mut egui::Ui, b: &mut BatchRename) {
                 (Scope::Page, "This page", ""),
                 (Scope::Document, "All pages", ""),
             ] {
-                let live = scope != Scope::Selection || !b.selection.is_empty();
-                let resp = ui.add_enabled_ui(live, |ui| {
-                    segment(ui, label, sub, b.scope == scope, 22.0, false)
-                });
-                let resp = resp.inner;
+                let live = scope != Scope::Selection || selected > 0;
+                let resp = ui
+                    .add_enabled_ui(live, |ui| {
+                        segment(ui, label, sub, s.scope == scope, ROW_H - 4.0)
+                    })
+                    .inner;
                 let resp = if live {
                     resp
                 } else {
                     resp.on_disabled_hover_text("Nothing is selected")
                 };
-                if resp.clicked() && b.scope != scope {
-                    b.set_scope(scope);
+                if resp.clicked() && s.scope != scope {
+                    s.set_scope(scope);
                 }
             }
         });
@@ -858,7 +1087,7 @@ fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: b
     }
 }
 
-/// A field's well and ring, lit while `focused`, laid out `w` wide.
+/// A field's well and ring, lit while `focused`.
 fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
     let p = ui.painter();
     p.rect_filled(rect, 5.0, color::FIELD);
@@ -873,22 +1102,41 @@ fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
 const FIND_ID: &str = "batch-rename-find";
 const TEMPLATE_ID: &str = "batch-rename-template";
 
-fn find_row(ui: &mut egui::Ui, b: &mut BatchRename, error: Option<&str>) {
+/// The part of a field `rect` its text takes, `right` short of its right edge for
+/// the toggles there.
+fn text_rect(rect: egui::Rect, right: f32) -> egui::Rect {
+    egui::Rect::from_min_max(
+        rect.min + egui::vec2(9.0, 0.0),
+        egui::pos2(rect.right() - 4.0 - right, rect.bottom()),
+    )
+}
+
+/// The toggles at a field's right end, `w` wide.
+fn toggles(ui: &mut egui::Ui, rect: egui::Rect, w: f32) -> egui::Ui {
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_max(
+                egui::pos2(rect.right() - 4.0 - w, rect.top()),
+                egui::pos2(rect.right() - 4.0, rect.bottom()),
+            ))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.spacing_mut().item_spacing.x = 4.0;
+    child
+}
+
+fn find_row(ui: &mut egui::Ui, s: &mut Settings, error: Option<&str>) {
     row(ui, "Find", FIELD_H, |ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             let w = ui.available_width();
             let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FIELD_H), egui::Sense::hover());
             let id = egui::Id::new(FIND_ID);
-            let focused = ui.memory(|m| m.has_focus(id));
-            field_ground(ui, rect, focused);
-            let text = egui::Rect::from_min_max(
-                rect.min + egui::vec2(9.0, 0.0),
-                egui::pos2(rect.right() - 4.0 - 52.0, rect.bottom()),
-            );
+            field_ground(ui, rect, ui.memory(|m| m.has_focus(id)));
+            let text = text_rect(rect, 52.0);
             ui.put(
                 text,
-                egui::TextEdit::singleline(&mut b.find)
+                egui::TextEdit::singleline(&mut s.find)
                     .id(id)
                     .frame(egui::Frame::NONE)
                     .margin(egui::Margin::ZERO)
@@ -902,18 +1150,9 @@ fn find_row(ui: &mut egui::Ui, b: &mut BatchRename, error: Option<&str>) {
                             .color(theme::text::FAINT),
                     ),
             );
-            let toggles = egui::Rect::from_min_max(
-                egui::pos2(rect.right() - 4.0 - 52.0, rect.top()),
-                egui::pos2(rect.right() - 4.0, rect.bottom()),
-            );
-            let mut child = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(toggles)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
-            child.spacing_mut().item_spacing.x = 4.0;
-            field_toggle(&mut child, "Aa", "Match case", &mut b.match_case, false);
-            field_toggle(&mut child, ".*", "Find as a pattern", &mut b.pattern, true);
+            let mut child = toggles(ui, rect, 52.0);
+            field_toggle(&mut child, "Aa", "Match case", &mut s.match_case, false);
+            field_toggle(&mut child, ".*", "Find as a pattern", &mut s.pattern, true);
             if let Some(e) = error {
                 ui.label(egui::RichText::new(e).size(10.5).color(color::WARN));
             }
@@ -923,7 +1162,8 @@ fn find_row(ui: &mut egui::Ui, b: &mut BatchRename, error: Option<&str>) {
 
 /// Rename to: the template field with its tokens as pills, and the buttons that
 /// insert them.
-fn template_row(ui: &mut egui::Ui, b: &mut BatchRename, groups: usize) {
+fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
+    let groups = b.plan.groups;
     row(ui, "Rename to", FIELD_H, |ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 7.0;
@@ -936,45 +1176,48 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename, groups: usize) {
             // Backspace and Delete take a pill out whole: read before the field,
             // which would take one bracket.
             if focused {
-                take_pill(ui, id, &mut b.template);
+                take_pill(ui, id, &mut b.s.template);
             }
-            let text = egui::Rect::from_min_max(
-                rect.min + egui::vec2(9.0, 0.0),
-                egui::pos2(rect.right() - 4.0 - 24.0, rect.bottom()),
-            );
+            let text = text_rect(rect, 24.0);
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 template_galley(ui, buf.as_str())
             };
-            let out = egui::TextEdit::singleline(&mut b.template)
-                .id(id)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .vertical_align(egui::Align::Center)
-                .desired_width(text.width())
-                .font(egui::FontId::proportional(12.0))
-                .layouter(&mut layouter)
-                .show(&mut ui.new_child(egui::UiBuilder::new().max_rect(text)));
-            let caret = out.cursor_range.map(|c| c.primary.index.0);
-            if out.response.changed() {
-                let (text, moved) = canonical(&b.template, caret.unwrap_or(0));
-                if text != b.template {
-                    b.template = text;
+            // `put` into the field's whole height, as Find is: shown in a child Ui,
+            // the edit takes one line's height and its text rides at the top.
+            let resp = ui.put(
+                text,
+                egui::TextEdit::singleline(&mut b.s.template)
+                    .id(id)
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::ZERO)
+                    .vertical_align(egui::Align::Center)
+                    .desired_width(text.width())
+                    .font(egui::FontId::proportional(12.0))
+                    .layouter(&mut layouter),
+            );
+            let cursor =
+                egui::TextEdit::load_state(ui.ctx(), id).and_then(|s| s.cursor.char_range());
+            let caret = cursor.map(|c| c.primary.index.0);
+            if resp.changed() {
+                let (text, moved) = canonical(&b.s.template, caret.unwrap_or(0));
+                if text != b.s.template {
+                    b.s.template = text;
                     b.focus = Some(Caret::At(moved));
                 }
             }
-            if out.response.has_focus() {
+            if resp.has_focus() {
                 b.caret = caret;
                 // A caret inside a pill steps out of it, to its far side.
-                if let Some(c) = out.cursor_range
+                if let Some(c) = cursor
                     && c.primary.index == c.secondary.index
-                    && let Some(r) = token_at(&b.template, c.primary.index.0, false)
+                    && let Some(r) = token_at(&b.s.template, c.primary.index.0, false)
                     && r.start < c.primary.index.0
                 {
                     b.focus = Some(Caret::At(r.end));
                 }
             }
             if let Some(f) = b.focus.take() {
-                let len = b.template.chars().count();
+                let len = b.s.template.chars().count();
                 let range = match f {
                     Caret::All => egui::text::CCursorRange::two(
                         egui::text::CCursor::new(0),
@@ -989,21 +1232,12 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename, groups: usize) {
                 state.store(ui.ctx(), id);
                 ui.memory_mut(|m| m.request_focus(id));
             }
-
-            let toggle = egui::Rect::from_min_max(
-                egui::pos2(rect.right() - 4.0 - 24.0, rect.top()),
-                egui::pos2(rect.right() - 4.0, rect.bottom()),
-            );
-            let mut child = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(toggle)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
+            let mut child = toggles(ui, rect, 24.0);
             field_toggle(
                 &mut child,
                 "Ab",
                 "Keep each match’s case",
-                &mut b.keep_case,
+                &mut b.s.keep_case,
                 false,
             );
 
@@ -1012,10 +1246,10 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename, groups: usize) {
                 let mut insert = |ui: &mut egui::Ui, label: &str, piece: Piece| {
                     if insert_button(ui, label).clicked() {
                         let token = Template(vec![piece]).to_string();
-                        let len = b.template.chars().count();
+                        let len = b.s.template.chars().count();
                         let at = b.caret.unwrap_or(len).min(len);
-                        let byte = char_to_byte(&b.template, at);
-                        b.template.insert_str(byte, &token);
+                        let byte = char_to_byte(&b.s.template, at);
+                        b.s.template.insert_str(byte, &token);
                         b.focus = Some(Caret::At(at + token.chars().count()));
                     }
                 };
@@ -1024,7 +1258,7 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename, groups: usize) {
                 for k in 1..=groups.min(9) {
                     insert(ui, &format!("Group {k}"), Piece::Group(k));
                 }
-                if b.template.is_empty() && !b.find.is_empty() {
+                if b.s.template.is_empty() && !b.s.find.is_empty() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Empty: removes the match")
@@ -1108,143 +1342,70 @@ fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     resp.on_hover_text(format!("Insert {label} at the caret"))
 }
 
-/// A whole-number field; `value` takes what it holds whenever that parses.
-fn int_field(ui: &mut egui::Ui, id: &str, text: &mut String, value: &mut i64) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(34.0, ROW_H), egui::Sense::hover());
-    let id = egui::Id::new(id);
-    let focused = ui.memory(|m| m.has_focus(id));
-    field_ground(ui, rect, focused);
-    let resp = ui.put(
-        rect.shrink2(egui::vec2(7.0, 0.0)),
-        egui::TextEdit::singleline(text)
-            .id(id)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin::ZERO)
-            .vertical_align(egui::Align::Center)
-            .font(egui::FontId::proportional(12.0))
-            .text_color(color::TEXT)
-            .char_limit(6),
-    );
-    if resp.changed()
-        && let Ok(n) = text.trim().parse::<i64>()
-    {
-        *value = n;
-    }
-    // Leaving puts back the last whole number; nothing commits until Rename.
-    // valve-gate-not-a-commit
-    if resp.lost_focus() {
-        *text = value.to_string();
-    }
-}
-
-/// The numbering row; returns the order button's rect, which its menu hangs from.
-fn number_row(ui: &mut egui::Ui, b: &mut BatchRename) -> egui::Rect {
-    row(ui, "Number", ROW_H, |ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let small = |ui: &mut egui::Ui, t: &str| {
-            ui.label(egui::RichText::new(t).size(11.0).color(theme::text::DIM));
-        };
-        small(ui, "From");
-        int_field(
+/// *From* and *Step* as the inspector's scrubbable fields, then the digits.
+fn number_row(ui: &mut egui::Ui, n: &mut Numbering) {
+    row(ui, "Number", NUM_H, |ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let size = egui::vec2(96.0, NUM_H);
+        // 0.5, the rate every other whole-unit field scrubs at.
+        ui::value_field(
             ui,
-            "batch-rename-from",
-            &mut b.from_text,
-            &mut b.numbering.from,
-        );
-        ui.add_space(6.0);
-        small(ui, "Step");
-        int_field(
+            size,
+            Prefix::Text("From"),
+            &mut n.from,
+            Scrub::whole(0.5),
+            |d| d.custom_formatter(ui::number(0)),
+        )
+        .on_hover_text("The first layer's number");
+        ui::value_field(
             ui,
-            "batch-rename-step",
-            &mut b.step_text,
-            &mut b.numbering.step,
-        );
-        ui.add_space(6.0);
+            size,
+            Prefix::Text("Step"),
+            &mut n.step,
+            Scrub::whole(0.5),
+            |d| d.custom_formatter(ui::number(0)),
+        )
+        .on_hover_text("Added for each layer after it; below zero counts down");
         well(ui, |ui| {
             for (digits, label) in [(1u8, "1"), (2, "01"), (3, "001")] {
-                if segment(ui, label, "", b.numbering.digits == digits, 22.0, false)
-                    .on_hover_text(format!(
-                        "Pad to {digits} digit{}",
-                        if digits == 1 { "" } else { "s" }
-                    ))
+                if segment(ui, label, "", n.digits == digits, NUM_H - 4.0)
+                    .on_hover_text(match digits {
+                        1 => "No padding".to_string(),
+                        d => format!("Pad to {d} digits"),
+                    })
                     .clicked()
                 {
-                    b.numbering.digits = digits;
+                    n.digits = digits;
                 }
             }
         });
-        ui.add_space(6.0);
-        let font = egui::FontId::proportional(12.0);
-        let galley =
-            ui.fonts_mut(|f| f.layout_no_wrap(b.order.label().to_string(), font, color::TEXT));
-        let (rect, resp) = ui.allocate_exact_size(
-            egui::vec2(8.0 + 13.0 + 6.0 + galley.size().x + 6.0 + 10.0 + 6.0, ROW_H),
-            egui::Sense::click(),
-        );
-        let p = ui.painter();
-        p.rect_filled(
-            rect,
-            5.0,
-            if resp.hovered() {
-                color::HOVER
-            } else {
-                color::FIELD
-            },
-        );
-        let y = rect.center().y;
-        p.text(
-            egui::pos2(rect.left() + 8.0, y),
-            egui::Align2::LEFT_CENTER,
-            b.order.glyph(),
-            theme::icon_font(13.0),
-            theme::text::DIM,
-        );
-        p.galley(
-            egui::pos2(rect.left() + 27.0, y - galley.size().y / 2.0),
-            galley,
-            color::TEXT,
-        );
-        p.text(
-            egui::pos2(rect.right() - 6.0, y),
-            egui::Align2::RIGHT_CENTER,
-            icon::CARET_DOWN,
-            theme::icon_font(10.0),
-            theme::text::DIM,
-        );
-        if resp.on_hover_text("Which layer is first").clicked() {
-            b.order_open = !b.order_open;
-        }
-        rect
-    })
+    });
 }
 
-/// The order menu under its button; the order picked, if one was.
-fn order_menu(ctx: &egui::Context, under: egui::Rect, now: Order) -> Option<Order> {
-    let size = egui::vec2(220.0, 4.0 * 28.0 + 8.0);
-    let at = crate::ui::dropdown_place(ctx, under, size, 4.0);
-    let mut picked = None;
-    egui::Area::new(egui::Id::new("batch-rename-order"))
-        .order(egui::Order::Tooltip)
-        .fixed_pos(at)
-        .show(ctx, |ui| {
-            crate::ui::menu_frame(4.0).show(ui, |ui| {
-                ui.set_width(size.x - 8.0);
-                ui.spacing_mut().item_spacing.y = 0.0;
+/// Which layer of the run is first, as the Settings modal's dropdowns.
+fn order_row(ui: &mut egui::Ui, order: &mut Order) {
+    row(ui, "Order", NUM_H, |ui| {
+        ui.spacing_mut().interact_size.y = NUM_H;
+        ui.spacing_mut().button_padding.y = 0.0;
+        egui::ComboBox::from_id_salt("batch-rename-order")
+            .icon(ui::combo_chevron)
+            .width(200.0)
+            .selected_text(ui::glyph_and_text(order.glyph(), order.label()))
+            .show_ui(ui, |ui| {
+                ui::menu_rows(ui);
+                ui.spacing_mut().button_padding.y = 2.0;
                 for o in Order::ALL {
-                    let row = crate::ui::MenuRow::new(o.glyph(), o.label()).checked(o == now);
-                    if crate::ui::menu_row(ui, row, 28.0).clicked() {
-                        picked = Some(o);
-                    }
+                    ui.selectable_value(order, o, ui::glyph_and_text(o.glyph(), o.label()));
                 }
-            });
-        });
-    picked
+            })
+            .response
+            .on_hover_text("Which layer is first");
+    });
 }
 
 fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
     ui.horizontal(|ui| {
         ui.add_space(LABEL_W + GAP);
-        ui.spacing_mut().item_spacing.x = 7.0;
         let font = egui::FontId::proportional(12.0);
         let galley = ui
             .fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), theme::text::STRONG));
@@ -1298,9 +1459,9 @@ fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
     });
 }
 
-fn checks(ui: &mut egui::Ui, b: &mut BatchRename, skipped: usize) {
-    match b.scope {
-        Scope::Selection => checkbox(ui, "Include layers inside", "", &mut b.inside),
+fn checks(ui: &mut egui::Ui, s: &mut Settings, skipped: usize) {
+    match s.scope {
+        Scope::Selection => checkbox(ui, "Include layers inside", "", &mut s.inside),
         Scope::Page | Scope::Document => {
             let note = match skipped {
                 0 => String::new(),
@@ -1310,14 +1471,15 @@ fn checks(ui: &mut egui::Ui, b: &mut BatchRename, skipped: usize) {
                 ui,
                 "Include layers inside instances",
                 &note,
-                &mut b.inside_instances,
+                &mut s.inside_instances,
             );
         }
     }
 }
 
-/// The preview: every layer at Selection, the matches elsewhere.
-fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan) {
+/// The preview: every layer at Selection, the matches elsewhere. Only the rows in
+/// view are laid out, so a run of thousands costs what eight do.
+fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, done: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 30.0), egui::Sense::hover());
     let p = ui.painter();
     let y = rect.bottom() - 10.0;
@@ -1343,24 +1505,29 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan) {
             bottom: 8,
         })
         .show(ui, |ui| {
+            if plan.rows.is_empty() {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::hover());
+                ui.painter().text(
+                    rect.left_center() + egui::vec2(8.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    if done {
+                        "No layer matches"
+                    } else {
+                        "Matching…"
+                    },
+                    egui::FontId::proportional(12.0),
+                    theme::text::DIM,
+                );
+                return;
+            }
             egui::ScrollArea::vertical()
                 .id_salt("batch-rename-preview")
                 .max_height(ROW_H * ROWS_SHOWN)
                 .auto_shrink([false, true])
-                .show(ui, |ui| {
+                .show_rows(ui, ROW_H, plan.rows.len(), |ui, range| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    if plan.rows.is_empty() {
-                        let (rect, _) = ui
-                            .allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::hover());
-                        ui.painter().text(
-                            rect.left_center() + egui::vec2(8.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            "No layer matches",
-                            egui::FontId::proportional(12.0),
-                            theme::text::DIM,
-                        );
-                    }
-                    for r in &plan.rows {
+                    for r in &plan.rows[range] {
                         match r {
                             Row::Page { name, count } => page_head(ui, name, *count),
                             Row::Layer(l) => layer_row(ui, l),
@@ -1371,7 +1538,7 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan) {
 }
 
 fn page_head(ui: &mut egui::Ui, name: &str, n: usize) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W - 12.0, 24.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::hover());
     let p = ui.painter();
     let y = rect.bottom() - 4.0 - 6.0;
     p.text(
@@ -1474,8 +1641,9 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
     p.galley(egui::pos2(x_new, y - new.size().y / 2.0), new, color::TEXT);
 }
 
-/// The footer's buttons; what was clicked.
-fn foot(ui: &mut egui::Ui, changes: usize) -> Option<Act> {
+/// The footer: the hint, then *Cancel* and *Rename* as the Settings modal's
+/// footer draws them. `why_not` dims Rename and is its tooltip.
+fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act> {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 48.0), egui::Sense::hover());
     ui.painter().text(
         egui::pos2(rect.left() + PAD, rect.center().y),
@@ -1490,41 +1658,27 @@ fn foot(ui: &mut egui::Ui, changes: usize) -> Option<Act> {
     };
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(egui::vec2(10.0, 10.0)))
+            .max_rect(rect.shrink2(egui::vec2(PAD, 10.0)))
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     child.spacing_mut().item_spacing.x = 8.0;
-    let primary = button(&mut child, &go, true, changes > 0);
-    let cancel = button(&mut child, "Cancel", false, true);
-    if primary.clicked() && changes > 0 {
+    let state = match why_not {
+        None => FieldButton::On,
+        Some(_) => FieldButton::Disabled,
+    };
+    let primary = crate::settings::text_button(&mut child, &go, state);
+    let primary = match why_not {
+        Some(why) => primary.on_hover_text(why),
+        None => primary,
+    };
+    let cancel = crate::settings::text_button(&mut child, "Cancel", FieldButton::Off);
+    if primary.clicked() && why_not.is_none() {
         Some(Act::Rename)
     } else if cancel.clicked() {
         Some(Act::Cancel)
     } else {
         None
     }
-}
-
-fn button(ui: &mut egui::Ui, label: &str, primary: bool, live: bool) -> egui::Response {
-    let font = egui::FontId::proportional(12.0);
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font, color::TEXT));
-    let sense = if live {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 24.0, 28.0), sense);
-    let p = ui.painter();
-    let (fill, ink) = match (primary, live) {
-        (true, true) if resp.hovered() => (color::ACCENT_400, egui::Color32::WHITE),
-        (true, true) => (color::ACCENT, egui::Color32::WHITE),
-        (true, false) => (color::ACCENT_800, color::text_a(110)),
-        (false, _) if resp.hovered() => (color::text_a(30), color::TEXT),
-        (false, _) => (color::text_a(20), theme::text::STRONG),
-    };
-    p.rect_filled(rect, 5.0, fill);
-    p.galley(rect.center() - galley.size() / 2.0, galley, ink);
-    resp
 }
 
 #[cfg(test)]
@@ -1565,16 +1719,22 @@ mod tests {
     }
 
     /// The box as `open_batch_rename` leaves it, with Find and the template set.
-    fn opened(app: &mut OndinApp, find: &str, template: &str) -> BatchRename {
-        app.open_batch_rename(None);
+    fn opened(ctx: &egui::Context, app: &mut OndinApp, find: &str, template: &str) -> BatchRename {
+        app.open_batch_rename(ctx, None);
         let mut b = app.batch_rename.take().expect("the box opened");
-        b.find = find.into();
-        b.template = template.into();
+        b.s.find = find.into();
+        b.s.template = template.into();
         b
     }
 
+    /// What the box opened over: the snapshot its worker plans from.
+    fn snapshot(app: &OndinApp) -> Snapshot {
+        let s = &app.session;
+        Snapshot::take(&s.doc, &s.resolved, s.selection.ids())
+    }
+
     fn planned(app: &OndinApp, b: &BatchRename) -> Plan {
-        plan(&app.session.doc, &app.session.resolved, app.session.page, b)
+        plan(&snapshot(app), &b.s)
     }
 
     fn new_names(app: &OndinApp, plan: &Plan) -> Vec<(String, String)> {
@@ -1590,17 +1750,17 @@ mod tests {
     /// The run is the tree's order, top row first, and only a layer that changes
     /// takes a number: the unmatched one is listed, dimmed, and leaves no gap.
     ///
-    /// flip: `plan` counting `taken` for every listed layer → fails at the second
-    /// name, `Item 3 a`.
+    /// flip: `plan_into` counting `taken` for every listed layer → fails at the
+    /// second name, `Item 3 a`.
     #[test]
     fn a_run_is_numbered_in_tree_order_and_a_skip_leaves_no_gap() {
-        let (_ctx, mut app) = app();
+        let (ctx, mut app) = app();
         let a = named(&mut app, "Rect a");
         let skip = named(&mut app, "Other");
         let b = named(&mut app, "Rect b");
         app.session.selection.set(vec![a, skip, b]);
-        let bx = opened(&mut app, "Rect", "Item [Number]");
-        assert_eq!(bx.scope, Scope::Selection);
+        let bx = opened(&ctx, &mut app, "Rect", "Item [Number]");
+        assert_eq!(bx.s.scope, Scope::Selection);
         let plan = planned(&app, &bx);
         assert_eq!(
             new_names(&app, &plan),
@@ -1614,7 +1774,7 @@ mod tests {
             panic!("a layer row")
         };
         assert_eq!((middle.id, &middle.new), (skip, &New::Unchanged));
-        assert_eq!(count_label(bx.scope, &plan), "2 of 3 change");
+        assert_eq!(count_label(bx.s.scope, &plan), "2 of 3 change");
     }
 
     /// *Left to right* takes rows by band, though no two tops line up, then reads
@@ -1625,7 +1785,7 @@ mod tests {
     /// than the centre gives the same answer here.
     #[test]
     fn the_canvas_orders_read_by_band() {
-        let (_ctx, mut app) = app();
+        let (ctx, mut app) = app();
         // Made out of order, so the tree's order is not the answer.
         let cards = [
             ("e", (114.0, 104.0), 64.0),
@@ -1640,15 +1800,15 @@ mod tests {
             .map(|(n, at, h)| rect(&mut app, n, *at, (76.0, *h)))
             .collect();
         app.session.selection.set(ids);
-        let mut bx = opened(&mut app, "", "[Name][Number]");
-        bx.order = Order::LeftToRight;
+        let mut bx = opened(&ctx, &mut app, "", "[Name][Number]");
+        bx.s.order = Order::LeftToRight;
         let got: Vec<String> = planned(&app, &bx)
             .changes
             .into_iter()
             .map(|c| c.1)
             .collect();
         assert_eq!(got, ["a1", "b2", "c3", "d4", "e5", "f6"]);
-        bx.order = Order::TopToBottom;
+        bx.s.order = Order::TopToBottom;
         let got: Vec<String> = planned(&app, &bx)
             .changes
             .into_iter()
@@ -1661,11 +1821,11 @@ mod tests {
     /// and is not counted in the button.
     #[test]
     fn an_empty_result_keeps_its_name() {
-        let (_ctx, mut app) = app();
+        let (ctx, mut app) = app();
         let hero = named(&mut app, "Draft Hero");
         let bare = named(&mut app, "Draft");
         app.session.selection.set(vec![hero, bare]);
-        let bx = opened(&mut app, "Draft", "");
+        let bx = opened(&ctx, &mut app, "Draft", "");
         let plan = planned(&app, &bx);
         assert_eq!(
             new_names(&app, &plan),
@@ -1678,21 +1838,47 @@ mod tests {
         );
     }
 
-    /// A pattern that does not parse renames nothing and says why.
+    /// A pattern that does not parse renames nothing and says why, which is also
+    /// Rename's tooltip.
     #[test]
     fn a_bad_pattern_renames_nothing() {
-        let (_ctx, mut app) = app();
+        let (ctx, mut app) = app();
         let a = named(&mut app, "Card");
         app.session.selection.set_one(a);
-        let mut bx = opened(&mut app, "(", "x");
-        bx.pattern = true;
+        let mut bx = opened(&ctx, &mut app, "(", "x");
+        bx.s.pattern = true;
         let plan = planned(&app, &bx);
         assert!(plan.changes.is_empty());
-        assert!(
-            plan.error
-                .as_deref()
-                .is_some_and(|e| e.starts_with("Not a pattern"))
+        let why = plan.why_not("(").expect("a reason");
+        assert!(why.starts_with("Not a pattern"), "{why}");
+        assert_eq!(plan.error.as_deref(), Some(why.as_str()));
+    }
+
+    /// Rename's tooltip says why it is dim: nothing matched, or every match would
+    /// come out empty or the same.
+    #[test]
+    fn a_dim_rename_says_why() {
+        let (ctx, mut app) = app();
+        let a = named(&mut app, "Card");
+        app.session.selection.set_one(a);
+        let mut bx = opened(&ctx, &mut app, "zzz", "x");
+        assert_eq!(
+            planned(&app, &bx).why_not("zzz").as_deref(),
+            Some("No layer matches Find")
         );
+        bx.s.find = "Card".into();
+        bx.s.template = "".into();
+        assert_eq!(
+            planned(&app, &bx).why_not("Card").as_deref(),
+            Some("Every new name would be empty")
+        );
+        bx.s.template = "[Name]".into();
+        assert_eq!(
+            planned(&app, &bx).why_not("Card").as_deref(),
+            Some("Nothing would change")
+        );
+        bx.s.template = "Tile".into();
+        assert_eq!(planned(&app, &bx).why_not("Card"), None);
     }
 
     /// Main frame *Card* holding two rectangles, and an instance of it on the page.
@@ -1740,13 +1926,18 @@ mod tests {
     /// At page scope the layers inside an instance are left out and counted, and
     /// *Include layers inside instances* takes them in. Keep case is on there.
     ///
-    /// flip: `plan` ignoring `inside_instances` → fails at "the copies are left out".
+    /// flip: `plan_into` ignoring `inside_instances` → fails at "the copies are
+    /// left out".
     #[test]
     fn the_page_leaves_instance_insides_out() {
-        let (_ctx, mut app, _) = with_an_instance();
-        let mut bx = opened(&mut app, "button", "cta");
-        assert_eq!(bx.scope, Scope::Page, "nothing selected opens on the page");
-        assert!(bx.keep_case, "keep case is on away from the selection");
+        let (ctx, mut app, _) = with_an_instance();
+        let mut bx = opened(&ctx, &mut app, "button", "cta");
+        assert_eq!(
+            bx.s.scope,
+            Scope::Page,
+            "nothing selected opens on the page"
+        );
+        assert!(bx.s.keep_case, "keep case is on away from the selection");
         let plan = planned(&app, &bx);
         assert_eq!(plan.listed, 2, "the copies are left out");
         assert_eq!(plan.skipped, 2);
@@ -1755,7 +1946,7 @@ mod tests {
             "{:?}",
             plan.changes
         );
-        bx.inside_instances = true;
+        bx.s.inside_instances = true;
         let plan = planned(&app, &bx);
         assert_eq!((plan.listed, plan.skipped), (4, 0));
     }
@@ -1764,15 +1955,15 @@ mod tests {
     /// list's order, and the number runs on across pages.
     #[test]
     fn all_pages_heads_each_page_and_numbers_on() {
-        let (_ctx, mut app) = app();
+        let (ctx, mut app) = app();
         named(&mut app, "Hero");
         named(&mut app, "Footer");
         let first = app.session.page;
         app.add_page();
         named(&mut app, "hero image");
         app.go_to_page(first);
-        let mut bx = opened(&mut app, "hero", "[Name] [Number]");
-        bx.set_scope(Scope::Document);
+        let mut bx = opened(&ctx, &mut app, "hero", "[Name] [Number]");
+        bx.s.set_scope(Scope::Document);
         let plan = planned(&app, &bx);
         let heads: Vec<usize> = plan
             .rows
@@ -1785,6 +1976,39 @@ mod tests {
         assert_eq!(heads, [1, 1]);
         let got: Vec<String> = plan.changes.into_iter().map(|c| c.1).collect();
         assert_eq!(got, ["Hero 1", "hero 2 image"]);
+    }
+
+    /// A plan sent in parts adds up to the plan made at once, its page headings
+    /// counting rows that arrive in a later part.
+    ///
+    /// flip: `Plan::absorb` not counting a row into the heading before it → fails
+    /// at the headings.
+    #[test]
+    fn parts_add_up_to_the_whole() {
+        let (ctx, mut app) = app();
+        for i in 0..(PART * 2 + 7) {
+            named(&mut app, &format!("Tile {i}"));
+        }
+        let mut bx = opened(&ctx, &mut app, "Tile", "Card");
+        bx.s.set_scope(Scope::Document);
+        let mut parts = 0;
+        let mut whole = Plan::default();
+        plan_into(&snapshot(&app), &bx.s, &mut |part| {
+            parts += 1;
+            whole.absorb(part);
+            true
+        });
+        assert_eq!(parts, 3);
+        assert_eq!(whole.listed, PART * 2 + 7);
+        assert_eq!(whole.changes.len(), PART * 2 + 7);
+        let Some(Row::Page { count, .. }) = whole.rows.first() else {
+            panic!("all pages heads the page")
+        };
+        assert_eq!(*count, PART * 2 + 7);
+        let at_once = plan(&snapshot(&app), &bx.s);
+        assert_eq!(whole.searched, at_once.searched);
+        assert_eq!(whole.rows, at_once.rows);
+        assert!(count_label(Scope::Document, &whole).starts_with("1,007 of "));
     }
 
     /// The count over the preview, at document scope.
@@ -1807,17 +2031,17 @@ mod tests {
     /// search opens on the page with Find holding its text.
     #[test]
     fn the_box_opens_on_what_fits() {
-        let (_ctx, mut app, m) = with_an_instance();
+        let (ctx, mut app, m) = with_an_instance();
         app.session.selection.set_one(m);
-        app.open_batch_rename(None);
+        app.open_batch_rename(&ctx, None);
         let b = app.batch_rename.take().unwrap();
         assert_eq!(
-            (b.scope, b.inside, b.keep_case),
+            (b.s.scope, b.s.inside, b.s.keep_case),
             (Scope::Selection, true, false)
         );
-        app.open_batch_rename(Some(" button ".into()));
+        app.open_batch_rename(&ctx, Some(" button ".into()));
         let b = app.batch_rename.take().unwrap();
-        assert_eq!((b.scope, b.find.as_str()), (Scope::Page, "button"));
+        assert_eq!((b.s.scope, b.s.find.as_str()), (Scope::Page, "button"));
     }
 
     /// Typed short forms become their tokens with the caret moved past them, and
@@ -1837,7 +2061,7 @@ mod tests {
         app: &mut OndinApp,
         events: Vec<egui::Event>,
         modifiers: egui::Modifiers,
-    ) {
+    ) -> egui::FullOutput {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -1848,7 +2072,23 @@ mod tests {
             events,
             ..Default::default()
         };
-        let _ = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+        ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame))
+    }
+
+    /// Frames until the worker's plan for the box's settings is whole.
+    fn settle(ctx: &egui::Context, app: &mut OndinApp) {
+        let start = std::time::Instant::now();
+        loop {
+            pass(ctx, app, Vec::new(), egui::Modifiers::NONE);
+            if app.batch_rename.as_ref().is_none_or(|b| b.done) {
+                return;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "the plan never landed"
+            );
+            std::thread::yield_now();
+        }
     }
 
     fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -1894,10 +2134,11 @@ mod tests {
             none,
         );
         assert_eq!(
-            app.batch_rename.as_ref().map(|b| b.template.as_str()),
+            app.batch_rename.as_ref().map(|b| b.s.template.as_str()),
             Some("Card [Number]"),
             "typing replaced the Name pill"
         );
+        settle(&ctx, &mut app);
         let depth = app.session.history.undo_depth();
         pass(&ctx, &mut app, vec![key(egui::Key::Enter, none)], none);
         assert!(app.batch_rename.is_none(), "Enter closes the box");
@@ -1921,7 +2162,7 @@ mod tests {
         let a = named(&mut app, "Rectangle 1");
         app.session.selection.set_one(a);
         pass(&ctx, &mut app, Vec::new(), none);
-        app.open_batch_rename(None);
+        app.open_batch_rename(&ctx, None);
         pass(&ctx, &mut app, Vec::new(), none);
         pass(
             &ctx,
@@ -1930,15 +2171,63 @@ mod tests {
             none,
         );
         pass(&ctx, &mut app, Vec::new(), none);
-        assert_eq!(app.batch_rename.as_ref().unwrap().template, "x[Number]");
+        assert_eq!(app.batch_rename.as_ref().unwrap().s.template, "x[Number]");
         pass(&ctx, &mut app, vec![key(egui::Key::Backspace, none)], none);
         assert_eq!(
-            app.batch_rename.as_ref().unwrap().template,
+            app.batch_rename.as_ref().unwrap().s.template,
             "x",
             "the pill went whole"
         );
         pass(&ctx, &mut app, vec![key(egui::Key::Escape, none)], none);
         assert!(app.batch_rename.is_none());
         assert_eq!(app.session.doc.get(a).unwrap().name(), "Rectangle 1");
+    }
+
+    /// The template's text, pills included, is centred in its field: the text's
+    /// vertical middle within a point of the field's.
+    ///
+    /// flip: showing the template edit in a child `Ui` instead of `ui.put` → fails,
+    /// the text riding at the field's top.
+    #[test]
+    fn the_template_text_is_centred_in_its_field() {
+        let (ctx, mut app) = app();
+        let none = egui::Modifiers::NONE;
+        let a = named(&mut app, "Rectangle 1");
+        app.session.selection.set_one(a);
+        pass(&ctx, &mut app, Vec::new(), none);
+        app.open_batch_rename(&ctx, None);
+        let mut out = pass(&ctx, &mut app, Vec::new(), none);
+        for _ in 0..3 {
+            out = pass(&ctx, &mut app, Vec::new(), none);
+        }
+        let text = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == "[Name]" => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()))
+                }
+                _ => None,
+            })
+            .expect("the template's galley");
+        // The field's ground: the well painted under the text.
+        let field = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                // By shape, not fill: the modal fades in, tinting its grounds.
+                egui::Shape::Rect(r)
+                    if (r.rect.height() - FIELD_H).abs() < 0.5
+                        && r.rect.contains(text.left_center() + egui::vec2(1.0, 0.0)) =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no field under the text at {text:?}"));
+        assert!(
+            (text.center().y - field.center().y).abs() < 1.0,
+            "text {text:?} in field {field:?}"
+        );
     }
 }

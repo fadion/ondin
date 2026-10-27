@@ -306,7 +306,14 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 ## Batch rename (`batch_rename.rs`)
 
 A box that renames many layers at once: the selection, the page or every page. The text rule is
-`ondin_core::rename`'s; `batch_rename::plan` picks, orders and numbers the layers.
+`ondin_core::rename`'s; `batch_rename::plan_into` picks, orders and numbers the layers.
+
+The document cannot change while the box is up, so what the plan reads of it — every page's layers
+in tree order, with name, bounds, glyph, and whether each is a variant, inside an instance, selected
+or under the selection — is taken once at open (`Snapshot`). A worker thread plans from that copy
+whenever a setting changes, taking only the newest request and abandoning a plan once a newer one is
+asked for, and sends the rows back in parts of 500 layers, so typing never waits on a large
+document. The preview keeps the previous plan until the new one's first part lands.
 
 - **Two verbs.** *Rename* (`Ctrl+R`, `F2`) is the layers tree's one-layer field (`app-selection.md`).
   *Batch rename…* (`Ctrl+Shift+R`, `Action::BatchRename`, `Item::BatchRename`, State group,
@@ -319,8 +326,9 @@ A box that renames many layers at once: the selection, the page or every page. T
 - **Placement and keys.** The palette's place: an `egui::Modal` with a transparent backdrop, 520
   wide, centred over the canvas column, its top 56pt below the canvas's top, so selection outlines
   stay visible. Opening it closes the palette, the context menu, the top-bar menu and the colour
-  picker. Enter or the *Rename* button renames; Escape, *Cancel*, ✕ or a click outside closes it and renames nothing
-  (with the order menu open, each closes the menu first). It counts in `modal_is_up`, so editor
+  picker. Enter or the *Rename* button renames; Escape, *Cancel*, ✕ or a click outside closes it
+  and renames nothing (with the order list open, Escape and the click close the list first, and
+  Enter does nothing). It counts in `modal_is_up`, so editor
   chords are off, and is drawn outside the `!focus` guard, so it works in focus mode.
 - **Scope**, the *In* row: *Selection · This page · All pages*. It opens on *Selection* when
   something is selected, else on *This page*. *Selection* is the selection at open, and is disabled
@@ -343,20 +351,25 @@ A box that renames many layers at once: the selection, the page or every page. T
   text in its match's case — `BUTTON` upper, `button` lower, `Button` a capital then lower; a mixed
   case leaves it as typed.
 - **Rename to** draws each token as a pill: the canonical `[Word]` text with its brackets hidden, so
-  the caret walks real characters. A typed short form is rewritten to the canonical token;
+  the caret walks real characters, at the text's own size so pill and words share a line. The
+  edit is `put` into the field's whole height, as Find is, which centres its text. A typed short form is rewritten to the canonical token;
   Backspace and Delete take a pill out whole; *+ Name*, *+ Number* and one *+ Group k* per pattern
   group insert at the caret. The field opens holding the last template (one *Name* pill the first
   time), all selected, so typing replaces it. An empty template with Find filled shows *Empty:
   removes the match*.
-- **Numbering.** The Number row shows once the template has a Number token: *From*, *Step*, digits
-  *1 · 01 · 001* (zero-padded; a negative step counts down) and the order menu — *Layers order*
+- **Numbering.** The Number and Order rows show once the template has a Number token. Number holds
+  *From* and *Step* as the inspector's scrubbable value fields (`ui::value_field`, the word inside
+  the field) and the digits *1 · 01 · 001* (zero-padded; a negative step counts down); Order, under
+  it, is a dropdown as the Settings modal's are. All are 28 tall, the Settings modal's field height.
+  The orders: *Layers order*
   (tree top to bottom, the default), *Layers order, reversed*, *Left to right* (rows: a layer joins
   the first band its centre falls in, bands taken top to bottom, each read left to right by left
   edge) and *Top to bottom* (columns, the same way). Each page's run is ordered and the pages follow
   the Pages list; the number runs on across pages. Only a layer that changes takes a number, so a
   skipped one leaves no gap.
 - **Preview**, in run order: glyph, old name with its matches underlined, arrow, new name with its
-  new runs in `ACCENT_300`; it scrolls past eight rows. At *Selection* every layer is listed and the
+  new runs in `ACCENT_300`; it scrolls past eight rows, and only the rows in view are laid out
+  (`ScrollArea::show_rows`), page headings at a row's height. At *Selection* every layer is listed and the
   unchanged ones dim; elsewhere only matches, and *All pages* heads each page's rows with its name
   and count. The count reads *N of M change* at *Selection*, *N of M match* on a page, plus *· K
   pages* for all pages. A name that would come out empty keeps its own (*Would be empty · kept*,
@@ -364,8 +377,11 @@ A box that renames many layers at once: the selection, the page or every page. T
 - **Renaming.** One transaction of `SetName`, one undo step named *Rename* with `TEXT_AA`; the
   status line says *Renamed N layers · Ctrl+Z to undo*. New names are cleaned as any typed name
   (`naming::usable`). Renaming a main reaches its copies by propagation; renaming inside an instance
-  is an override, as in the tree. It does not switch page. The button reads *Rename N layers* and
-  dims when nothing changes. Find, template, from, step, digits and order are kept in
+  is an override, as in the tree. It does not switch page. *Cancel* and *Rename N layers* are the
+  Settings modal's footer buttons (`settings::text_button`). Rename dims, its tooltip saying why,
+  while the plan is still matching, when the pattern does not parse (its reason), when nothing
+  matches Find, when every match would come out empty, when every match is a variant, or when
+  nothing would change. Find, template, from, step, digits and order are kept in
   `prefs.batch_rename` when a rename runs.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)

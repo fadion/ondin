@@ -1881,6 +1881,7 @@ impl OndinApp {
     fn document_rewound(&mut self) {
         self.points.clear();
         self.pen = None;
+        self.close_fix();
         // A picker on a slot a style has just landed on closes, or its next write would
         // cut the style again (unless the style itself is being edited).
         if self.session.style_edit.is_none()

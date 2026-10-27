@@ -10,11 +10,12 @@
 //! (`prefs.contrast`).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use ondin_core::kurbo::{Point, Rect};
 use ondin_core::peniko::Color;
 use ondin_core::{Brush, BrushSource, CharAttr, Document, Fill, NodeId, Operation, Transaction};
-use ondin_export::contrast::{self, Finding, Level, Options, Report};
+use ondin_export::contrast::{self, Finding, Level, Options, Prepared, Report};
 
 use crate::app::OndinApp;
 use crate::job::Job;
@@ -61,6 +62,10 @@ pub(crate) struct Contrast {
     /// Layers waiting to be sent to the worker.
     queue: HashSet<NodeId>,
     job: Option<Running>,
+    /// The page as the last job prepared it, with the revision it was prepared
+    /// at; a later job at that revision measures on it rather than preparing
+    /// the page again.
+    prepared: Option<(u64, Arc<Prepared>)>,
     /// The document as last seen, to tell which layers an edit could have changed.
     seen: Option<Snapshot>,
     /// When the document last changed, in egui's clock.
@@ -89,18 +94,27 @@ pub(crate) struct Contrast {
 enum Mark {
     Measured(Finding),
     Skipped(&'static str),
+    /// Measured, and nothing of it is drawn: clipped away, covered, or fully
+    /// transparent. No badge, and no remeasure until an edit could change that.
+    Nothing,
 }
 
 struct Running {
-    job: Job<Report>,
+    /// The report, and the page as the job prepared or reused it.
+    job: Job<(Report, Arc<Prepared>)>,
     ids: Vec<NodeId>,
     options: Options,
+    /// The document revision the job measured.
+    revision: u64,
 }
 
 struct Snapshot {
     revision: u64,
     doc: Document,
+    /// Each layer's box, which a subject is found by.
     bounds: HashMap<NodeId, Rect>,
+    /// Each layer's ink (`Resolved::ink_bounds`), which an edit dirties.
+    ink: HashMap<NodeId, Rect>,
 }
 
 /// The fix card over one failing layer.
@@ -112,6 +126,10 @@ struct FixCard {
     finding: Finding,
     nearest: Option<Color>,
     vars: Vec<(ondin_core::VarId, String, Color, f64)>,
+    /// What the nearest colour's edit, and a variable's, unbind or detach
+    /// besides the colour (`side_effects`).
+    nearest_notes: Vec<String>,
+    var_notes: Vec<String>,
     /// The row previewed on the canvas.
     previewing: Option<Fix>,
     /// Set on the frame the card opens, whose click (on a badge) is not a click
@@ -139,6 +157,7 @@ impl Contrast {
             stale: HashSet::new(),
             queue: HashSet::new(),
             job: None,
+            prepared: None,
             seen: None,
             changed_at: f64::NEG_INFINITY,
             measuring: None,
@@ -276,9 +295,13 @@ impl OndinApp {
         }
     }
 
-    /// Take an Enter for the open fix card before the keymap reads it. Runs at the
-    /// top of the frame.
+    /// Take an Enter for the open fix card before the keymap reads it, unless the
+    /// palette, a modal or a text field owns the keyboard. Runs at the top of the
+    /// frame.
     pub(crate) fn contrast_claim_keys(&mut self, ctx: &egui::Context) {
+        if self.palette.is_some() || self.modal_is_up() || ctx.egui_wants_keyboard_input() {
+            return;
+        }
         if let Some(card) = self.contrast.as_mut().and_then(|c| c.fix.as_mut()) {
             card.enter |= ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         }
@@ -318,8 +341,9 @@ impl OndinApp {
         if let Some(run) = &c.job {
             match run.job.poll() {
                 Ok(None) => {}
-                Ok(Some(report)) => {
+                Ok(Some((report, prepared))) => {
                     let run = c.job.take().expect("polled");
+                    c.prepared = Some((run.revision, prepared));
                     if run.options == c.options {
                         land(&mut c, &run.ids, report);
                     }
@@ -363,18 +387,24 @@ impl OndinApp {
                 self.contrast = Some(c);
                 return;
             }
-            let doc = self.session.doc.clone();
-            let (page, options) = (c.page, c.options);
+            let (page, options, revision) = (c.page, c.options, self.session.revision());
+            // The page as the last job prepared it, while the document is unchanged.
+            let source = match c.prepared.as_ref().filter(|(at, _)| *at == revision) {
+                Some((_, p)) => Ok(Arc::clone(p)),
+                None => Err(self.session.doc.clone()),
+            };
             let only = ids.clone();
             // The check lays the text out again, with the faces the canvas used.
             let fonts = self.session.resolved.text_fonts();
             c.job = Some(Running {
                 job: Job::spawn("contrast", ctx, move || {
                     ondin_core::text::register_font_data(&fonts);
-                    contrast::check_with(&doc, page, options, Some(&only))
+                    let prepared = source.unwrap_or_else(|doc| Arc::new(Prepared::new(&doc, page)));
+                    (prepared.check(options, Some(&only)), prepared)
                 }),
                 ids,
                 options,
+                revision,
             });
         } else if !c.queue.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(SETTLE));
@@ -390,10 +420,13 @@ impl OndinApp {
         let res = &self.session.resolved;
         let page = c.page;
         c.subjects = subjects_in_scope(doc, res, page, &c.scope, c.options.non_text);
-        let mut bounds = HashMap::new();
+        let (mut bounds, mut ink) = (HashMap::new(), HashMap::new());
         walk(doc, page, |id| {
             if let Some(b) = res.world_bounds(id) {
                 bounds.insert(id, b);
+            }
+            if let Some(b) = res.ink_bounds(id) {
+                ink.insert(id, b);
             }
         });
         let everything = match &c.seen {
@@ -407,17 +440,19 @@ impl OndinApp {
         let mut dirty: Vec<Rect> = Vec::new();
         let mut changed: HashSet<NodeId> = HashSet::new();
         if let (false, Some(old)) = (everything, &c.seen) {
+            // What a change could have drawn over is its ink, a shadow included,
+            // before and after.
             walk(doc, page, |id| {
                 let moved = old.bounds.get(&id) != bounds.get(&id);
                 if moved || old.doc.get(id) != doc.get(id) {
                     changed.insert(id);
-                    dirty.extend(old.bounds.get(&id));
-                    dirty.extend(bounds.get(&id));
+                    dirty.extend(old.ink.get(&id));
+                    dirty.extend(ink.get(&id));
                 }
             });
             walk(&old.doc, page, |id| {
                 if doc.get(id).is_none() {
-                    dirty.extend(old.bounds.get(&id));
+                    dirty.extend(old.ink.get(&id));
                 }
             });
         }
@@ -441,6 +476,7 @@ impl OndinApp {
             revision: self.session.revision(),
             doc: doc.clone(),
             bounds,
+            ink,
         });
     }
 
@@ -467,7 +503,7 @@ impl OndinApp {
             if dragging && self.moving(id) {
                 continue;
             }
-            let Some(mark) = c.marks.get(&id) else {
+            let Some(mark) = c.marks.get(&id).filter(|m| !matches!(m, Mark::Nothing)) else {
                 continue;
             };
             let Some(world) = self.session.preview_world_bounds(id) else {
@@ -488,6 +524,7 @@ impl OndinApp {
                 }
                 Mark::Measured(f) => (Kind::Fail, fail_text(f, level)),
                 Mark::Skipped(why) => (Kind::Skip, format!("Not measured · {why}")),
+                Mark::Nothing => continue,
             };
             if kind == Kind::Fail {
                 painter.rect_stroke(
@@ -510,12 +547,19 @@ impl OndinApp {
             if r.top() < canvas.top() + 2.0 {
                 r = r.translate(egui::vec2(0.0, canvas.top() + 2.0 - r.top()));
             }
-            // A badge over an earlier one moves down below it.
-            for _ in 0..placed.len() {
-                let Some(hit) = placed.iter().find(|p| p.intersects(r)) else {
-                    break;
-                };
-                r = r.translate(egui::vec2(0.0, hit.bottom() + 2.0 - r.top()));
+            // A badge over earlier ones moves down below the lowest it touches, and
+            // one pushed past the canvas is not drawn, which also bounds this loop
+            // by the badges a canvas can show.
+            while let Some(bottom) = placed
+                .iter()
+                .filter(|p| p.intersects(r))
+                .map(|p| p.bottom())
+                .reduce(f32::max)
+            {
+                r = r.translate(egui::vec2(0.0, bottom + 2.0 - r.top()));
+            }
+            if r.top() > canvas.bottom() {
+                continue;
             }
             placed.push(r);
             #[cfg(test)]
@@ -585,7 +629,9 @@ impl OndinApp {
         }
     }
 
-    fn close_fix(&mut self) {
+    /// Close the fix card, taking back its preview. An undo or redo closes it too:
+    /// its rows and preview were worked out on the document before.
+    pub(crate) fn close_fix(&mut self) {
         if let Some(c) = &mut self.contrast
             && let Some(f) = c.fix.take()
             && f.previewing.is_some()
@@ -899,26 +945,7 @@ impl OndinApp {
         let id = card.id;
         let name = doc.get(id).map_or("", |n| n.name()).to_string();
         let f = card.finding.clone();
-        // Only a bound fill that fails is replaced, so only then does a colour
-        // unbind it (`fix_transaction`).
-        let bound = doc.get(id).and_then(|n| {
-            let fill = n.paint().fills.iter().rev().find(|f| f.visible)?;
-            let var = fill.brush.var()?;
-            let uses_fill = ondin_core::TextRef::of(n.kind()).is_some_and(|t| {
-                t.spans
-                    .runs(t.style, t.content.len())
-                    .iter()
-                    .any(|(_, s)| s.color.is_none())
-            });
-            let drawn = match doc.resolve_brush(id, &fill.brush).as_ref() {
-                Brush::Solid(c) => Some(*c),
-                _ => None,
-            };
-            let fails = drawn
-                .and_then(|c| f.score_of(level, c))
-                .is_some_and(|s| s + 1e-9 < f.needs);
-            (uses_fill && fails).then(|| doc.variables().get(var).map(|v| v.name.clone()))?
-        });
+        let (nearest_notes, var_notes) = (card.nearest_notes.clone(), card.var_notes.clone());
         let (nearest, vars, opening) = (card.nearest, card.vars.clone(), card.opening);
         let anchor = clamp_card(ctx, card.anchor);
         let mut hovered: Option<Fix> = None;
@@ -952,8 +979,8 @@ impl OndinApp {
                             eyebrow(ui, "Nearest");
                             match nearest {
                                 Some(colour) => {
-                                    if let Some(var) = &bound {
-                                        note(ui, &format!("Unbinds {var}"));
+                                    for n in &nearest_notes {
+                                        note(ui, n);
                                     }
                                     let score = f.score_of(level, colour).unwrap_or(0.0);
                                     let row =
@@ -970,6 +997,10 @@ impl OndinApp {
                             eyebrow(ui, "Variables");
                             if vars.is_empty() {
                                 note(ui, "No colour variable passes");
+                            } else {
+                                for n in &var_notes {
+                                    note(ui, n);
+                                }
                             }
                             for (var, vname, swatch, score) in &vars {
                                 let row = fix_row(ui, *swatch, vname, &level.format(*score));
@@ -1020,7 +1051,8 @@ impl OndinApp {
             return;
         }
         card.previewing = fix;
-        match fix.and_then(|fix| fix_transaction(&self.session.doc, id, f, level, fix)) {
+        let new_fill = self.session.ids.mint_item();
+        match fix.and_then(|fix| fix_transaction(&self.session.doc, id, f, level, fix, new_fill)) {
             Some(tx) => self.session.set_preview(&tx),
             None => self.session.clear_gesture_preview(),
         }
@@ -1029,7 +1061,8 @@ impl OndinApp {
     /// Apply `fix` to the failing runs of `id` as one undo step, and close the card.
     pub(crate) fn apply_fix(&mut self, id: NodeId, f: &Finding, level: Level, fix: Fix) {
         self.close_fix();
-        let Some(tx) = fix_transaction(&self.session.doc, id, f, level, fix) else {
+        let new_fill = self.session.ids.mint_item();
+        let Some(tx) = fix_transaction(&self.session.doc, id, f, level, fix, new_fill) else {
             return;
         };
         self.session.name_step("Fix contrast", icon::CIRCLE_HALF);
@@ -1039,11 +1072,12 @@ impl OndinApp {
     }
 }
 
-/// Record a landed report: the layers it was sent for take their new marks, and
-/// stop being stale unless an edit queued them again meanwhile.
+/// Record a landed report: the layers it was sent for take their new marks (one
+/// the report leaves out is [`Mark::Nothing`]), and stop being stale unless an
+/// edit queued them again meanwhile.
 fn land(c: &mut Contrast, ids: &[NodeId], report: Report) {
     for id in ids {
-        c.marks.remove(id);
+        c.marks.insert(*id, Mark::Nothing);
     }
     for f in report.findings {
         c.marks.insert(f.id, Mark::Measured(f));
@@ -1154,34 +1188,112 @@ fn fix_card(doc: &Document, id: NodeId, f: Finding, level: Level, anchor: egui::
             };
             Some((v, var.name.clone(), swatch, score))
         })
-        .collect();
+        .collect::<Vec<_>>();
+    // The key a fill added for the notes' sake would take; the edit is not applied.
+    let key = ondin_core::ItemId::positional(0);
+    let notes = |fix: Fix| {
+        fix_transaction(doc, id, &f, level, fix, key)
+            .map(|tx| side_effects(doc, id, &tx))
+            .unwrap_or_default()
+    };
+    let nearest_notes = nearest.map(|c| notes(Fix::Colour(c))).unwrap_or_default();
+    let var_notes = vars
+        .first()
+        .map(|v| notes(Fix::Var(v.0)))
+        .unwrap_or_default();
     FixCard {
         id,
         anchor,
         finding: f,
         nearest,
         vars,
+        nearest_notes,
+        var_notes,
         previewing: None,
         opening: true,
         enter: false,
     }
 }
 
+/// What `tx` takes from `id` besides a colour, as the fix card notes it: each
+/// variable a fill or stroke it rewrites was bound to, and each style whose slot
+/// it writes, which the commit detaches (`style::settle`).
+fn side_effects(doc: &Document, id: NodeId, tx: &Transaction) -> Vec<String> {
+    use ondin_core::style::StyleSlot;
+    let Some(n) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for op in &tx.0 {
+        let (old, new, slot): (Vec<_>, Vec<_>, _) = match op {
+            Operation::SetFills { fills, .. } => (
+                n.paint().fills.iter().map(|x| x.brush.var()).collect(),
+                fills.iter().map(|x| x.brush.var()).collect(),
+                StyleSlot::Fills,
+            ),
+            Operation::SetStrokes { strokes, .. } => (
+                n.paint().strokes.iter().map(|x| x.brush.var()).collect(),
+                strokes.iter().map(|x| x.brush.var()).collect(),
+                StyleSlot::Strokes,
+            ),
+            _ => continue,
+        };
+        for var in old.iter().flatten() {
+            if !new.contains(&Some(*var))
+                && let Some(v) = doc.variables().get(*var)
+            {
+                out.push(format!("Unbinds {}", v.name));
+            }
+        }
+        if let Some(style) = n.styles().get(slot).and_then(|s| doc.styles().get(s)) {
+            out.push(format!("Detaches {}", style.name));
+        }
+    }
+    out.dedup();
+    out
+}
+
+/// `brush`'s colour as it draws in `mode`: a bound one's variable read there.
+fn colour_in(
+    doc: &Document,
+    brush: &BrushSource,
+    mode: Option<ondin_core::ModeId>,
+) -> Option<Color> {
+    match brush {
+        BrushSource::Literal(Brush::Solid(c)) => Some(*c),
+        BrushSource::Literal(_) => None,
+        BrushSource::Bound { var, alpha } => match doc.variables().resolve_opt(*var, mode) {
+            Some(ondin_core::Value::Color(c)) => Some(c.multiply_alpha(*alpha)),
+            _ => None,
+        },
+    }
+}
+
+/// Whether `brush` fails `f`: a bound colour is judged by its own value in each
+/// sample's mode, so a variable that adapts to every mode's backdrop passes.
+fn brush_fails(doc: &Document, f: &Finding, level: Level, brush: &BrushSource) -> bool {
+    f.samples
+        .iter()
+        .any(|s| colour_in(doc, brush, s.mode).is_some_and(|c| !s.passes_with(level, c)))
+}
+
 /// The edit `fix` makes to `id`: the runs and paints whose colour fails `f` take
 /// the new colour, or the variable. A run's own colour is replaced in the spans; a
 /// run drawn in the fill changes the fill. Binding a variable goes through the
 /// fill (a run's colour cannot be bound), so a failing run's own colour is
-/// cleared onto it, and a passing run that drew in the fill keeps its colour.
-/// `None` when nothing fails.
+/// cleared onto it, and a passing run that drew in the fill keeps its colour. A
+/// mark changes only the paints its measured ink came from. `new_fill` keys a
+/// fill added to a text that had no visible one. `None` when nothing fails.
 pub(crate) fn fix_transaction(
     doc: &Document,
     id: NodeId,
     f: &Finding,
     level: Level,
     fix: Fix,
+    new_fill: ondin_core::ItemId,
 ) -> Option<Transaction> {
     let node = doc.get(id)?;
-    let fails = |c: Color| f.score_of(level, c).is_some_and(|s| s + 1e-9 < f.needs);
+    let fails = |c: Color| !f.passes_with(level, c);
     let paint = doc.resolved_paint(id, node.paint());
     let solid = |b: &Brush| match b {
         Brush::Solid(c) => Some(*c),
@@ -1203,12 +1315,22 @@ pub(crate) fn fix_transaction(
     let mut ops = Vec::new();
     if let Some(text) = ondin_core::TextRef::of(node.kind()) {
         let top = node.paint().fills.iter().rposition(|x| x.visible);
-        let top_colour = top.and_then(|i| solid(paint.fills.get(i)?.brush.drawn()));
+        let stroked = node.paint().strokes.iter().any(|s| s.visible);
+        // What a run with no colour of its own draws: the top fill, else black,
+        // or nothing for outlined type.
+        let top_colour = match top {
+            Some(i) => paint.fills.get(i).and_then(|p| solid(p.brush.drawn())),
+            None if stroked => Some(Color::TRANSPARENT),
+            None => Some(Color::BLACK),
+        };
         let runs = text.spans.runs(text.style, text.content.len());
         let mut spans = text.spans.clone();
         let (mut spans_changed, mut onto_fill) = (false, false);
-        let fill_fails =
-            top_colour.is_some_and(fails) && runs.iter().any(|(_, s)| s.color.is_none());
+        let fill_fails = runs.iter().any(|(_, s)| s.color.is_none())
+            && match top {
+                Some(i) => brush_fails(doc, f, level, &node.paint().fills[i].brush),
+                None => !stroked && fails(Color::BLACK),
+            };
         for (range, style) in &runs {
             if let Some(c) = style.color
                 && fails(c)
@@ -1244,21 +1366,30 @@ pub(crate) fn fix_transaction(
                     let b = replace(&fills[i].brush);
                     fills[i].brush = b;
                 }
-                None => {
-                    fills = ondin_core::keyed_by_position([Fill {
+                // On top of the hidden fills, which stay as they were.
+                None => fills.push(ondin_core::Keyed::new(
+                    new_fill,
+                    Fill {
                         brush: replace(&BrushSource::Literal(Brush::Solid(Color::BLACK))),
                         visible: true,
-                    }]);
-                }
+                    },
+                )),
             }
             ops.push(Operation::SetFills { id, fills });
         }
     } else {
+        // Only the paints the measured ink came from: a white box with a dark
+        // border that fails is fixed by its border, its fill left white.
+        let changes = |brush: &BrushSource| {
+            f.samples
+                .iter()
+                .any(|s| colour_in(doc, brush, s.mode) == Some(s.ink))
+                && brush_fails(doc, f, level, brush)
+        };
         let mut fills = node.paint().fills.clone();
         let mut fills_changed = false;
-        for (i, fl) in fills.iter_mut().enumerate() {
-            let drawn = paint.fills.get(i).and_then(|p| solid(p.brush.drawn()));
-            if fl.visible && drawn.is_some_and(fails) {
+        for fl in fills.iter_mut() {
+            if fl.visible && changes(&fl.brush) {
                 let b = replace(&fl.brush);
                 fl.brush = b;
                 fills_changed = true;
@@ -1266,9 +1397,8 @@ pub(crate) fn fix_transaction(
         }
         let mut strokes = node.paint().strokes.clone();
         let mut strokes_changed = false;
-        for (i, st) in strokes.iter_mut().enumerate() {
-            let drawn = paint.strokes.get(i).and_then(|p| solid(p.brush.drawn()));
-            if st.visible && drawn.is_some_and(fails) {
+        for st in strokes.iter_mut() {
+            if st.visible && changes(&st.brush) {
                 let b = replace(&st.brush);
                 st.brush = b;
                 strokes_changed = true;
@@ -1740,7 +1870,8 @@ mod tests {
             frame(ctx, app, Vec::new());
             let Some(c) = &mut app.contrast else { return };
             if let Some(run) = c.job.take() {
-                let report = run.job.wait().expect("the worker answers");
+                let (report, prepared) = run.job.wait().expect("the worker answers");
+                c.prepared = Some((run.revision, prepared));
                 land(c, &run.ids, report);
                 continue;
             }
@@ -1849,7 +1980,7 @@ mod tests {
     fn passes(app: &OndinApp, id: NodeId) -> Option<bool> {
         match app.contrast.as_ref()?.marks.get(&id)? {
             Mark::Measured(f) => Some(f.passes()),
-            Mark::Skipped(_) => None,
+            Mark::Skipped(_) | Mark::Nothing => None,
         }
     }
 
@@ -2122,7 +2253,6 @@ mod tests {
             },
             Operation::SetTextSpans { id: f.black, spans },
         ])));
-        let doc = &f.app.session.doc;
         let finding = Finding {
             id: f.black,
             trail: vec![],
@@ -2135,12 +2265,17 @@ mod tests {
                 mode: None,
                 name: None,
                 score: 2.3,
+                needs: 4.5,
                 ink: grey,
                 opacity: 1.0,
+                under: Color::WHITE,
                 backdrop: Color::WHITE,
             }],
         };
-        let tx = fix_transaction(doc, f.black, &finding, Level::Aa, Fix::Var(var)).expect("a fix");
+        let key = f.app.session.ids.mint_item();
+        let doc = &f.app.session.doc;
+        let tx =
+            fix_transaction(doc, f.black, &finding, Level::Aa, Fix::Var(var), key).expect("a fix");
         let mut after = doc.clone();
         after.apply(&tx).unwrap();
         let n = after.get(f.black).unwrap();
@@ -2157,6 +2292,497 @@ mod tests {
             Some(var),
             "the fill is bound"
         );
+    }
+
+    fn enter(pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// With the palette open, Enter is the palette's even while the fix card is
+    /// open: it runs the palette's row, and no fix is applied.
+    ///
+    /// flip: `contrast_claim_keys` claiming Enter whoever owns the keyboard →
+    /// fails at "no fix".
+    #[test]
+    fn the_palette_keeps_its_enter_over_the_fix_card() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        f.app.open_fix(f.grey, egui::pos2(400.0, 100.0));
+        frame(&ctx, &mut f.app, Vec::new());
+        let depth = f.app.session.history.undo_depth();
+        f.app.toggle_palette(&ctx);
+        frame(&ctx, &mut f.app, Vec::new());
+        frame(&ctx, &mut f.app, vec![egui::Event::Text("Note".into())]);
+        frame(&ctx, &mut f.app, Vec::new());
+        frame(&ctx, &mut f.app, vec![enter(true), enter(false)]);
+        assert_eq!(f.app.session.history.undo_depth(), depth, "no fix");
+        assert!(f.app.palette.is_none(), "the palette ran its row");
+        assert_eq!(f.app.session.selection.ids(), &[f.other]);
+    }
+
+    /// An undo closes the fix card and takes back its preview, both worked out on
+    /// the document before it.
+    ///
+    /// flip: `document_rewound` not closing the card → fails at "the card
+    /// closes".
+    #[test]
+    fn an_undo_closes_the_fix_card_and_its_preview() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetFills {
+            id: f.black,
+            fills: solid(10, 10, 10),
+        }])));
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        f.app.open_fix(f.grey, egui::pos2(400.0, 100.0));
+        let card = f.app.contrast.as_ref().unwrap().fix.as_ref().expect("open");
+        let (finding, colour) = (card.finding.clone(), card.nearest.expect("a fix"));
+        f.app
+            .preview_fix(f.grey, &finding, Level::Aa, Some(Fix::Colour(colour)));
+        assert!(f.app.session.has_gesture_preview(), "fixture: previewing");
+        f.app.undo();
+        assert!(
+            f.app.contrast.as_ref().unwrap().fix.is_none(),
+            "the card closes"
+        );
+        assert!(!f.app.session.has_gesture_preview(), "its preview is gone");
+    }
+
+    /// Two modes, Light and Dark, and a variable `fg` black in Light and white in
+    /// Dark: the ids of the modes and the variable.
+    fn light_and_dark(
+        app: &mut OndinApp,
+    ) -> (ondin_core::ModeId, ondin_core::ModeId, ondin_core::VarId) {
+        let ids = &mut app.session.ids;
+        let (light, dark, fg) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
+        let mode = |id, name: &str, index| Operation::AddMode {
+            mode: ondin_core::Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        };
+        assert!(app.session.commit(Transaction(vec![
+            mode(light, "Light", 0),
+            mode(dark, "Dark", 1),
+            Operation::AddVariable {
+                var: ondin_core::Variable {
+                    id: fg,
+                    name: "fg".into(),
+                    kind: ondin_core::VarKind::Color,
+                    cells: [
+                        (light, ondin_core::Cell::Color(Color::BLACK)),
+                        (dark, ondin_core::Cell::Color(Color::WHITE)),
+                    ]
+                    .into(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ])));
+        (light, dark, fg)
+    }
+
+    /// A fill bound to a variable that passes in every mode stays bound: only
+    /// the run whose own colour fails takes the fix.
+    ///
+    /// flip: `fix_transaction` judging the bound fill by its default mode's
+    /// colour against every mode's backdrop → fails at "the fill stays bound".
+    #[test]
+    fn a_fix_leaves_a_passing_bound_fill_bound() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let (light, dark, fg) = light_and_dark(&mut f.app);
+        let grey = Color::from_rgba8(0x77, 0x77, 0x77, 255);
+        let fix = Color::from_rgba8(0x60, 0x60, 0x60, 255);
+        let mut spans = ondin_core::CharSpans::default();
+        spans.set(0..6, CharAttr::Color(Some(grey)), &TextStyle::default());
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetTextSpans {
+                    id: f.black,
+                    spans
+                }]))
+        );
+        let tx = ondin_core::bind_brush_at_all(
+            &f.app.session.doc,
+            &[f.black],
+            ondin_core::PaintTarget::Fill,
+            0,
+            fg,
+        );
+        assert!(f.app.session.commit(tx));
+        let sample = |mode, backdrop: Color, score| contrast::Sample {
+            mode: Some(mode),
+            name: None,
+            score,
+            needs: 4.5,
+            ink: grey,
+            opacity: 1.0,
+            under: backdrop,
+            backdrop,
+        };
+        let finding = Finding {
+            id: f.black,
+            trail: vec![],
+            ratio: 4.48,
+            needs: 4.5,
+            large: false,
+            non_text: false,
+            mode: None,
+            samples: vec![
+                sample(light, Color::WHITE, 4.48),
+                sample(dark, Color::BLACK, 4.69),
+            ],
+        };
+        let key = f.app.session.ids.mint_item();
+        let doc = &f.app.session.doc;
+        let tx = fix_transaction(doc, f.black, &finding, Level::Aa, Fix::Colour(fix), key)
+            .expect("a fix");
+        let mut after = doc.clone();
+        after.apply(&tx).unwrap();
+        let n = after.get(f.black).unwrap();
+        assert_eq!(
+            n.paint().fills[0].brush.var(),
+            Some(fg),
+            "the fill stays bound"
+        );
+        let t = ondin_core::TextRef::of(n.kind()).unwrap();
+        let runs = t.spans.runs(t.style, t.content.len());
+        assert_eq!(runs[0].1.color, Some(fix), "the grey run takes the fix");
+        assert_eq!(runs[1].1.color, None, "the rest still draws in fg");
+    }
+
+    /// A variable fix on text with no visible fill adds one on top: the hidden
+    /// fill stays, and a passing run with no colour of its own keeps the black
+    /// it drew in.
+    ///
+    /// flip: `fix_transaction` replacing the fill list rather than adding to it
+    /// → fails at "the hidden fill stays".
+    #[test]
+    fn a_variable_fix_keeps_hidden_fills() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let (_, _, fg) = light_and_dark(&mut f.app);
+        let grey = Color::from_rgba8(170, 170, 170, 255);
+        let mut spans = ondin_core::CharSpans::default();
+        spans.set(0..6, CharAttr::Color(Some(grey)), &TextStyle::default());
+        let hidden = ondin_core::keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
+            visible: false,
+        }]);
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id: f.black,
+                fills: hidden.clone(),
+            },
+            Operation::SetTextSpans { id: f.black, spans },
+        ])));
+        let finding = Finding {
+            id: f.black,
+            trail: vec![],
+            ratio: 2.3,
+            needs: 4.5,
+            large: false,
+            non_text: false,
+            mode: None,
+            samples: vec![contrast::Sample {
+                mode: None,
+                name: None,
+                score: 2.3,
+                needs: 4.5,
+                ink: grey,
+                opacity: 1.0,
+                under: Color::WHITE,
+                backdrop: Color::WHITE,
+            }],
+        };
+        let key = f.app.session.ids.mint_item();
+        let doc = &f.app.session.doc;
+        let tx =
+            fix_transaction(doc, f.black, &finding, Level::Aa, Fix::Var(fg), key).expect("a fix");
+        let mut after = doc.clone();
+        after.apply(&tx).unwrap();
+        let n = after.get(f.black).unwrap();
+        let fills = &n.paint().fills;
+        assert_eq!(fills.first(), hidden.first(), "the hidden fill stays");
+        assert_eq!(fills.len(), 2);
+        assert!(fills[1].visible && fills[1].brush.var() == Some(fg));
+        let t = ondin_core::TextRef::of(n.kind()).unwrap();
+        let runs = t.spans.runs(t.style, t.content.len());
+        assert_eq!(runs[0].1.color, None, "the failing run falls onto the fill");
+        assert_eq!(
+            runs[1].1.color,
+            Some(Color::BLACK),
+            "the passing run keeps black"
+        );
+    }
+
+    /// A mark's fix changes the paint its measured ink came from: a white box
+    /// whose faint border fails takes the fix on its border, its fill left white.
+    ///
+    /// flip: `fix_transaction` rewriting every failing paint of a mark → fails at
+    /// "the fill stays white".
+    #[test]
+    fn a_mark_s_fix_changes_the_paint_it_was_measured_by() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let check_box = f.app.session.ids.mint();
+        let faint = Color::from_rgba8(0xdd, 0xdd, 0xdd, 255);
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: check_box,
+                parent: f.card,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(16.0, 16.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((200.0, 20.0))),
+                name: Some("Box".into()),
+            },
+            Operation::SetFills {
+                id: check_box,
+                fills: solid(255, 255, 255),
+            },
+            Operation::SetStrokes {
+                id: check_box,
+                strokes: ondin_core::keyed_by_position([ondin_core::Stroke {
+                    brush: Brush::Solid(faint).into(),
+                    ..Default::default()
+                }]),
+            },
+        ])));
+        let finding = Finding {
+            id: check_box,
+            trail: vec![],
+            ratio: 1.4,
+            needs: 3.0,
+            large: false,
+            non_text: true,
+            mode: None,
+            samples: vec![contrast::Sample {
+                mode: None,
+                name: None,
+                score: 1.4,
+                needs: 3.0,
+                ink: faint,
+                opacity: 1.0,
+                under: Color::WHITE,
+                backdrop: Color::WHITE,
+            }],
+        };
+        let fix = Color::from_rgba8(0x80, 0x80, 0x80, 255);
+        let key = f.app.session.ids.mint_item();
+        let doc = &f.app.session.doc;
+        let tx = fix_transaction(doc, check_box, &finding, Level::Aa, Fix::Colour(fix), key)
+            .expect("a fix");
+        let mut after = doc.clone();
+        after.apply(&tx).unwrap();
+        let paint = after.get(check_box).unwrap().paint();
+        assert_eq!(
+            paint.fills[0].brush,
+            Brush::Solid(Color::from_rgba8(255, 255, 255, 255)).into(),
+            "the fill stays white"
+        );
+        assert_eq!(paint.strokes[0].brush, Brush::Solid(fix).into());
+    }
+
+    /// The card says what a fix detaches besides the colour: a text whose fill
+    /// comes from a style notes the style.
+    ///
+    /// flip: `side_effects` leaving out styles → fails at the note.
+    #[test]
+    fn the_card_notes_a_style_the_fix_detaches() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let style = f.app.session.ids.mint_style();
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::AddStyle {
+                style: ondin_core::style::Style {
+                    id: style,
+                    name: "ink/faint".into(),
+                    value: ondin_core::style::StyleValue::Fills(solid(170, 170, 170)),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetFillStyle {
+                id: f.grey,
+                style: Some(style),
+            },
+        ])));
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        f.app.open_fix(f.grey, egui::pos2(400.0, 100.0));
+        let card = f.app.contrast.as_ref().unwrap().fix.as_ref().expect("open");
+        assert_eq!(card.nearest_notes, ["Detaches ink/faint"]);
+    }
+
+    /// An edit to a shadow remeasures the text the shadow reaches, though the
+    /// text lies outside the shadowed layer's box.
+    ///
+    /// flip: `contrast_edited` dirtying the changed layer's box rather than its
+    /// ink → fails at "queued".
+    #[test]
+    fn a_shadow_edit_remeasures_the_text_it_reaches() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let bar = f.app.session.ids.mint();
+        let shadow = |color| {
+            ondin_core::keyed_by_position([ondin_core::Effect {
+                kind: ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
+                    offset: ondin_core::kurbo::Vec2::new(0.0, 30.0),
+                    blur: 20.0,
+                    spread: 0.0,
+                    color,
+                }),
+                visible: true,
+                vars: Default::default(),
+            }])
+        };
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: bar,
+                parent: f.card,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 20.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((20.0, 60.0))),
+                name: Some("Bar".into()),
+            },
+            Operation::SetFills {
+                id: bar,
+                fills: solid(240, 240, 240),
+            },
+            Operation::SetEffects {
+                id: bar,
+                effects: shadow(Color::from_rgba8(0, 0, 0, 40)),
+            },
+        ])));
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        let res = &f.app.session.resolved;
+        let (bar_box, caption) = (
+            res.world_bounds(bar).unwrap(),
+            res.world_bounds(f.grey).unwrap(),
+        );
+        assert!(!overlaps(bar_box, caption), "fixture: apart");
+        assert!(
+            res.ink_bounds(bar).is_some_and(|b| overlaps(b, caption)),
+            "fixture: the shadow reaches the caption"
+        );
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetEffects {
+                    id: bar,
+                    effects: shadow(Color::from_rgba8(0, 0, 0, 200)),
+                }]))
+        );
+        frame(&ctx, &mut f.app, Vec::new());
+        assert!(
+            f.app.contrast.as_ref().unwrap().stale.contains(&f.grey),
+            "queued"
+        );
+    }
+
+    /// A layer the check finds nothing of (covered whole) is marked so, and an
+    /// edit elsewhere does not send it to be measured again.
+    ///
+    /// flip: `land` leaving a layer the report omits unmarked → fails at "not
+    /// queued again".
+    #[test]
+    fn a_layer_with_nothing_drawn_is_not_remeasured_on_every_edit() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let cover = f.app.session.ids.mint();
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: cover,
+                parent: f.card,
+                index: 2,
+                kind: NodeKind::Rect {
+                    size: Size::new(300.0, 80.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((0.0, 100.0))),
+                name: Some("Cover".into()),
+            },
+            Operation::SetFills {
+                id: cover,
+                fills: solid(255, 255, 255),
+            },
+        ])));
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        let c = f.app.contrast.as_ref().unwrap();
+        assert!(
+            !matches!(
+                c.marks.get(&f.grey),
+                Some(Mark::Measured(_) | Mark::Skipped(_))
+            ) && !c.stale.contains(&f.grey),
+            "fixture: measured, and nothing found"
+        );
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetFills {
+            id: f.other,
+            fills: solid(20, 20, 20),
+        }])));
+        frame(&ctx, &mut f.app, Vec::new());
+        let c = f.app.contrast.as_ref().unwrap();
+        assert!(
+            !c.queue.contains(&f.grey) && !c.stale.contains(&f.grey),
+            "not queued again"
+        );
+    }
+
+    /// Jobs at one revision share the prepared page: a level change measures
+    /// again on it, and an edit prepares the page anew.
+    ///
+    /// flip: `contrast_tick` preparing the page for every job → fails at
+    /// "reused".
+    #[test]
+    fn jobs_at_one_revision_share_the_prepared_page() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        let prepared = |app: &OndinApp| {
+            let (at, p) = app.contrast.as_ref()?.prepared.as_ref()?;
+            Some((*at, Arc::clone(p)))
+        };
+        let (at, first) = prepared(&f.app).expect("prepared");
+        assert_eq!(at, f.app.session.revision());
+        f.app.prefs.contrast.set_level(Level::Aaa);
+        settle(&ctx, &mut f.app);
+        let (_, again) = prepared(&f.app).expect("prepared");
+        assert!(Arc::ptr_eq(&first, &again), "reused");
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetFills {
+            id: f.grey,
+            fills: solid(40, 40, 40),
+        }])));
+        settle(&ctx, &mut f.app);
+        let (at, after) = prepared(&f.app).expect("prepared");
+        assert!(!Arc::ptr_eq(&first, &after), "prepared anew");
+        assert_eq!(at, f.app.session.revision());
     }
 
     /// Opening a document turns the mode off.

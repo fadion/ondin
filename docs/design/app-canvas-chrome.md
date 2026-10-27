@@ -93,7 +93,7 @@ them with `ondin_export::contrast::check_with`, the measurement `ondin check con
 document opens, it is never saved or exported, and present mode's own branch never draws it.
 
 - **Scope: one frame at most** (`contrast_target`), since measuring renders every layer's box
-  twice and a page of several frames can take minutes. The selection when the mode starts, cut to
+  three or four times and a page of several frames can take minutes. The selection when the mode starts, cut to
   the top-level frame of its first layer; with nothing selected, the top-level frame filling most
   of the view, else the page's first frame in reading order; a page with no frame is checked
   whole. The scope is fixed for the mode's life: selecting other layers afterwards does not move
@@ -104,13 +104,18 @@ document opens, it is never saved or exported, and present mode's own branch nev
   `contrast_tick`, before the canvas, compares the document with a snapshot whenever
   `session.revision()` moves. A layer has changed when its stored node differs or its world box
   moved; a subject is queued, and drawn stale, when it changed or its box overlaps the old or new
-  box of a changed or removed layer. A change to variables, styles or the page ground, or of the
-  level or *Non-text*, queues everything. The queue goes once the document has been still for
-  `SETTLE` (0.15 s), so a run of nudges measures once, `CHUNK` (6) layers a job in reading order,
-  so badges arrive top down as they are measured. A layer queued again while its job is in flight
-  stays stale when that answer lands.
+  ink (`Resolved::ink_bounds`, a shadow included) of a changed or removed layer. A change to
+  variables, styles or the page ground, or of the level or *Non-text*, queues everything. The
+  queue goes once the document has been still for `SETTLE` (0.15 s), so a run of nudges measures
+  once, `CHUNK` (6) layers a job in reading order, so badges arrive top down as they are measured.
+  The first job at a revision prepares the page (`contrast::Prepared`: each mode's document,
+  layout and decoded pictures) and hands it back; later jobs at that revision measure on it.
+  A layer queued again while its job is in flight stays stale when that answer lands. A layer the
+  answer leaves out (nothing of it is drawn) is marked so, with no badge, and waits for an edit
+  that could change that rather than being queued on every edit.
 - **Badges** (`contrast_badges`) keep one screen size, above the layer's top left; a badge that
-  overlaps an earlier one moves down below it. They are painted in the canvas panel's own layer
+  overlaps earlier ones moves down below the lowest it touches, and one pushed past the canvas's
+  bottom is not drawn. They are painted in the canvas panel's own layer
   after `canvas_ui`, so every floating card covers them.
 
   | Mark | Badge |
@@ -139,22 +144,29 @@ document opens, it is never saved or exported, and present mode's own branch nev
   the arrow. Header (layer name; *body text*, *large text* or *non-text*; the level),
   the worst sample's ink and backdrop as a split swatch with both hexes and the score in red, a row
   per mode when there are several, then *Nearest* (`contrast::nearest`; *No colour at this hue
-  passes*), noting *Unbinds ‹var›* when the text draws in a bound fill that fails, then *Variables*
-  (`contrast::passing_variables`, at most six; *No colour variable passes*). Hovering a row
-  previews it (`session.set_preview`); a click, or Enter (the hovered row, else the first),
-  applies it as one undo step, *Fix contrast*. Escape or a click away closes it. A remeasure redoes
-  the rows, and closes the card when the layer now passes or is gone. The card and the level menu
-  own Escape through `a_popover_owns_escape` and `popover_heard`.
+  passes*), then *Variables* (`contrast::passing_variables`, at most six; *No colour variable
+  passes*). Each section notes what its edit takes besides the colour (`side_effects`):
+  *Unbinds ‹var›* for a fill or stroke it rewrites that was bound, *Detaches ‹style›* for a
+  styled slot it writes. Hovering a row previews it (`session.set_preview`); a click, or Enter
+  (the hovered row, else the first) while neither the palette, a modal nor a text field has the
+  keyboard, applies it as one undo step, *Fix contrast*. Escape, a click away, an undo or a redo
+  closes it. A remeasure redoes the rows, and closes the card when the layer now passes or is
+  gone. The card and the level menu own Escape through `a_popover_owns_escape` and
+  `popover_heard`.
 - **Every fix passes in every mode.** A raw colour is the same in all modes, so a fix for one mode
   that breaks another is no fix: *Nearest* must pass every mode's worst backdrop, and *Variables*
   lists only variables that pass in every mode, nearest the ink first. When no lightness at the
   hue passes everywhere the card offers only variables, the case modes exist for.
 - **What a fix edits** (`fix_transaction`): the runs and paints whose colour fails the finding,
-  never the backdrop. A run's own colour is replaced in the spans; runs drawing in the fill change
-  the top visible fill. A run's colour cannot be bound, so a variable goes through the fill: a
-  failing run's own colour is cleared onto the fill and the fill bound, and passing runs that drew
-  in the fill are given its old colour so they keep their look. On a shape the failing visible
-  solid fills and strokes are replaced or bound.
+  never the backdrop. A bound fill or stroke is judged by its variable's value in each mode against
+  that mode's sample, so a variable that adapts to every mode is left bound. A run's own colour is
+  replaced in the spans; runs drawing in the fill change the top visible fill. A run's colour
+  cannot be bound, so a variable goes through the fill: a failing run's own colour is cleared onto
+  the fill and the fill bound, and passing runs that drew in the fill are given its old colour
+  (black when there was no visible fill) so they keep their look. Text with no visible fill gets
+  a new one on top, its hidden fills kept. On a shape only the failing visible solid fills and
+  strokes the measured ink came from are replaced or bound: a white box with a failing border is
+  fixed on its border.
 
 ## The top bar's right cluster
 
@@ -521,7 +533,9 @@ runs (`pages` names each frame's page, index for index).
   mode (`focus_mode_keeps_the_map`).
 - `contrast_claim_keys` takes the fix card's Enter at the top of the frame, before `input::resolve`,
   which would otherwise open the selected text layer for editing
-  (`enter_applies_the_card_s_first_fix`). `contrast_badges` runs after `canvas_ui` in the same
+  (`enter_applies_the_card_s_first_fix`), and before the palette's keys, so it stands aside while
+  the palette, a modal or a text field has the keyboard
+  (`the_palette_keeps_its_enter_over_the_fix_card`). `contrast_badges` runs after `canvas_ui` in the same
   panel; called before it, the canvas takes the badge's press
   (`a_click_on_a_failing_badge_opens_the_card`).
 - Deriving the escape clip from overrides makes resized children pop out of their frame.

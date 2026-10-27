@@ -48,6 +48,7 @@ pub mod page;
 pub mod paint_box;
 pub mod propagate;
 pub mod query;
+pub mod rename;
 pub mod reset;
 pub mod resolve;
 pub mod style;

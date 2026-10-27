@@ -85,6 +85,7 @@ const CORE_PERMITTED: &[&str] = &[
     "parley",
     "peniko",
     "read-fonts",
+    "regex",
     "roxmltree",
     "rstar",
     "rustc-hash",

@@ -2851,6 +2851,7 @@ dependencies = [
  "parley",
  "peniko",
  "read-fonts 0.40.2",
+ "regex",
  "roxmltree 0.20.0",
  "rstar",
  "rustc-hash 2.1.3",

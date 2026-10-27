@@ -26,6 +26,10 @@ base64 = "0.22.1"
 # same reasoning the `base64` note above records, one step weaker. Zero
 # dependencies of its own, and a read-only tree, which is what an importer wants.
 roxmltree = "0.20.0"
+# Batch rename's Find (`rename`): a literal find is an escaped pattern, so one
+# matcher serves both, and a pattern's groups are what its template can insert.
+# Already in the workspace lock through `velopack`, at this version.
+regex = "1.13.1"
 kurbo.workspace = true
 parley.workspace = true
 peniko.workspace = true

@@ -169,6 +169,10 @@ fn length(points: &[Point], closed: bool) -> f64 {
 /// The longest stretch of a run the fit checks no point along, in units.
 const SPACING: f64 = 2.0;
 
+/// The most points [`densified`] puts along one run: past it the spacing widens, so
+/// a run millions of units long costs no more than a long one.
+const MAX_DENSIFIED: f64 = 4096.0;
+
 /// The spacing a fit within `accuracy` checks a run at: [`SPACING`], or twenty
 /// accuracies where that is less, so a fit of something small is checked as
 /// closely for its size.
@@ -180,6 +184,7 @@ fn spacing(accuracy: f64) -> f64 {
 /// fitted across a long straight stretch is checked along it rather than only at
 /// its ends, where it could bulge unseen.
 fn densified(run: &[Point], spacing: f64) -> Vec<Point> {
+    let spacing = spacing.max(length(run, false) / MAX_DENSIFIED);
     let mut out = vec![run[0]];
     for w in run.windows(2) {
         let steps = ((w[1] - w[0]).hypot() / spacing).ceil().max(1.0) as usize;
@@ -353,4 +358,25 @@ fn reparameterised(pts: &[Point], u: &[f64], c: &CubicBez) -> Vec<f64> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run is checked at a bounded number of points however long it is: two
+    /// million units of edge give a few thousand, not a million.
+    /// flip: `densified` keeping its spacing on any run → fails at "points".
+    #[test]
+    fn densified_is_bounded() {
+        let run = [
+            Point::new(0.0, 0.0),
+            Point::new(1e6, 0.0),
+            Point::new(1e6, 1e6),
+        ];
+        let n = densified(&run, SPACING).len();
+        assert!(n <= MAX_DENSIFIED as usize + run.len(), "points: {n}");
+        let short = densified(&[Point::ZERO, Point::new(10.0, 0.0)], SPACING);
+        assert_eq!(short.len(), 6, "a short run keeps its spacing");
+    }
 }

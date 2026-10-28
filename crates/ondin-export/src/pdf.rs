@@ -17,7 +17,8 @@ use ondin_core::peniko::FontData;
 use ondin_core::{Brush, Document, ExportText, NodeId, Resolved};
 
 /// How much denser than the page a filtered layer is rasterized: 4 is 288 dpi at
-/// a point per world unit.
+/// a point per world unit, less for a layer past 1250 units, since `krilla-svg`
+/// caps a raster at 5000 px a side.
 const FILTER_SCALE: f32 = 4.0;
 
 /// A PDF and what it could not say exactly: the SVG's `approximated`, plus what the
@@ -208,6 +209,24 @@ fn approximations(
         let Some(node) = doc.get(id) else { continue };
         if ondin_render::effects::any_ink(&doc.resolved_effects(id, node.effects())) {
             note("an effect, drawn as pixels");
+            // The whole `<g filter>` is one raster, text and vectors under it too.
+            if !node.children().is_empty() {
+                note(
+                    "a frame or group with an effect, drawn as pixels with everything inside it, text included",
+                );
+            }
+        }
+        // `usvg` draws a decoration from the font's own line: its colour,
+        // thickness, style, offset and skip-ink are not carried.
+        if text == ExportText::Live
+            && let Some(parts) = ondin_core::TextRef::of(res.used_kind_of(node))
+            && parts
+                .spans
+                .runs(parts.style, parts.content.len())
+                .iter()
+                .any(|(_, s)| s.underline.is_some() || s.strikethrough.is_some())
+        {
+            note("underlines and strikethroughs, drawn as the font's plain line");
         }
         let paint = doc.resolved_paint(id, node.paint());
         let adjusted = paint.fills.iter().filter(|f| f.visible).any(

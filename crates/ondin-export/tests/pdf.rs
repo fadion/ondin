@@ -175,6 +175,38 @@ fn an_effect_is_reported_as_pixels() {
     );
 }
 
+/// A frame with an effect says its contents go to pixels with it, and live
+/// text's decorations say they lose their style; outlined text's do not.
+///
+/// flip: `approximations` without the decoration note → fails at "live".
+#[test]
+fn a_rasterized_frame_and_decorations_are_reported() {
+    let mut f = styled(TextStyle {
+        underline: Some(Default::default()),
+        ..inter(400)
+    });
+    let live = approximated(&f.doc, &f.res, &[f.artboard], ExportText::Live);
+    let outlined = approximated(&f.doc, &f.res, &[f.artboard], ExportText::Outlines);
+    const DECO: &str = "underlines and strikethroughs, drawn as the font's plain line";
+    assert!(live.iter().any(|s| s == DECO), "live: {live:?}");
+    assert!(!outlined.iter().any(|s| s == DECO), "{outlined:?}");
+
+    f.doc
+        .apply(&Transaction(vec![Operation::SetEffects {
+            id: f.artboard,
+            effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow::default()))]),
+        }]))
+        .expect("a shadow on the frame");
+    f.res = Resolved::rebuild(&f.doc);
+    let notes = approximated(&f.doc, &f.res, &[f.artboard], ExportText::Live);
+    assert!(
+        notes
+            .iter()
+            .any(|s| s.starts_with("a frame or group with an effect")),
+        "{notes:?}"
+    );
+}
+
 /// OpenType features are reported for embedded text, which `usvg` shapes without
 /// them, and not for outlines, which are our own shaping.
 #[test]

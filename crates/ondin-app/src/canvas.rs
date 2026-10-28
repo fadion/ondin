@@ -542,8 +542,8 @@ const HANDLE_DRAWN: f64 = 1e-9;
 const TANGENT_SNAP_PX: f32 = 4.0;
 /// The ring that marks an armed snap target: radius and weight, in screen pt.
 /// Deliberately not [`PEN_PICK_PX`], which is a target area.
-const SNAP_RING_PX: f32 = 5.0;
-const SNAP_RING_STROKE_PX: f32 = 2.0;
+pub(crate) const SNAP_RING_PX: f32 = 5.0;
+pub(crate) const SNAP_RING_STROKE_PX: f32 = 2.0;
 /// Side of a path anchor's marker in the node tool, in screen pt. Its corners
 /// sit just inside `PEN_PICK_PX`; raise that too, or they stop being grabbable.
 const POINT_PX: f32 = 9.0;
@@ -624,9 +624,9 @@ fn outline_ink(ground: Color) -> Color {
 }
 
 /// The stroke a freshly drawn pen path and line get, which the pen's preview
-/// shares.
-const PEN_STROKE_COLOR: Color = Color::BLACK;
-const PEN_STROKE_WIDTH: f64 = 2.0;
+/// shares, and the pencil's first path.
+pub(crate) const PEN_STROKE_COLOR: Color = Color::BLACK;
+pub(crate) const PEN_STROKE_WIDTH: f64 = 2.0;
 
 /// The transform box and its four corners, in screen space.
 ///
@@ -1099,6 +1099,7 @@ impl OndinApp {
                     }),
                 ),
                 Tool::Pen => (egui::CursorIcon::Crosshair, Some(Bitmap::Pen)),
+                Tool::Pencil => (egui::CursorIcon::Crosshair, Some(Bitmap::Pencil)),
                 // The plain arrow over points, whose markers are the affordance;
                 // the point box gets resize arrows ([`Self::point_box_cursor`]),
                 // and the nib shows where `pen_verb`, the press's query, arms.
@@ -1372,6 +1373,11 @@ impl OndinApp {
             && !matches!(self.drag, Drag::Pan)
         {
             self.pen_input(ui, resp, rect, ppp);
+            return;
+        }
+
+        if self.tool == Tool::Pencil && !panning_armed && !matches!(self.drag, Drag::Pan) {
+            self.pencil_input(ui, resp, rect, ppp);
             return;
         }
 
@@ -3009,7 +3015,7 @@ impl OndinApp {
     /// Shift-drawn line. The direction is an integer step like `(±1, ±1)`, so a
     /// grid-rounded endpoint keeps the exact angle; the length is the pointer's
     /// projection onto it, as [`snap::constrain`] does for a move.
-    fn axial_corner(&self, start: Point, world: Point) -> Point {
+    pub(crate) fn axial_corner(&self, start: Point, world: Point) -> Point {
         const OCTANT: f64 = std::f64::consts::TAU / 8.0;
         let d = world - start;
         if d.hypot() < 1e-9 {
@@ -3241,6 +3247,7 @@ impl OndinApp {
             }
             // Not box-dragging tools (`drags_a_box`).
             Tool::Pen
+            | Tool::Pencil
             | Tool::Node
             | Tool::ImageEdit
             | Tool::Select
@@ -3267,7 +3274,7 @@ impl OndinApp {
 
     /// Where a layer drawn at `world` belongs: the frame under the point, or the
     /// current page; there is no fallback frame.
-    fn draw_target(&self, world: Point) -> (NodeId, Affine) {
+    pub(crate) fn draw_target(&self, world: Point) -> (NodeId, Affine) {
         self.target_artboard(world)
             .unwrap_or((self.session.page, Affine::IDENTITY))
     }
@@ -3497,7 +3504,11 @@ impl OndinApp {
     }
 
     /// [`Self::pen_resume_target`], restricted to one node when `only` names one.
-    fn pen_resume_target_in(&self, world: Point, only: Option<NodeId>) -> Option<PenEdit> {
+    pub(crate) fn pen_resume_target_in(
+        &self,
+        world: Point,
+        only: Option<NodeId>,
+    ) -> Option<PenEdit> {
         let slop = f64::from(PEN_PICK_PX) / self.points_per_world();
         hit_test(
             &self.session.resolved,
@@ -4972,7 +4983,7 @@ impl OndinApp {
 
     /// The **committed** outline and radii of `id`, for `rewrite_path`'s no-op
     /// comparison — both, so a radius scrubbed away and back is no undo step.
-    fn stored_path(&self, id: NodeId) -> Option<(&ondin_core::kurbo::BezPath, &[f64])> {
+    pub(crate) fn stored_path(&self, id: NodeId) -> Option<(&ondin_core::kurbo::BezPath, &[f64])> {
         match self.session.doc.get(id)?.kind() {
             NodeKind::Path { path, corner_radii } => Some((path, corner_radii)),
             _ => None,
@@ -5099,8 +5110,7 @@ impl OndinApp {
                     pen.parent_world,
                     &pen.anchors,
                     close,
-                    PEN_STROKE_COLOR,
-                    PEN_STROKE_WIDTH,
+                    tools::solid_stroke(PEN_STROKE_COLOR, PEN_STROKE_WIDTH),
                 );
                 (id, tx, "Created path")
             }
@@ -8194,6 +8204,8 @@ impl OndinApp {
             );
         }
 
+        self.draw_pencil(painter, rect, ppp, resp);
+
         self.draw_points(painter, rect, ppp, resp);
 
         // Image editing's crop window; not inside `draw_points`, which returns
@@ -8762,7 +8774,7 @@ fn crop_chrome(window: &[egui::Pos2], picture: Option<&[egui::Pos2]>) -> Vec<egu
 ///
 /// One drawing for both tools, so a path does not change appearance when it
 /// commits. The pen's are always circles: the node tool's square marks a corner.
-fn paint_anchor(painter: &egui::Painter, at: egui::Pos2, fill: egui::Color32) {
+pub(crate) fn paint_anchor(painter: &egui::Painter, at: egui::Pos2, fill: egui::Color32) {
     let radius = POINT_PX * 0.5;
     painter.circle_filled(at, radius, fill);
     painter.circle_stroke(

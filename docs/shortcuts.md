@@ -83,7 +83,8 @@ or the release, not the press.**
 
 ## 1. Tools
 
-Single key, `plain && !shift`, Normal mode only.
+Single key, `plain && !shift`, Normal mode only. The one Shift chord is the pencil's
+`Shift+P`, read in its own arm with `plain && m.shift`.
 
 | Key | Tool | |
 |---|---|---|
@@ -98,6 +99,7 @@ Single key, `plain && !shift`, Normal mode only.
 | `S` | Star | ✅ |
 | `L` | Line | ✅ Figma, Sketch |
 | `P` | Pen — **or arms the pen bias** inside an active point edit | ✅ (§15 D125) |
+| `Shift+P` | Pencil | ✅ the common pencil chord, `P` being the pen |
 | `A` | Node | ✅ Illustrator/Sketch direct-selection letter (Figma's `A` is Frame). **No lock check in the key's arm, and none wanted**: a locked layer can join the selection from the layers panel, so the refusal is in `canvas::edited_path` — the tool arms and finds no subject, as `A` over a rectangle does (§15 D321) |
 | `T` | Text — **click** plants an auto-width node, **drag** draws a fixed box | ✅ (§15 D170) |
 | `I` | Eyedropper — one shot; a second `I` hands back to the tool it was armed from (`choose_tool`) | ✅ Figma |

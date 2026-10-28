@@ -137,6 +137,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         Tool::Star,
         Tool::Line,
         Tool::Pen,
+        Tool::Pencil,
         Tool::Node,
         Tool::Text,
         Tool::Eyedropper,

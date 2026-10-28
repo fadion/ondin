@@ -1169,6 +1169,62 @@ pub fn simplify_outline(path: &kurbo::BezPath) -> kurbo::BezPath {
     out
 }
 
+/// The sharpest turn, in degrees, the pencil's fit smooths over. Wider than
+/// [`SIMPLIFY_CORNER_DEG`]: read over the pencil's coarser reach, a hand's shake on a
+/// small loop turns by more than 15°, and a corner drawn on purpose by far more.
+pub const FREEHAND_CORNER_DEG: f64 = 45.0;
+
+/// A freehand trail fitted as *Simplify* fits, within `accuracy`: what the pencil
+/// draws. The samples at `corners` stay corner anchors however little they turn,
+/// and `closed` fits the trail as a loop with no seam. Empty under two samples.
+///
+/// A closed trail with kept corners starts its loop at the first of them, so the
+/// seam falls where there is a corner anyway.
+pub fn freehand_outline(
+    points: &[kurbo::Point],
+    closed: bool,
+    corners: &[usize],
+    accuracy: f64,
+) -> kurbo::BezPath {
+    let n = points.len();
+    if n < 2 {
+        return kurbo::BezPath::new();
+    }
+    let mut stops: Vec<usize> = corners.iter().copied().filter(|&i| i < n).collect();
+    stops.sort_unstable();
+    stops.dedup();
+    if closed && n >= 3 && stops.is_empty() {
+        let fitted = crate::fit::fit_closed(points, accuracy, FREEHAND_CORNER_DEG);
+        return straightened(&fitted, accuracy);
+    }
+    let runs: Vec<Vec<kurbo::Point>> = if closed && n >= 3 {
+        (0..stops.len())
+            .map(|k| {
+                let end = stops.get(k + 1).copied().unwrap_or(stops[0] + n);
+                (stops[k]..=end).map(|i| points[i % n]).collect()
+            })
+            .collect()
+    } else {
+        let mut ends = vec![0];
+        ends.extend(stops.into_iter().filter(|&i| i > 0 && i + 1 < n));
+        ends.push(n - 1);
+        ends.windows(2)
+            .map(|w| points[w[0]..=w[1]].to_vec())
+            .collect()
+    };
+    let mut out = kurbo::BezPath::new();
+    for run in runs.iter().filter(|r| r.len() >= 2) {
+        let piece = crate::fit::fit_open(run, accuracy, FREEHAND_CORNER_DEG);
+        // Each run after the first carries on from the corner the last one ended on.
+        let skip = usize::from(!out.elements().is_empty());
+        out.extend(piece.iter().skip(skip));
+    }
+    if closed && !out.elements().is_empty() {
+        out.close_path();
+    }
+    straightened(&out, accuracy)
+}
+
 /// *Offset path* on the path `id` draws, read with the node's fill rule, as
 /// [`offset_outline`] offsets it.
 pub fn offset_path(doc: &Document, id: NodeId, distance: f64) -> Result<Transaction, OpError> {

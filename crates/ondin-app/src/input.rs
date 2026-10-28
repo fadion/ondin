@@ -1369,6 +1369,10 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
                 }
             }
         }
+        // The common pencil chord, since `P` is the pen.
+        if plain && m.shift && i.key_pressed(egui::Key::P) {
+            out.push(Action::ChooseTool(Tool::Pencil));
+        }
 
         out
     })
@@ -2199,6 +2203,21 @@ mod tests {
                 "{m:?}+A is not this"
             );
         }
+    }
+
+    /// `Shift+P` is the pencil and plain `P` stays the pen.
+    #[test]
+    fn shift_p_is_the_pencil_and_p_the_pen() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::P, shift)], shift),
+            vec![Action::ChooseTool(Tool::Pencil)]
+        );
+        let none = egui::Modifiers::NONE;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::P, none)], none),
+            vec![Action::ChooseTool(Tool::Pen)]
+        );
     }
 
     /// `Ctrl+Alt+G` frames the selection; `Ctrl+G` still groups, `Ctrl+Shift+G`

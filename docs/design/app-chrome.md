@@ -78,6 +78,7 @@ ondin-app/src/
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
 ├─ minimap.rs       the minimap card at the canvas's bottom left (app-canvas-chrome.md)
 ├─ path_bar.rs      the path bar beside the rail while points are edited (app-pen-and-nodes.md)
+├─ pencil.rs        the pencil: the freehand trail, its fit on release, extending and closing (app-pen-and-nodes.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ batch_rename.rs  the batch rename box: picks, orders and numbers the layers, previews, commits (app-canvas-chrome.md)
 ├─ contrast.rs      contrast check mode: badges, the fix card, the bar; measured on a worker (app-canvas-chrome.md)

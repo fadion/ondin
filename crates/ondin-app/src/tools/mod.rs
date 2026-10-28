@@ -39,6 +39,9 @@ pub enum Tool {
     Star,
     Line,
     Pen,
+    /// Draws a path freehand: the drag's trail is fitted to curves on release
+    /// (`crate::pencil`). Stays armed after a stroke, since freehand comes in runs.
+    Pencil,
     /// Edits the *points* of a path rather than the path as a layer — anchors,
     /// their handles, add and remove.
     ///
@@ -102,6 +105,7 @@ impl Tool {
             Tool::Select
             | Tool::Scale
             | Tool::Pen
+            | Tool::Pencil
             | Tool::Node
             | Tool::ImageEdit
             | Tool::Hand
@@ -2871,12 +2875,20 @@ pub fn pen_close_snap(
     near.then_some(first.at)
 }
 
-/// Create a `Path` node from world-space pen `anchors` under `parent`, stroked
-/// with `color` at `width`.
+/// A visible solid stroke of `color` at `width`, every other setting at its default.
+pub fn solid_stroke(color: Color, width: f64) -> Stroke {
+    Stroke {
+        brush: Brush::Solid(color).into(),
+        width,
+        ..Default::default()
+    }
+}
+
+/// Create a `Path` node from world-space pen `anchors` under `parent`, carrying the
+/// one `stroke` and no fill.
 ///
 /// The node origin sits at the first anchor. `close` joins the last anchor back to
 /// the first, through their handles. Fewer than two anchors yields an empty transaction.
-#[allow(clippy::too_many_arguments)]
 pub fn create_path(
     id: NodeId,
     parent: NodeId,
@@ -2884,8 +2896,7 @@ pub fn create_path(
     parent_world: Affine,
     anchors: &[PenAnchor],
     close: bool,
-    color: Color,
-    width: f64,
+    stroke: Stroke,
 ) -> Transaction {
     if anchors.len() < 2 {
         return Transaction(vec![]);
@@ -2910,11 +2921,7 @@ pub fn create_path(
         },
         Operation::SetStrokes {
             id,
-            strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(color).into(),
-                width,
-                ..Default::default()
-            }]),
+            strokes: keyed_by_position([stroke]),
         },
     ])
 }
@@ -5131,8 +5138,7 @@ mod tests {
             pw,
             &anchors,
             false,
-            Color::BLACK,
-            2.0,
+            solid_stroke(Color::BLACK, 2.0),
         ))
         .unwrap();
         let res = Resolved::rebuild(&doc);
@@ -5369,8 +5375,7 @@ mod tests {
             pw,
             &anchors,
             false,
-            Color::BLACK,
-            2.0,
+            solid_stroke(Color::BLACK, 2.0),
         ))
         .unwrap();
         let res = Resolved::rebuild(&doc);
@@ -5575,8 +5580,7 @@ mod tests {
             pw,
             &drawn,
             false,
-            Color::BLACK,
-            2.0,
+            solid_stroke(Color::BLACK, 2.0),
         ))
         .unwrap();
         let res = Resolved::rebuild(&doc);

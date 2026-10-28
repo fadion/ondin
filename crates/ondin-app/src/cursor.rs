@@ -5,7 +5,7 @@
 //!
 //! - **The hands.** winit maps both `Grab` and `Grabbing` onto Windows'
 //!   `IDC_SIZEALL` move arrow, so the two pan states would be identical.
-//! - **The pen.** `CursorIcon` has no pen.
+//! - **The pen and the pencil.** `CursorIcon` has neither.
 //! - **The crosshair.** `IDC_CROSS` is 32 texels across, about twice what a design
 //!   tool uses.
 //! - **The rotate arc.** `CursorIcon` has no rotate, and no icon set has a
@@ -14,7 +14,7 @@
 //! - **The loaded Image cursor**, the crosshair with a count badge
 //!   ([`Bitmap::Loaded`]).
 //!
-//! The hands, pen, Scale box and bin are rasterized from the Phosphor glyphs the
+//! The hands, pen, pencil, Scale box and bin are rasterized from the Phosphor glyphs the
 //! tool rail uses, so a tool's cursor and its rail button are one drawing; the
 //! crosshair, the rotate arc and the badge are drawn outright. Both paths meet at
 //! [`compose`], which gives them a common white core and dark rim.
@@ -102,6 +102,8 @@ pub enum Bitmap {
     HandClosed,
     /// The pen tool, about to drop an anchor point.
     Pen,
+    /// The pencil tool, about to draw freehand.
+    Pencil,
     /// The Scale tool. Select and Scale differ only in what a handle drag means, so
     /// without a cursor of its own the mode is invisible until something is scaled.
     Scale,
@@ -141,7 +143,7 @@ impl Bitmap {
     ///
     /// One function so a variant with no glyph has nowhere to put a hotspot:
     /// [`Cursors::image`] routes the drawn variants to functions that pass their own
-    /// [`Hotspot`], and only the six glyph variants reach this.
+    /// [`Hotspot`], and only the glyph variants reach this.
     fn glyph_and_hotspot(self) -> Option<(&'static str, Hotspot)> {
         match self {
             // A hand grabs with its palm; the bin and the Scale box aim from the
@@ -150,6 +152,8 @@ impl Bitmap {
             Self::HandClosed => Some((theme::icon::HAND_GRABBING, Hotspot::Middle)),
             // A pen draws from its nib, where the anchor point will appear.
             Self::Pen => Some((theme::icon::PEN_NIB, Hotspot::Nib)),
+            // A pencil's lead is bottom-left too.
+            Self::Pencil => Some((theme::icon::PENCIL_SIMPLE, Hotspot::Nib)),
             // The dropper's tip is bottom-left like the nib's, so it is mirrored
             // the same way.
             Self::Eyedropper => Some((theme::icon::EYEDROPPER, Hotspot::Nib)),
@@ -212,6 +216,7 @@ pub struct Cursors {
     hand_open: Slot,
     hand_closed: Slot,
     pen: Slot,
+    pencil: Slot,
     /// The Scale tool's; `scale` above is the display scale.
     scale_tool: Slot,
     crosshair: Slot,
@@ -240,6 +245,7 @@ impl Cursors {
             Bitmap::HandOpen => &mut self.hand_open,
             Bitmap::HandClosed => &mut self.hand_closed,
             Bitmap::Pen => &mut self.pen,
+            Bitmap::Pencil => &mut self.pencil,
             Bitmap::Scale => &mut self.scale_tool,
             Bitmap::Crosshair => &mut self.crosshair,
             Bitmap::Rotate(t) => &mut self.rotate[t.index()],
@@ -828,6 +834,7 @@ mod tests {
             ("hand-open", Bitmap::HandOpen),
             ("hand-closed", Bitmap::HandClosed),
             ("pen", Bitmap::Pen),
+            ("pencil", Bitmap::Pencil),
             ("scale", Bitmap::Scale),
             ("crosshair", Bitmap::Crosshair),
             ("rotate-0", Bitmap::Rotate(Turn(0))),

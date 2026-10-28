@@ -12,6 +12,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Skew**: `Ctrl`-drag a side; Shift holds 15° steps. **Transform origin**: a draggable pivot marker with two numeric fields. **Scale** (`K`): the same gestures, but stroke widths, radii and type scale too.
 - **Shapes**: frame, rect, ellipse, polygon, star, line. **Text**: edit on the canvas with a real caret.
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
+- **Pencil** (`Shift+P`, `Path`): a freehand trail fitted to curves on release (`app-pen-and-nodes.md`).
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key). **Tidy up** (2+ layers, `Alt+Shift+T`) lays the selection out as the grid it is roughly in (`build::tidy_moves`):
   - **Rows and columns** are clusters of box centres. A box joins a band while its centre is within half the band's largest box, or half its own when it is larger, of the band's mean centre.
@@ -243,7 +244,7 @@ over `Tool` is an exhaustive `match` (the cursor, `create_tx`), a `matches!` all
 **Arming a create tool clears the selection** (`OndinApp::choose_tool`). The set is `drags_a_box`:
 Frame, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select and Scale (operate on the
 selection), Hand (a pan keeps it), Node and ImageEdit (entered *from* a selected layer), Pen (places
-anchors, never drags a box), Eyedropper (picks onto the selection). `place_image_action` clears it too.
+anchors, never drags a box), Pencil (a stroke can carry on the selected path), Eyedropper (picks onto the selection). `place_image_action` clears it too.
 
 **A tool switch abandons the drag in flight.** `choose_tool` clears `self.drag` and `self.alt_clone`
 and calls `clear_gesture_preview`. It does not call `clear_preview` (which would discard a live text

@@ -37,6 +37,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 
 - **A per-operand boolean cache** — measured, nothing to win (§15 D239).
 - **`Flatten` on a lone non-boolean** — *Outline shape* (`build::outline`) is that verb (§15 D230).
+- **Pressure, tilt, variable width, brushes, an eraser or a smoothing setting on the pencil** — it makes geometry, not ink; *Simplify path* already smooths after the fact.
 
 ## Effects and paint
 

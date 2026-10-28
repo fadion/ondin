@@ -1,7 +1,7 @@
 # Pen and node tools
 
-Drawing paths with the pen, resuming them, editing their points with the node tool (`A`), joining
-two path layers, and per-anchor corner radii. Part of §9.4.
+Drawing paths with the pen and the pencil, resuming them, editing their points with the node tool
+(`A`), joining two path layers, and per-anchor corner radii. Part of §9.4.
 
 ## 9.4 The pen
 
@@ -35,6 +35,40 @@ two path layers, and per-anchor corner radii. Part of §9.4.
   `PEN_PICK_PX` radius, ringed on hover. Resuming at a subpath's start reverses a working copy and
   `finish_pen` turns it back, so the start is extended by prepending; a resume that changed nothing is
   skipped.
+
+## 9.4 The pencil (`Shift+P`)
+
+`Tool::Pencil` (`crate::pencil`) draws a path freehand. It makes geometry, not ink: what lands is an
+ordinary stroked `Path` the node tool edits like a pen path.
+
+- **The trail.** Press and drag leave a trail of samples (one per screen pt of movement), drawn as a
+  1 pt line in the selection blue, not as the final stroke, so nothing looks fitted before it is.
+- **The fit.** On release `build::freehand_outline` fits the trail as *Simplify* does (`fit::fit_open`
+  or `fit_closed`, then `straightened`), within 1.5 screen pt, so zoomed in you draw finer. Its corner
+  angle is `build::FREEHAND_CORNER_DEG` (45°), wider than `SIMPLIFY_CORNER_DEG`: at the pencil's
+  coarser reach a hand's jitter on a small loop turns by more than 15°, and 15° left a hand-drawn
+  circle in far more segments. A drag that never gets 3 screen pt from its press draws nothing.
+- **What lands.** One stroke, no fill, round caps and joins, in the frame under the press
+  (`draw_target`). Colour and width are the last pencil path's as it stands now
+  (`OndinApp::pencil_last`), so a width changed on it in the Stroke card carries to the next stroke;
+  before any, the pen's (`PEN_STROKE_COLOR`, `PEN_STROKE_WIDTH`). `tools::create_path` takes the whole
+  `Stroke`. The new path is selected; one stroke is one undo step, *Draw path*.
+- **The tool stays on** after a stroke, unlike the pen: freehand comes in runs. Arming it keeps the
+  selection, since a stroke can carry on the selected path.
+- **Closing.** Letting go within 8 screen pt of the start, having been more than 16 pt away, closes
+  the path, fitted as a loop with no seam; the start wears the pen's close ring while in range. Still
+  no fill.
+- **Shift mid-stroke** runs the trail straight from where Shift went down, in 45° steps
+  (`axial_corner`); releasing Shift carries on freehand. Both ends of the straight run are kept as
+  corner anchors through the fit.
+- **Carrying a path on.** A stroke started on an end anchor (within `PEN_PICK_PX`) of the single
+  selected, unlocked open path extends that path's subpath instead of making a new one, reversed back
+  when grabbed at the start, as pen resume does; the end is ringed on hover. Ending within 8 pt of
+  that subpath's other end closes it.
+- **Ways out.** Escape or a right-click mid-drag drops the stroke and records nothing
+  (`cancel_gesture`); Escape with nothing in flight falls through the ladder to Select. A tool
+  switch, an undo or redo that moves the document (`document_rewound`) and a page switch drop a
+  stroke in flight; a document switch also forgets `pencil_last`.
 
 ## The node tool (`A`)
 

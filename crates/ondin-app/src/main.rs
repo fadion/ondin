@@ -96,6 +96,7 @@ mod pages;
 mod palette;
 mod panels;
 mod path_bar;
+mod pencil;
 mod prefs;
 mod present;
 mod preview;

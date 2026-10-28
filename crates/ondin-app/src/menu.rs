@@ -1086,6 +1086,7 @@ impl Item {
                     Tool::Star => ("Tool: Star", icon::STAR, "S"),
                     Tool::Line => ("Tool: Line", icon::LINE_SEGMENT, "L"),
                     Tool::Pen => ("Tool: Pen", icon::PEN_NIB, "P"),
+                    Tool::Pencil => ("Tool: Pencil", icon::PENCIL_SIMPLE, "Shift+P"),
                     Tool::Node => ("Tool: Edit points", icon::BEZIER_CURVE, "A"),
                     Tool::Text => ("Tool: Text", icon::TEXT_T, "T"),
                     Tool::Eyedropper => ("Tool: Eyedropper", icon::EYEDROPPER, "I"),

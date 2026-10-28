@@ -4849,6 +4849,67 @@ fn simplify_refits_a_polyline_and_keeps_real_corners() {
     assert!(tx.0.is_empty(), "a square is already as simple as it gets");
 }
 
+/// The pencil's fit: a shaky hand-drawn loop comes back as a few smooth curves with no
+/// corner and no seam, and kept corners bound a straight run as a line.
+/// flip: `freehand_outline` ignoring `corners` → fails at "an anchor at the first kept
+/// corner".
+#[test]
+fn freehand_outline_smooths_a_loop_and_keeps_its_corners() {
+    use ondin_core::kurbo::{ParamCurve, ParamCurveDeriv, PathEl, PathSeg};
+    let wobble = |i: usize| ((i as f64 * 12.9898).sin() * 43758.5453).rem_euclid(1.0) - 0.5;
+    // A circle of radius 60 sampled every ~3 units with half a unit of shake.
+    let (r, c) = (60.0, Point::new(100.0, 100.0));
+    let ring: Vec<Point> = (0..126)
+        .map(|i| {
+            let a = i as f64 / 126.0 * std::f64::consts::TAU;
+            c + Vec2::new(a.cos(), a.sin()) * (r + wobble(i))
+        })
+        .collect();
+    let out = build::freehand_outline(&ring, true, &[], 1.5);
+    let segs: Vec<PathSeg> = out.segments().collect();
+    assert!(segs.len() <= 10, "a few curves, got {}", segs.len());
+    assert!(matches!(out.elements().last(), Some(PathEl::ClosePath)));
+    let dir = |s: &PathSeg, t: f64| match s {
+        PathSeg::Cubic(c) => c.deriv().eval(t).to_vec2().normalize(),
+        PathSeg::Line(l) => (l.p1 - l.p0).normalize(),
+        PathSeg::Quad(q) => q.deriv().eval(t).to_vec2().normalize(),
+    };
+    for (k, s) in segs.iter().enumerate() {
+        let next = &segs[(k + 1) % segs.len()];
+        let turn = dir(s, 1.0).dot(dir(next, 0.0));
+        assert!(
+            turn > 0.95,
+            "smooth through anchor {k}, the seam too: {turn}"
+        );
+        for t in [0.25, 0.5, 0.75] {
+            let d = (s.eval(t) - c).hypot();
+            assert!((d - r).abs() < 3.0, "on the circle: {d}");
+        }
+    }
+
+    // A curve rising into level, a flat run between two kept corners, a curve
+    // leaving it level: tangent at both joins, so only `corners` keeps them.
+    let quarter = std::f64::consts::FRAC_PI_2 / 19.0;
+    let mut trail: Vec<Point> = (0..20)
+        .map(|i| Point::new(i as f64 * 3.0, 60.0 - (i as f64 * quarter).sin() * 40.0))
+        .collect();
+    let a = trail.len() - 1;
+    let start = trail[a];
+    let end = start + Vec2::new(90.0, 0.0);
+    trail.push(end);
+    let b = trail.len() - 1;
+    trail.extend((1..20).map(|i| end + Vec2::new(i as f64 * 3.0, (i as f64 * 0.4).powi(2))));
+    let out = build::freehand_outline(&trail, false, &[a, b], 1.5);
+    let run = out
+        .segments()
+        .find(|s| (s.start() - trail[a]).hypot() < 1e-9)
+        .expect("an anchor at the first kept corner");
+    assert!(
+        matches!(run, PathSeg::Line(l) if (l.p1 - trail[b]).hypot() < 1e-9),
+        "the run is a line between the kept corners: {run:?}"
+    );
+}
+
 /// Offset grows a square by the distance with mitred corners, shrinks it, bands an
 /// open line with round caps, and refuses what has nothing left.
 #[test]

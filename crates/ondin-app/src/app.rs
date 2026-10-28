@@ -490,6 +490,11 @@ pub struct OndinApp {
     /// `Tool::Node` and only what a canvas press means changes (`canvas::pen_verb`).
     /// Read only through [`Self::pen_scope`], which confines it to the edited path.
     pub(crate) pen_bias: bool,
+    /// The pencil stroke being dragged, or `None`.
+    pub(crate) pencil: Option<crate::pencil::PencilStroke>,
+    /// The last pencil path drawn this session and the stroke it was drawn with,
+    /// which the next one takes (`crate::pencil`).
+    pub(crate) pencil_last: Option<(NodeId, ondin_core::Stroke)>,
     /// Images picked but not yet placed: what a loaded cursor holds (`Tool::Image`).
     /// Placed front-first; the tool hands back to Select when it empties. Already
     /// decoded, so nothing here can fail to place.
@@ -1292,6 +1297,8 @@ impl OndinApp {
             font_filter: String::new(),
             pen: None,
             pen_bias: false,
+            pencil: None,
+            pencil_last: None,
             pending_images: Vec::new(),
             dropper_return: Tool::Select,
             dropper_pick: None,
@@ -1875,6 +1882,7 @@ impl OndinApp {
     fn document_rewound(&mut self) {
         self.points.clear();
         self.pen = None;
+        self.pencil = None;
         self.close_fix();
         // A picker on a slot a style has just landed on closes, or its next write would
         // cut the style again (unless the style itself is being edited).
@@ -2264,6 +2272,10 @@ impl OndinApp {
             || self.in_flight.any()
             // A component carried out of the insert picker: its drag is egui's too.
             || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
+        // A pencil stroke in flight is dropped and records nothing.
+        if self.pencil.take().is_some() {
+            return true;
+        }
         if self.drag.is_none() && self.layer_drag.is_none() && !self.pages.dragging() && !field {
             return false;
         }
@@ -2516,6 +2528,7 @@ impl OndinApp {
         if tool != Tool::Pen {
             self.pen = None;
         }
+        self.pencil = None;
         // The bias belongs to one edit, so it cannot outlive the tool that holds it.
         self.pen_bias = false;
         if tool != Tool::Node {
@@ -5515,6 +5528,8 @@ impl OndinApp {
         // A document opens with the contrast check off.
         self.contrast = None;
         self.pen = None;
+        self.pencil = None;
+        self.pencil_last = None;
         self.text = None;
         self.mode = Mode::Normal;
         self.name_edit = None;
@@ -7286,6 +7301,7 @@ impl OndinApp {
             E::Btn(icon::LINE_SEGMENT, Some(Tool::Line), "Line (L)"),
             E::Sep,
             E::Btn(icon::PEN_NIB, Some(Tool::Pen), "Pen (P)"),
+            E::Btn(icon::PENCIL_SIMPLE, Some(Tool::Pencil), "Pencil (Shift+P)"),
             // No points button: like `Tool::ImageEdit`, `Tool::Node` is entered on a
             // subject (double-click, `Enter`, the context menu), and the path bar is
             // its chrome.

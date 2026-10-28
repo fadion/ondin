@@ -49,7 +49,7 @@ Read the file for the exact wording before relying on one.
 | `tools.md` | 9.4 | The v1 tools and canvas interaction |
 | `app-selection.md` | 9.4 | Selection on the canvas and in the layers panel |
 | `app-create-gestures.md` | 9.4 | Creation gestures |
-| `app-pen-and-nodes.md` | 9.4 | Pen and node tools |
+| `app-pen-and-nodes.md` | 9.4 | Pen, pencil and node tools |
 | `app-booleans.md` | 9.4 | Booleans, flatten, outline, masks |
 | `app-frames-and-copies.md` | 9.4 | Frames on the canvas, reparenting, copies |
 | `app-snapping.md` | 9.4 | Snapping |

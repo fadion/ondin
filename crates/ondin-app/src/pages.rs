@@ -148,6 +148,7 @@ impl OndinApp {
         self.drag = Drag::None;
         self.alt_clone = None;
         self.pen = None;
+        self.pencil = None;
         self.points.clear();
         self.name_edit = None;
         self.desc_edit = None;

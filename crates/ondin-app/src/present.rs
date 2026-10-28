@@ -551,6 +551,160 @@ mod tests {
         assert!(p.to_top, "a jump too");
     }
 
+    /// A page jump lands on the first frame of the next or previous page — from
+    /// a page's second frame too — and stays put at either end.
+    ///
+    /// flip: `jump_page`'s backward arm answering this page's start → fails at
+    /// "from page B's second frame".
+    #[test]
+    fn a_page_jump_lands_on_a_pages_first_frame() {
+        let mut ids = IdSource::new(0x9C);
+        let [a, b, c] = [(); 3].map(|_| ids.mint());
+        let mut p = Presenting {
+            frames: [(); 5].map(|_| ids.mint()).to_vec(),
+            pages: vec![a, a, b, b, c],
+            entered_at: 0.0,
+            at: 0,
+            was_fullscreen: false,
+            stepped_at: 0.0,
+            view: None,
+            to_top: false,
+        };
+        let jump = |p: &mut Presenting, from: usize, forward: bool| {
+            p.at = from;
+            p.jump_page(forward, 1.0);
+            p.at
+        };
+        assert_eq!(jump(&mut p, 3, false), 0, "from page B's second frame");
+        assert_eq!(jump(&mut p, 2, false), 0, "from page B's first frame");
+        assert_eq!(jump(&mut p, 4, false), 2, "from page C");
+        assert_eq!(jump(&mut p, 1, false), 1, "nothing before page A");
+        assert_eq!(jump(&mut p, 0, true), 2);
+        assert_eq!(jump(&mut p, 3, true), 4);
+        assert_eq!(jump(&mut p, 4, true), 4, "nothing after page C");
+        p.entered_at = 0.0;
+        jump(&mut p, 0, true);
+        assert_eq!(p.entered_at, 1.0, "entering a page restarts its chip");
+    }
+
+    /// Three pages, the middle one a draft; two frames side by side on the first
+    /// and one on each of the others; the app on the first. The pages, then the
+    /// frames.
+    fn three_pages(ctx: &egui::Context) -> (crate::app::OndinApp, [NodeId; 7]) {
+        use ondin_core::{Document, NodeKind, Operation, Transaction};
+        let mut app = crate::app::OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x9D);
+        let first = ids.mint();
+        let mut doc = Document::new(first);
+        let [second, third, f1, f1b, f2, f3] = [(); 6].map(|_| ids.mint());
+        let page = |id, index, name: &str| Operation::AddPage {
+            id,
+            index,
+            name: name.into(),
+            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            draft: false,
+            mode: None,
+        };
+        let frame = |id, parent, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(100.0, 100.0),
+            },
+            transform: Some(ondin_core::kurbo::Affine::translate((
+                if id == f1b { 300.0 } else { 0.0 },
+                0.0,
+            ))),
+            name: Some(name.into()),
+        };
+        doc.apply(&Transaction(vec![
+            page(second, 1, "Drafts"),
+            page(third, 2, "Pricing"),
+            Operation::SetPageDraft {
+                id: second,
+                draft: true,
+            },
+            frame(f1, first, "One"),
+            frame(f1b, first, "One b"),
+            frame(f2, second, "Two"),
+            frame(f3, third, "Three"),
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        (app, [first, second, third, f1, f1b, f2, f3])
+    }
+
+    /// Every text drawn by one present-mode frame.
+    fn present_texts(ctx: &egui::Context, app: &mut crate::app::OndinApp) -> Vec<String> {
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.present_ui(ui),
+        );
+        fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| texts(s, out)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for c in &out.shapes {
+            texts(&c.shape, &mut found);
+        }
+        found
+    }
+
+    /// Presenting skips a draft page, unless it is the page presented from, which
+    /// it then starts on; the page chip numbers the pages presented, not frames.
+    ///
+    /// flip: `start_presenting`'s filter without `p.id == here` → fails at "the
+    /// draft presented from is shown"; `present_ui` without its `dedup` → fails
+    /// at "the chip counts the pages presented".
+    #[test]
+    fn presenting_skips_draft_pages_but_the_current_one() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, [_, second, third, f1, f1b, f2, f3]) = three_pages(&ctx);
+        app.start_presenting(&ctx);
+        let p = app.presenting.as_ref().expect("presenting");
+        assert_eq!(p.frames, vec![f1, f1b, f3], "the draft page is left out");
+        assert_eq!(p.frames[p.at], f1);
+        let texts = present_texts(&ctx, &mut app);
+        assert!(
+            texts.iter().any(|t| t.ends_with("page 1 of 2")),
+            "the chip counts the pages presented: {texts:?}"
+        );
+        app.stop_presenting(&ctx);
+
+        app.go_to_page(second);
+        app.start_presenting(&ctx);
+        let p = app.presenting.as_ref().expect("presenting");
+        assert_eq!(
+            p.frames,
+            vec![f1, f1b, f2, f3],
+            "the draft presented from is shown"
+        );
+        assert_eq!(p.frames[p.at], f2, "starting on its page");
+        app.stop_presenting(&ctx);
+
+        app.go_to_page(third);
+        app.start_presenting(&ctx);
+        let p = app.presenting.as_ref().expect("presenting");
+        assert_eq!(p.frames[p.at], f3, "the current page's first frame");
+        let texts = present_texts(&ctx, &mut app);
+        assert!(
+            texts.iter().any(|t| t == "Pricing  ·  page 2 of 2"),
+            "{texts:?}"
+        );
+    }
+
     /// A zoomed view of a tall frame: centred across while it is narrower than
     /// the screen, its edges kept off-screen along it, and at or past the fit
     /// back to the fit.

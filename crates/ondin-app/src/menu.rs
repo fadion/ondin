@@ -2238,8 +2238,8 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
     rows
 }
 
-/// The View switches §6.1 and §6.3 share, each carrying its own state. All
-/// stay live in focus mode, which hides none of what they switch.
+/// §6.1's View switches, each carrying its own state. All stay live in focus
+/// mode, which hides none of what they switch.
 fn view_rows(cx: &Context<'_>) -> Vec<Row> {
     [
         ViewSwitch::Rulers,

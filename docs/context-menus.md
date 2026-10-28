@@ -296,6 +296,7 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | *—* | | |
 | Export all | `Ctrl+Alt+E` | re-runs every saved export spec on the pages that are not drafts; dims *"No layer in this document has export settings"* |
 | Export all frames… | — | every visible top-level frame of the current page: its own export rows, else a 1× PNG (`export.md`); dims *"No frames on the canvas"* |
+| Export frames as one PDF… | — | the frames *Export all frames…* takes, as one PDF with a page and a bookmark each; dims *"No frames on the canvas"* |
 | Export frames, all pages… | — | only with more than one page: *Export all frames…* for each page that is not a draft, a folder per page; the status line counts the drafts left out |
 | *—* | | |
 | Show rulers ✓ | `Shift+R` | |
@@ -303,6 +304,7 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Lock guides ✓ | `Ctrl+Alt+;` | the way back once guides are locked (C7) |
 | Show grid ✓ | `Ctrl+'` | |
 | Show layout grid ✓ | — | |
+| Outline mode ✓ | — | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
 switches less *Show layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages* and *Focus mode*. Every View

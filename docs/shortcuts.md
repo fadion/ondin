@@ -566,7 +566,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, history, toolbar, messages, outline mode, focus, and the snap
+  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, and the snap
   switches.
   `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
   drives stay in step while the chord is a second caller that never sees the row.

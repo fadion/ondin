@@ -128,7 +128,7 @@ document opens, it is never saved or exported, and present mode's own branch nev
   A stale badge dims to 45% with a spinning circle-notch in place of its glyph. During a drag (a
   gesture preview that is not the fix card's own) the badges of the selected layers and their
   descendants hide.
-- **The bar** (`contrast_bar`), an `Area` at the canvas's top centre, 12pt down: circle-half glyph,
+- **The bar** (`contrast_bar`), an `Area` at the canvas's top centre, 12pt below the top ruler (below the canvas's top edge with rulers hidden): circle-half glyph,
   the scope pill (*Contrast* on a page with no frame), the level head (`ui::menu_head`, as the top
   bar's dropdowns), then *Measuring…*, *All N pass* or *N failing* with `k / N` once stepped and
   prev/next arrows, then × to end the mode; groups part at hairlines. *Measuring…* pulses
@@ -193,7 +193,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline mode*,
-  *Show messages*.
+  *Show history*, *Show messages*.
 - **Outline mode** draws the artwork as one-device-pixel hairlines of every path the walk would fill
   or stroke, with type in the same ink, in near-black or near-white by the page ground's luminance.
   It pushes no layer, so nothing is clipped, masked, faded or given an effect: the view exists to

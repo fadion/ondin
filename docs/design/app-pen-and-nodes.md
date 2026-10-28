@@ -84,7 +84,7 @@ While a path's points are edited (`canvas::edited_path`), a short rail floats be
 centred on its Pen button and free to overlap the ruler (`crate::path_bar`). It holds the tool's verbs:
 select points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Join*, dimmed until the
 point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`). It shows
-nothing the canvas does not already offer except the last two.
+nothing the canvas does not already offer except *Simplify* and *Offset*.
 
 - **Simplify** (`build::simplify_path`, `simplify_outline`) flattens the drawn outline and refits it
   with `fit`'s cubics, within `SIMPLIFY_ACCURACY` (0.5 px in the layer's units), as *Offset path*'s

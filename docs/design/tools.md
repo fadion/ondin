@@ -14,7 +14,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key). **Tidy up** (2+ layers, `Alt+Shift+T`) lays the selection out as the grid it is roughly in (`build::tidy_moves`):
-  - **Rows and columns** are clusters of box centres. A box joins a band while it is within half the band's largest box of the band's mean centre.
+  - **Rows and columns** are clusters of box centres. A box joins a band while its centre is within half the band's largest box, or half its own when it is larger, of the band's mean centre.
   - **Cells** are kept, holes included, when no cell holds two boxes and some row spans every column. Otherwise each row is refilled from the left, which is what happens to bricks.
   - **Sizes**: a column is as wide as its widest box and a row as tall as its tallest, and each box is centred in its cell.
   - **Gaps** are the median of the current gaps between neighbouring bands, never negative; an axis with no gaps takes the other's. They are measured band to band rather than box to box, so a box inset in its cell does not read as a wider gap next time — except across refilled rows, whose columns are not bands the user made: there the gap across is read box to box within each row.

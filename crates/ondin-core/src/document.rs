@@ -741,6 +741,19 @@ impl Document {
         self.shown_in(&self.variables, id)
     }
 
+    /// Whether `id` and every ancestor up to its page are [`Self::shown`]: whether
+    /// the layer can be seen at all.
+    pub fn shown_through(&self, id: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(n) = at.and_then(|i| self.nodes.get(&i)) {
+            if !self.shown(n.id()) {
+                return false;
+            }
+            at = n.parent();
+        }
+        true
+    }
+
     /// [`Self::shown`] against table `t`.
     pub fn shown_in(&self, t: &crate::variable::Variables, id: NodeId) -> bool {
         let Some(n) = self.nodes.get(&id) else {

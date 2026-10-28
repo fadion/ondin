@@ -104,6 +104,7 @@ mod render_cli;
 mod rulers;
 mod session;
 mod settings;
+mod slice;
 mod snap;
 mod spacing;
 mod tabs;
@@ -1088,7 +1089,7 @@ fn run_export_all(
     };
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
-        if !node.exports().is_empty() {
+        if ondin_core::build::exported_in_bulk(&doc, id) {
             subjects.push(id);
         }
         stack.extend(node.children().iter().copied());

@@ -83,8 +83,8 @@ or the release, not the press.**
 
 ## 1. Tools
 
-Single key, `plain && !shift`, Normal mode only. The one Shift chord is the pencil's
-`Shift+P`, read in its own arm with `plain && m.shift`.
+Single key, `plain && !shift`, Normal mode only. The two Shift chords, the pencil's `Shift+P`
+and the slice's `Shift+F`, are read after the letters under `plain && m.shift`.
 
 | Key | Tool | |
 |---|---|---|
@@ -92,6 +92,7 @@ Single key, `plain && !shift`, Normal mode only. The one Shift chord is the penc
 | `H` | Hand | ✅ Figma |
 | `K` | Scale | ✅ Figma |
 | `F` | Frame | ✅ Figma (also `A`; taken here) |
+| `Shift+F` | Slice | ✅ on the frame's letter, as it sits beside the frame on the rail |
 | `R` | Rect | ✅ Figma, Sketch |
 | `O` | Ellipse | ✅ **primary** — Figma, Sketch |
 | `E` | Ellipse | ✅ alias; the rail tooltip shows `O` only |

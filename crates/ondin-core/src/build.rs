@@ -2726,6 +2726,17 @@ pub fn in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     all_in_document_order(doc, &outermost(doc, ids))
 }
 
+/// Whether *Export all* (and `ondin export --all`) takes `id`: it carries export
+/// settings and is not a hidden slice, by its own eye or an ancestor's. A hidden
+/// slice is one switched off; any other
+/// hidden layer still exports, its settings being a deliberate instruction.
+pub fn exported_in_bulk(doc: &Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| {
+        !n.exports().is_empty()
+            && !(matches!(n.kind(), NodeKind::Slice { .. }) && !doc.shown_through(id))
+    })
+}
+
 /// `ids` in document order, keeping a member that sits inside another.
 ///
 /// [`in_document_order`] without its `outermost` filter, which is wrong for the

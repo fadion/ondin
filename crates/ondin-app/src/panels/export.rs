@@ -555,6 +555,12 @@ impl OndinApp {
         key: PreviewKey,
     ) -> Option<ExportPreview> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
+        // A slice previews its box of the page, as its file is (`plan::render`).
+        let region = ondin_export::plan::slice_region(doc, res, key.node);
+        let origins = match &region {
+            Some((_, origins)) => origins.clone(),
+            None => vec![key.node],
+        };
         // No raster for a vector file: rasterizing it would preview something other
         // than the file.
         if !key.spec.format.is_raster() {
@@ -564,11 +570,17 @@ impl OndinApp {
             let (head, note) = match key.spec.format {
                 ExportFormat::Pdf => {
                     let approximated =
-                        ondin_export::pdf::approximated(doc, res, &[key.node], key.spec.text);
+                        ondin_export::pdf::approximated(doc, res, &origins, key.spec.text);
                     ("PDF".to_string(), fidelity_clauses(&approximated, &[]))
                 }
                 _ => {
-                    let out = ondin_export::svg::svg_with(doc, res, &[key.node], key.spec.text);
+                    let text = key.spec.text;
+                    let out = match &region {
+                        Some((view, _)) => {
+                            ondin_export::svg::svg_region(doc, res, &origins, *view, text)
+                        }
+                        None => ondin_export::svg::svg_with(doc, res, &origins, text),
+                    };
                     let note = fidelity_clauses(&out.approximated, &out.round_trip);
                     (format!("SVG · {}", human_bytes(out.svg.len())), note)
                 }
@@ -613,7 +625,12 @@ impl OndinApp {
 
         // Rasterized once, then both encoded and drawn, not rendered twice per edit.
         let opts = ondin_export::plan::raster_opts(doc, res, key.node, &key.spec);
-        let raster = ondin_export::png::raster_of(doc, res, &[key.node], &opts)?;
+        let raster = match &region {
+            Some((view, origins)) => {
+                ondin_export::png::raster_region(doc, res, origins, *view, &opts)
+            }
+            None => ondin_export::png::raster_of(doc, res, &[key.node], &opts)?,
+        };
         let bytes = ondin_export::plan::encode(&raster, &key.spec);
         let summary = format!(
             "{} · {}×{}{} · {}",
@@ -1048,21 +1065,33 @@ impl OndinApp {
                     });
 
                     // --- the two switches, at the card's own section gap -------
+                    // A slice's box is the point of it, so it offers no trim
+                    // (`plan::raster_opts` ignores one).
+                    let slices = self.session.selection.ids().iter().all(|id| {
+                        self.session
+                            .doc
+                            .get(*id)
+                            .is_some_and(|n| matches!(n.kind(), ondin_core::NodeKind::Slice { .. }))
+                    });
                     {
                         let size = egui::vec2(POP_INNER, POP_CELL);
-                        let trim = ui::toggle_row(
-                            ui,
-                            icon::CROP,
-                            "Trim transparent edges",
-                            trim_button_state(spec),
-                            size,
-                        )
-                        .on_hover_text(match spec.format.is_raster() {
-                            true => "Drop the fully transparent rows and columns",
-                            false => "Trimming reads pixels, and a vector file has none",
-                        });
-                        if trim.clicked() && spec.format.is_raster() {
-                            edit(&mut out, spec).trim = !spec.trim;
+                        if !slices {
+                            let trim = ui::toggle_row(
+                                ui,
+                                icon::CROP,
+                                "Trim transparent edges",
+                                trim_button_state(spec),
+                                size,
+                            )
+                            .on_hover_text(
+                                match spec.format.is_raster() {
+                                    true => "Drop the fully transparent rows and columns",
+                                    false => "Trimming reads pixels, and a vector file has none",
+                                },
+                            );
+                            if trim.clicked() && spec.format.is_raster() {
+                                edit(&mut out, spec).trim = !spec.trim;
+                            }
                         }
                         let pad = ui::toggle_row(
                             ui,
@@ -1843,7 +1872,7 @@ impl OndinApp {
             let Some(node) = self.session.doc.get(id) else {
                 continue;
             };
-            if !node.exports().is_empty() {
+            if ondin_core::build::exported_in_bulk(&self.session.doc, id) {
                 out.push(id);
             }
             // The walk's order is discarded: `all_in_document_order` below re-sorts

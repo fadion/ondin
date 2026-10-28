@@ -1,6 +1,6 @@
 # Creation gestures
 
-How the shape, line, image and text tools turn a drag or a click into a layer, and what Shift, Alt,
+How the shape, line, slice, image and text tools turn a drag or a click into a layer, and what Shift, Alt,
 Space and the arrows do while drawing (`canvas::create_*`, `Tool::click_makes`). Part of §9.4.
 
 ## 9.4 Creating layers
@@ -38,10 +38,12 @@ An exhaustive `match` over `Tool`, no wildcard; `canvas::normal_mode_input` has 
 | Image | `FittedImage` | the picture's own size, aspect kept, shrunk to fit frame/viewport (`tools::fitted_image_size`), **centred** on the pointer |
 | Text | `TextNode` | what gets typed |
 | Frame, Line | `None` | deliberately (a default frame guesses a layout; a line has no box) |
+| Slice | `None` | its click picks the slice under it instead (`tools.md`, *The Slice tool*) |
 
 - A click synthesizes the gesture: `click_create` runs `begin_create` (parent frame, id, side count),
   takes two points from `click_box`, and calls `commit_create`, the tail shared with the drag release
-  (text opens for typing, an image spends itself, a shape returns to Select).
+  (text opens for typing, an image spends itself, a slice keeps its tool so slices are cut in runs, a
+  shape returns to Select).
 - Alt on a click centres the default box on the click without resizing it. Shift does nothing.
 - Any tool that answers a click must also drag a box.
 - An image **drag** uses `create_image_in_box` and is obeyed exactly, aspect included.

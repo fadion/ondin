@@ -131,6 +131,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         Tool::Hand,
         Tool::Scale,
         Tool::Frame,
+        Tool::Slice,
         Tool::Rect,
         Tool::Ellipse,
         Tool::Polygon,

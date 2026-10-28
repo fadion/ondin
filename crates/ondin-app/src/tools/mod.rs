@@ -33,6 +33,10 @@ pub enum Tool {
     /// instead of editing its geometry — see [`Scaling`].
     Scale,
     Frame,
+    /// Cuts a slice: a box dragged out as a rect's is, on whole pixels always, that
+    /// exports whatever lies under it. Stays armed after a cut, so several slices
+    /// can be cut in a row.
+    Slice,
     Rect,
     Ellipse,
     Polygon,
@@ -77,6 +81,7 @@ impl Tool {
         matches!(
             self,
             Tool::Frame
+                | Tool::Slice
                 | Tool::Rect
                 | Tool::Ellipse
                 | Tool::Polygon
@@ -101,7 +106,8 @@ impl Tool {
             }
             Tool::Image => Some(ClickCreate::FittedImage),
             Tool::Text => Some(ClickCreate::TextNode),
-            Tool::Frame | Tool::Line => None,
+            // A slice's click picks the slice under it (`OndinApp::slice_at`).
+            Tool::Frame | Tool::Line | Tool::Slice => None,
             Tool::Select
             | Tool::Scale
             | Tool::Pen
@@ -189,7 +195,8 @@ pub fn resizable_size(kind: &NodeKind) -> Option<Size> {
         | NodeKind::Ellipse { size }
         | NodeKind::Polygon { size, .. }
         | NodeKind::Star { size, .. }
-        | NodeKind::Artboard { size, .. } => Some(*size),
+        | NodeKind::Artboard { size, .. }
+        | NodeKind::Slice { size } => Some(*size),
         // Auto text reports a zero box and auto-height a zero height, so handles
         // still take a width drag and the height follows the content.
         NodeKind::Text { sizing, .. } => Some(match sizing {
@@ -1662,6 +1669,40 @@ pub fn create_artboard(
                 brush: Brush::Solid(background).into(),
                 visible: true,
             }]),
+        },
+    ])
+}
+
+/// Create a slice spanning world points `a`..`b` under `parent`, its corners
+/// rounded to whole world units so a raster export is never cut on half a pixel,
+/// and carrying one export spec, PNG at 1×, so *Export all* takes it at once.
+pub fn create_slice(
+    id: NodeId,
+    parent: NodeId,
+    index: usize,
+    parent_world: Affine,
+    a: Point,
+    b: Point,
+) -> Transaction {
+    let round = |p: Point| Point::new(p.x.round(), p.y.round());
+    let (origin, size) = local_box(parent_world, round(a), round(b));
+    Transaction(vec![
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Slice {
+                size: Size::new(size.width.max(1.0), size.height.max(1.0)),
+            },
+            transform: Some(Affine::translate(origin.to_vec2())),
+            name: None,
+        },
+        Operation::SetExports {
+            id,
+            exports: keyed_by_position([ondin_core::ExportSpec::new(
+                ondin_core::ExportFormat::Png,
+                ondin_core::ExportScale::Times(1.0),
+            )]),
         },
     ])
 }

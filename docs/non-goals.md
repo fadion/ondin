@@ -82,6 +82,10 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Binding a `Path`'s corner radii** — unbindable by decision (§15 D1057).
 - **Editing a style with no users** — *Edit* works through a style's users (§15 D1063).
 
+## Export
+
+- **Cutting a frame into a grid of slices, nine-slice scaling, and a slice bound to a layer's bounds** — a layer's own Export already exports its bounds.
+
 ## Code export
 
 - **Native targets** (SwiftUI, Compose, Flutter, Floem) — an agent porting the HTML does it better (§15 D1098).

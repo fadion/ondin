@@ -13,6 +13,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Shapes**: frame, rect, ellipse, polygon, star, line. **Text**: edit on the canvas with a real caret.
 - **Pen** (`Path`), straight and curved. Corner↔smooth conversion over a point selection goes through `tools::set_smoothness`; a smooth pair is exactly mirrored, because that is what `is_smooth` means.
 - **Pencil** (`Shift+P`, `Path`): a freehand trail fitted to curves on release (`app-pen-and-nodes.md`).
+- **Slice** (`Shift+F`, `Slice`): a box dragged out over the page to export the region under it (below).
 - **Group/ungroup** and **frame selection** (`build::frame`, a new frame sized to the selection's union; a second builder beside `group`, not a flag on it).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key). **Tidy up** (2+ layers, `Alt+Shift+T`) lays the selection out as the grid it is roughly in (`build::tidy_moves`):
   - **Rows and columns** are clusters of box centres. A box joins a band while its centre is within half the band's largest box, or half its own when it is larger, of the band's mean centre.
@@ -242,7 +243,7 @@ over `Tool` is an exhaustive `match` (the cursor, `create_tx`), a `matches!` all
 `NodeKind`'s `matches!` lists answer a missing kind with a confident "no" (§15 D87–D88).
 
 **Arming a create tool clears the selection** (`OndinApp::choose_tool`). The set is `drags_a_box`:
-Frame, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select and Scale (operate on the
+Frame, Slice, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select and Scale (operate on the
 selection), Hand (a pan keeps it), Node and ImageEdit (entered *from* a selected layer), Pen (places
 anchors, never drags a box), Pencil (a stroke can carry on the selected path), Eyedropper (picks onto the selection). `place_image_action` clears it too.
 
@@ -250,6 +251,27 @@ anchors, never drags a box), Pencil (a stroke can carry on the selected path), E
 and calls `clear_gesture_preview`. It does not call `clear_preview` (which would discard a live text
 session's content) nor `cancel_gesture` (which needs an `&egui::Context` and covers states a tool
 switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three fields are a hand-kept list.
+
+### The Slice tool (`slice.rs`)
+
+`Tool::Slice` (`Shift+F`, glyph `knife`, the rail button after Frame, crosshair cursor) cuts slices
+(§5.3), the boxes that export a region of their page (§7).
+
+- **A drag cuts one** through the ordinary create gesture (`app-create-gestures.md`): one *Add slice*
+  step, landing in the frame under the press. `tools::create_slice` rounds both corners to whole world
+  units whether or not the pixel grid is on, since a raster cut on half a pixel blurs its border, and
+  gives the slice one export spec, PNG at 1×, so *Export all* takes it at once.
+- **The tool stays on** after a cut, the new slice selected, so slices are cut in runs. A click
+  without a drag makes nothing (`click_makes` answers `None`).
+- **Picking.** With the tool on, a click inside a slice picks it (`OndinApp::slice_at`: the topmost
+  shown, unlocked slice whose box holds the point); elsewhere it does nothing. With any other tool a
+  click inside passes through to what lies under it, and the slice is picked by its edge band
+  (`PICK_SLOP_PX`, §5.10) or its layers row; that band drags it, and once selected its handles resize
+  it. The marquee and the other bulk doors skip slices (`app-selection.md`).
+- **Chrome** (`OndinApp::draw_slices`, after the hover outline). A slice draws nothing in a render,
+  so the canvas draws a dashed 1 pt outline (4 on, 3 off) in `color::SELECT` round one that is hovered
+  (Select's hover target, or with the Slice tool the slice under the pointer) or selected. While the
+  tool is on, every other shown slice on the page is outlined at 45%, so what is already cut shows.
 
 ### The eyedropper (`eyedropper.rs`)
 

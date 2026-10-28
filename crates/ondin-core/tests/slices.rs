@@ -3,7 +3,7 @@
 
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::{
-    Document, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction, hit_test, io,
+    Document, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction, build, hit_test, io,
 };
 
 /// A page holding a group of a 100×100 rect at the origin and a 100×100 slice at
@@ -89,6 +89,54 @@ fn a_slice_lends_its_group_no_bounds() {
         ondin_core::local_box(&doc, &res, group),
         Some(Rect::new(0.0, 0.0, 100.0, 100.0)),
         "nor to the local box the handles are drawn on"
+    );
+}
+
+/// *Export all* takes a slice with settings while it shows and leaves it out once
+/// hidden; any other hidden layer with settings still exports.
+/// flip: `exported_in_bulk` ignoring visibility → fails at "a hidden slice".
+#[test]
+fn export_all_leaves_out_a_hidden_slice_only() {
+    let (mut doc, _, group, rect, slice) = fixture();
+    let png = ondin_core::ExportSpec::new(
+        ondin_core::ExportFormat::Png,
+        ondin_core::ExportScale::Times(1.0),
+    );
+    let mut ops = Vec::new();
+    for id in [rect, slice] {
+        ops.push(Operation::SetExports {
+            id,
+            exports: ondin_core::keyed_by_position([png.clone()]),
+        });
+        ops.push(Operation::SetVisible { id, visible: true });
+    }
+    doc.apply(&Transaction(ops)).expect("settings");
+    assert!(build::exported_in_bulk(&doc, slice), "a slice that shows");
+    doc.apply(&Transaction(vec![Operation::SetVisible {
+        id: group,
+        visible: false,
+    }]))
+    .expect("hide the group");
+    assert!(
+        !build::exported_in_bulk(&doc, slice),
+        "a slice in a hidden group"
+    );
+    doc.apply(&Transaction(vec![Operation::SetVisible {
+        id: group,
+        visible: true,
+    }]))
+    .expect("show the group");
+    for id in [rect, slice] {
+        doc.apply(&Transaction(vec![Operation::SetVisible {
+            id,
+            visible: false,
+        }]))
+        .expect("hide");
+    }
+    assert!(!build::exported_in_bulk(&doc, slice), "a hidden slice");
+    assert!(
+        build::exported_in_bulk(&doc, rect),
+        "a hidden rect still exports"
     );
 }
 

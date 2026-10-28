@@ -1085,6 +1085,7 @@ impl OndinApp {
             match self.tool {
                 // A drawn crosshair: the stock `IDC_CROSS` is 32 texels across.
                 Tool::Frame
+                | Tool::Slice
                 | Tool::Rect
                 | Tool::Ellipse
                 | Tool::Polygon
@@ -1394,6 +1395,17 @@ impl OndinApp {
 
         // A Space+click is a pan that did not travel.
         let clicked = resp.clicked() && !panning_armed;
+
+        // The Slice tool's click picks the slice under it; elsewhere it makes nothing.
+        if clicked
+            && self.tool == Tool::Slice
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            if let Some(id) = self.slice_at(self.to_world(p, rect, ppp)) {
+                self.session.selection.set_one(id);
+            }
+            return;
+        }
 
         // Every creation tool's click, dispatched on the exhaustive `Tool::click_makes`.
         if clicked
@@ -3078,7 +3090,7 @@ impl OndinApp {
         *sides = tools::step_sides(*sides, up, down);
     }
 
-    fn begin_create(&mut self, world: Point) {
+    pub(crate) fn begin_create(&mut self, world: Point) {
         let shape = self.tool;
         // Everything goes where it was drawn, frames included (§5.3).
         let (parent, parent_world) = self.draw_target(world);
@@ -3100,11 +3112,12 @@ impl OndinApp {
     /// Turn the live `Drag::Create` into a committed layer spanning `from`–`to`:
     /// the one tail for the drag's release and [`Self::click_create`]. Clears
     /// `self.drag` on every path, or the next frame's overlay reads it again.
-    fn commit_create(&mut self, id: NodeId, shape: Tool, from: Point, to: Point) {
+    pub(crate) fn commit_create(&mut self, id: NodeId, shape: Tool, from: Point, to: Point) {
         let tx = self.create_tx(from, to);
         self.drag = Drag::None;
         let label = match shape {
             Tool::Frame => "Add frame",
+            Tool::Slice => "Add slice",
             Tool::Rect => "Add rectangle",
             Tool::Ellipse => "Add ellipse",
             Tool::Polygon => "Add polygon",
@@ -3124,6 +3137,10 @@ impl OndinApp {
                 self.open_text_session(id);
             } else if shape == Tool::Image {
                 self.placed_one_image();
+            } else if shape == Tool::Slice {
+                // Slices are cut in runs, so the tool stays on.
+                self.session
+                    .info("Slice cut; it exports PNG at 1× until you change it");
             } else {
                 self.choose_tool(Tool::Select);
                 self.session.info("Created shape");
@@ -3168,6 +3185,7 @@ impl OndinApp {
             Tool::Frame => {
                 tools::create_artboard(id, parent, index, parent_world, start, corner, Color::WHITE)
             }
+            Tool::Slice => tools::create_slice(id, parent, index, parent_world, start, corner),
             Tool::Rect => tools::create_rect(
                 id,
                 parent,
@@ -6111,7 +6129,7 @@ impl OndinApp {
     /// The layer a resting pointer points *at* — what a click would take and a
     /// measure would measure to. `None` when the tool does not select, the pointer
     /// is off the canvas or over the selection's handles, or the target is selected.
-    fn hover_target(
+    pub(crate) fn hover_target(
         &self,
         ui: &egui::Ui,
         rect: egui::Rect,
@@ -7901,6 +7919,7 @@ impl OndinApp {
         self.draw_spacing_bands(painter, rect, ppp);
 
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
+        self.draw_slices(ui, painter, rect, ppp, resp);
         self.draw_history_hover(painter, rect, ppp);
 
         self.draw_frame_drop_outline(ui, painter, rect, ppp, resp);

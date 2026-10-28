@@ -1332,6 +1332,7 @@ impl OndinApp {
             node.kind(),
             NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
         );
+        let is_slice = matches!(node.kind(), NodeKind::Slice { .. });
         // The right-hand end of a resting row: one slot (the one the eye and lock
         // take over on hover) for several remarks, in priority order — mask (a mask
         // draws nothing, so its row is the only sign the layer exists), a folded
@@ -1509,8 +1510,9 @@ impl OndinApp {
                 container: is_container,
                 closed: is_container && has_children && !expanded,
             });
-            // A locked or hidden layer is drawn at 40% throughout, glyph and name.
-            let dimmed = locked || !visible;
+            // A locked or hidden layer is drawn at 40% throughout, glyph and name,
+            // and so is a slice, which never shows.
+            let dimmed = locked || !visible || is_slice;
             // The container an in-flight drop would land in: the line says where
             // but not which group, so its text and icon go blue. A frame behind the
             // line ([`LayerDrag::lit`]).

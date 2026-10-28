@@ -1369,9 +1369,13 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
                 }
             }
         }
-        // The common pencil chord, since `P` is the pen.
+        // The common pencil chord, since `P` is the pen; the slice sits on the
+        // frame's letter, as it sits beside the frame on the rail.
         if plain && m.shift && i.key_pressed(egui::Key::P) {
             out.push(Action::ChooseTool(Tool::Pencil));
+        }
+        if plain && m.shift && i.key_pressed(egui::Key::F) {
+            out.push(Action::ChooseTool(Tool::Slice));
         }
 
         out
@@ -2203,6 +2207,21 @@ mod tests {
                 "{m:?}+A is not this"
             );
         }
+    }
+
+    /// `Shift+F` is the Slice tool and plain `F` stays the frame.
+    #[test]
+    fn shift_f_is_the_slice_and_f_the_frame() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::F, shift)], shift),
+            vec![Action::ChooseTool(Tool::Slice)]
+        );
+        let none = egui::Modifiers::NONE;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::F, none)], none),
+            vec![Action::ChooseTool(Tool::Frame)]
+        );
     }
 
     /// `Shift+P` is the pencil and plain `P` stays the pen.

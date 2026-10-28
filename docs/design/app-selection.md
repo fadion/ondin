@@ -29,14 +29,15 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - Click: `query::hit_test` refuses it.
 - Marquee: `canvas::apply_marquee` picks frame contents plus loose layers, from
   `OndinApp::marquee_candidates`, filtered by `OndinApp::may_select_in_bulk`
-  (= `query::is_effectively_locked`). The visibility filter is `apply_marquee`'s own and uses the
+  (`query::is_effectively_locked`, and never a slice: a slice is picked on its own, by its edge, its
+  row or the Slice tool, never swept up with the art). The visibility filter is `apply_marquee`'s own and uses the
   node's own flag: a layer inside a hidden group *can* be marqueed. The modifier held at the press
   decides what the band does (`preview::MarqueeMode`): none replaces the selection, `Shift`
   toggles each layer it covers, `Alt` removes them. It selects **live**, every frame of the drag,
   applied to the selection held at the press (`Drag::Marquee::base`), so a toggle does not flip
   back and forth and a cancel restores that selection. The node tool's point marquee follows the
   same modes but resolves on release.
-- `Ctrl+A` (`OndinApp::select_all`): same candidates (locked excluded, hidden included), all on the
+- `Ctrl+A` (`OndinApp::select_all`): same candidates (locked and slices excluded, hidden included), all on the
   current page. With the candidate range empty it selects the page's frames themselves
   (`root_artboards`), filtered too. Emptiness is
   asked of the range **before** the lock filter (`marquee_range`).
@@ -49,7 +50,8 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   matches any text layer whose own family (through a bound one) or any run's equals one of the
   source's, case-insensitively (`text_families`).
 - *Select inverse* (palette only, `OndinApp::select_inverse`): the unselected children of each
-  selected outermost layer's parent, locked ones skipped; it needs a selection.
+  selected outermost layer's parent, locked ones and slices skipped; it needs a selection. *Select
+  same* skips slices too: every door here asks `may_select_in_bulk`.
 - The frame edge (`canvas::frame_edge_at`) checks both lock and visibility.
 - **Exception**: a layers-panel row selects a locked layer (`layers::select_from_row` reads no lock);
   once selected, inspector rules apply (a lock stops dragging, not recolouring).

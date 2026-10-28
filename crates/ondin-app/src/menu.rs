@@ -1080,6 +1080,7 @@ impl Item {
                     Tool::Hand => ("Tool: Hand", icon::HAND, "H"),
                     Tool::Scale => ("Tool: Scale", icon::RESIZE, "K"),
                     Tool::Frame => ("Tool: Frame", icon::FRAME_CORNERS, "F"),
+                    Tool::Slice => ("Tool: Slice", icon::KNIFE, "Shift+F"),
                     Tool::Rect => ("Tool: Rectangle", icon::SQUARE, "R"),
                     Tool::Ellipse => ("Tool: Ellipse", icon::CIRCLE, "O"),
                     Tool::Polygon => ("Tool: Polygon", icon::TRIANGLE, "G"),

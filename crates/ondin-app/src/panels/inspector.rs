@@ -1336,7 +1336,8 @@ impl OndinApp {
             | NodeKind::Ellipse { size }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
-            | NodeKind::Artboard { size, .. } => Some(*size),
+            | NodeKind::Artboard { size, .. }
+            | NodeKind::Slice { size } => Some(*size),
             // Read from `local_box` so the row agrees with the handles.
             NodeKind::Text { .. } => self.session.preview_local_box(id).map(|b| b.size()),
             // A derived box; an empty group has none, so the row does not appear.
@@ -1385,6 +1386,12 @@ impl OndinApp {
         let is_container = matches!(node.kind(), NodeKind::Group | NodeKind::Artboard { .. });
         let node_kind = node.kind().clone();
         self.inspector_header(ui, id, glyph, &name0, visible0, locked0);
+        // A slice is a box and what it exports, nothing else.
+        if matches!(node_kind, NodeKind::Slice { .. }) {
+            self.inspector_transform(ui, id, world, size0);
+            self.inspector_export(ui);
+            return;
+        }
         // What the layer is, so under its name and above the mask.
         self.inspector_component(ui, super::component::ComponentPart::Cards);
         // A mask draws nothing, so it is a fact about what the layer is.

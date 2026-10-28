@@ -2717,7 +2717,13 @@ impl OndinApp {
     /// The effective lock, so a layer inside a locked group is refused too. Visibility is
     /// deliberately not part of it: a hidden layer is editable.
     pub(crate) fn may_select_in_bulk(&self, id: NodeId) -> bool {
+        // A slice is picked on its own (`crate::slice`), never swept up with the art.
         !ondin_core::is_effectively_locked(&self.session.doc, id)
+            && !self
+                .session
+                .doc
+                .get(id)
+                .is_some_and(|n| matches!(n.kind(), NodeKind::Slice { .. }))
     }
 
     /// [`Self::marquee_candidates`] before the lock filter. Never select from it: it only
@@ -7294,6 +7300,11 @@ impl OndinApp {
             ),
             E::Sep,
             E::Btn(icon::FRAME_CORNERS, Some(Tool::Frame), "Frame (F)"),
+            E::Btn(
+                icon::KNIFE,
+                Some(Tool::Slice),
+                "Slice — drag out a region to export (Shift+F)",
+            ),
             E::Btn(icon::SQUARE, Some(Tool::Rect), "Rectangle (R)"),
             E::Btn(icon::CIRCLE, Some(Tool::Ellipse), "Ellipse (E)"),
             E::Btn(icon::TRIANGLE, Some(Tool::Polygon), "Polygon (G)"),

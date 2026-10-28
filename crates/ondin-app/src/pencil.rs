@@ -15,7 +15,7 @@ use crate::preview::{PenAnchor, PenEdit, PenSubpath};
 use crate::theme::{color, icon};
 use crate::tools::{self, Tool};
 use eframe::egui;
-use ondin_core::kurbo::{Affine, Cap, Join, Point};
+use ondin_core::kurbo::{Affine, Cap, Join, Point, Vec2};
 use ondin_core::{NodeId, Stroke, build};
 
 /// How far the fitted curve may stray from the trail, in screen pt.
@@ -25,8 +25,8 @@ const FIT_PT: f64 = 1.5;
 /// the path, in screen pt.
 const CLOSE_PT: f64 = 8.0;
 
-/// A drag that never gets further than this from its press, in screen pt, draws
-/// nothing.
+/// A drag that never gets further than this from its press, in screen pt, is a
+/// click: it draws a dot.
 const MIN_DRAG_PT: f64 = 3.0;
 
 /// The least the pointer moves, in screen pt, before the trail takes another sample.
@@ -159,7 +159,13 @@ impl OndinApp {
             .map(|p| (*p - start).hypot() * ppw)
             .fold(0.0, f64::max);
         if travel < MIN_DRAG_PT {
-            return;
+            // A click on a path's end only picks it up; anywhere else it leaves a dot,
+            // a run one screen pt long that the round caps draw round.
+            if stroke.extend.is_some() {
+                return;
+            }
+            stroke.samples = vec![start, start + Vec2::new(1.0 / ppw, 0.0)];
+            stroke.corners.clear();
         }
         let accuracy = FIT_PT / ppw;
         let (id, tx) = match stroke.extend.take() {
@@ -461,9 +467,11 @@ mod tests {
         assert_eq!(width, 7.0, "the width set on the last");
     }
 
-    /// A drag that never leaves a 3 pt radius draws nothing and records nothing.
+    /// A drag that never leaves a 3 pt radius draws a dot: one *Draw path* step, a
+    /// path one pt long from the press, round-capped, selected.
+    /// flip: `finish_pencil` returning on a short drag → fails at "one step".
     #[test]
-    fn a_short_drag_draws_nothing() {
+    fn a_click_draws_a_dot() {
         let ctx = egui::Context::default();
         let (mut app, _) = app_with_a_frame(&ctx);
         let before = app.session.history.done().len();
@@ -476,8 +484,36 @@ mod tests {
             ],
             |_| false,
         );
+        assert_eq!(app.session.history.done().len(), before + 1, "one step");
+        let id = app.session.selection.single().expect("the dot is selected");
+        let b = app.session.resolved.world_bounds(id).expect("drawn");
+        let center = b.center();
+        assert!(
+            (center.x - 50.5).abs() < 0.01 && (center.y - 50.0).abs() < 0.01,
+            "centred on the press: {b:?}"
+        );
+        let stroke = &app.session.doc.get(id).unwrap().paint().strokes[0].value;
+        assert_eq!(stroke.cap, Cap::Round);
+        assert_eq!(
+            path_of(&app, id).elements().len(),
+            2,
+            "one run: {:?}",
+            path_of(&app, id)
+        );
+    }
+
+    /// A click on the selected open path's end draws no dot there.
+    #[test]
+    fn a_click_on_an_end_draws_nothing() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_frame(&ctx);
+        draw(&mut app, &wave(), |_| false);
+        let id = app.session.selection.single().expect("drawn");
+        let before = app.session.history.done().len();
+        let end = wave()[99];
+        draw(&mut app, &[end, end + Vec2::new(1.0, 0.0)], |_| false);
         assert_eq!(app.session.history.done().len(), before);
-        assert!(app.session.selection.is_empty());
+        assert_eq!(app.session.selection.single(), Some(id));
     }
 
     /// A loop let go near its start closes, with no fill.

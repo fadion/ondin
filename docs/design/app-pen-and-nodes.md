@@ -47,7 +47,9 @@ ordinary stroked `Path` the node tool edits like a pen path.
   or `fit_closed`, then `straightened`), within 1.5 screen pt, so zoomed in you draw finer. Its corner
   angle is `build::FREEHAND_CORNER_DEG` (45°), wider than `SIMPLIFY_CORNER_DEG`: at the pencil's
   coarser reach a hand's jitter on a small loop turns by more than 15°, and 15° left a hand-drawn
-  circle in far more segments. A drag that never gets 3 screen pt from its press draws nothing.
+  circle in far more segments. A drag that never gets 3 screen pt from its press is a click and draws
+  a dot: a run one screen pt long from the press, which the round caps draw round. On the end of a
+  path it would carry on, a click draws nothing.
 - **What lands.** One stroke, no fill, round caps and joins, in the frame under the press
   (`draw_target`). Colour and width are the last pencil path's as it stands now
   (`OndinApp::pencil_last`), so a width changed on it in the Stroke card carries to the next stroke;

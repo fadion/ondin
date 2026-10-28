@@ -2531,10 +2531,16 @@ mod tests {
         frame(ctx, app, vec![]);
     }
 
+    /// Where the home tab starts: after the host's leading inset, which is the
+    /// traffic lights' width on macOS.
+    fn home_left() -> f32 {
+        crate::chrome::Chrome::current().leading_inset() + LEAD
+    }
+
     /// The centre of the `i`th document tab, and of its close box, in the
     /// 1320-wide window, where the tabs have their full width.
     fn tab_points(i: usize) -> (egui::Pos2, egui::Pos2) {
-        let left = LEAD + HOME_W + GAP + i as f32 * (TAB_MAX_W + GAP);
+        let left = home_left() + HOME_W + GAP + i as f32 * (TAB_MAX_W + GAP);
         let y = STRIP_H - TAB_H / 2.0;
         (
             egui::pos2(left + TAB_MAX_W / 2.0, y),
@@ -2584,7 +2590,7 @@ mod tests {
         click(
             &ctx,
             &mut app,
-            egui::pos2(LEAD + HOME_W / 2.0, STRIP_H - TAB_H / 2.0),
+            egui::pos2(home_left() + HOME_W / 2.0, STRIP_H - TAB_H / 2.0),
             primary,
         );
         assert_eq!(app.view, View::Dashboard, "the library's tab");

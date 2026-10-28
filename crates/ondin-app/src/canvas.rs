@@ -8214,27 +8214,6 @@ impl OndinApp {
                 egui::StrokeKind::Middle,
             );
         }
-        // A Shift marquee carries a + beside the pointer, an Alt one a −, on a
-        // selection-blue badge so it reads on any ground.
-        if let Drag::Marquee { mode, .. } = &self.drag
-            && let Some(p) = resp.interact_pointer_pos()
-            && let Some(sign) = match mode {
-                MarqueeMode::Toggle => Some("+"),
-                MarqueeMode::Subtract => Some("−"),
-                MarqueeMode::Replace => None,
-            }
-        {
-            let at = p + egui::vec2(16.0, 16.0);
-            painter.circle_filled(at, 6.0, color::SELECT);
-            painter.text(
-                at,
-                egui::Align2::CENTER_CENTER,
-                sign,
-                egui::FontId::proportional(11.0),
-                egui::Color32::WHITE,
-            );
-        }
-
         // The in-progress pen path, drawn as the stroke it will become.
         if let Some(pen) = &self.pen {
             let ink = color_to_egui(PEN_STROKE_COLOR);

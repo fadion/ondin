@@ -68,9 +68,8 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 ### The marquee and the lasso
 
 - **Modes.** The modifier held at the press decides what the marquee does (`preview::MarqueeMode`):
-  none replaces the selection, `Shift` toggles what it covers, `Alt` removes it. A `Shift` or `Alt`
-  marquee shows a white `+` or `−` on a 6pt-radius selection-blue disc 16pt below-right of the
-  pointer, drawn as canvas chrome rather than a cursor bitmap.
+  none replaces the selection, `Shift` toggles what it covers, `Alt` removes it. Nothing at the
+  pointer shows the mode (`non-goals.md`).
 - **Live.** Every frame of the drag applies the marquee afresh to what was selected at the press
   (`Drag::Marquee::base`, and in the node tool `Drag::Marquee::points`), so a toggle does not flip
   back and forth, and a cancel (`cancel_gesture`) restores both.

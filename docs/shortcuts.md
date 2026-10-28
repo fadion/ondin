@@ -334,8 +334,7 @@ skew snap · `Ctrl`+click deep select · `Alt`+`Shift`+click key layer · `Ctrl`
 measure (`measure.rs`; the overlay is in `canvas.rs`) · middle-mouse pan in **both** modes (Space
 is not the alias in a text session, where it is a character) · `Alt`+click eyedropper onto the
 top stroke · `Shift`+click eyedropper stays armed · `Shift`+marquee toggles what it covers ·
-`Alt`+marquee removes it (box or lasso, layers and path points alike, read at the press; a `+` or
-`−` badge beside the pointer shows which).
+`Alt`+marquee removes it (box or lasso, layers and path points alike, read at the press).
 
 - **`Space` held mid-draw repositions the uncommitted shape** (Figma, Adobe): `Drag::Create`
   carries the previous pointer, so the shape moves by the delta while Space was held.

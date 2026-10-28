@@ -4226,6 +4226,82 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
     );
 }
 
+/// A smoothed rect's bound corners preview with its smoothing kept: the binding
+/// itself, a cell edit of the variable, and a resize over the bound corners each
+/// draw as committed.
+///
+/// flip: the `SetCornerVars` arm of `absorb` rebuilding with `corner_smoothing:
+/// 0.0` → fails at "two corners bound"; the variable-cell arm, or
+/// `with_corners_drawn` (which that arm's `current_kind` reads) → fails at "the
+/// cell edited".
+#[test]
+fn a_smoothed_rects_bound_corners_preview_smoothed() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xC8);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                corner_smoothing: 0.6,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "radius/lg".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(14.0))].into(),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(ondin_core::bind_corners_ops(
+        &doc,
+        rect,
+        [Some(var), None, Some(var), None],
+    ));
+    assert_preview_matches_commit(&doc, &tx, "two corners bound");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Number(18.0),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "the cell edited");
+    let resize = Transaction(vec![Operation::SetGeometry {
+        id: rect,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(90.0, 50.0)),
+    }]);
+    assert_preview_matches_commit(&doc, &resize, "resized");
+}
+
 /// **A gap or a padding bound to a number variable previews as the layout it
 /// will lay out** (§15 D1058): the `--` list's highlight on a spacing field,
 /// `bind_spacing_ops` over a flex frame's column gap and left padding, drawn as

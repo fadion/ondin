@@ -1303,7 +1303,13 @@ impl OndinApp {
             egui::pos2(rect.right() - 6.0 - END_BOX / 2.0, rect.center().y),
             egui::vec2(END_BOX, END_BOX),
         );
-        let close_resp = ui.interact(close, id.with("close"), egui::Sense::CLICK);
+        // A pinned tab's end box is its pin glyph, which closes nothing: it senses
+        // only hover, so a press there falls through to the tab.
+        let sense = match info.pinned {
+            true => egui::Sense::hover(),
+            false => egui::Sense::CLICK,
+        };
+        let close_resp = ui.interact(close, id.with("close"), sense);
         let hovered = resp.hovered() || close_resp.hovered();
         let ground = if front {
             color::TOPBAR
@@ -2569,8 +2575,9 @@ mod tests {
     }
 
     /// A right-click on a tab opens its menu at the press; *Pin tab* pins it, and
-    /// the pinned tab shows no × to close it by.
-    /// flip: `doc_tab` not reading `secondary_clicked` → fails at "the menu opens".
+    /// the pinned tab shows no × to close it by, and its pin is part of the tab.
+    /// flip: `doc_tab` not reading `secondary_clicked` → fails at "the menu opens";
+    /// a pinned tab's end box sensing clicks → fails at "brought forward".
     #[test]
     fn a_tabs_menu_pins_it_and_a_pinned_tab_has_no_close_box() {
         let ctx = egui::Context::default();
@@ -2601,6 +2608,18 @@ mod tests {
 
         click(&ctx, &mut app, close, egui::PointerButton::Primary);
         assert!(app.tabs.get(a_tab).is_some(), "the pin is no close box");
+
+        // Behind another tab, a click on the pin brings it forward like the rest
+        // of the tab: the glyph is no dead spot.
+        let b = file(&root, "b");
+        app.open_path(&b);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![]);
+        }
+        assert_ne!(app.front_tab(), Some(a_tab), "fixture: a is behind");
+        let (_, pin_at) = tab_points(app.tabs.index(a_tab).unwrap());
+        click(&ctx, &mut app, pin_at, egui::PointerButton::Primary);
+        assert_eq!(app.front_tab(), Some(a_tab), "brought forward");
         let _ = std::fs::remove_dir_all(&root);
     }
 

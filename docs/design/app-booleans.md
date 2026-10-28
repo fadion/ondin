@@ -35,7 +35,9 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
   point cannot be found is **kept**, not dropped.
 - **Shared edges are spliced** (`boolean::spliced`, in `from_flo`): flo_curves leaves operands that
   share an edge as separate contours either side of it, which fill right and stroke a line through
-  the result, so two contours walking one edge in opposite directions become one. Ends must match
+  the result, so two contours walking one edge in opposite directions become one. flo_curves winds
+  its contours either way, so `from_flo` fixes each direction first; only then do two contours
+  either side of an edge walk it oppositely, and splicing keeps the directions right. Ends must match
   within `SEAM_EPS` (10⁻⁶), well under the thinnest sliver a boolean keeps, so a sliver's two sides
   are never taken for one edge; handles within `SEAM_HANDLE_EPS`, since flo_curves hands a split edge
   back with handles off by around 10⁻⁶. Segments are indexed once by their ends and linked round
@@ -44,15 +46,16 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
   is dropped; a thin one is a shape and is kept.
 - `Exclude` is `exclude_of`: all operand outlines concatenated and read **even-odd** (via
   `Node::fill_rule` deriving even-odd for an `Exclude`). It is not `sub(add(a,b), intersect(a,b))`,
-  which returns the operands unchanged. An open contour is closed first, as its fill closes it, and
-  each is turned one way, so two that share a
-  whole edge walk it oppositely and are spliced, and a contour that appears twice is dropped, as the
-  even-odd read cancels it. An edge shared only in part stays, since no arithmetic splits it: the
-  fill is right and a stroke draws along it.
+  which returns the operands unchanged. An open contour is closed first, as its fill closes it.
+  Read even-odd, an edge two contours both walk adds nothing whichever way each walks it, so
+  `boolean::cancelled` takes out every such pair and walks what is left back into closed loops,
+  following each segment's own successor where it survived; a rejoined loop may run either way along
+  its parts, which an even-odd read does not see. A straight edge shared only in part is first cut at
+  the other's ends (`boolean::split_overlaps`, grouping segments by the line they lie on); a curved
+  edge shared in part is not cut, and keeps its seam.
 - `ondin-core`'s `tests/boolean_suite.rs` checks shared, partly shared and nearly shared edges,
   touching corners, containment, identical operands and the shapes of `tests/common` under every
-  operation against the definition, and for specks and stray edges; its `KNOWN` list holds what still
-  fails, each entry required to keep failing.
+  operation against the definition, and for specks and stray edges.
 - `boolean::fold_operands`: `Union` and `Intersect` fold as a **balanced tree** (N log N on disjoint
   operands, which is what icon masks are); `Subtract` keeps the left fold — it is not associative.
 

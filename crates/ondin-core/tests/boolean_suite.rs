@@ -47,6 +47,22 @@ fn sets() -> Vec<(&'static str, Vec<BezPath>)> {
             vec![rect(0.0, 0.0, 60.0, 60.0), rect(60.0, 20.0, 120.0, 90.0)],
         ),
         (
+            // Collinear edges off the axes: the shared part is found by its line.
+            "turned, part of a side",
+            vec![
+                Affine::rotate(0.6) * rect(0.0, 0.0, 60.0, 60.0),
+                Affine::rotate(0.6) * rect(60.0, 20.0, 120.0, 90.0),
+            ],
+        ),
+        (
+            "a step of three",
+            vec![
+                rect(0.0, 0.0, 40.0, 40.0),
+                rect(40.0, 10.0, 80.0, 50.0),
+                rect(20.0, 40.0, 60.0, 80.0),
+            ],
+        ),
+        (
             "inside, sharing a side",
             vec![rect(0.0, 0.0, 100.0, 100.0), rect(0.0, 30.0, 40.0, 70.0)],
         ),
@@ -128,6 +144,16 @@ fn sets() -> Vec<(&'static str, Vec<BezPath>)> {
             vec![circle((0.0, 0.0), 30.0), circle((100.0, 0.0), 30.0)],
         ),
         (
+            // flo_curves hands the second back wound the other way round; `from_flo`
+            // fixing directions after `spliced` leaves the seam → Union fails at
+            // "edges with the fill on both sides".
+            "right triangles sharing an edge",
+            vec![
+                polygon(&[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)]),
+                polygon(&[(100.0, 0.0), (0.0, 0.0), (0.0, -100.0)]),
+            ],
+        ),
+        (
             // Open, as a pen path is: each fills as if closed back to its start.
             // flip: `exclude_of` leaving them open → its Exclude fails at "points
             // on the wrong side".
@@ -187,33 +213,7 @@ fn boolean_case(operands: &[BezPath], op: BoolOp) -> Vec<String> {
     )
 }
 
-/// What still fails, and why. `Exclude` does no arithmetic (`boolean::exclude_of`
-/// concatenates the outlines for an even-odd read), so where operands share only
-/// part of an edge, or nearly share one, the edge stays in the result: the fill is
-/// right and a stroke draws a line along it. flo_curves hands back a union of two
-/// open operands wound the same way, so their shared edge is never walked both
-/// ways and `spliced` keeps it, with the same effect.
-const KNOWN: [(&str, &str); 4] = [
-    (
-        "open triangles sharing an edge Union",
-        "edges with the fill on both sides",
-    ),
-    (
-        "part of a side Exclude",
-        "edges with the fill on both sides",
-    ),
-    (
-        "inside, sharing a side Exclude",
-        "edges with the fill on both sides",
-    ),
-    (
-        "nearly coincident Exclude",
-        "edges with the fill on both sides",
-    ),
-];
-
-/// Every operand set under every operation matches the oracle and is well formed,
-/// but for `KNOWN`.
+/// Every operand set under every operation matches the oracle and is well formed.
 #[test]
 fn booleans_match_the_oracle() {
     let cases: Vec<(String, (Vec<BezPath>, BoolOp))> = sets()
@@ -228,7 +228,7 @@ fn booleans_match_the_oracle() {
             .map(|op| (format!("{name} {op:?}"), (operands.clone(), op)))
         })
         .collect();
-    common::run_all_known(&cases, &KNOWN, |(operands, op)| boolean_case(operands, *op));
+    common::run_all(&cases, |(operands, op)| boolean_case(operands, *op));
 }
 
 /// Exclude over sixty by sixty adjacent tiles, every inner edge shared, splices

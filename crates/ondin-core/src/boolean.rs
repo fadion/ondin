@@ -296,13 +296,15 @@ fn fold_operands(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
 /// which `build::boolean` and `build::set_boolean_op` write. `path_full_intersect`'s
 /// fold, which this replaced, accumulated large error on dense operand sets.
 /// `None` for no operands, matching the fold.
+///
+/// Read even-odd, an edge two outlines both walk adds nothing whichever way each
+/// walks it, so every such pair is taken out ([`cancelled`]) rather than left for
+/// a stroke to draw. A straight edge two outlines share only part of is first cut
+/// where the other's ends fall on it ([`split_overlaps`]); a curved one is not.
 fn exclude_of(operands: &[BezPath]) -> Option<BezPath> {
-    // Read even-odd, a subpath means the same either way round, so each is turned
-    // one way: two that share an edge then walk it in opposite directions and
-    // `spliced` joins them, and a subpath walked twice cancels out. An open one is
-    // closed first, as a fill closes it: `spliced` reads a subpath as a loop of
-    // its segments, and would otherwise lose the edge back to its start.
-    let subs: Vec<BezPath> = operands
+    // An open subpath is closed first, as a fill closes it: a loop of segments
+    // would otherwise lose the edge back to its start.
+    let loops: Vec<Vec<kurbo::CubicBez>> = operands
         .iter()
         .flat_map(crate::geometry::subpaths)
         .filter(|s| s.segments().next().is_some())
@@ -310,65 +312,240 @@ fn exclude_of(operands: &[BezPath]) -> Option<BezPath> {
             if !matches!(s.elements().last(), Some(kurbo::PathEl::ClosePath)) {
                 s.close_path();
             }
-            match <BezPath as kurbo::Shape>::area(&s) < 0.0 {
-                true => s.reverse_subpaths(),
-                false => s,
-            }
+            s.segments().map(|seg| seg.to_cubic()).collect()
         })
         .collect();
-    let loops: Vec<Vec<kurbo::CubicBez>> = subs
-        .iter()
-        .map(|s| s.segments().map(|seg| seg.to_cubic()).collect())
-        .collect();
-    // Two copies of one loop share its segment count and the mean of its segments'
-    // starts, whichever it starts at, so only loops alike in both are compared.
-    let key = |l: &[kurbo::CubicBez]| {
-        let sum = l.iter().fold(kurbo::Vec2::ZERO, |s, c| s + c.p0.to_vec2());
-        (l.len(), seam_cell((sum / l.len().max(1) as f64).to_point()))
-    };
-    let mut alike: std::collections::HashMap<_, Vec<usize>> = std::collections::HashMap::new();
-    for (k, l) in loops.iter().enumerate() {
-        alike.entry(key(l)).or_default().push(k);
-    }
-    let mut gone = vec![false; subs.len()];
-    for k in 0..subs.len() {
-        if gone[k] {
-            continue;
-        }
-        let twin = alike[&key(&loops[k])]
-            .iter()
-            .copied()
-            .find(|&j| j > k && !gone[j] && same_loop(&loops[k], &loops[j]));
-        if let Some(j) = twin {
-            gone[k] = true;
-            gone[j] = true;
-        }
-    }
-    let kept = subs
-        .into_iter()
-        .zip(gone)
-        .filter_map(|(s, gone)| (!gone).then_some(s));
     let mut out = BezPath::new();
-    for s in spliced(kept.collect()) {
+    for s in cancelled(split_overlaps(loops)) {
         out.extend(s.iter());
     }
     (!out.is_empty()).then_some(out)
 }
 
-/// Whether the loops of segments `a` and `b` are one closed loop, whatever
-/// segment each starts at.
-fn same_loop(a: &[kurbo::CubicBez], b: &[kurbo::CubicBez]) -> bool {
-    let near = |p: Point, q: Point| (p - q).hypot() <= SEAM_EPS;
-    let handle = |p: Point, q: Point| (p - q).hypot() <= SEAM_HANDLE_EPS;
-    a.len() == b.len()
-        && (0..b.len()).any(|r| {
-            a.iter().zip(b.iter().cycle().skip(r)).all(|(x, y)| {
-                near(x.p0, y.p0) && handle(x.p1, y.p1) && handle(x.p2, y.p2) && near(x.p3, y.p3)
-            })
-        })
+/// Whether `c` is a straight segment whose handles lie between its ends.
+fn is_straight(c: &kurbo::CubicBez) -> bool {
+    let d = c.p3 - c.p0;
+    let len = d.hypot();
+    if len <= SEAM_EPS {
+        return false;
+    }
+    [c.p1, c.p2].iter().all(|&p| {
+        let v = p - c.p0;
+        let along = v.dot(d) / len;
+        v.cross(d).abs() / len <= SEAM_EPS && (-SEAM_EPS..=len + SEAM_EPS).contains(&along)
+    })
 }
 
-/// The grid cell [`spliced`] and [`exclude_of`] look up a point's partners in, a
+/// A straight segment from `a` to `b`, handles at the thirds — the form every
+/// straight piece takes in [`split_overlaps`], so a shared piece matches its partner.
+fn straight(a: Point, b: Point) -> kurbo::CubicBez {
+    kurbo::CubicBez::new(a, a.lerp(b, 1.0 / 3.0), a.lerp(b, 2.0 / 3.0), b)
+}
+
+/// `loops` with every straight segment cut at each end of another straight segment
+/// that lies on it, so a part of an edge two outlines share becomes a whole one.
+///
+/// Segments are grouped by the line they lie on — its direction, then its distance
+/// from the origin, both coarsely quantised — and an end is taken only when it is
+/// within [`SEAM_EPS`] of the segment's own line. A cut lands on the other's end
+/// exactly, so the two pieces it makes match. A pair either side of a group's
+/// boundary is missed, as [`seam_cell`] misses one.
+fn split_overlaps(loops: Vec<Vec<kurbo::CubicBez>>) -> Vec<Vec<kurbo::CubicBez>> {
+    // A thousandth of a degree of direction, a hundredth of a unit of offset.
+    const TURNS: f64 = 360_000.0;
+    let step = std::f64::consts::PI / TURNS;
+    let mut lines: std::collections::HashMap<(i64, i64), Vec<(usize, usize)>> =
+        std::collections::HashMap::new();
+    for (l, segs) in loops.iter().enumerate() {
+        for (s, c) in segs.iter().enumerate() {
+            if !is_straight(c) {
+                continue;
+            }
+            let d = c.p3 - c.p0;
+            // Direction modulo a half turn, so a line walked either way is one line.
+            let turn = (d.y.atan2(d.x) / step).round().rem_euclid(TURNS);
+            let theta = turn * step;
+            let offset =
+                c.p0.to_vec2()
+                    .cross(kurbo::Vec2::new(theta.cos(), theta.sin()));
+            lines
+                .entry((turn as i64, (offset / 0.01).round() as i64))
+                .or_default()
+                .push((l, s));
+        }
+    }
+    let mut cuts: std::collections::HashMap<(usize, usize), Vec<Point>> =
+        std::collections::HashMap::new();
+    for (&(turn, _), members) in &lines {
+        if members.len() < 2 {
+            continue;
+        }
+        let theta = turn as f64 * step;
+        let axis = kurbo::Vec2::new(theta.cos(), theta.sin());
+        // Every end on the line, in order along it.
+        let mut ends: Vec<(f64, Point)> = members
+            .iter()
+            .flat_map(|&(l, s)| [loops[l][s].p0, loops[l][s].p3])
+            .map(|p| (p.to_vec2().dot(axis), p))
+            .collect();
+        ends.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for &(l, s) in members {
+            let c = &loops[l][s];
+            let (a, b) = (c.p0.to_vec2().dot(axis), c.p3.to_vec2().dot(axis));
+            let (lo, hi) = (a.min(b) + SEAM_EPS, a.max(b) - SEAM_EPS);
+            let d = c.p3 - c.p0;
+            let len = d.hypot();
+            let first = ends.partition_point(|e| e.0 <= lo);
+            for &(u, p) in &ends[first..] {
+                if u >= hi {
+                    break;
+                }
+                if (p - c.p0).cross(d).abs() / len <= SEAM_EPS {
+                    cuts.entry((l, s)).or_default().push(p);
+                }
+            }
+        }
+    }
+    loops
+        .into_iter()
+        .enumerate()
+        .map(|(l, segs)| {
+            segs.into_iter()
+                .enumerate()
+                .flat_map(|(s, c)| {
+                    if !is_straight(&c) {
+                        return vec![c];
+                    }
+                    let mut at = cuts.remove(&(l, s)).unwrap_or_default();
+                    let d = c.p3 - c.p0;
+                    at.sort_by(|p, q| (*p - c.p0).dot(d).total_cmp(&(*q - c.p0).dot(d)));
+                    at.dedup_by(|p, q| (*p - *q).hypot() <= SEAM_EPS);
+                    let points: Vec<Point> = std::iter::once(c.p0)
+                        .chain(at)
+                        .chain(std::iter::once(c.p3))
+                        .collect();
+                    points.windows(2).map(|w| straight(w[0], w[1])).collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// `loops` with every pair of segments that trace one edge, in either direction,
+/// taken out, and what is left joined back into closed subpaths. For an even-odd
+/// read only: a pair walked the same way cancels in the crossing count but leaves
+/// no consistent direction, so a rejoined loop may run either way along its parts.
+///
+/// The walk follows a segment's own successor wherever it survived, so a loop
+/// nothing cancelled comes back as it went in.
+fn cancelled(loops: Vec<Vec<kurbo::CubicBez>>) -> Vec<BezPath> {
+    use kurbo::CubicBez;
+    let near = |a: Point, b: Point| (a - b).hypot() <= SEAM_EPS;
+    let handle = |a: Point, b: Point| (a - b).hypot() <= SEAM_HANDLE_EPS;
+    let same = |a: &CubicBez, b: &CubicBez| {
+        near(a.p0, b.p0) && handle(a.p1, b.p1) && handle(a.p2, b.p2) && near(a.p3, b.p3)
+    };
+    let reverse_of = |a: &CubicBez, b: &CubicBez| {
+        near(a.p0, b.p3) && handle(a.p1, b.p2) && handle(a.p2, b.p1) && near(a.p3, b.p0)
+    };
+    let mut segs: Vec<CubicBez> = Vec::new();
+    let (mut next, mut prev): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+    for l in &loops {
+        let start = segs.len();
+        let n = l.len();
+        segs.extend(l.iter().copied());
+        next.extend((0..n).map(|k| start + (k + 1) % n));
+        prev.extend((0..n).map(|k| start + (k + n - 1) % n));
+    }
+    let mut by_ends: std::collections::HashMap<_, Vec<usize>> = std::collections::HashMap::new();
+    for (x, c) in segs.iter().enumerate() {
+        by_ends
+            .entry((seam_cell(c.p0), seam_cell(c.p3)))
+            .or_default()
+            .push(x);
+    }
+    let mut alive = vec![true; segs.len()];
+    for x in 0..segs.len() {
+        if !alive[x] {
+            continue;
+        }
+        let c = &segs[x];
+        let (a, b) = (seam_cell(c.p0), seam_cell(c.p3));
+        let along = by_ends.get(&(a, b)).into_iter().flatten();
+        let back = by_ends.get(&(b, a)).into_iter().flatten();
+        let partner = along
+            .filter(|&&y| same(c, &segs[y]))
+            .chain(back.filter(|&&y| reverse_of(c, &segs[y])))
+            .copied()
+            .find(|&y| y != x && alive[y]);
+        if let Some(y) = partner {
+            alive[x] = false;
+            alive[y] = false;
+        }
+    }
+    // The survivors at each end point, for a walk that finds its successor gone.
+    let mut at_point: std::collections::HashMap<_, Vec<usize>> = std::collections::HashMap::new();
+    for (x, c) in segs.iter().enumerate() {
+        if alive[x] {
+            at_point.entry(seam_cell(c.p0)).or_default().push(x);
+            at_point.entry(seam_cell(c.p3)).or_default().push(x);
+        }
+    }
+    let mut used = vec![false; segs.len()];
+    let mut out = Vec::new();
+    for first in 0..segs.len() {
+        if !alive[first] || used[first] {
+            continue;
+        }
+        let home = segs[first].p0;
+        let mut p = BezPath::new();
+        p.move_to(home);
+        let (mut at, mut forward) = (first, true);
+        loop {
+            used[at] = true;
+            let c = segs[at];
+            let c = if forward {
+                c
+            } else {
+                CubicBez::new(c.p3, c.p2, c.p1, c.p0)
+            };
+            p.curve_to(c.p1, c.p2, c.p3);
+            let here = c.p3;
+            // Walking a segment backwards, its predecessor is what runs on from here.
+            let own = if forward { next[at] } else { prev[at] };
+            let starts_here =
+                |y: usize, fwd: bool| near(if fwd { segs[y].p0 } else { segs[y].p3 }, here);
+            // Back home the loop closes, unless its own successor runs on: a
+            // zero-length closing segment would otherwise be left as a speck.
+            let step = if alive[own] && !used[own] && starts_here(own, forward) {
+                Some((own, forward))
+            } else if near(here, home) {
+                None
+            } else {
+                at_point
+                    .get(&seam_cell(here))
+                    .into_iter()
+                    .flatten()
+                    .filter(|&&y| !used[y])
+                    .find_map(|&y| {
+                        [true, false]
+                            .into_iter()
+                            .find(|&fwd| starts_here(y, fwd))
+                            .map(|fwd| (y, fwd))
+                    })
+            };
+            let Some(step) = step else {
+                break;
+            };
+            (at, forward) = step;
+        }
+        p.close_path();
+        out.push(p);
+    }
+    out
+}
+
+/// The grid cell [`spliced`] and [`cancelled`] look up a point's partners in, a
 /// hundredth of a unit across. A pair straddling a cell boundary is missed.
 fn seam_cell(p: Point) -> (i64, i64) {
     ((p.x / 0.01).round() as i64, (p.y / 0.01).round() as i64)
@@ -526,6 +703,11 @@ fn to_flo(path: &BezPath) -> Vec<SimpleBezierPath> {
 /// outermost counter-clockwise, a hole clockwise, an island counter-clockwise again.
 /// The result then means the same under either fill rule, which also makes it safe
 /// for SVG.
+///
+/// The directions are fixed before [`spliced`] runs, not after: flo_curves winds its
+/// contours either way, and two that share an edge only walk it in opposite
+/// directions once each has its interior on the same side. Splicing keeps that
+/// invariant, so the loops it makes need no second pass.
 fn from_flo(paths: &[SimpleBezierPath]) -> Option<BezPath> {
     let subpaths: Vec<BezPath> = paths
         .iter()
@@ -542,19 +724,15 @@ fn from_flo(paths: &[SimpleBezierPath]) -> Option<BezPath> {
             Some(out)
         })
         .collect();
-    let subpaths: Vec<BezPath> = spliced(subpaths)
-        .into_iter()
-        .filter(|s| !is_degenerate(s))
-        .collect();
 
-    let mut out = BezPath::new();
+    let mut oriented = Vec::with_capacity(subpaths.len());
     for (i, sub) in subpaths.iter().enumerate() {
         // How many of the others enclose this one. `contains` is a winding test, so
         // it answers regardless of which way either subpath happens to run.
         // A subpath whose interior cannot be located is kept, not dropped: losing the
         // winding correction fills a hole solid, losing the geometry deletes shape.
         let Some(inside) = representative_point(sub) else {
-            out.extend(sub.iter());
+            oriented.push(sub.clone());
             continue;
         };
         // Bigger-than, not merely contains-a-point-of: a ring's bounding-box centre
@@ -574,11 +752,16 @@ fn from_flo(paths: &[SimpleBezierPath]) -> Option<BezPath> {
         // Even depth is solid and odd is a hole; `Shape::area` is signed, so its
         // sign is the direction, and a mismatch is reversed.
         let want_positive = depth % 2 == 0;
-        let sub = if (<BezPath as kurbo::Shape>::area(sub) > 0.0) == want_positive {
-            sub.clone()
-        } else {
-            sub.reverse_subpaths()
-        };
+        oriented.push(
+            if (<BezPath as kurbo::Shape>::area(sub) > 0.0) == want_positive {
+                sub.clone()
+            } else {
+                sub.reverse_subpaths()
+            },
+        );
+    }
+    let mut out = BezPath::new();
+    for sub in spliced(oriented).into_iter().filter(|s| !is_degenerate(s)) {
         out.extend(sub.iter());
     }
     (!out.is_empty()).then_some(out)
@@ -936,10 +1119,13 @@ mod tests {
             FillRule::EvenOdd.contains(&xor, a_only),
             "and what only one operand covers is inside it"
         );
+        // flip: `split_overlaps` leaving segments whole → fails here.
+        let on_overlap = |p: Point| p.y.abs() < 1e-9 && p.x > 50.0 + 1e-6 && p.x < 100.0 - 1e-6;
         assert!(
-            FillRule::NonZero.contains(&xor, overlap),
-            "read non-zero the very same path is a union — which is what the rule \
-             is for, and what a node that lost it would draw"
+            !xor.segments().any(|s| [0.25, 0.5, 0.75]
+                .iter()
+                .any(|&t| on_overlap(kurbo::ParamCurve::eval(&s, t)))),
+            "no edge runs along the top of the overlap, where a stroke would draw a seam"
         );
     }
 
@@ -965,23 +1151,25 @@ mod tests {
     /// `Exclude` gives one answer for every operand permutation, which is why the key
     /// layer (§9.4) reorders operands only for `Subtract`.
     ///
-    /// Three operands, because two would pass on pairwise symmetry alone. It compares
-    /// areas within 1.0, so it certifies only a small `Exclude`; the large-fold claim
-    /// is `exclude_agrees_with_odd_coverage_at_every_sample_point`'s, against a
-    /// referee.
+    /// Three operands, because two would pass on pairwise symmetry alone. Odd
+    /// coverage is 0–50, 80–100 and 150–200 across, 100 high: 12 000. It certifies
+    /// only a small `Exclude`; the large-fold claim is
+    /// `exclude_agrees_with_odd_coverage_at_every_sample_point`'s, against a referee.
     #[test]
     fn exclude_gives_the_same_answer_in_any_operand_order() {
         let a = Rect::new(0.0, 0.0, 100.0, 100.0).to_path(0.1);
         let b = Rect::new(50.0, 0.0, 150.0, 100.0).to_path(0.1);
         let c = Rect::new(80.0, 0.0, 200.0, 100.0).to_path(0.1);
-        let forward = area(&evaluate(BoolOp::Exclude, &[a.clone(), b.clone(), c.clone()]).unwrap());
-        let reversed =
-            area(&evaluate(BoolOp::Exclude, &[c.clone(), b.clone(), a.clone()]).unwrap());
-        let middled = area(&evaluate(BoolOp::Exclude, &[b, a, c]).unwrap());
-        assert!(
-            (forward - reversed).abs() < 1.0 && (forward - middled).abs() < 1.0,
-            "one answer per permutation, got {forward}, {reversed}, {middled}"
-        );
+        let xor = |ops: &[BezPath]| even_odd_area(&evaluate(BoolOp::Exclude, ops).unwrap(), 400);
+        let forward = xor(&[a.clone(), b.clone(), c.clone()]);
+        let reversed = xor(&[c.clone(), b.clone(), a.clone()]);
+        let middled = xor(&[b, a, c]);
+        for got in [forward, reversed, middled] {
+            assert!(
+                (got - 12_000.0).abs() < 120.0,
+                "one answer per permutation, got {forward}, {reversed}, {middled}"
+            );
+        }
     }
 
     /// Curves survive: a boolean of two circles is still made of curves, not a

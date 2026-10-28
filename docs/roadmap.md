@@ -9,8 +9,10 @@ reads true.
 
 ## Later · First
 
-- **Background blur.** Canvas and raster draw the backdrop; SVG cannot express it and the code export
-  has `backdrop-filter`, so the SVG writer owes an answer (a reported approximation, at least).
+- **Background blur.** Not built: `EffectKind` has no such effect. Neither vello 0.9 nor vello_cpu 0.2
+  has a backdrop filter, so both backends need a pass that renders what lies behind the layer, blurs
+  it and clips it to the shape. The code export would write `backdrop-filter`; SVG cannot express a
+  backdrop, so the SVG writer owes an answer (a reported approximation, at least).
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **PDF import.**
@@ -20,10 +22,6 @@ reads true.
   **Penpot** (open source, so its format can be read from its code). Pixso works with `.fig`;
   Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
-- **A union of two open paths sharing an edge keeps the seam.** flo_curves hands back two operands
-  wound the same way with the shared edge walked once, and `boolean::spliced` keeps it: the fill is
-  right, a stroke draws a line along it. Exclude does the same where operands share part of an edge
-  (`exclude_of` concatenates). Both are `boolean_suite.rs`'s `KNOWN` cases.
 - **Batch rename's reading order around a sidebar.** `batch_rename::by_bands` sets aside a layer
   whose box holds another's, but a tall layer beside the rows that holds none of them (a sidebar)
   starts the first band when its top is highest, and every row whose centre falls in its span
@@ -67,8 +65,6 @@ reads true.
   layers do not pair falls back to the prop and is reported
   approximated. The prop stays either way, for forcing a state. Live hover in present mode is
   prototyping, a non-goal.
-- **Command Mode's navigation first** — leap labels and structural `hjkl` navigation (`foundations.md`
-  §13) need no Luau, and could ship before the command line and scripting.
 - **Private mode**, for sharing a screen without exposing names (a client's or a company's name is
   often the first segment of a component's). A view flag saved as a preference, so a restart mid-call
   does not come back revealing; a shortcut, a palette command, and an accent *Private* pill in the top

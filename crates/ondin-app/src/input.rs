@@ -420,7 +420,8 @@ impl ViewSwitch {
     /// The View menu's rows, in the order Illustrator's View menu reads them:
     /// rulers, then the guides that are pulled out of them, then the grid — and
     /// then the layout grid, adjacent so the two grid rows read against each other;
-    /// outline view after them, the last row about the artwork.
+    /// then the panes (layers, history, minimap, toolbar, messages); then the modes,
+    /// Outline before Focus.
     pub const VIEW_MENU: [Self; 12] = [
         Self::Rulers,
         Self::Guides,

@@ -7322,7 +7322,7 @@ impl OndinApp {
                         match e {
                             E::Sep => crate::path_bar::separator(ui),
                             E::Btn(glyph, tool, tip) => {
-                                // With the pen armed inside a node edit both are lit.
+                                // With the pen armed inside a node edit, Pen is lit.
                                 let active = tool.is_some_and(|t| {
                                     t == self.tool || (self.pen_bias && t == Tool::Pen)
                                 });

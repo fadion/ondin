@@ -873,7 +873,7 @@ fn copying_a_mode_copies_its_column() {
 }
 
 /// Deleting a mode returns its frames to *Inherit*; renaming a group moves its
-/// members and refuses a name already taken (G14).
+/// members and refuses a name already taken.
 #[test]
 fn deleting_a_mode_and_renaming_a_group() {
     let mut f = fixture();

@@ -532,10 +532,10 @@ pub mod icon {
     pub const SWATCHES: &str = "\u{e5b8}";
     /// A style card's *Create style…* (§15 D1063).
     pub const PLUS_SQUARE: &str = "\u{ed4a}";
-    /// The browser's `+` menu (G5): *Colour variable* and *Number variable*.
+    /// The browser's `+` menu: *Colour variable* and *Number variable*.
     pub const PALETTE: &str = "\u{e6c8}";
     pub const HASH: &str = "\u{e2a2}";
-    /// *New mode* (G5).
+    /// The browser's *New mode*.
     pub const COLUMNS_PLUS_RIGHT: &str = "\u{e542}";
     /// *Publish* (§5.3e).
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";

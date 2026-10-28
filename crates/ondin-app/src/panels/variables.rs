@@ -1,8 +1,8 @@
-//! The styles and variables browser (§5.3f, D1038 G1–G22; §15 D1040).
+//! The styles and variables browser (§5.3f; §15 D1038, D1040).
 //!
 //! A panel beside the vertical toolbar, bottom-aligned with its swatches button
 //! directly above the hexagon — so it and the insert picker **swap in place**, one
-//! open at a time (G11). `Shift+S` or the button opens it; `Escape` or the button
+//! open at a time. `Shift+S` or the button opens it; `Escape` or the button
 //! closes it, and a canvas selection leaves it open. Its search takes the keyboard
 //! once, on opening, as the picker's does (§15 D1014).
 //!
@@ -26,7 +26,7 @@ use ondin_core::variable::{self as var, Cell, Mode, ModeId, Value, VarId, VarKin
 use ondin_core::{Described, Document, NodeId, Operation, Transaction};
 use std::collections::{BTreeMap, HashSet};
 
-/// The name column, a mode column and the panel's padding (G2): 340 with one
+/// The name column, a mode column and the panel's padding: 340 with one
 /// mode, 436 with two, 532 with three, the cap.
 const NAME_W: f32 = 220.0;
 const MODE_W: f32 = 96.0;
@@ -40,13 +40,13 @@ const SEARCH_H: f32 = 28.0;
 const HEAD_H: f32 = 24.0;
 const GROUP_H: f32 = 26.0;
 const ROW_H: f32 = 28.0;
-/// A variable row's name indent past its group's caret (G1).
+/// A variable row's name indent past its group's caret.
 const INDENT: f32 = 23.0;
 /// An in-place field's text inset from its outline (§15 D1083) — so a field
 /// opened over a label puts the text where the label was.
 const EDIT_PAD_X: f32 = 6.0;
 const MENU_ROW_H: f32 = 26.0;
-/// The browser's ground — the text at 17% over black, `#282828` (G1), a step
+/// The browser's ground — the text at 17% over black, `#282828`, a step
 /// above the inspector's card.
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(40, 40, 40);
 const SEARCH_ID: &str = "var-browser-search";
@@ -85,7 +85,7 @@ enum Edit {
         path: String,
         text: String,
     },
-    /// A style's whole name, on the *Styles* tab (G8, §15 D1063).
+    /// A style's whole name, on the *Styles* tab (§15 D1063).
     Style {
         style: StyleId,
         text: String,
@@ -122,14 +122,14 @@ impl Edit {
 #[derive(Clone, Debug, PartialEq)]
 enum Menu {
     /// The `+` button's: *Colour variable*, *Number variable*, *Boolean variable*
-    /// (§15 D1059), *String variable* (§15 D1069), *New mode* (G5).
+    /// (§15 D1059), *String variable* (§15 D1069), *New mode*.
     Add,
     Var(VarId),
     Mode(ModeId),
     Group(String),
     /// *Delete mode…*'s confirmation, with the frames it returns to *Inherit*.
     ConfirmMode(ModeId),
-    /// A style's row: *Rename*, *Edit*, *Select*, *Delete* (G8).
+    /// A style's row: *Rename*, *Edit*, *Select*, *Delete*.
     Style(StyleId),
     /// A style group's header: *Rename group*, *Select*, *Delete group*.
     StyleGroup(StyleSlot, String),
@@ -145,7 +145,7 @@ pub(crate) struct Browser {
     query: String,
     /// Whether the search should take the keyboard next frame — once, on open.
     focus: bool,
-    /// *In selection*, kept pressed across selection changes (G4).
+    /// *In selection*, kept pressed across selection changes.
     in_selection: bool,
     /// Collapsed group paths — a copy of the document's own set
     /// (`OndinApp::var_collapsed`), loaded for [`Self::root`] (§15 D1054).
@@ -159,9 +159,9 @@ pub(crate) struct Browser {
     /// The sentence a refused edit is answered with, until the next edit.
     refusal: Option<String>,
     /// The text that refusal answered, which the field draws dim and dotted
-    /// while it still holds it (B4's manner, §15 D1053).
+    /// while it still holds it, as the inspector's fields do (§15 D1053).
     refused: Option<String>,
-    /// How far the mode columns are scrolled sideways, past three modes (G3).
+    /// How far the mode columns are scrolled sideways, past three modes.
     scroll_x: f32,
     /// A drag on the sideways bar's thumb: the pointer's x and `scroll_x` where
     /// it pressed (§15 D1055).
@@ -227,7 +227,7 @@ enum Act {
     /// A colour cell's colour popup, opened beside the panel at this point
     /// (D1038 G-series, §15 D1052).
     OpenPicker(VarId, ModeId, egui::Pos2),
-    /// A style renamed, its *Edit* opened, deleted (G8, G9; §15 D1063).
+    /// A style renamed, its *Edit* opened, deleted (§15 D1063).
     StyleName(StyleId, String),
     EditStyle(StyleId),
     /// Styles deleted — one, or a group's — and the name the status gives them.
@@ -242,7 +242,7 @@ enum Act {
     /// A kit's mapping entry for a document mode set to a kit mode, or cleared
     /// to match by name (§15 D1065).
     KitMap(String, ModeId, Option<ModeId>),
-    /// A kit header's *v8 → v9* clicked (G22): the update summary opened.
+    /// A kit header's *v8 → v9* clicked: the update summary opened.
     KitUpdates,
 }
 
@@ -284,7 +284,7 @@ fn collapsed_key(doc: &ondin_core::Document) -> NodeId {
 impl OndinApp {
     /// Open the browser with its search taking the keyboard, or close it
     /// (`Shift+S`, the swatches button). Opening it closes the insert picker:
-    /// the two share a place (G11).
+    /// the two share a place.
     pub(crate) fn toggle_var_browser(&mut self) {
         self.var_browser = match self.var_browser {
             Some(_) => None,
@@ -323,7 +323,7 @@ impl OndinApp {
             b.root = Some(root);
         }
         let pending = self.var_cell_preview;
-        // The kits with an update waiting, for their headers' *v8 → v9* (G22).
+        // The kits with an update waiting, for their headers' *v8 → v9*.
         let waiting: Vec<(String, u32, u32)> = self
             .kits_waiting(false)
             .into_iter()
@@ -361,7 +361,7 @@ impl OndinApp {
                 .map(|v| v.id)
                 .collect()
         });
-        // And the styles' (G8, §15 D1063), for the *Styles* tab.
+        // And the styles' (§15 D1063), for the *Styles* tab.
         let mut style_users: BTreeMap<StyleId, Vec<NodeId>> = BTreeMap::new();
         for s in doc.styles().iter() {
             let mut who = sty::users(doc, s.id);
@@ -543,7 +543,7 @@ impl OndinApp {
         b.panel = Some(panel);
 
         // Past three modes the columns scroll sideways under the fixed name
-        // column (G3), by a horizontal wheel or `Shift` and the wheel.
+        // column, by a horizontal wheel or `Shift` and the wheel.
         // Only where there are columns to scroll: the *Variables* tab with rows
         // on it — not the *Styles* tab nor an empty state (`arch-scribe`'s read
         // of §15 D1055's first cut).
@@ -1354,8 +1354,8 @@ impl OndinApp {
                 layers.dedup();
                 // The value the users now hold, named only when every one of them
                 // drew the same: each detaches to what it read in its own mode, and
-                // two frames in two modes leave two values (G10's sentence is for
-                // the one-value case).
+                // two frames in two modes leave two values, so the sentence names
+                // a value only in the one-value case.
                 let value = match ids.as_slice() {
                     [one] => {
                         let mut drawn = layers.iter().filter_map(|n| doc.resolve_var(*n, *one));
@@ -1486,7 +1486,7 @@ fn in_group(name: &str, path: &str) -> bool {
 }
 
 /// Why `name` cannot be a variable's (`except` the one being renamed), if it
-/// cannot — empty, an empty group part, or taken (G14).
+/// cannot — empty, an empty group part, or taken.
 fn name_refusal(
     table: &ondin_core::Variables,
     name: &str,
@@ -1713,7 +1713,7 @@ fn all_lines<'a>(
     out
 }
 
-/// The *Variables* / *Styles* strip (G1).
+/// The *Variables* / *Styles* strip.
 fn tabs(ui: &mut egui::Ui, tab: &mut Tab) {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, TAB_H + 4.0), egui::Sense::hover());
@@ -1748,7 +1748,7 @@ fn tabs(ui: &mut egui::Ui, tab: &mut Tab) {
     }
 }
 
-/// The search, the *In selection* toggle and the `+` (G1, G4, G5).
+/// The search, the *In selection* toggle and the `+`.
 fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
@@ -1787,7 +1787,7 @@ fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
         let add = square_button(ui, icon::PLUS, matches!(b.menu, Some((Menu::Add, _))))
             .on_hover_text(match b.tab {
                 Tab::Variables => "New variable or mode",
-                // A style is made from a card's values (F4), and the `+` takes
+                // A style is made from a card's values, and the `+` takes
                 // the browser to the variables it can make (§15 D1063). The
                 // menu named in words: the chrome's text face has no `⋯`, and
                 // the tooltip drew a missing-glyph box in its place.
@@ -1830,11 +1830,11 @@ fn square_button(ui: &mut egui::Ui, glyph: &str, on: bool) -> egui::Response {
     resp
 }
 
-/// The *Styles* tab (G8, §15 D1063): one group per card, in the inspector's
+/// The *Styles* tab (§15 D1063): one group per card, in the inspector's
 /// order, each row a preview, the style's whole name and its usage count; a
 /// right-click or a double-click opens *Rename*, *Edit*, *Select*, *Delete*.
 /// *In selection* keeps the styles the selection uses, a group's count reading
-/// *1 of 4*, and a group with none of them drops out (G20).
+/// *1 of 4*, and a group with none of them drops out.
 #[allow(clippy::too_many_arguments)]
 fn styles_tab(
     ui: &mut egui::Ui,
@@ -1846,7 +1846,7 @@ fn styles_tab(
     acts: &mut Vec<Act>,
 ) {
     // The document's own by card, then each kit's by card under the kit's
-    // header — *kit groups last* (G8, F5; §15 D1065).
+    // header — *kit groups last* (§15 D1065).
     let mut kits: Vec<(String, &str)> = doc
         .styles()
         .iter()
@@ -2253,8 +2253,8 @@ fn mode_x(left: f32, i: usize, scroll: f32) -> f32 {
     left + NAME_W + MODE_W * i as f32 - scroll
 }
 
-/// *Name* and the mode headers — *Value* while there is one mode (G2).
-/// Double-click renames a mode; a right-click opens its menu (G6).
+/// *Name* and the mode headers — *Value* while there is one mode.
+/// Double-click renames a mode; a right-click opens its menu.
 fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act>) {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, HEAD_H), egui::Sense::hover());
@@ -2716,7 +2716,7 @@ fn kit_columns(modes: &[Mode]) -> Vec<Option<ModeId>> {
 /// *Match by name*.
 ///
 /// While an update of the kit waits (`waiting`, held and published versions)
-/// the name reads on *· v8 → v9* (G22, D1038's *Kit updates*), a click opening
+/// the name reads on *· v8 → v9* (§15 D1038's *Kit updates*), a click opening
 /// the update summary; its rows keep showing what the document holds — the
 /// summary is the one place that says what v9 changes.
 fn kit_row(
@@ -2927,7 +2927,7 @@ fn kit_var_row(
 }
 
 /// One cell at rest: a colour's swatch and hex, a bare number, an alias's capsule
-/// naming its target (G1, H4).
+/// naming its target.
 fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect, c: &Cell) {
     let y = cell.center().y;
     let font = egui::FontId::proportional(11.0);
@@ -3065,8 +3065,8 @@ fn scroll_bar(ctx: &egui::Context, panel: egui::Rect, modes: usize, b: &mut Brow
 }
 
 /// One of the browser's in-place fields, placed in `r` as `ui.put` places a
-/// widget — the four were `ui.put` each — and **refused in B4's manner** (D1038
-/// G14, G15; §15 D1053): while its text is still the text a refusal answered
+/// widget, and **refused as the inspector's fields are** (§15 D1038, D1053):
+/// while its text is still the text a refusal answered
 /// (`refused`), that text is laid out dim over a dotted underline, the
 /// inspector's fields' own layouter and dots (`binding::refusal_galley`,
 /// `underline_refusal`), and the sentence above the table says why. A keystroke
@@ -3123,7 +3123,7 @@ fn edit_field(
     out.response.response
 }
 
-/// A 12×12 colour chip, the checkerboard under a translucent one (G1) — the
+/// A 12×12 colour chip, the checkerboard under a translucent one — the
 /// Fill row's look (§15 D1082).
 pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
     let painter = p.with_clip_rect(rect.intersect(p.clip_rect()));
@@ -3303,7 +3303,7 @@ impl OndinApp {
     }
 
     /// The *Mode* menu: *Inherit* with the mode it would inherit, then every
-    /// mode, the frame's own checked (H1).
+    /// mode, the frame's own checked.
     pub(crate) fn mode_menu_ui(&mut self, ctx: &egui::Context) {
         let Some((id, under)) = self.mode_menu else {
             return;
@@ -3467,7 +3467,7 @@ mod tests {
         assert!(shapes.iter().any(|c| lit(&c.shape, at)), "lit");
     }
 
-    /// The browser and the insert picker share one place (G11): opening either
+    /// The browser and the insert picker share one place: opening either
     /// closes the other.
     #[test]
     fn the_browser_and_the_insert_picker_take_turns() {
@@ -3569,7 +3569,7 @@ mod tests {
         );
     }
 
-    /// **Deleting a used variable detaches its users and says so** (G10), and one
+    /// **Deleting a used variable detaches its users and says so**, and one
     /// undo brings the binding back.
     #[test]
     fn deleting_a_used_variable_detaches_and_says_so() {
@@ -3621,7 +3621,7 @@ mod tests {
     }
 
     /// **The *Styles* tab lists a style under its card and its path's group, and
-    /// *Delete* detaches its users, says so, and undoes whole** (G8, D1038 (6);
+    /// *Delete* detaches its users, says so, and undoes whole** (D1038 (6);
     /// §15 D1063). A folded group hides its rows, *Rename group* moves its
     /// styles, and a rename to a name its slot already holds is refused.
     #[test]
@@ -3866,7 +3866,7 @@ mod tests {
         assert_eq!(doc.mode_at(inner), Some(modes[1]));
     }
 
-    /// The panel is 340 wide with one mode and 436 with two (G2), and draws
+    /// The panel is 340 wide with one mode and 436 with two, and draws
     /// without a panic over a table, a group and an alias.
     #[test]
     fn the_panel_is_as_wide_as_its_modes() {
@@ -3890,7 +3890,7 @@ mod tests {
     }
 
     /// **A refused rename keeps its text, dim and dotted, until it is changed**
-    /// (B4's manner, D1038 G14; §15 D1053): *colour 2* renamed *colour 1* is
+    /// (§15 D1038, D1053): *colour 2* renamed *colour 1* is
     /// refused as taken, the sentence says so, and the field still holding
     /// *colour 1* lays it out at 40% over dots; typed into, it is plain again.
     ///
@@ -3998,7 +3998,7 @@ mod tests {
         );
     }
 
-    /// **Past three modes a bar under the columns scrolls them sideways** (G3, §15
+    /// **Past three modes a bar under the columns scrolls them sideways** (§15
     /// D1055): with four modes, a drag on its thumb moves `scroll_x` by the share
     /// of the hidden column the drag covers, and a long drag stops at the last
     /// column.

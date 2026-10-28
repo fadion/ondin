@@ -75,7 +75,7 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetVisibleVar { .. }
         | Operation::SetSizeVars { .. }
         | Operation::SetOpacityVar { .. }
-        // And a card's style (§15 D1062, D1038 F9): the main's own style is no
+        // And a card's style (§15 D1062, D1038): the main's own style is no
         // override, another one or a detach is.
         | Operation::SetFillStyle { .. }
         | Operation::SetStrokeStyle { .. }

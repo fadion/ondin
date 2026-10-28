@@ -2019,8 +2019,8 @@ impl OndinApp {
                     }
                     let on = bound == Some(v.id);
                     // A layer's hexes read in its mode; a cell's in the cell's
-                    // own, and a row that would loop is inert and says why (G15:
-                    // *this variable*, or *uses* the name it would go round by).
+                    // own, and a row that would loop is inert and says why:
+                    // *this variable*, or *uses* the name it would go round by.
                     let (value, refusal) = match target {
                         FaceTarget::Field(key) => (doc.resolve_var(key.at(), v.id), None),
                         FaceTarget::Cell(var, mode) => (
@@ -2093,8 +2093,7 @@ fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
     );
 }
 
-/// A kit's header in a list of variables or styles (D1038 E1, F5, G8; §15
-/// D1065): the kit mark and the kit's name, above its groups.
+/// A kit's header in a list of variables or styles (§15 D1038, D1065): the kit mark and the kit's name, above its groups.
 pub(crate) fn kit_header(ui: &mut egui::Ui, name: &str, w: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FACE_HEAD_H + 4.0), egui::Sense::hover());
     let p = ui.painter();
@@ -2150,7 +2149,7 @@ fn face_row(
         }
     }
     let check_w = 12.0;
-    // A row that would loop dims and reads why in place of its hex (G15).
+    // A row that would loop dims and reads why in place of its hex.
     let hex = match (refusal, value) {
         (Some(why), _) => why.to_owned(),
         (None, Some(Value::Color(c))) => ui::hex_of(c),

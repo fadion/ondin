@@ -1863,8 +1863,7 @@ impl OndinApp {
                         let next = if mixed { true } else { !on };
                         // Each bound layer the click changes detached in the edit
                         // itself, the detach the tooltip promises — asked for, so
-                        // the floating status says nothing (§15 D1071's
-                        // amendment, F2).
+                        // the floating status says nothing (§15 D1071).
                         let mut ops: Vec<_> = roots
                             .iter()
                             .flat_map(|r| variant::counterparts(doc, *r, p))
@@ -1978,7 +1977,7 @@ impl OndinApp {
                             // (§15 D1071's amendment): a bound copy this text
                             // changes is detached in the edit itself, so the
                             // detach is the one asked for and the floating status
-                            // says nothing (F2) — left to `keep_text_bindings`, the
+                            // says nothing — left to `keep_text_bindings`, the
                             // same key said *Detached copy/cta* here and nothing
                             // on the Type card.
                             let mut ops: Vec<_> = roots

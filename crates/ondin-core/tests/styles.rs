@@ -148,7 +148,7 @@ fn applying_a_style_writes_its_values_onto_the_layer() {
 }
 
 /// **Editing a style reaches every user in the one commit, and one undo takes it
-/// all back** (D1038 G9, live to every user).
+/// all back** (D1038: an edit is live to every user).
 #[test]
 fn editing_a_style_rewrites_every_user_and_undoes_whole() {
     let mut f = fixture();
@@ -392,7 +392,7 @@ fn copy_of(doc: &Document, inst: NodeId, main: NodeId) -> NodeId {
 }
 
 /// **On an instance the main's own style is no override, another style is, and
-/// a reset puts the main's back** (D1038 F9). A copy on another style keeps it —
+/// a reset puts the main's back** (D1038). A copy on another style keeps it —
 /// its values too — when the main's style gains an item that the component
 /// follow would otherwise carry onto it.
 ///

@@ -190,7 +190,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
             id,
             var: *opacity_var,
         },
-        // And the cards' styles (§15 D1062, D1038 F9): a copy on another style, or
+        // And the cards' styles (§15 D1062, D1038): a copy on another style, or
         // detached from its main's, is an override, and *Reset fill* puts the
         // main's style back — stated beside the lists above, so the commit's
         // `style::settle` reads a rebound slot and writes the style's values.

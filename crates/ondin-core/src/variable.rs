@@ -1786,8 +1786,8 @@ pub fn split_name(name: &str) -> (&str, &str) {
 
 /// The renames that move every variable in group `from` (and its subgroups) to
 /// `to` — *Rename group*, the bindings following because they name ids. `Err`
-/// with the first name that would land on a variable already there: G13's merge
-/// is not ruled, and G14's refusal of a taken name is the answer taken here.
+/// with the first name that would land on a variable already there: merging two
+/// groups is not ruled, so a taken name is refused, as a single rename's is.
 pub fn rename_group_ops(
     doc: &crate::Document,
     from: &str,

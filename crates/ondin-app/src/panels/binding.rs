@@ -497,7 +497,7 @@ fn trim_number(x: f64) -> String {
 }
 
 /// The variables `--query` lists for a field of `kind`: a substring match on the
-/// full name, grouped by group in name order (B1).
+/// full name, grouped by group in name order.
 pub(crate) fn matches<'a>(
     table: &'a ondin_core::Variables,
     kind: VarKind,
@@ -570,7 +570,7 @@ pub(crate) fn folded_find(name: &str, q: &str) -> Option<std::ops::Range<usize>>
     None
 }
 
-/// B4's refusal (§15 D1044): a field's buffer, `--` and all, that names a whole
+/// The `--` refusal (§15 D1044): a field's buffer, `--` and all, that names a whole
 /// variable of `kind` and then goes on — `--space/4 * 2` — when a variable fills
 /// the whole field, a live relationship breaching §13 decision 1 (D1037). The
 /// variable, and the byte of `text` where the rest begins.
@@ -602,7 +602,7 @@ pub(crate) fn refused<'a>(
         .map(|v| (v, lead + v.name.len()))
 }
 
-/// A bindable field's text laid out with B4's refused tail — from byte `at` on —
+/// A bindable field's text laid out with its refused tail — from byte `at` on —
 /// dimmed to 40%: the layouter every `--`-taking `TextEdit` shares. With no
 /// refusal it is the plain line `TextEdit` would have laid out itself, in the
 /// colour it would have chosen.
@@ -632,7 +632,7 @@ pub(crate) fn refusal_galley(
     ui.fonts_mut(|f| f.layout_job(job))
 }
 
-/// B4's dotted underline under a field's refused tail, from byte `at` to the end
+/// The dotted underline under a field's refused tail, from byte `at` to the end
 /// of the text the field drew — egui underlines solid only, so it is painted.
 pub(crate) fn underline_refusal(
     ui: &egui::Ui,
@@ -1099,7 +1099,7 @@ impl OndinApp {
         if up {
             c.highlight = c.highlight.saturating_sub(1);
         }
-        // The mode the values read in: the selected layer's (B1's footer).
+        // The mode the values read in, as the footer names it: the selected layer's.
         let at = c.key.at();
         let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
         let mut chosen: Option<VarId> = None;
@@ -1135,7 +1135,7 @@ impl OndinApp {
                         }
                         ui.add_space(3.0);
                     }
-                    // B4: a whole name with more after it is refused in one plain
+                    // A whole name with more after it is refused in one plain
                     // sentence — no red, no shake — and `Enter` stays inert, the
                     // list having no row to bind.
                     let refusal = (!c.own_search)
@@ -1241,7 +1241,7 @@ impl OndinApp {
             self.session.clear_gesture_preview();
             return;
         }
-        // The highlighted row previews live on the canvas (B1) — a paint's, and
+        // The highlighted row previews live on the canvas — a paint's, and
         // since §15 D1050 a radius's: `absorb` draws a `SetCornerVars` as the
         // radii it will resolve to, where D1039 refused it.
         match list.get(c.highlight) {
@@ -1511,9 +1511,9 @@ impl OndinApp {
         false
     }
 
-    /// An unbound field's two doors to a binding (D1038 B1 and C1): `--` typed
+    /// An unbound field's two doors to a binding (D1038): `--` typed
     /// into it opens the list — and hands the text to the retype buffer, which
-    /// can draw B4's refused tail where a `DragValue` cannot (§15 D1044) — and a
+    /// can draw the refused tail where a `DragValue` cannot (§15 D1044) — and a
     /// right-click opens the field menu. Every bindable field's unbound face
     /// calls it with its response.
     pub(super) fn field_doors(&mut self, ui: &egui::Ui, key: FieldKey, resp: &egui::Response) {
@@ -1556,7 +1556,7 @@ impl OndinApp {
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
             let (strip, lead) = ui::prefix_strip(ui, key.prefix());
             ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
-            // B4's refused tail dims as it is typed (§15 D1044).
+            // The refused tail dims as it is typed (§15 D1044).
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 let at = refused(table, key.kind(), buf.as_str()).map(|r| r.1);
                 refusal_galley(ui, buf.as_str(), at, &font)
@@ -1579,8 +1579,8 @@ impl OndinApp {
             caret_to_end(ui.ctx(), edit_id, &rt.text);
         }
         self.bind_typing(ui.ctx(), key, &rt.text, field.rect);
-        // `Enter` on a refused `--` leaves the buffer focused and as typed (B4,
-        // §15 D1044's *Fix*) — the `TextEdit` gave the keyboard up on it.
+        // `Enter` on a refused `--` leaves the buffer focused and as typed
+        // (§15 D1044) — the `TextEdit` gave the keyboard up on it.
         if field.lost_focus()
             && refused(self.session.doc.variables(), key.kind(), &rt.text).is_some()
             && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -1943,12 +1943,12 @@ pub(crate) fn caret_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
 }
 
 /// The colour picker's *Variables* face: a row's height and a group header's
-/// (D1038 E1).
+/// (D1038).
 const FACE_ROW_H: f32 = 24.0;
 const FACE_HEAD_H: f32 = 20.0;
 
 impl OndinApp {
-    /// The colour picker's *Variables* face (D1038 E1, §15 D1043): a search, then
+    /// The colour picker's *Variables* face (§15 D1038, D1043): a search, then
     /// every colour variable under its group's header, each row its swatch, full
     /// name and hex **in the layer's mode**. The current variable carries the
     /// row tint and a check, and is scrolled into view once on open; a click on
@@ -2002,7 +2002,7 @@ impl OndinApp {
                     ui.label(egui::RichText::new(none).size(11.5).color(theme::text::DIM));
                 }
                 // The document's own first, then each kit's under its name and
-                // the kit mark, its rows dimmed (E1, §15 D1065).
+                // the kit mark, its rows dimmed (§15 D1065).
                 let mut group: Option<(Option<&str>, &str)> = None;
                 let mut kit: Option<&str> = None;
                 for v in &list {
@@ -2115,7 +2115,7 @@ pub(crate) fn kit_header(ui: &mut egui::Ui, name: &str, w: f32) {
 }
 
 /// One row of the picker's *Variables* face: swatch, full name, hex, and the
-/// check on the current variable (E1) — a kit's dimmed.
+/// check on the current variable — a kit's dimmed.
 fn face_row(
     ui: &mut egui::Ui,
     v: &Variable,
@@ -2204,7 +2204,7 @@ pub(crate) fn paint_item(slot: PaintSlot) -> Option<(PaintTarget, usize)> {
 }
 
 /// One row of the `--` list: a colour's swatch, the full name — the match
-/// bright, the rest at 60% — and the value in the footer's mode (B1, B2).
+/// bright, the rest at 60% — and the value in the footer's mode.
 fn list_row(
     ui: &mut egui::Ui,
     v: &Variable,
@@ -2225,7 +2225,7 @@ fn list_row(
         ui::paint_colour_chip(p, sw, ui::color_to_egui(c));
         x = sw.right() + 8.0;
     }
-    // A kit's variable wears the kit mark (D1038 E1's package glyph, §15 D1065).
+    // A kit's variable wears the kit mark, the package glyph (§15 D1065).
     if v.origin.is_some() {
         let g = p.text(
             egui::pos2(x, y),
@@ -2400,7 +2400,7 @@ mod tests {
 
     /// **Typing `--br` and `Enter` binds the fill to the one match, keeping its
     /// `%`**; the list previews the highlighted variable on the canvas while it is
-    /// open (B1, B2).
+    /// open.
     #[test]
     fn typing_dashes_and_enter_binds_the_highlighted_variable() {
         let (ctx, mut app, rect, brand, _) = fixture();
@@ -2849,8 +2849,8 @@ mod tests {
         picker_frame(ctx, app, vec![button(false)]);
     }
 
-    /// **The colour picker's *Variables* tab binds, and *Solid* detaches** (D1038
-    /// E1, §15 D1043), driven through the popup's own clicks: the tab opens the
+    /// **The colour picker's *Variables* tab binds, and *Solid* detaches** (§15
+    /// D1038, D1043), driven through the popup's own clicks: the tab opens the
     /// face over an unbound fill and writes nothing; a row binds the fill, keeping
     /// its `%`; the face then stays up, the paint's kind being the binding; and
     /// *Solid* leaves the colour drawn, `%` folded in.
@@ -2904,7 +2904,7 @@ mod tests {
         assert!(app.picker.as_ref().is_some_and(|p| !p.browse));
     }
 
-    /// A bound fill's picker opens on the *Variables* face (E1) — the binding is
+    /// A bound fill's picker opens on the *Variables* face — the binding is
     /// the paint's kind. The last assertion is only that an effect's colour is not
     /// a slot `paint_item` binds, which is what keeps its picker at three tabs; no
     /// effect picker is drawn here and no tabs are counted.
@@ -2954,7 +2954,7 @@ mod tests {
         assert_eq!(folded_find("brand", "x"), None);
     }
 
-    /// **B4: a whole name with more after it is refused, and only then** (§15
+    /// **A whole name with more after it is refused, and only then** (§15
     /// D1044): `--radius/md * 2` refuses ` * 2`, case aside; a name still being
     /// typed, or the whole name alone, is not; and a whole name that is the start
     /// of a longer one is not refused while the longer one matches.
@@ -3008,7 +3008,7 @@ mod tests {
         assert_eq!(
             at(VarKind::Number, "--nothing * 2"),
             None,
-            "no name: B3's no match"
+            "no name: no match"
         );
         assert_eq!(
             at(VarKind::Number, "--brand/500 x"),
@@ -3026,8 +3026,8 @@ mod tests {
         );
     }
 
-    /// **The `--` list says a refusal in one sentence, and `Enter` binds nothing**
-    /// (B4): *Remove `* 2` to bind radius/md*, the list open after the key.
+    /// **The `--` list says a refusal in one sentence, and `Enter` binds
+    /// nothing**: *Remove `* 2` to bind radius/md*, the list open after the key.
     #[test]
     fn a_refused_query_says_why_and_enter_is_inert() {
         let (ctx, mut app, rect, _, _) = fixture();
@@ -3060,7 +3060,7 @@ mod tests {
 
     /// **The radius buffer a `--` is handed to writes a number typed back over it,
     /// on an unbound rect too, and `Escape` writes nothing** (§15 D1044): the
-    /// corner field's `DragValue` passes `--` text to `number_retype` so B4's tail
+    /// corner field's `DragValue` passes `--` text to `number_retype` so the refused tail
     /// can be drawn, which makes that buffer the unbound field's as well as a
     /// chip's.
     #[test]
@@ -3381,7 +3381,7 @@ mod tests {
     }
 
     /// **`Enter` on a refused `--` leaves either field as typed, the list still
-    /// up** (B4, §15 D1044's *Fix*): the hex field and the radius buffer, each
+    /// up** (§15 D1044): the hex field and the radius buffer, each
     /// drawn for real, the key landing once the buffer holds the keyboard.
     ///
     /// Flip, run: without the hex field's `refused_enter` arm it fails *"the hex
@@ -3657,7 +3657,7 @@ mod tests {
     }
 
     /// The field's refused tail is laid out at 40%, the rest as `TextEdit` would
-    /// have drawn it (B4).
+    /// have drawn it.
     #[test]
     fn a_refused_tail_is_laid_out_dim() {
         let ctx = egui::Context::default();
@@ -3697,8 +3697,8 @@ mod tests {
         });
     }
 
-    /// **Every face of the colour popup is one height** (E1: *"the popup keeps
-    /// its height on every tab, so nothing jumps under the pointer"*; §15 D1057),
+    /// **Every face of the colour popup is one height**, so nothing jumps under
+    /// the pointer (§15 D1057),
     /// measured as the bounds of everything the popup paints, shadow included,
     /// on each tab in turn.
     ///

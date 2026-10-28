@@ -1,16 +1,15 @@
-//! Styles in the inspector (§5.3f, D1038 F1–F10; §15 D1063).
+//! Styles in the inspector (§5.3f, D1038; §15 D1063).
 //!
-//! The four style slots' cards — Fill, Stroke, Effects and, since step 6, Type
-//! (§15 D1068) — wear a `⋯` in their
-//! header, always last (F8): *Apply style…*, *Create style…* and
-//! *Detach style* (F4). A styled card **collapses to one capsule** — caret,
+//! The four style slots' cards — Fill, Stroke, Effects and Type (§15 D1068) —
+//! wear a `⋯` in their header, always last: *Apply style…*, *Create style…* and
+//! *Detach style*. A styled card **collapses to one capsule** — caret,
 //! preview, name and a short summary, *Detach* in the summary's place on hover
-//! (F1, F2) — and opened it shows the card's rows greyed and inert, *Read-only —
-//! Detach to edit* (F3): the inspector is the one door that does not detach
+//! — and opened it shows the card's rows greyed and inert, *Read-only —
+//! Detach to edit*: the inspector is the one door that does not detach
 //! (D1038 (1)). Its `+` hides while any card in scope is styled, and nothing
-//! moves (F8, F10).
+//! moves.
 //!
-//! A style's values change through the browser's *Edit* (G9), which here opens
+//! A style's values change through the browser's *Edit*, which here opens
 //! **an edit mode on the style's users** rather than a card inside the browser
 //! (§15 D1063): the browser selects them, the card opens live under an *editing*
 //! capsule, and the commit door turns its writes into an edit of the style
@@ -24,16 +23,16 @@ use ondin_core::style::{self, Style, StyleId, StyleSlot, StyleValue};
 use ondin_core::{Brush, Document, NodeId, Operation, Transaction};
 
 /// The capsule's height and its corner — fully rounded, the reference shape
-/// (F1, D1038's capsule rule).
+/// (D1038's capsule rule).
 const CAPSULE_H: f32 = 28.0;
-/// The menu's and the picker's widths (F4, F5).
+/// The menu's and the picker's widths.
 const MENU_W: f32 = 210.0;
 const PICKER_W: f32 = 256.0;
 const ROW_H: f32 = 26.0;
-/// Greyed rows' opacity under a read-only capsule (F3).
+/// Greyed rows' opacity under a read-only capsule.
 const GREYED: f32 = 0.42;
 
-/// The read-only lock on `ui`: inert and greyed (D1038 (1), F3). An `Area`
+/// The read-only lock on `ui`: inert and greyed (D1038 (1)). An `Area`
 /// opened from a locked row inherits neither, so a popover takes it itself.
 pub(crate) fn lock(ui: &mut egui::Ui) {
     ui.disable();
@@ -47,9 +46,9 @@ pub(crate) enum StyleShown {
     Plain,
     /// Every one is bound to this style.
     One(StyleId),
-    /// Every one is styled, not all alike — the styles, in id order (F10).
+    /// Every one is styled, not all alike — the styles, in id order.
     Mixed(Vec<StyleId>),
-    /// Some are styled and some are not (F10's second case).
+    /// Some are styled and some are not.
     Partial,
 }
 
@@ -88,7 +87,7 @@ pub(crate) struct StyleMenu {
     under: egui::Rect,
 }
 
-/// *Apply style…*'s picker (F5), hung under the card's header.
+/// *Apply style…*'s picker, hung under the card's header.
 pub(crate) struct StylePicker {
     slot: StyleSlot,
     targets: Vec<NodeId>,
@@ -99,7 +98,7 @@ pub(crate) struct StylePicker {
 }
 
 /// A style just made by *Create style…*, its name being typed in the
-/// capsule (F6): `Enter` keeps, `Escape` undoes.
+/// capsule: `Enter` keeps, `Escape` undoes.
 pub(crate) struct StyleNaming {
     pub(crate) style: StyleId,
     text: String,
@@ -133,7 +132,7 @@ fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleVa
         .then_some(first)
 }
 
-/// A layout's glyph (F7): Phosphor's *columns* for a row, the same picture
+/// A layout's glyph: Phosphor's *columns* for a row, the same picture
 /// turned, *rows*, for a column — the display glyph turned with the direction —
 /// and the four squares for a grid (§15 D1076).
 pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static str {
@@ -147,7 +146,7 @@ pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static
     }
 }
 
-/// A style's short summary (F1): `1 fill`, `1 · inside`, `2 shadows`.
+/// A style's short summary: `1 fill`, `1 · inside`, `2 shadows`.
 fn summary(doc: &Document, value: &StyleValue) -> String {
     let plural = |n: usize, one: &str, many: &str| match n {
         1 => format!("1 {one}"),
@@ -246,7 +245,7 @@ fn preview_colour(doc: &Document, value: &StyleValue) -> Option<ondin_core::peni
 }
 
 /// A style's preview: a 14×14 swatch for a fill, a ring for a stroke, a small
-/// shadowed square for effects (F1, G8), and *Ag* for a text style (§15 D1068)
+/// shadowed square for effects, and *Ag* for a text style (§15 D1068)
 /// — in the chrome's face, since a document's families are not the UI's fonts.
 pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, rect: egui::Rect) {
     let ink = |a: u8| color::text_a(a);
@@ -285,7 +284,7 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
                 ink(204),
             );
         }
-        // F7: the display glyph turned with the direction (§15 D1076).
+        // The display glyph turned with the direction (§15 D1076).
         StyleValue::Layout(l) => {
             p.text(
                 rect.center(),
@@ -298,7 +297,7 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
     }
 }
 
-/// A capsule's frame: the fully rounded ground, `hover` lifting it (F1, F2).
+/// A capsule's frame: the fully rounded ground, `hover` lifting it.
 fn capsule_ground(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -310,7 +309,7 @@ fn capsule_ground(
     (rect, resp)
 }
 
-/// A styled card's capsule (F1–F3, G9's *editing*): caret, preview, name and
+/// A styled card's capsule, or the *editing* one: caret, preview, name and
 /// summary; on hover, *Detach* — or while editing, *Done* — in the summary's
 /// place. The capsule's own click opens or closes the card under it.
 fn capsule(
@@ -441,7 +440,7 @@ fn capsule(
     out
 }
 
-/// F10's capsule over several layers styled differently: no caret, a split
+/// The capsule over several layers styled differently: no caret, a split
 /// swatch, *Mixed* and the count, its tooltip naming them.
 fn mixed_capsule(ui: &mut egui::Ui, doc: &Document, styles: &[StyleId]) {
     let (rect, resp) = capsule_ground(ui, ui.id().with("style-mixed"), egui::Sense::hover());
@@ -474,7 +473,7 @@ fn mixed_capsule(ui: &mut egui::Ui, doc: &Document, styles: &[StyleId]) {
     resp.on_hover_text(names.join("\n"));
 }
 
-/// F3's footer under a read-only card, and G9's under one being edited.
+/// The footer under a read-only card, and under one being edited.
 fn footer(ui: &mut egui::Ui, glyph: &str, text: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.0;
@@ -489,7 +488,7 @@ fn footer(ui: &mut egui::Ui, glyph: &str, text: &str) {
 
 impl OndinApp {
     /// A style slot's card: [`OndinApp::panel_full`] with its `⋯`, and, while its
-    /// targets are styled, the capsule in place of the rows (F1–F3, F10) — the
+    /// targets are styled, the capsule in place of the rows — the
     /// rows themselves `body`. Answers whether the header's `+` was pressed,
     /// which a styled card never offers.
     pub(super) fn style_card(
@@ -529,7 +528,7 @@ impl OndinApp {
         let state = shown(&self.session.doc, targets, slot);
         let editing = matches!(state, StyleShown::One(s) if self.session.style_edit == Some(s));
         // The `+` hides while any card in scope is styled, and nothing moves:
-        // the `⋯` keeps its corner (F8, F10).
+        // the `⋯` keeps its corner.
         let action = if state.any() && !editing {
             None
         } else {
@@ -559,7 +558,7 @@ impl OndinApp {
     }
 
     /// The rows a style card draws for `state`: the capsule and its greyed,
-    /// editing or live rows, F10's mixed capsule, or `body` plain.
+    /// editing or live rows, the mixed capsule, or `body` plain.
     #[allow(clippy::too_many_arguments)]
     fn style_rows(
         &mut self,
@@ -624,7 +623,7 @@ impl OndinApp {
                 }
             }
             StyleShown::Mixed(list) => mixed_capsule(ui, &app.session.doc, list),
-            // Some styled and some not (F10): the rows greyed and inert, as a
+            // Some styled and some not: the rows greyed and inert, as a
             // styled card's are — the inspector is the one door that does
             // not detach (D1038 (1)); the `⋯` detaches or applies to them all.
             StyleShown::Partial => {
@@ -638,7 +637,7 @@ impl OndinApp {
         }
     }
 
-    /// F6's capsule: the new style's name being typed, the capsule ringed in
+    /// The naming capsule: the new style's name being typed, the capsule ringed in
     /// the accent; `Enter` keeps the name, `Escape` undoes the create.
     fn naming_capsule(&mut self, ui: &mut egui::Ui, style: &Style) {
         let Some(mut n) = self.style_naming.take() else {
@@ -687,7 +686,7 @@ impl OndinApp {
             )
         });
         if escape {
-            // `Escape` undoes (F6): the create was the last step.
+            // `Escape` undoes: the create was the last step.
             self.undo();
             return;
         }
@@ -735,7 +734,7 @@ impl OndinApp {
     }
 
     /// Detach `targets`' `slot` from whatever style each is bound to, their
-    /// values kept — F2's chip and F4's *Detach style*.
+    /// values kept — the capsule's *Detach* and the menu's *Detach style*.
     fn detach_styles(&mut self, slot: StyleSlot, targets: &[NodeId]) {
         let doc = &self.session.doc;
         let ops: Vec<Operation> = targets
@@ -751,7 +750,7 @@ impl OndinApp {
     }
 
     /// The operations applying `s` to `targets`, and the values the commit will
-    /// write beside them — what the picker's highlight previews (F5).
+    /// write beside them — what the picker's highlight previews.
     fn apply_tx(
         &self,
         s: StyleId,
@@ -775,7 +774,7 @@ impl OndinApp {
         Transaction(ops)
     }
 
-    /// *Create style…* (F4, F6): the agreed list made a style under a
+    /// *Create style…*: the agreed list made a style under a
     /// free name, every target bound to it, and the capsule opened on its name.
     fn create_style(&mut self, slot: StyleSlot, targets: &[NodeId]) {
         let Some(&from) = targets.first() else { return };
@@ -849,13 +848,13 @@ impl OndinApp {
             1 => "Apply style…".to_string(),
             n => format!("Apply style to {n} layers…"),
         };
-        // Create is the agreed list's — off over several styles or a mix (F10).
+        // Create is the agreed list's — off over several styles or a mix.
         let can_create = match &state {
             StyleShown::Plain => agreed(doc, &menu.targets, menu.slot).is_some(),
             StyleShown::One(_) => true,
             StyleShown::Mixed(_) | StyleShown::Partial => false,
         };
-        // Every row names how many layers it acts on (F10) — *Create* too, which
+        // Every row names how many layers it acts on — *Create* too, which
         // binds them all. One layer's rows are the maintainer's shorter words,
         // *Create style* and *Create style as a copy* (§15 D1086).
         let create = match (&state, n) {
@@ -938,13 +937,13 @@ impl OndinApp {
         };
         let doc = &self.session.doc;
         let query = pk.query.trim().to_lowercase();
-        // Grouped by the path before the last `/`, groups and rows by name (F5).
+        // Grouped by the path before the last `/`, groups and rows by name.
         let mut rows: Vec<&Style> = doc
             .styles()
             .of_slot(pk.slot)
             .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query))
             .collect();
-        // *Kit groups last* (F5, §15 D1065): the document's own, then each kit's
+        // *Kit groups last* (§15 D1065): the document's own, then each kit's
         // under its name, then its id, so two kits of one name never interleave.
         let kit_of = |s: &Style| {
             s.kit()
@@ -1143,7 +1142,7 @@ impl OndinApp {
             self.session.clear_gesture_preview();
             return;
         }
-        // The highlighted row previews on the canvas (F5).
+        // The highlighted row previews on the canvas.
         match rows.get(pk.highlight) {
             Some(s) => {
                 let tx = self.apply_tx(s.id, pk.slot, &pk.targets, true);
@@ -1177,7 +1176,7 @@ impl OndinApp {
         false
     }
 
-    /// The browser's *Edit* (G9, §15 D1063): select the style's users and open
+    /// The browser's *Edit* (§15 D1063): select the style's users and open
     /// their card on the style, live.
     pub(crate) fn edit_style(&mut self, s: StyleId) {
         let users = style::users(&self.session.doc, s);
@@ -1325,9 +1324,9 @@ mod tests {
         app.session.doc.get(id).unwrap().styles().fills
     }
 
-    /// **A styled Fill card is its capsule, and *Detach* keeps the values**
-    /// (F1, F2): after *Create style…*, the card draws the style's
-    /// name and its summary where the rows were, and detaching leaves the red.
+    /// **A styled Fill card is its capsule, and *Detach* keeps the values**:
+    /// after *Create style…*, the card draws the style's name and its summary
+    /// where the rows were, and detaching leaves the red.
     #[test]
     fn a_styled_card_draws_its_capsule_and_detaching_keeps_its_values() {
         let ctx = egui::Context::default();
@@ -1344,13 +1343,13 @@ mod tests {
         app.detach_styles(StyleSlot::Fills, &[a]);
         assert_eq!(fill_style(&app, a), None);
         assert_eq!(fill_colour(&app, a), Brush::Solid(RED));
-        // Asked for, so no status (F2: *no toast*).
+        // Asked for, so no status.
         assert!(!app.session.status().text.starts_with("Detached"));
         let shapes = frame(&ctx, &mut app, vec![]);
         assert!(!drawn(&shapes, "1 fill"), "the plain card is back");
     }
 
-    /// **The Container card is a style card** (§15 D1075, D1076, F7): a column
+    /// **The Container card is a style card** (§15 D1075, D1076): a column
     /// frame's layout made a style through *Create style…*, the card
     /// draws its capsule — *Column · 6* — where the rows were; applied to a plain
     /// frame it gives it the column; detached, the frame keeps it.
@@ -1423,7 +1422,7 @@ mod tests {
         );
     }
 
-    /// **`Escape` while the new style's name is typed undoes the create** (F6).
+    /// **`Escape` while the new style's name is typed undoes the create**.
     #[test]
     fn escape_on_a_new_styles_name_undoes_the_create() {
         let ctx = egui::Context::default();
@@ -1517,8 +1516,7 @@ mod tests {
         assert_eq!(fill_style(&app, b), None, "nothing applied");
     }
 
-    /// **The picker's highlight previews on the canvas and `Enter` applies it**
-    /// (F5).
+    /// **The picker's highlight previews on the canvas and `Enter` applies it**.
     #[test]
     fn the_pickers_highlight_previews_and_enter_applies() {
         let ctx = egui::Context::default();

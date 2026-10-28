@@ -21,16 +21,16 @@ use ondin_core::container::{Display, LaidGrid};
 use ondin_core::kurbo::{Affine, Point, Rect, Vec2};
 use ondin_core::{NodeId, Operation, Transaction};
 
-/// A band thinner than this on screen is not drawn and does not pick (H2): at
+/// A band thinner than this on screen is not drawn and does not pick: at
 /// that size the band is a line, and a handle on it would be guesswork.
 const MIN_BAND_PX: f64 = 6.0;
-/// How thick a band's pick area is on screen at least (P4) — so a gap of 0 can
+/// How thick a band's pick area is on screen at least — so a gap of 0 can
 /// still be grabbed and dragged open.
 const MIN_PICK_PX: f64 = 8.0;
-/// The pill drawn along the band under the pointer (P2), in screen points.
+/// The pill drawn along the band under the pointer, in screen points.
 const PILL_LEN: f32 = 12.0;
 const PILL_THICK: f32 = 3.0;
-/// The step `Shift` drags in (D1), a nudge's coarse step.
+/// The step `Shift` drags in, a nudge's coarse step.
 const SHIFT_STEP: f64 = 10.0;
 /// Units of spacing per local unit the pointer travels — half, so a value
 /// moves one unit per two points at 100% (§15 D1094, the maintainer's
@@ -91,7 +91,7 @@ impl BandKind {
         }
     }
 
-    /// The picking order (P3, G1): top and bottom padding own the corners they
+    /// The picking order: top and bottom padding own the corners they
     /// share with the sides, and a column gap wins where it crosses a row gap.
     fn priority(self) -> u8 {
         match self {
@@ -108,12 +108,12 @@ impl BandKind {
 pub(crate) struct Band {
     pub kind: BandKind,
     /// The space as laid out — under `space-between` more than the stored gap
-    /// (G2). Zero thick for a gap or padding of 0.
+    /// Zero thick for a gap or padding of 0.
     pub rect: Rect,
     /// The stored value the label reads and the drag writes.
     pub stored: f64,
     /// The room around a zero band — its neighbours' extent along the axis —
-    /// which decides whether its 8px pick strip still fits (H2).
+    /// which decides whether its 8px pick strip still fits.
     pub room: f64,
     /// The label's word: *Gap* for a flex container's between-items gap, else
     /// the axis's name, or *Padding*.
@@ -131,7 +131,7 @@ impl Band {
     }
 
     /// The area that picks it, at least `min` thick across its axis: a gap's
-    /// strip centred on the seam (P4), a padding's grown inward from the edge.
+    /// strip centred on the seam, a padding's grown inward from the edge.
     fn pick(&self, min: f64) -> Rect {
         let r = self.rect;
         if self.thickness() >= min {
@@ -159,14 +159,14 @@ impl Band {
 /// with `items` its in-flow children's laid boxes in that space, in flow order,
 /// and `grid` a grid container's laid tracks.
 ///
-/// Padding: four bands running edge to edge, so the corners belong to two
-/// (P3). A grid: a column-gap band between each pair of column tracks, across
-/// the rows' run, and a row-gap band likewise (G1). A flex container: its
+/// Padding: four bands running edge to edge, so the corners belong to two.
+/// A grid: a column-gap band between each pair of column tracks, across
+/// the rows' run, and a row-gap band likewise. A flex container: its
 /// items split into lines where the main axis runs back (`build::flow_index`'s
 /// rule), a between-items band between neighbours on a line across the line's
 /// cross band, and — wrapped — a band between lines across the content's whole
-/// main extent, a short last line included (G3). Every band is where the
-/// layout puts it, so a reversed direction needs nothing of its own (8).
+/// main extent, a short last line included. Every band is where the
+/// layout puts it, so a reversed direction needs nothing of its own.
 pub(crate) fn bands(
     display: &Display,
     bx: Rect,
@@ -326,8 +326,8 @@ pub(crate) fn bands(
 }
 
 /// The bands worth drawing and picking at `scale` (screen points per local
-/// unit along x and y): one thinner than [`MIN_BAND_PX`] is dropped on its own
-/// (H2), and a zero one only where its pick strip would crowd its neighbours —
+/// unit along x and y): one thinner than [`MIN_BAND_PX`] is dropped on its own,
+/// and a zero one only where its pick strip would crowd its neighbours —
 /// twice the strip wider than their room.
 pub(crate) fn shown(bands: Vec<Band>, scale: Vec2) -> Vec<Band> {
     bands
@@ -348,7 +348,7 @@ pub(crate) fn shown(bands: Vec<Band>, scale: Vec2) -> Vec<Band> {
 }
 
 /// The band at local point `p`, by [`BandKind::priority`]: none within `edge`
-/// of the box's outline (the resize handles' and sides' own pick radius, P4),
+/// of the box's outline (the resize handles' and sides' own pick radius),
 /// and **no band under a pinned child** — a layer pinned by its insets may sit
 /// on the padding or across a gap, and a click there is the layer's.
 /// `children` is every child's box with whether it is pinned by authored
@@ -356,10 +356,9 @@ pub(crate) fn shown(bands: Vec<Band>, scale: Vec2) -> Vec<Band> {
 /// drawing nothing of its own.
 ///
 /// **A padding band yields to any child in that list on it; a gap band only to
-/// a pinned one.** A gap thinner than `min` is a strip centred on its seam (P4), which
-/// reaches into the in-flow items either side by design, or a gap of 0 could
-/// never be dragged open. It yielded to no child at all until §15 D1078's
-/// second amendment, so a pinned layer over a gap lost its click to the band.
+/// a pinned one**, so a pinned layer over a gap keeps its click. A gap thinner
+/// than `min` is a strip centred on its seam, which reaches into the in-flow
+/// items either side by design, or a gap of 0 could never be dragged open.
 /// `min` is the strip's thickness and `edge` the resize radius, each per axis
 /// in that axis's local units.
 pub(crate) fn hit(
@@ -388,7 +387,7 @@ pub(crate) fn hit(
         // A gap band runs the tracks' whole run, so a grid item spanning the
         // gap lies across it: the item, laid over the band on both sides of
         // the point, takes the press. (A gap's thin strip reaching into an item
-        // beside it does not — P4's zero-gap pick.)
+        // beside it does not — that is the zero gap's pick.)
         let spans = || {
             children.iter().any(|(c, _)| {
                 c.contains(p)
@@ -407,8 +406,8 @@ pub(crate) fn hit(
         }
         // A padding band's strip reaches past the resize radius by `min` at
         // least, so a padding of 0 — or one thinner than the radius — can still
-        // be grabbed from the inner side (P4's *"padding picks only from the
-        // inner part of its band"*, made reachable for a thin one).
+        // be grabbed from the inner side: padding picks only from the inner
+        // part of its band, made reachable for a thin one.
         // `min` and `edge` along the band's own axis, each its screen size in
         // that axis's local units — a scaled container's 8 px are not the same
         // number of units across x as across y.
@@ -424,7 +423,7 @@ pub(crate) fn hit(
     })
 }
 
-/// The slots a drag of `kind` writes under the held modifiers (D2): a gap its
+/// The slots a drag of `kind` writes under the held modifiers: a gap its
 /// own axis; a padding its side, `Alt` the opposite side with it, `Alt+Shift`
 /// all four.
 pub(crate) fn written_slots(kind: BandKind, alt: bool, shift: bool) -> Vec<usize> {
@@ -447,10 +446,9 @@ pub(crate) fn written_slots(kind: BandKind, alt: bool, shift: bool) -> Vec<usize
 /// whole units, floored at 0. `step` drags in [`SHIFT_STEP`]s from `base`, as a
 /// nudge steps.
 ///
-/// **`Shift` alone steps, and not under `Alt`** — the session's ruling over the
-/// design, which gave `Shift` both the step (*"it combines with Alt"*) and,
-/// with `Alt`, the all-four chord (D2): one chord cannot mean both, and all
-/// four sides is the reading a designer reaches for with it.
+/// **`Shift` alone steps, and not under `Alt`**: `Alt+Shift` is the all-four
+/// chord, one chord cannot mean both, and all four sides is the reading a
+/// designer reaches for with it.
 pub(crate) fn dragged_value(kind: BandKind, base: f64, delta: Vec2, step: bool) -> f64 {
     let along = if kind.horizontal() { delta.x } else { delta.y } * kind.sign() * DRAG_RATE;
     let along = match step {
@@ -464,7 +462,7 @@ pub(crate) fn dragged_value(kind: BandKind, base: f64, delta: Vec2, step: bool) 
 /// previews and its release commits. **The literal and not the drawn**: a slot
 /// the drag does not touch keeps its stored number, so a bound one stays bound
 /// (`kept_spacing_vars`), and a touched bound slot detaches only if the value
-/// leaves the one its variable draws (B2).
+/// leaves the one its variable draws.
 pub(crate) fn written(literal: &Display, slots: &[usize], value: f64) -> Display {
     let mut s = literal.spacing();
     for i in slots {
@@ -475,7 +473,7 @@ pub(crate) fn written(literal: &Display, slots: &[usize], value: f64) -> Display
     d
 }
 
-/// The label a drag shows (D1, D2, G2): *Gap 24*, *Padding 28 · L R*,
+/// The label a drag shows: *Gap 24*, *Padding 28 · L R*,
 /// *Padding 28 · all*, and under derived space *Gap 8 · laid 52*.
 pub(crate) fn label(band: &Band, value: f64, slots: &[usize], laid: Option<f64>) -> String {
     let n = crate::ui::number(0)(value, 0..=0);
@@ -663,7 +661,7 @@ impl OndinApp {
     }
 
     /// The band under screen point `screen`, with its subject — what a press
-    /// there would grab and what the cursor answers for (7).
+    /// there would grab and what the cursor answers for.
     pub(crate) fn spacing_at(
         &self,
         screen: egui::Pos2,
@@ -777,7 +775,7 @@ impl OndinApp {
     /// The variables `tx` — a band drag's, [`Self::band_drag_tx`] — cuts, by
     /// name, for the floating status. The commit says what its own passes cut
     /// (§15 D1071) and says nothing of a binding the edit sets itself, which is
-    /// a chip's asked-for detach (F2); a drag's cut is a detach the user wrote
+    /// a chip's asked-for detach; a drag's cut is a detach the user wrote
     /// over, so the release says it.
     pub(crate) fn band_drag_cut(&self, tx: &Transaction) -> Vec<String> {
         let doc = &self.session.doc;
@@ -800,12 +798,12 @@ impl OndinApp {
         names
     }
 
-    /// The handles' drawing (2, 7): nothing at rest; with the pointer inside the
+    /// The handles' drawing: nothing at rest; with the pointer inside the
     /// subject container ([`Self::spacing_subject`]) every band faint in `GRID_GAP`'s tint — a grid's gaps
     /// are already drawn by its track lines, so only its padding is added — the
     /// band under the pointer strong with its pill; while dragging only the
     /// bands being written, strong, and the label beside the pointer. A bound
-    /// band's label shows on hover, its variable as a capsule (B1).
+    /// band's label shows on hover, its variable as a capsule.
     pub(crate) fn draw_spacing_bands(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if self.mode != crate::input::Mode::Normal {
             return;
@@ -878,7 +876,7 @@ impl OndinApp {
         fill(b.rect, strong);
         self.spacing_hatch(painter, &s, b, b.stored, rect, ppp);
         paint_pill(painter, quad(b.rect), b.kind, hue);
-        // A bound slot names its variable before any drag (B1).
+        // A bound slot names its variable before any drag.
         if let Some(var) = self
             .session
             .doc
@@ -905,7 +903,7 @@ impl OndinApp {
         crate::canvas::resize_icon(egui::vec2(x as f32, y as f32))
     }
 
-    /// G2's hatch: where a gap lays out wider than it stores, the stored part
+    /// The derived-space hatch: where a gap lays out wider than it stores, the stored part
     /// marked at the band's leading edge, so the label's two numbers read.
     fn spacing_hatch(
         &self,
@@ -946,7 +944,7 @@ impl OndinApp {
     }
 }
 
-/// The pill at a band's middle (P2, P3): lying along the band, across the
+/// The pill at a band's middle: lying along the band, across the
 /// direction it drags.
 fn paint_pill(painter: &egui::Painter, quad: [egui::Pos2; 4], kind: BandKind, hue: egui::Color32) {
     let centre = egui::pos2(
@@ -964,8 +962,8 @@ fn paint_pill(painter: &egui::Painter, quad: [egui::Pos2; 4], kind: BandKind, hu
     );
 }
 
-/// The value label beside the pointer (7), drawn as the size badge's pill;
-/// `var` a bound slot's variable, as a capsule after the word (B1). The gradient
+/// The value label beside the pointer, drawn as the size badge's pill;
+/// `var` a bound slot's variable, as a capsule after the word. The gradient
 /// handles' readout too.
 pub(crate) fn paint_label(
     painter: &egui::Painter,
@@ -1140,7 +1138,7 @@ mod canvas_tests {
             .spacing()
     }
 
-    /// **Dragging a gap band writes the gap, one undo step** (D1): the band
+    /// **Dragging a gap band writes the gap, one undo step**: the band
     /// between the first two items grabbed at x 65 and dragged 16 to the right
     /// — 8 at the drag's half rate (§15 D1094) — makes the gap 18, every gap of
     /// the row with it, and undo puts back 10.
@@ -1297,8 +1295,7 @@ mod canvas_tests {
         );
     }
 
-    /// **The modifiers choose the sides and the step** (D1, D2, and the
-    /// session's ruling): `Shift` on a gap steps by 10 — a 13-point drag, 6.5
+    /// **The modifiers choose the sides and the step**: `Shift` on a gap steps by 10 — a 13-point drag, 6.5
     /// at half rate (§15 D1094), is +10 — `Alt` on the left padding writes the
     /// right with it, and `Alt+Shift` all four, in whole units with no step.
     ///
@@ -1362,7 +1359,7 @@ mod canvas_tests {
     }
 
     /// **A bound gap detaches when released off its variable and says so, and
-    /// stays bound released on it** (B1, B2): the gap bound to *space/md* (10);
+    /// stays bound released on it**: the gap bound to *space/md* (10);
     /// a drag back to where it started commits nothing, a drag to 18 cuts the
     /// binding and the floating status names it.
     ///
@@ -1649,7 +1646,7 @@ mod canvas_tests {
         assert_eq!(spacing(&app, row)[0], 10.0, "nothing committed");
     }
 
-    /// **Bands are drawn on hover, not at rest** (2, P1): with the pointer off
+    /// **Bands are drawn on hover, not at rest**: with the pointer off
     /// the selected row no band's tint is in the frame's shapes; over its gap
     /// the faint bands and the strong one are.
     ///
@@ -1724,7 +1721,7 @@ mod canvas_tests {
             .count()
     }
 
-    /// **Derived space: the hatch and the label** (G2, D1): under
+    /// **Derived space: the hatch and the label**: under
     /// `space-between` at gap 8 the first gap lays out 120 wide — (360 − 120 −
     /// 16) / 2 + 8 — so hovering it hatches the stored part, and dragging it
     /// shows *Gap 8 · laid 120*; at the start, where the gap lays out as it
@@ -1780,7 +1777,7 @@ mod canvas_tests {
         );
     }
 
-    /// **A grid's column gap drags end to end** (G1): a grid of two 100-wide
+    /// **A grid's column gap drags end to end**: a grid of two 100-wide
     /// columns at gap 10 inside padding 20 — the gap band x 120–130 — dragged
     /// 16 to the right (8 at half rate) is a gap of 18, the row gap untouched.
     ///
@@ -2055,7 +2052,7 @@ mod canvas_tests {
     }
 
     /// **A layout-styled container's drag detaches the style and says so**
-    /// (B3, §15 D1075): the row made the user of a layout style, its gap
+    /// (§15 D1075): the row made the user of a layout style, its gap
     /// dragged to 18 — the style cut, the gap written, the floating status
     /// naming the style.
     #[test]
@@ -2091,7 +2088,7 @@ mod canvas_tests {
         assert_eq!(app.session.status().text, "Detached Stack/Row");
     }
 
-    /// **An instance's drag is an override** (B4): the row made a main and an
+    /// **An instance's drag is an override**: the row made a main and an
     /// instance placed over it, the instance selected and its gap dragged to
     /// 18 — the copy at 18 and still linked, the main at 10.
     #[test]
@@ -2193,7 +2190,7 @@ mod canvas_tests {
         );
     }
 
-    /// **A hugging container grows with the drag** (D1): the row's width fit to
+    /// **A hugging container grows with the drag**: the row's width fit to
     /// its content, a gap dragged +8 mid-drag (16 points at half rate) lays the
     /// row 16 wider — both gaps
     /// move. The size badge reads this same preview box; its drawing is not
@@ -2302,14 +2299,14 @@ mod canvas_tests {
         );
     }
 
-    /// **A rotated container's bands pick where they are drawn** (8): the row
+    /// **A rotated container's bands pick where they are drawn**: the row
     /// turned a quarter about its origin, the first gap's middle at world
     /// (−35, 65) picks the gap with the vertical arrows, and a drag 16 down (8
     /// at half rate) — along the row's own x — is a gap of 18.
     ///
     /// Flip, run: `spacing_at` testing the world point unmapped by the row's
-    /// inverse transform fails on *"the gap, turned"*. B3, B4 and the hugging
-    /// row's tests are not flipped: each rests on a pass with its own tests
+    /// inverse transform fails on *"the gap, turned"*. The layout-style, instance
+    /// and hugging row's tests are not flipped: each rests on a pass with its own tests
     /// (`style::settle`, the override marks, the flex engine's fit-content).
     #[test]
     fn a_rotated_containers_bands_pick_where_drawn() {
@@ -2342,7 +2339,7 @@ mod canvas_tests {
         assert_eq!(spacing(&app, row)[0], 18.0);
     }
 
-    /// **The cursor says resize only over a band** (7, H1): across a gap the
+    /// **The cursor says resize only over a band**: across a gap the
     /// horizontal arrows, across the top padding the vertical, over an item the
     /// plain arrow, and with two layers selected nothing over the same gap.
     #[test]
@@ -2430,7 +2427,7 @@ mod tests {
 
     /// **A column's between-items gap is a `RowGap`** — the vertical gap, as the
     /// engine reads it — and a wrapped row's line gap runs across the content's
-    /// whole width, under a short last line too (G3).
+    /// whole width, under a short last line too.
     #[test]
     fn a_columns_gap_is_vertical_and_a_wrapped_rows_line_gap_spans_the_content() {
         let col = Display::Flex(Flex {
@@ -2479,7 +2476,7 @@ mod tests {
         );
     }
 
-    /// **A grid's bands come from its laid tracks** (G1): a column-gap band
+    /// **A grid's bands come from its laid tracks**: a column-gap band
     /// between each pair of columns across the rows' whole run, a row-gap band
     /// likewise, each writing its own axis.
     #[test]
@@ -2515,7 +2512,7 @@ mod tests {
         assert_eq!((row.stored, row.name), (8.0, "Row gap"));
     }
 
-    /// **Picking** (P3, P4): a corner is the top padding's, a zero gap picks
+    /// **Picking**: a corner is the top padding's, a zero gap picks
     /// across a strip centred on its seam, nothing picks within the resize
     /// radius of the edge, and a thin padding is still reachable past it. A
     /// pinned child takes its own click over a padding band and over a gap band
@@ -2569,7 +2566,7 @@ mod tests {
         assert_eq!(i.map(|i| thin[i].kind), Some(BandKind::Padding(Side::Top)));
     }
 
-    /// **The write** (D1, D2): a delta at half the pointer's travel (§15
+    /// **The write**: a delta at half the pointer's travel (§15
     /// D1094) in whole units floored at 0, a right padding growing as the
     /// pointer moves in, `Shift` stepping by 10, and the modifiers choosing the
     /// sides; a bound slot left untouched keeps its literal.
@@ -2598,7 +2595,7 @@ mod tests {
         assert_eq!(d.gaps(), (10.0, 10.0));
     }
 
-    /// **The label** (D2, G2): the sides it writes, and under derived space the
+    /// **The label**: the sides it writes, and under derived space the
     /// laid number beside the stored one.
     #[test]
     fn the_label_names_the_sides_and_the_laid_space() {
@@ -2623,7 +2620,7 @@ mod tests {
         assert_eq!(label(&gap, 24.0, &[0], Some(24.0)), "Gap 24");
     }
 
-    /// **H2**: at a quarter scale a 16-unit band is 4 points and dropped, and a
+    /// **A band too thin on screen is dropped**: at a quarter scale a 16-unit band is 4 points and dropped, and a
     /// zero gap goes with it once its strip would crowd its neighbours.
     #[test]
     fn a_band_too_thin_on_screen_is_dropped() {

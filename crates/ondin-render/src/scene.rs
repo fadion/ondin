@@ -221,12 +221,15 @@ struct OutlinePainter<'a, P: ScenePainter> {
 
 impl<P: ScenePainter> OutlinePainter<'_, P> {
     fn hairline(&mut self, transform: Affine, path: &BezPath) {
-        // One device pixel in `transform`'s space: the inverse of the mean scale
-        // of world → device after it.
-        let scale = (base_linear_det(self.base * transform)).abs().sqrt();
-        if !scale.is_finite() || scale <= 0.0 {
+        // Stroked in world space, the path mapped there first: `transform` may
+        // scale unevenly (a sub-pixel box snapped to a pixel, a skew), and a
+        // width under it would come out thicker on one axis than the other.
+        // `base` is the camera's even scale, so a width under it is one width.
+        let scale = (base_linear_det(self.base)).abs().sqrt();
+        if !scale.is_finite() || scale <= 0.0 || base_linear_det(transform) == 0.0 {
             return;
         }
+        let path = transform * path.clone();
         let stroke = StrokePaint {
             brush: &self.ink,
             framing: None,
@@ -237,7 +240,7 @@ impl<P: ScenePainter> OutlinePainter<'_, P> {
             dashes: Vec::new(),
             dash_offset: 0.0,
         };
-        self.inner.stroke_path(transform, path, &stroke);
+        self.inner.stroke_path(Affine::IDENTITY, &path, &stroke);
     }
 }
 
@@ -642,12 +645,15 @@ fn paint_node<P: ScenePainter>(
     // Cull what misses the viewport, skipping a subtree only when the node's bounds
     // cover it: a group's, a clipping frame's, and a boolean's (its children are
     // never walked). A new `NodeKind` needs a look at this predicate.
+    //
+    // Outline mode draws what a frame clips, and a clipping frame's ink is its box
+    // alone, as is every ancestor's share of it: there only a leaf and a boolean
+    // are culled.
+    let outline = ov.outline().is_some();
     let bounds_cover_subtree = node.children().is_empty()
-        || node.clip()
-        || matches!(
-            node.kind(),
-            NodeKind::Group | NodeKind::Root | NodeKind::Boolean { .. }
-        );
+        || (node.clip() && !outline)
+        || matches!(node.kind(), NodeKind::Boolean { .. })
+        || (matches!(node.kind(), NodeKind::Group | NodeKind::Root) && !outline);
     // Never culled: a moving node (cached bounds describe where it *was*) or one
     // holding a ghost (the bounds cannot know about it). `ink_bounds`, not
     // `world_bounds` (§5.3a): a drop shadow lands outside the layer's box.

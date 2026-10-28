@@ -66,6 +66,7 @@ In the View menu and the palette, not the canvas menu: it is chrome-wide, like *
   visible stroke: a bound colour resolved, a gradient as its first stop, an image as grey. An
   opened group with no paint draws nothing itself; an unfilled frame, or a container too small to
   open, is a faint neutral box. A text layer is a rounded bar through the middle 60% of its box.
+  A mask draws nothing, as on the canvas, where it is not artwork.
   The selection's bounds are outlined in `color::SELECT`; the viewport is an accent box.
 - **The fit** is the page content ∪ the viewport, padded 4% of the larger side, so the viewport box
   never leaves the map; an empty page fits the viewport at 2.4× its size.
@@ -197,7 +198,10 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   or stroke, with type in the same ink, in near-black or near-white by the page ground's luminance.
   It pushes no layer, so nothing is clipped, masked, faded or given an effect: the view exists to
   show what the artwork covers. It is `scene::OutlinePainter` wrapping the backend's painter, so the
-  walk itself is unchanged, and `RenderOverrides::set_outline` carries the ink, installed every frame
+  walk is the same but for its cull: a clipping frame, a group and the page are not culled by
+  their ink, which stops at a clipping frame's box, so a frame's overflow shows with the frame
+  out of view. A hairline is stroked on the path mapped to world space, so it is one device pixel
+  on every axis of a skewed or snapped layer. `RenderOverrides::set_outline` carries the ink, installed every frame
   by `draw_canvas` (present mode clears it). Hit testing and selection are unchanged. The eyedropper
   samples the canvas as drawn, so in outline view it picks up the ink.
 - The switches are **view state**, not document state. All but focus mode and outline view are kept in `prefs.view`

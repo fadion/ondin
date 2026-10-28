@@ -324,6 +324,34 @@ fn outline_view_strokes_every_outline_as_a_hairline_and_drops_layers() {
     }
 }
 
+/// Outline mode draws what a frame clips even when only the overflow is in
+/// view: the cull reads the frame's unclipped bounds there.
+///
+/// flip: `paint_node` culling on `ink_bounds` alone → fails at "the overflow".
+#[test]
+fn outline_view_draws_a_frames_overflow_with_the_frame_out_of_view() {
+    let (mut doc, _res, _near, far) = two_rect_doc();
+    doc.apply(&Transaction(vec![Operation::SetTransform {
+        id: far,
+        transform: Affine::translate((3000.0, 3000.0)),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let vp = Viewport {
+        view: Rect::new(2900.0, 2900.0, 3200.0, 3200.0),
+        pixel_size: (300, 300),
+    };
+    let ink = Color::from_rgba8(255, 0, 128, 255);
+    let mut ov = RenderOverrides::default();
+    ov.set_outline(Some(ink));
+    let mut outlined = OutlineRecorder {
+        ink: Some(ink),
+        ..Default::default()
+    };
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut outlined);
+    assert!(!outlined.strokes.is_empty(), "the overflow is drawn");
+}
+
 /// "Clip content", off. The frame stops pushing a clip layer — and stops being
 /// a culling boundary with it, because its own bounds no longer say anything
 /// about where its children can paint. A child outside the frame but inside the

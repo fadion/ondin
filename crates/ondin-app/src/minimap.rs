@@ -372,7 +372,12 @@ impl OndinApp {
         scale: f64,
         out: &mut Vec<MapBox>,
     ) {
-        let Some(node) = self.session.display_node(id).filter(|n| n.visible()) else {
+        // A mask is not artwork: the canvas never paints it as itself.
+        let Some(node) = self
+            .session
+            .display_node(id)
+            .filter(|n| n.visible() && !self.session.doc.get(id).is_some_and(|d| d.mask()))
+        else {
             return;
         };
         let Some(own) = self.minimap_box_of(id) else {
@@ -836,6 +841,47 @@ mod tests {
             "the frame"
         );
         assert!(!boxes.iter().any(|b| b.bounds == rect), "not its contents");
+    }
+
+    /// A mask is not drawn on the map as a box of its own.
+    ///
+    /// flip: `walk_minimap` without its `mask()` test → fails at "no box".
+    #[test]
+    fn a_mask_is_not_drawn_on_the_map() {
+        let ctx = egui::Context::default();
+        let (mut app, _, group, inner) = app_with_sections(&ctx);
+        let rect = app.session.preview_world_bounds(inner).expect("bounds");
+        assert!(
+            app.minimap_boxes(0.1).iter().any(|b| b.bounds == rect),
+            "fixture: drawn while it is no mask"
+        );
+        // Something above the mask for it to mask, smaller than it.
+        let masked = app.session.ids.mint();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: masked,
+                parent: group,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(300.0, 150.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(ondin_core::kurbo::Affine::translate((150.0, 120.0))),
+                name: None,
+            },
+            ondin_core::Operation::SetMask {
+                id: inner,
+                mask: true,
+            },
+        ])));
+        let boxes: Vec<_> = app.minimap_boxes(0.1).iter().map(|b| b.bounds).collect();
+        let masked = app.session.preview_world_bounds(masked).expect("bounds");
+        assert!(
+            boxes.contains(&masked),
+            "fixture: the masked layer is drawn: {boxes:?}"
+        );
+        assert!(!boxes.contains(&rect), "no box for the mask: {boxes:?}");
     }
 
     /// The card's height follows the page's shape and stays in 90–160 pt.

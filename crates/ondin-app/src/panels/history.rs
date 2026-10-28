@@ -281,7 +281,8 @@ impl OndinApp {
         rows
     }
 
-    /// The rows, in a list that keeps the current one in view.
+    /// The rows, in a list that keeps the current one in view. Only the rows in
+    /// view are laid out: the history in a sitting is uncapped.
     fn history_list(&mut self, ui: &mut egui::Ui) {
         let rows = self.history_rows();
         let here = self.session.history.undo_depth();
@@ -290,30 +291,38 @@ impl OndinApp {
         self.history_pane.shown = Some(key);
         #[cfg(test)]
         self.history_pane.rows.clear();
+        let current = rows.iter().position(|r| r.depth == here);
+        let pad = f32::from(crate::panels::layers::TREE_PAD_X);
+        // The foot's gap, as one more row's worth of nothing.
+        const FOOT: f32 = 8.0;
         let list = egui::ScrollArea::vertical()
             .id_salt("history")
             .auto_shrink([false, false])
             .min_scrolled_height(0.0)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: crate::panels::layers::TREE_PAD_X,
-                        right: crate::panels::layers::TREE_PAD_X,
-                        top: 0,
-                        bottom: 8,
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        for row in &rows {
-                            let rect = self.history_row(ui, row, row.depth == here);
-                            #[cfg(test)]
-                            self.history_pane.rows.push((row.depth, rect));
-                            if scroll && row.depth == here {
-                                ui.scroll_to_rect(rect, None);
-                            }
-                        }
-                    });
+            .show_viewport(ui, |ui, viewport| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let (top, left) = (ui.max_rect().top(), ui.max_rect().left());
+                let width = ui.available_width();
+                ui.set_height(rows.len() as f32 * ROW_H + FOOT);
+                let first = ((viewport.min.y / ROW_H).floor().max(0.0)) as usize;
+                let last = ((viewport.max.y / ROW_H).ceil() as usize).min(rows.len());
+                let row_rect = |i: usize| {
+                    egui::Rect::from_min_size(
+                        egui::pos2(left + pad, top + i as f32 * ROW_H),
+                        egui::vec2((width - 2.0 * pad).max(0.0), ROW_H),
+                    )
+                };
+                for (i, row) in rows.iter().enumerate().take(last).skip(first) {
+                    let rect = row_rect(i);
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    let _rect = self.history_row(&mut child, row, row.depth == here);
+                    #[cfg(test)]
+                    self.history_pane.rows.push((row.depth, _rect));
+                }
+                if scroll && let Some(i) = current {
+                    ui.scroll_to_rect(row_rect(i), None);
+                }
             });
         crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::PANEL);
     }

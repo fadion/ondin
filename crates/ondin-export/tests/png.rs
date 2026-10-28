@@ -338,6 +338,91 @@ fn stroke_alignment_puts_the_paint_on_the_right_side_of_the_outline() {
     assert!(!inked(&rgba, 18, y), "outside: must not exceed its width");
 }
 
+/// One path of two same-wound squares, (20,20)–(60,60) and (40,40)–(80,80), with a
+/// 6-wide outside stroke and the fill rule `rule`. Their overlap is covered twice.
+fn overlapping_path_doc(rule: ondin_core::FillRule) -> (Document, Resolved) {
+    let (mut doc, _) = stroked_rect_doc(StrokeAlign::Outside);
+    let rect = doc.get(doc.first_page()).unwrap().children()[0];
+    let rect = doc.get(rect).unwrap().children()[0];
+    let strokes = doc.get(rect).unwrap().paint().strokes.clone();
+    let mut ids = IdSource::new(77);
+    let path = ids.mint();
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
+    let squares = ondin_core::kurbo::BezPath::from_svg(
+        "M20,20 L60,20 L60,60 L20,60 Z M40,40 L80,40 L80,80 L40,80 Z",
+    )
+    .unwrap();
+    doc.apply(&Transaction(vec![
+        Operation::DeleteNode { id: rect },
+        Operation::CreateNode {
+            id: path,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Path {
+                path: squares,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+    ]))
+    .unwrap();
+    let mut strokes = strokes;
+    strokes[0].value.width = 6.0;
+    doc.apply(&Transaction(vec![
+        Operation::SetFills {
+            id: path,
+            fills: Vec::new(),
+        },
+        Operation::SetStrokes { id: path, strokes },
+        Operation::SetFillRule { id: path, rule },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    (doc, res)
+}
+
+/// An outside stroke on a self-overlapping path leaves out what the fill covers,
+/// read by the path's own rule. At (57, 50), inside both squares, non-zero counts
+/// two and even-odd none; at (63, 50), inside the second square only, both count
+/// one. (17, 30) is just outside the first square's left edge.
+///
+/// flip: `paint_strokes` cutting a non-zero path with the even-odd complement →
+/// fails at "the overlap is inside".
+#[test]
+fn an_outside_stroke_leaves_out_what_the_paths_own_fill_covers() {
+    let render = |rule| {
+        let (doc, res) = overlapping_path_doc(rule);
+        VelloCpuRenderer::new()
+            .render_to_rgba(
+                &doc,
+                &res,
+                &viewport(),
+                &ondin_render::ImageStore::new(),
+                doc.first_page(),
+            )
+            .0
+    };
+    let rgba = render(ondin_core::FillRule::NonZero);
+    assert!(
+        inked(&rgba, 17, 30),
+        "non-zero: the stroke is drawn outside"
+    );
+    assert!(!inked(&rgba, 57, 50), "non-zero: the overlap is inside");
+    assert!(!inked(&rgba, 63, 50), "non-zero: so is the second square");
+    let rgba = render(ondin_core::FillRule::EvenOdd);
+    assert!(
+        inked(&rgba, 17, 30),
+        "even-odd: the stroke is drawn outside"
+    );
+    assert!(inked(&rgba, 57, 50), "even-odd: the overlap is outside");
+    assert!(
+        !inked(&rgba, 63, 50),
+        "even-odd: the second square is inside"
+    );
+}
+
 /// The clip must not leak into whatever is drawn next. An inside stroke pushes
 /// a clip layer; a sibling painted afterwards has to be unaffected by it.
 #[test]

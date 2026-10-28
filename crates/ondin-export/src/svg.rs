@@ -1435,7 +1435,7 @@ fn emit_shape(
             // A per-side stroke or a fitted multi-subpath dash is several
             // `<path>`s, so neither can ride the shape's own element.
             [(_, s)] => {
-                align_clip(res.used_kind_of(node), shape.as_ref(), s).is_none()
+                align_clip(res.used_kind_of(node), shape.as_ref(), s, node.fill_rule()).is_none()
                     && geometry::effective_sides(res.used_kind_of(node), s).is_all()
                     && dash_pieces(shape.as_ref(), s, s.width).is_none()
             }
@@ -1763,15 +1763,30 @@ fn emit_strokes(
             &format!("stroke-{i}"),
             inner,
             |out, inner| {
-                match align_clip(res.used_kind_of(node), shape.as_ref(), s) {
-                    Some((clip_d, rule)) => {
-                        // Indexed by the paint's own index, stable under hiding.
-                        let clip_id = format!("sa-{}-{i}", id.to_wire().replace(':', "-"));
+                // Indexed by the paint's own index, stable under hiding.
+                let clip_id = format!("sa-{}-{i}", id.to_wire().replace(':', "-"));
+                match align_clip(res.used_kind_of(node), shape.as_ref(), s, node.fill_rule()) {
+                    Some(AlignCut::Clip(clip_d, rule)) => {
                         let _ = writeln!(
                             out,
                             r#"{inner}<clipPath id="{clip_id}"{rule}><path d="{clip_d}"/></clipPath>"#
                         );
                         let _ = writeln!(out, r#"{inner}<g clip-path="url(#{clip_id})">"#);
+                        ink(out, &format!("{inner}  "), true);
+                        let _ = writeln!(out, "{inner}</g>");
+                    }
+                    Some(AlignCut::Mask(ring, shape_d)) => {
+                        let (x, y, w, h) = (
+                            fmt(ring.x0),
+                            fmt(ring.y0),
+                            fmt(ring.width()),
+                            fmt(ring.height()),
+                        );
+                        let _ = writeln!(
+                            out,
+                            r##"{inner}<mask id="{clip_id}" maskUnits="userSpaceOnUse" x="{x}" y="{y}" width="{w}" height="{h}"><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="#fff"/><path d="{shape_d}" fill="#000"/></mask>"##
+                        );
+                        let _ = writeln!(out, r#"{inner}<g mask="url(#{clip_id})">"#);
                         ink(out, &format!("{inner}  "), true);
                         let _ = writeln!(out, "{inner}</g>");
                     }
@@ -2207,18 +2222,30 @@ fn matrix_attr(name: &str, a: Affine) -> String {
     format!(r#" {name}="matrix({m0} {m1} {m2} {m3} {m4} {m5})""#)
 }
 
-/// The clip an aligned stroke has to be built out of — the path to clip against
-/// and the fill rule — or `None` when the stroke needs no construction.
+/// How an aligned stroke is cut down to its side of the outline.
+enum AlignCut {
+    /// A `<clipPath>`: its path data and its ` clip-rule` attribute.
+    Clip(String, &'static str),
+    /// A `<mask>` over `region`, white but where the shape's path data fills.
+    Mask(Rect, String),
+}
+
+/// What an aligned stroke has to be cut with, or `None` when the stroke needs no
+/// construction. `rule` is the node's fill rule.
 ///
 /// SVG has no stroke alignment, so as on the canvas (§6.3) the stroke is doubled
-/// and the wrong half clipped away: inside clips to the shape, outside to
-/// everything but it (shape plus enclosing box, even-odd). `None` for a centred
-/// stroke, an open shape, or no outline.
+/// and the wrong half cut away: inside clips to the shape, outside to everything
+/// but it (shape plus enclosing box, even-odd). A non-zero path or glyph outline
+/// may cross itself, where that even-odd complement counts the overlap as outside,
+/// so its outside stroke is masked by the shape's own fill instead, as
+/// `scene::paint_strokes` erases it. `None` for a centred stroke, an open shape,
+/// or no outline.
 fn align_clip(
     kind: &NodeKind,
     shape: Option<&BezPath>,
     s: &Stroke,
-) -> Option<(String, &'static str)> {
+    rule: ondin_core::FillRule,
+) -> Option<AlignCut> {
     if s.align == StrokeAlign::Center || !geometry::stroke_align_applies(kind) {
         return None;
     }
@@ -2231,11 +2258,23 @@ fn align_clip(
             let reach =
                 geometry::effective_sides(kind, s).max_width(s.width) * s.miter_limit.max(1.0);
             let pad_out = (b.width() + b.height()).max(1.0) + reach;
-            let mut complement = b.inflate(pad_out, pad_out).to_path(0.1);
+            let ring = b.inflate(pad_out, pad_out);
+            if rule == ondin_core::FillRule::NonZero
+                && matches!(kind, NodeKind::Path { .. } | NodeKind::Text { .. })
+            {
+                return Some(AlignCut::Mask(ring, path_d(path)));
+            }
+            let mut complement = ring.to_path(0.1);
             complement.extend(path.iter());
-            (path_d(&complement), r#" clip-rule="evenodd""#)
+            AlignCut::Clip(path_d(&complement), r#" clip-rule="evenodd""#)
         }
-        _ => (path_d(path), ""),
+        _ => AlignCut::Clip(
+            path_d(path),
+            match rule {
+                ondin_core::FillRule::NonZero => "",
+                ondin_core::FillRule::EvenOdd => r#" clip-rule="evenodd""#,
+            },
+        ),
     })
 }
 

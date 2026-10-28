@@ -22,10 +22,6 @@ reads true.
   **Penpot** (open source, so its format can be read from its code). Pixso works with `.fig`;
   Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
-- **An outside stroke on a self-overlapping non-zero path inks the overlap.** `scene::paint_strokes`
-  clips an outside stroke to the shape plus a big rect taken even-odd, so where a non-zero path
-  overlaps itself the overlap counts as outside; *Outline stroke* (`build::stroke_ink`) does not ink
-  it. The fix is a non-zero complement, in every backend.
 
 ## Later · Second
 

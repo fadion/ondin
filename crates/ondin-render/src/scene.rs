@@ -124,6 +124,15 @@ pub trait ScenePainter {
     /// or the composite erases artwork behind it.
     fn push_mask_layer(&mut self);
 
+    /// Begin a layer composited over the enclosing layer **as an eraser**: what is
+    /// there survives in proportion to the alpha *not* drawn here
+    /// (`Compose::DestOut`). The caller owes it an enclosing layer holding only
+    /// what is to be erased, as [`Self::push_mask_layer`] does. The default
+    /// composites plainly; shipping backends override.
+    fn push_erase_layer(&mut self) {
+        self.push_layer(Affine::IDENTITY, None, ClipRule::NonZero, 1.0);
+    }
+
     /// Begin a layer **filtered** before it is composited: a node's effect stack
     /// (§5.3a). `bounds` is the node's ink box in `transform`'s space, grown by
     /// [`ondin_core::effect::stack_escape`]; it comes from the walk so both
@@ -202,6 +211,7 @@ pub fn build_of<P: ScenePainter>(
             inner: painter,
             ink: Brush::Solid(ink),
             base,
+            erasing: Vec::new(),
         };
         walk_origins(doc, res, vp, overrides, origins, base, &mut outline);
     } else {
@@ -240,6 +250,9 @@ struct OutlinePainter<'a, P: ScenePainter> {
     ink: Brush,
     /// World → device pixels, to size the hairline in device pixels.
     base: Affine,
+    /// One entry per open layer, true for an eraser: what an eraser fills is no
+    /// artwork, so it draws no hairline.
+    erasing: Vec<bool>,
 }
 
 impl<P: ScenePainter> OutlinePainter<'_, P> {
@@ -285,7 +298,9 @@ impl<P: ScenePainter> ScenePainter for OutlinePainter<'_, P> {
         _framing: Option<Framing>,
         _rule: ClipRule,
     ) {
-        self.hairline(transform, path);
+        if !self.erasing.contains(&true) {
+            self.hairline(transform, path);
+        }
     }
     fn stroke_path(&mut self, transform: Affine, path: &BezPath, _stroke: &StrokePaint<'_>) {
         self.hairline(transform, path);
@@ -298,10 +313,21 @@ impl<P: ScenePainter> ScenePainter for OutlinePainter<'_, P> {
         };
         self.inner.draw_text(transform, &run);
     }
-    fn push_layer(&mut self, _: Affine, _: Option<&BezPath>, _: ClipRule, _: f32) {}
-    fn push_mask_layer(&mut self) {}
-    fn push_effect_layer(&mut self, _: Affine, _: Rect, _: &[ondin_core::Keyed<Effect>]) {}
-    fn pop_layer(&mut self) {}
+    fn push_layer(&mut self, _: Affine, _: Option<&BezPath>, _: ClipRule, _: f32) {
+        self.erasing.push(false);
+    }
+    fn push_mask_layer(&mut self) {
+        self.erasing.push(false);
+    }
+    fn push_erase_layer(&mut self) {
+        self.erasing.push(true);
+    }
+    fn push_effect_layer(&mut self, _: Affine, _: Rect, _: &[ondin_core::Keyed<Effect>]) {
+        self.erasing.push(false);
+    }
+    fn pop_layer(&mut self) {
+        self.erasing.pop();
+    }
 }
 
 /// Whether axis-aligned boxes snap to whole device pixels (see
@@ -1007,6 +1033,7 @@ fn paint_node_pass<P: ScenePainter>(
             painted.kind,
             &painted.paint,
             &frame,
+            ClipRule::NonZero,
             box_,
         );
     }
@@ -1337,7 +1364,16 @@ fn paint_ghost<P: ScenePainter>(
     }
     if frame_stroke && let Some(frame) = geometry::local_path(&ghost.kind) {
         let box_ = frame.bounding_box();
-        paint_strokes(doc, painter, shape_world, &ghost.kind, &paint, &frame, box_);
+        paint_strokes(
+            doc,
+            painter,
+            shape_world,
+            &ghost.kind,
+            &paint,
+            &frame,
+            ClipRule::NonZero,
+            box_,
+        );
     }
     if outer_opacity {
         painter.pop_layer();
@@ -1627,6 +1663,7 @@ fn paint_shape<P: ScenePainter>(
                     painted.kind,
                     &painted.paint,
                     &outline,
+                    ClipRule::NonZero,
                     layout.bounds(),
                 );
             }
@@ -1693,6 +1730,7 @@ fn paint_shape<P: ScenePainter>(
         painted.kind,
         &painted.paint,
         &path,
+        painted.rule,
         frame,
     );
 }
@@ -1709,7 +1747,9 @@ fn paint_shape<P: ScenePainter>(
 /// Alignment applies only where the kind has an interior
 /// (`geometry::stroke_align_applies`, asked of the kind since a side path is
 /// open). `frame` is what an image brush is framed in: the shape's box, not the
-/// ink's, and for outlined type the text box.
+/// ink's, and for outlined type the text box. `rule` is how `shape` decides its
+/// interior, as its fill reads it.
+#[allow(clippy::too_many_arguments)]
 fn paint_strokes<P: ScenePainter>(
     doc: &Document,
     painter: &mut P,
@@ -1717,6 +1757,7 @@ fn paint_strokes<P: ScenePainter>(
     kind: &NodeKind,
     paint: &Paint,
     shape: &BezPath,
+    rule: ClipRule,
     frame: Rect,
 ) {
     let visible: Vec<&Stroke> = paint
@@ -1750,6 +1791,28 @@ fn paint_strokes<P: ScenePainter>(
             }
             continue;
         }
+        // A non-zero path or glyph outline may cross itself, and a complement taken
+        // even-odd counts the overlap as outside: the ink is drawn whole and the
+        // shape's own fill erased from it instead. The other kinds never overlap
+        // themselves and keep the one clip layer.
+        if align == StrokeAlign::Outside
+            && rule == ClipRule::NonZero
+            && matches!(kind, NodeKind::Path { .. } | NodeKind::Text { .. })
+        {
+            painter.push_layer(world, None, ClipRule::NonZero, 1.0);
+            for s in run {
+                let framing = framing_of(doc, s.brush.drawn(), frame);
+                clipped(painter, world, framing, |p| {
+                    lay_sides(p, world, kind, s, shape, framing, true)
+                });
+            }
+            painter.push_erase_layer();
+            let opaque = Brush::Solid(ondin_core::peniko::Color::BLACK);
+            painter.fill_path(world, shape, &opaque, None, ClipRule::NonZero);
+            painter.pop_layer();
+            painter.pop_layer();
+            continue;
+        }
         // "Everything but the shape": it plus a big rect, taken even-odd.
         let complement = (align == StrokeAlign::Outside).then(|| {
             let reach = run
@@ -1765,11 +1828,16 @@ fn paint_strokes<P: ScenePainter>(
             path.extend(shape.iter());
             path
         });
-        let rule = match align {
+        let clip_rule = match align {
             StrokeAlign::Outside => ClipRule::EvenOdd,
-            _ => ClipRule::NonZero,
+            _ => rule,
         };
-        painter.push_layer(world, Some(complement.as_ref().unwrap_or(shape)), rule, 1.0);
+        painter.push_layer(
+            world,
+            Some(complement.as_ref().unwrap_or(shape)),
+            clip_rule,
+            1.0,
+        );
         for s in run {
             let framing = framing_of(doc, s.brush.drawn(), frame);
             clipped(painter, world, framing, |p| {

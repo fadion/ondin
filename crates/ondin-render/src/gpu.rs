@@ -285,6 +285,18 @@ impl ScenePainter for GpuScenePainter<'_> {
         );
     }
 
+    fn push_erase_layer(&mut self) {
+        self.opened_ordinary();
+        let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);
+        self.scene().push_layer(
+            Fill::NonZero,
+            BlendMode::new(Mix::Normal, Compose::DestOut),
+            1.0,
+            at,
+            unbounded.as_ref(),
+        );
+    }
+
     fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
         self.opened_ordinary();
         let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);

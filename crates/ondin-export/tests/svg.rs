@@ -556,6 +556,57 @@ fn an_aligned_stroke_exports_as_a_clipped_double_width_stroke() {
     }
 }
 
+/// An outside stroke on a path is cut by a `<mask>` erasing the path's own fill
+/// when the path is non-zero, which may cross itself, and by the even-odd
+/// complement clip when it is even-odd.
+///
+/// flip: `align_clip` taking the complement clip for a non-zero path → fails at
+/// "non-zero: a mask".
+#[test]
+fn an_outside_stroke_on_a_non_zero_path_is_masked_by_its_fill() {
+    use ondin_core::{FillRule, IdSource, NodeKind, Operation, Resolved, Transaction};
+    for rule in [FillRule::NonZero, FillRule::EvenOdd] {
+        let mut f = common::fixture_with_stroke_align(ondin_core::StrokeAlign::Outside);
+        let strokes = f.doc.get(f.rect).unwrap().paint().strokes.clone();
+        let path = IdSource::new(0x5A7).mint();
+        let page = f.doc.first_page();
+        f.doc
+            .apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: path,
+                    parent: page,
+                    index: 0,
+                    kind: NodeKind::Path {
+                        path: ondin_core::kurbo::BezPath::from_svg(
+                            "M0,0 L40,0 L40,40 L0,40 Z M20,20 L60,20 L60,60 L20,60 Z",
+                        )
+                        .unwrap(),
+                        corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetStrokes { id: path, strokes },
+                Operation::SetFillRule { id: path, rule },
+                Operation::DeleteNode { id: f.rect },
+            ]))
+            .unwrap();
+        let res = Resolved::rebuild(&f.doc);
+        let out = svg(&f.doc, &res, page, None);
+        let masked = out.contains(r#"mask="url(#sa-"#);
+        let clipped = out.contains(r#"clip-path="url(#sa-"#);
+        match rule {
+            FillRule::NonZero => assert!(masked && !clipped, "non-zero: a mask:\n{out}"),
+            FillRule::EvenOdd => assert!(clipped && !masked, "even-odd: a clip:\n{out}"),
+        }
+        assert!(
+            out.contains(r#"stroke-width="6""#),
+            "{rule:?}: doubled:\n{out}"
+        );
+    }
+}
+
 /// A centred stroke is the overwhelming majority and must keep the plain
 /// semantic markup — no clip paths, no duplicated elements.
 #[test]
@@ -1414,12 +1465,10 @@ fn a_frame_without_a_border_is_still_one_group() {
 }
 
 /// **A text node's stroke reaches the file**, on the `<text>` element itself so the
-/// output stays re-shapeable — and for outlined type, inside a `clipPath` built from
-/// the glyph outlines, which is the same construction a shape's aligned stroke gets.
-///
-/// Text took fills and dropped strokes entirely before this, in the walk and here.
+/// output stays re-shapeable — and for outlined type, an outside one inside a
+/// `<mask>` that erases the glyph outlines, the construction a path's gets.
 #[test]
-fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_clip() {
+fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_mask() {
     use ondin_core::{Operation, Resolved, Stroke, StrokeAlign, Transaction};
     let red =
         ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255));
@@ -1461,29 +1510,32 @@ fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_clip() {
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
     let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
+    // Glyph contours may overlap, so the cut is a mask erasing the glyphs' own
+    // non-zero fill, not an even-odd complement clip.
     assert!(
-        out.contains(r#"clip-rule="evenodd""#),
-        "outlined type needs the complement clip:\n{out}"
+        out.contains(r#"mask="url(#sa-"#),
+        "outlined type needs the erasing mask:\n{out}"
     );
     assert!(
         out.contains(r#"stroke-width="4""#),
-        "and the doubled width the clip halves back:\n{out}"
+        "and the doubled width the mask halves back:\n{out}"
     );
-    // The clip path is the glyph outlines, not the node's box: a box would clip
+    // The mask's black is the glyph outlines, not the node's box: a box would cut
     // nothing and the stroke would come out centred on every letter.
-    let clip = out
+    let mask = out
         .lines()
-        .find(|l| l.contains("<clipPath") && l.contains("evenodd"))
-        .expect("the clipPath line");
+        .find(|l| l.contains("<mask") && l.contains("sa-"))
+        .expect("the mask line");
     // Quadratics, because Inter is `glyf` — a cubic-only test would pass on a CFF
     // face and fail on the bundled one, which is the only one this suite has.
     assert!(
-        clip.matches('Q').count() + clip.matches('C').count() > 4,
-        "glyph outlines are curves, so the clip is not a rectangle:\n{clip}"
+        mask.matches('Q').count() + mask.matches('C').count() > 4,
+        "glyph outlines are curves, so the mask is not a rectangle:\n{mask}"
     );
-    // The complement ring is in there too — the outer box the even-odd rule turns
-    // into "everything but the letters".
-    assert!(clip.matches('Z').count() > 2, "ring plus contours:\n{clip}");
+    assert!(
+        mask.contains(r##"fill="#fff""##) && mask.contains(r##"fill="#000""##),
+        "white everywhere but the letters:\n{mask}"
+    );
 }
 
 /// **A fitted dash on a multi-subpath path is one `<path>` per subpath**, each with

@@ -691,11 +691,14 @@ fn an_image_is_framed_by_its_shape_and_its_stroke_agrees() {
 // --- stroke alignment -----------------------------------------------------
 
 /// Records exactly what the alignment construction is: the stroke widths issued
-/// and the clip rules pushed.
+/// the clip rules pushed, and the erasing layers.
 #[derive(Default)]
 struct StrokeRecorder {
     widths: Vec<f64>,
     clips: Vec<ClipRule>,
+    /// Whether each pushed layer clipped at all, beside `clips`.
+    clipped: Vec<bool>,
+    erasers: usize,
     depth_at_stroke: Vec<i32>,
     depth: i32,
 }
@@ -725,14 +728,19 @@ impl ScenePainter for StrokeRecorder {
     fn push_layer(
         &mut self,
         _t: Affine,
-        _c: Option<&ondin_core::kurbo::BezPath>,
+        c: Option<&ondin_core::kurbo::BezPath>,
         rule: ClipRule,
         _o: f32,
     ) {
         self.clips.push(rule);
+        self.clipped.push(c.is_some());
         self.depth += 1;
     }
     fn push_mask_layer(&mut self) {
+        self.depth += 1;
+    }
+    fn push_erase_layer(&mut self) {
+        self.erasers += 1;
         self.depth += 1;
     }
     fn pop_layer(&mut self) {
@@ -1218,9 +1226,9 @@ fn painted_text(
 
 /// **Outlined type: a stroke on a text node, aligned outside.** The model has always
 /// been able to say it and the walk used to drop it — text took fills and nothing
-/// else. It goes through the same construction a shape's stroke does, on the outline
-/// of its own glyphs, so the doubled width and the even-odd complement clip are the
-/// evidence that it is the *same* path and not a special case.
+/// else. It goes through a path's construction, on the outline of its own glyphs:
+/// the doubled width, drawn in an unclipped layer and the glyphs' fill erased from
+/// it, since contours of one glyph may overlap.
 #[test]
 fn text_strokes_its_glyph_outlines_and_honours_the_alignment() {
     let (doc, res, _t) = painted_text(
@@ -1238,9 +1246,9 @@ fn text_strokes_its_glyph_outlines_and_honours_the_alignment() {
         "one stroke over the whole glyph outline, doubled for the outside construction"
     );
     assert_eq!(
-        r.clips,
-        vec![ClipRule::EvenOdd],
-        "clipped to everything but the glyphs, which is what makes it *outside*"
+        (r.clipped, r.erasers),
+        (vec![false], 1),
+        "drawn whole, then the glyphs erased, which is what makes it *outside*"
     );
     assert_eq!(r.depth_at_stroke, vec![1]);
     assert_eq!(r.depth, 0);

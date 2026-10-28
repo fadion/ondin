@@ -411,3 +411,72 @@ fn a_draft_page_keeps_its_mains_out_of_a_kit_but_not_the_ones_used() {
     assert_eq!(tops.tops(), &[a, b], "the used draft main is carried");
     assert_eq!(ondin_core::kit::carried_from_drafts(&doc), vec![b]);
 }
+
+/// A draft main that only a carried draft main uses is carried too: the reach
+/// is transitive.
+///
+/// flip: `draft_tops` without its `pending.extend(reach(t))` → fails at "used
+/// only through `b`".
+#[test]
+fn a_draft_main_used_by_a_carried_one_is_carried_too() {
+    let (mut doc, mut ids, [_, second, a, b]) = two_pages();
+    let c = ids.mint();
+    doc.apply(&Transaction(vec![
+        create(c, second, frame()),
+        Operation::SetComponent {
+            id: a,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: b,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: c,
+            component: true,
+        },
+        Operation::SetPageDraft {
+            id: second,
+            draft: true,
+        },
+    ]))
+    .unwrap();
+    let mut instance = |doc: &mut Document, main: NodeId, parent: NodeId| {
+        let template = doc.capture_subtree(main).unwrap();
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut ids,
+            &[Placement {
+                nodes: template,
+                parent,
+                index: None,
+            }],
+            Default::default(),
+        );
+        doc.apply(&tx).unwrap();
+        assert!(
+            doc.get(made[0]).unwrap().link().is_some(),
+            "fixture: an instance"
+        );
+    };
+    // `a` holds an instance of `b` taken before `b` held one of `c`, so nothing
+    // under `a` links to `c` itself.
+    instance(&mut doc, b, a);
+    instance(&mut doc, c, b);
+    let under_a = doc.capture_subtree(a).unwrap();
+    assert!(
+        under_a.iter().all(|n| n.link() != Some(c)),
+        "fixture: `a` reaches `c` only through `b`"
+    );
+    // Before `freeze`, whose debug check of the frozen kit would fire first.
+    let mut carried = ondin_core::kit::carried_from_drafts(&doc);
+    carried.sort();
+    let mut want = vec![b, c];
+    want.sort();
+    assert_eq!(carried, want, "`c`, used only through `b`, is carried");
+    let mut tops = ondin_core::kit::freeze(&doc).unwrap().tops().to_vec();
+    tops.sort();
+    let mut want = vec![a, b, c];
+    want.sort();
+    assert_eq!(tops, want);
+}

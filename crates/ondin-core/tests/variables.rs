@@ -370,6 +370,46 @@ fn a_bound_corner_is_drawn_from_the_used_kind_and_follows_a_cell_edit() {
     assert_matches_rebuild(&f.doc, &res);
 }
 
+/// A smoothed rect with a bound corner keeps its smoothing in the used kind, so
+/// its outline is the smoothed one at the drawn radii.
+///
+/// flip: `with_bound_corners` rebuilding the rect with `corner_smoothing: 0.0` →
+/// fails at "keeps its smoothing".
+#[test]
+fn a_bound_corner_keeps_the_rects_smoothing() {
+    let mut f = fixture();
+    let mut ops = vec![Operation::SetGeometry {
+        id: f.rect,
+        geometry: ondin_core::GeometryPatch::CornerSmoothing(0.6),
+    }];
+    ops.extend(ondin_core::bind_corners_ops(
+        &f.doc,
+        f.rect,
+        [Some(f.radius), None, None, None],
+    ));
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let used = res.used_kind(&f.doc, f.rect).unwrap().clone();
+    let NodeKind::Rect {
+        size,
+        corner_radii,
+        corner_smoothing,
+    } = used.clone()
+    else {
+        panic!("not a rect: {used:?}");
+    };
+    assert_eq!(
+        [corner_radii.top_left, corner_radii.top_right],
+        [4.0, 2.0],
+        "fixture: the bound corner draws Light's 4"
+    );
+    assert_eq!(corner_smoothing, 0.6, "keeps its smoothing");
+    assert_eq!(
+        ondin_core::geometry::local_path(&used),
+        Some(ondin_core::geometry::smoothed_rect(size, corner_radii, 0.6)),
+    );
+}
+
 /// Detaching corners writes the radius they draw, and the binding goes.
 #[test]
 fn detaching_corners_keeps_what_they_draw() {

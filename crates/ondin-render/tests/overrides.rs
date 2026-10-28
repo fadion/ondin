@@ -48,6 +48,9 @@ enum Call {
     /// whole of a scrub and gone the instant it committed. A recorder that dropped
     /// the number could not tell the two apart.
     Effect([f64; 6], [f64; 4], Vec<ondin_core::Effect>),
+    /// A blend layer, with its mode: recorded as a plain `Push` a previewed mode
+    /// and a committed one would look the same.
+    Blend(ondin_core::BlendMode),
     Pop,
 }
 
@@ -112,6 +115,9 @@ impl ScenePainter for Recorder {
             [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
             ondin_core::item::values(effects),
         ));
+    }
+    fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
+        self.0.push(Call::Blend(mode));
     }
     fn pop_layer(&mut self) {
         self.0.push(Call::Pop);
@@ -521,6 +527,30 @@ fn opacity_matches_its_commit() {
             opacity: 0.3,
         }]),
         "group opacity",
+    );
+}
+
+/// A previewed mode draws as its commit — the rect's own layer and the frame
+/// isolated around it, which reads the mode through the overrides too.
+/// flip: `holds_blend` reading `child.blend()` alone → fails at "rect multiply".
+#[test]
+fn a_blend_mode_matches_its_commit() {
+    let f = fixture();
+    assert_preview_matches_commit(
+        &f.doc,
+        &Transaction(vec![Operation::SetBlend {
+            id: f.rect,
+            blend: ondin_core::BlendMode::Multiply,
+        }]),
+        "rect multiply",
+    );
+    assert_preview_matches_commit(
+        &f.doc,
+        &Transaction(vec![Operation::SetBlend {
+            id: f.group,
+            blend: ondin_core::BlendMode::Normal,
+        }]),
+        "group isolated",
     );
 }
 
@@ -1886,6 +1916,7 @@ fn a_chrome_ghost_draws_under_its_layer_without_counting_as_a_preview() {
                 text: None,
                 path: None,
                 opacity: 0.3,
+                blend: ondin_core::BlendMode::Normal,
                 visible: true,
                 clip: false,
                 mask: false,
@@ -2083,6 +2114,7 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
                     text: None,
                     path: None,
                     opacity: 0.3,
+                    blend: ondin_core::BlendMode::Normal,
                     visible: true,
                     clip: false,
                     mask: false,

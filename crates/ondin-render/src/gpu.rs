@@ -280,6 +280,18 @@ impl ScenePainter for GpuScenePainter<'_> {
         );
     }
 
+    fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
+        self.opened_ordinary();
+        let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);
+        self.scene().push_layer(
+            Fill::NonZero,
+            BlendMode::new(scene::mix(mode), Compose::SrcOver),
+            1.0,
+            at,
+            unbounded.as_ref(),
+        );
+    }
+
     /// Redirect drawing into a sub-scene of its own, to be rasterized and
     /// filtered after the walk.
     ///

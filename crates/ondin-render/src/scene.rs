@@ -11,14 +11,17 @@
 //!   culling.
 //! - **Opacity is a layer**, pushed only when a node needs one: folding it into
 //!   each child's alpha is wrong where children overlap.
+//! - **A blend mode is the outermost layer**, outside the effect layer, pushed
+//!   only when the node isolates (`BlendMode::isolates`) or is a top-level frame
+//!   holding a blended layer.
 
 use crate::renderer::{GhostNode, RenderOverrides, Viewport};
 use kurbo::{Affine, BezPath, Rect, Shape};
 use ondin_core::Brush;
 use ondin_core::text::{Glyph as TextGlyph, TextLayout};
 use ondin_core::{
-    Document, Effect, Framing, MaskMode, NodeId, NodeKind, Paint, Resolved, Stroke, StrokeAlign,
-    geometry,
+    BlendMode, Document, Effect, Framing, MaskMode, NodeId, NodeKind, Paint, Resolved, Stroke,
+    StrokeAlign, geometry,
 };
 
 const TOLERANCE: f64 = 0.1;
@@ -134,6 +137,14 @@ pub trait ScenePainter {
     ) {
         let _ = (bounds, effects);
         self.push_layer(transform, None, ClipRule::NonZero, 1.0);
+    }
+
+    /// Begin an unclipped layer composited over the enclosing one by `mode`
+    /// ([`ondin_core::Node::blend`]). Normal is an isolation group. The default
+    /// composites plainly; shipping backends override.
+    fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
+        let _ = mode;
+        self.push_layer(Affine::IDENTITY, None, ClipRule::NonZero, 1.0);
     }
 
     fn pop_layer(&mut self);
@@ -731,7 +742,8 @@ fn paint_node<P: ScenePainter>(
     // composites as one unit.
     let frame_stroke = matches!(painted.kind, NodeKind::Artboard { .. })
         && painted.paint.strokes.iter().any(|s| s.visible);
-    // The effect layer is the outermost, in two load-bearing positions: outside the
+    // The effect layer is outermost but for the blend layer, in two load-bearing
+    // positions: outside the
     // clip, so a clipping frame's drop shadow is not cut off, and outside the
     // opacity, so a half-transparent layer casts a half-transparent shadow.
     let effects = doc.resolved_effects(
@@ -745,6 +757,13 @@ fn paint_node<P: ScenePainter>(
     let effect_layer = crate::effects::any_ink(effects)
         .then(|| effect_bounds(res, id, &painted, world, effects))
         .flatten();
+    // The blend layer is outside even the effect layer: a layer's shadow blends
+    // with it.
+    let blend = over.and_then(|o| o.blend).unwrap_or(node.blend());
+    let blend_layer = blend_layer(doc, ov, id, painted.kind, blend);
+    if let Some(mode) = blend_layer {
+        painter.push_blend_layer(mode);
+    }
     if let Some(ink) = effect_layer {
         painter.push_effect_layer(world, ink, effects);
     }
@@ -797,6 +816,9 @@ fn paint_node<P: ScenePainter>(
         if effect_layer.is_some() {
             painter.pop_layer();
         }
+        if blend_layer.is_some() {
+            painter.pop_layer();
+        }
         return;
     }
 
@@ -815,7 +837,8 @@ fn paint_node<P: ScenePainter>(
             } else {
                 reopen(painter, &mut open, &mut mask);
             }
-            paint_ghost(doc, ov, &ghost.node, world, base, painter);
+            let top = matches!(node.kind(), NodeKind::Root);
+            paint_ghost(doc, ov, &ghost.node, top, world, base, painter);
             next_ghost += 1;
         }
         let Some(child) = children.get(pos) else {
@@ -865,6 +888,86 @@ fn paint_node<P: ScenePainter>(
     if effect_layer.is_some() {
         painter.pop_layer();
     }
+    if blend_layer.is_some() {
+        painter.pop_layer();
+    }
+}
+
+/// The mode of the layer `id` composites through, or `None` when it draws
+/// straight into its parent's.
+///
+/// A top-level frame holding a blended layer is isolated too, so what is inside
+/// blends with the frame's content and never the canvas ground: the frame then
+/// looks the same on the canvas as exported alone.
+fn blend_layer(
+    doc: &Document,
+    ov: &RenderOverrides,
+    id: NodeId,
+    kind: &NodeKind,
+    blend: BlendMode,
+) -> Option<BlendMode> {
+    if blend.isolates(kind) {
+        return Some(blend);
+    }
+    let top_frame = matches!(kind, NodeKind::Artboard { .. })
+        && doc
+            .get(id)
+            .and_then(|n| n.parent())
+            .and_then(|p| doc.get(p))
+            .is_some_and(|p| matches!(p.kind(), NodeKind::Root));
+    (top_frame && holds_blend(doc, ov, id)).then_some(BlendMode::Normal)
+}
+
+/// Whether a layer under `id`, ghosts included, blends with what is beneath it.
+fn holds_blend(doc: &Document, ov: &RenderOverrides, id: NodeId) -> bool {
+    let Some(node) = doc.get(id) else {
+        return false;
+    };
+    ov.ghosts_of(id).any(|g| ghost_blends(&g.node))
+        || ov
+            .children_of(id)
+            .unwrap_or(node.children())
+            .iter()
+            .any(|c| {
+                let Some(child) = doc.get(*c) else {
+                    return false;
+                };
+                let mode = ov.get(*c).and_then(|o| o.blend).unwrap_or(child.blend());
+                blends(mode) || holds_blend(doc, ov, *c)
+            })
+}
+
+fn ghost_blends(g: &GhostNode) -> bool {
+    blends(g.blend) || g.children.iter().any(ghost_blends)
+}
+
+/// The backends' mix for `mode`; both draw all sixteen. Pass through never
+/// reaches a layer, and is Normal if it does.
+pub(crate) fn mix(mode: BlendMode) -> ondin_core::peniko::Mix {
+    use ondin_core::peniko::Mix;
+    match mode {
+        BlendMode::PassThrough | BlendMode::Normal => Mix::Normal,
+        BlendMode::Darken => Mix::Darken,
+        BlendMode::Multiply => Mix::Multiply,
+        BlendMode::ColorBurn => Mix::ColorBurn,
+        BlendMode::Lighten => Mix::Lighten,
+        BlendMode::Screen => Mix::Screen,
+        BlendMode::ColorDodge => Mix::ColorDodge,
+        BlendMode::Overlay => Mix::Overlay,
+        BlendMode::SoftLight => Mix::SoftLight,
+        BlendMode::HardLight => Mix::HardLight,
+        BlendMode::Difference => Mix::Difference,
+        BlendMode::Exclusion => Mix::Exclusion,
+        BlendMode::Hue => Mix::Hue,
+        BlendMode::Saturation => Mix::Saturation,
+        BlendMode::Color => Mix::Color,
+        BlendMode::Luminosity => Mix::Luminosity,
+    }
+}
+
+/// Whether `mode` mixes with what is beneath rather than covering it.
+fn blends(mode: BlendMode) -> bool {
+    !matches!(mode, BlendMode::Normal | BlendMode::PassThrough)
 }
 
 /// The ink box an effect layer is allocated from, in the node's **own** space.
@@ -935,11 +1038,14 @@ fn ghost_ink(ghost: &GhostNode, world: Affine) -> Option<Rect> {
 }
 
 /// Draw a ghost subtree: [`paint_node`]'s walk with children inline and no
-/// culling. `doc` supplies the image table that framing reads.
+/// culling. `doc` supplies the image table that framing reads; `top` says the
+/// ghost lands directly on a page, for [`blend_layer`]'s top-level frame.
+#[allow(clippy::too_many_arguments)]
 fn paint_ghost<P: ScenePainter>(
     doc: &Document,
     ov: &RenderOverrides,
     ghost: &GhostNode,
+    top: bool,
     parent_world: Affine,
     base: Affine,
     painter: &mut P,
@@ -976,6 +1082,15 @@ fn paint_ghost<P: ScenePainter>(
             );
             world.inverse().transform_rect_bbox(ink)
         });
+    let blend_layer = if ghost.blend.isolates(&ghost.kind) {
+        Some(ghost.blend)
+    } else {
+        let top_frame = top && matches!(ghost.kind, NodeKind::Artboard { .. });
+        (top_frame && ghost.children.iter().any(ghost_blends)).then_some(BlendMode::Normal)
+    };
+    if let Some(mode) = blend_layer {
+        painter.push_blend_layer(mode);
+    }
     if let Some(ink) = ghost_effects {
         painter.push_effect_layer(world, ink, &ghost.effects);
     }
@@ -1018,6 +1133,9 @@ fn paint_ghost<P: ScenePainter>(
         if ghost_effects.is_some() {
             painter.pop_layer();
         }
+        if blend_layer.is_some() {
+            painter.pop_layer();
+        }
         return;
     }
     // A ghost masks its own children; nothing leaves a ghost, so no `escape_clip`.
@@ -1025,7 +1143,7 @@ fn paint_ghost<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun, ghost: &GhostNode| {
         if mask.alpha_to_composite().is_some() {
             painter.push_mask_layer();
-            paint_ghost(doc, ov, ghost, world, base, painter);
+            paint_ghost(doc, ov, ghost, false, world, base, painter);
             painter.pop_layer();
         }
         mask.close(painter);
@@ -1052,7 +1170,7 @@ fn paint_ghost<P: ScenePainter>(
             continue;
         }
         mask.reopen(painter, world);
-        paint_ghost(doc, ov, child, world, base, painter);
+        paint_ghost(doc, ov, child, false, world, base, painter);
     }
     if let Some(g) = alpha_ghost.take() {
         end_run(painter, &mut mask, g);
@@ -1070,6 +1188,9 @@ fn paint_ghost<P: ScenePainter>(
         painter.pop_layer();
     }
     if ghost_effects.is_some() {
+        painter.pop_layer();
+    }
+    if blend_layer.is_some() {
         painter.pop_layer();
     }
 }

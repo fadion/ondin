@@ -1117,6 +1117,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         // A corner's binding is the radius field's, an opacity's the opacity field's.
         O::SetOpacity { .. }
         | O::SetOpacityVar { .. }
+        | O::SetBlend { .. }
         | O::SetClip { .. }
         | O::SetCornerVars { .. } => Some("Appearance"),
         O::SetMaskMode { .. } => Some("Mask"),
@@ -3969,7 +3970,7 @@ mod tests {
             .iter()
             .position(|(t, _)| t == "APPEARANCE")
             .expect("the collapsed header");
-        assert_eq!(painted[head + 1].0, "1", "the count stays");
+        assert_eq!(after_blend_drop(&painted, head), "1", "the count stays");
         frame(
             &mut f.app,
             &ctx,
@@ -3980,6 +3981,16 @@ mod tests {
             !texts(&out).iter().any(|(t, _)| t == "Reset appearance"),
             "no chip on a collapsed card"
         );
+    }
+
+    /// The first text painted after the header at `head` other than the
+    /// Appearance header's blend drop and its caret.
+    fn after_blend_drop(painted: &[(String, egui::Rect)], head: usize) -> &str {
+        painted[head + 1..]
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .find(|t| *t != "Normal" && *t != icon::CARET_DOWN)
+            .unwrap_or("")
     }
 
     fn fills_of(app: &OndinApp, id: NodeId) -> Vec<ondin_core::Keyed<ondin_core::Fill>> {
@@ -4010,7 +4021,11 @@ mod tests {
             .iter()
             .position(|(t, _)| t == "APPEARANCE")
             .unwrap_or_else(|| panic!("no Appearance header in {painted:?}"));
-        assert_eq!(painted[head + 1].0, "1", "the count after the label");
+        assert_eq!(
+            after_blend_drop(&painted, head),
+            "1",
+            "the count after the label"
+        );
         let on_head = painted[head].1.center();
         frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(on_head)]);
         let out = frame(&mut f.app, &ctx, Vec::new());

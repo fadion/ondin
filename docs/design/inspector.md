@@ -203,6 +203,12 @@ Override marks on an instance cover the arc and smoothing on every kind.
 - The per-corner and corner-smoothing buttons are present and inert; the fields keep single-card widths.
 - "Disagree" is a tolerance, `build::OPACITY_AGREEMENT`/`RADIUS_AGREEMENT`, read by `inspector::shared_opacity_shown`/`shared_radius_shown`.
 
+### Appearance header: blend mode
+
+- Both Appearance cards carry the blend mode as a small dropdown on the right of the header (`ui::HeadDrop`, through `panel_full`'s `drop`; `inspector::appearance_panel`). It reads `build::shared_blend` over the targets (the outermost members on a selection): the mode's label, *Mixed* when they differ, muted while every target is at its kind's default and strong otherwise.
+- Its menu (an egui `Popup`, 210 wide, `blend_menu`) lists `BlendMode::ALL` in families, a separator after each of `BlendMode::FAMILY_ENDS`, a check on the current mode and each chord as its hint (`shortcuts.md` §2). Normal drops its hint when a target is a frame or group, where `Shift+3` means Pass through. Pass through is dimmed with the hint *groups* when no target is a frame or group.
+- Hovering a row previews it on the canvas through the session preview; leaving the rows or the menu closing (Esc, a click away) puts the old mode back (`end_blend_preview`, also called at the top of `inspector_ui` when the menu is gone). A click commits `build::set_blend_all` as one step named *Blend · <Mode>*.
+
 ### Fill and Stroke
 
 **One implementation over a `PaintScope`** (`Node(NodeId)` or `Selection`).

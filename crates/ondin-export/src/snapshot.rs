@@ -32,7 +32,8 @@ use std::collections::BTreeMap;
 ///   `world_transform`, `world_bounds`) is written at the SVG writer's four places.
 /// - **12** pages: `root` became `pages`, and every node says which page it is on.
 /// - **13** the `"slice"` kind and `Geometry::Slice`.
-pub const SNAPSHOT_VERSION: u32 = 13;
+/// - **14** `NodeSnapshot::blend`, absent at the kind's default.
+pub const SNAPSHOT_VERSION: u32 = 14;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -93,6 +94,11 @@ pub struct NodeSnapshot {
     /// above, which says the layer refuses edits altogether.
     pub proportions_locked: bool,
     pub opacity: f32,
+    /// How the node mixes with what is beneath it, as the menu names it
+    /// (`"Multiply"`, `"Pass through"`), absent at its kind's default: Pass
+    /// through on a frame or group, Normal elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<String>,
     /// Whether this node clips its children to its own frame. Only frames act
     /// on it; it is reported for every node because the model carries it there.
     pub clip: bool,
@@ -398,6 +404,9 @@ fn node_snapshot(
         locked: node.locked(),
         proportions_locked: node.proportions_locked(),
         opacity: doc.drawn_opacity(id),
+        blend: Some(node.blend())
+            .filter(|b| *b != ondin_core::BlendMode::default_for(node.kind()))
+            .map(|b| b.label().to_string()),
         clip: node.clip(),
         mask: node.mask(),
         mask_mode: node.mask_mode().label().to_string(),

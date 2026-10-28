@@ -574,6 +574,56 @@ fn shapes_match_the_canvas() {
     holds("shapes", &doc, &res);
 }
 
+/// Blend modes as the browser draws them: a separable and a non-separable mode
+/// over the frame's fill, and a group set to Normal whose Difference child hangs
+/// off its white card onto the frame and has nothing to difference against there.
+#[test]
+fn blend_modes_match_the_canvas() {
+    use ondin_core::BlendMode as B;
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 300.0, 120.0, "Board");
+    d.fill(f, solid(40, 90, 200, 255));
+    let m = d.rect(f, 20.0, 20.0, 60.0, 80.0, 0.0);
+    d.fill(m, solid(240, 160, 80, 255));
+    let l = d.rect(f, 100.0, 20.0, 60.0, 80.0, 8.0);
+    d.fill(l, solid(250, 230, 120, 255));
+    let g = d.add(Some(f), NodeKind::Group, Affine::IDENTITY, "Isolated");
+    let card = d.rect(g, 180.0, 20.0, 60.0, 80.0, 0.0);
+    d.fill(card, solid(255, 255, 255, 255));
+    let disc = d.rect(g, 210.0, 30.0, 70.0, 60.0, 30.0);
+    d.fill(disc, solid(240, 160, 80, 255));
+    d.apply(vec![
+        Operation::SetBlend {
+            id: m,
+            blend: B::Multiply,
+        },
+        Operation::SetBlend {
+            id: l,
+            blend: B::Luminosity,
+        },
+        Operation::SetBlend {
+            id: g,
+            blend: B::Normal,
+        },
+        Operation::SetBlend {
+            id: disc,
+            blend: B::Difference,
+        },
+    ]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    for decl in [
+        "mix-blend-mode: multiply",
+        "mix-blend-mode: luminosity",
+        "mix-blend-mode: difference",
+        "isolation: isolate",
+    ] {
+        assert!(css.contains(decl), "{decl} in {css}");
+    }
+    holds("blend", &doc, &res);
+}
+
 /// Inside, centre and outside strokes, square and rounded, and a per-side border.
 #[test]
 fn strokes_match_the_canvas() {

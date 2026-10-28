@@ -116,7 +116,7 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
 ## Flatten, Outline shape, Outline stroke, Convert to path
 
 All four share `build::replace_with_path` (*Outline stroke* only when it replaces the layer), which carries what survives being redrawn: transform,
-z-slot, paint, name, opacity, visibility, effects, **moved pivot**, **mask flag**, the **effective fill rule**
+z-slot, paint, name, opacity, a blend mode other than Normal or Pass through, visibility, effects, **moved pivot**, **mask flag**, the **effective fill rule**
 (derived even-odd for an `Exclude`, else stored), and the layer's place in a layout (insets when
 authored, item properties when non-default). `display` is not carried (a path has no children).
 Lock and the proportion lock are dropped deliberately. None of the four has a chord.
@@ -168,8 +168,8 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
 - **Result shape.** A layer with no visible fill and one stroke is replaced by the path
   (`replace_with_path`, then the stroke's brush as its one fill, no strokes, non-zero). Otherwise the
   layer, its strokes removed, and the stroke paths above it (each named "‹layer› stroke") go into a new
-  group in its slot, named as the layer; the group takes the layer's effects, visibility and opacity,
-  each binding moved with its literal, which composite over both: a hidden layer's strokes stay hidden,
+  group in its slot, named as the layer; the group takes the layer's effects, visibility, opacity and a non-Normal blend mode,
+  each binding moved with its literal, which composite over both (the group isolates the two parts and blends them as one layer): a hidden layer's strokes stay hidden,
   and a bound opacity survives a layer with no visible fill being deleted inside that group.
 - Refused for frames (their children would be lost), groups and text, and for a mask the result would
   group: it would mask its own stroke paths and stop masking the siblings above it

@@ -30,9 +30,9 @@ use ondin_core::build::{Axis, Edge};
 use ondin_core::kurbo::{Affine, Cap, Join, Point, Rect, RoundedRectRadii, Size, Vec2};
 use ondin_core::style::StyleSlot;
 use ondin_core::{
-    Adjustment, DashStyle, Effect, EffectKind, Fill, GeometryPatch, GridAlign, GridAxis, GuideAxis,
-    Keyed, LayoutGrid, NodeId, NodeKind, Operation, OrientOp, PaintShown, PaintTarget, Stroke,
-    StrokeAlign, StrokeSides, TextSizing, Transaction, build,
+    Adjustment, BlendMode, DashStyle, Effect, EffectKind, Fill, GeometryPatch, GridAlign, GridAxis,
+    GuideAxis, Keyed, LayoutGrid, NodeId, NodeKind, Operation, OrientOp, PaintShown, PaintTarget,
+    Stroke, StrokeAlign, StrokeSides, TextSizing, Transaction, build,
 };
 /// What the identity row's *Use as mask* would do to the current selection.
 ///
@@ -331,6 +331,15 @@ impl AngleScrub {
 /// Faded rather than moved or struck through: the row is still what you edit to
 /// bring the paint back. 0.6: at 0.7 it read too close to a live row.
 const HIDDEN_OPACITY: f32 = 0.6;
+
+/// The blend-mode menu's width.
+const BLEND_MENU_W: f32 = 210.0;
+
+/// The blend-mode menu's popup id, one for the app: a preview is taken back
+/// whenever no menu under it is open ([`OndinApp::end_blend_preview`]).
+fn blend_menu_id() -> egui::Id {
+    egui::Id::new("blend-menu")
+}
 
 /// How far an effect's blur may be scrubbed or typed: core's cap, which the
 /// bound chip's retype stops at too.
@@ -833,6 +842,11 @@ impl OndinApp {
         // would ambush whoever selected that layer next.
         self.pending_picker
             .take_if(|(id, _)| !self.session.selection.contains(*id));
+        // A deselect can close the blend menu with no Appearance card left to
+        // take its preview back.
+        if !egui::Popup::is_id_open(ui.ctx(), blend_menu_id()) {
+            self.end_blend_preview();
+        }
         // Before any card is drawn.
         self.gather_card_overrides();
         let guides = self.selected_guides();
@@ -2709,7 +2723,7 @@ impl OndinApp {
         opacity_mark: Option<Mark>,
         radius_mark: Option<Mark>,
     ) {
-        self.panel(ui, "Appearance", None, |app, ui| {
+        self.appearance_panel(ui, ids, |app, ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 // The single-layer panel's arithmetic, so fields do not shift.
@@ -4510,6 +4524,118 @@ impl OndinApp {
         );
         self.field_doors(ui, key, &ro);
     }
+    /// The Appearance card over `targets`, its header carrying their blend mode:
+    /// *Mixed* when they differ, muted at each layer's default. The header's menu
+    /// previews the mode under the pointer and commits the one clicked.
+    fn appearance_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        targets: &[NodeId],
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) {
+        let doc = &self.session.doc;
+        let shared = ondin_core::build::shared_blend(doc, targets);
+        let at_default = ondin_core::build::outermost(doc, targets).iter().all(|t| {
+            doc.get(*t)
+                .is_some_and(|n| n.blend() == BlendMode::default_for(n.kind()))
+        });
+        let text = shared.map_or("Mixed", BlendMode::label);
+        let drop = ui::HeadDrop {
+            text,
+            strong: !at_default,
+            tooltip: "Blend mode",
+        };
+        let clicks = self.panel_full(ui, "Appearance", None, None, None, false, Some(drop), body);
+        self.blend_menu(ui, targets, shared, clicks);
+    }
+
+    /// The blend-mode menu under the Appearance header: the modes in families,
+    /// the chorded ones naming their chord, Pass through offered only when a
+    /// target is a frame or a group.
+    fn blend_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        targets: &[NodeId],
+        shared: Option<BlendMode>,
+        clicks: ui::HeadClicks,
+    ) {
+        let containers = targets.iter().any(|t| {
+            self.session
+                .doc
+                .get(*t)
+                .is_some_and(|n| BlendMode::passes_through(n.kind()))
+        });
+        let mut hovered = None;
+        let mut pick = None;
+        if let Some(anchor) = clicks.drop_rect {
+            egui::Popup::new(blend_menu_id(), ui.ctx().clone(), anchor, ui.layer_id())
+                .kind(egui::PopupKind::Menu)
+                .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                .style(egui::containers::menu::menu_style)
+                .open_memory(clicks.drop.then_some(egui::SetOpenCommand::Toggle))
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .align(egui::RectAlign::BOTTOM_END)
+                .gap(ui::MENU_GAP)
+                .show(|ui| {
+                    ui::menu_rows(ui);
+                    ui.set_width(BLEND_MENU_W);
+                    for mode in BlendMode::ALL {
+                        let offered = mode != BlendMode::PassThrough || containers;
+                        let chord = match mode {
+                            BlendMode::PassThrough if !containers => Some("groups".to_owned()),
+                            BlendMode::Normal if containers => None,
+                            _ => mode.chord_digit().map(|d| format!("Shift+{d}")),
+                        };
+                        let on = shared == Some(mode);
+                        let row = ui::MenuRow::new(if on { icon::CHECK } else { "" }, mode.label())
+                            .accel(chord.as_deref())
+                            .checked(on)
+                            .enabled(offered);
+                        let resp = ui::menu_row(ui, row, ui::MENU_ROW_H);
+                        if !offered {
+                            resp.on_hover_text("Only a frame or a group passes through");
+                        } else if resp.clicked() {
+                            pick = Some(mode);
+                            ui.close();
+                        } else if resp.hovered() {
+                            hovered = Some(mode);
+                        }
+                        if BlendMode::FAMILY_ENDS.contains(&mode) {
+                            ui::menu_sep(ui);
+                        }
+                    }
+                });
+        }
+        if let Some(mode) = pick {
+            self.end_blend_preview();
+            let tx = ondin_core::build::set_blend_all(&self.session.doc, targets, mode);
+            if !tx.0.is_empty() {
+                self.session
+                    .name_step(format!("Blend · {}", mode.label()), icon::INTERSECT_THREE);
+                self.commit_edit(tx);
+            }
+            return;
+        }
+        let open = egui::Popup::is_id_open(ui.ctx(), blend_menu_id());
+        match hovered.filter(|_| open) {
+            Some(mode) if self.blend_preview != Some(mode) => {
+                let tx = ondin_core::build::set_blend_all(&self.session.doc, targets, mode);
+                self.session.set_preview(&tx);
+                self.blend_preview = Some(mode);
+            }
+            Some(_) => {}
+            // Off the rows, or the menu gone (Esc, a click away): the old mode back.
+            None => self.end_blend_preview(),
+        }
+    }
+
+    /// Take back the blend menu's hover preview, if one is showing.
+    pub(crate) fn end_blend_preview(&mut self) {
+        if self.blend_preview.take().is_some() {
+            self.session.clear_preview();
+        }
+    }
+
     /// The Appearance panel: opacity, corner radius, and the vertex counts.
     #[allow(clippy::too_many_arguments)]
     fn inspector_appearance(
@@ -4526,7 +4652,7 @@ impl OndinApp {
             Some(NodeKind::Ellipse { arc, .. }) => Some(*arc),
             _ => None,
         };
-        self.panel(ui, "Appearance", None, |app, ui| {
+        self.appearance_panel(ui, &[id], |app, ui| {
             let per_corner = app.per_corner_radius.contains(&id);
             let smoothing = app.corner_smoothing_open.contains(&id);
             ui.horizontal(|ui| {
@@ -8988,7 +9114,7 @@ impl OndinApp {
     /// One effect's numbers, behind its row.
     ///
     /// An `Area` in the popover lane ([`OndinApp::popover_anchor`]), so opening it
-    /// does not push the card down. No `Blend` dropdown: blend modes are not built.
+    /// does not push the card down. No `Blend` row: a shadow has no mode of its own yet.
     fn effect_menu_popup(
         &mut self,
         ui: &mut egui::Ui,
@@ -10035,11 +10161,12 @@ impl OndinApp {
         badge: Option<&str>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> ui::HeadClicks {
-        self.panel_full(ui, title, size, action, badge, false, body)
+        self.panel_full(ui, title, size, action, badge, false, None, body)
     }
 
     /// [`Self::panel_head`] with a `⋯` after the action icon when `more` — a
-    /// style slot's card, its click in [`ui::HeadClicks::more`].
+    /// style slot's card, its click in [`ui::HeadClicks::more`] — and a
+    /// [`ui::HeadDrop`] on the right when `drop` is given.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn panel_full(
         &mut self,
@@ -10049,6 +10176,7 @@ impl OndinApp {
         action: Option<ui::HeadAction>,
         badge: Option<&str>,
         more: bool,
+        drop: Option<ui::HeadDrop<'_>>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> ui::HeadClicks {
         let shown = match size {
@@ -10082,7 +10210,7 @@ impl OndinApp {
             .push_id(title, |ui| {
                 ui::card_at(ui, |ui| {
                     let clicks = ui::section_head_full(
-                        ui, &shown, open, action, badge, overrides, more, open,
+                        ui, &shown, open, action, badge, overrides, more, drop, open,
                     );
                     if open {
                         body(self, ui);
@@ -10107,6 +10235,9 @@ impl OndinApp {
             }
             if action.is_some() && more {
                 hit.max.x -= ui::HEAD_MORE_W;
+            }
+            if let Some(d) = clicks.drop_rect {
+                hit.max.x = hit.max.x.min(d.left());
             }
             let whole = ui.interact(
                 hit,
@@ -22771,6 +22902,276 @@ mod effect_reorder_tests {
             app.picker.as_ref().map(|p| p.slot),
             Some(PaintSlot::Effect(2)),
             "the picker follows its effect"
+        );
+    }
+}
+
+#[cfg(test)]
+mod blend_menu_tests {
+    //! The Appearance header's blend-mode menu and the `Shift`+digit chords.
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+
+    /// A group holding a rect, the rect selected.
+    fn app(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        crate::theme::install(ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0xB1);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (group, rect) = (ids.mint(), ids.mint());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: rect,
+                parent: group,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 40.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(rect);
+        (app, group, rect)
+    }
+
+    fn frame(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 1600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| {
+            ui.set_max_width(280.0);
+            app.inspector_ui(ui)
+        })
+    }
+
+    /// Every text painted, with its rect.
+    fn texts(out: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+        let mut found = Vec::new();
+        for clipped in &out.shapes {
+            if let egui::Shape::Text(t) = &clipped.shape {
+                found.push((t.galley.text().to_owned(), t.visual_bounding_rect()));
+            }
+        }
+        found
+    }
+
+    fn find(out: &egui::FullOutput, text: &str) -> egui::Pos2 {
+        let painted = texts(out);
+        painted
+            .iter()
+            .find(|(t, _)| t == text)
+            .unwrap_or_else(|| panic!("no {text:?} in {painted:?}"))
+            .1
+            .center()
+    }
+
+    fn hover(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) -> egui::FullOutput {
+        frame(app, ctx, vec![egui::Event::PointerMoved(at)]);
+        frame(app, ctx, Vec::new())
+    }
+
+    fn click(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) -> egui::FullOutput {
+        hover(app, ctx, at);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(app, ctx, vec![button(true)]);
+        frame(app, ctx, vec![button(false)]);
+        frame(app, ctx, Vec::new())
+    }
+
+    fn escape() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn previewed(app: &OndinApp, id: NodeId) -> Option<BlendMode> {
+        app.session.render_inputs().2.get(id).and_then(|o| o.blend)
+    }
+
+    /// The header reads the mode; its menu previews the row under the pointer
+    /// without committing, a click commits one named step, and leaving the menu
+    /// takes the preview back.
+    /// flip: `blend_menu` skipping `set_preview` → fails at "Multiply previews".
+    #[test]
+    fn hovering_previews_and_a_click_commits_one_step() {
+        let ctx = egui::Context::default();
+        let (mut app, _, rect) = app(&ctx);
+        frame(&mut app, &ctx, Vec::new());
+        let out = frame(&mut app, &ctx, Vec::new());
+        let drop = find(&out, "Normal");
+        let out = click(&mut app, &ctx, drop);
+        let multiply = find(&out, "Multiply");
+        let depth = app.session.history.undo_depth();
+
+        hover(&mut app, &ctx, multiply);
+        assert_eq!(
+            previewed(&app, rect),
+            Some(BlendMode::Multiply),
+            "Multiply previews"
+        );
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().blend(),
+            BlendMode::Normal,
+            "a preview is not a commit"
+        );
+
+        let out = hover(&mut app, &ctx, find(&out, "Screen"));
+        assert_eq!(
+            previewed(&app, rect),
+            Some(BlendMode::Screen),
+            "the row under it"
+        );
+        let screen = find(&out, "Screen");
+        click(&mut app, &ctx, screen);
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().blend(),
+            BlendMode::Screen
+        );
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        assert_eq!(
+            app.session
+                .history
+                .current_note_mut()
+                .map(|n| n.label.clone()),
+            Some("Blend · Screen".into())
+        );
+        assert_eq!(previewed(&app, rect), None, "nothing left previewing");
+    }
+
+    /// Leaving the rows puts the old mode back with the menu still open, and so
+    /// does Esc, which closes it.
+    /// flip: `blend_menu`'s no-row arm doing nothing → fails at "off the rows".
+    /// The Esc half has a second defence in `inspector_ui`, so that flip alone
+    /// leaves "the old mode back" green.
+    #[test]
+    fn leaving_the_rows_or_escape_takes_the_preview_back() {
+        let ctx = egui::Context::default();
+        let (mut app, _, rect) = app(&ctx);
+        frame(&mut app, &ctx, Vec::new());
+        let out = frame(&mut app, &ctx, Vec::new());
+        let out = click(&mut app, &ctx, find(&out, "Normal"));
+        let multiply = find(&out, "Multiply");
+        hover(&mut app, &ctx, multiply);
+        assert_eq!(previewed(&app, rect), Some(BlendMode::Multiply), "fixture");
+        hover(&mut app, &ctx, egui::pos2(700.0, 1500.0));
+        assert!(
+            egui::Popup::is_id_open(&ctx, blend_menu_id()),
+            "a pointer move closes nothing"
+        );
+        assert_eq!(previewed(&app, rect), None, "off the rows");
+        hover(&mut app, &ctx, multiply);
+        assert_eq!(previewed(&app, rect), Some(BlendMode::Multiply), "back on");
+        frame(&mut app, &ctx, vec![escape()]);
+        frame(&mut app, &ctx, Vec::new());
+        assert_eq!(previewed(&app, rect), None, "the old mode back");
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().blend(),
+            BlendMode::Normal
+        );
+    }
+
+    /// Pass through is offered only to a frame or a group, and a group's header
+    /// reads it at the default.
+    #[test]
+    fn pass_through_is_offered_to_a_group_alone() {
+        let ctx = egui::Context::default();
+        let (mut app, group, _) = app(&ctx);
+        frame(&mut app, &ctx, Vec::new());
+        let out = frame(&mut app, &ctx, Vec::new());
+        let out = click(&mut app, &ctx, find(&out, "Normal"));
+        let pass = find(&out, "Pass through");
+        click(&mut app, &ctx, pass);
+        assert_eq!(
+            app.session.doc.get(group).unwrap().blend(),
+            BlendMode::PassThrough
+        );
+        let rect = app.session.selection.single().unwrap();
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().blend(),
+            BlendMode::Normal,
+            "a dimmed row takes no click"
+        );
+        // Nor does it close the menu.
+        frame(&mut app, &ctx, vec![escape()]);
+
+        app.session.selection.set_one(group);
+        frame(&mut app, &ctx, Vec::new());
+        let out = frame(&mut app, &ctx, Vec::new());
+        let out = click(&mut app, &ctx, find(&out, "Pass through"));
+        click(&mut app, &ctx, find(&out, "Normal"));
+        assert_eq!(
+            app.session.doc.get(group).unwrap().blend(),
+            BlendMode::Normal
+        );
+    }
+
+    /// `Shift`+`5` sets Screen in one step and says so; `Shift`+`3` puts each
+    /// layer's default back, Pass through on the group and Normal on the rect.
+    #[test]
+    fn the_chords_set_a_mode_and_three_restores_each_default() {
+        let ctx = egui::Context::default();
+        let (mut app, group, rect) = app(&ctx);
+        app.session.selection.set(vec![group]);
+        app.blend_chord(5);
+        assert_eq!(
+            app.session.doc.get(group).unwrap().blend(),
+            BlendMode::Screen
+        );
+        assert_eq!(app.session.status().text, "Screen");
+        assert_eq!(
+            app.session
+                .history
+                .current_note_mut()
+                .map(|n| n.label.clone()),
+            Some("Blend · Screen".into())
+        );
+        app.session.selection.set_one(rect);
+        app.blend_chord(8);
+        app.session.selection.set(vec![group]);
+        app.blend_chord(3);
+        assert_eq!(
+            app.session.doc.get(group).unwrap().blend(),
+            BlendMode::PassThrough
+        );
+        app.session.selection.set_one(rect);
+        app.blend_chord(3);
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().blend(),
+            BlendMode::Normal
         );
     }
 }

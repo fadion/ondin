@@ -1656,3 +1656,87 @@ fn the_pool_lets_go_of_what_recent_frames_did_not_need() {
          needs — it is not letting go of textures no recent frame used"
     );
 }
+
+/// The white square in `mode`, over a full-page blue rect drawn first.
+fn blended(mode: ondin_core::BlendMode, effects: Vec<Effect>) -> (Document, Resolved) {
+    let (mut doc, _) = document(effects, 1.0);
+    let square = doc.get(doc.first_page()).unwrap().children()[0];
+    let ground = ondin_core::NodeId {
+        actor: 1,
+        seq: 1000,
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: ground,
+            parent: doc.first_page(),
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(SIDE as f64, SIDE as f64),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: ground,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(40, 90, 200, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetFills {
+            id: square,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(240, 160, 80, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetBlend {
+            id: square,
+            blend: mode,
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    (doc, res)
+}
+
+/// The GPU backend draws a blend layer as the CPU reference does, a separable
+/// and a non-separable mode alike, with a shadow inside the blended layer.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn both_backends_blend_alike() {
+    use ondin_core::BlendMode as B;
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    for (mode, effects) in [
+        (B::Multiply, vec![]),
+        (B::Difference, vec![]),
+        (B::Luminosity, vec![]),
+        (B::Screen, vec![red_shadow(12.0, 0.0)]),
+    ] {
+        let (doc, res) = blended(mode, effects);
+        let gpu_px = render_gpu(&mut g, &doc, &res);
+        let cpu_px = render_cpu(&doc, &res);
+        let (normal, normal_res) = blended(B::Normal, vec![]);
+        assert_ne!(
+            at(&render_cpu(&normal, &normal_res), 50, 50),
+            at(&cpu_px, 50, 50),
+            "{mode:?} changes the square, or two unblended pictures would agree"
+        );
+        for (x, y) in [(50, 50), (50, 78), (10, 10)] {
+            let (a, b) = (at(&gpu_px, x, y), at(&cpu_px, x, y));
+            let close = [
+                a.0.abs_diff(b.0),
+                a.1.abs_diff(b.1),
+                a.2.abs_diff(b.2),
+                a.3.abs_diff(b.3),
+            ]
+            .iter()
+            .all(|d| *d <= 2);
+            assert!(close, "{mode:?} at ({x}, {y}): gpu {a:?} vs cpu {b:?}");
+        }
+    }
+}

@@ -133,7 +133,18 @@ an empty selection.
   gesture owes zero transactions (§9.3).
 - ⚠️ **The pending digit carries the layers it was typed against** (§15 D470): `4` on A, click B,
   and the deadline used to apply 40% to B. `4` on A then `5` on B are two values.
-- ⚠️ **Reserve `Shift+3`…`Shift+9`** for blend modes (Adobe); `Shift+0/1/2` are zoom (§3).
+### Blend mode
+
+| Key | Mode |
+|---|---|
+| `Shift+3` | ✅ each layer's default: Normal, or Pass through on a frame or group |
+| `Shift+4` / `5` / `6` / `7` | ✅ Multiply / Screen / Overlay / Soft light |
+| `Shift+8` / `9` | ✅ Darken / Lighten |
+
+Adobe's chords; `Shift+0/1/2` are zoom (§3). Read as the physical digit (`Action::BlendChord`):
+`#`…`(` have no `egui::Key`. Applies via `build::set_blend_all` to the outermost members, as one
+step named *Blend · <Mode>*; the status line names the mode, with *· N layers* for several, and
+*Default* for a `Shift+3` over frames and leaves together.
 
 ## 3. Zoom
 
@@ -544,7 +555,6 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
   `Tab` is egui's focus key and costs a frame to claim (§15 D123): the last key worth a second
   meaning. The TextInsert nesting meaning (§10) is affordable because the two live in different
   `Mode`s; a global toggle would have to out-rank both.
-- **`Shift`+digits 3–9** — held for blend modes (§2).
 - **`Ctrl+Shift`+ the key of a bound `Ctrl` chord** — never a second spelling, guarded since
   §15 D710. **A chord that does nothing is the honest state for one whose action was removed or
   never bound**; it leaves the combination available. Eight `normal_mode` arms answered the shifted
@@ -566,7 +576,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 1. **`Ctrl+0` / `Ctrl+1`.** Sketch and Figma: 100% / fit; Adobe: fit / 100%. We follow Sketch.
 2. **`Ctrl+R`.** Figma: rename; Illustrator and Photoshop: rulers. We say rename; rulers have
    `Shift+R` (§4).
-3. **`Shift`+digits.** Figma: zoom; Adobe: blend modes. We follow Figma for 0/1/2 and reserve 3–9
+3. **`Shift`+digits.** Figma: zoom; Adobe: blend modes. We follow Figma for 0/1/2 and Adobe for 3–9
    (§2).
 
 ## Implementation notes

@@ -9,7 +9,11 @@ reads true.
 
 ## Later · First
 
-- **Blend modes**, per layer and per effect. `shortcuts.md` §2 reserves `Shift+3`…`Shift+9`.
+- **A blend mode per shadow.** Drop and inner shadow rows gain a *Blend* dropdown, Normal by
+  default, so a Multiply shadow darkens a coloured ground. A drop shadow must blend with what is
+  beneath the layer, which the effect buffer does not hold, so the effect composite has to be split
+  on both backends and in the SVG filter graph; an inner shadow can blend inside the buffer.
+  Per-layer modes are built (`core-model.md`, `render.md`).
 - **Background blur.** Canvas and raster draw the backdrop; SVG cannot express it and the code export
   has `backdrop-filter`, so the SVG writer owes an answer (a reported approximation, at least).
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.

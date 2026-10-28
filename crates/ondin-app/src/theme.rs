@@ -437,6 +437,8 @@ pub mod icon {
     pub const UNITE_SQUARE: &str = "\u{e878}";
     pub const SUBTRACT_SQUARE: &str = "\u{ebd4}";
     pub const INTERSECT_SQUARE: &str = "\u{e87a}";
+    /// A blend-mode step's History glyph.
+    pub const INTERSECT_THREE: &str = "\u{ecc4}";
     pub const EXCLUDE_SQUARE: &str = "\u{e880}";
     /// Flatten, at the foot of the same dropdown. Deliberately not a set diagram:
     /// it happens once and discards the operands rather than being a fifth state.
@@ -752,6 +754,7 @@ pub mod icon {
         ("unite-square", UNITE_SQUARE),
         ("subtract-square", SUBTRACT_SQUARE),
         ("intersect-square", INTERSECT_SQUARE),
+        ("intersect-three", INTERSECT_THREE),
         ("exclude-square", EXCLUDE_SQUARE),
         ("arrows-merge", ARROWS_MERGE),
         ("arrows-left-right", ARROWS_LEFT_RIGHT),

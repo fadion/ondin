@@ -37,6 +37,8 @@ pub struct NodeOverride {
     /// Kept apart from `paint` because effects live on containers, which have no `Paint`.
     pub effects: Option<Vec<ondin_core::Keyed<ondin_core::Effect>>>,
     pub opacity: Option<f32>,
+    /// Replacement blend mode — the inspector menu's hover preview.
+    pub blend: Option<ondin_core::BlendMode>,
     pub visible: Option<bool>,
     /// Re-shaped layout, when the kind change affected text.
     pub text: Option<TextLayout>,
@@ -89,6 +91,8 @@ pub struct GhostNode {
     /// asked to compute it per frame.
     pub path: Option<kurbo::BezPath>,
     pub opacity: f32,
+    /// How it mixes with what is beneath it, as `Node::blend` does.
+    pub blend: ondin_core::BlendMode,
     pub visible: bool,
     /// Whether this ghost clips its children, as `Node::clip` does.
     pub clip: bool,
@@ -104,6 +108,7 @@ impl GhostNode {
     /// A childless ghost with a layer's default properties — a shape tool
     /// dragging out a new node.
     fn leaf(id: NodeId, transform: Affine, kind: NodeKind, text: Option<TextLayout>) -> Self {
+        let blend = ondin_core::BlendMode::default_for(&kind);
         Self {
             id,
             transform,
@@ -114,6 +119,7 @@ impl GhostNode {
             // No shape tool makes a boolean or a mask: both designate existing layers.
             path: None,
             opacity: 1.0,
+            blend,
             visible: true,
             clip: false,
             mask: false,
@@ -1170,6 +1176,16 @@ impl RenderOverrides {
                     None => self.entry(*id).opacity = Some(*opacity),
                 }
             }
+            Operation::SetBlend { id, blend } => match self.ghost_mut(*id) {
+                Some(g) if blend.allowed_on(&g.kind) => g.blend = *blend,
+                Some(_) => return None,
+                None => {
+                    if !blend.allowed_on(doc.get(*id)?.kind()) {
+                        return None;
+                    }
+                    self.entry(*id).blend = Some(*blend);
+                }
+            },
             Operation::SetVisible { id, visible } => match self.ghost_mut(*id) {
                 Some(g) => g.visible = *visible,
                 None => self.entry(*id).visible = Some(*visible),
@@ -1891,6 +1907,7 @@ fn build_ghost(
             node.opacity(),
             node.opacity_var(),
         ),
+        blend: node.blend(),
         visible: ghost_shown(doc, node),
         clip: node.clip(),
         mask: node.mask(),

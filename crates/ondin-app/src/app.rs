@@ -610,6 +610,9 @@ pub struct OndinApp {
     /// Rects whose Appearance panel shows the corner smoothing field; view state. Never
     /// shares a rect with `per_corner_radius`: opening either closes the other.
     pub(crate) corner_smoothing_open: HashSet<NodeId>,
+    /// The mode the Appearance header's blend menu is previewing, while the
+    /// pointer is on one of its rows.
+    pub(crate) blend_preview: Option<ondin_core::BlendMode>,
     /// The run of Ctrl+D duplicates in progress, if any.
     pub(crate) clones: Option<CloneChain>,
     /// The group the user has stepped into by double-clicking it. A selection scope
@@ -1346,6 +1349,7 @@ impl OndinApp {
             field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
             corner_smoothing_open: HashSet::new(),
+            blend_preview: None,
             open_menu: TopMenu::None,
             zoom_entry: None,
             kit_picker: None,
@@ -2079,6 +2083,7 @@ impl OndinApp {
             Action::Distribute(axis) => self.distribute(axis),
             Action::TidyUp => self.tidy_up(),
             Action::OpacityDigit(d) => self.opacity_digit(ctx, d),
+            Action::BlendChord(d) => self.blend_chord(d),
             Action::TextStyle(chord) => self.text_chord(chord),
         }
         ctx.request_repaint();
@@ -2254,6 +2259,46 @@ impl OndinApp {
         } else {
             self.session.set_preview(&tx);
             self.session.info(format!("Opacity {pct:.0}%"));
+        }
+    }
+
+    /// `Shift`+`3`…`9` — set the selection's blend mode in one step, the status
+    /// line naming it (`docs/shortcuts.md` §2). `3` gives each layer its default,
+    /// so a group goes back to Pass through and a shape to Normal.
+    pub(crate) fn blend_chord(&mut self, digit: u8) {
+        // The layers the write lands on, so the label and the count say what changed.
+        let ids = ondin_core::build::outermost(&self.session.doc, self.session.selection.ids());
+        let doc = &self.session.doc;
+        // What the digit means on each layer: `3` differs between a group and a
+        // shape, and a selection holding both is named for neither.
+        let mut modes = ids
+            .iter()
+            .filter_map(|id| doc.get(*id))
+            .filter_map(|n| ondin_core::BlendMode::of_chord(digit, n.kind()));
+        let Some(shown) = modes.next() else {
+            return;
+        };
+        let label = match modes.all(|m| m == shown) {
+            true => shown.label(),
+            false => "Default",
+        };
+        let mode = match digit {
+            3 => ondin_core::BlendMode::PassThrough,
+            _ => shown,
+        };
+        let tx = ondin_core::build::set_blend_all(doc, &ids, mode);
+        let layers = match ids.len() {
+            1 => String::new(),
+            n => format!(" · {n} layers"),
+        };
+        if tx.0.is_empty() {
+            self.session.info(format!("{label}{layers}"));
+            return;
+        }
+        self.session
+            .name_step(format!("Blend · {label}"), icon::INTERSECT_THREE);
+        if self.commit_edit(tx) {
+            self.session.info(format!("{label}{layers}"));
         }
     }
 

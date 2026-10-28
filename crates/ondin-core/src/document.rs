@@ -13,7 +13,7 @@ use crate::io::{CURRENT_SCHEMA_VERSION, MAX_TREE_DEPTH};
 use crate::item::Keyed;
 use crate::meta::DocumentMeta;
 use crate::node::{
-    BlockStyle, CharSpans, Fill, FillRule, MaskMode, Node, NodeKind, Paint, ParaSpans,
+    BlendMode, BlockStyle, CharSpans, Fill, FillRule, MaskMode, Node, NodeKind, Paint, ParaSpans,
     ParagraphStyle, Pivot, Stroke, TextStyle,
 };
 use crate::op::{
@@ -141,6 +141,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         locked: false,
         proportions_locked: false,
         opacity: 1.0,
+        blend: BlendMode::Normal,
         clip: false,
         mask: false,
         mask_mode: MaskMode::default(),
@@ -1233,6 +1234,7 @@ impl Document {
                 self.op_set_proportions_locked(*id, *locked, dirty)
             }
             Operation::SetOpacity { id, opacity } => self.op_set_opacity(*id, *opacity, dirty),
+            Operation::SetBlend { id, blend } => self.op_set_blend(*id, *blend, dirty),
             Operation::SetPivot { id, pivot } => self.op_set_pivot(*id, *pivot, dirty),
             Operation::SetClip { id, clip } => self.op_set_clip(*id, *clip, dirty),
             Operation::SetMask { id, mask } => self.op_set_mask(*id, *mask, dirty),
@@ -1763,6 +1765,7 @@ impl Document {
             locked: false,
             proportions_locked: false,
             opacity: 1.0,
+            blend: BlendMode::default_for(kind),
             // Frames clip by default (Figma's "clip content", on); nothing else
             // has a frame to clip to, so the flag is inert for other kinds.
             clip: kind.clips_children(),
@@ -1912,6 +1915,9 @@ impl Document {
             }
             if !(0.0..=1.0).contains(&n.opacity) {
                 return Err(OpError::BadOpacity);
+            }
+            if !n.blend.allowed_on(&n.kind) {
+                return Err(OpError::WrongKindForOp);
             }
             // The same field invariant `op_create` upholds one door over. This is
             // the door an MCP write tool, an importer or a paste (`io::clip`, OS
@@ -2875,6 +2881,24 @@ impl Document {
         Ok(Operation::SetOpacity { id, opacity: old })
     }
 
+    /// Like opacity, the mode changes only how this node's layer composites, so
+    /// the node alone is dirtied.
+    fn op_set_blend(
+        &mut self,
+        id: NodeId,
+        blend: BlendMode,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
+        if !blend.allowed_on(&node.kind) {
+            return Err(OpError::WrongKindForOp);
+        }
+        let old = node.blend;
+        node.blend = blend;
+        dirty.0.insert(id);
+        Ok(Operation::SetBlend { id, blend: old })
+    }
+
     /// Turning a clip off lets descendants paint outside the frame, so the
     /// frame's own bounds are not the whole story any more — the subtree is
     /// dirtied, not just the node.
@@ -3122,6 +3146,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             locked: n.locked,
             proportions_locked: n.proportions_locked,
             opacity: n.opacity,
+            blend: n.blend,
             clip: n.clip,
             // A copy of a mask is a mask; the duplicate starts a second run at the
             // index it was inserted at.
@@ -3406,6 +3431,7 @@ mod tests {
             id,
             parent,
             children,
+            blend: BlendMode::default_for(&kind),
             kind,
             transform: Affine::IDENTITY,
             name: "n".into(),

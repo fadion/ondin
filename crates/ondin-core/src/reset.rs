@@ -56,6 +56,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         locked: _,
         proportions_locked: _,
         opacity,
+        blend,
         clip,
         mask,
         mask_mode,
@@ -110,6 +111,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
             id,
             opacity: *opacity,
         },
+        O::SetBlend { id, blend: *blend },
         O::SetClip { id, clip: *clip },
         O::SetMask { id, mask: *mask },
         O::SetMaskMode {

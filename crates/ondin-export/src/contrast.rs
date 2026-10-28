@@ -482,6 +482,10 @@ fn check_one(
         else {
             continue;
         };
+        if blends_here(doc, id) {
+            skip(&mut report, BLENDED);
+            continue;
+        }
         let measured = match measure(
             doc, res, images, page, id, bounds, ground, &colours, level, non_text,
         ) {
@@ -591,6 +595,21 @@ struct Measured {
 
 /// Why a layer whose paint the preview cannot change is skipped.
 const UNPREVIEWABLE: &str = "cannot be drawn apart";
+
+/// Why a layer mixed into what is beneath it by a blend mode is skipped: the
+/// drawn colour is [`drawn`]'s source-over, which a mode replaces.
+const BLENDED: &str = "is blended with what is beneath it";
+
+/// Whether `id` or a layer it is drawn inside has a mode that mixes rather
+/// than covers.
+fn blends_here(doc: &Document, id: NodeId) -> bool {
+    std::iter::successors(doc.get(id), |n| n.parent().and_then(|p| doc.get(p))).any(|n| {
+        !matches!(
+            n.blend(),
+            ondin_core::BlendMode::Normal | ondin_core::BlendMode::PassThrough
+        )
+    })
+}
 
 /// The lowest score of the layer's ink, as drawn, against the backdrop, over
 /// the pixels the layer covers most; with `any_part`, the score of its best

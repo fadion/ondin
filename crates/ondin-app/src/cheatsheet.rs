@@ -159,6 +159,8 @@ fn sections(lead: Lead) -> Vec<Section> {
     );
     // Opacity digits are a value, not a verb; no registry row names them.
     layer.rows.push(hand_row("Opacity 10–100%", &["0–9"]));
+    // Nor the blend chords, each a mode (`BlendMode::of_chord`).
+    layer.rows.push(hand_row("Blend mode", &["Shift+3–9"]));
     let view: Vec<Item> = [
         ViewSwitch::Rulers,
         ViewSwitch::Guides,
@@ -858,6 +860,7 @@ mod tests {
                     | A::Enter
                     | A::PasteRelease
                     | A::OpacityDigit(_)
+                    | A::BlendChord(_)
             )
         };
         let m = |ctrl, alt, shift| egui::Modifiers {

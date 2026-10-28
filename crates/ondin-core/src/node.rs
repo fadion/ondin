@@ -48,6 +48,10 @@ pub struct Node {
     pub(crate) proportions_locked: bool,
     /// 0.0..=1.0.
     pub(crate) opacity: f32,
+    /// How this layer mixes with what is drawn beneath it. Only a frame or a
+    /// group may hold [`BlendMode::PassThrough`], and it is their default
+    /// ([`BlendMode::default_for`]).
+    pub(crate) blend: BlendMode,
     /// Whether this node clips what its children draw to its own frame.
     /// Node-level like `visible`/`locked`; ignored by kinds with no frame.
     pub(crate) clip: bool,
@@ -313,6 +317,10 @@ impl Node {
     pub fn opacity(&self) -> f32 {
         self.opacity
     }
+    /// How this layer mixes with what is drawn beneath it.
+    pub fn blend(&self) -> BlendMode {
+        self.blend
+    }
     /// Whether this node clips its children to its own frame. Only containers
     /// with a frame — artboards — act on it today.
     pub fn clip(&self) -> bool {
@@ -469,6 +477,187 @@ impl MaskMode {
     }
 
     pub const ALL: [MaskMode; 2] = [MaskMode::Shape, MaskMode::Alpha];
+}
+
+/// How a layer mixes with what is drawn beneath it ([`Node::blend`]): the
+/// sixteen modes CSS, SVG and PDF share, which both backends draw, plus
+/// [`Self::PassThrough`] for frames and groups.
+///
+/// A blended layer mixes with what is already drawn inside its nearest isolated
+/// ancestor ([`Self::isolates`]), failing that the top-level frame's
+/// content. Plus darker, Plus lighter and the other modes CSS lacks are left out
+/// so the canvas and every export agree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BlendMode {
+    /// A frame's or group's children blend with whatever lies under it, as if
+    /// the container were not there. Their default; no other kind holds it.
+    PassThrough,
+    Normal,
+    Darken,
+    Multiply,
+    ColorBurn,
+    Lighten,
+    Screen,
+    ColorDodge,
+    Overlay,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+impl BlendMode {
+    /// Every mode in menu order, Pass through first; the menu separates
+    /// [`Self::FAMILY_ENDS`].
+    pub const ALL: [BlendMode; 17] = [
+        BlendMode::PassThrough,
+        BlendMode::Normal,
+        BlendMode::Darken,
+        BlendMode::Multiply,
+        BlendMode::ColorBurn,
+        BlendMode::Lighten,
+        BlendMode::Screen,
+        BlendMode::ColorDodge,
+        BlendMode::Overlay,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+        BlendMode::Difference,
+        BlendMode::Exclusion,
+        BlendMode::Hue,
+        BlendMode::Saturation,
+        BlendMode::Color,
+        BlendMode::Luminosity,
+    ];
+
+    /// The last mode of each family; a menu draws a separator after each.
+    pub const FAMILY_ENDS: [BlendMode; 5] = [
+        BlendMode::Normal,
+        BlendMode::ColorBurn,
+        BlendMode::ColorDodge,
+        BlendMode::HardLight,
+        BlendMode::Exclusion,
+    ];
+
+    /// Whether `kind` may hold [`Self::PassThrough`]: a frame or a group. A
+    /// boolean draws its operands as one shape, so it is a leaf here.
+    pub fn passes_through(kind: &NodeKind) -> bool {
+        matches!(kind, NodeKind::Artboard { .. } | NodeKind::Group)
+    }
+
+    /// The mode a new layer of `kind` takes, and the one the file leaves out.
+    pub fn default_for(kind: &NodeKind) -> BlendMode {
+        if Self::passes_through(kind) {
+            BlendMode::PassThrough
+        } else {
+            BlendMode::Normal
+        }
+    }
+
+    /// Whether a layer of `kind` may hold this mode.
+    pub fn allowed_on(self, kind: &NodeKind) -> bool {
+        self != BlendMode::PassThrough || Self::passes_through(kind)
+    }
+
+    /// Whether a layer of `kind` in this mode is drawn alone and then
+    /// composited: a frame or group set to anything but Pass through, or any
+    /// layer whose mode is not Normal. Opacity, a clip and a mask isolate too;
+    /// the scene walk asks those itself.
+    pub fn isolates(self, kind: &NodeKind) -> bool {
+        match self {
+            BlendMode::PassThrough => false,
+            // Normal on a leaf is plain source-over: nothing to draw alone.
+            BlendMode::Normal => Self::passes_through(kind),
+            _ => true,
+        }
+    }
+
+    /// The label a menu or a dropdown shows.
+    pub fn label(self) -> &'static str {
+        match self {
+            BlendMode::PassThrough => "Pass through",
+            BlendMode::Normal => "Normal",
+            BlendMode::Darken => "Darken",
+            BlendMode::Multiply => "Multiply",
+            BlendMode::ColorBurn => "Color burn",
+            BlendMode::Lighten => "Lighten",
+            BlendMode::Screen => "Screen",
+            BlendMode::ColorDodge => "Color dodge",
+            BlendMode::Overlay => "Overlay",
+            BlendMode::SoftLight => "Soft light",
+            BlendMode::HardLight => "Hard light",
+            BlendMode::Difference => "Difference",
+            BlendMode::Exclusion => "Exclusion",
+            BlendMode::Hue => "Hue",
+            BlendMode::Saturation => "Saturation",
+            BlendMode::Color => "Color",
+            BlendMode::Luminosity => "Luminosity",
+        }
+    }
+
+    /// The CSS `mix-blend-mode` keyword, which SVG and the snapshot share;
+    /// Pass through is `normal` on a `<g>` left unisolated.
+    pub fn css(self) -> &'static str {
+        match self {
+            BlendMode::PassThrough | BlendMode::Normal => "normal",
+            BlendMode::Darken => "darken",
+            BlendMode::Multiply => "multiply",
+            BlendMode::ColorBurn => "color-burn",
+            BlendMode::Lighten => "lighten",
+            BlendMode::Screen => "screen",
+            BlendMode::ColorDodge => "color-dodge",
+            BlendMode::Overlay => "overlay",
+            BlendMode::SoftLight => "soft-light",
+            BlendMode::HardLight => "hard-light",
+            BlendMode::Difference => "difference",
+            BlendMode::Exclusion => "exclusion",
+            BlendMode::Hue => "hue",
+            BlendMode::Saturation => "saturation",
+            BlendMode::Color => "color",
+            BlendMode::Luminosity => "luminosity",
+        }
+    }
+
+    /// The mode a CSS `mix-blend-mode` keyword names; `normal` reads as Normal.
+    pub fn from_css(keyword: &str) -> Option<BlendMode> {
+        let keyword = keyword.trim();
+        Self::ALL[1..]
+            .iter()
+            .copied()
+            .find(|m| m.css().eq_ignore_ascii_case(keyword))
+    }
+
+    /// The digit of the `Shift`+digit chord that sets this mode, if it has one.
+    /// `3` is Normal, or Pass through on a frame or group.
+    pub fn chord_digit(self) -> Option<u8> {
+        match self {
+            BlendMode::Normal | BlendMode::PassThrough => Some(3),
+            BlendMode::Multiply => Some(4),
+            BlendMode::Screen => Some(5),
+            BlendMode::Overlay => Some(6),
+            BlendMode::SoftLight => Some(7),
+            BlendMode::Darken => Some(8),
+            BlendMode::Lighten => Some(9),
+            _ => None,
+        }
+    }
+
+    /// The mode `Shift`+`digit` sets on a layer of `kind`.
+    pub fn of_chord(digit: u8, kind: &NodeKind) -> Option<BlendMode> {
+        Some(match digit {
+            3 => Self::default_for(kind),
+            4 => BlendMode::Multiply,
+            5 => BlendMode::Screen,
+            6 => BlendMode::Overlay,
+            7 => BlendMode::SoftLight,
+            8 => BlendMode::Darken,
+            9 => BlendMode::Lighten,
+            _ => return None,
+        })
+    }
 }
 
 /// A node's transform origin, in the node's own local space.

@@ -710,6 +710,20 @@ pub struct HeadClicks {
     pub more: bool,
     /// The box the `⋯` paints, for its menu to hang from.
     pub more_rect: Option<egui::Rect>,
+    /// The header's [`HeadDrop`] was pressed.
+    pub drop: bool,
+    /// The box the [`HeadDrop`] paints, for its menu to hang from.
+    pub drop_rect: Option<egui::Rect>,
+}
+
+/// A small dropdown on a header's right, its value and a caret: the Appearance
+/// card's blend mode. Dim at the default and full strength otherwise, so a
+/// changed value shows with the card closed.
+#[derive(Clone, Copy)]
+pub struct HeadDrop<'a> {
+    pub text: &'a str,
+    pub strong: bool,
+    pub tooltip: &'a str,
 }
 
 /// A card's overrides, for its header: a dot and `count` at rest, and on hover a
@@ -794,7 +808,7 @@ pub fn section_head_badged(
     badge: Option<&str>,
     sense: bool,
 ) -> HeadClicks {
-    section_head_full(ui, label, open, action, badge, None, false, sense)
+    section_head_full(ui, label, open, action, badge, None, false, None, sense)
 }
 
 /// The width a header's `⋯` takes from the toggle target beside it: its box and
@@ -812,7 +826,8 @@ const HEAD_RESET_PAD: f32 = 6.0;
 /// neutral dot and the count; with the pointer over the header, a chip
 /// (*↺ Reset effects*) whose click is [`HeadClicks::reset`]. The chip's slot is
 /// reserved at rest, and registered after the toggle target so it takes the press.
-/// `more` puts a `⋯` last at the right-hand end ([`HeadClicks::more`]).
+/// `more` puts a `⋯` last at the right-hand end ([`HeadClicks::more`]); `drop`
+/// puts a [`HeadDrop`] left of everything else there ([`HeadClicks::drop`]).
 #[allow(clippy::too_many_arguments)]
 pub fn section_head_full(
     ui: &mut egui::Ui,
@@ -822,6 +837,7 @@ pub fn section_head_full(
     badge: Option<&str>,
     overrides: Option<HeadOverrides<'_>>,
     more: bool,
+    drop: Option<HeadDrop<'_>>,
     sense: bool,
 ) -> HeadClicks {
     let mut clicks = HeadClicks::default();
@@ -862,7 +878,7 @@ pub fn section_head_full(
                 }
             });
 
-            if action.is_some() || badge.is_some() || more {
+            if action.is_some() || badge.is_some() || more || drop.is_some() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if more {
                         let pad = egui::Margin {
@@ -916,6 +932,11 @@ pub fn section_head_full(
                     if let Some(word) = badge {
                         head_badge(ui, word);
                     }
+                    if let Some(d) = drop {
+                        let resp = head_drop(ui, d);
+                        clicks.drop = resp.clicked();
+                        clicks.drop_rect = Some(resp.rect);
+                    }
                 });
             }
         })
@@ -935,6 +956,11 @@ pub fn section_head_full(
             } else {
                 HEAD_ACTION_W + HEAD_ACTION_PAD
             };
+        }
+        // The drop is the leftmost of the right-hand controls, so the target
+        // stops at it.
+        if let Some(d) = clicks.drop_rect {
+            hit.max.x = hit.max.x.min(d.left());
         }
         let head = ui.interact(
             hit,
@@ -1041,6 +1067,41 @@ fn head_badge(ui: &mut egui::Ui, word: &str) {
         galley,
         color::ACCENT_100,
     );
+}
+
+/// A [`HeadDrop`]: 11-pt text and a 10-pt caret 4 pt after it, muted at the
+/// default and strong otherwise or under the pointer.
+fn head_drop(ui: &mut egui::Ui, d: HeadDrop<'_>) -> egui::Response {
+    let font = egui::FontId::proportional(11.0);
+    let text_w = ui
+        .painter()
+        .layout_no_wrap(d.text.to_owned(), font.clone(), theme::text::STRONG)
+        .size()
+        .x;
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(text_w + 14.0, 18.0), egui::Sense::click());
+    let ink = if d.strong || resp.hovered() {
+        theme::text::STRONG
+    } else {
+        theme::text::MUTED
+    };
+    let p = ui.painter();
+    let mid = rect.center().y;
+    p.text(
+        egui::pos2(rect.left(), mid),
+        egui::Align2::LEFT_CENTER,
+        d.text,
+        font,
+        ink,
+    );
+    p.text(
+        egui::pos2(rect.right() - 5.0, mid),
+        egui::Align2::CENTER_CENTER,
+        icon::CARET_DOWN,
+        theme::icon_font(10.0),
+        ink,
+    );
+    resp.on_hover_text(d.tooltip)
 }
 
 /// Horizontal inset between a [`field_frame`]'s hairline and its contents; [`grip`]
@@ -4929,6 +4990,7 @@ mod head_tests {
                         None,
                         None,
                         true,
+                        None,
                         true,
                     );
                 },

@@ -92,7 +92,7 @@ copies at every depth through the reverse link map, each level compared against 
   mask over a group holding a frame, `holds_a_frame`) and keeps the inverse. This stands on every such
   op writing its node alone.
 - `propagate::mode`, wildcard-free, picks the comparison:
-  - **whole** — transform, geometry, text with spans, the span ops, name, visibility, opacity, pivot,
+  - **whole** — transform, geometry, text with spans, the span ops, name, visibility, opacity, blend mode, pivot,
     clip, mask, mask mode, fill rule, display mode (`SetMode`), the variable bindings (`SetCornerVars`,
     `SetSpacingVars`, `SetVisibleVar`, `SetSizeVars`, `SetOpacityVar`) and the card
     styles (`SetFillStyle`, `SetStrokeStyle`, `SetEffectsStyle`, `SetTypeStyle`, `SetLayoutStyle`);

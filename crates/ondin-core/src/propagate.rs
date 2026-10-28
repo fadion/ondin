@@ -62,6 +62,7 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetName { .. }
         | Operation::SetVisible { .. }
         | Operation::SetOpacity { .. }
+        | Operation::SetBlend { .. }
         | Operation::SetPivot { .. }
         | Operation::SetClip { .. }
         | Operation::SetMask { .. }
@@ -1131,6 +1132,7 @@ pub(crate) fn untouched(
         && c.name == s.name
         && c.visible == s.visible
         && c.opacity == s.opacity
+        && c.blend == s.blend
         && c.clip == s.clip
         && c.mask == s.mask
         && c.mask_mode == s.mask_mode

@@ -433,7 +433,8 @@ worded for the scope that plan was made for (`Plan::scope`).
   Show*, *Lock / Unlock* and *Paste* name the verb rather than one state), alternatives from
   `Item::alt_accel` joined by "or". A row is never dimmed for availability and never runs. Mouse,
   Tabs and Library are hand-written rows: `tabs::read_keys` reads the tab chords before the keymap,
-  so the chord test, which drives the keymap, cannot cover them.
+  so the chord test, which drives the keymap, cannot cover them. Layer's *Opacity 10–100%* and
+  *Blend mode* (`Shift+3–9`) rows are hand-written too: a digit is a value, not a registry verb.
 - **Sections** (`sections`): Tools, Zoom, Pages, Edit, Structure, Arrange, Layer, View, Components and
   kits, File, Tabs, Text editing, Mouse, Library, dealt in order into three columns, each filled to about
   its share; a section is never split. *Lasso select* sits in Tools, beside the tools whose marquee

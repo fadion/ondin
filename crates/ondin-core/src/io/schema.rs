@@ -16,7 +16,7 @@ use crate::image::{ImageEntry, ImageFormat, ImageId, ImageSource};
 use crate::io::{CURRENT_SCHEMA_VERSION, IoError, MAX_TREE_DEPTH};
 use crate::item::Keyed;
 use crate::meta::DocumentMeta;
-use crate::node::{FillRule, MaskMode, Node, NodeKind, Paint, Pivot};
+use crate::node::{BlendMode, FillRule, MaskMode, Node, NodeKind, Paint, Pivot};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use kurbo::Affine;
@@ -209,6 +209,11 @@ pub(crate) struct NodeDto {
     #[serde(default)]
     pub proportions_locked: bool,
     pub opacity: f32,
+    /// How the node mixes with what is beneath it, absent at its kind's default
+    /// (`BlendMode::default_for`), which is what every earlier file meant.
+    /// Additive and skipped when `None` (invariant 9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<BlendMode>,
     /// Whether the node clips its children (§5.3). Defaulted, not versioned: a v2
     /// file's frames all clipped, which `true` reproduces.
     #[serde(default = "clips_by_default")]
@@ -386,6 +391,7 @@ impl NodeDto {
             locked: n.locked(),
             proportions_locked: n.proportions_locked(),
             opacity: n.opacity(),
+            blend: Some(n.blend()).filter(|b| *b != BlendMode::default_for(n.kind())),
             // Normalized on the way out as well as in (§15 D663): `op_set_clip`
             // accepts the flag on a kind that cannot honour it and `into_node`
             // zeroes it on load, so without this a document's bytes move on
@@ -449,6 +455,11 @@ impl NodeDto {
         // Inert on kinds that cannot be a mask, like `clip`; guards against a
         // hand-edited or future file.
         let mask = self.mask && self.kind.can_mask();
+        // Pass through on a leaf, from a hand-edited file, reads as the default.
+        let blend = self
+            .blend
+            .filter(|b| b.allowed_on(&self.kind))
+            .unwrap_or_else(|| BlendMode::default_for(&self.kind));
         Ok(Node {
             id,
             parent,
@@ -468,6 +479,7 @@ impl NodeDto {
             } else {
                 1.0
             },
+            blend,
             clip,
             mask,
             // Not gated on `mask`: the mode is remembered while the mask is off.

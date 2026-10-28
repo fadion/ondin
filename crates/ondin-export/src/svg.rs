@@ -15,11 +15,11 @@
 
 use ondin_core::kurbo::{Affine, BezPath, Insets, Rect, Shape};
 use ondin_core::peniko::{Color, Extend, GradientKind};
-use ondin_core::{Brush, Keyed};
 use ondin_core::{
-    Decoration, Document, Effect, EffectKind, ExportText, Fill, Framing, LineStyle, MaskMode, Node,
-    NodeId, NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign, geometry,
+    BlendMode, Decoration, Document, Effect, EffectKind, ExportText, Fill, Framing, LineStyle,
+    MaskMode, Node, NodeId, NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign, geometry,
 };
+use ondin_core::{Brush, Keyed};
 use std::fmt::Write;
 
 /// An export and what it could not say exactly — the writer's side of
@@ -1146,14 +1146,26 @@ fn emit_node(
         report
             .approximate("a crop past the picture's edge, repeated where the canvas stretches it");
     }
+    // The blend mode is the outermost wrapper, outside even the filter, as the
+    // scene walk's blend layer is: a layer's shadow blends with it.
+    let blend = blend_style(doc, node);
+    let blend_pad = "  ".repeat(depth);
+    let depth = depth + usize::from(blend.is_some());
+    if let Some(style) = &blend {
+        let _ = writeln!(out, "{blend_pad}<g style=\"{style}\">");
+    }
     let wrap_pad = "  ".repeat(depth);
     let depth = depth + usize::from(fx);
     if fx {
         let _ = writeln!(out, "{wrap_pad}<g filter=\"url(#{})\">", effect_id(id));
     }
+    // Closes the filter wrapper and the blend one, in that order.
     let close_fx = |out: &mut String| {
         if fx {
             let _ = writeln!(out, "{wrap_pad}</g>");
+        }
+        if blend.is_some() {
+            let _ = writeln!(out, "{blend_pad}</g>");
         }
     };
 
@@ -2306,6 +2318,43 @@ fn alpha_attr(name: &str, alpha: u8) -> String {
     } else {
         format!(r#" {name}="{}""#, fmt(alpha as f64 / 255.0))
     }
+}
+
+/// The style of the `<g>` a node's blend mode wraps it in, or `None` when it
+/// draws straight into its parent.
+fn blend_style(doc: &Document, node: &ondin_core::Node) -> Option<String> {
+    blend_decl(doc, node).map(|(prop, value)| format!("{prop}:{value}"))
+}
+
+/// The CSS declaration a node's blend mode needs, or `None` when it draws
+/// straight into its parent — `scene::blend_layer`'s decision, made again for
+/// the SVG writer and code export. A Normal that isolates is `isolation:
+/// isolate`; a top-level frame holding a blended layer takes one so what is
+/// inside blends with the frame alone.
+pub(crate) fn blend_decl(
+    doc: &Document,
+    node: &ondin_core::Node,
+) -> Option<(&'static str, &'static str)> {
+    let blend = node.blend();
+    if blend.isolates(node.kind()) {
+        return Some(match blend {
+            BlendMode::Normal => ("isolation", "isolate"),
+            mode => ("mix-blend-mode", mode.css()),
+        });
+    }
+    let top_frame = matches!(node.kind(), NodeKind::Artboard { .. })
+        && node
+            .parent()
+            .and_then(|p| doc.get(p))
+            .is_some_and(|p| matches!(p.kind(), NodeKind::Root));
+    (top_frame && holds_blend(doc, node)).then_some(("isolation", "isolate"))
+}
+
+/// Whether a layer under `node` blends with what is beneath it.
+fn holds_blend(doc: &Document, node: &ondin_core::Node) -> bool {
+    node.children().iter().filter_map(|c| doc.get(*c)).any(|c| {
+        !matches!(c.blend(), BlendMode::Normal | BlendMode::PassThrough) || holds_blend(doc, c)
+    })
 }
 
 fn opacity_attr(opacity: f32) -> String {

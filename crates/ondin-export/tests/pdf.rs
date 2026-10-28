@@ -143,6 +143,28 @@ fn the_page_is_a_point_per_world_unit() {
     assert!(text.contains("/MediaBox[0 0 400 300]"), "{text}");
 }
 
+/// A blend mode reaches the PDF as its own graphics state, not pixels, and adds
+/// nothing to the report.
+#[test]
+fn a_blend_mode_is_a_pdf_blend_mode() {
+    let mut f = common::fixture();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetBlend {
+            id: f.rect,
+            blend: ondin_core::BlendMode::Multiply,
+        }]))
+        .expect("a blend");
+    f.res = Resolved::rebuild(&f.doc);
+    let out = pdf_of(&f.doc, &f.res, &[f.artboard], ExportText::Live).expect("a pdf");
+    let text = String::from_utf8_lossy(&out.pdf).into_owned();
+    let streams = inflated_streams(&out.pdf).join("\n");
+    assert!(
+        text.contains("/BM/Multiply") || streams.contains("/BM/Multiply"),
+        "no Multiply graphics state"
+    );
+    assert!(out.approximated.is_empty(), "{:?}", out.approximated);
+}
+
 /// An effect becomes pixels in a PDF and the report says so; the card's
 /// `approximated` agrees with the export's own list.
 #[test]

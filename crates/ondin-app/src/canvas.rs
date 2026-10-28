@@ -3975,6 +3975,7 @@ impl OndinApp {
                     text: None,
                     path: None,
                     opacity: display.opacity() * GHOST_ALPHA,
+                    blend: ondin_core::BlendMode::Normal,
                     visible: true,
                     clip: false,
                     mask: false,

@@ -1852,6 +1852,18 @@ pub fn outline_stroke(
         }
         tx.0.push(Operation::SetOpacity { id, opacity: 1.0 });
     }
+    // So does the blend mode: the group, set to it, isolates the two parts and
+    // blends them as one layer.
+    if node.blend() != crate::BlendMode::Normal {
+        tx.0.push(Operation::SetBlend {
+            id: g,
+            blend: node.blend(),
+        });
+        tx.0.push(Operation::SetBlend {
+            id,
+            blend: crate::BlendMode::Normal,
+        });
+    }
     if has_fill {
         tx.0.push(Operation::SetStrokes {
             id,
@@ -2319,6 +2331,13 @@ fn replace_with_path(
     let opacity = doc.drawn_opacity(id);
     if opacity != 1.0 {
         ops.push(Operation::SetOpacity { id: new, opacity });
+    }
+    let blend = node.blend();
+    if !matches!(
+        blend,
+        crate::BlendMode::Normal | crate::BlendMode::PassThrough
+    ) {
+        ops.push(Operation::SetBlend { id: new, blend });
     }
     if !doc.shown(id) {
         ops.push(Operation::SetVisible {
@@ -5288,6 +5307,10 @@ pub struct Properties {
     pub opacity: f32,
     /// The variable it is bound to, landed by the paste's rule as a paint's is.
     pub opacity_var: Option<crate::VarId>,
+    /// The blend mode, landing on the outermost targets as opacity does. Normal
+    /// lands as each target's default, so a group pasted onto keeps passing
+    /// through.
+    pub blend: crate::BlendMode,
     /// What a bound paint needs to land in another document: the name and kind of
     /// every variable bound, and each paint as it drew at the copy. The clipboard
     /// outlives a document switch, so a paste cannot ask the copying document.
@@ -5369,6 +5392,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
         effects,
         opacity: doc.drawn_opacity(id),
         opacity_var: node.opacity_var(),
+        blend: node.blend(),
         carried,
     })
 }
@@ -5376,7 +5400,8 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
 /// Give every target in scope the appearance in `props`.
 ///
 /// [`set_fills_all`] and [`set_strokes_all`] (through groups), then
-/// [`set_effects_all`] and [`set_opacity_all`] (outermost members alone), composed;
+/// [`set_effects_all`], [`set_opacity_all`] and [`set_blend_all`] (outermost
+/// members alone), composed;
 /// each drops targets that already agree, so pasting a layer's own properties is empty.
 ///
 /// A bound paint is kept where this document has the variable, else rebound to
@@ -5463,6 +5488,11 @@ pub fn paste_properties(
         }
         None => ops.extend(set_opacity_all(doc, ids, props.opacity).0),
     }
+    let blend = match props.blend {
+        crate::BlendMode::Normal => crate::BlendMode::PassThrough,
+        other => other,
+    };
+    ops.extend(set_blend_all(doc, ids, blend).0);
     Transaction(ops)
 }
 
@@ -5511,6 +5541,38 @@ pub fn set_opacity_all(doc: &Document, ids: &[NodeId], opacity: f32) -> Transact
             .map(|id| Operation::SetOpacity { id, opacity })
             .collect(),
     )
+}
+
+/// Set the blend mode of every **outermost** member of `ids`, for opacity's
+/// reason: Multiply on a group and on each child would multiply twice.
+///
+/// Pass through lands as Normal on a layer that is not a frame or group — the
+/// same picture — so it doubles as `Shift`+`3`'s "each layer's default".
+pub fn set_blend_all(doc: &Document, ids: &[NodeId], blend: crate::BlendMode) -> Transaction {
+    Transaction(
+        outermost(doc, ids)
+            .into_iter()
+            .filter_map(|id| {
+                let node = doc.get(id)?;
+                let blend = if blend.allowed_on(node.kind()) {
+                    blend
+                } else {
+                    crate::BlendMode::Normal
+                };
+                (node.blend() != blend).then_some(Operation::SetBlend { id, blend })
+            })
+            .collect(),
+    )
+}
+
+/// The one blend mode every outermost member of `ids` shares, or `None` when
+/// they differ — the panel's *Mixed* — or there are none.
+pub fn shared_blend(doc: &Document, ids: &[NodeId]) -> Option<crate::BlendMode> {
+    let mut modes = outermost(doc, ids)
+        .into_iter()
+        .filter_map(|id| doc.get(id).map(|n| n.blend()));
+    let first = modes.next()?;
+    modes.all(|m| m == first).then_some(first)
 }
 
 /// How near two opacities have to be for a readout to call them one value.

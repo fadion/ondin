@@ -476,6 +476,17 @@ impl ScenePainter for CpuPainter<'_> {
         );
     }
 
+    fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
+        self.opened_ordinary();
+        self.ctx().push_layer(
+            None,
+            Some(BlendMode::new(scene::mix(mode), Compose::SrcOver)),
+            None,
+            None,
+            None,
+        );
+    }
+
     /// Redirect drawing into a buffer of its own, to be filtered on the way out.
     ///
     /// The buffer is clamped to the enclosing target, so an effect on a mostly

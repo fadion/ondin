@@ -273,3 +273,82 @@ fn the_agreement_is_about_decisions_and_not_about_appearance() {
         svg.contains(&clear)
     );
 }
+
+/// Records the mode of every blend layer the walk pushes, in walk order, as the
+/// SVG writer spells it.
+#[derive(Default)]
+struct Blends(Vec<String>);
+
+impl ScenePainter for Blends {
+    fn has_image(&self, _id: &ondin_core::ImageId) -> bool {
+        true
+    }
+    fn fill_path(
+        &mut self,
+        _: Affine,
+        _: &BezPath,
+        _: &Brush,
+        _: Option<ondin_core::Framing>,
+        _: ClipRule,
+    ) {
+    }
+    fn stroke_path(&mut self, _: Affine, _: &BezPath, _: &StrokePaint<'_>) {}
+    fn draw_text(&mut self, _: Affine, _: &TextRun<'_>) {}
+    fn push_layer(&mut self, _: Affine, _: Option<&BezPath>, _: ClipRule, _: f32) {}
+    fn push_mask_layer(&mut self) {}
+    fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
+        self.0.push(match mode {
+            ondin_core::BlendMode::Normal => "isolation:isolate".to_owned(),
+            m => format!("mix-blend-mode:{}", m.css()),
+        });
+    }
+    fn pop_layer(&mut self) {}
+}
+
+/// The two walks wrap the same layers in a blend, in the same order: an
+/// isolated group, two blended rects, and the top-level frame holding them.
+/// flip: dropping `holds_blend` from `svg::blend_style` → fails at the
+/// comparison, the frame's `isolation:isolate` only in the scene.
+#[test]
+fn the_two_walks_blend_the_same_layers() {
+    use ondin_core::BlendMode as B;
+    let mut t = tree();
+    let (plain, inside) = (t.painted[1].0, t.painted[2].0);
+    let group = t.doc.get(inside).unwrap().parent().unwrap();
+    t.doc
+        .apply(&Transaction(vec![
+            Operation::SetBlend {
+                id: group,
+                blend: B::Normal,
+            },
+            Operation::SetBlend {
+                id: inside,
+                blend: B::Multiply,
+            },
+            Operation::SetBlend {
+                id: plain,
+                blend: B::Difference,
+            },
+        ]))
+        .unwrap();
+    t.res = Resolved::rebuild(&t.doc);
+    let mut scene = Blends::default();
+    ondin_render::scene::build_of(
+        &t.doc,
+        &t.res,
+        &everything(),
+        &RenderOverrides::default(),
+        &[t.root],
+        &mut scene,
+    );
+    let markup = ondin_export::svg::svg_of(&t.doc, &t.res, &[t.root]);
+    let svg: Vec<String> = markup
+        .match_indices("<g style=\"")
+        .map(|(at, _)| {
+            let rest = &markup[at + 10..];
+            rest[..rest.find('"').unwrap()].to_owned()
+        })
+        .collect();
+    assert_eq!(scene.0.len(), 4, "fixture: {:?}", scene.0);
+    assert_eq!(scene.0, svg);
+}

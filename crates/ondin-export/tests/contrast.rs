@@ -258,6 +258,24 @@ fn a_gradient_fill_is_skipped() {
     assert_eq!(r.skipped[0].why, "gradient fill");
 }
 
+/// Text inside a Multiply frame is skipped and said so: its colour is not the
+/// source-over the score is computed from.
+#[test]
+fn a_blended_layer_is_skipped() {
+    let mut d = doc((0, 0, 0), 16.0, false);
+    assert_eq!(check(&d.doc, d.page, Level::Aa).skipped.len(), 0, "fixture");
+    d.doc
+        .apply(&Transaction(vec![Operation::SetBlend {
+            id: d.frame,
+            blend: ondin_core::BlendMode::Multiply,
+        }]))
+        .unwrap();
+    let r = check(&d.doc, d.page, Level::Aa);
+    assert!(r.findings.is_empty(), "{r:?}");
+    assert_eq!(r.skipped.len(), 1);
+    assert_eq!(r.skipped[0].why, "is blended with what is beneath it");
+}
+
 /// A layer drawn in two modes keeps a sample for each, in mode order, with the
 /// ink and the backdrop it was found at; only a variable passing in both is
 /// offered.

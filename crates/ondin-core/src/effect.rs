@@ -6,10 +6,12 @@
 //!
 //! **Four effects**: drop shadow, inner shadow, layer blur and colour filters
 //! are the ones that agree across the canvas (vello on wgpu), the raster export
-//! (`vello_cpu`) and the SVG writer. **Background blur** and **blend modes**
-//! (per layer and per effect) are planned but not built: SVG cannot express a
-//! backdrop (`BackgroundImage` was never implemented by any renderer), so that
-//! writer owes an answer. **Noise** is a non-goal: one generator written three
+//! (`vello_cpu`) and the SVG writer. **Background blur** and a **shadow's own
+//! blend mode** are planned but not built: SVG cannot express a backdrop
+//! (`BackgroundImage` was never implemented by any renderer), so that writer owes
+//! an answer, and a shadow's mode blends with what is beneath the layer, which the
+//! effect buffer does not hold. A layer's mode is `crate::Node::blend`. **Noise**
+//! is a non-goal: one generator written three
 //! times would have to agree to the pixel, and it belongs in the fill list.
 
 use crate::item::Keyed;

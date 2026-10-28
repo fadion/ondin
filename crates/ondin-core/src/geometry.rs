@@ -1649,6 +1649,7 @@ mod tests {
             id: crate::IdSource::new(1).mint(),
             parent: None,
             children: Vec::new(),
+            blend: crate::BlendMode::default_for(&kind),
             kind,
             transform: Affine::IDENTITY,
             name: String::new(),

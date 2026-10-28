@@ -9,7 +9,7 @@ use crate::guide::{Guide, GuideId};
 use crate::id::NodeId;
 use crate::image::{ImageEntry, ImageId};
 use crate::item::Keyed;
-use crate::node::{Fill, FillRule, MaskMode, Node, NodeKind, Pivot, Stroke, TextStyle};
+use crate::node::{BlendMode, Fill, FillRule, MaskMode, Node, NodeKind, Pivot, Stroke, TextStyle};
 use kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size};
 use peniko::Color;
 use rustc_hash::FxHashSet;
@@ -131,6 +131,12 @@ pub enum Operation {
     SetOpacity {
         id: NodeId,
         opacity: f32,
+    },
+    /// How the layer mixes with what is beneath it. Pass through on a kind that
+    /// is not a frame or a group is `WrongKindForOp`.
+    SetBlend {
+        id: NodeId,
+        blend: BlendMode,
     },
     /// Move the node's transform origin — the point rotation and mirroring hold
     /// still. `None` puts it back on the centre of the node's box (§5.3, [`Pivot`]).
@@ -557,6 +563,7 @@ impl Operation {
             | Operation::SetLocked { id, .. }
             | Operation::SetProportionsLocked { id, .. }
             | Operation::SetOpacity { id, .. }
+            | Operation::SetBlend { id, .. }
             | Operation::SetPivot { id, .. }
             | Operation::SetClip { id, .. }
             | Operation::SetMask { id, .. }
@@ -656,6 +663,7 @@ impl Operation {
             | Operation::SetLocked { id, .. }
             | Operation::SetProportionsLocked { id, .. }
             | Operation::SetOpacity { id, .. }
+            | Operation::SetBlend { id, .. }
             | Operation::SetPivot { id, .. }
             | Operation::SetClip { id, .. }
             | Operation::SetMask { id, .. }
@@ -837,6 +845,7 @@ impl Operation {
             | Operation::SetBlockStyle { .. }
             | Operation::SetVisible { .. }
             | Operation::SetOpacity { .. }
+            | Operation::SetBlend { .. }
             | Operation::SetClip { .. }
             // **The most visible flag in this list**: it takes one layer off the
             // page and cuts every layer above it down to that outline.
@@ -1112,6 +1121,7 @@ impl Operation {
             Operation::SetOpacity { id, opacity } => {
                 node(id).is_some_and(|n| n.opacity() == *opacity)
             }
+            Operation::SetBlend { id, blend } => node(id).is_some_and(|n| n.blend() == *blend),
             Operation::SetPivot { id, pivot } => node(id).is_some_and(|n| n.pivot() == *pivot),
             Operation::SetClip { id, clip } => node(id).is_some_and(|n| n.clip() == *clip),
             Operation::SetMask { id, mask } => node(id).is_some_and(|n| n.mask() == *mask),
@@ -1695,6 +1705,10 @@ mod changes_ink_tests {
                 ground: peniko::Color::BLACK,
             },
             Operation::SetOpacity { id, opacity: 0.5 },
+            Operation::SetBlend {
+                id,
+                blend: crate::BlendMode::Multiply,
+            },
             Operation::SetClip { id, clip: true },
             Operation::SetTransform {
                 id,

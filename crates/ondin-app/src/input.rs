@@ -294,6 +294,9 @@ pub enum Action {
     /// stays a pure function of one frame's input. `Key::Num0`–`Num9` cover the
     /// main row and numpad.
     OpacityDigit(u8),
+    /// `Shift`+`3`…`9`, which sets the selection's blend mode
+    /// (`BlendMode::of_chord`, `docs/shortcuts.md` §2).
+    BlendChord(u8),
     /// One of the styling chords a live text session admits — see [`TextChord`].
     TextStyle(TextChord),
 }
@@ -1323,7 +1326,7 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         // --- opacity digits (`docs/shortcuts.md` §2) ---
         //
         // `!m.shift` keeps them off the zoom chords (`Shift+0/1/2`) and off
-        // `Shift`+`3`…`9`, which are reserved for blend modes.
+        // the blend chords below.
         if plain && !m.shift {
             for (n, key) in [
                 egui::Key::Num0,
@@ -1341,6 +1344,24 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             .enumerate()
             {
                 on(i.key_pressed(key), Action::OpacityDigit(n as u8), &mut out);
+            }
+        }
+
+        // --- blend chords (`docs/shortcuts.md` §2) ---
+        //
+        // The physical digit: `#`, `$`, `%`, `^`, `&`, `*` and `(` have no
+        // `egui::Key` variant, as for `Shift+0` and `Shift+2` above.
+        if plain && m.shift {
+            for (n, key) in [
+                (3, egui::Key::Num3),
+                (4, egui::Key::Num4),
+                (5, egui::Key::Num5),
+                (6, egui::Key::Num6),
+                (7, egui::Key::Num7),
+                (8, egui::Key::Num8),
+                (9, egui::Key::Num9),
+            ] {
+                on(i.key_pressed(key), Action::BlendChord(n), &mut out);
             }
         }
 
@@ -3262,10 +3283,10 @@ mod opacity_key_tests {
         }
     }
 
-    /// Shifted digits are zoom or nothing, never opacity: `Shift+0/1/2` are zoom
-    /// chords and `Shift+3`–`9` are reserved for blend modes.
+    /// Shifted digits are zoom or blend, never opacity: `Shift+0/1/2` are zoom
+    /// chords and `Shift+3`–`9` the blend chords.
     #[test]
-    fn shifted_digits_are_zoom_or_nothing_but_never_opacity() {
+    fn shifted_digits_are_zoom_or_blend_but_never_opacity() {
         let shift = egui::Modifiers {
             shift: true,
             ..egui::Modifiers::NONE
@@ -3278,15 +3299,19 @@ mod opacity_key_tests {
             actions(Mode::Normal, vec![key(egui::Key::Num2, shift)], shift),
             vec![Action::ZoomSelection]
         );
-        for k in [
-            egui::Key::Num3,
-            egui::Key::Num5,
-            egui::Key::Num7,
-            egui::Key::Num9,
+        for (n, k) in [
+            (3, egui::Key::Num3),
+            (4, egui::Key::Num4),
+            (5, egui::Key::Num5),
+            (6, egui::Key::Num6),
+            (7, egui::Key::Num7),
+            (8, egui::Key::Num8),
+            (9, egui::Key::Num9),
         ] {
-            assert!(
-                actions(Mode::Normal, vec![key(k, shift)], shift).is_empty(),
-                "Shift+{k:?} is reserved for blend modes and must stay unbound"
+            assert_eq!(
+                actions(Mode::Normal, vec![key(k, shift)], shift),
+                vec![Action::BlendChord(n)],
+                "Shift+{k:?}"
             );
         }
     }

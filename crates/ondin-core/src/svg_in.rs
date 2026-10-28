@@ -19,7 +19,8 @@
 //! with an inline `style` beating them and a `<style>` rule beating a presentation
 //! attribute; solid paint and both gradient kinds in both `gradientUnits`, with
 //! `gradientTransform`, `spreadMethod` and `xlink:href` inheritance;
-//! `fill-rule`; opacity, `display` and `visibility`; `viewBox`; `<clipPath>` and
+//! `fill-rule`; opacity, `display` and `visibility`; `mix-blend-mode` and
+//! `isolation`; `viewBox`; `<clipPath>` and
 //! `<mask>` as **mask nodes**; `<use>` and `<symbol>` as deep copies; `<image>` as a
 //! rect with an image fill; `<text>` placed by its baseline; and a `<filter>` as an
 //! **effect stack** — a lone `<feGaussianBlur>`, a lone `<feDropShadow>`, and the
@@ -35,8 +36,8 @@
 //! selector needing sibling order, a pseudo-class or an attribute. **[`Import::approximated`]**
 //! is what is there and slightly wrong: a `<mask>` whose luminance and alpha readings
 //! differ, `objectBoundingBox` clip units, a stretched image, a substituted font, a
-//! `<tspan>` whose own gradient or stroke was dropped, and an `feGaussianBlur` with two
-//! unequal deviations, averaged. Nothing is lost silently.
+//! `<tspan>` whose own gradient or stroke was dropped, an `feGaussianBlur` with two
+//! unequal deviations, averaged, and a `mix-blend-mode` the model lacks, drawn normal. Nothing is lost silently.
 //!
 //! An entry on either list is a claim about the model, which can grow; re-derive an old
 //! loss rather than trust it. A property read with `attribute` or `has_attribute`
@@ -2012,6 +2013,13 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 .and_then(|def| effects_of(def, css, current));
             (v, read)
         });
+        // An inner `<tspan>`'s run takes the outer element's, as for `filter`.
+        let blend = prop("mix-blend-mode")
+            .or_else(|| outer("mix-blend-mode"))
+            .map(str::to_owned);
+        let isolate = [prop("isolation"), outer("isolation")]
+            .iter()
+            .any(|v| v.is_some_and(|v| v.trim() == "isolate"));
         if let Some(o) = opacity
             && o < 1.0
         {
@@ -2022,6 +2030,18 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         }
         if hidden {
             self.push(Operation::SetVisible { id, visible: false });
+        }
+        match blend.map(|v| (crate::BlendMode::from_css(&v), v)) {
+            Some((Some(mode), _)) if mode != crate::BlendMode::Normal => {
+                self.push(Operation::SetBlend { id, blend: mode });
+            }
+            Some((None, v)) => self.approximate(&format!("mix-blend-mode {v} (drawn normal)")),
+            // Normal on a group isolates it; on anything else it is the default.
+            _ if isolate => self.push(Operation::SetBlend {
+                id,
+                blend: crate::BlendMode::Normal,
+            }),
+            _ => {}
         }
         match filter {
             None => {}

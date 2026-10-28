@@ -366,6 +366,76 @@ fn a_group_keeps_its_opacity_rather_than_fading_each_child() {
     }
 }
 
+/// A group set to Normal and a Multiply rect inside it come back blending the
+/// same: each mode on one group, which holds what was blended. The writer wraps a
+/// blended layer in a `<g style>` and the reader reads the group it is given, as
+/// for an effect's `<g filter>`.
+/// flip: the reader ignoring `mix-blend-mode` → fails at "Multiply".
+#[test]
+fn blend_modes_come_back_blending_the_same() {
+    use ondin_core::BlendMode as B;
+    let mut ids = IdSource::new(0xB1E);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (group, a, b) = (ids.mint(), ids.mint(), ids.mint());
+    let rect = |id, index, at: f64| Operation::CreateNode {
+        id,
+        parent: group,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(40.0, 40.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(Affine::translate((at, 0.0))),
+        name: None,
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: group,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        rect(a, 0, 0.0),
+        rect(b, 1, 20.0),
+        Operation::SetBlend {
+            id: group,
+            blend: B::Normal,
+        },
+        Operation::SetBlend {
+            id: b,
+            blend: B::Multiply,
+        },
+    ]))
+    .expect("the fixture applies");
+    let res = Resolved::rebuild(&doc);
+
+    let (back, got) = reimport(&svg_of(&doc, &res, &[group]));
+    let carrying = |mode: B| -> Vec<NodeId> {
+        got.iter()
+            .copied()
+            .filter(|id| back.get(*id).unwrap().blend() == mode)
+            .collect()
+    };
+    for (mode, what) in [(B::Normal, "Normal"), (B::Multiply, "Multiply")] {
+        let on: Vec<NodeId> = carrying(mode)
+            .into_iter()
+            .filter(|id| matches!(back.get(*id).unwrap().kind(), NodeKind::Group))
+            .collect();
+        assert_eq!(on.len(), 1, "one group carries {what}: {on:?}");
+    }
+    let multiply = carrying(B::Multiply)[0];
+    let inside = back.get(multiply).unwrap().children();
+    assert_eq!(inside.len(), 1, "the Multiply group holds the one rect");
+    assert!(matches!(
+        back.get(inside[0]).unwrap().kind(),
+        NodeKind::Rect { .. } | NodeKind::Path { .. }
+    ));
+}
+
 /// An exclusion round-trips as an even-odd path; a reader ignoring `fill-rule`
 /// would fill the hole. Asserted as the hole, not as the attribute.
 ///

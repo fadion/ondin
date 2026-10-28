@@ -1227,6 +1227,9 @@ impl Walk<'_> {
                 el.set("opacity", fmt(f64::from(opacity.max(0.0))));
             }
         }
+        if let Some((prop, value)) = crate::svg::blend_decl(doc, node) {
+            el.set(prop, value);
+        }
         self.effects(&mut el, node);
 
         let mut over_children = None;
@@ -2268,6 +2271,11 @@ impl Walk<'_> {
             e.attrs.push(("alt", node.name().to_string()));
             e
         };
+        // On the element, not only inside it: an `<svg>` or an `<img>` is drawn
+        // alone, so a mode written within blends with nothing of the page.
+        if let Some((prop, value)) = crate::svg::blend_decl(self.doc, node) {
+            pic.set(prop, value);
+        }
         pic.set("position", "absolute");
         pic.set("left", "0");
         pic.set("top", "0");

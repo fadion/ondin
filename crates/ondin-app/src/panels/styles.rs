@@ -534,7 +534,7 @@ impl OndinApp {
         } else {
             action
         };
-        let clicks = self.panel_full(ui, title, None, action, None, true, |app, ui| {
+        let clicks = self.panel_full(ui, title, None, action, None, true, None, |app, ui| {
             app.style_rows(ui, &state, slot, targets, editing, live, body);
             tail(app, ui);
         });

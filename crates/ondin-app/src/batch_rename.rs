@@ -388,12 +388,51 @@ fn holds(outer: kurbo::Rect, inner: kurbo::Rect) -> bool {
         && outer.area() > inner.area()
 }
 
+/// Which of `spans` reach across two rows: each one whose span holds the centres
+/// of two spans that do not overlap.
+///
+/// The spans whose centres a span holds are a run of the spans sorted by centre,
+/// so each answer is two range queries — the least end and the greatest start in
+/// that run — over sparse tables.
+fn spanning(spans: &[(f64, f64)]) -> Vec<bool> {
+    let mut by_centre: Vec<usize> = (0..spans.len()).collect();
+    let centre = |k: usize| (spans[k].0 + spans[k].1) / 2.0;
+    by_centre.sort_by(|&a, &b| centre(a).total_cmp(&centre(b)));
+    let centres: Vec<f64> = by_centre.iter().map(|&k| centre(k)).collect();
+    let table = |v: Vec<f64>, f: fn(f64, f64) -> f64| {
+        let mut levels = vec![v];
+        while 2 << (levels.len() - 1) <= centres.len() {
+            let (last, w) = (&levels[levels.len() - 1], 1 << (levels.len() - 1));
+            let next = (0..last.len() - w)
+                .map(|i| f(last[i], last[i + w]))
+                .collect();
+            levels.push(next);
+        }
+        levels
+    };
+    let query = |t: &[Vec<f64>], a: usize, b: usize, f: fn(f64, f64) -> f64| {
+        let level = (b - a).ilog2() as usize;
+        f(t[level][a], t[level][b - (1 << level)])
+    };
+    let ends = table(by_centre.iter().map(|&k| spans[k].1).collect(), f64::min);
+    let starts = table(by_centre.iter().map(|&k| spans[k].0).collect(), f64::max);
+    spans
+        .iter()
+        .map(|&(lo, hi)| {
+            let a = centres.partition_point(|&c| c < lo);
+            let b = centres.partition_point(|&c| c <= hi);
+            b >= a + 2 && query(&ends, a, b, f64::min) < query(&starts, a, b, f64::max)
+        })
+        .collect()
+}
+
 /// `ids` in reading order: rows (or columns, `!rows`) gathered by bands — a layer
 /// joins the first band its centre falls in — then each band read along. A layer
 /// whose box holds another's (a frame round its cards) would stretch a band over
 /// every row it spans, so it forms no band with them: those layers come first,
-/// read among themselves the same way. Layers with no bounds keep their order at
-/// the end.
+/// read among themselves the same way. So does a layer that holds none but reaches
+/// across two rows ([`spanning`]: a sidebar beside them), after the holders. Layers
+/// with no bounds keep their order at the end.
 fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
     /// A row or column: the span of the layer that started it, and its layers
     /// with where each starts along it.
@@ -418,8 +457,19 @@ fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
         true => Vec::new(),
         false => by_bands(outer, rows),
     };
+    let span = |l: &Layer| {
+        let r = l.bounds.unwrap_or_default();
+        if rows { (r.y0, r.y1) } else { (r.x0, r.x1) }
+    };
+    // The shortest layer never reaches across two rows, so each call reads fewer.
+    let wide = spanning(&inner.iter().map(|l| span(l)).collect::<Vec<_>>());
+    let (wide, inner): (Vec<_>, Vec<_>) = inner.into_iter().zip(wide).partition(|p| p.1);
+    if !wide.is_empty() {
+        out.extend(by_bands(wide.into_iter().map(|p| p.0).collect(), rows));
+    }
     let mut boxed: Vec<(&'a Layer, (f64, f64), f64)> = inner
         .into_iter()
+        .map(|p| p.0)
         .filter_map(|l| {
             let r = l.bounds?;
             Some(match rows {
@@ -2013,6 +2063,66 @@ mod tests {
             names(&bx),
             ["Grid1", "TL2", "BL3", "TM4", "BM5", "TR6", "BR7"]
         );
+    }
+
+    /// A sidebar beside two rows of cards, its top the highest, holds none of them
+    /// but reaches across both: it comes first, and the cards still read by row.
+    ///
+    /// flip: `by_bands` leaving `spanning` layers in the bands → fails at the
+    /// left-to-right order, the sidebar's band swallowing both rows.
+    #[test]
+    fn a_sidebar_beside_the_rows_does_not_swallow_them() {
+        let (ctx, mut app) = app();
+        // Made out of order, so the tree's order is not the answer.
+        let ids = [
+            rect(&mut app, "BR", (200.0, 100.0), (80.0, 80.0)),
+            rect(&mut app, "TL", (100.0, 2.0), (80.0, 80.0)),
+            rect(&mut app, "Side", (0.0, 0.0), (80.0, 200.0)),
+            rect(&mut app, "BL", (100.0, 100.0), (80.0, 80.0)),
+            rect(&mut app, "TR", (200.0, 2.0), (80.0, 80.0)),
+        ];
+        app.session.selection.set(ids.to_vec());
+        let mut bx = opened(&ctx, &mut app, "", "[Name][Number]");
+        bx.s.order = Order::LeftToRight;
+        let got: Vec<String> = planned(&app, &bx)
+            .changes
+            .into_iter()
+            .map(|c| c.1)
+            .collect();
+        assert_eq!(got, ["Side1", "TL2", "TR3", "BL4", "BR5"]);
+    }
+
+    /// `spanning` marks a span only when the centres it holds belong to two spans
+    /// that do not overlap, checked against every pair directly.
+    #[test]
+    fn spanning_agrees_with_the_pairwise_definition() {
+        let mut seed = 7_u64;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as f64 / f64::from(1u32 << 31) * 100.0
+        };
+        for n in [0, 1, 2, 3, 5, 8, 13, 40] {
+            let spans: Vec<(f64, f64)> = (0..n)
+                .map(|_| {
+                    let (a, len) = (next(), next() / 2.0);
+                    (a, a + len)
+                })
+                .collect();
+            let centre = |s: (f64, f64)| (s.0 + s.1) / 2.0;
+            let want: Vec<bool> = spans
+                .iter()
+                .map(|&(lo, hi)| {
+                    let held: Vec<_> = spans
+                        .iter()
+                        .filter(|&&s| (lo..=hi).contains(&centre(s)))
+                        .collect();
+                    held.iter().any(|a| held.iter().any(|b| a.1 < b.0))
+                })
+                .collect();
+            assert_eq!(spanning(&spans), want, "{n} spans: {spans:?}");
+        }
     }
 
     /// *Layers order, reversed* numbers the tree's bottom row first.

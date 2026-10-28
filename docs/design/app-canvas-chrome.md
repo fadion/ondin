@@ -394,7 +394,9 @@ worded for the scope that plan was made for (`Plan::scope`).
   edge) and *Top to bottom* (columns, the same way). A layer whose box holds another run layer's —
   a frame round its cards, a background under a grid — forms no band with them, since its span
   would swallow every row it covers: such layers come first, read among themselves the same way,
-  and the rest are banded without them. Each page's run is ordered and the pages follow
+  and the rest are banded without them. So, next, does a layer that holds none but whose span holds
+  the centres of two layers that do not overlap — a sidebar beside the rows (`batch_rename::spanning`).
+  Each page's run is ordered and the pages follow
   the Pages list; the number runs on across pages. Only a layer Find matches takes a number, so a
   skipped one leaves no gap; a matched layer whose name already is its result keeps that number, so
   no two layers are given the same one.

@@ -1227,9 +1227,17 @@ impl Walk<'_> {
                 size,
                 corner_smoothing,
             } => {
-                if *corner_smoothing > 0.0
-                    && !ondin_core::geometry::is_square_cornered(corner_radii)
-                {
+                let bound = node.corner_vars();
+                let r = [
+                    corner_radii.top_left,
+                    corner_radii.top_right,
+                    corner_radii.bottom_right,
+                    corner_radii.bottom_left,
+                ];
+                // A bound corner may read 0 in this mode and not in another, so it
+                // is rounded wherever `border-radius` is written, and noted alike.
+                let rounded = r.iter().any(|r| *r > 0.0) || bound.iter().any(Option::is_some);
+                if *corner_smoothing > 0.0 && rounded {
                     self.report.approximate(format!(
                         "{} {}: CSS has no corner smoothing, so its corners are circular",
                         kind_word(node),
@@ -1248,14 +1256,7 @@ impl Walk<'_> {
                 } else {
                     px(half)
                 };
-                let bound = node.corner_vars();
-                let r = [
-                    corner_radii.top_left,
-                    corner_radii.top_right,
-                    corner_radii.bottom_right,
-                    corner_radii.bottom_left,
-                ];
-                if r.iter().any(|r| *r > 0.0) || bound.iter().any(Option::is_some) {
+                if rounded {
                     let all: Vec<String> = r
                         .iter()
                         .zip(bound)

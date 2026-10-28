@@ -2569,3 +2569,67 @@ fn a_use_in_another_mode_draws_that_modes_values() {
     assert_eq!(html_of_components(&doc, &res, &[board]).inlined.len(), 1);
     holds_components("use-mode", &doc, &res);
 }
+
+/// A smoothed rectangle whose corners are bound to a variable that reads 0 in this
+/// mode still gets `border-radius` for the others, so it is noted all the same.
+///
+/// flip: the note keyed on this mode's radii → fails at the note.
+#[test]
+fn a_bound_corner_reading_zero_still_notes_its_smoothing() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (light, dark, radius) = (d.ids.mint_mode(), d.ids.mint_mode(), d.ids.mint_var());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    d.apply(vec![
+        mode(light, "Light", 0),
+        mode(dark, "Dark", 1),
+        Operation::AddVariable {
+            var: Variable {
+                id: radius,
+                name: "radius".into(),
+                kind: VarKind::Number,
+                cells: [(light, Cell::Number(0.0)), (dark, Cell::Number(16.0))]
+                    .into_iter()
+                    .collect(),
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+    ]);
+    let f = d.frame(None, 0.0, 0.0, 100.0, 100.0, "Board");
+    let card = d.add(
+        Some(f),
+        NodeKind::Rect {
+            size: Size::new(60.0, 40.0),
+            corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            corner_smoothing: 0.6,
+        },
+        Affine::translate((10.0, 10.0)),
+        "Card",
+    );
+    let ops = ondin_core::bind_corners_ops(&d.doc, card, [Some(radius); 4]);
+    d.apply(ops);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(
+        css.contains("border-radius"),
+        "fixture: rounded in CSS: {css}"
+    );
+    assert!(
+        export
+            .approximated
+            .iter()
+            .any(|n| n.contains("no corner smoothing")),
+        "{:?}",
+        export.approximated
+    );
+}

@@ -20,8 +20,9 @@ use ondin_core::build::{self, Arrangement, Axis};
 use ondin_core::kurbo::{Point, Rect, Vec2};
 use ondin_core::{NodeId, Transaction};
 
-/// The centre dot's radius, and how near it a press must land, in screen points.
-const DOT_R: f32 = 5.0;
+/// The centre dot's radius, and how near it a press must land, in screen points:
+/// the shape handles' dot and reach, so every such dot matches.
+const DOT_R: f32 = 3.5;
 const DOT_PICK_PX: f32 = 8.0;
 
 /// A loose selection read as a run: its layers, their world boxes in the same

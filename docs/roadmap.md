@@ -35,6 +35,10 @@ reads true.
   whose box holds another's, but a tall layer beside the rows that holds none of them (a sidebar)
   starts the first band when its top is highest, and every row whose centre falls in its span
   joins that one band, read along as a single row.
+- **An outside stroke on a self-overlapping non-zero path inks the overlap.** `scene::paint_strokes`
+  clips an outside stroke to the shape plus a big rect taken even-odd, so where a non-zero path
+  overlaps itself the overlap counts as outside; *Outline stroke* (`build::stroke_ink`) does not ink
+  it. The fix is a non-zero complement, in every backend.
 
 ## Later · Second
 

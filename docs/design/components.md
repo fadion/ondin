@@ -721,9 +721,10 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
 - **Layers**: the badge slot shows *N variants* on a collapsed set, `{}` on a layer bound to a property
   of the owner above; priority mask → set count → `{}` → frame size / subtract base. A variant row is
   named by its values and wears the filled hexagon.
-- Values are edited from a chip's popup, not in place, and dragged; binding is from one line, not `{}`
-  buttons on layers/Appearance/Type; defining is through the header `+` menu, with no *Default* row;
-  *Preferred mains* are rows under the filter, not a list of their own.
+- Values are renamed, moved and deleted from a chip's popup, never edited in place or dragged;
+  binding is from one line, not `{}` buttons on layers/Appearance/Type; defining is through the
+  header `+` menu, with no *Default* row; *Preferred mains* are rows under the filter, not a list of
+  their own.
 
 ### Nested component properties
 

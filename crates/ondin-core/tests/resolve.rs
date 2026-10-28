@@ -3933,18 +3933,17 @@ fn a_translate_on_a_group_does_not_reshape_the_text_inside_it() {
     );
 }
 
-/// **…and nor does a translate on a group that lays its text out** (§15 D936,
-/// the release review's `[X2-L4-01]`). D590's fixture with a column on the
-/// group: the nudge dirties the group, which is a layout root, so its pass runs
-/// — and the pass measured every text item again, at every width it asked, so
-/// D590's defect came back under a layout at five times its old size (120 shapes
-/// a nudge on twenty 4k-character blocks). The pass still runs; the text boxes
-/// it asks for are remembered across commits and dropped only for a dirty node.
+/// **…and nor does a translate on a group that lays its text out** (§15 D936).
+/// D590's fixture with a column on the group: the nudge dirties the group, which
+/// is a layout root, so its pass runs — and the pass measured every text item
+/// again, at every width it asked, so D590's defect came back under a layout at
+/// five times its old size. The pass still runs; the text boxes it asks for are
+/// remembered across commits and dropped only for a dirty node.
 ///
 /// **Flip run**, `UsedView` measuring through the trait's default rather than
 /// the memo: fails on *"a translate re-shaped laid text"*, 9 against 0 — three
-/// shapes a label, the review's per-label rate — the predicted site. The `SetText` control keeps a re-shape for the edited
-/// block, so the memo is not simply never cleared.
+/// shapes a label — the predicted site. The `SetText` control keeps a re-shape
+/// for the edited block, so the memo is not simply never cleared.
 #[test]
 fn a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it() {
     use ondin_core::container::{Display, Flex, FlexDirection};

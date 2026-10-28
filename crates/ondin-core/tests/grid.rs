@@ -1015,9 +1015,8 @@ fn a_dropped_area_keeps_its_span_and_its_spelling() {
 ///
 /// **Flip run**, the backward half of `grid_drop_many`'s `room` answering the
 /// raw shift: fails on *"stopped whole at line 1"* with `a` written as line −6
-/// and `b` at line 2 — the predicted site. (This read *"each start then clamped
-/// alone by `line`"*; `line` clamps nothing since §15 D918's amendment, and a
-/// start before the grid is written as a negative line — `[R2-L8-02]`.)
+/// and `b` at line 2 — the predicted site. (`line` clamps nothing — §15 D918 —
+/// and a start before the grid is written as a negative line.)
 #[test]
 fn several_items_of_a_grid_move_as_a_block() {
     use ondin_core::kurbo::Vec2;
@@ -1222,12 +1221,11 @@ fn a_spanning_item_dropped_on_the_last_column_keeps_its_span_inside() {
 }
 
 /// **A block dropped at the bottom-right stops whole inside, on both axes**
-/// (§15 D927's row axis and its block case, *"read, not tested"* until
-/// `[X4.1-L6-01]`): over a 3 × 3 grid of `1fr`, `a` spanning two rows and `b`
-/// beside it are dragged together until the block's centre is on the last
-/// cell. The block moves one column and one row — as far as `b`'s column and
-/// `a`'s rows have room for — so `a` lands `2 / span 2` down and in column 2,
-/// `b` in column 3 row 2, neither hanging past the last line.
+/// (§15 D927's row axis and its block case): over a 3 × 3 grid of `1fr`, `a`
+/// spanning two rows and `b` beside it are dragged together until the block's
+/// centre is on the last cell. The block moves one column and one row — as far
+/// as `b`'s column and `a`'s rows have room for — so `a` lands `2 / span 2` down
+/// and in column 2, `b` in column 3 row 2, neither hanging past the last line.
 ///
 /// **Flip runs**: `room`'s forward arm clamping columns only (`axis == 0`)
 /// fails on *"a stopped at the last row"*, line 3 — the predicted site. `room`
@@ -1434,12 +1432,11 @@ fn a_placement_reads_and_writes_as_css() {
     }
 }
 
-/// **Outlining a grid item keeps its cell** (§15 D930, the release review's
-/// `[X1-L1-01]`). Three 100 px columns, `a` set to `grid-column: 3`, `b` auto —
-/// so `b` takes the first cell and `a` the third. `replace_with_path` dropped
-/// the layer's item properties, so the outline of `a` came back auto-placed in
-/// the first cell and pushed `b` into the second: two layers moved by an edit
-/// that changes only how one of them is held.
+/// **Outlining a grid item keeps its cell** (§15 D930). Three 100 px columns, `a`
+/// set to `grid-column: 3`, `b` auto — so `b` takes the first cell and `a` the
+/// third. `replace_with_path` dropped the layer's item properties, so the outline
+/// of `a` came back auto-placed in the first cell and pushed `b` into the second:
+/// two layers moved by an edit that changes only how one of them is held.
 ///
 /// **Flip run**, the `SetLayoutItem` carry deleted: fails on *"the path keeps
 /// a's cell"*, x0 0 against 200, the predicted site.
@@ -1467,15 +1464,14 @@ fn outlining_a_grid_item_keeps_its_cell() {
 }
 
 /// **A file's refused layout value can be edited away, undone back to, and
-/// carried forward by an edit to something else** (§15 D937, the release
-/// review's `[R3-L1-01]`). A grid item at `grid-column: 0` (CSS refuses line 0;
-/// D914 opens it and keeps it): set to line 3, then undone. The undo's inverse
-/// wrote line 0 back, `SetLayoutItem` refused it with `BadLayout`, and
-/// `History::undo`, having popped the step, dropped it — the file's value could
-/// never be returned to. And a change to the item's `grow`, which writes the
-/// whole record back with the line in it, was refused whole. (A gap edit on a
-/// grid whose template a file carries refused was too; `Display::is_valid_over`
-/// is the same rule for it, read and not tested here.)
+/// carried forward by an edit to something else** (§15 D937). A grid item at
+/// `grid-column: 0` (CSS refuses line 0; D914 opens it and keeps it): set to line
+/// 3, then undone. The undo's inverse wrote line 0 back, `SetLayoutItem` refused
+/// it with `BadLayout`, and `History::undo`, having popped the step, dropped it —
+/// the file's value could never be returned to. And a change to the item's
+/// `grow`, which writes the whole record back with the line in it, was refused
+/// whole. (A gap edit on a grid whose template a file carries refused was too;
+/// `Display::is_valid_over` is the same rule for it, read and not tested here.)
 ///
 /// **Flip runs**: `History::undo` back on plain `apply` fails on *"the undo
 /// lands"*, `Err(BadLayout)`; `op_set_layout_item` checking `is_valid` rather
@@ -1534,7 +1530,7 @@ fn a_files_refused_value_can_be_undone_back_to_and_carried_forward() {
 }
 
 /// **A negative padding, gap, growth or size is refused, and read as zero from
-/// a file** (§15 D937, `[X3.1-L2-01]`) — CSS refuses all of them, and a row with
+/// a file** (§15 D937) — CSS refuses all of them, and a row with
 /// `column-gap: -20` laid its second item over its first. The cards clamp at
 /// zero; the operations did not.
 ///
@@ -1591,13 +1587,13 @@ fn a_negative_layout_length_is_refused_and_read_as_zero() {
 }
 
 /// **`baseline` lines up text's first baselines, in a grid and in a flex row**
-/// (§15 D939, the release review's `[X3.3-L1-01]`). Two labels, 12 and 24 px
-/// Inter at a 1.2em line, side by side with `align-items: baseline`: a text leaf
-/// reported no baseline to the engine, which then aligned the boxes' bottom
-/// edges — the small label placed at y 14.40625, its letters about 3 px below
-/// the big one's. Asserted on what the user sees: each label's first baseline in
-/// world y, read off its own shaped layout, equal across the two. A shape keeps
-/// no baseline and is still aligned by its bottom, CSS's synthesized one.
+/// (§15 D939). Two labels, 12 and 24 px Inter at a 1.2em line, side by side with
+/// `align-items: baseline`: a text leaf reported no baseline to the engine, which
+/// then aligned the boxes' bottom edges — the small label placed at y 14.40625,
+/// its letters about 3 px below the big one's. Asserted on what the user sees:
+/// each label's first baseline in world y, read off its own shaped layout, equal
+/// across the two. A shape keeps no baseline and is still aligned by its bottom,
+/// CSS's synthesized one.
 ///
 /// **Flip run**, the leaf's `baselines.first` left unset: fails on the grid's
 /// *"letters on one line"*, the bottoms aligned instead — the predicted site.

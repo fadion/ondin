@@ -342,10 +342,10 @@ fn breadth_field(
                     .filter(|k| !matches!(k, Kind::MinMax | Kind::Repeat))
                     .filter(|k| fr || *k != Kind::Fr)
                 {
-                    // **The lit row picks nothing** (§15 D941, the release
-                    // review's `[X6.3-L1-02]`) — `track_row`'s kind menu already
-                    // said so; this one reset `minmax(200px, 1fr)` to
-                    // `minmax(100px, 1fr)` on a click of its own `px`.
+                    // **The lit row picks nothing** (§15 D941) — `track_row`'s
+                    // kind menu already said so; this one reset
+                    // `minmax(200px, 1fr)` to `minmax(100px, 1fr)` on a click of
+                    // its own `px`.
                     if ui
                         .selectable_label(k == kind, k.word())
                         .on_hover_text(k.describe())
@@ -357,12 +357,12 @@ fn breadth_field(
                 }
             });
     }
-    // **Under a keyword, a keystroke is an edit too** (§15 D941, `[X6.3-L1-03]`):
-    // the hidden number there is 0, so a typed `0` never moved it and
-    // `minmax(0, 1fr)` — CSS's idiom for an `fr` track that may shrink below its
-    // content — could not be typed. A click in and out types nothing, so D885's
-    // rule holds. **Only what can be part of a number counts**: a letter typed
-    // over `auto` leaves the hidden 0 in place, and counting it wrote `0px`.
+    // **Under a keyword, a keystroke is an edit too** (§15 D941): the hidden
+    // number there is 0, so a typed `0` never moved it and `minmax(0, 1fr)` —
+    // CSS's idiom for an `fr` track that may shrink below its content — could not
+    // be typed. A click in and out types nothing, so D885's rule holds. **Only
+    // what can be part of a number counts**: a letter typed over `auto` leaves
+    // the hidden 0 in place, and counting it wrote `0px`.
     let keystroke = word.is_some()
         && resp.has_focus()
         && ui.input(|i| {
@@ -421,11 +421,11 @@ fn css_field(
     if resp.lost_focus() {
         ui.ctx().data_mut(|d| d.remove::<String>(key));
         // **Against what the field was seeded with**, not against `shown` (§15
-        // D941, the release review's `[X6.3-L1-01]`): a mixed selection seeds it
-        // empty with `shown` `None`, and `Some("") != None` read the untouched
-        // buffer as typed — a click in and out of a *Mixed* template line wrote
-        // `none` to every selected grid, and an item's line field raised a
-        // refusal nobody typed. D885's rule: a click in and out writes nothing.
+        // D941): a mixed selection seeds it empty with `shown` `None`, and
+        // `Some("") != None` read the untouched buffer as typed — a click in and
+        // out of a *Mixed* template line wrote `none` to every selected grid, and
+        // an item's line field raised a refusal nobody typed. D885's rule: a
+        // click in and out writes nothing.
         if ui::defocus_commits(&resp) && text != shown.unwrap_or_default() {
             out = Some(text);
         }

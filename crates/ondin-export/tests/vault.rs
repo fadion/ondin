@@ -2,9 +2,8 @@
 //! D1012): the vault is a second root, and every walk here starts at the
 //! document's own.
 //!
-//! The v0.5.0 release review's `[R2-L6-02]`: the claim was pinned only for
-//! `Resolved` and hit-testing, and no export test built a document with a
-//! vault — so an export or snapshot change iterating the node map, the shape
+//! `Resolved` and hit-testing pin the claim elsewhere; without a document with a
+//! vault here, an export or snapshot change iterating the node map, the shape
 //! §5.3e names as the one to suspect, would put a kit's hidden mains in every
 //! consumer's SVG and JSON with every suite green.
 

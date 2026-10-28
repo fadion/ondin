@@ -319,15 +319,14 @@ fn the_variant_rules_are_held_after_the_last_op() {
 /// derives; dragged out, it drops them. Flip: `settle` answering nothing refuses
 /// the drag-in (`Values`).
 ///
-/// And it brings its properties (`[X6.2-L6-04]`): a main carrying one, dragged
-/// in, gives it to the set — every route into a set (*Combine as variants*
-/// too) goes through `settle`'s merge, and no fixture's main carried any.
-/// Flip, run: the merge's `if grew {` made `if false && grew {` — the variant's
-/// own list still emptied — fails the set's props, 0 for 1: the definition and
-/// its binding silently gone (and, since `[R1-L2-02]`'s fix,
+/// And it brings its properties: a main carrying one, dragged in, gives it to the
+/// set — every route into a set (*Combine as variants* too) goes through
+/// `settle`'s merge. Flip, run: the merge's `if grew {` made `if false && grew {`
+/// — the variant's own list still emptied — fails the set's props, 0 for 1: the
+/// definition and its binding silently gone (and
 /// `combining_mains_whose_properties_share_an_id_keys_them_apart` with it, so
-/// *Combine*'s route is no longer bare). A second flip, the `SetName` arm dropped from
-/// `can_break`, fails the hand rename's assertion, `"Tiny"` for `"Small"`.
+/// *Combine*'s route is covered too). A second flip, the `SetName` arm dropped
+/// from `can_break`, fails the hand rename's assertion, `"Tiny"` for `"Small"`.
 #[test]
 fn a_main_moved_into_a_set_is_settled_as_a_variant() {
     let mut f = fixture();
@@ -343,7 +342,7 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
             component: true,
         },
     ]);
-    // A property of its own, bound inside it (`[X6.2-L6-04]`).
+    // A property of its own, bound inside it.
     let (tx, item) =
         variant::define(&f.doc, &mut f.ids, m, "Label text", PropKind::Text, vec![t]).unwrap();
     f.commit(tx.0);
@@ -382,7 +381,7 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
 /// rule the instances still carrying the variant's name (names are copied
 /// verbatim — §5.3d's rule under D979 (e), held by D982). Flip, run: `settle`
 /// after `propagate` **in `propagate::owed`** — the order the app's commit runs,
-/// not a copy of it (`[X6.2-L6-05]`) — fails the instance's name, "Small".
+/// not a copy of it — fails the instance's name, "Small".
 /// Flip, run: the remap closure an identity (`if false && v.get(prop) ==
 /// Some(&old)`) passes the value-0 half and fails at Large's values,
 /// `["Compact"]` for `["Big"]` — Large re-valued by the fallback to the first
@@ -400,9 +399,9 @@ fn renaming_a_value_renames_its_variants_and_their_instances() {
     assert_eq!(f.doc.get(f.small).unwrap().variant(), strs(&["Compact"]));
     assert_eq!(f.name(f.small), "Compact");
     assert_eq!(f.name(f.i), "Compact");
-    // And a value that is not the first (`[X6.2-L6-01]`): renaming value 0 is the
-    // one case `settle`'s first-value fallback answers the same as the remap, so
-    // a `rename_value` writing the set and leaving the variants alone passed.
+    // And a value that is not the first: renaming value 0 is the one case
+    // `settle`'s first-value fallback answers the same as the remap, so a
+    // `rename_value` writing the set and leaving the variants alone would pass it.
     let tx = variant::rename_value(&f.doc, f.s, 0, 1, "Big").unwrap();
     f.commit(tx.0);
     assert_eq!(f.doc.get(f.large).unwrap().variant(), strs(&["Big"]));
@@ -411,11 +410,11 @@ fn renaming_a_value_renames_its_variants_and_their_instances() {
 }
 
 /// Deleting a value deletes the variants holding it, and **their instances
-/// detach** (§15 D979 (c)) — and keep their
-/// layers (`[X6.2-L6-09]`): the check of the children was an `all()`, which an
-/// emptied instance satisfies. Flip, run: `propagate_structure`'s deleted-parent
-/// `partition` made `true || …` (the D984 defect, a deleted main's children read
-/// as losses) fails the `kids == before` assertion, `[]` for the two layers.
+/// detach** (§15 D979 (c)) — and keep their layers, compared whole: an `all()`
+/// over the children an emptied instance satisfies. Flip, run:
+/// `propagate_structure`'s deleted-parent `partition` made `true || …` (the D984
+/// defect, a deleted main's children read as losses) fails the `kids == before`
+/// assertion, `[]` for the two layers.
 #[test]
 fn deleting_a_value_deletes_its_variants_and_detaches_their_instances() {
     let mut f = fixture();
@@ -448,7 +447,7 @@ fn two_properties(f: &mut F) {
 
 /// *Add property* gives every variant its one value, renaming them and the
 /// instances that carry their names; a name a variant property or a component
-/// property already has is refused (`[R2-L6-01]`).
+/// property already has is refused.
 ///
 /// Flip, run: `add_property`'s remap inserting the value first
 /// (`v.insert(0, value)` for `v.push(value)`) passes Small — `settle` repairs
@@ -488,8 +487,8 @@ fn adding_a_property_gives_every_variant_its_value() {
 }
 
 /// *Delete property* drops exactly that position from every variant, and is
-/// refused for the last property (`[R2-L6-01]`). Deleting the **second** one, so
-/// that dropping the wrong position shows.
+/// refused for the last property. Deleting the **second** one, so that dropping
+/// the wrong position shows.
 ///
 /// Flip, run: `delete_property`'s remap `v.remove(0)` for `v.remove(prop)`
 /// passes Small (its `["Default"]` misfits and `settle` falls back to the first
@@ -516,7 +515,7 @@ fn deleting_a_property_drops_its_position_from_every_variant() {
 
 /// *Rename property* renames it in the set and leaves every variant's values
 /// alone; a name another variant property or one of the set's component
-/// properties has is refused (`[R2-L6-01]`).
+/// properties has is refused.
 ///
 /// Flip, run: the component-property half of the clash test dropped (`|| false`
 /// for `|| s.props.iter().any(..)`) fails the last assertion — the rename to
@@ -547,8 +546,8 @@ fn renaming_a_property_refuses_a_name_taken_either_way() {
     assert!(variant::rename_property(&f.doc, f.s, 1, "Label text").is_none());
 }
 
-/// *Move value* reorders the set's values and leaves the variants' alone
-/// (`[R2-L6-01]`). Three values, so a move is not a swap.
+/// *Move value* reorders the set's values and leaves the variants' alone. Three
+/// values, so a move is not a swap.
 ///
 /// Flip, run: `p.values.swap(from, to)` for the remove-and-insert fails the
 /// set's order, `["Huge", "Large", "Small"]` for `["Huge", "Small", "Large"]`.
@@ -578,7 +577,7 @@ fn moving_a_value_reorders_the_set_and_not_the_variants() {
 
 /// A variant card's dropdown: values the set has are written — a clash allowed,
 /// which the set shows — and a value it lacks, or a list of the wrong length,
-/// is refused (`[R2-L6-01]`).
+/// is refused.
 ///
 /// Flip, run: the `p.values.contains(v)` test dropped from `set_values` fails
 /// the refusal of `Huge`.
@@ -595,8 +594,7 @@ fn setting_a_variants_values_refuses_one_the_set_lacks() {
 }
 
 /// `edit_property` rewrites, or with `None` removes, exactly the item it was
-/// given, by id (`[R2-L6-01]`). The second of two, so a position-0 removal
-/// shows.
+/// given, by id. The second of two, so a position-0 removal shows.
 ///
 /// Flip, run: `props.remove(0)` for `props.remove(at)` fails the last
 /// assertion, the survivor *Show bg* for *Caption*.
@@ -712,11 +710,11 @@ fn switching_a_variant_carries_overrides_and_keeps_ids() {
 }
 
 /// **Variants made apart share no item ids**, and a switch matches their fills by
-/// position (`rekey_lists`, `[X6.2-L6-02]`). Every fixture keyed its fills
-/// `keyed_by_position`, so Small's and Large's `Bg` fill already shared one id
-/// and the rekeying was a no-op wherever a test reached it. Here each variant's
-/// fill is minted, as the inspector mints one: the instance's recoloured fill
-/// carries as its one fill, and an untouched instance takes Large's.
+/// position (`rekey_lists`). A fixture keyed `keyed_by_position` gives Small's
+/// and Large's `Bg` fill one id already, so the rekeying is a no-op there. Here
+/// each variant's fill is minted, as the inspector mints one: the instance's
+/// recoloured fill carries as its one fill, and an untouched instance takes
+/// Large's.
 ///
 /// Flip, run: `rekey_lists` returning `(old, cur)` unchanged fails the
 /// one-fill assertion — Large's blue arrives as a second item beside the
@@ -824,11 +822,11 @@ fn an_unmatched_layer_the_instance_changed_is_kept_as_its_own() {
 /// instance is an override of the bound field, the main's value is the default,
 /// and resetting it puts the field back.
 ///
-/// Both kinds (`[X6.2-L6-08]`): the body set and reset only the text one, so
-/// the `Boolean` arm of `property_reset_ops` could be emptied with everything
-/// green. Flip, run: that arm made `false && matches!(op, SetVisible { .. })`
-/// fails the boolean's `property_state` after it is set off — `(false, false)`
-/// for `(false, true)`, no override seen — before the reset is reached.
+/// Both kinds, so the `Boolean` arm of `property_reset_ops` is covered as well
+/// as the text one. Flip, run: that arm made
+/// `false && matches!(op, SetVisible { .. })` fails the boolean's
+/// `property_state` after it is set off — `(false, false)` for `(false, true)`,
+/// no override seen — before the reset is reached.
 #[test]
 fn a_property_is_a_view_over_its_bound_fields() {
     let mut f = fixture();
@@ -883,7 +881,7 @@ fn a_property_is_a_view_over_its_bound_fields() {
         variant::property_state(&f.doc, f.i, &text_prop),
         Some((PropValue::Text("Go".into()), false))
     );
-    // The boolean half (`[X6.2-L6-08]`): set off, it is an override of the bound
+    // The boolean half: set off, it is an override of the bound
     // layer's visibility — the dot — and its reset puts the layer back.
     let bool_prop = variant::instance_properties(&f.doc, f.i)
         .into_iter()
@@ -1178,7 +1176,7 @@ fn a_duplicated_set_is_a_new_set_of_new_variants() {
     }
 }
 
-// ── The switch's matching rules (`[X6.2-L6-03]`, `[X6.1-L1-01]`) ───────────────
+// ── The switch's matching rules ────────────────────────────────────────────────
 
 impl F {
     /// Commit `ops` creating layers in the two variants — the instance takes its
@@ -1219,12 +1217,12 @@ impl F {
     }
 }
 
-/// **A layer matches only under a matched parent** (`[X6.1-L1-01]`): Small's
-/// Group "Box" and Large's Frame "Box" are different kinds, so neither they nor
-/// the "Box/Shape" under them match. The child matched by itself, under a parent
-/// that did not, and the switch was refused (`NoSuchNode`, the Shape relinked
-/// after its untouched parent was deleted) — or, the parent changed, left the
-/// instance with both Boxes and a stale link.
+/// **A layer matches only under a matched parent**: Small's Group "Box" and
+/// Large's Frame "Box" are different kinds, so neither they nor the "Box/Shape"
+/// under them match. The child matched by itself, under a parent that did not,
+/// and the switch was refused (`NoSuchNode`, the Shape relinked after its
+/// untouched parent was deleted) — or, the parent changed, left the instance with
+/// both Boxes and a stale link.
 ///
 /// Flip: the matching loop without its matched-parent test fails the first
 /// switch's commit, `NoSuchNode`.
@@ -1366,9 +1364,9 @@ fn a_switch_does_not_bring_back_a_layer_the_instance_removed() {
     assert!(f.copies_of(f.llabel).is_empty(), "still removed");
 }
 
-/// **No switch to a main of another kind** (§15 D1003 (5), `[X6.1-L1-02]`): a
-/// Frame instance relinked to a Group main could never draw as it. Flip: `switch`
-/// without its `same_kind` test answers `Some`.
+/// **No switch to a main of another kind** (§15 D1003 (5)): a Frame instance
+/// relinked to a Group main could never draw as it. Flip: `switch` without its
+/// `same_kind` test answers `Some`.
 #[test]
 fn a_switch_refuses_a_main_of_another_kind() {
     let mut f = fixture();
@@ -1385,10 +1383,9 @@ fn a_switch_refuses_a_main_of_another_kind() {
 }
 
 /// **A variant pasted into a document with no set commits, a plain main**
-/// (`[X6.1-L1-04]`): `settle`'s gate read only the document before the paste,
-/// so with no set left the pass never ran and `check` refused the copy's
-/// values. Flip: the gate without its `inserts` test fails the paste's commit,
-/// `Variant(Values)`.
+/// — `settle`'s gate read only the document before the paste, so with no set
+/// left the pass never ran and `check` refused the copy's values. Flip: the gate
+/// without its `inserts` test fails the paste's commit, `Variant(Values)`.
 #[test]
 fn a_variant_pasted_where_no_set_is_lands_a_plain_main() {
     let mut f = fixture();
@@ -1418,9 +1415,9 @@ fn a_variant_pasted_where_no_set_is_lands_a_plain_main() {
 }
 
 /// **A set given a property of no values is refused, not a panic**
-/// (`[R1-L2-03]`, invariant 8): `settle` read the property's first value
-/// before `apply` could refuse. Flip: `settle` without its empty-values guard
-/// panics, *"index out of bounds: the len is 0"*.
+/// (invariant 8): `settle` read the property's first value before `apply` could
+/// refuse. Flip: `settle` without its empty-values guard panics, *"index out of
+/// bounds: the len is 0"*.
 #[test]
 fn an_empty_property_is_refused_rather_than_panicking() {
     let mut f = fixture();
@@ -1487,18 +1484,18 @@ fn mains_sharing_a_property_id() -> (Document, IdSource, [NodeId; 4], ondin_core
 }
 
 /// **Combining mains whose properties share an item id keys them apart**
-/// (`[R1-L2-02]`; §15 D980's *unique within one list*, D982's merge). `settle`
-/// moves each variant's properties onto the set, merging by name and kind; the
-/// names differ, so both are pushed — and the set held `[(P, "Label"), (P,
-/// "Title")]`, every edit by id (`edit_property`, the Properties card's rename and
-/// delete) then hitting the *first*. The merge now re-keys a pushed property whose
-/// id the set already holds, and `apply` refuses a repeated property id as it does
-/// a repeated fill's.
+/// (§15 D980's *unique within one list*, D982's merge). `settle` moves each
+/// variant's properties onto the set, merging by name and kind; the names differ,
+/// so both are pushed — and the set held `[(P, "Label"), (P, "Title")]`, every
+/// edit by id (`edit_property`, the Properties card's rename and delete) then
+/// hitting the *first*. The merge re-keys a pushed property whose id the set
+/// already holds, and `apply` refuses a repeated property id as it does a
+/// repeated fill's.
 ///
 /// Flips, run: the merge's re-key removed fails the commit itself — *"the set:
-/// DuplicateItemId"*, `apply`'s check now refusing the combine, the second
-/// defence; with `props` taken back out of `check_item_ids` as well, it fails at
-/// *"the set's properties, one id each"*, the defect as reported.
+/// DuplicateItemId"*, `apply`'s check refusing the combine, the second defence;
+/// with `props` taken back out of `check_item_ids` as well, it fails at *"the
+/// set's properties, one id each"*.
 #[test]
 fn combining_mains_whose_properties_share_an_id_keys_them_apart() {
     let (mut doc, mut ids, [a, b, ..], shared) = mains_sharing_a_property_id();
@@ -1535,7 +1532,7 @@ fn combining_mains_whose_properties_share_an_id_keys_them_apart() {
 }
 
 /// `apply` refuses a property list repeating an item id — `check_item_ids`' sixth
-/// list (`[R1-L2-02]`, §15 D980). Flip, run: `props` left out of
+/// list (§15 D980). Flip, run: `props` left out of
 /// `check_item_ids` fails *"refused"* with `Ok`.
 #[test]
 fn apply_refuses_a_property_id_twice_in_one_list() {
@@ -1558,13 +1555,13 @@ fn apply_refuses_a_property_id_twice_in_one_list() {
     );
 }
 
-/// **A file repeating a property id loads, the repeat re-keyed** (`[R1-L2-02]`).
-/// A build before the fix saved such files — *Combine as variants* made them — so
-/// refusing one on load would lose the document over a defect the app itself
-/// wrote. The loader gives each repeat the lowest positional id the list does not
-/// hold (`item::rekey_repeats`), a function of the bytes alone, so loading the
-/// same bytes twice still gives one document (invariant 9), and the re-save is
-/// stable from then on.
+/// **A file repeating a property id loads, the repeat re-keyed.** Older builds
+/// saved such files — *Combine as variants* made them — so refusing one on load
+/// would lose the document over a defect the app itself wrote. The loader gives
+/// each repeat the lowest positional id the list does not hold
+/// (`item::rekey_repeats`), a function of the bytes alone, so loading the same
+/// bytes twice still gives one document (invariant 9), and the re-save is stable
+/// from then on.
 ///
 /// Flip, run: the loader's re-key removed (`props: self.props`) fails the `load`
 /// itself, *"has item id … twice in one list"* — the check refusing it, which is

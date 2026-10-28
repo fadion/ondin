@@ -457,7 +457,7 @@ impl OndinApp {
         // The typing is committed before the update, so a layer being typed
         // into is touched — cut loose rather than deleted under the session,
         // which then committed onto a node that was gone and said "Text
-        // updated" (`[X3.2-L5-01]`).
+        // updated".
         self.finish_text_first();
         let waiting: Vec<Waiting> = self
             .kits_waiting(false)
@@ -668,8 +668,7 @@ pub(crate) fn stack_local(
         let Some(n) = scratch.get(*m) else { continue };
         let at = n.transform();
         // Laid out, a frame too: a hugging frame's stored size is not its box
-        // (§15 D874), and stacking by it overlapped the mains (the v0.5.0
-        // release review's `[R1-L2-01]`).
+        // (§15 D874), and stacking by it overlapped the mains.
         let Some(b) = res.world_bounds(*m) else {
             continue;
         };
@@ -1355,10 +1354,9 @@ mod tests {
         );
     }
 
-    /// **Hugging frames stack by the boxes layout gives them** (the v0.5.0
-    /// release review's `[R1-L2-01]`): two flex frames stored at 10×10 that each
-    /// hug a 120×40 rect. Stacked by stored height, the second overlapped the
-    /// first by 30.
+    /// **Hugging frames stack by the boxes layout gives them**: two flex frames
+    /// stored at 10×10 that each hug a 120×40 rect. Stacked by stored height,
+    /// the second overlapped the first by 30.
     ///
     /// Flip, run: measuring a frame by its stored size again fails *"no
     /// overlap"*.
@@ -1509,10 +1507,9 @@ mod tests {
     }
 
     /// **An accept that cannot read a waiting kit applies nothing, and says so**
-    /// (§15 D1036 (5), the v0.5.0 release review's `[X3.2-L1-02]`): the kit
-    /// publishes, and its file is gone before the accept. It said *"Atlas could
-    /// not be read, so its update waits"*, which read as though the others had
-    /// been taken.
+    /// (§15 D1036 (5)): the kit publishes, and its file is gone before the
+    /// accept. It said *"Atlas could not be read, so its update waits"*, which
+    /// read as though the others had been taken.
     ///
     /// Flip, run: the old wording fails *"nothing was updated"*.
     #[test]
@@ -1545,11 +1542,11 @@ mod tests {
 
     /// **One kit's accept that reaches a newer main of another kit takes every
     /// waiting update, or says why it cannot** (§15 D1024 — *"the retry is not
-    /// driven by a test"*; the v0.5.0 release review's `[X3.2-L6-03]`). Kit
-    /// *Cards* nests kit *Icons*' *Icon* in its *Card*; the consumer places
-    /// *Card*, so it holds both at v1. *Icons* publishes v2 — a *Ring* added to
-    /// *Icon*, which v1 lacks — and *Cards*' author takes it, through a commit so
-    /// the nested copy gains the ring, and publishes v2 too. *Cards*' v2 alone
+    /// driven by a test"*). Kit *Cards* nests kit *Icons*' *Icon* in its
+    /// *Card*; the consumer places *Card*, so it holds both at v1. *Icons*
+    /// publishes v2 — a *Ring* added to *Icon*, which v1 lacks — and *Cards*'
+    /// author takes it, through a commit so the nested copy gains the ring, and
+    /// publishes v2 too. *Cards*' v2 alone
     /// cannot be applied — it reaches *Icons*' ring and the document holds *Icon*
     /// at v1 — so accepting *Cards* from its card or the canvas menu (`only`)
     /// accepts both, as *Accept all* does, in one undo step. With *Icons*' file
@@ -1721,7 +1718,7 @@ mod tests {
     }
 
     /// ***Make all local* reveals a set and a main as one undo step, stacked**
-    /// (§5.3e, 6B — *"undoable"*; the v0.5.0 release review's `[X3.2-L6-03]`).
+    /// (§5.3e, 6B — *"undoable"*).
     /// The page holds an instance of *Atlas*' set *Button* and one of its
     /// *Badge*, so the kit's vault holds two tops. The dialog is driven — its
     /// *Make all local* clicked — and both tops leave the vault for the page,
@@ -1873,10 +1870,10 @@ mod tests {
         }
     }
 
-    /// **The kit doors end a live text session first** (`[X3.2-L5-01]`, the
-    /// v0.5.0 release review's Critical). Typing into a text layer of the kit
-    /// opened by *Go to main in the kit*, then leaving by the back link, lost the
-    /// typing: the save on the way out wrote `session.doc`, which holds none of it.
+    /// **The kit doors end a live text session first**. Typing into a text layer
+    /// of the kit opened by *Go to main in the kit*, then leaving by the back
+    /// link, lost the typing: the save on the way out wrote `session.doc`, which
+    /// holds none of it.
     /// The back link and *Kits used… → Open kit* both call `open_path`, which is
     /// where this drives it; the seam is `OndinApp::park_active`, which every
     /// change of tab passes.
@@ -1906,10 +1903,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ***Accept all* under a live text session commits the typing first**
-    /// (`[X3.2-L5-01]`'s second route): the update is applied to a document that
-    /// holds what is on screen, and no session is left over a document the
-    /// update rewrote.
+    /// ***Accept all* under a live text session commits the typing first**: the
+    /// update is applied to a document that holds what is on screen, and no
+    /// session is left over a document the update rewrote.
     ///
     /// Flip, run: the `finish_text_first` line out of `accept_kit_updates`
     /// fails *"the session ended before the update"* — the session still live
@@ -1939,10 +1935,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ***Publish* under a live text session publishes what is on screen**
-    /// (`[X5-L1-02]`): the published main's text reads the typing, and the kit
-    /// has nothing left to publish after. Before, the frozen state read "hello",
-    /// the version was spent, and ending the session left one change behind.
+    /// ***Publish* under a live text session publishes what is on screen**: the
+    /// published main's text reads the typing, and the kit has nothing left to
+    /// publish after. Before, the frozen state read "hello", the version
+    /// was spent, and ending the session left one change behind.
     ///
     /// Flip, run: the `finish_text_first` lines out of both `open_publish` and
     /// `publish_now` fail *"the publish holds the typing"* with `Some("hello")`.

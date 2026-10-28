@@ -623,11 +623,9 @@ fn a_file_that_lost_its_vault_key_is_refused() {
 }
 
 /// **A published state nested in a published state is refused** (§5.11: *the
-/// nesting is one level*; the v0.5.0 release review's `[R2-L6-01]`). A hand-made
-/// file whose kit's published document carries a published state of its own
-/// would otherwise be loaded one level per nesting, and kept with a
-/// `published` every reader assumes is never there. The guard had no test:
-/// deleting it left every suite green.
+/// nesting is one level*). A hand-made file whose kit's published document
+/// carries a published state of its own would otherwise be loaded one level per
+/// nesting, and kept with a `published` every reader assumes is never there.
 ///
 /// Flip, run: the guard deleted fails *"the nested published state loaded"*.
 #[test]
@@ -866,12 +864,11 @@ fn a_carrying_paste_reuses_what_the_document_holds() {
 }
 
 /// **A carrying paste over an older held main asks for the update** (§15 D1036
-/// (7), the v0.5.0 release review's `[X1-L1-01]`). F holds *Icon* at v4; L
-/// gives *Icon* a *Ring* and publishes v5; D places *Card* at v5. Pasting D's
-/// *Card* into F carried a fresh *Card* whose nested copy links to a *Ring* F's
-/// *Icon* lacks — inserted into the vault dangling, and the whole paste refused
-/// as a broken link. It answers `NeedsUpdate`, naming F's *Icon*, as the picker
-/// does for the same main.
+/// (7)). F holds *Icon* at v4; L gives *Icon* a *Ring* and publishes v5; D
+/// places *Card* at v5. Pasting D's *Card* into F carried a fresh *Card* whose
+/// nested copy links to a *Ring* F's *Icon* lacks — inserted into the vault
+/// dangling, and the whole paste refused as a broken link. It answers
+/// `NeedsUpdate`, naming F's *Icon*, as the picker does for the same main.
 ///
 /// Flip, run: `adopt` without the check fails *"an update owed"* with `Ok`.
 #[test]
@@ -899,13 +896,12 @@ fn a_carrying_paste_over_an_older_held_main_asks_for_the_update() {
     );
 }
 
-/// 🚨 **A kit built on this one is not used back in it** (§15 D1036 (2), the
-/// v0.5.0 release review's `[X1-L1-02]`). M uses L's *Icon* in its *Card2*;
-/// L inserting *Card2* would vendor a frozen copy linking to L's live *Icon*,
-/// and from then on every structural edit of *Icon* in L was refused,
-/// `Vault(.., NoOrigin)`, naming nothing. The insert answers `Circular`
-/// naming *Icon*, and so does an update of a *Card2* L held before M nested
-/// the *Icon* in it.
+/// 🚨 **A kit built on this one is not used back in it** (§15 D1036 (2)). M uses
+/// L's *Icon* in its *Card2*; L inserting *Card2* would vendor a frozen copy
+/// linking to L's live *Icon*, and from then on every structural edit of *Icon*
+/// in L was refused, `Vault(.., NoOrigin)`, naming nothing. The insert answers
+/// `Circular` naming *Icon*, and so does an update of a *Card2* L held before M
+/// nested the *Icon* in it.
 ///
 /// Flip, run: `vendor`'s `into_vault` resolving as `resolve` does fails
 /// *"the insert names Icon"*; `Builder::resolve` taking a live node fails
@@ -1164,14 +1160,13 @@ fn the_change_count_is_what_consumers_would_receive() {
     assert!(k.doc.published().unwrap().tops().contains(&fresh));
 }
 
-/// **The count leaves out a main's whole place, and counts its order** (the
-/// v0.5.0 release review's `[X2-L1-03]`, `[X2-L1-04]`). Hiding *Icon* on the
-/// kit's page, pinning the *Button* set inside its frame and then moving it,
-/// and giving it a layout item each changed something only the main's own
-/// place holds — an instance root keeps its own (`propagate::is_placement`) —
-/// and each was counted, an update for nothing. Putting *Icon* after *Card*
-/// changes no node and does change the order a consumer's picker lists them
-/// in, and was not counted, so it could not be published.
+/// **The count leaves out a main's whole place, and counts its order.** Hiding
+/// *Icon* on the kit's page, pinning the *Button* set inside its frame and then
+/// moving it, and giving it a layout item each changed something only the main's
+/// own place holds — an instance root keeps its own (`propagate::is_placement`)
+/// — and each was counted, an update for nothing. Putting *Icon* after *Card*
+/// changes no node and does change the order a consumer's picker lists them in,
+/// and was not counted, so it could not be published.
 ///
 /// Flip, run: `reach` blanking the transform alone fails *"hiding a main is
 /// not a change"*; `reordered` left false fails *"the order is"*.
@@ -1230,11 +1225,10 @@ fn a_mains_place_is_not_a_change_and_its_order_is() {
     assert!(c.reordered && c.any(), "the order is");
 }
 
-/// **A third kit's version alone is not a change** (the v0.5.0 release
-/// review's `[X2-L1-03]`): L's *Chip* nests K's *Badge*; K publishes a change
-/// to another main, and L takes K's update — which moves *Badge*'s recorded
-/// version and nothing else. L counted *Chip* changed, and every consumer of L
-/// got an update that drew nothing new.
+/// **A third kit's version alone is not a change**: L's *Chip* nests K's
+/// *Badge*; K publishes a change to another main, and L takes K's update — which
+/// moves *Badge*'s recorded version and nothing else. L counted *Chip* changed,
+/// and every consumer of L got an update that drew nothing new.
 ///
 /// Flip, run: `reach` comparing the origin's version fails *"nothing L draws
 /// changed"*.
@@ -1533,14 +1527,13 @@ fn make_local_reveals_the_copy_and_promotes_no_instance() {
 }
 
 /// 🚨 ***Make local* on a main the kit's own components nest leaves them the
-/// kit's** (§15 D1036 (1), the v0.5.0 release review's `[R1-L2-02]`, with
-/// `[R3-L5-02]`'s probe). D holds *Card*, so the vault holds *Card* and the
-/// *Icon* it nests; D makes *Icon* local. Before, the vault's *Card* went on
-/// linking to the revealed *Icon*: an edit of the local *Icon* reached the
-/// kit's *Card* and its instances, and the next update — even one changing
-/// only *Card*'s name — vendored a fresh *Icon* and put them back, while the
-/// toast said overrides were kept. Now the same transaction copies *Icon* back
-/// into the vault for *Card*, so the local *Icon* is the user's own fork.
+/// kit's** (§15 D1036 (1)). D holds *Card*, so the vault holds *Card* and the
+/// *Icon* it nests; D makes *Icon* local. Left linking to the revealed *Icon*,
+/// the vault's *Card* let an edit of the local *Icon* reach the kit's *Card* and
+/// its instances, and the next update — even one changing only *Card*'s name —
+/// vendored a fresh *Icon* and put them back, while the toast said overrides
+/// were kept. The same transaction copies *Icon* back into the vault for *Card*,
+/// so the local *Icon* is the user's own fork.
 ///
 /// Flip, run — **two defences**: `make_local` leaving the vault's references as
 /// they were is refused at the commit by `kit::check`'s `LinksOut` (*"make local
@@ -1624,10 +1617,9 @@ fn make_local_on_a_nested_kit_main_leaves_the_kits_components_the_kits() {
 }
 
 /// **An update says which mains it changed, and which it removed** (§15 D1036
-/// (4), (5); the v0.5.0 release review's `[X3.2-L1-02]` and `[R3-L5-03]`). D
-/// holds *Icon* and the *Button* set; the kit fades *Icon*'s dot and deletes
-/// the *Small* variant D placed. Every synced main moves to the new version,
-/// so `updated` holds both — the toast counted that, and named a version-only
+/// (4), (5)). D holds *Icon* and the *Button* set; the kit fades *Icon*'s dot
+/// and deletes the *Small* variant D placed. Every synced main moves to the new
+/// version, so `updated` holds both — a toast counting that named a version-only
 /// publish as N components changed. `changed` holds *Icon* alone; `removed`
 /// holds *Small*, whose instance the commit detaches.
 ///
@@ -1698,13 +1690,12 @@ fn picture(
     (id, entry, fill)
 }
 
-/// **An update brings the pictures it introduces** (the v0.5.0 release review's
-/// `[R3-L5-01]`): the kit puts a picture on Icon's dot and adds a layer wearing
-/// a second one. Accepting it adds both to the consumer's image table, in the
-/// update's own transaction — so they survive a save and a load, and one undo
-/// takes them out with the layers. Before, only `vendor` added images: the
-/// instance showed the missing-picture placeholder and the file kept a
-/// reference with no bytes, for good.
+/// **An update brings the pictures it introduces**: the kit puts a picture on
+/// Icon's dot and adds a layer wearing a second one. Accepting it adds both to
+/// the consumer's image table, in the update's own transaction — so they survive
+/// a save and a load, and one undo takes them out with the layers. With only
+/// `vendor` adding images, the instance showed the missing-picture placeholder
+/// and the file kept a reference with no bytes, for good.
 ///
 /// Flip, run: `update_all` without its image ops fails *"the changed fill's
 /// picture"*.
@@ -1867,11 +1858,10 @@ fn a_swap_to_an_unused_kit_main_vendors_it_at_the_swap() {
 /// - Out of order, syncing *Card* first met a new layer linked to a ring the
 ///   scratch did not hold yet, and the update failed to build, `Incomplete`, on
 ///   every accept, for good. The link is now pointed once both are synced.
-/// - **In order too** — which the review did not reach, its probe stopping at
-///   the build — the commit was refused: the update writes *Card*'s nested ring
-///   itself, as published, and the structural pass, seeing *Icon* gain a layer,
-///   copied it into that same nested copy again, with no origin, so the vault
-///   refused it. The pass now skips a copy the edit already supplied.
+/// - **In order too**, the commit was refused: the update writes *Card*'s nested
+///   ring itself, as published, and the structural pass, seeing *Icon* gain a
+///   layer, copied it into that same nested copy again, with no origin, so the
+///   vault refused it. The pass now skips a copy the edit already supplied.
 ///
 /// Each instance ends with one ring.
 ///
@@ -2450,8 +2440,8 @@ fn a_third_kits_newer_main_asks_for_its_update() {
         let mut tx = u.tx;
         ondin_core::propagate::owed(&d, &mut tx, &mut ids);
         d.apply(&tx).expect("and commit");
-        // What it commits (`[X2-L6-01]`): one *Dot* in *Chip*'s *Badge*, the
-        // copy of *Badge*'s own.
+        // What it commits: one *Dot* in *Chip*'s *Badge*, the copy of *Badge*'s
+        // own.
         let nested = d.get(held(&d, L_ID, chip)).unwrap().children()[0];
         let badge_dot = d.get(held(&d, K_ID, badge)).unwrap().children()[0];
         let dots = d.get(nested).unwrap().children();
@@ -2459,11 +2449,11 @@ fn a_third_kits_newer_main_asks_for_its_update() {
         assert_eq!(d.get(dots[0]).unwrap().link(), Some(badge_dot));
     }
 
-    // 🚨 **K's update taken while L's publish is older** (the v0.5.0 release
-    // review's `[X2-L1-01]`, route 2): D's *Badge* gains the dot, and *Chip*'s
-    // nested *Badge* — L's v7, which never saw it — was given a copy of it with
-    // no origin, and the vault refused the commit. K alone, and K with L's v7
-    // again, *Accept all*'s case, both commit, *Chip* as L published it.
+    // 🚨 **K's update taken while L's publish is older**: D's *Badge* gains the
+    // dot, and *Chip*'s nested *Badge* — L's v7, which never saw it — was given a
+    // copy of it with no origin, and the vault refused the commit. K alone, and K
+    // with L's v7 again, *Accept all*'s case, both commit, *Chip* as L published
+    // it.
     for kits in [vec![(K_ID, 3, &k3)], vec![(K_ID, 3, &k3), (L_ID, 7, &l7)]] {
         let mut d = d.clone();
         let mut tx = kit::update_all(&d, &mut ids, d.first_page(), &kits)
@@ -2495,11 +2485,11 @@ fn held(d: &Document, kit: &str, node: NodeId) -> NodeId {
 }
 
 /// 🚨 **A layer the kit deletes from a nested copy stays deleted through the
-/// update** (the v0.5.0 release review's `[X2-L1-01]`, route 1). L gives *Icon*
-/// a *Ring*, then deletes *Ring*'s copy from *Card*'s nested *Icon* — instance
-/// structure is free (§5.3d) — and publishes. D, holding *Card*, accepts: the
-/// commit's structural pass gave the vault's nested copy the ring again, with
-/// no origin, and the vault refused the update every time it was asked.
+/// update.** L gives *Icon* a *Ring*, then deletes *Ring*'s copy from *Card*'s
+/// nested *Icon* — instance structure is free (§5.3d) — and publishes. D, holding
+/// *Card*, accepts: the commit's structural pass gave the vault's nested copy the
+/// ring again, with no origin, and the vault refused the update every time it
+/// was asked.
 ///
 /// Flip, run: `follows_nothing` answering `false` fails *"an accepted update
 /// commits"* with `Vault(.., NoOrigin)`.
@@ -2536,12 +2526,12 @@ fn a_layer_the_kit_cut_from_a_nested_copy_stays_cut() {
     );
 }
 
-/// **A consumer's copy is the publish, value and order** (the v0.5.0 release
-/// review's `[X2-L1-02]`). The kit changes *Icon*'s dot and holds *Card*'s
-/// nested dot at the old opacity. Accepting wrote the publish into the vault —
-/// no op for the nested dot, already 1 — and then the commit's field pass made
-/// the copy follow its main again: 0.5 against the published 1, so D drew Card
-/// unlike a consumer that inserted the same version fresh.
+/// **A consumer's copy is the publish, value and order.** The kit changes
+/// *Icon*'s dot and holds *Card*'s nested dot at the old opacity. Accepting wrote
+/// the publish into the vault — no op for the nested dot, already 1 — and then
+/// the commit's field pass made the copy follow its main again: 0.5 against the
+/// published 1, so D drew Card unlike a consumer that inserted the same version
+/// fresh.
 ///
 /// Flip, run: `follows_nothing` answering `false` fails *"the value is the
 /// publish's"*, 0.5 against 1.
@@ -2580,11 +2570,10 @@ fn an_accepted_copy_is_the_publish_value() {
     assert_eq!(shape(&d, page_nested), want, "and the page's");
 }
 
-/// **…and its order** (`[X2-L1-02]`'s second case): with D holding *Icon*
-/// {Dot, Ring}, the kit puts a layer of *Card*'s own at the front of its nested
-/// *Icon* and moves *Ring* before *Dot* in *Icon*. The sync put the nested copy
-/// in the published order and the structural pass's reorder arm then applied
-/// *Icon*'s reorder to it again.
+/// **…and its order**: with D holding *Icon* {Dot, Ring}, the kit puts a layer of
+/// *Card*'s own at the front of its nested *Icon* and moves *Ring* before *Dot*
+/// in *Icon*. The sync put the nested copy in the published order and the
+/// structural pass's reorder arm then applied *Icon*'s reorder to it again.
 ///
 /// Flip, run: `follows_nothing` answering `false` fails *"the order is the
 /// publish's"* with `[Ring, Dot, Own]` against `[Own, Ring, Dot]`. ⚠️ **Its

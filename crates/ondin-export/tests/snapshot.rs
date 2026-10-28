@@ -586,7 +586,7 @@ fn a_pivot_is_reported_as_a_point_and_only_when_it_has_been_moved() {
 }
 
 /// **A rotated layer's transforms and bounds are written at four places**
-/// (§15 D972, `[R1-L2-03]`): a 30° rotation's `sin` and `cos` are where a
+/// (§15 D972): a 30° rotation's `sin` and `cos` are where a
 /// platform's maths library can differ in the last digit, and the golden is a
 /// byte comparison on three of them.
 ///

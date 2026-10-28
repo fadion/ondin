@@ -105,7 +105,7 @@ fn a_main_and_its_instance_round_trip_through_a_file() {
 }
 
 /// An override one ULP off its main survives a save and a reopen, and the
-/// coordinate comes back bit-exact (`[R3-L5-02]`). An override *is* a value that
+/// coordinate comes back bit-exact. An override *is* a value that
 /// differs from the main's (§15 D979 (a)), so the loader has to read back the
 /// `f64` the file wrote, not its neighbour: `serde_json`'s default float parser
 /// reads the shortest text of `0x403d19fb54ced16a` (`29.101491260998422`) as
@@ -363,8 +363,8 @@ fn load_on_a_small_stack(bytes: Vec<u8>) -> Result<Document, String> {
 
 /// A crafted file holding a long chain of mains loads on a small stack, and the
 /// same chain closed into a loop is refused as a cycle rather than aborting the
-/// process (`[R1-L2-04]`). `component::check`'s cycle search runs on every load
-/// and every `Document::apply`, and it recursed once per main along the chain: a
+/// process. `component::check`'s cycle search runs on every load and every
+/// `Document::apply`, and it recursed once per main along the chain: a
 /// stack overflow is an abort, not a panic, so nothing caught it — the cover
 /// worker's `catch_unwind` included (the rule `io::MAX_TREE_DEPTH`'s doc states
 /// for §15 D416, arriving by a new axis). The search is an explicit stack now.

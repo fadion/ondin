@@ -3685,7 +3685,7 @@ fn every_refusal_the_clipboard_door_makes_has_a_test() {
             "2 roots",
         ),
         (
-            // `[X2-L2-02]` — the child listed first. Legal as a *set*, and the
+            // The child listed first. Legal as a *set*, and the
             // format says the root comes first because two paste decisions read
             // position while `remap_subtree` reads the predicate.
             "the root listed second",
@@ -3707,7 +3707,7 @@ fn every_refusal_the_clipboard_door_makes_has_a_test() {
             "duplicate image id",
         ),
         (
-            // `[R3-L5-01]`, §15 D852 — the maintainer's ruling that linked
+            // §15 D852 — the maintainer's ruling that linked
             // pictures stay out of v1, enforced at the one door that could make
             // one. The URL is the attack: it was written verbatim into every
             // SVG export as an `href`.
@@ -3732,7 +3732,7 @@ fn every_refusal_the_clipboard_door_makes_has_a_test() {
         );
     }
 
-    // `[X2-L5-01]` — an entry no node keys into is **dropped, not refused**: a
+    // An entry no node keys into is **dropped, not refused**: a
     // payload that over-carries should still paste, and D179's rule is that a
     // dangling reference draws a placeholder rather than failing the load.
     let over = clip_wrap(
@@ -3757,16 +3757,15 @@ fn every_refusal_the_clipboard_door_makes_has_a_test() {
 ///
 /// 🚨 **The second half is a measurement, not an assertion about paste: the
 /// non-finite `from` filter cannot be reached from the wire at all.**
-/// `[R2-L6-01]` asks for a test of that filter and there cannot be one through
-/// `io::clip::read` (plain backticks — an integration test is its own crate
-/// root and the doc gate cannot see it, §15 D319), because the only door is
-/// JSON and `serde_json` refuses
-/// every spelling of a non-finite `f64` — it writes `NaN` as `null` and rejects
-/// `null` where an `f64` is wanted, and rejects an overflowing literal
-/// outright. `1e999` comes back **`Serde("number out of range")`** from
-/// `from_str`, one function *before* the filter. That is `io::schema`'s own
-/// recorded argument for why the loader carries no finiteness check, arriving
-/// at the clipboard door.
+/// There can be no test of that filter through `io::clip::read` (plain backticks
+/// — an integration test is its own crate root and the doc gate cannot see it,
+/// §15 D319), because the only door is JSON and `serde_json` refuses every
+/// spelling of a non-finite `f64` — it writes `NaN` as `null` and rejects `null`
+/// where an `f64` is wanted, and rejects an overflowing literal outright.
+/// `1e999` comes back **`Serde("number out of range")`** from `from_str`, one
+/// function *before* the filter. That is `io::schema`'s own recorded argument
+/// for why the loader carries no finiteness check, arriving at the clipboard
+/// door.
 ///
 /// **So this asserts the refusal, and the filter is recorded as unreachable
 /// rather than left looking merely untested.** It is kept — it costs one
@@ -3861,7 +3860,7 @@ fn find_text_node(doc: &Document, from: NodeId) -> Option<NodeId> {
 /// test stays green, and under the depth flip the cycle test does.
 #[test]
 fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
-    // `[X2-L1-01]` — `[R, A, B]` with `A` and `B` pointing at each other. One
+    // `[R, A, B]` with `A` and `B` pointing at each other. One
     // root, every child listed once, every back-pointer consistent: the count
     // this door used to make balances at `2 + 1 == 3`.
     let cycle = clip_wrap(
@@ -3873,7 +3872,7 @@ fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
         "",
     );
 
-    // `[R1-L2-02]` — a chain past the loader's own bound, arriving in one paste.
+    // A chain past the loader's own bound, arriving in one paste.
     let n = io::MAX_TREE_DEPTH + 8;
     let chain_ids: Vec<String> = (0..n).map(|i| format!("dee9:{i}")).collect();
     let chain = clip_wrap(
@@ -3894,7 +3893,7 @@ fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
         "",
     );
 
-    // `[R1-L2-01]` — a gradient whose ramp opacity is finite and far out of
+    // A gradient whose ramp opacity is finite and far out of
     // range. Built by copying a real one and moving the number, because that is
     // the only value in this family JSON can carry at all: `serde_json` writes a
     // `NaN` as `null` and refuses it on the way back, so the finite

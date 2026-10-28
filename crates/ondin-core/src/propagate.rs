@@ -197,19 +197,19 @@ pub fn touches_copied(doc: &Document, tx: &Transaction) -> bool {
         })
 }
 
-/// 🚨 **Whether `id` is a copy no pass may write: one in the vault** (the v0.5.0
-/// release review's `[X2-L1-01]`, `[X2-L1-02]`; §15 D1012's read-only vault).
-/// A vendored main is the kit's publish and nothing else — a kit update writes
-/// every vault node to it, and `vendor` copies it whole — so a copy inside the
-/// vault takes its values, its children and their order **from the publish
-/// alone**, never by following its main here. Followed, it went wrong three
-/// ways: a nested copy the publish leaves without a layer its main gained (free
-/// instance structure in the kit, or a third kit newer than the one that nests
-/// it) was given a fresh copy with no origin and the vault refused the whole
-/// update, for good; a nested value the publish holds equal to the main's old
-/// one — so the sync wrote no op for it — was made to follow the main's new
-/// one; and a sync's reorder of a nested copy was reordered again. Each left
-/// a consumer's copy unlike the publish, or no update at all.
+/// 🚨 **Whether `id` is a copy no pass may write: one in the vault** (§15
+/// D1012's read-only vault). A vendored main is the kit's publish and nothing
+/// else — a kit update writes every vault node to it, and `vendor` copies it
+/// whole — so a copy inside the vault takes its values, its children and their
+/// order **from the publish alone**, never by following its main here.
+/// Followed, it went wrong three ways: a nested copy the publish leaves without
+/// a layer its main gained (free instance structure in the kit, or a third kit
+/// newer than the one that nests it) was given a fresh copy with no origin and
+/// the vault refused the whole update, for good; a nested value the publish
+/// holds equal to the main's old one — so the sync wrote no op for it — was made
+/// to follow the main's new one; and a sync's reorder of a nested copy was
+/// reordered again. Each left a consumer's copy unlike the publish, or no update
+/// at all.
 ///
 /// Only the *follower* is spared: a vault node is still a source, so its own
 /// edits — the sync's — reach the document's instances of it.
@@ -290,8 +290,7 @@ fn structural_copies(doc: &Document) -> FxHashMap<NodeId, Vec<NodeId>> {
 ///   counterparts of a layer dragged out of its main. Following onto those wrote
 ///   a `SetTransform` on a deleted node, and the whole drag was refused at the
 ///   commit; or, for a counterpart kept because the instance had changed it, moved
-///   the instance's own layer to the main's new place, outside its instance
-///   (`[X3-L1-01]`).
+///   the instance's own layer to the main's new place, outside its instance.
 pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     let copies = followers(doc);
     if copies.is_empty() {
@@ -375,11 +374,9 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
 /// (`build::keep_insets`, `build::keep_flex_sizes`) are done.
 ///
 /// **One function so the order is one fact.** The core tests that pin it —
-/// *"settle after propagate leaves the instance named Small"* — ran it through
-/// a hand-written copy of this list, and reversing two passes in the app's own
-/// copy passed every test in the workspace (`[X6.2-L6-05]`, CLAUDE.md's gate
-/// hole 16: two lists a person keeps agree whatever either says). The tests call
-/// this now, so a flip here fails there.
+/// *"settle after propagate leaves the instance named Small"* — call this rather
+/// than a hand-written copy of the list, which would agree with itself whatever
+/// the app ran; a flip here fails there.
 pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource) {
     // What the user's edit is, for the styles (§15 D1062): a slot one of these
     // operations writes on a styled layer detaches it; one the passes below
@@ -691,8 +688,7 @@ pub fn propagate_structure(
             // layer that came in from outside the main — dragged in from the canvas
             // or from another main — is copied whole, as a `CreateNode` is (§5.3d
             // build step 4). The first form pruned every node that existed before
-            // the edit, and a layer dragged into a main never reached its instances
-            // (`[X2-L1-01]`).
+            // the edit, and a layer dragged into a main never reached its instances.
             let template = only_new(template, |id| {
                 before.contains_key(&id) && main_of_node(doc, id) == main
             });
@@ -703,7 +699,7 @@ pub fn propagate_structure(
             let mut level = vec![(*p, template)];
             while let Some((src_parent, nodes)) = level.pop() {
                 for &pc in copies.get(&src_parent).into_iter().flatten() {
-                    // A copy the edit itself deleted is owed nothing (`[X2-L1-02]`).
+                    // A copy the edit itself deleted is owed nothing.
                     if deleted.contains(&pc) || !after_nodes.contains_key(&pc) {
                         continue;
                     }
@@ -787,11 +783,10 @@ pub fn propagate_structure(
     // An ungroup (or a boolean's *Release*) deletes the parent it lifts out of. A
     // copy of that parent the instance changed keeps its children: what they look
     // like depends on it — a moved or faded group — and lifting them left an empty
-    // unlinked shell holding the change while they drew as the main did
-    // (`[R3-L5-01]`). §15 D1003 (2): the changed copy stays as a local wrapper,
-    // its children inside it still linked; an untouched copy ungroups as the main
-    // did. Judged ignoring the children being lifted, whose own changes travel
-    // with them.
+    // unlinked shell holding the change while they drew as the main did. §15
+    // D1003 (2): the changed copy stays as a local wrapper, its children inside it
+    // still linked; an untouched copy ungroups as the main did. Judged ignoring
+    // the children being lifted, whose own changes travel with them.
     //
     // **At every depth** (`arch-scribe`'s reading of the first build): "the old
     // parent goes" was asked of the tree the transaction leaves, and one level
@@ -830,7 +825,7 @@ pub fn propagate_structure(
     };
     while let Some((x, old_parent, new_parent, goes, origin)) = moves.pop() {
         for &c in copies.get(&x).into_iter().flatten() {
-            // A copy the edit itself deleted is owed nothing (`[X2-L1-02]`).
+            // A copy the edit itself deleted is owed nothing.
             if !after_nodes.contains_key(&c) {
                 continue;
             }
@@ -841,8 +836,7 @@ pub fn propagate_structure(
             // nested instance's copy is an instance root itself, and asked of the
             // copy that answered with the copy, under which neither its old nor
             // its new parent's counterpart is: grouping a nested instance inside a
-            // main left every copy of it where it was (found writing the test for
-            // `[X2-L1-03]`).
+            // main left every copy of it where it was.
             let Some(root) = crate::component::instance_root(doc, from) else {
                 continue;
             };
@@ -921,7 +915,7 @@ pub fn propagate_structure(
         for &c in copies.get(&gone).into_iter().flatten() {
             // A counterpart the edit itself deleted — selected beside its source,
             // or inside an instance deleted with it — is not deleted twice: that
-            // refused the whole transaction, `NoSuchNode` (`[X2-L1-02]`).
+            // refused the whole transaction, `NoSuchNode`.
             if deleted.contains(&c)
                 || !after_nodes.contains_key(&c)
                 || !untouched(doc, c, gone, &moved_out)
@@ -941,19 +935,17 @@ pub fn propagate_structure(
 
     // Reorders: a parent whose kept children are in a new order — carried
     // down the copy chain as the other three arms are, a copy this reorders being
-    // a parent reordered in turn for its own copies. Single-level until the
-    // release review: a nested copy in an outer main's instance kept the old
-    // order, and from then on refused every later reorder as one the instance
-    // had made itself (`[X3-L2-02]`).
+    // a parent reordered in turn for its own copies. A nested copy in an outer
+    // main's instance left at the old order would read every later reorder as
+    // one the instance had made itself, and refuse it.
     //
-    // 🚨 **A parent that also gained or lost children is reordered too** (the
-    // v0.5.0 release review's `[X2-L1-02]`): what is compared is the order of
-    // the children it kept, and each copy's children are read as the arms above
-    // left them (`sim`, less what they delete). The arm once took only a parent
-    // whose children were the same set, so a kit update that gave a nested copy
-    // a layer of its own *and* the main's new order — one transaction — carried
-    // the layer to the instances and not the order. A hand edit rarely does both
-    // at once; an update does it whenever a publish does.
+    // 🚨 **A parent that also gained or lost children is reordered too**: what is
+    // compared is the order of the children it kept, and each copy's children are
+    // read as the arms above left them (`sim`, less what they delete). The arm
+    // once took only a parent whose children were the same set, so a kit update
+    // that gave a nested copy a layer of its own *and* the main's new order — one
+    // transaction — carried the layer to the instances and not the order. A hand
+    // edit rarely does both at once; an update does it whenever a publish does.
     let link_now = |k: NodeId| {
         new_links
             .get(&k)

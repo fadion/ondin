@@ -2934,12 +2934,11 @@ mod tests {
     }
 
     /// **A path pinned on both sides of an axis stores its true end distance**
-    /// (§15 D938, the release review's `[X3.1-L1-02]`). A path cannot stretch, so
-    /// between two plain insets its end inset is ignored when placing — and
-    /// `with_edge`'s `0` placeholder for the second edge survived `inverse`, which
-    /// returned early for a placement that had not moved. Stored `right: 0`, 180
-    /// px from the edge: un-pinning the left then jumped the path flush right, and
-    /// centring between the two moved it to x 110.
+    /// (§15 D938). A path cannot stretch, so between two plain insets its end inset
+    /// is ignored when placing — and `with_edge`'s `0` placeholder for the second
+    /// edge survived `inverse`, which returned early for a placement that had not
+    /// moved. Stored `right: 0`, 180 px from the edge: un-pinning the left then
+    /// jumped the path flush right, and centring between the two moved it to x 110.
     ///
     /// **Flip run**, `inverse`'s end check dropped: fails on *"the true distance"*,
     /// `Px(0)` against `Px(180)`, the predicted site.
@@ -3033,7 +3032,7 @@ mod tests {
 /// The flex engine on its own, against an in-memory `LayoutView` — what taffy
 /// computes through `FlexTree`, before `Resolved` is involved (§15 D867, D875).
 /// Plain backticks: a `cfg(test)` module's doc is as invisible to `cargo doc` as
-/// its prose (§15 D319, `[R2-L8-04]`).
+/// its prose (§15 D319).
 #[cfg(test)]
 mod flex_tests {
     use super::*;
@@ -3309,13 +3308,12 @@ mod flex_tests {
         );
     }
 
-    /// **An indented paragraph's min-content counts its indent** (§15 D931, the
-    /// release review's `[X1-L1-02]`). A wrapping text with a 40 px start indent
-    /// beside a 20 × 20 rect in a 150-wide row is shrunk to its min-content; that
-    /// was parley's widest word alone, 177.58, while the breaker places every line
-    /// 40 px in — so the text's ink ran to 216.37 and the rect was laid at 177.58,
-    /// **inside it**. The assertion is the visible one: the next item starts at or
-    /// past the text's ink.
+    /// **An indented paragraph's min-content counts its indent** (§15 D931). A
+    /// wrapping text with a 40 px start indent beside a 20 × 20 rect in a 150-wide
+    /// row is shrunk to its min-content; that was parley's widest word alone,
+    /// 177.58, while the breaker places every line 40 px in — so the text's ink ran
+    /// to 216.37 and the rect was laid at 177.58, **inside it**. The assertion is
+    /// the visible one: the next item starts at or past the text's ink.
     ///
     /// **Flip run**, `content_widths` returning parley's figures alone: fails on
     /// the one assertion, 177.58 against 216.37, the predicted site.

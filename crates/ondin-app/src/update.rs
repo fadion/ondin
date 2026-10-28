@@ -316,12 +316,12 @@ impl Updater {
                 spawn_check(live);
             }
             // ⚠️ **Asked for again on every pass, not once when the round is
-            // armed** (`[X1-L1-03]`). eframe keeps one "repaint at" per
-            // viewport and the next input's immediate repaint overwrites it, so
-            // a wake requested once was erased by the first mouse move and a
-            // window then left alone never checked again until touched. egui
-            // keeps the earliest of a pass's requests, so this costs nothing
-            // when something sooner is due.
+            // armed**. eframe keeps one "repaint at" per viewport and the next
+            // input's immediate repaint overwrites it, so a wake requested once
+            // was erased by the first mouse move and a window then left alone
+            // never checked again until touched. egui keeps the earliest of a
+            // pass's requests, so this costs nothing when something sooner is
+            // due.
             Some(at) => live.ctx.request_repaint_after(at - now),
             None => {}
         }
@@ -632,10 +632,10 @@ mod tests {
     }
 
     /// **The Release workflow packs with the Velopack CLI the client was built
-    /// against** (§15 D974, `[X3-L5-03]`): `vpk` is pinned in `release.yml`,
-    /// and a `velopack` bump in `Cargo.lock` without the pin moving would pack
-    /// with a CLI the client was not built for. Read from both files, so the
-    /// mismatch fails here rather than in a release.
+    /// against** (§15 D974): `vpk` is pinned in `release.yml`, and a `velopack`
+    /// bump in `Cargo.lock` without the pin moving would pack with a CLI the
+    /// client was not built for. Read from both files, so the mismatch fails
+    /// here rather than in a release.
     ///
     /// **Flip-check, run**: the workflow's `--version 1.2.161` edited to
     /// `1.2.160` fails with both versions named.
@@ -776,9 +776,9 @@ mod tests {
     }
 
     /// **The `Settled` arm stages what a click will apply, and re-arms only
-    /// while the answer can change** (`[X1-L6-01]`): a found update is `Ready`
-    /// *and* staged, with no round after it; nothing found and a failure each
-    /// arm the next round.
+    /// while the answer can change**: a found update is `Ready` *and* staged,
+    /// with no round after it; nothing found and a failure each arm the next
+    /// round.
     ///
     /// **Flip-check, run**: deleting `self.staged = Some(asset)` fails on
     /// *"a found update is what a click applies"* — the chip it leaves says
@@ -822,10 +822,10 @@ mod tests {
         assert_eq!(next(&u), None, "a staged update ends the polling");
     }
 
-    /// **The recheck's wake is asked for on every pass** (`[X1-L1-03]`): eframe
-    /// keeps one repaint deadline and an input's repaint overwrites it, so a
-    /// wake requested once, when the round was armed, was gone at the first
-    /// mouse move.
+    /// **The recheck's wake is asked for on every pass**: eframe keeps one
+    /// repaint deadline and an input's repaint overwrites it, so a wake
+    /// requested once, when the round was armed, was gone at the first mouse
+    /// move.
     ///
     /// **Flip-check, run**: the `Some(at) =>` arm of `poll` emptied leaves no
     /// request at all, and this fails on **pass 1** with `repaint_delay` at
@@ -847,10 +847,10 @@ mod tests {
     }
 
     /// 🚨 **A restart launches nothing until the window has gone, and a
-    /// cancelled close launches nothing at all** (§15 D970, `[R3-L5-02]`). The
-    /// click used to launch Velopack's updater at once, which waits sixty
-    /// seconds and then applies regardless — on Windows by killing every Ondin
-    /// process, the window whose close was just answered *Cancel* included.
+    /// cancelled close launches nothing at all** (§15 D970). The click used to
+    /// launch Velopack's updater at once, which waits sixty seconds and then
+    /// applies regardless — on Windows by killing every Ondin process, the
+    /// window whose close was just answered *Cancel* included.
     ///
     /// **Flip-check, run**: `restart_called_off` emptied fails on *"a cancelled
     /// close applies nothing"* with one launch; `on_exit_with`'s
@@ -896,9 +896,8 @@ mod tests {
     }
 
     /// 🚨 **Another Ondin running holds the update back, at the click and again
-    /// at the exit** (§15 D970, `[R1-L2-01]`): the updater stops every process
-    /// running from the install, and a second window's unsaved work was never
-    /// asked about.
+    /// at the exit** (§15 D970): the updater stops every process running from
+    /// the install, and a second window's unsaved work was never asked about.
     ///
     /// **Flip-check, run**: `restart_with` ignoring the count fails on *"the
     /// click is refused"*; `on_exit_with` ignoring it fails on *"a window opened

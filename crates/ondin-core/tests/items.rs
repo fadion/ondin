@@ -79,10 +79,9 @@ fn a_shared_fill_list_agrees_by_value_not_by_id() {
 
 /// An edit of the shared list lands on each layer's **own** items: deleting the
 /// first row and adding one leaves each layer its own id for the survivor and
-/// **one shared id** for the new row — the one the caller minted (§15 D1003 (6),
-/// `[X1-L1-01]`; this asserted a fresh id per layer until the ruling). Flip:
-/// writing `edited` verbatim (the anchor's ids) fails the second rect's survivor
-/// assertion; minting per layer, the rule before, fails *"one id for the new row"*.
+/// **one shared id** for the new row — the one the caller minted (§15 D1003 (6)).
+/// Flip: writing `edited` verbatim (the anchor's ids) fails the second rect's
+/// survivor assertion; minting per layer fails *"one id for the new row"*.
 #[test]
 fn an_edit_over_a_selection_keeps_each_layers_item_ids() {
     let (mut doc, mut src, ids) = rects(2);
@@ -190,11 +189,11 @@ fn a_v4_file_migrates_to_positional_item_ids() {
 }
 
 /// **All five lists** of a v4 file are numbered — strokes, effects, exports and
-/// layout grids as well as fills (X1's note beside `[R2-L6-02]`). The test above
-/// strips only fills, and the v0/v1/v3 chain tests rewind a v5 save that
-/// already carries ids, so four of `migrate_4_to_5`'s five calls ran on nothing.
-/// A frame holding two items in each list, every id stripped, loads with
-/// positional ids, the same values, and the same bytes saved twice.
+/// layout grids as well as fills. The test above strips only fills, and the
+/// v0/v1/v3 chain tests rewind a v5 save that already carries ids, so without
+/// this four of `migrate_4_to_5`'s five calls would run on nothing. A frame
+/// holding two items in each list, every id stripped, loads with positional
+/// ids, the same values, and the same bytes saved twice.
 ///
 /// Flip, run: dropping `number(node.get_mut("grids"))` from `migrate_4_to_5`
 /// fails the load — `missing field id`, the grid items arriving with none — at
@@ -368,7 +367,7 @@ fn reserving_ids_skips_past_item_ids() {
 }
 
 /// The component properties are swept too — the sixth keyed list, and the one the
-/// loader re-keys onto positional ids (`[R1-L2-02]`). A main holding five
+/// loader re-keys onto positional ids. A main holding five
 /// positionally keyed properties and three fills: a session of actor 0 starts at
 /// `0:5`. Flip, run: the `props` arm dropped from `reserve_existing_ids` mints
 /// `0:3`, which the property list already holds.

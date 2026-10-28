@@ -255,7 +255,7 @@ impl OndinApp {
     /// Reveal `tops` and place them down the right of the content (D1011 (3)),
     /// one step; the selection does not move.
     pub(crate) fn make_local_now(&mut self, tops: &[NodeId]) {
-        // A commit under a live text session (`[X3.2-L5-01]`).
+        // A commit, so a live text session is ended first.
         self.finish_text_first();
         let doc = &self.session.doc;
         let page = self.session.page;

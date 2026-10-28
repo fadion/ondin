@@ -15,7 +15,7 @@
 //!
 //! **No reset deletes a local layer** (§15 D981 (1)): a layer of the instance's
 //! own keeps its place. A list reset is the source's list, and the copy's own
-//! items go with it (§15 D994, `[X4-L2-01]`).
+//! items go with it (§15 D994).
 //!
 //! **Reading a node as operations.** [`state_ops`] writes every field the
 //! propagation pass carries as the operation that would set it, so a copy and its
@@ -330,7 +330,7 @@ pub fn source_of(doc: &Document, id: NodeId) -> Option<NodeId> {
 /// the half [`overrides`] already splits. A placement reset reads its insets and
 /// a Transform mark its X, Y, W and H from here; read from [`source_of`] they
 /// named the swap target's page position and size, and a reset moved the slot
-/// out of its button or unpinned it (`[X9.1-L1-01]`).
+/// out of its button or unpinned it.
 pub fn slot_source_of(doc: &Document, id: NodeId) -> Option<NodeId> {
     let n = doc.get(id)?;
     match n.swap {
@@ -635,12 +635,12 @@ fn reset_items<T: Clone>(src: &[Keyed<T>]) -> Vec<Keyed<T>> {
 /// its swap's main, not into the instance's source, and resetting the instance
 /// resets them too — the swap with them.
 ///
-/// ⚠️ **Only the members *under* it** (`[X4-L1-02]`). This grew one set with the
-/// whole of every swap it met, keyed on link targets, so a local instance of the
-/// main a slot is swapped to — placed anywhere after that slot — passed as a copy
-/// (its link, the main, was in the swap's subtree; its members' links too): the
-/// card read *0 local layers* and *Reset all* wrote its fields back to the main's,
-/// dropped its own list items (D994) and restored its removed children. So each
+/// ⚠️ **Only the members *under* it.** This grew one set with the whole of every
+/// swap it met, keyed on link targets, so a local instance of the main a slot is
+/// swapped to — placed anywhere after that slot — passed as a copy (its link,
+/// the main, was in the swap's subtree; its members' links too): the card read
+/// *0 local layers* and *Reset all* wrote its fields back to the main's, dropped
+/// its own list items (D994) and restored its removed children. So each
 /// node is read against the swapped copies **above it**, a layer linked to
 /// something out of scope takes its subtree out with it (a local instance's
 /// members are its own), and a link to a main admits only the scope's own root —
@@ -780,13 +780,12 @@ impl ChildDrift {
 /// [`ChildDrift`] of the copy `p`. Empty for anything unlinked — a main, an
 /// ordinary layer, a local layer of an instance.
 ///
-/// 🚨 **The case no row marked** (`[X11.1-L2-03]`): an **expanded** instance with
-/// a removed or reordered child showed no dot anywhere. Each row asked
-/// [`overrides`], fields only; a removed child has no row, and reordered children
-/// each have no field override, so the mark went nowhere — collapsing the
-/// instance showed it, the bubbled [`drift`] counting both. The maintainer's ruling
-/// (§15 D1003 (9)) puts the dot on the parent whose children differ, expanded or
-/// collapsed.
+/// 🚨 **The case no row marked**: an **expanded** instance with a removed or
+/// reordered child showed no dot anywhere. Each row asked [`overrides`], fields
+/// only; a removed child has no row, and reordered children each have no field
+/// override, so the mark went nowhere — collapsing the instance showed it, the
+/// bubbled [`drift`] counting both. The dot goes on the parent whose children
+/// differ, expanded or collapsed (§15 D1003 (9)).
 pub fn child_drift(doc: &Document, p: NodeId) -> ChildDrift {
     if source_of(doc, p).is_none() {
         return ChildDrift::default();
@@ -860,9 +859,9 @@ fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
 /// `arch-scribe`'s). A member dragged out of a local instance is cut by
 /// `settle_links` anyway, so nothing past that root can hold its links.
 ///
-/// ⚠️ **Nor out of a swapped copy** (`[X4-L1-03]`). Its members link into its
-/// swap (§15 D983), which the outer instance's source does not hold, so
-/// `settle_links` cuts one dragged out of it as it cuts a local instance's —
+/// ⚠️ **Nor out of a swapped copy.** Its members link into its swap (§15 D983),
+/// which the outer instance's source does not hold, so `settle_links` cuts one
+/// dragged out of it as it cuts a local instance's —
 /// and climbing past it let a **second** slot swapped to the same main mask the
 /// first's deleted child: `b1`'s `r2` holds a `Shine` linked to the same Heart
 /// node `r`'s was, and *Restore removed children* read 0

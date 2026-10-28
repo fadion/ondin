@@ -354,7 +354,7 @@ fn a_shown_copy_carries_its_values_across_a_swap_by_name() {
     );
 }
 
-/// **By name, not by position** (`[X6.2-L6-06]`): every set in the fixture has
+/// **By name, not by position**: every set in the fixture has
 /// one property, where the two coincide. Arrow is given a second, `Size: M`,
 /// after its `Weight`; a third set, **Tick**, holds the same two the other way
 /// round — `Size: M`, then `Weight: Regular, Bold`. `r` at Arrow · Bold, shown,
@@ -583,13 +583,12 @@ fn two_same_named_nested_instances_are_two_groups() {
 }
 
 /// **A main's component properties round-trip through a file** — all four
-/// kinds, a swap property's filter, and their item ids (`[R2-L6-02]`). The
-/// range's round trips ran before any property was defined, so `Property`'s
-/// serde shape — `bound` through `wire_ids`, the nameless `Nested`, `filter`
-/// skipped only when empty, the `Keyed` id — never went through a file. And the
-/// file is read as text too: `bound` is written as wire ids like every other id
-/// in the format, which a load alone cannot see, `NodeId`'s derived shape
-/// round-tripping just as well.
+/// kinds, a swap property's filter, and their item ids, so `Property`'s serde
+/// shape goes through a file: `bound` through `wire_ids`, the nameless `Nested`,
+/// `filter` skipped only when empty, the `Keyed` id. And the file is read as
+/// text too: `bound` is written as wire ids like every other id in the format,
+/// which a load alone cannot see, `NodeId`'s derived shape round-tripping just
+/// as well.
 ///
 /// Flip, run: `with = "wire_ids"` dropped from `Property::bound` loads, equals
 /// and re-saves byte-identically — and fails the wire-id assertion, the bound
@@ -678,10 +677,9 @@ fn a_mains_properties_round_trip_through_a_file() {
 }
 
 /// **In a set, showing a slot shows the slot at the same name path in every
-/// variant** (§15 D988, *"appears on every Button"*; `[X6.2-L6-07]`). No nested
-/// fixture put the owner in a set. A set **Buttons** of Small and Large, each
-/// holding an Arrow instance named *Icon*: showing Small's binds Large's too, and
-/// an instance of Large lists its copy.
+/// variant** (§15 D988, *"appears on every Button"*). A set **Buttons** of Small
+/// and Large, each holding an Arrow instance named *Icon*: showing Small's binds
+/// Large's too, and an instance of Large lists its copy.
 ///
 /// Flip, run: `set_shown`'s `match o.set` made
 /// `match o.set.as_ref().filter(|_| false)` (a set's owner taking only the slot

@@ -389,10 +389,10 @@ fn binding_fits(nodes: &FxHashMap<NodeId, Node>, owner: NodeId, bound: &Node) ->
 /// makes none.
 ///
 /// `src` is for the merge alone: a variant's property pushed onto its set under
-/// an id the set already holds is re-keyed (`[R1-L2-02]`). *Duplicate as
-/// component* copies a main's properties with their ids (D980's copy rule), so
-/// combining the two after the copy's property was renamed pushed both under one
-/// id, and every edit by id of the second then hit the first.
+/// an id the set already holds is re-keyed. *Duplicate as component* copies a
+/// main's properties with their ids (D980's copy rule), so combining the two
+/// after the copy's property was renamed pushed both under one id, and every edit
+/// by id of the second then hit the first.
 pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Operation> {
     let makes = tx.0.iter().any(|op| {
         matches!(
@@ -408,7 +408,7 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
     // layer renamed inside a set that shows a slot (its name path may now be shown) — or
     // a link moved, since a swap or nested binding fits only a node linked to a
     // main (`kind_fits`): a detach of a bound or shown slot was refused at the
-    // commit (`[X6.1-L2-03]`).
+    // commit.
     let can_break = makes
         || tx.0.iter().any(|op| match op {
             Operation::CreateNode { .. }
@@ -426,7 +426,7 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
     let relevant = |n: &Node| n.set.is_some() || !n.variant.is_empty() || !n.props.is_empty();
     // A pasted variant carries its values in its `InsertSubtree`: asked of the
     // document before the paste alone, the gate skipped the pass in a document
-    // with no set, and `check` refused the paste (`[X6.1-L1-04]`).
+    // with no set, and `check` refused the paste.
     let inserts = tx.0.iter().any(|op| match op {
         Operation::InsertSubtree { nodes, .. } => nodes.iter().any(relevant),
         _ => false,
@@ -440,7 +440,7 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
     }
     // **A set with a property of no values is `apply`'s to refuse** — read here,
     // its first value panicked the commit before `apply` could answer
-    // (`[R1-L2-03]`, invariant 8).
+    // (invariant 8).
     if scratch
         .node_map()
         .values()
@@ -547,7 +547,7 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
                     Some(q) => q.bound.extend(p.bound.iter().copied()),
                     None => {
                         // An id the set already holds — another variant's copy of
-                        // this property, renamed — is re-keyed (`[R1-L2-02]`).
+                        // this property, renamed — is re-keyed.
                         if props.iter().any(|q| q.id == p.id) {
                             p.id = src.mint_item();
                         }
@@ -695,8 +695,8 @@ pub fn combine(
             .iter()
             .any(|m| !doc.get(*m).is_some_and(|n| n.component) || set_of(doc, *m).is_some())
         // One kind per set (§15 D1003 (5)): a group main and a frame main made one
-        // set left a switch between them relinking a group to a frame
-        // (`[X6.1-L1-02]`). The app says why before it gets here.
+        // set left a switch between them relinking a group to a frame. The app
+        // says why before it gets here.
         || !one_kind(doc, mains)
     {
         return Err(OpError::WrongKindForOp);
@@ -1244,11 +1244,11 @@ pub fn one_kind(doc: &Document, mains: &[NodeId]) -> bool {
 /// inside their own set, are not asked — staying is never refused, the rule
 /// `component::can_hold` keeps.
 ///
-/// 🚨 **The case `fits_set` cannot see** (`[X2-L2-02]`'s K7 leftover): a frame
-/// main and a group main dropped together into an **empty** set each fit it
-/// alone — an empty set takes either — and the drop made a set of two kinds.
-/// Asked by the doors that drop several layers at once, the canvas's move and
-/// the layers panel's. `true` for a parent that is not a set.
+/// 🚨 **The case `fits_set` cannot see**: a frame main and a group main dropped
+/// together into an **empty** set each fit it alone — an empty set takes either
+/// — and the drop made a set of two kinds. Asked by the doors that drop several
+/// layers at once, the canvas's move and the layers panel's. `true` for a parent
+/// that is not a set.
 pub fn takes_together(doc: &Document, set: NodeId, moving: &[NodeId]) -> bool {
     if !is_set(doc, set) {
         return true;
@@ -1316,10 +1316,10 @@ pub(crate) enum Rewrite {
 ///
 /// **Never to a main of another kind than `root`** (§15 D1003 (5)): no operation
 /// turns a layer into another kind, so a Group instance relinked to a Frame
-/// variant could never draw the frame's fill, size or clip (`[X6.1-L1-02]`). A
-/// set holds one kind — its doors refuse another — and this is the second
-/// defence, for a file made before that rule; a nested copy's swap already
-/// refused it (`swap::can_swap_to`).
+/// variant could never draw the frame's fill, size or clip. A set holds one kind
+/// — its doors refuse another — and this is the second defence, for a file made
+/// before that rule; a nested copy's swap already refused it
+/// (`swap::can_swap_to`).
 pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> Option<Transaction> {
     if !can_switch(doc, root) || !same_kind(doc, root, to) {
         return None;
@@ -1360,12 +1360,11 @@ pub(crate) fn rewrite(
     let old_base = Base::of(doc, from);
     let new_base = Base::of(doc, to);
     let base_of = |s: NodeId| old_base.of_node(doc, s);
-    // **Matched by the shown mains' names, not the slot's** (`[X5-L1-03]`): a
-    // name set on the slot inside the outer main is an override like any other
-    // (D991's point, for names), and matching by it left the layer unmatched —
-    // its override dropped, a stray layer kept beside the new main's, and a
-    // duplicate on the swap back. For a variant switch both ends are mains, and
-    // each base is the node itself.
+    // **Matched by the shown mains' names, not the slot's**: a name set on the
+    // slot inside the outer main is an override like any other (D991's point, for
+    // names), and matching by it left the layer unmatched — its override dropped,
+    // a stray layer kept beside the new main's, and a duplicate on the swap back.
+    // For a variant switch both ends are mains, and each base is the node itself.
     //
     // **A layer the slot adds is out of the pool, on both sides** (§15 D1004
     // (1)): one the outer main put into the slot copies nothing of the main the
@@ -1395,11 +1394,11 @@ pub(crate) fn rewrite(
     .into_iter()
     .map(|(id, p)| (p, id))
     .collect();
-    // Old source → new source. **A layer matches only under a matched parent**
-    // (`[X6.1-L1-01]`): kinds are matched node by node, so a Group "Box" and a
-    // Frame "Box" did not match while the "Box/Shape" under them did — and the
-    // unmatched parent was deleted or cut with the matched child inside it,
-    // refusing the commit or leaving two Shapes. `paths_by` lists parents first.
+    // Old source → new source. **A layer matches only under a matched parent**:
+    // kinds are matched node by node, so a Group "Box" and a Frame "Box" did not
+    // match while the "Box/Shape" under them did — and the unmatched parent was
+    // deleted or cut with the matched child inside it, refusing the commit or
+    // leaving two Shapes. `paths_by` lists parents first.
     let mut matched: FxHashMap<NodeId, NodeId> = FxHashMap::default();
     matched.insert(from, to);
     for (id, p) in &paths_old {

@@ -91,10 +91,10 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
 /// copy — and among several, the first by path, so the answer does not hang on
 /// the scan's order.
 ///
-/// 🚨 **The dashboard once asked its own question** (the v0.5.0 release review's
-/// `[X3.1-L1-03]`): it ruled out every conflict copy, so a kit whose original
-/// was trashed or renamed away stood in the picker, from its copy, and was
-/// neither listed under *Kits* nor offered *Stop sharing* on its card.
+/// 🚨 **The dashboard asks here, not its own question**: one that ruled out every
+/// conflict copy left a kit whose original was trashed or renamed away in the
+/// picker, from its copy, yet neither listed under *Kits* nor offered *Stop
+/// sharing* on its card.
 pub(crate) fn kit_file<'a>(lib: &'a Library, id: &str) -> Option<&'a Entry> {
     let claimants = lib
         .entries
@@ -191,13 +191,13 @@ struct Shelf {
     version: Option<u32>,
     load: Load,
     /// Whether the tile pictures are still being drawn — after the published
-    /// state has landed (`[X3.1-L4-01]`).
+    /// state has landed.
     drawing: bool,
     /// A font the kit names has arrived since it was drawn: read it again on
     /// the next ask ([`KitShelf::fonts_changed`]).
     stale: bool,
     /// The rendered pictures not yet uploaded: each is taken out as its
-    /// texture is made (`[X3.1-L4-02]`).
+    /// texture is made.
     pixels: HashMap<NodeId, Pixels>,
     tiles: HashMap<NodeId, egui::TextureHandle>,
 }
@@ -211,10 +211,9 @@ struct Job {
 /// What the worker sends: a kit's published state as soon as it is read, then
 /// its tile pictures once drawn.
 ///
-/// 🚨 **Two messages, so nothing waits on the drawing** (the v0.5.0 release
-/// review's `[X3.1-L4-01]`): one message carrying both kept the update pill's
-/// *Accept all* disabled under *"Loading…"* for every second a picture-heavy
-/// kit took to render — tiles the pill never shows.
+/// 🚨 **Two messages, so nothing waits on the drawing**: one message carrying
+/// both kept the update pill's *Accept all* disabled under *"Loading…"* for
+/// every second a picture-heavy kit took to render — tiles the pill never shows.
 enum Done {
     State {
         id: String,
@@ -364,11 +363,10 @@ impl KitShelf {
 
     /// Drop every kit `listed` does not name — a kit deleted, moved out of
     /// the library or no longer shared, whose pictures were otherwise kept for
-    /// the window's life (the v0.5.0 release review's `[X3.1-L4-02]`) — and
-    /// forget every read that failed, so the next ask reads the file again: a
-    /// sync client or an antivirus holding the file once (§15 D716) left the
-    /// kit *Unreadable* until its file changed (`[X3.1-L1-01]`). The picker
-    /// calls it as it opens.
+    /// the window's life — and forget every read that failed, so the next ask
+    /// reads the file again: a sync client or an antivirus holding the file
+    /// once (§15 D716) left the kit *Unreadable* until its file changed. The
+    /// picker calls it as it opens.
     pub(crate) fn refresh(&mut self, listed: &[KitEntry]) {
         self.shelves
             .retain(|id, s| !matches!(s.load, Load::Failed) && listed.iter().any(|k| &k.id == id));
@@ -422,7 +420,7 @@ impl KitShelf {
             return Some(t.clone());
         }
         // Taken out as it is uploaded: the texture is the picture from here,
-        // and a re-read brings both again (`[X3.1-L4-02]`).
+        // and a re-read brings both again.
         let t = s
             .pixels
             .remove(&top)?
@@ -488,7 +486,7 @@ fn spawn() -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
 
 /// Load a kit's file: its published state, with the version the file says it
 /// published, as read. Its tiles are drawn after, by [`tiles_of`], in a
-/// message of their own (`[X3.1-L4-01]`).
+/// message of their own.
 fn read(path: &std::path::Path) -> (Load, Option<u32>) {
     let Some(doc) = std::fs::read(path)
         .ok()
@@ -543,20 +541,19 @@ pub(crate) fn tile_subject(doc: &ondin_core::Document, top: NodeId) -> NodeId {
 ///
 /// 🚨 **Each drawn as a placement will have it** (`ondin_core::kit::as_placed`):
 /// moved to the root with its own transform, as `kit::insert` and the picker
-/// place it. Drawn where it sat (the v0.5.0 release review's `[X4.1-L1-02]`,
-/// with `[X4.1-L1-04]`), a main in a frame rotated 90° and scaled 2× dragged
-/// turned and twice its size — the review's 80 × 20 main as 40 × 160, the
-/// test's 80 × 30 as 60 × 160 — and landed level at its own; since the ancestor was
-/// no input to `LocalTiles`' comparison, rotating it left the tile as it was;
-/// a variant drew at the size its set's layout gave it, not the one it lands
-/// at; and a vault main, never resolved where it sits, dragged as an empty box.
+/// place it. Drawn where it sat, a main in a frame rotated 90° and scaled 2×
+/// dragged turned and twice its size and landed level at its own; since the
+/// ancestor was no input to `LocalTiles`' comparison, rotating it left the tile
+/// as it was; a variant drew at the size its set's layout gave it, not the one
+/// it lands at; and a vault main, never resolved where it sits, dragged as an
+/// empty box.
 pub(crate) fn tiles_of(doc: &ondin_core::Document, tops: &[NodeId]) -> HashMap<NodeId, Pixels> {
     // Each subject chosen before the move: out of its set, a default variant
     // is no longer the set's, and asking afterwards drew the next variant.
     let shown: Vec<NodeId> = tops.iter().map(|t| tile_subject(doc, *t)).collect();
     let doc = &ondin_core::kit::as_placed(doc, &shown);
     let res = ondin_core::Resolved::rebuild(doc);
-    // The pictures decoded once for every tile (`[X3.1-L4-01]`).
+    // The pictures decoded once for every tile.
     let images = prepared(doc);
     let mut pixels = HashMap::new();
     for (top, shown) in tops.iter().zip(shown) {
@@ -577,8 +574,7 @@ pub(crate) fn prepared(doc: &ondin_core::Document) -> ondin_render::ImageStore {
 
 /// `id` rendered to fit `w × h` pixels, never scaled past `max_scale`, from
 /// `images` — [`prepared`] for `doc` once by the caller: a store made here,
-/// per call, decoded every picture in the document for every tile (the v0.5.0
-/// release review's `[X3.1-L4-01]`, 9.3 s for 200 mains over ten photos).
+/// per call, decoded every picture in the document for every tile.
 pub(crate) fn raster_fit(
     doc: &ondin_core::Document,
     res: &ondin_core::Resolved,
@@ -662,9 +658,8 @@ mod tests {
         dir
     }
 
-    /// **The published state is sent ahead of the pictures** (the v0.5.0
-    /// release review's `[X3.1-L4-01]`): an accept waits on the state, never on
-    /// the drawing.
+    /// **The published state is sent ahead of the pictures**: an accept waits
+    /// on the state, never on the drawing.
     ///
     /// Flip, run: one message carrying both fails *"the state first"*.
     #[test]
@@ -779,8 +774,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A tile's pixels go once its texture is made** (the v0.5.0 release
-    /// review's `[X3.1-L4-02]`): each was held twice for the window's life.
+    /// **A tile's pixels go once its texture is made**: each was held twice for
+    /// the window's life.
     ///
     /// Flip, run: `tile` reading the pixels without taking them fails
     /// *"uploaded, let go"*.
@@ -810,10 +805,9 @@ mod tests {
     }
 
     /// **A read that failed is tried again when the picker opens, and a kit the
-    /// library no longer lists is let go** (the v0.5.0 release review's
-    /// `[X3.1-L1-01]`, `[X3.1-L4-02]`). The file is missing at the first read,
-    /// then appears with the modification time the scan had — which kept the
-    /// kit *Unreadable* until its file changed again.
+    /// library no longer lists is let go**. The file is missing at the first
+    /// read, then appears with the modification time the scan had — which kept
+    /// the kit *Unreadable* until its file changed again.
     ///
     /// Flip, run: `refresh` keeping a failed shelf fails *"read again"*.
     #[test]

@@ -49,11 +49,11 @@ fn main() {
 
 /// The code to exit with for a child that exited with `code`.
 ///
-/// 🚨 **Passed through whole, never squeezed into a byte** (`[R2-L6-01]`).
-/// This read `code.clamp(0, 255) as u8`, and a crashed Windows process exits
-/// with its NTSTATUS — `0xC0000005` is `-1073741819` as an `i32` — which the
-/// clamp turned into **0**: a script running `ondin export` read success from
-/// an access violation. `std::process::exit` takes the whole `i32` and Windows
+/// 🚨 **Passed through whole, never squeezed into a byte**. This read
+/// `code.clamp(0, 255) as u8`, and a crashed Windows process exits with its
+/// NTSTATUS — `0xC0000005` is `-1073741819` as an `i32` — which the clamp
+/// turned into **0**: a script running `ondin export` read success from an
+/// access violation. `std::process::exit` takes the whole `i32` and Windows
 /// keeps all 32 bits; on Unix the child's code is already a byte.
 ///
 /// `None` — a Unix child ended by a signal — is a failure, `1`.
@@ -61,7 +61,7 @@ fn exit_code(code: Option<i32>) -> i32 {
     code.unwrap_or(1)
 }
 
-/// End the child when this process ends, however it ends (`[X1-L1-01]`).
+/// End the child when this process ends, however it ends.
 ///
 /// **Ctrl+C at the prompt reaches this process and not the child**: a
 /// GUI-subsystem `ondin.exe` has no console to be sent the event, so before
@@ -121,7 +121,7 @@ fn tie_to_this_process(_child: &std::process::Child) {}
 mod tests {
     use super::*;
 
-    /// A crash's status is a failure, not a success (`[R2-L6-01]`).
+    /// A crash's status is a failure, not a success.
     ///
     /// **Flip-check, run**: the old `code.clamp(0, 255)` fails on the access
     /// violation with 0 — the reported symptom, a crash read as success.

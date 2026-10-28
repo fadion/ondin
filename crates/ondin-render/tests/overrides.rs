@@ -146,13 +146,12 @@ fn assert_preview_matches_commit(doc: &Document, tx: &Transaction, what: &str) {
     assert_eq!(previewed, committed, "{what}: preview diverged from commit");
 }
 
-/// **`assert_preview_matches_commit` through the doors the app uses** (the
-/// release review's `[X4.2-L6-01]`): the preview built from `tx` plus
-/// `build::flex_holds`, as `session::set_preview` builds it less its propagation to a
-/// main's instances, which neither side here runs, and the commit made
-/// of `build::keep_flex_sizes(build::keep_insets(tx))`, as `session::commit_inner`
-/// makes it. Returns the committed document, so a caller can also ask whether
-/// the hold held.
+/// **`assert_preview_matches_commit` through the doors the app uses**: the
+/// preview built from `tx` plus `build::flex_holds`, as `session::set_preview`
+/// builds it less its propagation to a main's instances, which neither side here
+/// runs, and the commit made of `build::keep_flex_sizes(build::keep_insets(tx))`,
+/// as `session::commit_inner` makes it. Returns the committed document, so a
+/// caller can also ask whether the hold held.
 ///
 /// **The plain harness commits the raw transaction, which the app never does.**
 /// The commit door drops an in-flow item's translation, adds the hold that keeps
@@ -160,7 +159,7 @@ fn assert_preview_matches_commit(doc: &Document, tx: &Transaction, what: &str) {
 /// D905, D913) and rewrites a pinned layer's placement as insets (§15 D874); the
 /// preview takes only the hold. So a change making `flex_holds` and
 /// `keep_flex_sizes` disagree, or the preview drawing a resized pinned layer
-/// anywhere but where `keep_insets` pins it, passed every test that goes through
+/// anywhere but where `keep_insets` pins it, passes every test that goes through
 /// the plain harness.
 ///
 /// ⚠️ **Not for a plain move of an in-flow item**: the preview draws the drag
@@ -810,10 +809,10 @@ fn values_the_commit_would_reject_are_refused() {
         "out-of-range opacity"
     );
 
-    // A layout the commit refuses (§15 D937, the release review's `[R1-L2-05]`):
-    // a repeat count past the track cap, which the preview drew as the capped
-    // grid the template lays and the commit then refused. Flip run: `absorb`'s
-    // `SetDisplay` check deleted fails on "a template past the track cap".
+    // A layout the commit refuses (§15 D937): a repeat count past the track cap,
+    // which the preview drew as the capped grid the template lays and the commit
+    // then refused. Flip run: `absorb`'s `SetDisplay` check deleted fails on "a
+    // template past the track cap".
     use ondin_core::container::{Display, Grid, LayoutItem, Track, TrackBreadth, TrackSize};
     let too_many = Grid {
         columns: vec![Track::Repeat {
@@ -3065,11 +3064,11 @@ fn a_flex_item_dragged_onto_its_slot_lands_there() {
 }
 
 /// **A landing whose reorder moves its container lands where the commit puts
-/// it** (§15 D945, the release review's `[X4.2-L1-01]`): a 400 × 400 column
-/// centring a hugging wrap row 100 wide, of rects 60, 30, 60 and 30 wide — two
-/// lines. Dragging the 30 after the second 60 makes three lines, so the row grows
-/// and the column re-centres it 10 higher; the outline was composed with the
-/// row's *committed* world transform and sat 10 below the slot the siblings open.
+/// it** (§15 D945): a 400 × 400 column centring a hugging wrap row 100 wide, of
+/// rects 60, 30, 60 and 30 wide — two lines. Dragging the 30 after the second 60
+/// makes three lines, so the row grows and the column re-centres it 10 higher;
+/// the outline was composed with the row's *committed* world transform and sat
+/// 10 below the slot the siblings open.
 ///
 /// **Flip run**, `landing_of` composing with `res.world_transform` again: fails
 /// on *"where the commit puts it"*, 10 low, the predicted site.
@@ -3683,11 +3682,11 @@ fn sized_rect(w: f64, h: f64) -> NodeKind {
 }
 
 /// **A frame resize previews the flex frames inside it as its commit lays them**
-/// (§15 D933, the release review's `[X4.2-L2-01]`). `RenderOverrides::relayout`
-/// re-placed every child of the resized frame, and for one with no insets and no
-/// preview of its own it fell back to the *stored* transform and kind — which,
-/// for a layout root that hugs or an item laid in its flow, are places nobody has
-/// been drawn at since the layout was set. So:
+/// (§15 D933). `RenderOverrides::relayout` re-placed every child of the resized
+/// frame, and for one with no insets and no preview of its own it fell back to
+/// the *stored* transform and kind — which, for a layout root that hugs or an
+/// item laid in its flow, are places nobody has been drawn at since the layout
+/// was set. So:
 ///
 /// - (a) a hugging row inside a plain frame previewed at its stored 300 × 100,
 ///   its three rects piled at their stored (250, 250);
@@ -3914,12 +3913,12 @@ fn a_resize_previews_nested_layouts_as_its_commit_lays_them() {
 }
 
 /// **A stretched, growing flex item resized from its left, its top and its
-/// top-left corner previews as its commit, through the doors** (the release
-/// review's `[X4.2-L6-01]`) — a 400 × 200 row, padding 20 and gap 10, of three
-/// 40 × 30 rects under the default `align-items: stretch`, the middle one growing
-/// to 260 × 160. Each resize writes the shifted slot beside its size, which the
-/// commit door drops; the hold stops the growth (§15 D875) and, for the top
-/// handle, aligns the item to the end so its bottom stays (§15 D905).
+/// top-left corner previews as its commit, through the doors** — a 400 × 200
+/// row, padding 20 and gap 10, of three 40 × 30 rects under the default
+/// `align-items: stretch`, the middle one growing to 260 × 160. Each resize
+/// writes the shifted slot beside its size, which the commit door drops; the hold
+/// stops the growth (§15 D875) and, for the top handle, aligns the item to the
+/// end so its bottom stays (§15 D905).
 ///
 /// `a_left_handle_resize_of_a_flex_item_previews_as_its_commit` checks the same
 /// shape through the plain harness, against a commit that keeps the
@@ -3930,7 +3929,7 @@ fn a_resize_previews_nested_layouts_as_its_commit_lays_them() {
 /// on *"from its left: preview diverged from commit"* — the commit grows the item
 /// back to 260 while the preview holds it at 230 — the predicted site. The grid
 /// test beside this one fails the same way. Every test that uses the plain
-/// harness stays green, which is the finding.
+/// harness stays green.
 #[test]
 fn a_stretched_flex_item_resized_from_its_start_edges_previews_as_it_commits() {
     use ondin_core::container::{Display, Flex};
@@ -4009,24 +4008,22 @@ fn a_stretched_flex_item_resized_from_its_start_edges_previews_as_it_commits() {
 }
 
 /// **A stretched grid item resized from its left, its top and its top-left
-/// corner previews as its commit, through the doors** (the release review's
-/// `[X4.2-L6-01]`) — `grid_fixture`'s first rect, given `justify-self` and
-/// `align-self: stretch` so it fills its 100 × 50 cell. The hold is grid's
-/// (§15 D913's second ruling), with D905's end edge on both axes: a start-edge
-/// resize writes `end`, so the far edges stay at 600 and 550. Until this, those
-/// holds were pinned at commit in `ondin-core`'s `tests/grid.rs` and in no
-/// preview; `a_grid_previews_as_it_commits` writes a right-edge hold by hand.
+/// corner previews as its commit, through the doors** — `grid_fixture`'s first
+/// rect, given `justify-self` and `align-self: stretch` so it fills its 100 × 50
+/// cell. The hold is grid's (§15 D913's second ruling), with D905's end edge on
+/// both axes: a start-edge resize writes `end`, so the far edges stay at 600 and
+/// 550. `ondin-core`'s `tests/grid.rs` pins those holds at commit only, and
+/// `a_grid_previews_as_it_commits` writes a right-edge hold by hand.
 ///
 /// **Flip run**, `build::keep_flex_sizes` leaving out the holds it appends: fails
 /// on *"from its left: preview diverged from commit"*, the predicted site.
 ///
-/// **Flip run**, `build::flex_holds`' grid arm answering the item unchanged (the
-/// finding's own flip): fails on *"from its left: the hold held"*, the item
-/// stretched back to its cell at 500–600. ⚠️ **The differential does not
-/// bite on it, and cannot**: `keep_flex_sizes` takes its holds from
-/// `flex_holds`, so the preview and the commit both lose the hold and still
-/// agree. That is why each case also asserts the committed box. The finding
-/// expected the parity check alone to catch this flip.
+/// **Flip run**, `build::flex_holds`' grid arm answering the item unchanged:
+/// fails on *"from its left: the hold held"*, the item stretched back to its cell
+/// at 500–600. ⚠️ **The differential does not bite on it, and cannot**:
+/// `keep_flex_sizes` takes its holds from `flex_holds`, so the preview and the
+/// commit both lose the hold and still agree. That is why each case also asserts
+/// the committed box.
 #[test]
 fn a_stretched_grid_item_resized_from_its_start_edges_previews_as_it_commits() {
     use ondin_core::container::{AlignItems, LayoutItem};
@@ -4079,12 +4076,12 @@ fn a_stretched_grid_item_resized_from_its_start_edges_previews_as_it_commits() {
 }
 
 /// **A pinned layer resized from its left, and one moved, previews as its
-/// commit, through the doors** (the release review's `[X4.2-L6-01]`) —
-/// `pinned_fixture`'s layer stretched between `left: 10` and `right: 10`, its left
-/// edge dragged 30 in; then its right-pinned sibling moved. The preview draws
-/// each where the tool's own ops put it, since `relayout` skips a layer the
-/// transaction places. The commit turns them into insets through
-/// `build::keep_insets` (§15 D874). Each case also asserts the committed box.
+/// commit, through the doors** — `pinned_fixture`'s layer stretched between
+/// `left: 10` and `right: 10`, its left edge dragged 30 in; then its right-pinned
+/// sibling moved. The preview draws each where the tool's own ops put it, since
+/// `relayout` skips a layer the transaction places. The commit turns them into
+/// insets through `build::keep_insets` (§15 D874). Each case also asserts the
+/// committed box.
 ///
 /// **Flip run**, `build::keep_insets` returning its transaction untouched: fails
 /// on *"a stretched pinned layer resized from its left: preview diverged from

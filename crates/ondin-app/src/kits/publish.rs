@@ -147,8 +147,8 @@ impl OndinApp {
     pub(crate) fn open_publish(&mut self) {
         // The one seam for the button, the menu row and the chord: a publish
         // under a live text session froze the main without what was typed and
-        // spent the version on it (`[X5-L1-02]`), and the dialog's change list
-        // has to be counted from the committed text too.
+        // spent the version on it, and the dialog's change list has to be
+        // counted from the committed text too.
         self.finish_text_first();
         let Some(c) = self.kit_changes() else {
             self.session
@@ -356,9 +356,8 @@ impl OndinApp {
 }
 
 /// What changed that is not a component — the kit's name, the order of its
-/// components (the v0.5.0 release review's `[X2-L1-04]`), the variables and
-/// styles they read (§15 D1064), or any of them together — as the subject of
-/// *"… changed since v4"*.
+/// components, the variables and styles they read (§15 D1064), or any of them
+/// together — as the subject of *"… changed since v4"*.
 fn not_a_component(c: &Changes) -> String {
     let mut s = joined(&[
         (c.renamed, "the kit's name"),

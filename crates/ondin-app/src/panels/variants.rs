@@ -222,12 +222,11 @@ impl Rules {
 /// egui's memory under `id` while the field has focus — and after, only when the
 /// field stopped being drawn with focus still on it ([`pending`]).
 ///
-/// **One protocol for every field of these cards** (`[X10-L3-01]`): a property's
-/// name, a value's, a swap filter, and an instance's text content, each with its
-/// own [`Rules`]. The content row borrowed the name field's, which seeded its
-/// buffer with the word *Mixed* — so typing over a mixed selection wrote
-/// "MixOKed" to every instance (`[X10-L1-01]`) — and trimmed the content and
-/// refused it empty (`[X10-L1-04]`).
+/// **One protocol for every field of these cards**: a property's name, a
+/// value's, a swap filter, and an instance's text content, each with its own
+/// [`Rules`]. The content row borrowed the name field's, which seeded its buffer
+/// with the word *Mixed* — so typing over a mixed selection wrote "MixOKed" to
+/// every instance — and trimmed the content and refused it empty.
 fn committed_field(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -915,8 +914,8 @@ impl OndinApp {
                     );
                     // The rename field's id is the value's place, and the menu
                     // closes on a move so a place never names another value
-                    // under an open menu (`[X10-L1-02]`: a second *Move later*
-                    // moved the neighbour back, and *Delete* deleted it).
+                    // under an open menu (a second *Move later* moved the
+                    // neighbour back, and *Delete* deleted it).
                     let field = egui::Id::new(("variant-value", set, pi, vi));
                     let shown = egui::Popup::menu(&chip)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -1012,11 +1011,11 @@ impl OndinApp {
                             }
                         });
                     // **A rename typed and left commits when the menu closes**
-                    // (§15 D1003 (11), `[X10-L1-03]`): a click on the canvas
-                    // closes the popup before its field can see its focus go,
-                    // and the inspector holds the set on screen for the frame
-                    // that takes (`hold_inspector`, D999's promise extended to a
-                    // popover field that commits).
+                    // (§15 D1003 (11)): a click on the canvas closes the popup
+                    // before its field can see its focus go, and the inspector
+                    // holds the set on screen for the frame that takes
+                    // (`hold_inspector`, D999's promise extended to a popover
+                    // field that commits).
                     if shown.is_none()
                         && let Some(n) = pending(ui, field, v, Rules::NAME)
                     {
@@ -1087,12 +1086,12 @@ impl OndinApp {
             }
         });
         let renamed = self.run_edits(edits);
-        // 🚨 **The confirmation follows the frame's renames** (the v0.5.0
-        // release review's `[X6-L1-01]`, D1009's ⚠️ run): a used value's name
-        // typed in its menu commits on the frame *Delete value* is clicked, after
-        // this was built from the name as drawn — so the modal named a value
-        // that no longer existed, and *Delete* found no value of that name and
-        // deleted nothing, silently. It takes the value's name and place now.
+        // 🚨 **The confirmation follows the frame's renames** (D1009's ⚠️ run):
+        // a used value's name typed in its menu commits on the frame *Delete
+        // value* is clicked, after this was built from the name as drawn — so
+        // the modal named a value that no longer existed, and *Delete* found no
+        // value of that name and deleted nothing, silently. It takes the value's
+        // name and place now.
         if let Some((drawn_prop, mut c)) = confirm {
             let prop = renamed.prop(&drawn_prop);
             let value = renamed.value(&drawn_prop, &c.name);
@@ -1768,9 +1767,8 @@ impl OndinApp {
             .collect();
         // Each row's readings from `PropCache` while the document is unchanged,
         // and its reset built only for a row that is overridden — the mark and
-        // its ↺ are the reset's only readers (`[X10-L4-01]`). Uncached and
-        // unconditional, the two were half each of a 33 ms share of the frame at
-        // 300 selected instances.
+        // its ↺ are the reset's only readers. Uncached and unconditional, the two
+        // weighed on every frame with hundreds of instances selected.
         let cache = self.prop_cache.at(rev);
         for p in &props {
             let states: Vec<(PropValue, bool)> = roots
@@ -1890,12 +1888,11 @@ impl OndinApp {
                         .clone();
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        // 🚨 **The ↺ is the user's last act, and wins** (the
-                        // v0.5.0 release review's `[X6-L1-02]`): clicking it
-                        // with text typed into this row's own field commits
-                        // that field on the same frame, after the reset, and
-                        // put the typing back over it — two undo steps whose
-                        // sum was the reset lost. The two are one field, the
+                        // 🚨 **The ↺ is the user's last act, and wins**:
+                        // clicking it with text typed into this row's own field
+                        // commits that field on the same frame, after the
+                        // reset, and put the typing back over it — two undo
+                        // steps whose sum was the reset lost. The two are one field, the
                         // case D1008's "different fields" left out.
                         let reset_clicked = row_label(ui, &p.name, mark.as_ref());
                         if reset_clicked {
@@ -2541,13 +2538,13 @@ enum Bind {
 }
 
 /// An owner's properties with `node` bound, for `kind`, as `pick` says — the
-/// decision [`OndinApp::bind_line`] commits, lifted out so a test can ask it
-/// (`[X10-L6-01]`: its flips left the whole suite green). The layer comes off
-/// **every** property of the kind first, so it is never bound twice for one
-/// field (which `variant::settle` would prune silently, losing the new
-/// binding); a new property is named for the layer — `Show {layer}`,
-/// `{layer} text`, the layer's name — made fresh among the others, and a swap
-/// property takes `filter`, the suggestion from the main the layer shows.
+/// decision [`OndinApp::bind_line`] commits, lifted out so a test can ask it.
+/// The layer comes off **every** property of the kind first, so it is never
+/// bound twice for one field (which `variant::settle` would prune silently,
+/// losing the new binding); a new property is named for the layer — `Show
+/// {layer}`, `{layer} text`, the layer's name — made fresh among the others,
+/// and a swap property takes `filter`, the suggestion from the main the layer
+/// shows.
 fn rebind(
     props: &[Keyed<Property>],
     kind: PropKind,
@@ -2972,10 +2969,10 @@ mod tests {
     use super::*;
     use ondin_core::IdSource;
 
-    /// **A binding dropdown's decision** (`[X10-L6-01]`): picking a property of
-    /// the kind moves the layer to it — off the other, never on both — *None*
-    /// takes it off, and *New property…* makes one named for the layer, fresh
-    /// among the others, a swap property with the suggested filter.
+    /// **A binding dropdown's decision**: picking a property of the kind moves
+    /// the layer to it — off the other, never on both — *None* takes it off,
+    /// and *New property…* makes one named for the layer, fresh among the
+    /// others, a swap property with the suggested filter.
     ///
     /// Flips, run: never unbinding (`retain(|_| true)`) fails "off the first";
     /// the new property's name not made fresh fails "made fresh".
@@ -3022,10 +3019,9 @@ mod tests {
         );
     }
 
-    /// **The text fields' rules** (`[X10-L1-01]`, `[X10-L1-04]`, §15 D1003
-    /// (10)): a name trims and is never empty; content keeps its spaces and may
-    /// be emptied; over a mixed selection the field starts empty and only typing
-    /// commits. Flip, run: content trimmed (`name: true`) fails "spaces kept".
+    /// **The text fields' rules** (§15 D1003 (10)): a name trims and is never
+    /// empty; content keeps its spaces and may be emptied; over a mixed
+    /// selection the field starts empty and only typing commits. Flip, run: content trimmed (`name: true`) fails "spaces kept".
     #[test]
     fn a_field_commits_by_its_rules() {
         let content = Rules {
@@ -3232,14 +3228,13 @@ mod tests {
     }
 
     /// **A kit reached only through a swap reads as used** (§15 D1028 (4): *an
-    /// instance on the page links or swaps to* it; the v0.5.0 release review's
-    /// `[X4.2-L6-02]`). The nested copy is swapped to the kit's *Badge*, which the
-    /// document never used: its `link` still names the slot — *Glyph*, the
-    /// document's own — and *Badge* is an empty frame, so no child's link reaches
-    /// the vault either. Only `swap` names the vendored main, and since D1019 made
-    /// a swap a door into a kit, `kits_on_the_page`'s swap arm is the one thing
-    /// that keeps the picker from listing the kit under *In your library, not
-    /// used here* while an instance shows its component.
+    /// instance on the page links or swaps to* it). The nested copy is swapped to
+    /// the kit's *Badge*, which the document never used: its `link` still names
+    /// the slot — *Glyph*, the document's own — and *Badge* is an empty frame, so
+    /// no child's link reaches the vault either. Only `swap` names the vendored
+    /// main, and since D1019 made a swap a door into a kit, `kits_on_the_page`'s
+    /// swap arm is the one thing that keeps the picker from listing the kit under
+    /// *In your library, not used here* while an instance shows its component.
     ///
     /// Flip, run: `kits_on_the_page` reading `n.link()` alone (the `n.swap()`
     /// dropped from its pair) fails *"used through a swap"*, `Some(false)`.
@@ -3369,12 +3364,11 @@ mod tests {
         drawn(app, ctx, vec![])
     }
 
-    /// **Swap to a kit main through the Component card itself** (§15 D1019; the
-    /// v0.5.0 release review's `[X4.2-L6-03]`, which found every swap test
-    /// calling `swap_list` and `swap_to_kit` underneath the rows). The inspector
-    /// is drawn with the nested copy selected and the library's kit **never
-    /// asked for** — no picker opened, no pill — and the *Swap* row's dropdown is
-    /// clicked open: the open list asks the shelf, and once the read lands the
+    /// **Swap to a kit main through the Component card itself** (§15 D1019),
+    /// not by calling `swap_list` and `swap_to_kit` underneath the rows. The
+    /// inspector is drawn with the nested copy selected and the library's kit
+    /// **never asked for** — no picker opened, no pill — and the *Swap* row's
+    /// dropdown is clicked open: the open list asks the shelf, and once the read lands the
     /// kit's *Badge* is offered. Picked, the copy shows the vendored *Badge* in
     /// one undo step, and the kit is first in this document's last-use order.
     /// Then a swap property *Icon* on *Row*, picked on *Row*'s instance: its
@@ -3502,9 +3496,8 @@ mod tests {
     }
 
     /// **A swap to a variant the held set lacks is refused, with a status**
-    /// (§15 D1019 names `NeedsUpdate`; the v0.5.0 release review's
-    /// `[X4.2-L6-03]`: `the_swap_list_offers_…` builds a waiting update and never
-    /// picks under it). The page holds *Atlas*' set *Button* at v4; v5 adds a
+    /// (§15 D1019 names `NeedsUpdate`; `the_swap_list_offers_…` builds a waiting
+    /// update and never picks under it). The page holds *Atlas*' set *Button* at v4; v5 adds a
     /// variant *Huge*. *Huge* is offered — the shelf reads v5 — and picked, the
     /// set would have to move to v5 first: nothing is committed, and the status
     /// says the update comes first.

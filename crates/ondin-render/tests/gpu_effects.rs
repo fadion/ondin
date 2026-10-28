@@ -1448,7 +1448,7 @@ fn what_an_on_screen_effect_layer_costs_per_frame() {
         }
         let stats = g.renderer.fx_stats();
         println!(
-            "[X7-L4-01] {n}x{n}: {jobs} effect jobs, median frame {:.2} ms, \
+            "[fx] {n}x{n}: {jobs} effect jobs, median frame {:.2} ms, \
              render() returned {:.2} ms, passes {}, fx submits {}, textures made \
              over the last 50 frames {made}, pool {:.1} MB",
             median(&mut frame),
@@ -1499,9 +1499,7 @@ fn a_steady_frame_makes_nothing_and_submits_once_per_pass() {
     let second = g.renderer.fx_stats();
     draw(&mut g, &doc, &res, &vp, &view);
     let steady = g.renderer.fx_stats();
-    println!(
-        "[X7-L4-01] first {first:?}\n[X7-L4-01] second {second:?}\n[X7-L4-01] steady {steady:?}"
-    );
+    println!("[fx] first {first:?}\n[fx] second {second:?}\n[fx] steady {steady:?}");
 
     // The fixture reached the state the test is about: a crowd of layers and a
     // first frame that had to allocate.
@@ -1532,7 +1530,7 @@ fn a_steady_frame_makes_nothing_and_submits_once_per_pass() {
         steady.submits,
         g.renderer.pass_high_water(),
         "the passes submitted {} times for {} layers in {} vello passes — one \
-         submit per layer is `[X7-L4-01]`'s cost",
+         submit per layer is the cost this pins",
         steady.submits,
         steady.layers,
         g.renderer.pass_high_water()
@@ -1644,7 +1642,7 @@ fn the_pool_lets_go_of_what_recent_frames_did_not_need() {
         draw(&mut g, &square, &square_res, &vp, &view);
         held.push(g.renderer.fx_stats().pooled_bytes);
     }
-    println!("[X7-L4-01] grid {full}, square alone {needed}, held frame by frame {held:?}");
+    println!("[fx] grid {full}, square alone {needed}, held frame by frame {held:?}");
     assert!(
         held[0] <= full,
         "on the first frame of the square the pool held {} bytes, more than the \

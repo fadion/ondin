@@ -1,16 +1,13 @@
 //! Flex's model → taffy mapping, one value at a time, against boxes worked by
-//! hand from CSS (the release review's `[X3.2-L6-01]`).
+//! hand from CSS.
 //!
 //! `tests/flex.rs` pins that the engine is wired; `container`'s `flex_tests` pin
-//! what it computes. When the review looked, neither placed an item under
-//! `column-reverse`, `wrap`, `justify-content` past `start`, `align-content`
-//! past `start`/`stretch`, `align-items: center`, a limit or a basis (a basis
-//! fixture has since arrived with §15 D935's resize test) — and
-//! `incremental_update_equals_rebuild_over_random_layout_ops` cannot see a wrong
-//! arm, because `update` and `rebuild` both go through `style_of` (§15 D898's
-//! own caveat). §15 D909 is a mapping error of exactly that shape which lived
-//! through two build steps with every gate green. So every expected box here is
-//! arithmetic on CSS, not a reading of the engine, and each row says its sum.
+//! what it computes, and `incremental_update_equals_rebuild_over_random_layout_ops`
+//! cannot see a wrong arm, because `update` and `rebuild` both go through
+//! `style_of` (§15 D898's own caveat); §15 D909 is a mapping error of exactly
+//! that shape.
+//! So every expected box here is arithmetic on CSS, not a reading of the engine,
+//! and each row says its sum.
 //!
 //! The harness is `tests/flex.rs`' `Scene`: incremental `update` checked against
 //! a full `rebuild` after every commit.

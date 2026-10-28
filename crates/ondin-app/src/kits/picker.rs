@@ -194,8 +194,8 @@ impl LocalTiles {
                     // subtracting a second `elapsed()` underflowed a `Duration`
                     // — a panic in every profile — on a frame that landed a few
                     // nanoseconds before the deadline, the very frame the
-                    // `request_repaint_after` below asks for (`[X4.1-L1-01]` of
-                    // the v0.5.0 release review; the crate denies the lint).
+                    // `request_repaint_after` below asks for. The crate denies
+                    // `clippy::unchecked_time_subtraction` for it.
                     let left = SETTLE.saturating_sub(since.elapsed());
                     if !left.is_zero() {
                         ctx.request_repaint_after(left);
@@ -969,9 +969,8 @@ fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
 /// **Nor over anything floating on the canvas** — `under` is the area there
 /// (`Context::layer_id_at`), and only the canvas's own background layer, or
 /// none, takes the drop. The inspector and the colour picker float over the
-/// canvas's rect, and a tile let go on one was placed out of sight beneath it
-/// (the v0.5.0 release review's `[X4.1-L1-03]`); aiming at a panel is the same
-/// change of mind as aiming back at the picker.
+/// canvas's rect, and a tile let go on one was placed out of sight beneath it;
+/// aiming at a panel is the same change of mind as aiming back at the picker.
 ///
 /// ⚠️ **The floating status bar is not one of them, on purpose**: it is not
 /// interactable, so every click passes through it to the canvas, and
@@ -1012,8 +1011,7 @@ fn centred(
     let at = scratch.get(instance)?.transform();
     // The laid-out box for every kind, a frame's too: a frame that hugs its
     // content stores the size it was drawn at, not the one layout gives it
-    // (§15 D874), and centring the stored box put a hugging main 55 px off the
-    // aim (the v0.5.0 release review's `[R1-L2-01]`).
+    // (§15 D874), and centring the stored box put a hugging main off the aim.
     let res = ondin_core::Resolved::rebuild(&scratch);
     let bounds: Rect = res.world_bounds(instance)?;
     // The shift is in world space; the transform is in the parent's, a frame's when
@@ -2365,8 +2363,7 @@ pub(crate) mod tests {
 
         // Back over the panel: a change of mind. The frames a placement waits
         // (§15 D1030) pumped first, and nothing queued — checked on the release
-        // alone it could not tell "not asked" from "asked, not yet run" (the
-        // v0.5.0 release review's `[X4.2-L6-01]`).
+        // alone it could not tell "not asked" from "asked, not yet run".
         drag(&mut app, tile, tile + egui::vec2(60.0, 0.0));
         frame_with(&mut app, vec![]);
         frame_with(&mut app, vec![]);
@@ -2423,8 +2420,7 @@ pub(crate) mod tests {
         assert_eq!(frozen.get(small).unwrap().name(), "Small", "the fixture");
         let tiles = tiles_of(frozen, &[set]);
         // *Small* as an insert lands, out of its set — whose layout stretches
-        // it to 80 × 30 where it sits; it lands at the 80 × 20 it stores (the
-        // v0.5.0 release review's `[X4.1-L1-02]`).
+        // it to 80 × 30 where it sits; it lands at the 80 × 20 it stores.
         let placed = ondin_core::kit::as_placed(frozen, &[small]);
         let res = ondin_core::Resolved::rebuild(&placed);
         let images = super::super::index::prepared(&placed);
@@ -3090,7 +3086,7 @@ pub(crate) mod tests {
         let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
         // The frames a placement waits (§15 D1030), then nothing queued or
         // placed: checked on the `Enter`'s own frame it passed whatever the
-        // guard did (the v0.5.0 release review's `[X4.2-L6-01]`).
+        // guard did.
         for _ in 0..2 {
             let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
         }
@@ -3112,8 +3108,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A main's tile and drag picture are drawn as it lands** (the v0.5.0
-    /// release review's `[X4.1-L1-02]`, with `[X4.1-L1-04]`). *Badge* is 80 ×
+    /// **A main's tile and drag picture are drawn as it lands**. *Badge* is 80 ×
     /// 30 in a frame rotated 90° and scaled 2×. The picture was drawn where it
     /// sat — 60 × 160, turned — and the placement landed 80 × 30 and level; and
     /// a vault main, which nothing resolves where it sits, dragged as an empty
@@ -3121,7 +3116,7 @@ pub(crate) mod tests {
     ///
     /// Flip, run: the ghost drawing from the document as it is fails *"the
     /// size it lands at"* with 60 × 160 against 80 × 30. The vault half was
-    /// not flipped on its own; the review's probe measured `None` there.
+    /// not flipped on its own.
     #[test]
     fn a_mains_pictures_are_drawn_as_it_lands() {
         let ctx = egui::Context::default();
@@ -3191,11 +3186,11 @@ pub(crate) mod tests {
         assert!(ghost.picture.is_some(), "a vault main draws");
     }
 
-    /// **A tile let go over a panel floating on the canvas places nothing**
-    /// (the v0.5.0 release review's `[X4.1-L1-03]`): inside the canvas's rect,
-    /// off the picker, but over the inspector's area. This asks the predicate;
-    /// that the call site hands it `Context::layer_id_at` is read, not driven —
-    /// the picker's drag test runs the picker alone, with no inspector drawn.
+    /// **A tile let go over a panel floating on the canvas places nothing**:
+    /// inside the canvas's rect, off the picker, but over the inspector's area.
+    /// This asks the predicate; that the call site hands it
+    /// `Context::layer_id_at` is read, not driven — the picker's drag test runs
+    /// the picker alone, with no inspector drawn.
     ///
     /// Flip, run: `under` ignored fails *"over a floating panel"*.
     #[test]
@@ -3217,14 +3212,12 @@ pub(crate) mod tests {
         );
     }
 
-    /// **A hugging frame is centred by the box layout gives it** (the v0.5.0
-    /// release review's `[R1-L2-01]`): a flex frame stored at 10×10 that hugs a
-    /// 120×40 rect. Centring its stored box put the real one 55 px right and
-    /// 15 px down of the aim.
+    /// **A hugging frame is centred by the box layout gives it**: a flex frame
+    /// stored at 10×10 that hugs a 120×40 rect. Centring its stored box put the
+    /// real one 55 px right and 15 px down of the aim.
     ///
     /// Flip, run: measuring a frame by its stored size again fails *"the laid-out
-    /// box is centred on the aim"*, centre (555, 315) against (500, 300) — the
-    /// review's 55 and 15 exactly.
+    /// box is centred on the aim"*, centre (555, 315) against (500, 300).
     #[test]
     fn a_hugging_frame_is_centred_by_its_laid_out_box() {
         use ondin_core::container::{Dimension, Display, Flex};
@@ -3544,10 +3537,8 @@ pub(crate) mod tests {
     }
 
     /// **A second placement asked while one waits is dropped** (§15 D1030 — *"as
-    /// a second click on a busy button is"*; the v0.5.0 release review's
-    /// `[X4.2-L6-04]`: only the `cfg(test)` door, which bypasses the wait, had
-    /// ever placed twice). *Badge* is asked, then the set, before a frame; the
-    /// frames that follow place *Badge* alone.
+    /// a second click on a busy button is"*). *Badge* is asked, then the set,
+    /// before a frame; the frames that follow place *Badge* alone.
     ///
     /// Flip, run: `ask_place` replacing the waiting ask (its `is_none` guard
     /// dropped) fails *"the first ask places"* with *Small*.
@@ -3580,9 +3571,8 @@ pub(crate) mod tests {
 
     /// **A drag's picture is capped at half the canvas each way** (§15 D1029 —
     /// *"so a page-sized component does not cover the place it is being aimed
-    /// at"*; the v0.5.0 release review's `[X4.2-L6-04]`: the ghost tests used a
-    /// 24 × 30 *Badge*, far under it). A 2000 × 30 main at zoom 1 over an 800 ×
-    /// 600 canvas draws 400 × 6 — scaled whole, its proportions kept.
+    /// at"*). A 2000 × 30 main at zoom 1 over an 800 × 600 canvas draws 400 × 6
+    /// — scaled whole, its proportions kept.
     ///
     /// Flip, run: the cap deleted (`k` fixed at 1) fails *"half the canvas"*
     /// with 2000 × 30.

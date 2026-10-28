@@ -4,17 +4,17 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
-# **`cargo run -p ondin-app` means the app** (`[R2-L8-01]`): `src/bin/ondin-cli.rs`
-# made this crate two binaries, and cargo refuses to pick between two without
-# this — which broke the README's build command and every headless `export`
-# recipe in CLAUDE.md with "could not determine which binary to run".
+# **`cargo run -p ondin-app` means the app**: `src/bin/ondin-cli.rs` makes this
+# crate two binaries, and cargo refuses to pick between two without this —
+# which broke the README's build command and every headless `export` recipe in
+# AGENTS.md with "could not determine which binary to run".
 default-run = "ondin"
 
 # The `ondin` binary: GUI shell + `serve`/`export` subcommands. Only this crate
 # may depend on egui/winit (§3). Ties the whole graph together.
 #
 # ⚠️ **And it is the second crate allowed `wgpu`, which §3 denied until 2026-09-15**
-# (§15 D774, `[A2-L7-04]`). eframe owns the device; vello renders the canvas and
+# (§15 D774). eframe owns the device; vello renders the canvas and
 # egui-wgpu composites it, so the two must share one wgpu — and `ondin-render`'s
 # seam takes `&Device`, `&Queue` and `&TextureView`, so this crate cannot call it
 # without naming the types. `canvas.rs` is where they are named — count them with

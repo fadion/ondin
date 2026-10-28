@@ -455,10 +455,10 @@ fn the_slot_keeps_placement_size_and_visibility() {
 
 /// **`reset::slot_source_of` answers the slot for a swapped copy** — the source
 /// its placement and size compare against — where `reset::source_of` answers the
-/// swap; for anything not swapped the two agree (`[X9.1-L1-01]`: the Transform
-/// card read both from `source_of` and marked a swapped slot at Heart's page
-/// position and size). Flip, run: `slot_source_of` answering `source_of` for a
-/// swapped copy fails *"the slot"*.
+/// swap; for anything not swapped the two agree. Read from `source_of`, the
+/// Transform card marked a swapped slot at Heart's page position and size. Flip,
+/// run: `slot_source_of` answering `source_of` for a swapped copy fails *"the
+/// slot"*.
 #[test]
 fn a_swapped_copys_slot_fields_compare_with_its_link() {
     let mut f = fixture();
@@ -552,15 +552,14 @@ fn a_swapped_copys_field_overrides_count_against_its_swap() {
 }
 
 /// **A local instance of the main a slot is swapped to stays a local addition**
-/// (`[X4-L1-02]`; §15 D981 (1) as D994 amends it, *local layers survive every
-/// reset*). `l`, a Heart placed in `b1` after `r` with its own opacity and fill,
-/// is not in `b1`'s scope because `r` shows Heart too: `scope_nodes` had grown
-/// one set with the whole of every swap it met, keyed on link targets, so `l`
-/// (linked to Heart) and its `Shape` (linked to Heart's) passed — the card read
-/// *0 local layers* and *Reset all* put `l` back to Heart's look. Only when `l`
-/// came after `r` in preorder, which is the order here. The scope now reads a
-/// swap's members only under the swapped copy, and a link to a main only at the
-/// scope's own root.
+/// (§15 D981 (1) as D994 amends it, *local layers survive every reset*). `l`, a
+/// Heart placed in `b1` after `r` with its own opacity and fill, is not in `b1`'s
+/// scope because `r` shows Heart too: `scope_nodes` had grown one set with the
+/// whole of every swap it met, keyed on link targets, so `l` (linked to Heart)
+/// and its `Shape` (linked to Heart's) passed — the card read *0 local layers*
+/// and *Reset all* put `l` back to Heart's look. Only when `l` came after `r` in
+/// preorder, which is the order here. The scope reads a swap's members only
+/// under the swapped copy, and a link to a main only at the scope's own root.
 ///
 /// Flip, run: `scope_nodes` back to the one shared set (every swap's subtree,
 /// its root included, admitting any node) fails the first assertion, `drift`
@@ -610,15 +609,15 @@ fn a_local_instance_of_a_swaps_main_is_not_reset_with_the_slot() {
     assert_eq!(f.fill(lshape), red(77), "and its own fill");
 }
 
-/// **Two slots swapped to one main do not mask each other's removed children**
-/// (`[X4-L1-03]`). `b1` holds `r` and `r2`, both swapped to Heart; `r`'s `Shine`
-/// is deleted. `reset::missing` looked for a counterpart under the *outermost*
-/// root — it climbed from `r` to `b1`, as it must for a member dragged out of a
-/// nested copy — and found `r2`'s `Shine`, linked to the same Heart node, so
-/// *Restore removed children* read 0 and restored nothing. A swapped copy's
-/// members link into its swap, which nothing outside the copy may claim for the
-/// outer instance (`settle_links` cuts a member dragged out of it), so the climb
-/// stops at a swapped root.
+/// **Two slots swapped to one main do not mask each other's removed children.**
+/// `b1` holds `r` and `r2`, both swapped to Heart; `r`'s `Shine` is deleted.
+/// `reset::missing` looked for a counterpart under the *outermost* root — it
+/// climbed from `r` to `b1`, as it must for a member dragged out of a nested copy
+/// — and found `r2`'s `Shine`, linked to the same Heart node, so *Restore removed
+/// children* read 0 and restored nothing. A swapped copy's members link into its
+/// swap, which nothing outside the copy may claim for the outer instance
+/// (`settle_links` cuts a member dragged out of it), so the climb stops at a
+/// swapped root.
 ///
 /// Flip, run: `outermost_root` climbing through a swapped root again fails the
 /// `removed` assertion, 0 for 1. (Asserted first: with `r2` unswapped the same
@@ -1013,7 +1012,7 @@ fn the_fixture_is_what_it_says() {
     let _ = f.hshape;
 }
 
-// ── The release review (`v0.4.1..7d0c666`) ─────────────────────────────────────
+// ── Swaps through copies, climbs and pastes ────────────────────────────────────
 
 /// The card fixture of `a_copy_of_a_swapped_copy_follows_it`: a `Card` main
 /// holding `b2`, an instance of Button, and `c1`, an instance of Card — so `r2`
@@ -1035,10 +1034,10 @@ fn card(f: &mut F) -> (NodeId, NodeId, NodeId, NodeId) {
     (card, c1, r2, r3)
 }
 
-/// **A swap matches layers by the shown main's names, not the slot's**
-/// (`[X5-L1-03]`): a name set on the slot inside the Button main is an override,
-/// and matching by it left `r`'s `Body` unmatched — its fill dropped, a stray
-/// layer beside Heart's `Shape`, and a second `Body` on the swap back.
+/// **A swap matches layers by the shown main's names, not the slot's**: a name
+/// set on the slot inside the Button main is an override, and matching by it
+/// left `r`'s `Body` unmatched — its fill dropped, a stray layer beside Heart's
+/// `Shape`, and a second `Body` on the swap back.
 ///
 /// Flip: `paths_by` naming each layer by its own name (the slot's) fails "one
 /// layer for Heart's Shape", three children against two.
@@ -1267,10 +1266,10 @@ fn a_nested_instance_the_slot_adds_carries_across_a_swap() {
 }
 
 /// **A copy and its copy swapped in one transaction** — *Select all instances*,
-/// then the swap property (`[X5-L1-02]`). `r3` was rewritten against `r2`'s new
-/// contents while measured from its old, and came out with a cut Shine, a
-/// "removed" child and a redundant swap. Its swap is now found redundant — its
-/// slot shows Heart — and cleared, and it follows `r2`.
+/// then the swap property. `r3` was rewritten against `r2`'s new contents while
+/// measured from its old, and came out with a cut Shine, a "removed" child and a
+/// redundant swap. Its swap is found redundant — its slot shows Heart — and
+/// cleared, and it follows `r2`.
 ///
 /// Flip: dropping `settle`'s redundant-swap clear fails "it follows its slot",
 /// `Some(Heart)`. ⚠️ **`settle`'s new order is not what this test pins**: put back
@@ -1301,10 +1300,10 @@ fn a_copy_and_its_copy_swapped_together_follow_one_another() {
     assert!(!d.any(), "nothing the user made: {d:?}");
 }
 
-/// **A swap left naming what its slot shows is cleared** (§15 D1003 (4),
-/// `[X5-L2-01]`): `r3` swapped to Star while its slot shows Heart is an
-/// override; once `r2` goes back to Star it names what its slot shows, counts
-/// nothing, and follows the slot's next swap.
+/// **A swap left naming what its slot shows is cleared** (§15 D1003 (4)): `r3`
+/// swapped to Star while its slot shows Heart is an override; once `r2` goes
+/// back to Star it names what its slot shows, counts nothing, and follows the
+/// slot's next swap.
 ///
 /// Flip: `settle`'s redundant-swap clear dropped fails `r3`'s swap, `Some(Star)`.
 #[test]
@@ -1326,10 +1325,10 @@ fn a_swap_equal_to_its_slots_is_cleared() {
     );
 }
 
-/// **A climb past a swapped node carries the swap** (`[X5-L1-01]`): `r3`
-/// follows `r2`'s swap to Heart one link up, and detaching `c1` — or deleting
-/// the Card main, which detaches it — climbs `r3` past `r2` to Star's slot. It
-/// landed showing Star with Heart's layers cut loose; it lands showing Heart.
+/// **A climb past a swapped node carries the swap**: `r3` follows `r2`'s swap to
+/// Heart one link up, and detaching `c1` — or deleting the Card main, which
+/// detaches it — climbs `r3` past `r2` to Star's slot. It lands showing Heart,
+/// not Star with Heart's layers cut loose.
 ///
 /// Flip: `land_ops_through` ignoring `met` fails "still Heart" for both doors.
 #[test]
@@ -1370,9 +1369,9 @@ fn detaching_an_outer_instance_keeps_a_swap_made_one_link_up() {
 }
 
 /// **A pasted instance holding a swapped copy commits in a document with no
-/// link** (`[X5-L1-04]`): `settle_copy` dropped the copy's link to the slot and
-/// left its swap for `settle_links`, which a link-free document never reaches,
-/// and `check` refused the paste. Into a fresh document the copy is plain
+/// link**: `settle_copy` dropped the copy's link to the slot and left its swap
+/// for `settle_links`, which a link-free document never reaches, and `check`
+/// refused the paste. Into a fresh document the copy is plain
 /// layers; into one still holding Heart it is an instance of Heart.
 ///
 /// Flip: `settle_copy` leaving the swap where it drops the link fails both
@@ -1430,9 +1429,9 @@ fn a_pasted_swapped_copy_commits_where_its_slot_is_not() {
 }
 
 /// **Detaching a nested instance bound to a swap property commits** — the
-/// binding goes (`[X6.1-L2-03]`). `variant::settle` ran only after an edit that
-/// moves a layer, and a detach writes links alone, so the binding a detached
-/// slot no longer fits was left for `check` to refuse.
+/// binding goes. `variant::settle` ran only after an edit that moves a layer,
+/// and a detach writes links alone, so the binding a detached slot no longer
+/// fits was left for `check` to refuse.
 ///
 /// Flip: `settle`'s gate without `SetLink` fails the detach's commit,
 /// `Variant(Binding)`.
@@ -1461,10 +1460,10 @@ fn detaching_a_bound_slot_drops_its_binding() {
     assert!(bound.is_empty(), "unbound: {bound:?}");
 }
 
-/// **A nested instance inside a copied member climbs** (`[X2-L1-03]`): the
-/// Button main's Star wrapped in a group, and `b1`'s copy of that group
-/// duplicated — the copy's Star is an instance of Star, as the nested copy
-/// duplicated alone is. It came out a cut frame with members still linked.
+/// **A nested instance inside a copied member climbs**: the Button main's Star
+/// wrapped in a group, and `b1`'s copy of that group duplicated — the copy's
+/// Star is an instance of Star, as the nested copy duplicated alone is, not a cut
+/// frame with members still linked.
 ///
 /// Flip: the climb gated on the template's root again fails "an instance of
 /// Star".
@@ -1507,9 +1506,9 @@ fn a_nested_instance_in_a_copied_member_climbs() {
 }
 
 /// **Ungrouping a group main leaves the nested instances in its instances
-/// instances of their own main**, as deleting it does (`[X2-L2-03]`): the
-/// nested source survives an ungroup, so nothing climbed, and the membership
-/// cut the copy to plain layers.
+/// instances of their own main**, as deleting it does: the nested source
+/// survives an ungroup, so nothing climbed, and the membership cut the copy to
+/// plain layers.
 ///
 /// Flip: dropping `settle_links`' detached-owner climb fails "an instance of
 /// Star".
@@ -1535,12 +1534,12 @@ fn ungrouping_a_group_main_keeps_its_instances_nested_instances() {
     assert_eq!(f.node(f.kids(cn)[0]).link(), Some(f.sshape));
 }
 
-/// **The ungroup's climb carries a swap it passes** (`[X2-L2-03]`, D983's
-/// amendment building D1003 (3)–(5)): a group main holding `b2`, an instance of
-/// Button whose nested copy `r2` is swapped to Heart, and `io`, an instance of the
-/// group — so `r3`, `io`'s copy of `r2`, follows the swap one link up. Ungrouping
-/// the main climbs `b3` to Button and `r3` past `r2` to Star's slot; it must take
-/// `r2`'s swap with it, as `detach` and `relink_past` do, or it lands showing Star
+/// **The ungroup's climb carries a swap it passes** (D983's amendment building
+/// D1003 (3)–(5)): a group main holding `b2`, an instance of Button whose nested
+/// copy `r2` is swapped to Heart, and `io`, an instance of the group — so `r3`,
+/// `io`'s copy of `r2`, follows the swap one link up. Ungrouping the main climbs
+/// `b3` to Button and `r3` past `r2` to Star's slot; it must take `r2`'s swap
+/// with it, as `detach` and `relink_past` do, or it lands showing Star
 /// while its layers, climbing on past `r2`'s, link to Heart's. The climb landed
 /// with `land_ops` and `check` refused the ungroup, `Membership` — before
 /// `c84a940` every copy was cut and the ungroup committed.
@@ -1600,14 +1599,13 @@ fn ungrouping_a_group_main_keeps_a_swap_one_link_up() {
     );
 }
 
-/// **`swap::tidy`, two of its arms** (`[X5-L6-01]` — every arm was untested,
-/// and the whole suite passed with it answering nothing): a swapped copy whose
-/// link a bare `SetLink` cuts is no instance and loses its swap; and a copy
-/// swapped to a group main that is ungrouped — no `relink_for_delete` on that
-/// door — loses its swap and keeps the look.
+/// **`swap::tidy`, two of its arms**: a swapped copy whose link a bare `SetLink`
+/// cuts is no instance and loses its swap; and a copy swapped to a group main
+/// that is ungrouped — no `relink_for_delete` on that door — loses its swap and
+/// keeps the look.
 ///
 /// Flip: `tidy` answering nothing fails the first commit, `Swap` (the second is
-/// then never reached; the review's probe saw it refused `Dangling`).
+/// then never reached; on its own it is refused `Dangling`).
 #[test]
 fn tidy_clears_a_swap_that_no_longer_stands() {
     let mut f = fixture();
@@ -1652,10 +1650,10 @@ fn tidy_clears_a_swap_that_no_longer_stands() {
     assert!(f.doc.get(shape).is_some(), "the look kept");
 }
 
-/// **A swap target that contains the outer main is not offered** (`[X5-L6-02]`):
-/// `Wrap` holds an instance of `Panel`, which holds `r2` — showing Wrap at `r2`
-/// would put Panel inside itself. The only cycle test swapped to Panel itself,
-/// which the search's first step answers.
+/// **A swap target that contains the outer main is not offered**: `Wrap` holds
+/// an instance of `Panel`, which holds `r2` — showing Wrap at `r2` would put
+/// Panel inside itself. The search finds it only past its first step; a swap to
+/// Panel itself is answered at the first.
 ///
 /// Flip: `would_cycle` not searching past the target fails "Wrap holds Panel".
 #[test]

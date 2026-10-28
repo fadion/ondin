@@ -1,5 +1,5 @@
 //! Grid's model → taffy mapping and its validity rules, one value at a time,
-//! against boxes worked by hand from CSS (the release review's `[X3.3-L6-01]`).
+//! against boxes worked by hand from CSS.
 //!
 //! `tests/grid.rs` pins grid at row and column flow, the `minmax()` order and
 //! negative lines; every fixture there uses uniform padding, sets

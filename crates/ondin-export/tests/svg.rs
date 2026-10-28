@@ -4021,14 +4021,11 @@ fn a_flattened_node_with_an_effect_exports_a_file_with_no_nan_in_it() {
     );
 }
 
-// 🚨 **`collecting_defs_does_not_grow_with_the_square_of_their_count` stood here and
-// is gone** (§15 D854, `[X8-L6-01]`). It timed two exports and bounded their ratio,
-// which made it the once-a-session release gate's one flake: §15 D705 and D829 each
-// repaired its sampling, and under load it still failed 13 runs in 60. The
-// regression it guarded — §15 D593's quadratic `Defs::add` — is now pinned by
+// 🚨 **`collecting_defs_does_not_grow_with_the_square_of_their_count` is not
+// here** (§15 D854): timing two exports and bounding their ratio flakes under
+// load. The regression it guarded — §15 D593's quadratic `Defs::add` — is pinned by
 // **counting id comparisons** in `ondin-export`'s own `svg::def_count_tests`, which
-// has no clock to be wrong about. Its long sampling history is in D593, D705 and
-// D829, which is where a reader who meets the old name will look.
+// has no clock to be wrong about.
 
 /// `n` rects, all filled with one 4 KB picture, and the exported SVG.
 fn shared_image_export(n: usize) -> String {

@@ -564,7 +564,7 @@ pub struct Changes {
     pub renamed: bool,
     /// The published mains' order changed — the order a consumer's picker lists
     /// them in, so worth a publish as the name is: §15 D1015 counts what changes
-    /// downstream (the v0.5.0 release review's `[X2-L1-04]`).
+    /// downstream.
     pub reordered: bool,
     /// The variables or styles the mains read changed — a value, a name, a mode
     /// (§15 D1064): a change every consumer draws though no node of a main moved.
@@ -669,14 +669,13 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
         // consumer — the first cut blanked `top` alone and counted Card changed
         // when Icon moved.
         //
-        // 🚨 **And all of a top's place, not only its transform** (the v0.5.0
-        // release review's `[X2-L1-03]`): an instance root's insets, its layout
-        // item and its visibility are its own as its transform is
-        // (`propagate::is_placement`), so hiding a main on the kit's page, or
-        // moving one pinned in a frame, reached no consumer's instance — and was
-        // counted, an update for nothing. Nor is an origin's **version** a change
-        // anyone draws: accepting a third kit's update moves it on every main
-        // that nests it, and counted each as changed.
+        // 🚨 **And all of a top's place, not only its transform**: an instance
+        // root's insets, its layout item and its visibility are its own as its
+        // transform is (`propagate::is_placement`), so hiding a main on the kit's
+        // page, or moving one pinned in a frame, reached no consumer's instance —
+        // and was counted, an update for nothing. Nor is an origin's **version** a
+        // change anyone draws: accepting a third kit's update moves it on every
+        // main that nests it, and counted each as changed.
         for mut n in captured {
             if n.id == t {
                 n.transform = kurbo::Affine::IDENTITY;
@@ -914,11 +913,11 @@ pub fn vendor(
             None => Err(KitError::Incomplete(r)),
         }
     };
-    // 🚨 **A frozen copy never lands on a live node** (§15 D1036 (2), the
-    // v0.5.0 release review's `[X1-L1-02]`): `find`'s own-kit arm answers a
-    // node of `doc` itself when the kit being vendored from was built on this
-    // one — its copy then linked out of the vault, and every structural edit of
-    // that main was refused for good, naming nothing. Refused here, naming it.
+    // 🚨 **A frozen copy never lands on a live node** (§15 D1036 (2)): `find`'s
+    // own-kit arm answers a node of `doc` itself when the kit being vendored from
+    // was built on this one — its copy then linked out of the vault, and every
+    // structural edit of that main was refused for good, naming nothing. Refused
+    // here, naming it.
     let into_vault = |r: NodeId| -> Result<NodeId, KitError> {
         let found = resolve(r)?;
         if doc.contains(found) && !doc.in_vault(found) {
@@ -1090,14 +1089,14 @@ pub fn carried(doc: &Document, subtrees: &[Vec<Node>]) -> Vec<Vec<Node>> {
 /// version, which grew or lost a layer), is left out of the map, and whatever
 /// linked to it lands detached by the ordinary rule.
 ///
-/// 🚨 **Except a node a fresh copy reaches** (§15 D1036 (7), the v0.5.0 release
-/// review's `[X1-L1-01]`): a kit main carried fresh that nests one `doc` holds
-/// at an older version, without the layer the copy links to, was inserted into
-/// the vault with the link dangling — no `settle_copy` runs on a vault insert —
-/// and the whole paste was refused as a broken link. That is an update owed,
-/// [`KitError::NeedsUpdate`] naming the held main, as the picker answers for the
-/// same main. And a fresh copy reaching a live main of `doc` — a kit built on
-/// this one — is [`KitError::Circular`], as [`vendor`] answers (D1036 (2)).
+/// 🚨 **Except a node a fresh copy reaches** (§15 D1036 (7)): a kit main carried
+/// fresh that nests one `doc` holds at an older version, without the layer the
+/// copy links to, was inserted into the vault with the link dangling — no
+/// `settle_copy` runs on a vault insert — and the whole paste was refused as a
+/// broken link. That is an update owed, [`KitError::NeedsUpdate`] naming the
+/// held main, as the picker answers for the same main. And a fresh copy reaching
+/// a live main of `doc` — a kit built on this one — is [`KitError::Circular`],
+/// as [`vendor`] answers (D1036 (2)).
 pub fn adopt(
     doc: &Document,
     ids: &mut IdSource,
@@ -1715,14 +1714,13 @@ fn update_in_order(
     for op in make_local(&b.scratch, ids, page, &made_local).0 {
         b.push(op)?;
     }
-    // 🚨 **The pictures the update brings, first in the transaction** (the
-    // v0.5.0 release review's `[R3-L5-01]`). Only `vendor` added images, so a
-    // fill a sync set to a new picture, or a layer it inserted wearing one, left
-    // the document with a reference and no bytes — saved that way, and never
-    // repaired, since the next update finds the fill equal. Asked of the whole
-    // vault as the scratch leaves it, against the scratch, so what `vendor`
-    // already added is not added twice; an id is taken from the first accepted
-    // kit's publish that holds it.
+    // 🚨 **The pictures the update brings, first in the transaction.** Only
+    // `vendor` added images, so a fill a sync set to a new picture, or a layer it
+    // inserted wearing one, left the document with a reference and no bytes —
+    // saved that way, and never repaired, since the next update finds the fill
+    // equal. Asked of the whole vault as the scratch leaves it, against the
+    // scratch, so what `vendor` already added is not added twice; an id is taken
+    // from the first accepted kit's publish that holds it.
     let held = b
         .scratch
         .vault()
@@ -1761,16 +1759,15 @@ fn update_in_order(
 /// is the caller's (the vault is never resolved). A node that is not a vault
 /// child is skipped.
 ///
-/// 🚨 **And a kit main that nests this one keeps the kit's** (§15 D1036 (1),
-/// the v0.5.0 release review's `[R1-L2-02]`): revealing *Icon* while the vault's
-/// *Card* still nests it left *Card*'s nested copy linked to the now-local main
-/// — a vault node linking out, so an edit of the local *Icon* reached the kit's
-/// *Card*, deleting it detached it, and the next update of the kit vendored a
-/// fresh *Icon* and silently reverted *Card*'s instances. So in the same
-/// transaction every revealed main a remaining vault node reaches is copied back
-/// into the vault, origins kept, and those references are pointed at the copy:
-/// the kit's components keep the kit's version, and the revealed one is the
-/// user's own fork.
+/// 🚨 **And a kit main that nests this one keeps the kit's** (§15 D1036 (1)):
+/// revealing *Icon* while the vault's *Card* still nests it left *Card*'s nested
+/// copy linked to the now-local main — a vault node linking out, so an edit of
+/// the local *Icon* reached the kit's *Card*, deleting it detached it, and the
+/// next update of the kit vendored a fresh *Icon* and silently reverted *Card*'s
+/// instances. So in the same transaction every revealed main a remaining vault
+/// node reaches is copied back into the vault, origins kept, and those
+/// references are pointed at the copy: the kit's components keep the kit's
+/// version, and the revealed one is the user's own fork.
 ///
 /// 🚨 **And the variables and styles it reads are forked with it** (§15
 /// D1066, the maintainer's ruling): a main that no longer follows its kit

@@ -433,10 +433,10 @@ fn a_pinned_child_of_a_flex_group_is_placed_against_its_box_and_re_pinned_when_m
 /// its stored size, which is definite and never stretched either (§15 D879) — the
 /// first draft of this test used one and found exactly that.
 ///
-/// ⚠️ **Across only, and in both directions** (`[X3.2-L6-02]`): with both axes
-/// hugging, whichever axis `fit_content_across` read answered `FitContent`, so
-/// the test passed against the axis picked backwards — and a hugged height in a
-/// row is the commonest Hug there is. The column is
+/// ⚠️ **Across only, and in both directions**: with both axes hugging, whichever
+/// axis `fit_content_across` read answered `FitContent`, so the test passed
+/// against the axis picked backwards — and a hugged height in a row is the
+/// commonest Hug there is. The column is
 /// `a_frame_that_hugs_across_a_column_is_not_stretched`'s.
 ///
 /// **Flip runs**: the `fit_content_across` patch in `FlexTree::push` deleted
@@ -480,9 +480,9 @@ fn a_frame_that_hugs_across_the_line_is_not_stretched() {
 }
 
 /// **A frame that hugs across a column is not stretched** — the column twin of
-/// `a_frame_that_hugs_across_the_line_is_not_stretched` (`[X3.2-L6-02]`):
-/// in a 400 × 200 column with padding 20, a card hugging its **width** only
-/// stays 40 wide, and an `auto`-width rect beside it stretches to 360.
+/// `a_frame_that_hugs_across_the_line_is_not_stretched`: in a 400 × 200 column
+/// with padding 20, a card hugging its **width** only stays 40 wide, and an
+/// `auto`-width rect beside it stretches to 360.
 ///
 /// **Flip run**, `fit_content_across` reading the axis backwards (`is_row()`
 /// negated): fails on *"the hugging card keeps hugging across the column"*,
@@ -708,9 +708,8 @@ fn a_dragged_flex_item_reorders_by_where_its_centre_falls() {
 /// 130..160, and `a_released_stretch_keeps_the_held_edge_on_every_axis` with it;
 /// `container::content_alignment`'s `Start` arm alone fails at the same site with
 /// a at 40..70; the two together put a at 20..50 — each run one at a time and
-/// together (`[X3.2-L6-03]`: this read 20..50 against each, the joint flip's
-/// number), the predicted site. `resized_from_cross_start` without its `WrapReverse` swap
-/// fails on *"the flow's start held"*, `End` — predicted.
+/// together, the predicted site. `resized_from_cross_start` without its
+/// `WrapReverse` swap fails on *"the flow's start held"*, `End` — predicted.
 #[test]
 fn flex_start_follows_the_reversals() {
     use ondin_core::container::{AlignContent, FlexWrap};
@@ -1406,10 +1405,10 @@ fn stretched_pair() -> (Scene, NodeId, NodeId, NodeId) {
 }
 
 /// **Group, *Frame selection*, a boolean and *Use as mask* over in-flow items
-/// leave every member where it is drawn** (§15 D929, the release review's
-/// `[R1-L2-01]`). Each wrapped the members by their *stored* transforms: grouped,
-/// both rects went back to (300, 150), the new group took their slot measured
-/// from there, and `b` was drawn at 20..80 — on top of `a`, both 30 tall.
+/// leave every member where it is drawn** (§15 D929). Each wrapped the members by
+/// their *stored* transforms: grouped, both rects went back to (300, 150), the
+/// new group took their slot measured from there, and `b` was drawn at 20..80 —
+/// on top of `a`, both 30 tall.
 ///
 /// Every verb through the commit door the app uses (`keep_insets`, then
 /// `keep_flex_sizes`), with the members' world boxes compared whole — place and
@@ -1472,12 +1471,11 @@ fn wrapping_flex_items_leaves_them_where_they_are_drawn() {
 }
 
 /// **Ungrouping a group with a layout leaves every child where it is drawn**
-/// (§15 D929, `[R1-L2-02]`). A frame (no layout) holds a group at (100, 100)
-/// laying out a row of `a` 40 × 30 and `b` 60 × 30, both stored at (300, 150),
-/// beside `c`, 10 × 10, pinned to the group's top right (§15 D887). Drawn: `a`
-/// at 120..160, `b` at 170..230, `c` at 240..250. Folding the stored transforms
-/// put `a` and `b` both at (400, 250) and re-pinned `c` against the frame from
-/// (100, 100).
+/// (§15 D929). A frame (no layout) holds a group at (100, 100) laying out a row
+/// of `a` 40 × 30 and `b` 60 × 30, both stored at (300, 150), beside `c`, 10 ×
+/// 10, pinned to the group's top right (§15 D887). Drawn: `a` at 120..160, `b` at
+/// 170..230, `c` at 240..250. Folding the stored transforms put `a` and `b` both
+/// at (400, 250) and re-pinned `c` against the frame from (100, 100).
 ///
 /// **Flip run**, `ungroup` folding `node.transform()` again for the children
 /// rather than the used local: fails on *"a"* at x0 400 against 120, the
@@ -1596,13 +1594,12 @@ fn a_grown_laid_group_keeps_its_box_when_wrapped() {
     assert_eq!(s.bounds(g), grown, "the grown group keeps its box");
 }
 
-/// **Outlining a layer in a layout leaves it where it is drawn** (§15 D930,
-/// `[X1-L1-01]`): a 20 × 20 rect pinned `top: 10; right: 10` in the stretching
-/// row, and `b`, stretched to 160 tall. `replace_with_path` dropped the insets,
-/// so the pinned layer's path came back **in the flow**, pushed into the row
-/// after `b`; and `outline` cut its path from the stored kind, so the stretched
-/// `b` came back 30 tall — a path cannot stretch, so the size it is cut at is
-/// the size it keeps.
+/// **Outlining a layer in a layout leaves it where it is drawn** (§15 D930): a
+/// 20 × 20 rect pinned `top: 10; right: 10` in the stretching row, and `b`,
+/// stretched to 160 tall. `replace_with_path` dropped the insets, so the pinned
+/// layer's path came back **in the flow**, pushed into the row after `b`; and
+/// `outline` cut its path from the stored kind, so the stretched `b` came back 30
+/// tall — a path cannot stretch, so the size it is cut at is the size it keeps.
 ///
 /// **Flip runs**: the `SetInsets` carry deleted fails on *"the pinned layer"*,
 /// at x0 140 against 370, the predicted site; `outline` reading the stored kind
@@ -1632,13 +1629,13 @@ fn outlining_a_laid_layer_leaves_it_where_it_is_drawn() {
 }
 
 /// **A flex frame stretched by its own insets lays its items out in the width
-/// it is drawn at** (§15 D933, the release review's `[X3.1-L1-01]`). A 500 × 200
-/// frame holds a 200 × 100 row with `justify-content: end` and one 50 × 50 rect,
-/// pinned `left: 0; right: 0` — drawn 500 wide, CSS's absolutely positioned
-/// container between two insets. The pass ran at the stored 200, so the rect sat
-/// at 150..200, the end of a box nobody can see, where CSS puts it at 450..500;
-/// and it stayed there when the outer frame grew to 600. `update` stays equal to
-/// `rebuild` across both, the harness's own check.
+/// it is drawn at** (§15 D933). A 500 × 200 frame holds a 200 × 100 row with
+/// `justify-content: end` and one 50 × 50 rect, pinned `left: 0; right: 0` —
+/// drawn 500 wide, CSS's absolutely positioned container between two insets. The
+/// pass ran at the stored 200, so the rect sat at 150..200, the end of a box
+/// nobody can see, where CSS puts it at 450..500; and it stayed there when the
+/// outer frame grew to 600. `update` stays equal to `rebuild` across both, the
+/// harness's own check.
 ///
 /// **Flip run**, `lay_out` returning its first pass whatever `pinned_size`
 /// says: fails on *"the end of the drawn width"*, x0 150 against 450, the
@@ -1672,12 +1669,12 @@ fn a_flex_frame_stretched_by_its_insets_lays_out_in_its_drawn_width() {
 }
 
 /// **A drag in a single-line row reorders by the main axis alone, whatever the
-/// items' heights** (§15 D934, the release review's `[X4.1-L1-01]`). In a row
-/// aligned to the start, `a` is 20 tall and `b` 100: "same line" was asked of
-/// each sibling's own cross extent, and `a`'s 20..40 never holds `b`'s centre at
-/// 70, so `b` read `a` as a line above and could not be dropped before it however
-/// far it was dragged. And three equal items dragged with a 16 px vertical
-/// wobble — past half their height — landed first or last by the wobble's sign.
+/// items' heights** (§15 D934). In a row aligned to the start, `a` is 20 tall and
+/// `b` 100: "same line" was asked of each sibling's own cross extent, and `a`'s
+/// 20..40 never holds `b`'s centre at 70, so `b` read `a` as a line above and
+/// could not be dropped before it however far it was dragged. And three equal
+/// items dragged with a 16 px vertical wobble — past half their height — landed
+/// first or last by the wobble's sign.
 ///
 /// **Flip run**, the lines read per sibling again (`flow_index`'s band the
 /// sibling's own cross extent): fails on *"b before a"*, `None`, the predicted
@@ -1716,12 +1713,12 @@ fn a_drag_in_one_line_reorders_by_the_main_axis_alone() {
 }
 
 /// **A drag that keeps an item's place in the flow is no reorder, beside a
-/// pinned or hidden sibling** (§15 D934, `[X4.1-L1-02]`). `[a, p, b]` with `p`
-/// pinned: `a` nudged 3 px is still first in the flow, but the index was the one
-/// just before the next in-flow sibling, `b` — so a `Reorder` past `p` was
-/// committed, painting `a` over the layer it was under, an undo step with nothing
-/// moved. The block form: `[a, h, b, c]` with `h` hidden, the block `[a, b]`
-/// dragged short of `c`, pulled `h` out from between them.
+/// pinned or hidden sibling** (§15 D934). `[a, p, b]` with `p` pinned: `a`
+/// nudged 3 px is still first in the flow, but the index was the one just before
+/// the next in-flow sibling, `b` — so a `Reorder` past `p` was committed,
+/// painting `a` over the layer it was under, an undo step with nothing moved. The
+/// block form: `[a, h, b, c]` with `h` hidden, the block `[a, b]` dragged short
+/// of `c`, pulled `h` out from between them.
 ///
 /// **Flip run**, `flex_reorder` comparing child-list indices again: fails on
 /// *"a nudge beside a pinned sibling"*, `Some(Reorder { a, 1 })`, the predicted
@@ -1774,18 +1771,17 @@ fn a_drag_that_keeps_the_flow_order_is_no_reorder() {
 }
 
 /// **A definite-size item resized from its top does not jump to the far side of
-/// its line** (§15 D935, the release review's `[X3.2-L1-01]`). In a stretching
-/// row a frame 100 tall is not stretched — its `auto` is its stored size,
-/// definite (D879) — and neither is a laid group 100px tall. Resized from the top
-/// to 70, each was written `align-self: end`, D905's rule for a stretched item,
-/// and jumped to the line's end, 110..180.
+/// its line** (§15 D935). In a stretching row a frame 100 tall is not stretched —
+/// its `auto` is its stored size, definite (D879) — and neither is a laid group
+/// 100px tall. Resized from the top to 70, each was written `align-self: end`,
+/// D905's rule for a stretched item, and jumped to the line's end, 110..180.
 ///
-/// ⚠️ **The finding expected the bottom to hold at 120, and nothing can give
-/// that**: a definite item in a stretching line is placed at the line's start,
-/// as a start-aligned one is, so it keeps its top at 20 whichever handle resized
-/// it — 20..90, the ordinary behaviour of a start-aligned item, which is what
-/// D905 replaced for a *stretched* one only. Holding the bottom would need a
-/// keyword that moves it to the line's end, which is the jump.
+/// ⚠️ **Nothing can hold the bottom at 120**: a definite item in a stretching
+/// line is placed at the line's start, as a start-aligned one is, so it keeps its
+/// top at 20 whichever handle resized it — 20..90, the ordinary behaviour of a
+/// start-aligned item, which is what D905 replaced for a *stretched* one only.
+/// Holding the bottom would need a keyword that moves it to the line's end, which
+/// is the jump.
 ///
 /// **Flip run**, `stretched_across` asked of the keyword alone: fails on *"at
 /// the line's start"*, 110..180, the predicted site.
@@ -1851,12 +1847,12 @@ fn a_definite_item_dragged_by_its_top_does_not_jump() {
     );
 }
 
-/// **A resize below an item's `flex-basis` holds** (§15 D935, `[X4.1-L1-03]`):
-/// a 40-wide rect with `basis: 100px` is drawn 100 wide, and resized to 60 it
-/// stayed 100 — the basis decides the main size before growth does, and the
-/// commit cleared growth but left the basis. And **a point edit on a growing
-/// path leaves its growth alone** (`[X4.1-L1-04]`): a path never stretches, so
-/// growth only widens its slot, and stopping it jumped the sibling from x 340.
+/// **A resize below an item's `flex-basis` holds** (§15 D935): a 40-wide rect
+/// with `basis: 100px` is drawn 100 wide, and resized to 60 it stayed 100 — the
+/// basis decides the main size before growth does, and the commit cleared growth
+/// but left the basis. And **a point edit on a growing path leaves its growth
+/// alone**: a path never stretches, so growth only widens its slot, and stopping
+/// it jumped the sibling from x 340.
 ///
 /// **Flip runs**: `held` keeping the basis fails on *"drawn at the size it was
 /// resized to"*, 100 against 60; the kind gate in `flex_holds` deleted fails on

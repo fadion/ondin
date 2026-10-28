@@ -185,17 +185,17 @@ fn an_overridden_fill_is_kept_while_its_sibling_follows() {
 }
 
 /// **A fill one edit adds to a main and its instance together is one item on
-/// both** (§15 D1003 (6), `[X1-L1-01]`). The main's rect and the instance's copy
-/// selected together, a row added with the Fill card's `+` — the app's path,
+/// both** (§15 D1003 (6)). The main's rect and the instance's copy selected
+/// together, a row added with the Fill card's `+` — the app's path,
 /// `shared_fills` for the anchor, a minted row pushed, `retarget_fills_all` —
 /// then committed with what it owes. The copy's new fill is the main's item, so
 /// the instance shows no drift, and the main's next edit to it reaches the copy.
 ///
-/// Before the ruling the row was minted **per target**, so the copy's was a local
-/// addition with its own id: two override units and a ghost row for the main's
-/// "removed" fill straight after one edit the user made to both layers, and every
-/// later edit to the main's new fill skipped the copy — `propagate` stands down on
-/// a (node, field) the user's own transaction wrote. Flip, run: `item::retarget`
+/// A row minted **per target** would make the copy's a local addition with its
+/// own id: two override units and a ghost row for the main's "removed" fill
+/// straight after one edit the user made to both layers, and every later edit to
+/// the main's new fill skipping the copy — `propagate` stands down on a (node,
+/// field) the user's own transaction wrote. Flip, run: `item::retarget`
 /// back to minting for an item the anchor lacks fails *"one id for the added
 /// fill"*, the predicted site.
 #[test]
@@ -241,10 +241,10 @@ fn a_fill_added_to_a_main_and_its_instance_together_is_one_item() {
 
 /// *Paste properties* onto a main and its instance together — the wholesale
 /// replacement, `item::rekey_by_position` — gives a fill **past the end** of both
-/// lists one id too (§15 D1003 (6), `[X1-L1-01]`), so the copy follows the main's
-/// later edit to it. Flip, run: `PastTheEnd::at` minting on every call
-/// (`insert` for `get_or_insert_with`, so each target mints its own, the rule
-/// before) fails *"one id past the end"*, and `item.rs`'s own test beside it.
+/// lists one id too (§15 D1003 (6)), so the copy follows the main's later edit
+/// to it. Flip, run: `PastTheEnd::at` minting on every call (`insert` for
+/// `get_or_insert_with`, so each target mints its own) fails *"one id past the
+/// end"*, and `item.rs`'s own test beside it.
 #[test]
 fn a_paste_onto_a_main_and_its_instance_gives_a_new_fill_one_id() {
     let mut f = fixture();
@@ -602,10 +602,10 @@ fn a_reorder_in_the_main_follows() {
     assert_eq!(kids(&f.doc, f.i), vec![f.it, f.ia]);
 }
 
-/// **A child gained and a reorder in one transaction both follow** (the v0.5.0
-/// release review's `[X2-L1-02]`): the main gains *x* at the front and moves
-/// its text before its rect. The reorder arm took only a parent whose children
-/// were the same set, so the instance got *x* and kept the old order.
+/// **A child gained and a reorder in one transaction both follow**: the main
+/// gains *x* at the front and moves its text before its rect. The reorder arm
+/// took only a parent whose children were the same set, so the instance got *x*
+/// and kept the old order.
 ///
 /// Flip, run: the arm skipping a parent that gained a child fails with the
 /// instance's links `[a, x, t]` — *x*'s copy anchored after *a*'s counterpart,
@@ -636,11 +636,9 @@ fn a_child_gained_with_a_reorder_reaches_the_instance_in_the_new_order() {
 
 /// **A copy the transaction itself gave its new counterpart is not given a
 /// second** (§15 D1022's `supplied`): the main gains *x*, and the same
-/// transaction puts a node linked to *x* into the instance. Written for a kit
-/// update, where the vault's nested copies once took it; since the v0.5.0
-/// release review's `[X2-L1-01]` the vault follows nothing, and no kit test
-/// reaches the skip — so this pins it on the shape it answers, apart from the
-/// vault.
+/// transaction puts a node linked to *x* into the instance. The vault follows
+/// nothing, so no kit test reaches the skip — this pins it on the shape it
+/// answers, apart from the vault.
 ///
 /// Flip, run: the `supplied` skip removed fails *"one counterpart, and no
 /// second copy beside it"* with `[a, t, None, x]`. ⚠️ **Its first assertion
@@ -928,7 +926,7 @@ fn deleting_a_main_through_the_commit_keeps_its_instances_layers() {
     assert_eq!(link(&f.doc, ia), None);
 }
 
-// ── The release review's blockers (`v0.4.1..7d0c666`) ─────────────────────────
+// ── Nesting, drags in and out, deletes and ungroups ────────────────────────────
 
 /// The fixture's instance nested in an outer main, which gets an instance of its
 /// own: the nested copy there, holding copies of `i`'s children.
@@ -972,12 +970,11 @@ fn nest(f: &mut F) -> NodeId {
 }
 
 /// **A value the loader admits and the operations refuse does not take the
-/// commit down** (`[R1-L2-01]`). A gradient's opacity of 5 loads — its reader
-/// clamps it, §15 D767 — and editing that fill on a main read the old value by
-/// applying the edit and re-applying its inverse, which `op_set_fills` refuses:
-/// `peek` asserted it took, and the commit panicked, as did every preview frame of
-/// a scrub on the same fill. `peek` reads off a one-node scratch now and restores
-/// nothing.
+/// commit down.** A gradient's opacity of 5 loads — its reader clamps it, §15
+/// D767 — and editing that fill on a main read the old value by applying the edit
+/// and re-applying its inverse, which `op_set_fills` refuses: `peek` asserted it
+/// took, and the commit panicked, as did every preview frame of a scrub on the
+/// same fill. `peek` reads off a one-node scratch and restores nothing.
 ///
 /// Flip: `peek` re-applying the inverse with the `expect` back panics here,
 /// *"an inverse applies to the state it was taken from: NonFinite"*.
@@ -1026,12 +1023,12 @@ fn a_loaded_value_the_operations_refuse_does_not_panic_a_mains_edit() {
 }
 
 /// **A layer dragged out of a main leaves its instances, and the drag commits**
-/// (`[X3-L1-01]`, §15 D979 (xiv)). The canvas writes the move as a `Reparent`
-/// and a `SetTransform`; the structural pass deletes the untouched counterpart,
-/// and the field pass — whose copy map is the document before the edit — then
-/// wrote the transform onto the deleted node, and `apply` refused the whole drag
-/// with `NoSuchNode`. A counterpart the instance had changed is kept and cut, and
-/// the field pass moved it 300 units out of its 100×100 instance.
+/// (§15 D979 (xiv)). The canvas writes the move as a `Reparent` and a
+/// `SetTransform`; the structural pass deletes the untouched counterpart, and the
+/// field pass — whose copy map is the document before the edit — then wrote the
+/// transform onto the deleted node, and `apply` refused the whole drag with
+/// `NoSuchNode`. A counterpart the instance had changed is kept and cut, and the
+/// field pass moved it 300 units out of its 100×100 instance.
 ///
 /// Flip: dropping `propagate`'s `gone` check fails the first commit with
 /// `NoSuchNode`, the `expect` in `commit_all`.
@@ -1083,8 +1080,8 @@ fn a_member_dragged_out_of_a_main_leaves_its_instances() {
 }
 
 /// **Deleting a main's child together with its counterpart, or with the whole
-/// instance, commits** (`[X2-L1-02]`). The structural pass read the counterpart
-/// as untouched in the document before the edit and deleted it a second time.
+/// instance, commits.** The structural pass read the counterpart as untouched in
+/// the document before the edit and deleted it a second time.
 ///
 /// Flip: dropping the lost queue's `after_nodes` check fails both commits with
 /// `NoSuchNode`.
@@ -1114,10 +1111,10 @@ fn deleting_a_child_with_its_counterpart_or_its_instance_commits() {
 }
 
 /// **A layer dragged into a main from outside it reaches the main's instances**
-/// (`[X2-L1-01]`, §5.3d build step 4: *"a `Reparent` into the main"*). The gained
-/// subtree was pruned to what the edit had *made*, so a layer that existed before
-/// — drawn on the canvas and then dragged in — was never copied, and each
-/// instance silently stopped matching its main.
+/// (§5.3d build step 4: *"a `Reparent` into the main"*). The gained subtree was
+/// pruned to what the edit had *made*, so a layer that existed before — drawn on
+/// the canvas and then dragged in — was never copied, and each instance silently
+/// stopped matching its main.
 ///
 /// Flip: `only_new` admitting every node that existed before (the old predicate)
 /// fails the child count, 2 against 3.
@@ -1150,10 +1147,10 @@ fn a_layer_dragged_into_a_main_reaches_its_instances() {
 }
 
 /// **An ungroup inside a main keeps an instance's changed copy of the group as
-/// a local wrapper, its children inside it and still linked** (`[R3-L5-01]`,
-/// §15 D1003 (2)). The moves loop lifted the counterparts out whatever the copy
-/// held: they drew as the main did — 30 units left of where the instance had
-/// put them, at full opacity — and the moved, faded group stayed behind empty.
+/// a local wrapper, its children inside it and still linked** (§15 D1003 (2)).
+/// The moves loop lifted the counterparts out whatever the copy held: they drew
+/// as the main did — 30 units left of where the instance had put them, at full
+/// opacity — and the moved, faded group stayed behind empty.
 /// The group's transform the ungroup bakes into the child is the main's, not this
 /// copy's, so the child keeps its own local transform too.
 ///
@@ -1246,10 +1243,10 @@ fn an_ungroup_in_a_main_keeps_a_changed_group_copy_as_a_local_wrapper() {
     );
 }
 
-/// **A reorder in a main reaches through a nested instance** (`[X3-L2-02]`,
-/// §5.3d *Linking*: transitive). The reorder arm handled one level, so the outer
-/// instance's nested copy kept the old order and refused every later reorder as
-/// one it had made itself.
+/// **A reorder in a main reaches through a nested instance** (§5.3d *Linking*:
+/// transitive). A reorder arm handling one level leaves the outer instance's
+/// nested copy in the old order, refusing every later reorder as one it had made
+/// itself.
 ///
 /// Flip: dropping the `reorders.push` leaves the nested copy at `[a, t]`.
 #[test]

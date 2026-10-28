@@ -232,6 +232,25 @@ impl OndinApp {
             .map(|t| t.id)
     }
 
+    /// [`Self::tab_of_path`] for an open door: also the tab whose path names the
+    /// same file spelled otherwise (a case difference on Windows, a `..`, a
+    /// junction), so one file never gets two tabs saving over each other. Reads the
+    /// disk, so a per-frame caller keeps to `tab_of_path`.
+    pub(crate) fn tab_of_file(&self, path: &Path) -> Option<TabId> {
+        self.tab_of_path(path).or_else(|| {
+            let want = std::fs::canonicalize(path).ok()?;
+            self.tabs
+                .list
+                .iter()
+                .find(|t| {
+                    self.tab_path(t)
+                        .and_then(|p| std::fs::canonicalize(p).ok())
+                        .is_some_and(|p| p == want)
+                })
+                .map(|t| t.id)
+        })
+    }
+
     /// The tab in front, or `None` while the library is.
     pub(crate) fn front_tab(&self) -> Option<TabId> {
         match self.view {
@@ -1791,6 +1810,24 @@ mod tests {
             app.session.camera.zoom, 3.0,
             "the same session, not a reload"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One file spelled two ways is one tab: opening it through a `..` brings the
+    /// open tab forward.
+    /// flip: `open_path` asking `tab_of_path` → fails at "one tab".
+    #[test]
+    fn one_file_spelled_two_ways_is_one_tab() {
+        let ctx = egui::Context::default();
+        let root = temp_root("spelled");
+        let mut app = app_at(&ctx, &root);
+        let a = file(&root, "a");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        app.open_path(&a);
+        let count = app.tabs.list.len();
+        app.open_path(&root.join("sub").join("..").join("a.ondin"));
+        assert_eq!(app.tabs.list.len(), count, "one tab");
+        assert_eq!(front_path(&app).as_deref(), Some(a.as_path()));
         let _ = std::fs::remove_dir_all(&root);
     }
 

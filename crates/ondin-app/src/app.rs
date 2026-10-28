@@ -5337,7 +5337,7 @@ impl OndinApp {
     /// strip; a document already open has its tab brought forward instead. Reports
     /// failure and stays where it is, so the dashboard row can be tried again.
     pub(crate) fn open_path(&mut self, path: &std::path::Path) {
-        if let Some(id) = self.tab_of_path(path) {
+        if let Some(id) = self.tab_of_file(path) {
             match self.tabs.get(id).map(|t| &t.body) {
                 Some(crate::tabs::Body::Unloaded { .. }) => {
                     if self.load_now(id) {
@@ -5358,7 +5358,7 @@ impl OndinApp {
     /// at once, pulsing until [`Self::poll_open`] adopts the document. A document
     /// already open has its tab brought forward instead.
     pub(crate) fn begin_open(&mut self, path: &std::path::Path) {
-        let found = self.tab_of_path(path);
+        let found = self.tab_of_file(path);
         if let Some(id) = found
             && !matches!(
                 self.tabs.get(id).map(|t| &t.body),

@@ -15794,6 +15794,166 @@ mod close_confirmation_tests {
                 .collect::<Vec<_>>()
         );
     }
+
+    /// The `.ondin` files straight in `dir`: the library's documents, not the
+    /// recovery snapshots in its `.recovery` folder.
+    fn documents_under(dir: &std::path::Path) -> usize {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "ondin"))
+            .count()
+    }
+
+    /// A headless app over a library at a fresh `root`, with tabs `a`, `b` and
+    /// `c` opened from files there and the starter tab closed; `a` and `b` carry
+    /// an edit and no path, `c` is clean and in front. The tabs, then the root.
+    fn three_tabs(
+        ctx: &egui::Context,
+        tag: &str,
+    ) -> (OndinApp, [crate::tabs::TabId; 3], std::path::PathBuf) {
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let root = std::env::temp_dir().join(format!("ondin-close-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = OndinApp::headless(ctx);
+        app.prefs.base_folder = Some(root.clone());
+        app.library = crate::library::state::Library::open(root.clone());
+        let starter = app.tabs.active.unwrap();
+        app.discard_tab(starter);
+        let tabs = ["a", "b", "c"].map(|name| {
+            let mut ids = ondin_core::IdSource::new(7);
+            let path = root.join(format!("{name}.ondin"));
+            crate::library::store::write_document(&path, &ondin_core::Document::new(ids.mint()))
+                .unwrap();
+            app.open_path(&path);
+            app.tab_of_path(&path).unwrap()
+        });
+        for tab in &tabs[..2] {
+            app.activate_tab(*tab);
+            let s = &mut app.session;
+            let (id, parent) = (s.ids.mint(), s.page);
+            assert!(s.commit(Transaction(vec![Operation::CreateNode {
+                id,
+                parent,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            }])));
+            s.path = None;
+        }
+        app.activate_tab(tabs[2]);
+        (app, tabs, root)
+    }
+
+    /// Answer the card by the button labelled `label`: frames to fade it in, then
+    /// move there, press and release.
+    fn answer(app: &mut OndinApp, ctx: &egui::Context, label: &str) {
+        let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 800.0));
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.close_confirmation(ui.ctx()))
+                .shapes
+        };
+        for _ in 0..30 {
+            run(app, vec![]);
+        }
+        let at = run(app, vec![])
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{label:?} is drawn"));
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(app, vec![egui::Event::PointerMoved(at)]);
+        run(app, vec![button(true)]);
+        run(app, vec![button(false)]);
+    }
+
+    /// *Save and close* over several tabs files each never-filed one and closes
+    /// it, leaving the tab not asked about open.
+    ///
+    /// flip: the tab arm saving only the first asked tab → fails at "both closed".
+    #[test]
+    fn save_and_close_files_and_closes_every_tab_asked_about() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, [a, b, c], root) = three_tabs(&ctx, "save");
+        let before = documents_under(&root);
+        app.closing_tabs = vec![a, b];
+        answer(&mut app, &ctx, "Save and close");
+        assert!(
+            app.tabs.get(a).is_none() && app.tabs.get(b).is_none(),
+            "both closed"
+        );
+        assert_eq!(documents_under(&root), before + 2, "both filed");
+        assert!(app.tabs.get(c).is_some(), "the tab not asked about stays");
+        assert!(app.closing_tabs.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A tab whose save fails stays open with its work; the other still closes.
+    ///
+    /// flip: the tab arm discarding without reading `save_file`'s answer → fails
+    /// at "the failed tab stays".
+    #[test]
+    fn a_tab_whose_save_fails_stays_open() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, [a, b, c], root) = three_tabs(&ctx, "save-fails");
+        // `b` saves under a file standing where its folder should be.
+        std::fs::write(root.join("blocker"), b"").unwrap();
+        app.activate_tab(b);
+        app.session.path = Some(root.join("blocker").join("b.ondin"));
+        app.activate_tab(c);
+        app.closing_tabs = vec![a, b];
+        answer(&mut app, &ctx, "Save and close");
+        assert!(app.tabs.get(a).is_none(), "the one that saved closes");
+        assert!(app.tabs.get(b).is_some(), "the failed tab stays");
+        assert!(app.dirty_tabs().contains(&b), "with its work");
+        assert!(app.closing_tabs.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// *Discard* over several tabs closes each asked tab without writing it.
+    ///
+    /// flip: the tab arm discarding only the first asked tab → fails at "both
+    /// closed".
+    #[test]
+    fn discard_closes_every_tab_asked_about_unwritten() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, [a, b, c], root) = three_tabs(&ctx, "discard");
+        let before = documents_under(&root);
+        app.closing_tabs = vec![a, b];
+        answer(&mut app, &ctx, "Discard");
+        assert!(
+            app.tabs.get(a).is_none() && app.tabs.get(b).is_none(),
+            "both closed"
+        );
+        assert_eq!(documents_under(&root), before, "nothing written");
+        assert!(app.tabs.get(c).is_some(), "the tab not asked about stays");
+        assert!(app.closing_tabs.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]

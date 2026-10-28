@@ -1281,4 +1281,181 @@ mod tests {
         let note = app.session.history.current_note_mut().expect("a step");
         assert_eq!(note.subject.as_deref(), Some("Pricing"));
     }
+
+    /// One frame of the Pages section alone, 300 × 600, `events` delivered; the
+    /// page rows' rects it laid, top to bottom.
+    fn section(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::Rect> {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.pages_section(ui),
+        );
+        let mut rows: Vec<egui::Rect> = ctx.viewport(|v| {
+            v.prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, w)| w.iter())
+                .filter(|w| w.sense == egui::Sense::click_and_drag() && w.rect.height() == ROW_H)
+                .map(|w| w.rect)
+                .collect()
+        });
+        rows.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        rows
+    }
+
+    /// A page row dropped on a gap lands there: below its own row the slot counts
+    /// the row itself, above it not, and its own gap moves nothing.
+    ///
+    /// flip: `page_drag_ui` taking the slot as the index (no `slot - 1` below the
+    /// row) → fails at "dropped one gap down".
+    #[test]
+    fn a_dragged_page_row_lands_in_the_gap_it_is_dropped_on() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [first, second, ..]) = two_pages(&ctx);
+        let third = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::AddPage {
+            id: third,
+            index: 2,
+            name: "Archive".into(),
+            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            draft: false,
+            mode: None,
+        }])));
+        section(&ctx, &mut app, vec![]);
+        let rows = section(&ctx, &mut app, vec![]);
+        assert_eq!(rows.len(), 3, "fixture: three page rows");
+        let drop = |app: &mut OndinApp, page: NodeId, y: f32| {
+            app.pages.drag = Some((page, None));
+            let at = egui::pos2(rows[0].center().x, y);
+            section(
+                &ctx,
+                app,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+            assert!(app.pages.drag.is_none(), "the release ends the drag");
+        };
+        let order = |app: &OndinApp| -> Vec<NodeId> {
+            app.session.doc.pages().iter().map(|p| p.id).collect()
+        };
+
+        // Between the second and third rows: slot 2, which is index 1 once the
+        // first row is lifted out.
+        drop(&mut app, first, rows[2].top() + 2.0);
+        assert_eq!(
+            order(&app),
+            vec![second, first, third],
+            "dropped one gap down"
+        );
+        // Above the first row: slot 0.
+        drop(&mut app, third, rows[0].top() + 2.0);
+        assert_eq!(order(&app), vec![third, second, first], "dropped on top");
+        // Just under its own row: its own gap.
+        let depth = app.session.history.undo_depth();
+        drop(&mut app, second, rows[1].bottom() + 2.0);
+        assert_eq!(order(&app), vec![third, second, first], "stays");
+        assert_eq!(app.session.history.undo_depth(), depth, "and adds no step");
+    }
+
+    /// One frame of *Delete page?* alone, its shapes returned.
+    fn confirm_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |_| app.page_delete_confirmation(ctx))
+            .shapes
+    }
+
+    /// Click the card's button labelled `label`: move there, press, release.
+    fn click_confirm(ctx: &egui::Context, app: &mut OndinApp, label: &str) {
+        for _ in 0..3 {
+            confirm_frame(ctx, app, vec![]);
+        }
+        let shapes = confirm_frame(ctx, app, vec![]);
+        let at = shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{label:?} is drawn"));
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        confirm_frame(ctx, app, vec![egui::Event::PointerMoved(at)]);
+        confirm_frame(ctx, app, vec![button(true)]);
+        confirm_frame(ctx, app, vec![button(false)]);
+    }
+
+    /// *Delete page?*'s *Delete* deletes the page it was asked about, not the
+    /// current one; *Cancel* and Escape close it with the page kept.
+    ///
+    /// flip: `page_delete_confirmation` deleting `self.session.page` → fails at
+    /// "the page asked about goes".
+    #[test]
+    fn the_delete_page_card_deletes_the_page_it_asked_about() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [first, second, ..]) = two_pages(&ctx);
+        app.pages.deleting = Some(second);
+        click_confirm(&ctx, &mut app, "Delete");
+        assert!(
+            !app.session.doc.is_page(second),
+            "the page asked about goes"
+        );
+        assert!(app.session.doc.is_page(first), "the current page stays");
+        assert_eq!(app.session.page, first);
+        assert!(app.pages.deleting.is_none());
+
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        app.pages.deleting = Some(second);
+        click_confirm(&ctx, &mut app, "Cancel");
+        assert!(app.session.doc.is_page(second), "Cancel keeps the page");
+        assert!(app.pages.deleting.is_none(), "and closes the card");
+
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        app.pages.deleting = Some(second);
+        for _ in 0..3 {
+            confirm_frame(&ctx, &mut app, vec![]);
+        }
+        confirm_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.session.doc.is_page(second), "Escape keeps the page");
+        assert!(app.pages.deleting.is_none(), "and closes the card");
+    }
 }

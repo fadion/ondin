@@ -1554,23 +1554,7 @@ impl eframe::App for OndinApp {
 
         // The tab in front is still being read, or could not be: its place, over the
         // active tab's state, which nothing this frame may touch.
-        if self.tabs.shown.is_some() && self.tabs.shown != self.tabs.active {
-            self.palette = None;
-            self.stop_presenting(ui.ctx());
-            // The tab menu holds the keyboard here as in the editor.
-            if self.tabs.menu.is_some() && !self.modal_is_up() {
-                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    self.tabs.menu = None;
-                } else {
-                    self.tabs.menu_nav = crate::menu::read_nav(&ctx);
-                }
-            }
-            self.tab_strip(ui, !self.modal_is_up(), false);
-            if !self.modal_is_up() {
-                self.tab_placeholder(ui);
-            }
-            crate::chrome::above_modal(ui.ctx(), crate::chrome::Chrome::current());
-            self.chrome_focus = ui.ctx().memory(|m| m.focused()).is_some();
+        if self.placeholder_frame(ui, false, false) {
             return;
         }
 
@@ -1699,6 +1683,11 @@ impl eframe::App for OndinApp {
                 }
             }
         }
+        // A key that brought forward a tab still to be read (`Ctrl+Tab`, `Ctrl+W`
+        // onto one) left the scratch session in the fields; it is never drawn.
+        if self.placeholder_frame(ui, false, true) {
+            return;
+        }
 
         // Dropped files bypass the `egui::Modal` backdrop, so a modal blocks them here.
         if !self.modal_is_up() {
@@ -1727,6 +1716,10 @@ impl eframe::App for OndinApp {
         // Focus mode overrides the chrome switches without changing them.
         if !self.focus {
             self.tab_strip(ui, true, false);
+            // The same for a click on such a tab, under the strip just drawn.
+            if self.placeholder_frame(ui, true, true) {
+                return;
+            }
             self.top_bar(ui);
             if self.show_layers {
                 self.layers_panel(ui);

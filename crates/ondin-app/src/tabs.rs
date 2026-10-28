@@ -1557,9 +1557,47 @@ impl OndinApp {
         }
     }
 
+    /// The frame's body while the tab in front is not the active one — it is being
+    /// read, or could not be: the strip, unless `strip_drawn`, and
+    /// [`Self::tab_placeholder`]. Answers whether it drew; the caller then returns,
+    /// since the fields hold the parked tab's scratch session, never to be drawn.
+    /// `keys_read`: the editor already acted on this frame's keys, which egui does
+    /// not consume, so the placeholder must not act on them a second time.
+    pub(crate) fn placeholder_frame(
+        &mut self,
+        ui: &mut egui::Ui,
+        strip_drawn: bool,
+        keys_read: bool,
+    ) -> bool {
+        if self.tabs.shown.is_none() || self.tabs.shown == self.tabs.active {
+            return false;
+        }
+        let ctx = ui.ctx().clone();
+        self.palette = None;
+        self.stop_presenting(&ctx);
+        if !strip_drawn {
+            // The tab menu holds the keyboard here as in the editor.
+            if !keys_read && self.tabs.menu.is_some() && !self.modal_is_up() {
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.tabs.menu = None;
+                } else {
+                    self.tabs.menu_nav = crate::menu::read_nav(&ctx);
+                }
+            }
+            self.tab_strip(ui, !self.modal_is_up(), false);
+        }
+        if !self.modal_is_up() {
+            self.tab_placeholder(ui, !keys_read);
+        }
+        crate::chrome::above_modal(&ctx, crate::chrome::Chrome::current());
+        self.chrome_focus = ctx.memory(|m| m.focused()).is_some();
+        true
+    }
+
     /// The editor's place while the tab in front is being read, or could not be:
-    /// its name, and for a failed read why, with *Try again* and *Close tab*.
-    pub(crate) fn tab_placeholder(&mut self, ui: &mut egui::Ui) {
+    /// its name, and for a failed read why, with *Try again* and *Close tab*; its
+    /// keys only when `keys`.
+    pub(crate) fn tab_placeholder(&mut self, ui: &mut egui::Ui, keys: bool) {
         use crate::theme::{color, text};
         let Some(id) = self.tabs.shown else {
             return;
@@ -1636,14 +1674,14 @@ impl OndinApp {
             return;
         }
         let (close_key, library_key) = ui.ctx().input(|i| {
-            let cmd = i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift;
+            let cmd = keys && i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift;
             (
                 // `Ctrl+W` spares a pinned tab, as in the editor; the button does not.
                 cmd && i.key_pressed(egui::Key::W) && !info.pinned,
                 cmd && i.key_pressed(egui::Key::O),
             )
         });
-        if let Some(key) = read_keys(ui.ctx()) {
+        if let Some(key) = read_keys(ui.ctx()).filter(|_| keys) {
             self.tab_key(key);
         } else if retry {
             self.retry_tab(id);
@@ -2325,6 +2363,113 @@ mod tests {
         assert!(
             app.tabs.get(failed).is_none(),
             "control: unpinned, it closes"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The texts one whole app frame paints, `modifiers` held and `events` delivered.
+    fn frame_texts(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        modifiers: egui::Modifiers,
+        events: Vec<egui::Event>,
+    ) -> Vec<String> {
+        let mut f = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            modifiers,
+            events,
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut f));
+        out.shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A tab key or a click in the editor that brings forward a tab still to be
+    /// read draws its placeholder on that same frame, never the scratch session
+    /// parked in the fields (the starter document's "Frame 1"), and steps once.
+    /// flip: the editor frame without its post-key `placeholder_frame` → fails at
+    /// "no scratch session after the key" (focus mode: outside it the post-strip
+    /// guard catches the key too); without the post-strip one → fails at
+    /// "no scratch session after the click"; the placeholder's keys read on a
+    /// frame the editor already read them → fails at "one step".
+    #[test]
+    fn a_tab_still_to_be_read_never_shows_the_scratch_session() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("scratch");
+        let mut app = app_at(&ctx, &root);
+        let starter = app.tabs.active.unwrap();
+        app.discard_tab(starter);
+        let a = file(&root, "a");
+        app.open_path(&a);
+        let b = app.tabs.add(Body::Unloaded {
+            path: file(&root, "b"),
+            failed: None,
+        });
+        let c = app.tabs.add(Body::Unloaded {
+            path: file(&root, "c"),
+            failed: None,
+        });
+        let quiet = frame_texts(&ctx, &mut app, egui::Modifiers::NONE, Vec::new());
+        assert!(
+            app.view == View::Editor && !quiet.iter().any(|t| t == "Frame 1"),
+            "fixture: a's editor, with no frame of its own: {quiet:?}"
+        );
+
+        // In focus mode, where no strip is drawn to stop the frame after it.
+        app.focus = true;
+        let tab = egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        let texts = frame_texts(&ctx, &mut app, egui::Modifiers::COMMAND, vec![tab]);
+        assert_eq!(app.tabs.shown, Some(b), "one step");
+        assert!(
+            !texts.iter().any(|t| t == "Frame 1"),
+            "no scratch session after the key: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Loading B…"),
+            "b's placeholder: {texts:?}"
+        );
+
+        // Back on a, read again into its tab, then a click on c's tab.
+        app.focus = false;
+        app.settle_open();
+        app.activate_tab(app.tab_of_path(&a).unwrap());
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(app.tabs.active, app.tabs.shown, "fixture: a in front");
+        let (at, _) = tab_points(2);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, &mut app, vec![press(true)]);
+        let texts = frame_texts(&ctx, &mut app, egui::Modifiers::NONE, vec![press(false)]);
+        assert_eq!(
+            app.tabs.shown,
+            Some(c),
+            "fixture: the click brought c forward"
+        );
+        assert!(
+            !texts.iter().any(|t| t == "Frame 1"),
+            "no scratch session after the click: {texts:?}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

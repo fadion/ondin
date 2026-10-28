@@ -1345,8 +1345,15 @@ const WINDING_FLATTEN: f64 = 0.01;
 /// Not `Shape::winding`: kurbo's ray cast over a cubic that turns through
 /// horizontal mid-segment reads some points up to a unit and a half outside it as
 /// inside, which a click zoomed in can land on.
+///
+/// Only a curve whose control points straddle `p` both across and along the ray is
+/// flattened. One wholly above, below or to the left of `p` cannot cross the ray to
+/// its right, and one wholly to the right crosses it as its chord does, however
+/// often it wiggles; so a hit test pays for the few curves near the point.
 pub fn winding(path: &BezPath, p: Point) -> i32 {
-    let bounds = path.bounding_box();
+    // The control points' box, not the curves' own: as good for ruling a point out,
+    // without solving every cubic for its extremes on every hit test.
+    let bounds = path.control_box();
     if !bounds.contains(p) {
         return 0;
     }
@@ -1362,24 +1369,59 @@ pub fn winding(path: &BezPath, p: Point) -> i32 {
             w -= 1;
         }
     };
+    let mut segment = |seg: kurbo::PathSeg| {
+        let (a, b) = (seg.start(), seg.end());
+        let hull = match seg {
+            kurbo::PathSeg::Line(_) => return cross(a, b),
+            kurbo::PathSeg::Quad(q) => Rect::from_points(q.p0, q.p2).union_pt(q.p1),
+            kurbo::PathSeg::Cubic(c) => Rect::from_points(c.p0, c.p3).union_pt(c.p1).union_pt(c.p2),
+        };
+        if hull.y0 > p.y || hull.y1 <= p.y || hull.x1 < p.x {
+            return;
+        }
+        if hull.x0 > p.x {
+            return cross(a, b);
+        }
+        let mut at = a;
+        let el = match seg {
+            kurbo::PathSeg::Quad(q) => PathEl::QuadTo(q.p1, q.p2),
+            kurbo::PathSeg::Cubic(c) => PathEl::CurveTo(c.p1, c.p2, c.p3),
+            kurbo::PathSeg::Line(l) => PathEl::LineTo(l.p1),
+        };
+        kurbo::flatten([PathEl::MoveTo(a), el], flat, |el| {
+            if let PathEl::LineTo(q) = el {
+                cross(at, q);
+                at = q;
+            }
+        });
+    };
     let (mut at, mut start) = (Point::ZERO, Point::ZERO);
-    kurbo::flatten(path.iter(), flat, |el| match el {
-        PathEl::MoveTo(q) => {
-            // The subpath before this one closes implicitly, as a fill closes it.
-            cross(at, start);
-            (at, start) = (q, q);
+    // Every subpath closes, explicitly or as a fill closes it.
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(q) => {
+                segment(kurbo::PathSeg::Line(kurbo::Line::new(at, start)));
+                (at, start) = (q, q);
+            }
+            PathEl::LineTo(q) => {
+                segment(kurbo::PathSeg::Line(kurbo::Line::new(at, q)));
+                at = q;
+            }
+            PathEl::QuadTo(c, q) => {
+                segment(kurbo::PathSeg::Quad(kurbo::QuadBez::new(at, c, q)));
+                at = q;
+            }
+            PathEl::CurveTo(c1, c2, q) => {
+                segment(kurbo::PathSeg::Cubic(kurbo::CubicBez::new(at, c1, c2, q)));
+                at = q;
+            }
+            PathEl::ClosePath => {
+                segment(kurbo::PathSeg::Line(kurbo::Line::new(at, start)));
+                at = start;
+            }
         }
-        PathEl::LineTo(q) => {
-            cross(at, q);
-            at = q;
-        }
-        PathEl::ClosePath => {
-            cross(at, start);
-            at = start;
-        }
-        _ => {}
-    });
-    cross(at, start);
+    }
+    segment(kurbo::PathSeg::Line(kurbo::Line::new(at, start)));
     w
 }
 
@@ -2371,5 +2413,61 @@ mod tests {
             world_bounds_of_path(&path, node.paint(), node.kind(), Affine::IDENTITY).is_some(),
             "control: and so does an ordinary outline"
         );
+    }
+
+    /// A closed path of `n` cubics wobbling a few percent round a circle of radius
+    /// `r`.
+    fn wobbly_circle(r: f64, n: usize) -> BezPath {
+        let at = |k: usize, s: f64| {
+            let a = k as f64 / (3 * n) as f64 * std::f64::consts::TAU;
+            let rr = r * (1.0 + 0.03 * s);
+            Point::new(rr * a.cos(), rr * a.sin())
+        };
+        let mut p = BezPath::new();
+        p.move_to(at(0, 0.0));
+        for k in 0..n {
+            p.curve_to(at(3 * k + 1, 1.0), at(3 * k + 2, -1.0), at(3 * k + 3, 0.0));
+        }
+        p.close_path();
+        p
+    }
+
+    /// A hit test on a path of thousands of cubics flattens only the few that pass
+    /// by the point, and answers inside and outside right; a thousand of them take
+    /// a fraction of a second even in a debug build, where flattening the whole
+    /// path every time takes tens of seconds.
+    /// flip: `winding` flattening every curve → fails at "a thousand hit tests".
+    #[test]
+    fn winding_skips_curves_that_cannot_cross_the_ray() {
+        let path = wobbly_circle(20000.0, 4000);
+        assert_eq!(winding(&path, Point::ZERO).abs(), 1, "inside");
+        assert_eq!(winding(&path, Point::new(14500.0, 14500.0)), 0, "outside");
+        let start = std::time::Instant::now();
+        for k in 0..1000 {
+            let a = k as f64 / 1000.0 * std::f64::consts::TAU;
+            let q = Point::new(15000.0 * a.cos(), 15000.0 * a.sin());
+            assert_ne!(winding(&path, q), 0, "inside at {q:?}");
+        }
+        let took = start.elapsed();
+        assert!(took.as_secs_f64() < 3.0, "a thousand hit tests: {took:?}");
+    }
+
+    /// An enormous path is flattened in proportion to its size, so a hit test on
+    /// one a trillion units across answers right at once.
+    /// flip: `winding` flattening at `WINDING_FLATTEN` whatever the size → fails
+    /// at "at once".
+    #[test]
+    fn winding_on_an_enormous_path_answers_at_once() {
+        let path = wobbly_circle(1e12, 16);
+        let start = std::time::Instant::now();
+        for k in 0..160 {
+            let a = (k as f64 + 0.5) / 160.0 * std::f64::consts::TAU;
+            let (c, s) = (a.cos(), a.sin());
+            assert_ne!(winding(&path, Point::new(5e11 * c, 5e11 * s)), 0, "inside");
+            let out = Point::new(1.05e12 * c, 1.05e12 * s);
+            assert_eq!(winding(&path, out), 0, "outside");
+        }
+        let took = start.elapsed();
+        assert!(took.as_secs_f64() < 1.0, "at once: {took:?}");
     }
 }

@@ -2013,6 +2013,113 @@ mod tests {
         );
     }
 
+    /// *Layers order, reversed* numbers the tree's bottom row first.
+    ///
+    /// flip: `plan_into` leaving the run unreversed for `Order::Reversed` → fails
+    /// at the names, `c1` first.
+    #[test]
+    fn reversed_numbers_from_the_bottom_row() {
+        let (ctx, mut app) = app();
+        let ids = ["a", "b", "c"].map(|n| named(&mut app, n));
+        app.session.selection.set(ids.to_vec());
+        let mut bx = opened(&ctx, &mut app, "", "[Name][Number]");
+        bx.s.order = Order::Reversed;
+        let got: Vec<String> = planned(&app, &bx)
+            .changes
+            .into_iter()
+            .map(|c| c.1)
+            .collect();
+        assert_eq!(got, ["a1", "b2", "c3"]);
+    }
+
+    /// *Include layers inside* takes the selected layer's subtree, and off it
+    /// takes the layer alone.
+    ///
+    /// flip: `Snapshot::take` not passing `under_selected` down to the children →
+    /// fails at "the frame and its two rectangles".
+    #[test]
+    fn include_layers_inside_takes_the_subtree() {
+        let (ctx, mut app, m) = with_an_instance();
+        app.session.selection.set_one(m);
+        let mut bx = opened(&ctx, &mut app, "", "X");
+        assert!(bx.s.inside);
+        let mut got: Vec<String> = new_names(&app, &planned(&app, &bx))
+            .into_iter()
+            .map(|c| c.0)
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            ["Button a", "Button b", "Card"],
+            "the frame and its two rectangles"
+        );
+        bx.s.inside = false;
+        assert_eq!(
+            new_names(&app, &planned(&app, &bx)),
+            [("Card".to_string(), "X".to_string())]
+        );
+    }
+
+    /// A variant in a set is listed as named by its properties, never renamed, and
+    /// takes no number.
+    ///
+    /// flip: `plan_into` without its variant arm → fails at "both variants listed
+    /// as such".
+    #[test]
+    fn a_variant_is_never_renamed() {
+        let (ctx, mut app) = app();
+        let mains = ["Small", "Large"].map(|n| {
+            let s = &mut app.session;
+            let (id, page) = (s.ids.mint(), s.page);
+            assert!(s.commit(Transaction(vec![
+                Operation::CreateNode {
+                    id,
+                    parent: page,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(50.0, 50.0),
+                    },
+                    transform: None,
+                    name: Some(n.into()),
+                },
+                Operation::SetComponent {
+                    id,
+                    component: true,
+                },
+            ])));
+            id
+        });
+        app.session.selection.set(mains.to_vec());
+        app.combine_as_variants();
+        let set = app.session.selection.single().expect("the set");
+        assert!(ondin_core::variant::is_set(&app.session.doc, set));
+        app.session.selection.clear();
+        let bx = opened(&ctx, &mut app, "", "X[Number]");
+        assert_eq!(bx.s.scope, Scope::Page);
+        let plan = planned(&app, &bx);
+        let variants: Vec<NodeId> = plan
+            .rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Layer(l) if l.new == New::Variant => Some(l.id),
+                _ => None,
+            })
+            .collect();
+        let mut want = mains.to_vec();
+        want.sort();
+        let mut variants_sorted = variants.clone();
+        variants_sorted.sort();
+        assert_eq!(variants_sorted, want, "both variants listed as such");
+        assert!(
+            plan.changes.iter().all(|c| !mains.contains(&c.0)),
+            "no variant renamed: {:?}",
+            plan.changes
+        );
+        let numbers: Vec<String> = plan.changes.iter().map(|c| c.1.clone()).collect();
+        let want: Vec<String> = (1..=numbers.len()).map(|i| format!("X{i}")).collect();
+        assert_eq!(numbers, want, "the variants took no number");
+    }
+
     /// A name that would come out empty is kept and says so; it takes no number
     /// and is not counted in the button.
     #[test]

@@ -286,9 +286,9 @@ fn trim_runs_before_pad() {
 /// anything tries to allocate the buffer.
 #[test]
 fn an_impossible_size_is_clamped_and_reported() {
-    let (_doc, res, _, rect) = frame_with_a_small_rect();
+    let (doc, res, _, rect) = frame_with_a_small_rect();
     let mut spec = ExportSpec::new(ExportFormat::Png, ExportScale::Width(200_000));
-    let (size, clamped) = ondin_export::plan::raster_size(&res, rect, &spec);
+    let (size, clamped) = ondin_export::plan::raster_size(&doc, &res, rect, &spec);
     // 65408 is `MAX_RASTER_SIDE`, and it is **not** `u16::MAX` — see the
     // constant, and `a_raster_at_the_cap_renders_on_either_axis` below, which is
     // what says the difference is load-bearing rather than cosmetic.
@@ -296,7 +296,7 @@ fn an_impossible_size_is_clamped_and_reported() {
     assert!(clamped, "and the panel is told");
 
     spec.scale = ExportScale::Times(2.0);
-    let (size, clamped) = ondin_export::plan::raster_size(&res, rect, &spec);
+    let (size, clamped) = ondin_export::plan::raster_size(&doc, &res, rect, &spec);
     assert_eq!(size, Some((200, 100)));
     assert!(!clamped, "an ordinary request is not flagged");
 }

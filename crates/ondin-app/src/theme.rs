@@ -312,6 +312,8 @@ pub mod icon {
     pub const SQUARES_FOUR: &str = "\u{e464}";
     /// The dashboard's *Edit project*.
     pub const PENCIL_SIMPLE: &str = "\u{e3b4}";
+    /// A slice's glyph.
+    pub const KNIFE: &str = "\u{e636}";
     pub const SHARE_NETWORK: &str = "\u{e408}";
     pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{e038}"; // undo
     pub const FOLDER_OPEN: &str = "\u{e256}";
@@ -731,6 +733,7 @@ pub mod icon {
         ("files", FILES),
         ("squares-four", SQUARES_FOUR),
         ("pencil-simple", PENCIL_SIMPLE),
+        ("knife", KNIFE),
         ("arrow-u-up-left", ARROW_U_UP_LEFT),
         ("arrow-u-up-right", ARROW_U_UP_RIGHT),
         ("arrow-u-down-left", ARROW_U_DOWN_LEFT),

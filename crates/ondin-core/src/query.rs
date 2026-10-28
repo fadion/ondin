@@ -122,6 +122,9 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     node.children()
         .iter()
         .filter_map(|c| {
+            if !crate::resolve::lends_bounds(doc, *c) {
+                return None;
+            }
             let child = doc.get(*c)?;
             let local = res.used_local(doc, *c)?;
             let b = local_box(doc, res, *c).map(|b| geometry::transform_rect(local, b));

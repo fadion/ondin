@@ -1,5 +1,5 @@
 {
-  "snapshot_version": 12,
+  "snapshot_version": 13,
   "pages": [
     {
       "id": "601d:1",
@@ -418,12 +418,58 @@
       "strokes": []
     },
     {
+      "id": "601d:18",
+      "kind": "slice",
+      "name": "Crop",
+      "page": "601d:1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        10.0,
+        10.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        20.0,
+        20.0
+      ],
+      "world_bounds": [
+        20.0,
+        20.0,
+        80.0,
+        60.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Slice",
+        "width": 60.0,
+        "height": 40.0
+      },
+      "fills": [],
+      "strokes": []
+    },
+    {
       "id": "601d:2",
       "kind": "artboard",
       "name": "Board",
       "page": "601d:1",
       "parent": "601d:1",
       "children": [
+        "601d:18",
         "601d:3",
         "601d:4",
         "601d:5",

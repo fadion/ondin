@@ -307,7 +307,8 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
         | NodeKind::Ellipse { size: s }
         | NodeKind::Polygon { size: s, .. }
         | NodeKind::Star { size: s, .. }
-        | NodeKind::Artboard { size: s, .. } => *s = size,
+        | NodeKind::Artboard { size: s, .. }
+        | NodeKind::Slice { size: s } => *s = size,
         NodeKind::Text { sizing, .. } => {
             *sizing = match (*sizing, stretched) {
                 (_, (false, false)) => *sizing,
@@ -1501,9 +1502,13 @@ pub fn is_container(kind: &NodeKind) -> bool {
 /// reading, §15 D874). **A hidden layer leaves the flow** — CSS's `display: none`
 /// rather than `visibility: hidden`, the design-tool reading of an eye switched
 /// off: the session's default in §15 D875, **ruled by the maintainer in §15
-/// D881**, when the Item card came to say so in words.
+/// D881**, when the Item card came to say so in words. A slice is never in the
+/// flow: it is placed absolutely, over whatever it exports.
 pub fn in_flow(view: &dyn LayoutView, id: crate::NodeId) -> bool {
-    view.visible(id) && !view.mask(id) && !view.insets(id).is_authored()
+    view.visible(id)
+        && !view.mask(id)
+        && !view.insets(id).is_authored()
+        && !matches!(view.kind(id), Some(NodeKind::Slice { .. }))
 }
 
 /// Whether `id` is a **replaced element** to the layout engine (§15 D872) — what

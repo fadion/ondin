@@ -268,7 +268,8 @@ pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind)
             | NodeKind::Ellipse { size }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
-            | NodeKind::Artboard { size } => Some(crate::GeometryPatch::Size(*size)),
+            | NodeKind::Artboard { size }
+            | NodeKind::Slice { size } => Some(crate::GeometryPatch::Size(*size)),
             NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(
                 kept_text_mode(node, kind, *sizing),
             )),
@@ -1041,7 +1042,8 @@ pub fn can_outline(kind: &NodeKind) -> bool {
         | NodeKind::Group
         | NodeKind::Artboard { .. }
         | NodeKind::Text { .. }
-        | NodeKind::Boolean { .. } => false,
+        | NodeKind::Boolean { .. }
+        | NodeKind::Slice { .. } => false,
     }
 }
 

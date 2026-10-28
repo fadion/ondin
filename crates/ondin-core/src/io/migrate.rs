@@ -38,6 +38,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             7 => migrate_7_to_8(&mut value),
             8 => migrate_8_to_9(&mut value),
             9 => migrate_9_to_10(&mut value),
+            10 => migrate_10_to_11(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -316,4 +317,18 @@ fn one_page(doc: &mut Value) {
         "pages".into(),
         serde_json::json!([{ "id": root, "ground": ground }]),
     );
+}
+
+/// v10 → v11: the `Slice` kind. Nothing to reshape; the bump is for an older
+/// build's sake, which refuses a v11 file rather than failing on a kind it does
+/// not know. The published document is bumped with it.
+fn migrate_10_to_11(value: &mut Value) {
+    value["schema_version"] = Value::from(11u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(11u32);
+    }
 }

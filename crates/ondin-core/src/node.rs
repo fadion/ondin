@@ -659,6 +659,12 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "is_zero")]
         on_path_offset: f64,
     },
+    /// A box and nothing else, for exporting a region of the page: it draws
+    /// nothing anywhere, and exports whatever is visible on its page inside it,
+    /// clipped to it (`ondin_export::plan`).
+    Slice {
+        size: Size,
+    },
 }
 
 /// `serde`'s skip predicate for a `f64` that means "no offset".
@@ -792,7 +798,9 @@ impl NodeKind {
         }
         match self {
             NodeKind::Root | NodeKind::Group | NodeKind::Boolean { .. } => true,
-            NodeKind::Artboard { size: s } | NodeKind::Ellipse { size: s } => size(s),
+            NodeKind::Artboard { size: s }
+            | NodeKind::Ellipse { size: s }
+            | NodeKind::Slice { size: s } => size(s),
             NodeKind::Polygon {
                 size: s,
                 corner_radius,
@@ -916,6 +924,7 @@ impl NodeKind {
             NodeKind::Line { .. } => "Line",
             NodeKind::Path { .. } => "Path",
             NodeKind::Text { .. } => "Text",
+            NodeKind::Slice { .. } => "Slice",
             // Named for the operation, so the layer list says what it does.
             NodeKind::Boolean { op } => op.label(),
         }
@@ -1367,6 +1376,7 @@ pub(crate) mod kind_fixture {
             NodeKind::Path { .. } => "Path",
             NodeKind::Boolean { .. } => "Boolean",
             NodeKind::Text { .. } => "Text",
+            NodeKind::Slice { .. } => "Slice",
         }
     }
 
@@ -1415,6 +1425,7 @@ pub(crate) mod kind_fixture {
                 on_path_flip: false,
                 on_path_offset: 0.0,
             },
+            NodeKind::Slice { size: one },
         ]
     }
 
@@ -1458,8 +1469,9 @@ mod kind_predicate_tests {
     /// The six `matches!`-over-`NodeKind` predicates, each as the pair of sets it
     /// actually divides the enum into.
     ///
-    /// One test rather than six, so `is_indexed` and `takes_paint` (identical
-    /// membership, spelled in two modules) are compared side by side.
+    /// One test rather than six, so `is_indexed` and `takes_paint` (the same
+    /// membership but for the slice, spelled in two modules) are compared side by
+    /// side.
     ///
     /// flip: delete `NodeKind::Boolean { .. }` from `resolve::is_indexed` → fails
     /// at the `is_indexed` assertion. flip: remove `"Root"` from `clips_children`'s
@@ -1473,7 +1485,7 @@ mod kind_predicate_tests {
                 vec!["Artboard"],
                 vec![
                     "Root", "Group", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path",
-                    "Boolean", "Text",
+                    "Boolean", "Text", "Slice",
                 ]
             ),
             "clips_children"
@@ -1485,7 +1497,7 @@ mod kind_predicate_tests {
                     "Group", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
                     "Text"
                 ],
-                vec!["Root", "Artboard"]
+                vec!["Root", "Artboard", "Slice"]
             ),
             "can_mask"
         );
@@ -1496,7 +1508,7 @@ mod kind_predicate_tests {
                     "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
                     "Text"
                 ],
-                vec!["Root", "Group"]
+                vec!["Root", "Group", "Slice"]
             ),
             "takes_paint"
         );
@@ -1505,11 +1517,11 @@ mod kind_predicate_tests {
             (
                 vec![
                     "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
-                    "Text"
+                    "Text", "Slice"
                 ],
                 vec!["Root", "Group"]
             ),
-            "is_indexed — identical to takes_paint, and that is the drift surface"
+            "is_indexed — takes_paint's set plus the slice"
         );
         assert_eq!(
             split(crate::geometry::stroke_sides_apply),
@@ -1517,7 +1529,7 @@ mod kind_predicate_tests {
                 vec!["Artboard", "Rect"],
                 vec![
                     "Root", "Group", "Ellipse", "Polygon", "Star", "Line", "Path", "Boolean",
-                    "Text"
+                    "Text", "Slice"
                 ]
             ),
             "stroke_sides_apply"
@@ -1528,7 +1540,7 @@ mod kind_predicate_tests {
                 vec!["Group", "Boolean"],
                 vec![
                     "Root", "Artboard", "Rect", "Ellipse", "Polygon", "Star", "Line", "Path",
-                    "Text"
+                    "Text", "Slice"
                 ]
             ),
             "steps_into (group_chain's arm)"

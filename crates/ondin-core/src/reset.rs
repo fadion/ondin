@@ -228,7 +228,9 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
     let geo = |geometry: G| Operation::SetGeometry { id, geometry };
     match kind {
         NodeKind::Root | NodeKind::Group => Vec::new(),
-        NodeKind::Artboard { size } | NodeKind::Ellipse { size } => vec![geo(G::Size(*size))],
+        NodeKind::Artboard { size } | NodeKind::Ellipse { size } | NodeKind::Slice { size } => {
+            vec![geo(G::Size(*size))]
+        }
         NodeKind::Rect {
             size,
             corner_radii,

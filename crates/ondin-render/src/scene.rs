@@ -635,9 +635,11 @@ fn paint_node<P: ScenePainter>(
     let Some(node) = doc.get(id) else { return };
     let over = ov.get(id);
 
-    if !over
-        .and_then(|o| o.visible)
-        .unwrap_or_else(|| doc.shown(id))
+    // A slice is never drawn.
+    if matches!(node.kind(), NodeKind::Slice { .. })
+        || !over
+            .and_then(|o| o.visible)
+            .unwrap_or_else(|| doc.shown(id))
     {
         return;
     }

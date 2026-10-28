@@ -86,20 +86,36 @@ pub fn svg_of_reported(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Ex
 /// [`svg_of_reported`] with text written as `text` asks: `<text>` elements, or the
 /// glyph outlines the canvas draws.
 pub fn svg_with(doc: &Document, res: &Resolved, origins: &[NodeId], text: ExportText) -> Export {
-    svg_linking(doc, res, origins, Default::default(), text)
+    svg_linking(doc, res, origins, Default::default(), text, None)
+}
+
+/// [`svg_with`] with `view`, a world-space box, as the `viewBox`, so whatever of
+/// the origins lies outside it is cut off: what a slice exports.
+pub fn svg_region(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[NodeId],
+    view: Rect,
+    text: ExportText,
+) -> Export {
+    svg_linking(doc, res, origins, Default::default(), text, Some(view))
 }
 
 /// [`svg_with`], each picture in `linked` written as a link to its path there
-/// rather than embedded: code export's pages share one file per picture.
+/// rather than embedded: code export's pages share one file per picture. `view`
+/// frames the file on a box of its own rather than on the origins' extent.
 pub(crate) fn svg_linking(
     doc: &Document,
     res: &Resolved,
     origins: &[NodeId],
     linked: std::collections::HashMap<ondin_core::ImageId, String>,
     text: ExportText,
+    view: Option<Rect>,
 ) -> Export {
     // `crate::extent`, shared with the PNG writer so the two frame the same box.
-    let view = crate::extent(res, origins).unwrap_or_else(|| Rect::new(0.0, 0.0, 100.0, 100.0));
+    let view = view
+        .or_else(|| crate::extent(res, origins))
+        .unwrap_or_else(|| Rect::new(0.0, 0.0, 100.0, 100.0));
 
     // Defs first so the header can carry them; ids follow document order.
     let mut defs = Defs {
@@ -1107,8 +1123,8 @@ fn emit_node(
     report: &mut Report,
 ) {
     let Some(node) = doc.get(id) else { return };
-    // Shown, a bound visibility resolved.
-    if !doc.shown(id) {
+    // Shown, a bound visibility resolved. A slice is never drawn.
+    if !doc.shown(id) || matches!(node.kind(), NodeKind::Slice { .. }) {
         return;
     }
     // The effect stack gets a transform-free wrapper, not an attribute: `filter`
@@ -1948,7 +1964,8 @@ fn write_element(
                 h = fmt(size.height),
             );
         }
-        NodeKind::Root | NodeKind::Group => {}
+        // `emit_node` never reaches here with a slice.
+        NodeKind::Root | NodeKind::Group | NodeKind::Slice { .. } => {}
     }
 }
 

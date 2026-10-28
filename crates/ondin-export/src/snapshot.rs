@@ -31,7 +31,8 @@ use std::collections::BTreeMap;
 /// - **11** every platform-sensitive number (`geometry.svg`, `local_transform`,
 ///   `world_transform`, `world_bounds`) is written at the SVG writer's four places.
 /// - **12** pages: `root` became `pages`, and every node says which page it is on.
-pub const SNAPSHOT_VERSION: u32 = 12;
+/// - **13** the `"slice"` kind and `Geometry::Slice`.
+pub const SNAPSHOT_VERSION: u32 = 13;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -211,6 +212,11 @@ pub enum Geometry {
     /// A frame. It has no background here: its ground is an ordinary entry in
     /// `NodeSnapshot::fills`.
     Artboard {
+        width: f64,
+        height: f64,
+    },
+    /// An export region's box; it draws nothing.
+    Slice {
         width: f64,
         height: f64,
     },
@@ -485,6 +491,7 @@ fn kind_name(kind: &NodeKind) -> &'static str {
         NodeKind::Line { .. } => "line",
         NodeKind::Path { .. } => "path",
         NodeKind::Text { .. } => "text",
+        NodeKind::Slice { .. } => "slice",
         // Not "boolean": a reader wants to know which operation.
         NodeKind::Boolean { op } => match op {
             ondin_core::BoolOp::Union => "boolean-union",
@@ -501,6 +508,10 @@ fn geometry(kind: &NodeKind) -> Geometry {
         // Its derived outline is `Resolved`'s, not the document's.
         NodeKind::Root | NodeKind::Group | NodeKind::Boolean { .. } => Geometry::None,
         NodeKind::Artboard { size } => Geometry::Artboard {
+            width: size.width,
+            height: size.height,
+        },
+        NodeKind::Slice { size } => Geometry::Slice {
             width: size.width,
             height: size.height,
         },

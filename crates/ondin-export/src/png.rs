@@ -114,7 +114,35 @@ pub fn raster_of_with(
     opts: &RasterOpts,
     images: &ImageStore,
 ) -> Option<Raster> {
-    let vp = viewport_at(crate::extent(res, origins)?, opts.scale);
+    let view = crate::extent(res, origins)?;
+    Some(raster_framed(doc, res, origins, view, opts, images))
+}
+
+/// [`raster_of`] framed on `view`, a world-space box, rather than on the origins'
+/// own extent: whatever of them is inside it, cut at its edges. What a slice
+/// exports.
+pub fn raster_region(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[ondin_core::NodeId],
+    view: ondin_core::kurbo::Rect,
+    opts: &RasterOpts,
+) -> Raster {
+    let mut images = ImageStore::new();
+    images.prepare(doc);
+    raster_framed(doc, res, origins, view, opts, &images)
+}
+
+/// The raster of `origins` seen through `view`, finished as `opts` asks.
+fn raster_framed(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[ondin_core::NodeId],
+    view: ondin_core::kurbo::Rect,
+    opts: &RasterOpts,
+    images: &ImageStore,
+) -> Raster {
+    let vp = viewport_at(view, opts.scale);
     let (rgba, width, height) =
         VelloCpuRenderer::new().render_subtrees_to_rgba(doc, res, &vp, images, origins);
     let mut r = Raster {
@@ -131,7 +159,7 @@ pub fn raster_of_with(
     if let Some(bg) = opts.background {
         composite_under(&mut r, bg);
     }
-    Some(r)
+    r
 }
 
 /// Drop the fully transparent rows and columns round the edges.

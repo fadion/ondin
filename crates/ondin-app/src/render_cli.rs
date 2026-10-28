@@ -366,7 +366,7 @@ fn render_modes(
 /// the raster limit took the size down.
 fn render_one(s: &EditorSession, node: NodeId, spec: &ExportSpec, path: String) -> Rendered {
     let (pixels, clamped) = match spec.format.is_raster() {
-        true => ondin_export::plan::raster_size(&s.resolved, node, spec),
+        true => ondin_export::plan::raster_size(&s.doc, &s.resolved, node, spec),
         false => (None, false),
     };
     if clamped && let Some((w, h)) = pixels {

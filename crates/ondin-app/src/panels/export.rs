@@ -585,7 +585,7 @@ impl OndinApp {
             });
         }
 
-        let (size, clamped) = ondin_export::plan::raster_size(res, key.node, &key.spec);
+        let (size, clamped) = ondin_export::plan::raster_size(doc, res, key.node, &key.spec);
         let (w, h) = size?;
         // The cap is on the preview, not the export: past it the section reports the
         // size it would be and renders nothing.
@@ -861,7 +861,7 @@ impl OndinApp {
         let Some(id) = sizing else {
             return String::new();
         };
-        match ondin_export::plan::raster_size(&self.session.resolved, id, spec) {
+        match ondin_export::plan::raster_size(&self.session.doc, &self.session.resolved, id, spec) {
             (Some((w, h)), true) => format!("{w}×{h} max"),
             (Some((w, h)), false) => format!("{w}×{h}"),
             (None, _) => String::new(),

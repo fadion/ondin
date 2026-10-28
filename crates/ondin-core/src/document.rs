@@ -3266,9 +3266,8 @@ pub(crate) fn apply_geometry_patch(
         | (NodeKind::Ellipse { size }, G::Size(new))
         | (NodeKind::Polygon { size, .. }, G::Size(new))
         | (NodeKind::Star { size, .. }, G::Size(new))
-        | (NodeKind::Artboard { size, .. }, G::Size(new)) => {
-            Ok(G::Size(std::mem::replace(size, *new)))
-        }
+        | (NodeKind::Artboard { size, .. }, G::Size(new))
+        | (NodeKind::Slice { size }, G::Size(new)) => Ok(G::Size(std::mem::replace(size, *new))),
         (NodeKind::Polygon { sides, .. }, G::Sides(new))
         | (NodeKind::Star { points: sides, .. }, G::Sides(new)) => {
             Ok(G::Sides(std::mem::replace(sides, *new)))

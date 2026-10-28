@@ -7,6 +7,7 @@
 //!
 //! Nothing here writes to disk: planning is pure and rendering returns bytes.
 
+use ondin_core::kurbo::Rect;
 use ondin_core::peniko::Color;
 use ondin_core::{
     Document, ExportBackground, ExportFormat, ExportScale, ExportSpec, NodeId, NodeKind, Resolved,
@@ -97,7 +98,7 @@ pub fn plan(
             let wanted = format!("{stem}.{}", spec.format.extension());
             let path = de_collide(wanted, &mut taken);
             let (pixels, clamped) = match spec.format.is_raster() {
-                true => raster_size(res, node, spec),
+                true => raster_size(doc, res, node, spec),
                 false => (None, false),
             };
             out.push(PlannedFile {
@@ -118,10 +119,13 @@ pub fn plan(
 /// `None` when the layer has no bounds (an empty group), the refusal `png_of`
 /// makes too. Public because the panel shows it without a render; it is the size
 /// before trim and pad, which are not knowable without rasterizing.
-pub fn raster_size(res: &Resolved, node: NodeId, spec: &ExportSpec) -> (Option<(u32, u32)>, bool) {
-    // `ink_bounds`, because `png::raster_of` frames from it (§5.3a); the editing
-    // box would be off by the reach of a shadow.
-    let Some(b) = res.ink_bounds(node) else {
+pub fn raster_size(
+    doc: &Document,
+    res: &Resolved,
+    node: NodeId,
+    spec: &ExportSpec,
+) -> (Option<(u32, u32)>, bool) {
+    let Some(b) = framed_box(doc, res, node) else {
         return (None, false);
     };
     let (w, h) = (b.width().max(1.0), b.height().max(1.0));
@@ -132,6 +136,31 @@ pub fn raster_size(res: &Resolved, node: NodeId, spec: &ExportSpec) -> (Option<(
     (Some(vp.pixel_size), clamped)
 }
 
+/// What a slice exports: its own world box, and its page's top-level layers to
+/// draw through it, cut at its edges. `None` for every other layer, which exports
+/// its own subtree.
+///
+/// The page's layers, not the ones the box overlaps: what falls outside is cut
+/// off by the frame, and any other slice draws nothing.
+pub fn slice_region(doc: &Document, res: &Resolved, node: NodeId) -> Option<(Rect, Vec<NodeId>)> {
+    if !matches!(doc.get(node)?.kind(), NodeKind::Slice { .. }) {
+        return None;
+    }
+    let view = res.world_bounds(node)?;
+    let page = doc.page_of(node)?;
+    Some((view, doc.get(page)?.children().to_vec()))
+}
+
+/// The world box an export of `node` is framed on: a slice's own box, else the
+/// layer's `ink_bounds`, because `png::raster_of` frames from it (§5.3a) and the
+/// editing box would be off by the reach of a shadow.
+fn framed_box(doc: &Document, res: &Resolved, node: NodeId) -> Option<Rect> {
+    match slice_region(doc, res, node) {
+        Some((view, _)) => Some(view),
+        None => res.ink_bounds(node),
+    }
+}
+
 /// Render one planned file to bytes. `None` when the layer has no bounds to
 /// frame — the one refusal both writers already make.
 ///
@@ -139,6 +168,24 @@ pub fn raster_size(res: &Resolved, node: NodeId, spec: &ExportSpec) -> (Option<(
 /// halfway through a drag cannot leak an uncommitted position into a file
 /// (§15 D264). Nothing here can check that.
 pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<u8>> {
+    if let Some((view, origins)) = slice_region(doc, res, file.node) {
+        let text = file.spec.text;
+        return match file.spec.format {
+            ExportFormat::Svg => Some(
+                crate::svg::svg_region(doc, res, &origins, view, text)
+                    .svg
+                    .into_bytes(),
+            ),
+            ExportFormat::Pdf => {
+                crate::pdf::pdf_region(doc, res, &origins, view, text).map(|e| e.pdf)
+            }
+            ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Webp => {
+                let opts = raster_opts(doc, res, file.node, &file.spec);
+                let r = crate::png::raster_region(doc, res, &origins, view, &opts);
+                Some(encode(&r, &file.spec))
+            }
+        };
+    }
     let origins = [file.node];
     match file.spec.format {
         ExportFormat::Svg => Some(
@@ -181,12 +228,13 @@ pub fn raster_opts(
 ) -> crate::png::RasterOpts {
     // The box `raster_size` measures and `png::raster_of` frames from, or
     // `Width(n)` resolves against the wrong box.
-    let b = res.ink_bounds(node);
+    let b = framed_box(doc, res, node);
     let (w, h) = b.map_or((1.0, 1.0), |b| (b.width().max(1.0), b.height().max(1.0)));
     crate::png::RasterOpts {
         scale: format_capped(spec.scale.factor(w, h), w, h, spec.format),
         background: background_color(doc, node, spec),
-        trim: spec.trim,
+        // A slice's box is the point of it, so it is never trimmed.
+        trim: spec.trim && slice_region(doc, res, node).is_none(),
         pad_square: spec.pad_square,
     }
 }

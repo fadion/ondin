@@ -86,6 +86,7 @@ fn kind_name(k: &NodeKind) -> &'static str {
         NodeKind::Path { .. } => "path",
         NodeKind::Boolean { .. } => "boolean",
         NodeKind::Text { .. } => "text",
+        NodeKind::Slice { .. } => "slice",
     }
 }
 
@@ -488,6 +489,20 @@ fn golden_document() -> (Document, Resolved) {
         },
     ]))
     .expect("the second page");
+
+    // A slice over part of the board: in the snapshot, absent from the SVG.
+    let slice = ids.mint();
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: slice,
+        parent: artboard,
+        index: 0,
+        kind: NodeKind::Slice {
+            size: Size::new(60.0, 40.0),
+        },
+        transform: Some(Affine::translate((10.0, 10.0))),
+        name: Some("Crop".into()),
+    }]))
+    .expect("the slice");
 
     let res = Resolved::rebuild(&doc);
     (doc, res)

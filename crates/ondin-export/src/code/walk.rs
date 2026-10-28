@@ -296,7 +296,11 @@ impl Walk<'_> {
             .get(&id)
             .filter(|b| b.kind == PropKind::Boolean)
             .map(|b| b.name.clone());
-        if node.mask() || (shown_by.is_none() && !doc.shown(id)) {
+        // A slice is an export region, never part of the page's code.
+        if node.mask()
+            || matches!(node.kind(), NodeKind::Slice { .. })
+            || (shown_by.is_none() && !doc.shown(id))
+        {
             return None;
         }
         let mut used = None;
@@ -1036,6 +1040,8 @@ impl Walk<'_> {
             NodeKind::Path { .. } => return Some("a vector path".into()),
             NodeKind::Boolean { .. } => return Some("a boolean".into()),
             NodeKind::Root => return Some("the document".into()),
+            // `node` never visits one.
+            NodeKind::Slice { .. } => return Some("a slice".into()),
         }
         if node
             .children()
@@ -2199,6 +2205,7 @@ impl Walk<'_> {
             &[id],
             linked,
             ondin_core::ExportText::Live,
+            None,
         );
         let mut pic = if svg.approximated.is_empty() {
             self.report.position(format!(

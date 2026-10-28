@@ -44,6 +44,23 @@ pub fn pdf_of(
     pdf_pages(doc, res, &[(String::new(), origins.to_vec())], text)
 }
 
+/// [`pdf_of`] framed on `view`, a world-space box, as [`crate::svg::svg_region`]
+/// frames it: what a slice exports.
+pub fn pdf_region(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[NodeId],
+    view: ondin_core::kurbo::Rect,
+    text: ExportText,
+) -> Option<Export> {
+    pdf_framed(
+        doc,
+        res,
+        &[(String::new(), origins.to_vec(), Some(view))],
+        text,
+    )
+}
+
 /// Several pages in one PDF, each its subtrees framed as [`pdf_of`] frames one,
 /// at its own size. A page with a name gets a bookmark of that name, so a reader's
 /// sidebar lists the frames; unnamed pages get none.
@@ -56,15 +73,35 @@ pub fn pdf_pages(
     pages: &[(String, Vec<NodeId>)],
     text: ExportText,
 ) -> Option<Export> {
+    let framed: Vec<(String, Vec<NodeId>, Option<ondin_core::kurbo::Rect>)> = pages
+        .iter()
+        .map(|(name, origins)| (name.clone(), origins.clone(), None))
+        .collect();
+    pdf_framed(doc, res, &framed, text)
+}
+
+/// [`pdf_pages`] with each page framed on its own box where it names one, and on
+/// its subtrees' extent where it does not.
+fn pdf_framed(
+    doc: &Document,
+    res: &Resolved,
+    pages: &[(String, Vec<NodeId>, Option<ondin_core::kurbo::Rect>)],
+    text: ExportText,
+) -> Option<Export> {
     if pages.is_empty() {
         return None;
     }
     let mut document = krilla::Document::new();
     let mut outline = krilla::outline::Outline::new();
     let mut approximated: Vec<String> = Vec::new();
-    for (index, (name, origins)) in pages.iter().enumerate() {
-        crate::extent(res, origins)?;
-        let svg = crate::svg::svg_with(doc, res, origins, text);
+    for (index, (name, origins, view)) in pages.iter().enumerate() {
+        let svg = match view {
+            Some(view) => crate::svg::svg_region(doc, res, origins, *view, text),
+            None => {
+                crate::extent(res, origins)?;
+                crate::svg::svg_with(doc, res, origins, text)
+            }
+        };
         let shown = shown_nodes(doc, origins);
         for note in approximations(doc, res, &shown, svg.approximated, text) {
             if !approximated.contains(&note) {
@@ -122,7 +159,7 @@ pub fn pdf_pages(
         }
     }
     // Only with a bookmark in it, so a one-page export's bytes are what they were.
-    if pages.iter().any(|(name, _)| !name.is_empty()) {
+    if pages.iter().any(|(name, ..)| !name.is_empty()) {
         document.set_outline(outline);
     }
     let pdf = document.finish().ok()?;

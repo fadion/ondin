@@ -437,6 +437,7 @@ pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
         NodeKind::Line { .. } => (icon::LINE_SEGMENT, theme::text::MUTED),
         NodeKind::Path { .. } => (icon::POLYGON, color::ACCENT_400),
         NodeKind::Text { .. } => (icon::TEXT_T, theme::text::MUTED),
+        NodeKind::Slice { .. } => (icon::KNIFE, theme::text::MUTED),
         // Accent, like `Path`, with the operation's own glyph: the name can be
         // renamed away, the icon cannot.
         NodeKind::Boolean { op } => (op_glyph(*op), color::ACCENT_400),

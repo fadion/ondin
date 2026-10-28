@@ -535,12 +535,21 @@ fn kind_in<'a>(used: &'a FxHashMap<NodeId, Used>, node: &'a Node) -> &'a NodeKin
         .unwrap_or_else(|| node.kind())
 }
 
+/// Whether `id` adds to its container's box and ink. A slice does not: it is a
+/// region to export, laid over the art rather than part of it, so it never grows
+/// a group or a hugging frame. Asked by every arm that unions children, beside
+/// the mask's own exclusion.
+pub(crate) fn lends_bounds(doc: &Document, id: NodeId) -> bool {
+    !doc.get(id)
+        .is_some_and(|n| matches!(n.kind(), NodeKind::Slice { .. }))
+}
+
 /// Nodes that appear in the spatial index — the drawable/selectable leaves.
 /// Groups and Root are containers and are excluded.
 ///
-/// `pub(crate)` for `node`'s kind-predicate matrix test. Its membership matches
-/// `NodeKind::takes_paint`'s today for two unrelated reasons; the matrix makes
-/// drift visible.
+/// `pub(crate)` for `node`'s kind-predicate matrix test. Its membership is
+/// `NodeKind::takes_paint`'s plus a slice, which paints nothing but is picked by
+/// its edge.
 pub(crate) fn is_indexed(kind: &NodeKind) -> bool {
     matches!(
         kind,
@@ -552,6 +561,7 @@ pub(crate) fn is_indexed(kind: &NodeKind) -> bool {
             | NodeKind::Path { .. }
             | NodeKind::Text { .. }
             | NodeKind::Artboard { .. }
+            | NodeKind::Slice { .. }
             // A container, but the only thing in a boolean subtree the canvas
             // paints, so the only thing there a click can land on.
             | NodeKind::Boolean { .. }
@@ -1158,6 +1168,9 @@ impl Resolved {
                 node.children()
                     .iter()
                     .filter_map(|c| {
+                        if !lends_bounds(doc, *c) {
+                            return None;
+                        }
                         let is_mask = doc.get(*c).is_some_and(|n| n.mask());
                         let b = self.world_bounds.get(c).copied();
                         if is_mask {
@@ -1267,6 +1280,9 @@ impl Resolved {
         node.children()
             .iter()
             .filter_map(|c| {
+                if !lends_bounds(doc, *c) {
+                    return None;
+                }
                 let is_mask = doc.get(*c).is_some_and(|n| n.mask());
                 let b = self.ink_bounds.get(c).copied();
                 if is_mask {
@@ -1351,9 +1367,10 @@ fn resolve_subtree(
             mask_box = mask_extent(doc, c.world_bounds, *child);
             mask_ink = mask_extent(doc, c.ink_bounds, *child);
         }
-        // A mask contributes nothing, as in `recompute_bounds`.
+        // A mask contributes nothing, as in `recompute_bounds`, and nor does a slice.
+        let lends = lends_bounds(doc, *child);
         let contribution = match mask_box {
-            _ if is_mask => None,
+            _ if is_mask || !lends => None,
             Some(m) => cb.and_then(|b| clipped_to(b, m)),
             None => cb,
         };
@@ -1364,7 +1381,7 @@ fn resolve_subtree(
             });
         }
         let ink_contribution = match mask_ink {
-            _ if is_mask => None,
+            _ if is_mask || !lends => None,
             Some(m) => ci.and_then(|b| clipped_to(b, m)),
             None => ci,
         };

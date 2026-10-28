@@ -468,6 +468,8 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
         NodeKind::Path { path, corner_radii } => Some(round_corners(path, corner_radii)),
         // Both have an outline this argument cannot build (see above).
         NodeKind::Root | NodeKind::Group | NodeKind::Text { .. } | NodeKind::Boolean { .. } => None,
+        // Nothing to fill or stroke: a slice draws nothing.
+        NodeKind::Slice { .. } => None,
     }
 }
 
@@ -771,7 +773,7 @@ pub fn stroke_join_applies(kind: &NodeKind) -> bool {
         // No corners: smooth throughout, and no interior vertex respectively.
         NodeKind::Ellipse { .. } | NodeKind::Line { .. } => false,
         // Nothing here strokes at all (§6.3), so there is no join to shape.
-        NodeKind::Root | NodeKind::Group => false,
+        NodeKind::Root | NodeKind::Group | NodeKind::Slice { .. } => false,
     }
 }
 
@@ -1052,7 +1054,8 @@ pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> 
         | NodeKind::Ellipse { size }
         | NodeKind::Polygon { size, .. }
         | NodeKind::Star { size, .. }
-        | NodeKind::Artboard { size, .. } => Some(Rect::new(0.0, 0.0, size.width, size.height)),
+        | NodeKind::Artboard { size, .. }
+        | NodeKind::Slice { size } => Some(Rect::new(0.0, 0.0, size.width, size.height)),
         NodeKind::Line { end } => Some(Rect::new(
             0.0_f64.min(end.x),
             0.0_f64.min(end.y),
@@ -1112,7 +1115,8 @@ pub fn pivot_for(kind: &NodeKind, local: Rect, at: Point) -> Pivot {
         | NodeKind::Ellipse { .. }
         | NodeKind::Polygon { .. }
         | NodeKind::Star { .. }
-        | NodeKind::Artboard { .. } => true,
+        | NodeKind::Artboard { .. }
+        | NodeKind::Slice { .. } => true,
         NodeKind::Text { sizing, .. } => matches!(sizing, crate::node::TextSizing::Fixed(_)),
         NodeKind::Root
         | NodeKind::Group
@@ -1333,6 +1337,13 @@ pub fn contains_local(
         // A boolean is hit-testable, but its outline is not this function's to
         // build; the test lives beside the cache in `query::hit_test`.
         NodeKind::Group | NodeKind::Root | NodeKind::Boolean { .. } => false,
+        // Only a band `slop` wide either side of the edge: a slice usually lies over
+        // the art, so a click inside it picks what is underneath, and an exact test
+        // (no `slop`) never lands on one.
+        NodeKind::Slice { size } => {
+            let b = Rect::new(0.0, 0.0, size.width, size.height);
+            slop > 0.0 && b.inflate(slop, slop).contains(p) && !b.inflate(-slop, -slop).contains(p)
+        }
     }
 }
 

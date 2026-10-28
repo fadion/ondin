@@ -34,6 +34,7 @@ pub const GENERATED_NAMES: &[&str] = &[
     "Line",
     "Path",
     "Text",
+    "Slice",
     "Union",
     "Subtract",
     "Intersect",
@@ -179,7 +180,8 @@ mod tests {
             | NodeKind::Line { .. }
             | NodeKind::Path { .. }
             | NodeKind::Boolean { .. }
-            | NodeKind::Text { .. } => is_generated(kind.default_name()),
+            | NodeKind::Text { .. }
+            | NodeKind::Slice { .. } => is_generated(kind.default_name()),
         }
     }
 
@@ -226,6 +228,7 @@ mod tests {
                 on_path_flip: false,
                 on_path_offset: 0.0,
             },
+            NodeKind::Slice { size: one },
         ];
         kinds.extend(BoolOp::ALL.map(|op| NodeKind::Boolean { op }));
         for kind in &kinds {

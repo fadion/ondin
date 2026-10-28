@@ -148,7 +148,8 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 
 `plan(doc, res, subjects, PlanOptions) -> Vec<PlannedFile>` is the one place a saved `ExportSpec` (§5.3) is interpreted: scale becomes a multiplier against a layer's box, `Background::Frame` a colour by walking to the enclosing artboard, a layer name a filename sanitized for the strictest filesystem. The spec's `prefix` and the layer name are **composed before sanitizing**, so `/` means one thing across the whole path.
 
-- `PlannedFile` carries the pixel size the panel shows and a `clamped` flag. `raster_size` and `raster_opts` measure `ink_bounds` (the box `extent` frames), so rows predict file size for layers with effects and `Width(512)` resolves against the framed box.
+- `PlannedFile` carries the pixel size the panel shows and a `clamped` flag. `raster_size(doc, …)` and `raster_opts` measure the box the render frames (`framed_box`): `ink_bounds` (the box `extent` frames) for a layer, so rows predict file size for layers with effects and `Width(512)` resolves against the framed box, and a slice's own box for a slice.
+- **A slice exports a region of its page** (`plan::slice_region`): its world box (axis-aligned), drawn through by its page's top-level layers. What falls outside is cut by the frame, and every slice draws nothing, so the subjects are the whole page rather than what the box overlaps. `render` frames the file on that box: `png::raster_region` (a viewport on it, through `raster_framed`, which `raster_of` shares), `svg::svg_region` (the box is the `viewBox`), `pdf::pdf_region` (through `pdf_framed`, which `pdf_pages` shares). `raster_opts` turns `trim` off for a slice, since its box is the point of it. Its file is named after the slice as any layer's is; `Background::Frame` walks from the slice to its enclosing frame. A slice itself is skipped by every writer (`svg::emit_node`, `code::walk::node`, the scene walk), so it never appears in its own or any other export.
 - A subject with no specs of its own plans `PlanOptions::unset`, `None` (nothing) unless a door sets it; *Export all frames* sets a 1× PNG.
 - `render(doc, res, file)` returns bytes; `zip(files)` packs a set. Nothing here touches the filesystem (app and CLI do). `encode(raster, spec)` is the one place a raster becomes bytes for a spec, shared by `render` and the panel's preview, which rasterizes once to both encode and draw.
 - **No two files in a plan share a name**: `ExportSpec::effective_suffix` separates specs on one layer (typed suffix, else the scale's marker), and a case-insensitive ` (2)` de-collision (`de_collide`) catches same-name layers and duplicated layers (which carry their specs). This covers names *inside one plan* only; a file already in the destination is replaced by whichever writer runs.
@@ -200,7 +201,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 
 `snapshot(doc, res) -> Snapshot`, serde-serializable and **distinct from the save schema**. It describes every page: `Snapshot::pages` lists them in order (`id`, `name`, `ground` as `#rrggbb`, `draft`, `mode` by id), each page's root is also a node of kind `Root`, and every node names its `page`. Node content: id, kind, name, page, local and world transform, world bounds, paint summary (gradients as kind and stops; images by content-hash id, framing mode, alpha, non-rest adjustments), full text style, children ids, artboard membership, and a `warnings` list (missing font families).
 
-- `snapshot_version` is currently **12**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
+- `snapshot_version` is currently **13**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
 
 | Version | Change |
 | --- | --- |
@@ -214,6 +215,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 | 10 | A gradient's `opacity` |
 | 11 | Numbers platforms disagree about, written at the SVG writer's four places (`geometry.svg`, `local_transform`, `world_transform`, `world_bounds`); no key moves |
 | 12 | Pages: `pages` replaces `root`, and every `NodeSnapshot` carries `page` |
+| 13 | The `"slice"` kind and `Geometry::Slice { width, height }` |
 
 - `local_transform` and `geometry` are **used** values (§5.3 layout), not what the user set; `world_transform`/`world_bounds` come from `Resolved`. A local an agent computes from these and writes back is a used value saved as typed. Whether the snapshot also carries specified values is MCP-work's question.
 - `NodeSnapshot::pivot` is skipped when unset and reports the **resolved local point** (fraction resolved against `local_box`). It is the one derived field: a node with no measurable box falls to `Rect::ZERO`, so its fraction reports `[0, 0]`. Additive, no bump. `pivot` is not rounded.

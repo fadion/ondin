@@ -9261,22 +9261,17 @@ impl OndinApp {
                                 "Edit this shadow's colour",
                             );
                             // --- how it mixes with what is beneath it ---------
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = COL;
+                            ui.scope(|ui| {
+                                // `CELL` whole: a combo strokes inside its own rect.
                                 ui.spacing_mut().interact_size.y = CELL;
                                 ui.spacing_mut().button_padding.y = 0.0;
-                                ui.add_sized(
-                                    egui::vec2(half, CELL),
-                                    egui::Label::new(
-                                        egui::RichText::new("Blend")
-                                            .size(11.0)
-                                            .color(theme::text::MUTED),
-                                    ),
-                                );
                                 egui::ComboBox::from_id_salt(("shadow-blend", index))
                                     .icon(ui::combo_chevron)
-                                    .width(half - 18.0)
-                                    .selected_text(s.blend.label())
+                                    .width(inner)
+                                    .selected_text(ui::glyph_and_text(
+                                        icon::INTERSECT_THREE,
+                                        s.blend.label(),
+                                    ))
                                     .show_ui(ui, |ui| {
                                         ui::menu_rows(ui);
                                         ui.spacing_mut().button_padding.y = 2.0;
@@ -9293,7 +9288,9 @@ impl OndinApp {
                                         }
                                     })
                                     .response
-                                    .on_hover_text("How the shadow mixes with what is beneath it");
+                                    .on_hover_text(
+                                        "Blend mode: how the shadow mixes with what is beneath it",
+                                    );
                             });
                         }
                         EffectKind::LayerBlur { radius } => {
@@ -15985,8 +15982,38 @@ mod effects_panel_tests {
                 .1
                 .center()
         };
-        let _ = at(&out, "Blend");
-        card.click(at(&out, "Normal"));
+        // The face is one galley, the glyph before the mode.
+        let face = ink(&out)
+            .into_iter()
+            .find(|(t, _)| t.starts_with(icon::INTERSECT_THREE) && t.ends_with("Normal"))
+            .expect("the full-width blend combo, glyph first")
+            .1;
+        // The widest frame under the face is the combo's; the colour row above
+        // spans the card's inner width.
+        let frames = |at: egui::Pos2| -> Vec<egui::Rect> {
+            out.shapes
+                .iter()
+                .filter_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Rect(r) if r.rect.contains(at) => Some(r.rect),
+                    _ => None,
+                })
+                .collect()
+        };
+        let widest = |at| frames(at).iter().map(|r| r.width()).fold(0.0, f32::max);
+        let colour = ink(&out)
+            .into_iter()
+            .find(|(t, _)| {
+                t.starts_with('#') || t.len() == 6 && t.chars().all(|c| c.is_ascii_hexdigit())
+            })
+            .map(|(_, r)| r.center())
+            .expect("the colour row's hex");
+        let combo = widest(face.center());
+        assert!(
+            (combo - widest(colour)).abs() < 2.0,
+            "as wide as the colour row: {combo} against {}",
+            widest(colour)
+        );
+        card.click(face.center());
         let out = card.settle();
         card.click(at(&out, "Multiply"));
         let EffectKind::DropShadow(s) = &card.committed()[0].kind else {

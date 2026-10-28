@@ -388,8 +388,9 @@ document. The preview keeps the previous plan until the new one's first part lan
   (tree top to bottom, the default), *Layers order, reversed*, *Left to right* (rows: a layer joins
   the first band its centre falls in, bands taken top to bottom, each read left to right by left
   edge) and *Top to bottom* (columns, the same way). Each page's run is ordered and the pages follow
-  the Pages list; the number runs on across pages. Only a layer that changes takes a number, so a
-  skipped one leaves no gap.
+  the Pages list; the number runs on across pages. Only a layer Find matches takes a number, so a
+  skipped one leaves no gap; a matched layer whose name already is its result keeps that number, so
+  no two layers are given the same one.
 - **Preview**, in run order: glyph, old name with its matches underlined, arrow, new name with its
   new runs in `ACCENT_300`; it scrolls past eight rows, and only the rows in view are laid out
   (`ScrollArea::show_rows`), page headings at a row's height. At *Selection* every layer is listed and the

@@ -431,7 +431,9 @@ pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan
     };
     let matches = |name: &str| rule.as_ref().is_some_and(|r| r.apply(name, "").is_some());
 
-    // Only layers that change take a number, so a skipped one leaves no gap.
+    // A layer takes a number when Find matches it and its new name is usable, even
+    // when that name is its own: an unmatched layer leaves no gap, and one that
+    // already carries its number keeps it rather than lending it to the next.
     let mut taken = 0usize;
     let mut since = 0usize;
     let every = s.scope == Scope::Selection;
@@ -469,7 +471,10 @@ pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan
                 Some(r) if l.variant => (r.matched, New::Variant),
                 Some(r) => match ondin_core::naming::usable(&r.text()) {
                     None => (r.matched, New::Empty),
-                    Some(name) if name == l.name => (r.matched, New::Unchanged),
+                    Some(name) if name == l.name => {
+                        taken += 1;
+                        (r.matched, New::Unchanged)
+                    }
                     Some(name) => {
                         taken += 1;
                         part.changes.push((l.id, name));
@@ -1794,7 +1799,7 @@ mod tests {
             .collect()
     }
 
-    /// The run is the tree's order, top row first, and only a layer that changes
+    /// The run is the tree's order, top row first, and only a layer Find matches
     /// takes a number: the unmatched one is listed, dimmed, and leaves no gap.
     ///
     /// flip: `plan_into` counting `taken` for every listed layer → fails at the
@@ -1822,6 +1827,32 @@ mod tests {
         };
         assert_eq!((middle.id, &middle.new), (skip, &New::Unchanged));
         assert_eq!(count_label(bx.s.scope, &plan), "2 of 3 change");
+    }
+
+    /// A matched layer that already carries its number keeps it and uses it up,
+    /// so renumbering after a reorder hands no number to two layers.
+    ///
+    /// flip: `plan_into` not counting `taken` for a name left as it was → fails at
+    /// the changes, `Item 1` renamed `Item 2`.
+    #[test]
+    fn a_layer_already_numbered_keeps_its_number() {
+        let (ctx, mut app) = app();
+        // Made bottom first, so the tree reads Item 3, Item 2, Item 1.
+        let ids = ["Item 1", "Item 2", "Item 3"].map(|n| named(&mut app, n));
+        app.session.selection.set(ids.to_vec());
+        let bx = opened(&ctx, &mut app, "", "Item [Number]");
+        let plan = planned(&app, &bx);
+        assert_eq!(
+            new_names(&app, &plan),
+            [
+                ("Item 3".to_string(), "Item 1".to_string()),
+                ("Item 1".to_string(), "Item 3".to_string()),
+            ]
+        );
+        let Row::Layer(middle) = &plan.rows[1] else {
+            panic!("a layer row")
+        };
+        assert_eq!((middle.id, &middle.new), (ids[1], &New::Unchanged));
     }
 
     /// *Left to right* takes rows by band, though no two tops line up, then reads

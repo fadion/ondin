@@ -23,6 +23,8 @@ fn rect(w: f64, h: f64) -> NodeKind {
 fn artboard() -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(800.0, 600.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -30,6 +32,7 @@ fn artboard() -> NodeKind {
 fn ellipse(w: f64, h: f64) -> NodeKind {
     NodeKind::Ellipse {
         size: Size::new(w, h),
+        arc: ondin_core::EllipseArc::default(),
     }
 }
 
@@ -362,7 +365,7 @@ fn a_frame_is_the_union_of_its_members_and_moves_none_of_them() {
     approx(f.world_origin(b), before[1], "b stayed put");
 
     // The box is the union: (100,100)..(230,160) in the artboard's space.
-    let NodeKind::Artboard { size } = f.doc.get(fr).unwrap().kind() else {
+    let NodeKind::Artboard { size, .. } = f.doc.get(fr).unwrap().kind() else {
         panic!("framing made something that is not a frame");
     };
     assert_eq!(*size, Size::new(130.0, 60.0));
@@ -2632,7 +2635,10 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
         "and the path took its z-slot, under the sibling in front of it"
     );
     let node = f.doc.get(made).unwrap();
-    let NodeKind::Path { path, corner_radii } = node.kind() else {
+    let NodeKind::Path {
+        path, corner_radii, ..
+    } = node.kind()
+    else {
         panic!("a Path");
     };
     assert!(
@@ -2723,6 +2729,7 @@ fn outlining_a_path_keeps_the_fill_rule_the_user_set_on_it() {
         NodeKind::Path {
             path: compound,
             corner_radii: vec![10.0; 8],
+            corner_smoothing: 0.0,
         },
         (0.0, 0.0),
     );
@@ -2837,6 +2844,7 @@ fn stroke_ink_covers_what_a_non_zero_expansion_fills() {
         points: 5,
         inner_ratio: 0.4,
         corner_radius: 0.0,
+        corner_smoothing: 0.0,
     })
     .unwrap();
     let ellipse = ondin_core::geometry::local_path(&ellipse(100.0, 60.0)).unwrap();
@@ -2861,6 +2869,7 @@ fn stroke_ink_covers_what_a_non_zero_expansion_fills() {
         let kind = NodeKind::Path {
             path: path.clone(),
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         };
         let ours = ondin_core::build::stroke_ink(&kind, &path, &stroke).unwrap();
         let style = kurbo::Stroke {
@@ -3094,17 +3103,22 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
 
     for yes in [
         rect(10.0, 10.0),
-        NodeKind::Ellipse { size },
+        NodeKind::Ellipse {
+            size,
+            arc: ondin_core::EllipseArc::default(),
+        },
         NodeKind::Polygon {
             size,
             sides: 5,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         NodeKind::Star {
             size,
             points: 5,
             inner_ratio: 0.5,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         NodeKind::Line {
             end: Point::new(10.0, 0.0),
@@ -3120,7 +3134,11 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
             op: ondin_core::BoolOp::Union,
         },
         NodeKind::Group,
-        NodeKind::Artboard { size },
+        NodeKind::Artboard {
+            size,
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
         text_node(),
         NodeKind::Root,
     ] {
@@ -3137,6 +3155,7 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
         !build::can_outline(&NodeKind::Path {
             path: path.clone(),
             corner_radii: vec![0.0, 0.0, 0.0],
+            corner_smoothing: 0.0,
         }),
         "a path with nothing to bake is already an outline"
     );
@@ -3144,6 +3163,7 @@ fn can_outline_takes_the_five_shapes_and_asks_a_path_about_its_radii() {
         build::can_outline(&NodeKind::Path {
             path,
             corner_radii: vec![0.0, 3.0, 0.0],
+            corner_smoothing: 0.0,
         }),
         "and one radius in the model is enough to make baking mean something"
     );
@@ -3618,6 +3638,7 @@ fn a_fresh_layer_is_numbered_among_its_new_siblings() {
         f.artboard,
         NodeKind::Ellipse {
             size: Size::new(5.0, 5.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         (0.0, 0.0),
     );
@@ -4799,13 +4820,17 @@ fn path_kind(path: ondin_core::kurbo::BezPath) -> NodeKind {
     NodeKind::Path {
         path,
         corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
     }
 }
 
 /// The stored path of `id` once `tx` is committed.
 fn path_after(f: &mut Fixture, id: NodeId, tx: Transaction) -> ondin_core::kurbo::BezPath {
     f.commit(tx);
-    let NodeKind::Path { path, corner_radii } = f.doc.get(id).unwrap().kind() else {
+    let NodeKind::Path {
+        path, corner_radii, ..
+    } = f.doc.get(id).unwrap().kind()
+    else {
         panic!("still a path");
     };
     assert!(corner_radii.is_empty(), "the radii are baked in");

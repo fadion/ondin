@@ -171,15 +171,30 @@ const ARCLEN_ACC: f64 = 1e-4;
 /// **Each radius is clamped to half of each adjoining segment**, so two rounded
 /// corners sharing a short edge cannot eat past each other and invert the outline.
 pub fn round_corners(path: &BezPath, radii: &[f64]) -> BezPath {
+    round_corners_smoothed(path, radii, 0.0)
+}
+
+/// [`round_corners`] with every fillet between two straight legs smoothed by
+/// `smoothing` (`0..=1`), the construction [`smoothed_rect`] uses generalised to
+/// any angle: the arc shrinks to `turn × (1 − s)` and eases into each leg,
+/// reaching `(1 + s)` times the circular fillet's reach. Where a leg is too short
+/// the smoothing gives way before the radius does. A fillet against a curved leg
+/// keeps its tangent join.
+pub fn round_corners_smoothed(path: &BezPath, radii: &[f64], smoothing: f64) -> BezPath {
     // `any(> 0)` rather than `all(<= 0)`: they are not each other's negation
     // with `NaN` (see the guard in `round_run`).
     if !radii.iter().any(|r| *r > 0.0) {
         return path.clone();
     }
+    let smoothing = if smoothing.is_nan() {
+        0.0
+    } else {
+        smoothing.clamp(0.0, 1.0)
+    };
     let mut out = BezPath::new();
     let mut base = 0usize;
     for run in anchor_runs(path) {
-        round_run(&mut out, &run, &radii[base.min(radii.len())..]);
+        round_run(&mut out, &run, &radii[base.min(radii.len())..], smoothing);
         base += run.points.len();
     }
     out
@@ -200,9 +215,12 @@ struct Fillet {
     /// Both legs straight — then the bridge is an exact circular arc about this
     /// corner.
     straight: Option<Point>,
+    /// Both legs straight and smoothed: the radius and circular reach the
+    /// smoothed bridge is built from, after the clamp, and the smoothing left.
+    smooth: Option<(f64, f64, f64)>,
 }
 
-fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64]) {
+fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64], smoothing: f64) {
     let (n, ns) = (run.points.len(), run.segs.len());
     if ns == 0 {
         if n == 1 {
@@ -245,7 +263,7 @@ fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64]) {
             }
             let la = *lens[ia].get_or_insert_with(|| run.segs[ia].arclen(ARCLEN_ACC));
             let lb = *lens[ib].get_or_insert_with(|| run.segs[ib].arclen(ARCLEN_ACC));
-            let Some(f) = fillet(sa, sb, radius, la, lb) else {
+            let Some(f) = fillet(sa, sb, radius, la, lb, smoothing) else {
                 continue;
             };
             trim_end[ia] = f.u_in;
@@ -280,7 +298,14 @@ fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64]) {
 ///
 /// `la` and `lb` are the two legs' arc lengths, passed in because `round_run`
 /// memoizes them; the caller has already established `radius > 0.0`.
-fn fillet(sa: &PathSeg, sb: &PathSeg, radius: f64, la: f64, lb: f64) -> Option<Fillet> {
+fn fillet(
+    sa: &PathSeg,
+    sb: &PathSeg,
+    radius: f64,
+    la: f64,
+    lb: f64,
+    smoothing: f64,
+) -> Option<Fillet> {
     let corner = sa.eval(1.0);
     // The directions the two legs actually leave the corner in — tangents, so a
     // curved leg is measured by where it is going rather than by where its far
@@ -293,15 +318,23 @@ fn fillet(sa: &PathSeg, sb: &PathSeg, radius: f64, la: f64, lb: f64) -> Option<F
     if theta < 1e-6 || (std::f64::consts::PI - theta).abs() < 1e-6 {
         return None;
     }
-    let t = (radius / (theta * 0.5).tan()).min(la * 0.5).min(lb * 0.5);
+    let limit = (la * 0.5).min(lb * 0.5);
+    let t = (radius / (theta * 0.5).tan()).min(limit);
     if t < EPS {
         return None;
     }
-    let (u_in, u_out) = (
-        sa.inv_arclen(la - t, ARCLEN_ACC),
-        sb.inv_arclen(t, ARCLEN_ACC),
-    );
     let straight = matches!((sa, sb), (PathSeg::Line(_), PathSeg::Line(_))).then_some(corner);
+    // The smoothed corner takes `(1 + s) × t` of each leg; the smoothing is cut
+    // to what the legs allow first, the radius only by the clamp above.
+    let smooth = (straight.is_some() && smoothing > 0.0).then(|| {
+        let s = smoothing.min((limit / t - 1.0).max(0.0));
+        (t * (theta * 0.5).tan(), t, s)
+    });
+    let reach = smooth.map_or(t, |(_, t, s)| (1.0 + s) * t);
+    let (u_in, u_out) = (
+        sa.inv_arclen(la - reach, ARCLEN_ACC),
+        sb.inv_arclen(reach, ARCLEN_ACC),
+    );
     Some(Fillet {
         u_in,
         u_out,
@@ -310,6 +343,7 @@ fn fillet(sa: &PathSeg, sb: &PathSeg, radius: f64, la: f64, lb: f64) -> Option<F
         d_from: unit_tangent(sa, u_in)?,
         d_to: unit_tangent(sb, u_out)?,
         straight,
+        smooth: smooth.filter(|(_, _, s)| *s > 0.0),
     })
 }
 
@@ -334,6 +368,10 @@ fn push_seg(out: &mut BezPath, seg: PathSeg) {
 
 /// Bridge the gap a fillet cut.
 fn bridge(out: &mut BezPath, f: &Fillet) {
+    if let (Some(corner), Some((r, t, s))) = (f.straight, f.smooth) {
+        smoothed_corner(out, corner, f.d_from, f.d_to, r, t, s);
+        return;
+    }
     if let Some(corner) = f.straight {
         arc_to(out, f.from, f.to, corner);
         return;
@@ -396,6 +434,117 @@ fn arc_to(out: &mut BezPath, from: Point, to: Point, corner: Point) {
     });
 }
 
+/// A smoothed fillet at `corner`, between straight legs arriving along `u` and
+/// leaving along `v`; the outline is already at `(1 + s) × t` back up the
+/// incoming leg. [`smoothed_rect`]'s construction with the 90° turn made any
+/// angle: an arc of `turn × (1 − s)` on the circle of radius `r`, eased into each
+/// leg by a cubic whose controls lie on the leg.
+fn smoothed_corner(out: &mut BezPath, corner: Point, u: Vec2, v: Vec2, r: f64, t: f64, s: f64) {
+    let cos = u.dot(v).clamp(-1.0, 1.0);
+    let turn = cos.acos();
+    let (n_in, n_out) = (v - u * cos, -(u - v * cos));
+    let (li, lo) = (n_in.hypot(), n_out.hypot());
+    if li < EPS || lo < EPS {
+        out.line_to(corner + v * ((1.0 + s) * t));
+        return;
+    }
+    let (n_in, n_out) = (n_in / li, n_out / lo);
+    // How far the arc's end tangent has turned from the leg.
+    let psi = turn * s * 0.5;
+    let p = (1.0 + s) * t;
+    let along = t - r * psi.sin();
+    let across = r * (1.0 - psi.cos());
+    let c = r * (psi * 0.5).tan() * psi.cos();
+    let b = (p - along - c) / 3.0;
+    let a = 2.0 * b;
+    let at_in = |al: f64, ac: f64| corner - u * al + n_in * ac;
+    let at_out = |al: f64, ac: f64| corner + v * al + n_out * ac;
+    let e1 = at_in(along, across);
+    out.curve_to(at_in(p - a, 0.0), at_in(along + c, 0.0), e1);
+    let centre = at_in(t, r);
+    let sign = if u.cross(v) > 0.0 { 1.0 } else { -1.0 };
+    let arc = Arc::new(
+        centre,
+        (r, r),
+        (e1 - centre).atan2(),
+        turn * (1.0 - s) * sign,
+        0.0,
+    );
+    arc.append_iter(TOLERANCE).for_each(|el| match el {
+        PathEl::MoveTo(_) => {}
+        el => out.push(el),
+    });
+    out.curve_to(at_out(along + c, 0.0), at_out(p - a, 0.0), at_out(p, 0.0));
+}
+
+/// An ellipse filling `size`, cut to `arc`: the whole ellipse, a wedge closed
+/// to the centre, a ring of two outlines, or a ring sector.
+///
+/// A ring's inner outline runs the other way round, so the hole is a hole under
+/// either fill rule, in fill, stroke and hit-testing alike.
+pub fn ellipse_path(size: Size, arc: crate::node::EllipseArc) -> BezPath {
+    let centre = Point::new(size.width * 0.5, size.height * 0.5);
+    let radii = Vec2::new(size.width * 0.5, size.height * 0.5);
+    let arc = arc.normalized();
+    // Closed by hand, because `Ellipse::to_path` emits four cubics and no
+    // `ClosePath`. A fill cannot tell, but an unclosed stroke is an open path:
+    // its ends are capped rather than joined, and a wide open expansion differs
+    // from a closed one. `scene::lay_stroke` fixes the wide-stroke hole itself.
+    if arc.is_whole() {
+        let mut path = Ellipse::new(centre, radii, 0.0).to_path(TOLERANCE);
+        path.close_path();
+        return path;
+    }
+    let start = arc.start.to_radians();
+    let sweep = arc.sweep.to_radians();
+    let at = |k: f64, a: f64| centre + Vec2::new(radii.x * k * a.cos(), radii.y * k * a.sin());
+    let push_arc = |path: &mut BezPath, k: f64, from: f64, by: f64| {
+        Arc::new(centre, radii * k, from, by, 0.0)
+            .append_iter(TOLERANCE)
+            .for_each(|el| match el {
+                PathEl::MoveTo(_) => {}
+                el => path.push(el),
+            });
+    };
+    let inner = arc.ratio;
+    let mut path = BezPath::new();
+    if arc.sweep >= 360.0 {
+        // A ring: the outer outline clockwise, the inner one back.
+        path.move_to(at(1.0, start));
+        push_arc(&mut path, 1.0, start, sweep);
+        path.close_path();
+        path.move_to(at(inner, start));
+        push_arc(&mut path, inner, start, -sweep);
+        path.close_path();
+    } else if inner <= 0.0 {
+        path.move_to(centre);
+        path.line_to(at(1.0, start));
+        push_arc(&mut path, 1.0, start, sweep);
+        path.close_path();
+    } else {
+        path.move_to(at(1.0, start));
+        push_arc(&mut path, 1.0, start, sweep);
+        path.line_to(at(inner, start + sweep));
+        push_arc(&mut path, inner, start + sweep, -sweep);
+        path.close_path();
+    }
+    path
+}
+
+/// A frame's or rect's outline: square, circular or smoothed corners.
+/// `from_rect` clamps each radius to half the shorter side, so an over-large
+/// corner rounds as far as it can rather than turning the outline inside out.
+pub fn rect_path(size: Size, radii: RoundedRectRadii, smoothing: f64) -> BezPath {
+    let rect = Rect::new(0.0, 0.0, size.width, size.height);
+    if is_square_cornered(&radii) {
+        rect.to_path(TOLERANCE)
+    } else if smoothing > 0.0 {
+        smoothed_rect(size, radii, smoothing)
+    } else {
+        RoundedRect::from_rect(rect, radii).to_path(TOLERANCE)
+    }
+}
+
 /// The node's outline in its own local space. `None` for the pure containers, for
 /// text and for a boolean.
 ///
@@ -408,56 +557,39 @@ fn arc_to(out: &mut BezPath, from: Point, to: Point, corner: Point) {
 /// its glyphs', built by [`crate::text::outline`] from the cached `TextLayout`.
 pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
     match kind {
-        // A frame's outline is its own box, square-cornered through the same
-        // `Rect::to_path` a square rect uses; its stroke, alignment clip and
-        // sides are built from it.
-        NodeKind::Artboard { size, .. } => {
-            Some(Rect::new(0.0, 0.0, size.width, size.height).to_path(TOLERANCE))
-        }
-        NodeKind::Rect {
+        // A frame's outline is a rect's: its fill, stroke, alignment clip,
+        // sides and the clip of its children are all built from it.
+        NodeKind::Artboard {
             size,
             corner_radii,
             corner_smoothing,
-        } => {
-            let rect = Rect::new(0.0, 0.0, size.width, size.height);
-            // `from_rect` clamps each radius to half the shorter side, so an
-            // over-large corner rounds as far as it can rather than turning the
-            // outline inside out.
-            Some(if is_square_cornered(corner_radii) {
-                rect.to_path(TOLERANCE)
-            } else if *corner_smoothing > 0.0 {
-                smoothed_rect(*size, *corner_radii, *corner_smoothing)
-            } else {
-                RoundedRect::from_rect(rect, *corner_radii).to_path(TOLERANCE)
-            })
         }
-        // Closed by hand, because `Ellipse::to_path` emits four cubics and no
-        // `ClosePath`. A fill cannot tell, but an unclosed stroke is an open path:
-        // its ends are capped rather than joined, and a wide open expansion differs
-        // from a closed one. `scene::lay_stroke` fixes the wide-stroke hole itself.
-        NodeKind::Ellipse { size } => {
-            let mut path = Ellipse::new(
-                (size.width * 0.5, size.height * 0.5),
-                (size.width * 0.5, size.height * 0.5),
-                0.0,
-            )
-            .to_path(TOLERANCE);
-            path.close_path();
-            Some(path)
-        }
+        | NodeKind::Rect {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } => Some(rect_path(*size, *corner_radii, *corner_smoothing)),
+        NodeKind::Ellipse { size, arc } => Some(ellipse_path(*size, *arc)),
         NodeKind::Polygon {
             size,
             sides,
             corner_radius,
-        } => Some(rounded_star(star_path(*size, *sides, None), *corner_radius)),
+            corner_smoothing,
+        } => Some(rounded_star(
+            star_path(*size, *sides, None),
+            *corner_radius,
+            *corner_smoothing,
+        )),
         NodeKind::Star {
             size,
             points,
             inner_ratio,
             corner_radius,
+            corner_smoothing,
         } => Some(rounded_star(
             star_path(*size, *points, Some(*inner_ratio)),
             *corner_radius,
+            *corner_smoothing,
         )),
         NodeKind::Line { end } => Some(BezPath::from_vec(vec![
             PathEl::MoveTo(Point::ZERO),
@@ -465,7 +597,15 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
         ])),
         // The one place a path's corner radii become geometry; every consumer
         // reaches it through here or `Resolved::local_path`.
-        NodeKind::Path { path, corner_radii } => Some(round_corners(path, corner_radii)),
+        NodeKind::Path {
+            path,
+            corner_radii,
+            corner_smoothing,
+        } => Some(round_corners_smoothed(
+            path,
+            corner_radii,
+            *corner_smoothing,
+        )),
         // Both have an outline this argument cannot build (see above).
         NodeKind::Root | NodeKind::Group | NodeKind::Text { .. } | NodeKind::Boolean { .. } => None,
         // Nothing to fill or stroke: a slice draws nothing.
@@ -550,12 +690,12 @@ fn star_path(size: Size, n: u32, inner: Option<f64>) -> BezPath {
 /// A polygon's or star's outline with every vertex rounded by `radius`, through
 /// [`round_corners`], so its clamp to half of each side holds here too. The
 /// rounded outline pulls in from the box; the box stays the node's bounds.
-fn rounded_star(path: BezPath, radius: f64) -> BezPath {
+fn rounded_star(path: BezPath, radius: f64, smoothing: f64) -> BezPath {
     if radius.is_nan() || radius <= 0.0 {
         return path;
     }
     let vertices = path.elements().len().saturating_sub(1);
-    round_corners(&path, &vec![radius; vertices])
+    round_corners_smoothed(&path, &vec![radius; vertices], smoothing)
 }
 
 /// A rect's outline with each rounded corner smoothed by `smoothing` (`0..=1`):
@@ -752,8 +892,9 @@ pub fn stroke_align_applies(kind: &NodeKind) -> bool {
 
 /// Whether a node's outline has corners for a join to shape.
 ///
-/// An **ellipse** is four tangent cubics, so every "corner" is already smooth; a
-/// **line** has no interior vertex. Miter, Round and Bevel draw the same on either.
+/// A whole **ellipse** is four tangent cubics, so every "corner" is already
+/// smooth; a **line** has no interior vertex. Miter, Round and Bevel draw the same
+/// on either. An ellipse cut to a wedge or a ring sector has the cut's corners.
 ///
 /// **Gated on the kind, not on the geometry**, so the control does not appear and
 /// disappear while a rect's radius field is being scrubbed.
@@ -770,8 +911,9 @@ pub fn stroke_join_applies(kind: &NodeKind) -> bool {
         | NodeKind::Artboard { .. }
         // Glyph outlines are full of corners.
         | NodeKind::Text { .. } => true,
-        // No corners: smooth throughout, and no interior vertex respectively.
-        NodeKind::Ellipse { .. } | NodeKind::Line { .. } => false,
+        NodeKind::Ellipse { arc, .. } => arc.sweep < 360.0,
+        // No interior vertex.
+        NodeKind::Line { .. } => false,
         // Nothing here strokes at all (§6.3), so there is no join to shape.
         NodeKind::Root | NodeKind::Group | NodeKind::Slice { .. } => false,
     }
@@ -815,11 +957,10 @@ pub fn side_path(kind: &NodeKind, side: Side) -> Option<BezPath> {
     let (size, corner_radii) = match kind {
         NodeKind::Rect {
             size, corner_radii, ..
+        }
+        | NodeKind::Artboard {
+            size, corner_radii, ..
         } => (*size, *corner_radii),
-        // A frame is the same box with no radii, so its four sides are four
-        // straight edges meeting at sharp vertices — the `radius == 0` branch
-        // below, which a square-cornered rect already takes.
-        NodeKind::Artboard { size, .. } => (*size, RoundedRectRadii::from_single_radius(0.0)),
         _ => return None,
     };
     let rect = Rect::new(0.0, 0.0, size.width, size.height);
@@ -1051,7 +1192,7 @@ pub fn fitted_dashes(dashes: &[f64], length: f64) -> Vec<f64> {
 pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> {
     match kind {
         NodeKind::Rect { size, .. }
-        | NodeKind::Ellipse { size }
+        | NodeKind::Ellipse { size, .. }
         | NodeKind::Polygon { size, .. }
         | NodeKind::Star { size, .. }
         | NodeKind::Artboard { size, .. }
@@ -1063,11 +1204,13 @@ pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> 
             0.0_f64.max(end.y),
         )),
         // The box of the rounded outline: a rect's box is unchanged by a radius,
-        // but a rounded path's can shrink. `round_corners` returns the path
-        // unchanged when there are no radii.
-        NodeKind::Path { path, corner_radii } => {
-            Some(round_corners(path, corner_radii).bounding_box())
-        }
+        // but a rounded path's can shrink. `round_corners_smoothed` returns the
+        // path unchanged when there are no radii.
+        NodeKind::Path {
+            path,
+            corner_radii,
+            corner_smoothing,
+        } => Some(round_corners_smoothed(path, corner_radii, *corner_smoothing).bounding_box()),
         // The layout's box, not `0,0..w,h`: a trimmed text node's box starts
         // below its local origin ([`TextLayout::origin`]), so this is the one kind
         // whose local bounds need not begin at the origin.
@@ -1298,7 +1441,11 @@ pub fn contains_local(
         NodeKind::Rect { size, .. } | NodeKind::Artboard { size, .. } => {
             p.x >= -tol && p.y >= -tol && p.x <= size.width + tol && p.y <= size.height + tol
         }
-        NodeKind::Ellipse { size } => {
+        // A wedge or ring is tested against its outline, so the hole and the cut
+        // away part fall through to what is behind.
+        NodeKind::Ellipse { arc, .. } if !arc.is_whole() => local_path(kind)
+            .is_some_and(|path| winding(&path, p) != 0 || near_outline(&path, p, tol)),
+        NodeKind::Ellipse { size, .. } => {
             // Grown radii rather than a distance to the true ellipse, which has no
             // closed form; the error is a fraction of `tol`.
             let (rx, ry) = (size.width * 0.5 + tol, size.height * 0.5 + tol);
@@ -1598,6 +1745,7 @@ mod tests {
                 size: Size::new(100.0, 100.0),
                 sides,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             };
             let path = local_path(&kind).unwrap();
             let pts = corners_of(&path);
@@ -1629,6 +1777,7 @@ mod tests {
                 points: 5,
                 inner_ratio: ratio,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             })
             .unwrap();
             let b = path.bounding_box();
@@ -1654,6 +1803,7 @@ mod tests {
                 points: 5,
                 inner_ratio: ratio,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             })
             .unwrap()
         };
@@ -1678,6 +1828,7 @@ mod tests {
             size,
             sides: 5,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         })
         .unwrap();
         assert!(
@@ -1695,6 +1846,7 @@ mod tests {
                 size: Size::new(80.0, 80.0),
                 sides,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             })
             .unwrap();
             assert_eq!(corners_of(&path).len(), MIN_SIDES as usize, "{sides} sides");
@@ -1705,6 +1857,7 @@ mod tests {
             size: Size::new(80.0, 80.0),
             sides: 10_000,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         })
         .unwrap();
         assert_eq!(corners_of(&path).len(), MAX_SIDES as usize);
@@ -1725,6 +1878,7 @@ mod tests {
                     size,
                     sides: n,
                     corner_radius: r,
+                    corner_smoothing: 0.0,
                 });
                 for ratio in [MIN_INNER_RATIO, 0.382, 0.7, 1.0] {
                     out.push(NodeKind::Star {
@@ -1732,6 +1886,7 @@ mod tests {
                         points: n,
                         inner_ratio: ratio,
                         corner_radius: r,
+                        corner_smoothing: 0.0,
                     });
                 }
             }
@@ -1782,6 +1937,7 @@ mod tests {
             size,
             sides: 6,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         })
         .unwrap();
         for r in [-3.0, f64::NAN] {
@@ -1789,6 +1945,7 @@ mod tests {
                 size,
                 sides: 6,
                 corner_radius: r,
+                corner_smoothing: 0.0,
             })
             .unwrap();
             assert_eq!(path, sharp, "radius {r}");
@@ -1805,6 +1962,7 @@ mod tests {
             size: Size::new(100.0, 100.0),
             sides: 4,
             corner_radius: r,
+            corner_smoothing: 0.0,
         })
         .unwrap();
         // The top vertex of the diamond is at (50, 0) and turns through 90°.
@@ -1983,6 +2141,7 @@ mod tests {
         let node = bare(NodeKind::Path {
             path,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         });
 
         assert!(
@@ -2250,10 +2409,12 @@ mod tests {
         let square = NodeKind::Path {
             path: path.clone(),
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         };
         let rounded = NodeKind::Path {
             path,
             corner_radii: vec![30.0],
+            corner_smoothing: 0.0,
         };
         let plain = local_bounds(&square, None).unwrap();
         let cut = local_bounds(&rounded, None).unwrap();

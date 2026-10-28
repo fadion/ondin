@@ -22,6 +22,8 @@ const K_ID: &str = "5eed0000000000000000000000000002";
 fn frame(w: f64, h: f64) -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 

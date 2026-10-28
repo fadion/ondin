@@ -9,6 +9,8 @@ use ondin_core::{Document, IdSource, NodeId, NodeKind, OpError, Operation, Trans
 fn frame() -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(100.0, 100.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 

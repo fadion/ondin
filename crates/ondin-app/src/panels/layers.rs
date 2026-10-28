@@ -2198,6 +2198,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 300.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,
@@ -2284,6 +2286,8 @@ mod tests {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((500.0, 0.0))),
                 name: None,
@@ -3418,6 +3422,8 @@ mod tree_guide_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 300.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3683,6 +3689,8 @@ mod drop_indent_tests {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 300.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3742,6 +3750,8 @@ mod drop_indent_tests {
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(40.0, 40.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(page, root, frame()),
@@ -3799,6 +3809,8 @@ mod drop_indent_tests {
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(40.0, 40.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(k, frame()),
@@ -3852,6 +3864,8 @@ mod drop_indent_tests {
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(40.0, 40.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let set = |id| Operation::SetVariantSet {
             id,
@@ -5120,6 +5134,8 @@ mod collapse_all_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -5322,6 +5338,8 @@ mod row_mark_tests {
                 root,
                 NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             create(a, m, rect()),
@@ -5539,6 +5557,8 @@ mod bound_eye_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(40.0, 40.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

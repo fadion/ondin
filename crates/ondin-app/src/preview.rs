@@ -158,6 +158,17 @@ pub enum Drag {
         id: NodeId,
         press: Point,
     },
+    /// Dragging a shape-parameter dot of layer `id` (`crate::shape_handles`): a
+    /// corner's radius or an ellipse's arc. `press` is the press in the layer's
+    /// local space, `alt` whether one corner alone is dragged, and `last` the value
+    /// the previous frame set, so a sweep stops at 0 and 360 rather than wrapping.
+    ShapeHandle {
+        id: NodeId,
+        grab: crate::shape_handles::Grab,
+        press: Point,
+        alt: bool,
+        last: f64,
+    },
     /// Moving a layer's transform origin ([`ondin_core::Pivot`]).
     ///
     /// Carries no preview: the pivot is not scene content, so the canvas draws the

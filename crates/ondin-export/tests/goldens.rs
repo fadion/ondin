@@ -127,6 +127,8 @@ fn golden_document() -> (Document, Resolved) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 320.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: Some("Board".into()),
@@ -156,6 +158,7 @@ fn golden_document() -> (Document, Resolved) {
             index: 1,
             kind: NodeKind::Ellipse {
                 size: Size::new(70.0, 45.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((140.0, 20.0))),
             name: None,
@@ -168,6 +171,7 @@ fn golden_document() -> (Document, Resolved) {
                 size: Size::new(60.0, 60.0),
                 sides: 6,
                 corner_radius: 6.0,
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((240.0, 20.0))),
             name: None,
@@ -181,6 +185,7 @@ fn golden_document() -> (Document, Resolved) {
                 points: 5,
                 inner_ratio: 0.382,
                 corner_radius: 4.0,
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((310.0, 20.0))),
             name: None,
@@ -202,6 +207,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Path {
                 path: outline,
                 corner_radii: vec![6.0, 0.0, 3.0],
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((160.0, 100.0))),
             name: Some("Triangle".into()),
@@ -257,6 +263,7 @@ fn golden_document() -> (Document, Resolved) {
             index: 1,
             kind: NodeKind::Ellipse {
                 size: Size::new(50.0, 50.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((55.0, 20.0))),
             name: None,
@@ -483,6 +490,8 @@ fn golden_document() -> (Document, Resolved) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(120.0, 80.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("Sketch".into()),

@@ -9,7 +9,7 @@
 
 use ondin_core::Brush;
 use ondin_core::item::values;
-use ondin_core::kurbo::{Affine, Cap, Join, RoundedRectRadii, Size};
+use ondin_core::kurbo::{Affine, BezPath, Cap, Join, RoundedRectRadii, Size};
 use ondin_core::peniko::{Color, Gradient};
 use ondin_core::{
     Document, Fill, History, IdSource, Keyed, NodeId, NodeKind, Operation, Stroke, StrokeAlign,
@@ -81,6 +81,8 @@ impl Fixture {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 300.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -351,11 +353,11 @@ fn setting_opacity_over_a_group_does_not_also_set_its_children() {
 fn corner_radius_is_shared_only_when_every_rect_agrees_evenly() {
     let mut f = Fixture::new();
     let g = f.add(f.artboard, NodeKind::Group);
-    assert!(!build::any_rect_in(&f.doc, &[g]), "no rect yet");
+    assert!(!build::any_cornered_in(&f.doc, &[g]), "no rect yet");
 
     let a = f.add(g, rect());
     let b = f.add(g, rect());
-    assert!(build::any_rect_in(&f.doc, &[g]));
+    assert!(build::any_cornered_in(&f.doc, &[g]));
     assert_eq!(build::shared_corner_radius(&f.doc, &[g]), Some(0.0));
 
     f.commit(build::set_corner_radius_all(&f.doc, &[g], 6.0));
@@ -387,6 +389,65 @@ fn corner_radius_reaches_into_a_selected_group() {
         panic!("not a rect");
     };
     assert_eq!(corner_radii.top_left, 4.0);
+}
+
+/// The multi-selection radius writes polygons and stars too, and reads them for
+/// the shared value; a path, whose radius is per anchor, is left out.
+/// flip: `multi_radii` keeping only frames and rects → fails at "a polygon alone".
+#[test]
+fn corner_radius_reaches_polygons_and_stars_but_not_paths() {
+    let mut f = Fixture::new();
+    let g = f.add(f.artboard, NodeKind::Group);
+    let poly = f.add(
+        g,
+        NodeKind::Polygon {
+            size: Size::new(10.0, 10.0),
+            sides: 6,
+            corner_radius: 0.0,
+            corner_smoothing: 0.0,
+        },
+    );
+    assert!(build::any_cornered_in(&f.doc, &[poly]), "a polygon alone");
+    let star = f.add(
+        g,
+        NodeKind::Star {
+            size: Size::new(10.0, 10.0),
+            points: 5,
+            inner_ratio: 0.5,
+            corner_radius: 0.0,
+            corner_smoothing: 0.0,
+        },
+    );
+    let mut line = BezPath::new();
+    line.move_to((0.0, 0.0));
+    line.line_to((10.0, 0.0));
+    line.line_to((10.0, 10.0));
+    let path = f.add(
+        g,
+        NodeKind::Path {
+            path: line,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+        },
+    );
+
+    f.commit(build::set_corner_radius_all(&f.doc, &[g], 3.0));
+    let radius = |id| {
+        f.doc
+            .get(id)
+            .unwrap()
+            .kind()
+            .corner_radii()
+            .unwrap()
+            .top_left
+    };
+    assert_eq!(radius(poly), 3.0, "the polygon is rounded");
+    assert_eq!(radius(star), 3.0);
+    assert_eq!(build::shared_corner_radius(&f.doc, &[g]), Some(3.0));
+    let NodeKind::Path { corner_radii, .. } = f.doc.get(path).unwrap().kind() else {
+        panic!("not a path");
+    };
+    assert!(corner_radii.is_empty(), "the path keeps its own radii");
 }
 
 /// **A control that loses focus without being edited must produce nothing.**

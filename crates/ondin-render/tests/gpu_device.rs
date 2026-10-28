@@ -58,6 +58,8 @@ fn gpu_renders_fixture_on_device() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

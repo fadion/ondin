@@ -265,10 +265,10 @@ pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind)
     if kind != node.kind() {
         let geometry = match kind {
             NodeKind::Rect { size, .. }
-            | NodeKind::Ellipse { size }
+            | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
-            | NodeKind::Artboard { size }
+            | NodeKind::Artboard { size, .. }
             | NodeKind::Slice { size } => Some(crate::GeometryPatch::Size(*size)),
             NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(
                 kept_text_mode(node, kind, *sizing),
@@ -334,7 +334,7 @@ pub fn baked(doc: &Document, res: &Resolved, id: NodeId) -> Vec<Operation> {
         return ops;
     }
     let drawn = match kind {
-        NodeKind::Artboard { size } => Some(*size),
+        NodeKind::Artboard { size, .. } => Some(*size),
         NodeKind::Group => res.used_frame(id),
         _ => None,
     };
@@ -626,6 +626,8 @@ pub fn frame(
         parent_node.kind(),
         &NodeKind::Artboard {
             size: kurbo::Size::ZERO,
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
     ) || !doc.frame_may_sit_under(parent)
     {
@@ -663,7 +665,11 @@ pub fn frame(
         id: frame_id,
         parent,
         index: siblings.len(),
-        kind: NodeKind::Artboard { size },
+        kind: NodeKind::Artboard {
+            size,
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
         transform: Some(Affine::translate(origin.to_vec2())),
         name: None,
     });
@@ -717,6 +723,8 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
         parent.kind(),
         &NodeKind::Artboard {
             size: kurbo::Size::ZERO,
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
     ) && doc.frame_may_sit_under(parent_id)
 }
@@ -792,7 +800,7 @@ pub fn flex_from_placement(doc: &Document, res: &Resolved, id: NodeId) -> Option
     // A frame's padding against the box it is laid out at, which its parent's
     // layout may have stretched past the size it stores.
     let padding = match (res.used_kind(doc, id).unwrap_or(node.kind()), union) {
-        (NodeKind::Artboard { size }, Some(u)) => {
+        (NodeKind::Artboard { size, .. }, Some(u)) => {
             [u.y0, size.width - u.x1, size.height - u.y1, u.x0].map(|p| p.max(0.0).round())
         }
         // A group in its parent's flow is placed there whatever it stores.
@@ -1790,6 +1798,7 @@ pub fn outline_stroke(
             kind: NodeKind::Path {
                 path: ink,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: Some(local),
             name: Some(format!("{} stroke", node.name())),
@@ -2255,6 +2264,7 @@ pub fn detach_text_path(
             kind: NodeKind::Path {
                 path: rail,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: Some(node.transform()),
             name: None,
@@ -2299,6 +2309,7 @@ fn replace_with_path(
         kind: NodeKind::Path {
             path,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         },
         transform: Some(node.transform()),
         name: Some(node.name().to_string()),
@@ -2419,6 +2430,7 @@ fn flatten_union(
     let kind = NodeKind::Path {
         path,
         corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
     };
     // Named here: the create precedes the deletes, so the operands would still count.
     let name = crate::naming::free_name(&doc.child_names(parent, &ordered), kind.default_name(), 1);
@@ -3483,15 +3495,17 @@ pub fn set_top_paint_all(
     Transaction(ops)
 }
 
-/// Bind rectangle `id`'s corners to `vars` — `None` leaving a corner as it is. The
-/// bound corners' literals are written 0, so a rectangle compares equal to its
-/// instance's copy bound to the same variable (§5.3d). Empty when `id` is not a
-/// rectangle or nothing would change.
+/// Bind `id`'s corners to `vars` — `None` leaving a corner as it is. The bound
+/// corners' literals are written 0, so a layer compares equal to its instance's
+/// copy bound to the same variable (§5.3d). A polygon's or star's one radius is
+/// bound as a rect's uniform one is, the same variable in all four slots. Empty
+/// when `id` has no corner radius (`NodeKind::corner_radii`) or nothing would
+/// change.
 pub fn bind_corners_ops(doc: &Document, id: NodeId, vars: crate::CornerVars) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
     };
-    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+    let Some(corner_radii) = &node.kind().corner_radii() else {
         return Vec::new();
     };
     let mut next = node.corner_vars();
@@ -3520,14 +3534,14 @@ pub fn bind_corners_ops(doc: &Document, id: NodeId, vars: crate::CornerVars) -> 
     ops
 }
 
-/// Detach rectangle `id`'s bound corners to the radii they draw. Empty when no
+/// Detach `id`'s bound corners to the radii they draw. Empty when no
 /// corner is bound. Any write of a radius to a bound corner must carry this, or it
 /// lands on a literal nobody draws.
 pub fn detach_corners_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
     };
-    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+    let Some(corner_radii) = &node.kind().corner_radii() else {
         return Vec::new();
     };
     let Some(drawn) = doc.resolve_corners(id, *corner_radii) else {
@@ -3551,7 +3565,7 @@ pub fn detach_corner_ops(doc: &Document, id: NodeId, slot: usize) -> Vec<Operati
     let Some(node) = doc.get(id) else {
         return Vec::new();
     };
-    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+    let Some(corner_radii) = &node.kind().corner_radii() else {
         return Vec::new();
     };
     let mut vars = node.corner_vars();
@@ -3650,7 +3664,7 @@ pub fn detach_brush_at_all(
     })
 }
 
-/// The corner bindings rectangle `id` keeps when its radii are written `written`
+/// The corner bindings `id` keeps when its radii are written `written`
 /// (TL, TR, BR, BL) — [`keep_corner_bindings`]' judgement, corner by corner; any
 /// corner not kept comes back `None`. Shared with the preview (`absorb`'s
 /// `SetGeometry` arm), so a kept corner is not drawn square until the commit.
@@ -3658,7 +3672,7 @@ pub fn kept_corner_vars(doc: &Document, id: NodeId, written: [f64; 4]) -> crate:
     let Some(node) = doc.get(id) else {
         return Default::default();
     };
-    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+    let Some(corner_radii) = &node.kind().corner_radii() else {
         return Default::default();
     };
     let bound = node.corner_vars();
@@ -3708,7 +3722,7 @@ pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
             continue;
         }
         let Some(node) = doc.get(*id) else { continue };
-        let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+        let Some(corner_radii) = &node.kind().corner_radii() else {
             continue;
         };
         let bound = node.corner_vars();
@@ -5509,23 +5523,26 @@ pub const OPACITY_AGREEMENT: f32 = 1e-6;
 /// length in document units: 1e-9 is below anything a drag or parser can author.
 pub const RADIUS_AGREEMENT: f64 = 1e-9;
 
-/// Set the same radius on all four corners of every rect in the subtrees.
+/// The corner radii of `id` when the multi-selection radius field writes it: a
+/// frame, rect, polygon or star. A path is left out — its radius is per anchor,
+/// and one value for all would round corners the user never chose.
+fn multi_radii(doc: &Document, id: NodeId) -> Option<RoundedRectRadii> {
+    doc.get(id)?.kind().corner_radii()
+}
+
+/// Set the same radius on all four corners of every frame and rect, and on every
+/// vertex of every polygon and star, in the subtrees.
 ///
 /// Subtree rather than outermost, unlike opacity: a radius does not compose.
 pub fn set_corner_radius_all(doc: &Document, ids: &[NodeId], radius: f64) -> Transaction {
-    // So an unedited field that loses focus pushes no undo step.
-    let already = |id: NodeId| {
-        matches!(
-            doc.get(id).map(|n| n.kind()),
-            Some(NodeKind::Rect { corner_radii, .. })
-                if crate::geometry::uniform_radius(corner_radii) == Some(radius)
-        )
-    };
     Transaction(
         subtree_nodes(doc, ids)
             .into_iter()
-            .filter(|id| matches!(doc.get(*id).map(|n| n.kind()), Some(NodeKind::Rect { .. })))
-            .filter(|id| !already(*id))
+            // So an unedited field that loses focus pushes no undo step.
+            .filter(|id| {
+                multi_radii(doc, *id)
+                    .is_some_and(|r| crate::geometry::uniform_radius(&r) != Some(radius))
+            })
             .map(|id| Operation::SetGeometry {
                 id,
                 geometry: crate::op::GeometryPatch::CornerRadius(radius),
@@ -5534,15 +5551,15 @@ pub fn set_corner_radius_all(doc: &Document, ids: &[NodeId], radius: f64) -> Tra
     )
 }
 
-/// The one uniform corner radius every rect in scope shares, or `None` when they
-/// differ or none of them is a rect.
+/// The one uniform corner radius every shape in scope shares ([`multi_radii`]),
+/// or `None` when they differ or none has a corner radius.
 pub fn shared_corner_radius(doc: &Document, ids: &[NodeId]) -> Option<f64> {
     let mut shared: Option<f64> = None;
     for id in subtree_nodes(doc, ids) {
-        let Some(NodeKind::Rect { corner_radii, .. }) = doc.get(id).map(|n| n.kind()) else {
+        let Some(corner_radii) = multi_radii(doc, id) else {
             continue;
         };
-        let r = crate::geometry::uniform_radius(corner_radii)?;
+        let r = crate::geometry::uniform_radius(&corner_radii)?;
         match shared {
             None => shared = Some(r),
             Some(s) if (s - r).abs() < RADIUS_AGREEMENT => {}
@@ -5552,12 +5569,12 @@ pub fn shared_corner_radius(doc: &Document, ids: &[NodeId]) -> Option<f64> {
     shared
 }
 
-/// Whether any node in scope is a rect, i.e. whether a corner-radius control has
-/// anything to act on.
-pub fn any_rect_in(doc: &Document, ids: &[NodeId]) -> bool {
+/// Whether any node in scope has a corner radius the multi-selection field
+/// writes ([`multi_radii`]), i.e. whether that control has anything to act on.
+pub fn any_cornered_in(doc: &Document, ids: &[NodeId]) -> bool {
     subtree_nodes(doc, ids)
         .into_iter()
-        .any(|id| matches!(doc.get(id).map(|n| n.kind()), Some(NodeKind::Rect { .. })))
+        .any(|id| multi_radii(doc, id).is_some())
 }
 
 /// Whether any node in scope draws fills and strokes of its own, so a Fill or
@@ -7304,7 +7321,7 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         // the committed one (the Scale tool resizes a laid group and moves a pinned
         // child in one edit): `laid_group_box` over `after`.
         let frame = match parent_kind {
-            NodeKind::Artboard { size } => size,
+            NodeKind::Artboard { size, .. } => size,
             NodeKind::Group if parent.display().is_some() => {
                 match laid_group_box(&after, parent.id()) {
                     Some(size) => size,

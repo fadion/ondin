@@ -190,24 +190,33 @@ mod tests {
         let one = Size::new(1.0, 1.0);
         let mut kinds = vec![
             NodeKind::Root,
-            NodeKind::Artboard { size: one },
+            NodeKind::Artboard {
+                size: one,
+                corner_radii: crate::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
             NodeKind::Group,
             NodeKind::Rect {
                 size: one,
                 corner_radii: Default::default(),
                 corner_smoothing: 0.0,
             },
-            NodeKind::Ellipse { size: one },
+            NodeKind::Ellipse {
+                size: one,
+                arc: crate::node::EllipseArc::default(),
+            },
             NodeKind::Polygon {
                 size: one,
                 sides: 3,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             },
             NodeKind::Star {
                 size: one,
                 points: 5,
                 inner_ratio: 0.5,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             },
             NodeKind::Line {
                 end: crate::kurbo::Point::new(1.0, 0.0),
@@ -215,6 +224,7 @@ mod tests {
             NodeKind::Path {
                 path: Default::default(),
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             NodeKind::Text {
                 content: String::new(),

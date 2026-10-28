@@ -304,7 +304,7 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
     let mut out = kind.clone();
     match &mut out {
         NodeKind::Rect { size: s, .. }
-        | NodeKind::Ellipse { size: s }
+        | NodeKind::Ellipse { size: s, .. }
         | NodeKind::Polygon { size: s, .. }
         | NodeKind::Star { size: s, .. }
         | NodeKind::Artboard { size: s, .. }
@@ -1457,7 +1457,7 @@ pub trait LayoutView {
     /// width.
     fn parent_box(&self, id: crate::NodeId) -> Option<Size> {
         match self.kind(self.parent(id)?)? {
-            NodeKind::Artboard { size } => Some(size),
+            NodeKind::Artboard { size, .. } => Some(size),
             _ => None,
         }
     }
@@ -1670,11 +1670,18 @@ pub fn root_sized(
 ) -> (Option<NodeKind>, Option<Size>) {
     match view.kind(id) {
         Some(NodeKind::Group) => (None, Some(size)),
-        Some(NodeKind::Artboard { size: own })
-            if !near(own.width, size.width) || !near(own.height, size.height) =>
-        {
-            (Some(NodeKind::Artboard { size }), None)
-        }
+        Some(NodeKind::Artboard {
+            size: own,
+            corner_radii,
+            corner_smoothing,
+        }) if !near(own.width, size.width) || !near(own.height, size.height) => (
+            Some(NodeKind::Artboard {
+                size,
+                corner_radii,
+                corner_smoothing,
+            }),
+            None,
+        ),
         _ => (None, None),
     }
 }
@@ -1737,7 +1744,7 @@ fn pinned_size(view: &dyn LayoutView, root: crate::NodeId, out: &[Laid]) -> Opti
     };
     let (_, placed) = place(&insets, frame, view.local(root), &kind)?;
     match placed? {
-        NodeKind::Artboard { size }
+        NodeKind::Artboard { size, .. }
             if !near(size.width, own.width) || !near(size.height, own.height) =>
         {
             Some(size)
@@ -2181,7 +2188,7 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
         }
     };
     let stored = match kind {
-        NodeKind::Artboard { size } => Some(*size),
+        NodeKind::Artboard { size, .. } => Some(*size),
         _ => None,
     };
     let mut style = taffy::Style {
@@ -2735,6 +2742,7 @@ mod tests {
         let path = NodeKind::Path {
             path: line,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         };
         let (slot, size) = placed(insets, Affine::IDENTITY, &path);
         assert_eq!(
@@ -2956,6 +2964,7 @@ mod tests {
         let kind = NodeKind::Path {
             path,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         };
         let bx = geometry::local_bounds(&kind, None).unwrap();
         let at = Affine::translate((20.0, 10.0));
@@ -3133,6 +3142,8 @@ mod flex_tests {
     fn frame(w: f64, h: f64) -> NodeKind {
         NodeKind::Artboard {
             size: Size::new(w, h),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     }
 

@@ -1231,7 +1231,16 @@ impl OndinApp {
             Drag::LooseGap { .. } | Drag::LooseReorder { .. } => {
                 return (self.loose_cursor(None).unwrap_or_default(), None);
             }
+            Drag::ShapeHandle { .. } => return (egui::CursorIcon::Grabbing, None),
             _ => {}
+        }
+
+        // A shape's corner or arc dot, in the press's order: ahead of the box
+        // handles, whose sides and corners it may sit on.
+        if let Some(p) = resp.hover_pos()
+            && let Some(icon) = self.shape_handle_cursor(self.shape_handle_at(p, rect, ppp))
+        {
+            return (icon, None);
         }
 
         // A selected set's `+` resolves ahead of the box handles, as the press
@@ -1654,6 +1663,7 @@ impl OndinApp {
         self.on_pivot(screen, rect, ppp).is_some()
             || self.gradient_claims(screen, rect, ppp)
             || self.set_plus_at(screen, rect, ppp).is_some()
+            || self.shape_handle_at(screen, rect, ppp).is_some()
             || (self.line_ends(rect, ppp).is_some()
                 && self.grab_line_end(screen, rect, ppp).is_some())
             || self.grab_rail_handle(screen, rect, ppp).is_some()
@@ -1692,6 +1702,12 @@ impl OndinApp {
 
         // A press that slides off a set's `+` starts nothing.
         if self.set_plus_at(grab, rect, ppp).is_some() {
+            return;
+        }
+
+        // A shape's corner or arc dot, ahead of the box handles it may sit on.
+        let alt = ui.input(|i| i.modifiers.alt);
+        if self.begin_shape_drag(grab, rect, ppp, alt) {
             return;
         }
 
@@ -1860,6 +1876,7 @@ impl OndinApp {
                     self.session.set_preview(&tx);
                 }
             }
+            Drag::ShapeHandle { .. } => self.preview_shape_drag(world, shift),
             // `node_input` runs first and owns the node tool's drags end to end.
             Drag::Points { .. }
             | Drag::Handle { .. }
@@ -2038,6 +2055,10 @@ impl OndinApp {
             drag @ (Drag::LooseGap { .. } | Drag::LooseReorder { .. }) => {
                 self.drag = drag;
                 self.finish_loose_drag(world, shift);
+            }
+            drag @ Drag::ShapeHandle { .. } => {
+                self.drag = drag;
+                self.finish_shape_drag(world, shift);
             }
             // `node_input` commits its own release.
             Drag::Points { .. }
@@ -2869,7 +2890,8 @@ impl OndinApp {
             }
             // The display node's kind, as `draw_layout_grids` reads: the used box,
             // where a hug, a stretch or a bound size draws the grid.
-            let Some(NodeKind::Artboard { size }) = self.session.display_node(id).map(|n| n.kind())
+            let Some(NodeKind::Artboard { size, .. }) =
+                self.session.display_node(id).map(|n| n.kind())
             else {
                 continue;
             };
@@ -3602,7 +3624,10 @@ impl OndinApp {
         .iter()
         .filter(|id| only.is_none_or(|want| **id == want))
         .find_map(|id| {
-            let NodeKind::Path { path, corner_radii } = self.session.doc.get(*id)?.kind() else {
+            let NodeKind::Path {
+                path, corner_radii, ..
+            } = self.session.doc.get(*id)?.kind()
+            else {
                 return None;
             };
             let node_world = self.session.resolved.world_transform(*id)?;
@@ -3963,7 +3988,10 @@ impl OndinApp {
     /// The edited path's subpaths in **world** space from the committed document —
     /// the fixed origin an edit is computed from, since the preview compounds.
     fn edited_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
-        let NodeKind::Path { path, corner_radii } = self.session.doc.get(id)?.kind() else {
+        let NodeKind::Path {
+            path, corner_radii, ..
+        } = self.session.doc.get(id)?.kind()
+        else {
             return None;
         };
         let world = self.session.resolved.world_transform(id)?;
@@ -3976,7 +4004,10 @@ impl OndinApp {
     /// For anything that shows a point and for an incremental edit like a scrub
     /// ([`Self::nudge_points_tx`]).
     fn preview_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
-        let NodeKind::Path { path, corner_radii } = self.session.display_node(id)?.kind() else {
+        let NodeKind::Path {
+            path, corner_radii, ..
+        } = self.session.display_node(id)?.kind()
+        else {
             return None;
         };
         let world = self.session.preview_world_transform(id)?;
@@ -5087,7 +5118,9 @@ impl OndinApp {
     /// comparison — both, so a radius scrubbed away and back is no undo step.
     pub(crate) fn stored_path(&self, id: NodeId) -> Option<(&ondin_core::kurbo::BezPath, &[f64])> {
         match self.session.doc.get(id)?.kind() {
-            NodeKind::Path { path, corner_radii } => Some((path, corner_radii)),
+            NodeKind::Path {
+                path, corner_radii, ..
+            } => Some((path, corner_radii)),
             _ => None,
         }
     }
@@ -8002,6 +8035,7 @@ impl OndinApp {
         self.draw_grid_tracks(painter, rect, ppp);
         self.draw_spacing_bands(painter, rect, ppp);
         self.draw_loose_spacing(painter, rect, ppp);
+        self.draw_shape_handles(painter, rect, ppp);
 
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
         self.draw_slices(ui, painter, rect, ppp, resp);
@@ -10471,7 +10505,11 @@ mod layout_grid_tests {
                 id: frame,
                 parent: root,
                 index: 0,
-                kind: NodeKind::Artboard { size: FRAME },
+                kind: NodeKind::Artboard {
+                    size: FRAME,
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
                 transform: None,
                 name: None,
             },
@@ -10768,6 +10806,8 @@ mod grid_track_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -11115,6 +11155,8 @@ mod grid_track_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -11357,6 +11399,8 @@ mod paste_text_tests {
                 0,
                 NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             create(group, frame, 0, NodeKind::Group),
@@ -13182,6 +13226,7 @@ mod headless_app_tests {
                 kind: NodeKind::Path {
                     path: p,
                     corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((1000.0, 1000.0))),
                 name: None,
@@ -13698,6 +13743,7 @@ mod headless_app_tests {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -14482,6 +14528,8 @@ mod headless_app_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((100.0, 100.0))),
             name: None,
@@ -14979,6 +15027,7 @@ mod rail_drag_tests {
         let text = ids.mint();
         let ring = ondin_core::geometry::local_path(&NodeKind::Ellipse {
             size: ondin_core::kurbo::Size::new(200.0, 200.0),
+            arc: ondin_core::EllipseArc::default(),
         })
         .expect("an ellipse has an outline");
         doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -15221,6 +15270,8 @@ mod paste_placement_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 150.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((100.0, 100.0))),
                 name: Some("Board".into()),
@@ -15306,6 +15357,8 @@ mod frame_menu_door_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 150.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((100.0, 100.0))),
                 name: Some("Board".into()),
@@ -15345,6 +15398,8 @@ mod frame_menu_door_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(20.0, 20.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -15454,6 +15509,8 @@ mod frame_menu_door_tests {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(20.0, 20.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -15901,6 +15958,8 @@ mod frame_menu_door_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(30.0, 20.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((8.0, 8.0))),
             name: Some(name.into()),
@@ -15983,6 +16042,8 @@ mod frame_menu_door_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(50.0, 50.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((100.0, 400.0))),
             name: Some("Plain".into()),
@@ -16221,6 +16282,8 @@ mod frame_menu_door_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Page".into()),
@@ -16231,6 +16294,8 @@ mod frame_menu_door_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 80.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Header".into()),
@@ -16451,6 +16516,7 @@ mod locked_path_verb_tests {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -17726,6 +17792,7 @@ mod select_drag_tests {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -18270,6 +18337,8 @@ mod zero_travel_release_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -18341,6 +18410,7 @@ mod zero_travel_release_tests {
         let id = ids.mint();
         let ring = ondin_core::geometry::local_path(&NodeKind::Ellipse {
             size: Size::new(200.0, 200.0),
+            arc: ondin_core::EllipseArc::default(),
         })
         .expect("an ellipse has an outline");
         doc.apply(&Transaction(vec![Operation::CreateNode {
@@ -18688,6 +18758,8 @@ mod marquee_selectability_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -18768,6 +18840,8 @@ mod marquee_selectability_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -18830,6 +18904,8 @@ mod marquee_selectability_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -18893,6 +18969,8 @@ mod frame_edge_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -19205,6 +19283,8 @@ mod group_fence_tests {
         };
         let frame = |w, h| NodeKind::Artboard {
             size: Size::new(w, h),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let square = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
@@ -19256,6 +19336,8 @@ mod group_fence_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(w, w),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -19300,6 +19382,8 @@ mod group_fence_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(w, w),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -19361,6 +19445,8 @@ mod group_fence_tests {
         };
         let frame = |w| NodeKind::Artboard {
             size: Size::new(w, w),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             node(k, root, frame(200.0), (0.0, 0.0)),
@@ -19491,6 +19577,8 @@ mod group_fence_tests {
         };
         let frame = |w| NodeKind::Artboard {
             size: Size::new(w, w),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             node(set, root, frame(300.0), (0.0, 0.0)),
@@ -19576,6 +19664,8 @@ mod group_fence_tests {
                 root,
                 NodeKind::Artboard {
                     size: Size::new(1000.0, 1000.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 (0.0, 0.0),
             ),
@@ -19585,6 +19675,8 @@ mod group_fence_tests {
                 row,
                 NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 (0.0, 0.0),
             ),
@@ -19660,6 +19752,8 @@ mod flex_drag_tests {
                 0,
                 NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             create(a, frame, 0, rect(40.0)),
@@ -19776,6 +19870,8 @@ mod flex_canvas_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -20183,6 +20279,8 @@ mod flex_canvas_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -20527,6 +20625,8 @@ mod flex_canvas_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(300.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -20631,6 +20731,8 @@ mod flex_canvas_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(w, h),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(at),
             name: None,
@@ -21205,6 +21307,7 @@ mod join_and_grid_snap_tests {
         NodeKind::Path {
             path,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         }
     }
 
@@ -21285,6 +21388,8 @@ mod join_and_grid_snap_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((100.0, 0.0))),
                 name: None,
@@ -21316,6 +21421,8 @@ mod join_and_grid_snap_tests {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(
                     Affine::translate((1000.0, 0.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2)
@@ -21363,6 +21470,8 @@ mod join_and_grid_snap_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((100.0, 0.0))),
                 name: None,
@@ -21439,6 +21548,8 @@ mod bound_default_span_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

@@ -1286,9 +1286,10 @@ fn paint_shape<P: ScenePainter>(
     // and outside the clip, which only `paint_node` can do, so a frame cannot fall
     // through to the generic tail. This loop is the tail's; if one grows a rule the
     // other must.
-    if let NodeKind::Artboard { size } = painted.kind {
+    if let NodeKind::Artboard { size, .. } = painted.kind {
         let frame = Rect::new(0.0, 0.0, size.width, size.height);
-        let path = frame.to_path(TOLERANCE);
+        // The rounded outline, the same one the children are clipped to.
+        let path = geometry::local_path(painted.kind).unwrap_or_else(|| frame.to_path(TOLERANCE));
         for fill in painted.paint.fills.iter().filter(|f| f.visible) {
             let framing = framing_of(doc, fill.brush.drawn(), frame);
             fill_or_placeholder(

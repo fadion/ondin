@@ -192,6 +192,8 @@ fn a_nested_frame_clips_inside_its_parent() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(120.0, 90.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((40.0, 50.0))),
                 name: Some("Card".into()),
@@ -1506,6 +1508,7 @@ fn a_fitted_dash_on_two_subpaths_is_two_paths_with_two_patterns() {
         kind: NodeKind::Path {
             path,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -2857,6 +2860,7 @@ fn a_mask_wraps_the_run_above_it_and_writes_no_shape_of_its_own() {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(64.0, 48.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((7.0, 9.0))),
             name: Some("Masker".into()),
@@ -2928,6 +2932,7 @@ fn a_mask_inside_a_clipping_stroked_frame_nests_and_closes() {
                 index: 0,
                 kind: NodeKind::Ellipse {
                     size: Size::new(64.0, 48.0),
+                    arc: ondin_core::EllipseArc::default(),
                 },
                 transform: Some(Affine::translate((7.0, 9.0))),
                 name: None,
@@ -3003,6 +3008,7 @@ fn an_alpha_mask_exports_as_a_mask_element_typed_alpha() {
                 index: 0,
                 kind: NodeKind::Ellipse {
                     size: Size::new(64.0, 48.0),
+                    arc: ondin_core::EllipseArc::default(),
                 },
                 transform: Some(Affine::translate((7.0, 9.0))),
                 name: None,
@@ -3079,6 +3085,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
             index: if id == a { 0 } else { 1 },
             kind: NodeKind::Ellipse {
                 size: Size::new(100.0, 100.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((x, 0.0))),
             name: None,
@@ -3120,6 +3127,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(10.0, 10.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: None,
@@ -3231,6 +3239,7 @@ fn a_boolean_the_arithmetic_gave_up_on_exports_as_the_placeholder() {
             index: i as usize,
             kind: NodeKind::Ellipse {
                 size: Size::new(180.0, 180.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((c.x - 90.0, c.y - 90.0))),
             name: None,
@@ -3719,6 +3728,8 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3864,6 +3875,8 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3884,6 +3897,7 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(200.0, 200.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((1000.0, 1000.0))),
             name: None,
@@ -4277,6 +4291,7 @@ fn a_hidden_mask_leaves_the_run_unwrapped_in_both_modes() {
                     index: 0,
                     kind: NodeKind::Ellipse {
                         size: Size::new(64.0, 48.0),
+                        arc: ondin_core::EllipseArc::default(),
                     },
                     transform: Some(Affine::translate((7.0, 9.0))),
                     name: None,

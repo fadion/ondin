@@ -756,6 +756,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(40.0, 20.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Badge".into()),
@@ -766,6 +768,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(4.0, 4.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Dot".into()),
@@ -1380,6 +1384,8 @@ mod tests {
                     index: i,
                     kind: NodeKind::Artboard {
                         size: Size::new(10.0, 10.0),
+                        corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -1442,6 +1448,8 @@ mod tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(20.0, 20.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),
@@ -1570,6 +1578,8 @@ mod tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(20.0, 20.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),

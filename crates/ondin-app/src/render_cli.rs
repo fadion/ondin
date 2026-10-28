@@ -773,6 +773,8 @@ mod tests {
         let [set, small, sl, sb, large, ll, lb] = [(); 7].map(|_| ids.mint());
         let frame = |w| NodeKind::Artboard {
             size: Size::new(w, 30.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let badge = || NodeKind::Rect {
             size: Size::new(8.0, 8.0),
@@ -1107,6 +1109,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(40.0, 40.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Card".into()),
@@ -1240,6 +1244,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(40.0, 40.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),
@@ -1332,6 +1338,8 @@ mod tests {
         // A set's variants are frames, so every icon is one.
         let icon = || NodeKind::Artboard {
             size: Size::new(10.0, 10.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
             id,
@@ -1361,6 +1369,8 @@ mod tests {
                 1,
                 NodeKind::Artboard {
                     size: Size::new(60.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 "Arrow",
             ),
@@ -1387,6 +1397,8 @@ mod tests {
                 3,
                 NodeKind::Artboard {
                     size: Size::new(30.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 "Card",
             ),

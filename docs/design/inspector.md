@@ -186,9 +186,20 @@ comes from the committed document.
 - **Preview** section at the foot, collapsed by default; opening it renders and encodes once per edit, keyed on `EditorSession::revision`. A slice previews its region of the page, as its file is (`plan::slice_region` → `png::raster_region`, `svg::svg_region`; a PDF's clauses read the region's origins). A vector row previews as a line, not a picture: an SVG's size and fidelity clauses, a PDF's clauses alone, since it is not converted per edit (`pdf::approximated`).
 - **JPEG quality** is the one scrubbable export setting. It holds its in-flight value in `export_quality_scrub` and bypasses both committers: `commit_run` would make it uncancellable, and `RenderOverrides` treats `SetExports` as a no-op. The decision is `quality_step`.
 
+### Appearance (single layer)
+
+| Kind | Rows |
+| --- | --- |
+| Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them |
+| Polygon, star | opacity, radius (bindable, chip and doors as a rect's) and the smoothing button; the smoothing field opens under them, above the count row |
+| Ellipse | a 2 × 2 grid of equal fields: opacity and Sweep, then Start and Ratio; icons only (pie slice, arrow-clockwise, dashed circle), no labels, the polygon's pattern |
+| Path | the per-corner button (inert: a path's radius is per anchor), then the smoothing button; the smoothing field opens under them |
+
+Override marks on an instance cover the arc and smoothing on every kind.
+
 ### Appearance (multi-selection)
 
-- Opacity, and corner radius when any member is a rect; both absolute, *Mixed* on disagreement. Opacity is set on outermost members, radius on the whole subtree (§5.7a).
+- Opacity, and corner radius when any member is a frame, rect, polygon or star (`build::any_cornered_in`; tip "Corner radius of every shape in the selection"); both absolute, *Mixed* on disagreement. Opacity is set on outermost members, radius on the whole subtree (§5.7a).
 - The per-corner and corner-smoothing buttons are present and inert; the fields keep single-card widths.
 - "Disagree" is a tolerance, `build::OPACITY_AGREEMENT`/`RADIUS_AGREEMENT`, read by `inspector::shared_opacity_shown`/`shared_radius_shown`.
 

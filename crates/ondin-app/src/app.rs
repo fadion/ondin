@@ -9167,6 +9167,7 @@ mod image_edit_lock_tests {
         NodeKind::Path {
             path: p,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         }
     }
 
@@ -13120,6 +13121,8 @@ mod library_wiring_tests {
                 index: 0,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(80.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Button".into()),
@@ -14288,6 +14291,8 @@ mod library_wiring_tests {
             index,
             kind: ondin_core::NodeKind::Artboard {
                 size: ondin_core::kurbo::Size::new(400.0, 300.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(ondin_core::kurbo::Affine::translate((x, 0.0))),
             name: Some(name.into()),
@@ -14403,6 +14408,8 @@ mod library_wiring_tests {
                 index: 0,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(40.0, 20.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Badge".into()),
@@ -15325,6 +15332,7 @@ mod undo_rewind_tests {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -16300,6 +16308,8 @@ mod select_all_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((300.0 * index as f64, 0.0))),
             name: None,
@@ -16553,6 +16563,8 @@ mod component_verb_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -16725,6 +16737,8 @@ mod component_verb_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(50.0, 50.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -16844,6 +16858,8 @@ mod component_verb_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(50.0, 50.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -16910,6 +16926,8 @@ mod component_verb_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(40.0, 40.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Badge".into()),
@@ -17074,6 +17092,8 @@ mod component_verb_tests {
         let [star, ss, heart, hs, m] = [(); 5].map(|_| ids.mint());
         let frame = |w: f64| NodeKind::Artboard {
             size: Size::new(w, w),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let rect = || NodeKind::Rect {
             size: Size::new(10.0, 10.0),
@@ -17524,6 +17544,8 @@ mod component_verb_tests {
         let [star, sshape, heart, hshape, button] = [(); 5].map(|_| ids.mint());
         let frame = |w: f64| NodeKind::Artboard {
             size: Size::new(w, w),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let rect = || NodeKind::Rect {
             size: Size::new(4.0, 4.0),
@@ -17787,6 +17809,8 @@ mod component_verb_tests {
         let page = app.session.ids.mint();
         let frame = NodeKind::Artboard {
             size: Size::new(500.0, 500.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         assert!(app.session.commit(create(page, root, frame.clone())));
         assert!(app.session.commit(Transaction(vec![Operation::Reparent {
@@ -17851,6 +17875,8 @@ mod component_verb_tests {
                 root,
                 NodeKind::Artboard {
                     size: Size::new(50.0, 50.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             Operation::SetComponent {
@@ -18093,6 +18119,8 @@ mod select_same_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -18224,6 +18252,8 @@ mod paste_target_tests {
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(200.0, 200.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         assert!(app.session.commit(Transaction(vec![
             at(a, root, frame(), 0.0, 0.0),

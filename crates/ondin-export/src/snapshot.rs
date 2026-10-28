@@ -167,6 +167,10 @@ pub enum Geometry {
     Ellipse {
         width: f64,
         height: f64,
+        /// Start and sweep in degrees clockwise from three o'clock, and the hole
+        /// as a fraction of the radius; absent for the whole ellipse.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arc: Option<ondin_core::EllipseArc>,
     },
     Polygon {
         width: f64,
@@ -175,6 +179,8 @@ pub enum Geometry {
         /// One radius on every vertex; absent when square-cornered.
         #[serde(default, skip_serializing_if = "is_zero")]
         corner_radius: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     Star {
         width: f64,
@@ -184,6 +190,8 @@ pub enum Geometry {
         inner_ratio: f64,
         #[serde(default, skip_serializing_if = "is_zero")]
         corner_radius: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     Line {
         end_x: f64,
@@ -214,6 +222,11 @@ pub enum Geometry {
     Artboard {
         width: f64,
         height: f64,
+        /// Per corner; absent when square-cornered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        corner_radii: Option<RoundedRectRadii>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     /// An export region's box; it draws nothing.
     Slice {
@@ -507,9 +520,16 @@ fn geometry(kind: &NodeKind) -> Geometry {
         // A boolean reports no geometry, like a group: it comes from its children.
         // Its derived outline is `Resolved`'s, not the document's.
         NodeKind::Root | NodeKind::Group | NodeKind::Boolean { .. } => Geometry::None,
-        NodeKind::Artboard { size } => Geometry::Artboard {
+        NodeKind::Artboard {
+            size,
+            corner_radii,
+            corner_smoothing,
+        } => Geometry::Artboard {
             width: size.width,
             height: size.height,
+            corner_radii: (!ondin_core::geometry::is_square_cornered(corner_radii))
+                .then_some(*corner_radii),
+            corner_smoothing: *corner_smoothing,
         },
         NodeKind::Slice { size } => Geometry::Slice {
             width: size.width,
@@ -525,31 +545,36 @@ fn geometry(kind: &NodeKind) -> Geometry {
             corner_radii: *corner_radii,
             corner_smoothing: *corner_smoothing,
         },
-        NodeKind::Ellipse { size } => Geometry::Ellipse {
+        NodeKind::Ellipse { size, arc } => Geometry::Ellipse {
             width: size.width,
             height: size.height,
+            arc: (!arc.is_default()).then_some(*arc),
         },
         NodeKind::Polygon {
             size,
             sides,
             corner_radius,
+            corner_smoothing,
         } => Geometry::Polygon {
             width: size.width,
             height: size.height,
             sides: *sides,
             corner_radius: *corner_radius,
+            corner_smoothing: *corner_smoothing,
         },
         NodeKind::Star {
             size,
             points,
             inner_ratio,
             corner_radius,
+            corner_smoothing,
         } => Geometry::Star {
             width: size.width,
             height: size.height,
             points: *points,
             inner_ratio: *inner_ratio,
             corner_radius: *corner_radius,
+            corner_smoothing: *corner_smoothing,
         },
         NodeKind::Line { end } => Geometry::Line {
             end_x: end.x,

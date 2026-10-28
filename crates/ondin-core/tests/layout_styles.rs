@@ -28,6 +28,8 @@ fn frame(id: NodeId, parent: NodeId, index: usize) -> Operation {
         index,
         kind: NodeKind::Artboard {
             size: Size::new(200.0, 200.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,

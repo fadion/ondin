@@ -25,7 +25,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
-- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
+- **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, an ellipse's start, sweep and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
 
 ### The wheel
@@ -226,6 +226,26 @@ chrome hides, and the box handles, a lone line's ends and the rail handle do not
   the start angle. Cursor: `Grab` over a handle or dot, `Grabbing` while dragging, the plain arrow over
   the bare guide, where the ghost dot is the affordance. A locked layer draws the handles and arms none
   of them.
+
+### Shape handles (`shape_handles.rs`)
+
+Under Select, one selected rect or ellipse that is unlocked and shown draws dots while the pointer is
+over it or a dot is dragged. A frame has none: its radius is rarely set, and its Appearance fields
+are enough. They hide while its shorter side is under `MIN_SIDE_PX` (48
+screen pt), during any other drag, while the chrome is hidden and while a gradient is edited. Dots are
+worked in the layer's local space, so a rotated layer's dots turn with it. The press takes them after the
+pivot, the gradient handles and a set's `+`, and ahead of the box handles they may sit on
+(`begin_shape_drag`; `chrome_claims` asks `shape_handle_at`). `Drag::ShapeHandle` previews each frame
+and commits once; the value shows beside the pointer.
+
+| Kind | Dots | Drag | Undo step |
+| --- | --- | --- | --- |
+| Rect | one inside each corner, inset by its radius along both edges, or `ZERO_INSET_PX` (12 screen pt) at radius 0 to clear the resize handle | all four corners to one radius, whole points, 0 to half the shorter side ("Radius 32"); Alt sets that corner alone and opens the per-corner disclosure ("Top left 48") | *Corner radius* |
+| Ellipse | start and end on the outline; ratio on the inner edge at mid-sweep (the centre while there is no hole) | end sets Sweep; start moves Start with the end held; ratio sets Ratio in whole percent. Shift snaps an angle to 15°; Sweep stops at 0 and 360 rather than wrapping | *Start*, *Sweep*, *Ratio* |
+
+- Smoothing does not move a corner dot. A drag unbinds what it writes (all four corners, or with Alt the one) by a `SetCornerVars` in its own transaction, so the commit's binding keeper leaves it alone.
+- A whole ellipse's start and end dots coincide; the end is listed first, so the press drags Sweep.
+- Polygons and stars have no dots.
 
 ### The Scale tool
 

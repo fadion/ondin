@@ -11,6 +11,8 @@ use ondin_core::{Document, History, IdSource, NodeId, NodeKind, OpError, Operati
 fn artboard() -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(800.0, 600.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 

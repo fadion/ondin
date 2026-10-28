@@ -38,6 +38,8 @@ fn doc(ink: (u8, u8, u8), size: f64, panel: bool) -> Doc {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("Frame".into()),

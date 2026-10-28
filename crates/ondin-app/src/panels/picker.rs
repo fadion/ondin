@@ -3188,12 +3188,16 @@ mod grid_orphan_tests {
                 a,
                 NodeKind::Artboard {
                     size: Size::new(400.0, 300.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             node(
                 b,
                 NodeKind::Artboard {
                     size: Size::new(400.0, 300.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             node(

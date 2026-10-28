@@ -1760,6 +1760,8 @@ pub(crate) mod tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(w, 30.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),
@@ -1940,6 +1942,8 @@ pub(crate) mod tests {
             index: 0,
             kind: ondin_core::NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(
                 Affine::translate((1000.0, 1000.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2),
@@ -2040,6 +2044,8 @@ pub(crate) mod tests {
             index: 0,
             kind: ondin_core::NodeKind::Artboard {
                 size: Size::new(side, side),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(at)),
             name: None,
@@ -3148,7 +3154,7 @@ pub(crate) mod tests {
         ghost.settle(&ctx);
         let (_, size) = ghost.picture.expect("a picture");
         let stored = match doc.get(badge).unwrap().kind() {
-            NodeKind::Artboard { size } => *size,
+            NodeKind::Artboard { size, .. } => *size,
             _ => unreachable!(),
         };
         assert_eq!(
@@ -3236,6 +3242,8 @@ pub(crate) mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(10.0, 10.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

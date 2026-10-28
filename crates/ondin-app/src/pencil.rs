@@ -370,6 +370,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 300.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -594,6 +596,7 @@ mod tests {
             kind: NodeKind::Path {
                 path: drawn,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

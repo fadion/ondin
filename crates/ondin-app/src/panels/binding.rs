@@ -1639,22 +1639,24 @@ impl OndinApp {
                 match key {
                     // One corner: the other three keep their literals, the same
                     // `CornerRadii` the per-corner field writes (§15 D1049).
-                    FieldKey::Corner { id, slot } => match doc.get(id).map(|n| n.kind()) {
-                        Some(ondin_core::NodeKind::Rect { corner_radii, .. }) => {
-                            let mut c = *corner_radii;
-                            match slot {
-                                0 => c.top_left = r,
-                                1 => c.top_right = r,
-                                2 => c.bottom_right = r,
-                                _ => c.bottom_left = r,
+                    FieldKey::Corner { id, slot } => {
+                        match doc.get(id).and_then(|n| n.kind().corner_radii()) {
+                            Some(corner_radii) => {
+                                let mut c = corner_radii;
+                                match slot {
+                                    0 => c.top_left = r,
+                                    1 => c.top_right = r,
+                                    2 => c.bottom_right = r,
+                                    _ => c.bottom_left = r,
+                                }
+                                ops.push(Operation::SetGeometry {
+                                    id,
+                                    geometry: ondin_core::GeometryPatch::CornerRadii(c),
+                                });
                             }
-                            ops.push(Operation::SetGeometry {
-                                id,
-                                geometry: ondin_core::GeometryPatch::CornerRadii(c),
-                            });
+                            _ => return,
                         }
-                        _ => return,
-                    },
+                    }
                     FieldKey::Radius { id } => ops.push(Operation::SetGeometry {
                         id,
                         geometry: ondin_core::GeometryPatch::CornerRadius(r),
@@ -1838,12 +1840,13 @@ impl OndinApp {
                     _ => None,
                 }
             }
-            FieldKey::Radius { id } => match self.session.resolved.used_kind(doc, id)? {
-                ondin_core::NodeKind::Rect { corner_radii, .. } => {
-                    Some(Cell::Number(corner_radii.top_left))
-                }
-                _ => None,
-            },
+            FieldKey::Radius { id } => Some(Cell::Number(
+                self.session
+                    .resolved
+                    .used_kind(doc, id)?
+                    .corner_radii()?
+                    .top_left,
+            )),
             // The first slot's number as the first container lays it out.
             FieldKey::Spacing { id, slots } => {
                 let d = doc.resolved_display(id)?;
@@ -1905,15 +1908,15 @@ impl OndinApp {
                 let s = self.session.resolved.used_kind(doc, id)?.box_size()?;
                 Some(Cell::Number(if axis == 0 { s.width } else { s.height }))
             }
-            FieldKey::Corner { id, slot } => match self.session.resolved.used_kind(doc, id)? {
-                ondin_core::NodeKind::Rect { corner_radii, .. } => Some(Cell::Number(match slot {
+            FieldKey::Corner { id, slot } => {
+                let corner_radii = self.session.resolved.used_kind(doc, id)?.corner_radii()?;
+                Some(Cell::Number(match slot {
                     0 => corner_radii.top_left,
                     1 => corner_radii.top_right,
                     2 => corner_radii.bottom_right,
                     _ => corner_radii.bottom_left,
-                })),
-                _ => None,
-            },
+                }))
+            }
             // The string as drawn (§15 D1069).
             FieldKey::Content { id } | FieldKey::Family { id } => {
                 match doc.resolved_kind(id)?.into_owned() {
@@ -3532,6 +3535,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(200.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4263,6 +4268,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

@@ -946,10 +946,10 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
     node.effects = doc.resolved_effects(id, &node.effects).into_owned();
     node.item = doc.limits_drawn_in(doc.variables(), id, node.item);
     node.item.limit_vars = Default::default();
-    if let crate::NodeKind::Rect { corner_radii, .. } = &mut node.kind
-        && let Some(drawn) = doc.resolve_corners(id, *corner_radii)
+    if let Some(corner_radii) = node.kind.corner_radii()
+        && let Some(drawn) = doc.resolve_corners(id, corner_radii)
     {
-        *corner_radii = drawn;
+        node.kind.set_corner_radii(drawn);
     }
     node.corner_vars = Default::default();
     if let Some(d) = &node.display {
@@ -1232,12 +1232,9 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 }
             }
             if n.corner_vars.iter().any(Option::is_some) {
-                let drawn = twin.and_then(|d| match d.kind {
-                    crate::NodeKind::Rect { corner_radii, .. } => Some(corner_radii),
-                    _ => None,
-                });
+                let drawn = twin.and_then(|d| d.kind.corner_radii());
                 let mut vars = n.corner_vars;
-                if let crate::NodeKind::Rect { corner_radii, .. } = &mut n.kind {
+                if let Some(mut corner_radii) = n.kind.corner_radii() {
                     let slots: [&mut f64; 4] = [
                         &mut corner_radii.top_left,
                         &mut corner_radii.top_right,
@@ -1254,6 +1251,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                             }
                         }
                     }
+                    n.kind.set_corner_radii(corner_radii);
                 }
                 n.corner_vars = vars;
             }
@@ -1494,11 +1492,11 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             }
             ops.push(O::SetLayoutItem { id, item });
         }
-        if let crate::NodeKind::Rect { corner_radii, .. } = &n.kind
+        if let Some(corner_radii) = n.kind.corner_radii()
             && n.corner_vars.iter().flatten().any(|v| vars.contains(v))
-            && let Some(drawn) = doc.resolve_corners(id, *corner_radii)
+            && let Some(drawn) = doc.resolve_corners(id, corner_radii)
         {
-            let mut radii = *corner_radii;
+            let mut radii = corner_radii;
             let mut kept = n.corner_vars;
             let slots = [
                 (&mut radii.top_left, drawn.top_left),
@@ -2013,7 +2011,7 @@ pub(crate) fn check<'a>(
             return Err(VarRule::BadBinding(n.id));
         }
         if n.corner_vars.iter().any(Option::is_some) {
-            if !matches!(n.kind, crate::NodeKind::Rect { .. }) {
+            if n.kind.corner_radii().is_none() {
                 return Err(VarRule::BadCorners(n.id));
             }
             if n.corner_vars

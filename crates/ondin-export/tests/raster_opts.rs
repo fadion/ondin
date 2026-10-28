@@ -33,6 +33,8 @@ fn frame_with_a_small_rect() -> (Document, Resolved, NodeId, NodeId) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 300.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("Board".into()),

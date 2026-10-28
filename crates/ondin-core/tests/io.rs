@@ -42,6 +42,8 @@ fn rich_document() -> (Document, NodeId) {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(800.0, 600.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Board".into()),
@@ -79,6 +81,7 @@ fn rich_document() -> (Document, NodeId) {
                 index: 1,
                 kind: NodeKind::Ellipse {
                     size: Size::new(40.0, 40.0),
+                    arc: ondin_core::EllipseArc::default(),
                 },
                 transform: None,
                 name: None,
@@ -100,6 +103,7 @@ fn rich_document() -> (Document, NodeId) {
                 kind: NodeKind::Path {
                     path: p,
                     corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -346,7 +350,9 @@ fn a_v1_file_carrying_all_three_old_shapes_migrates_through_every_step() {
     assert_eq!(
         frame.kind(),
         &NodeKind::Artboard {
-            size: Size::new(800.0, 600.0)
+            size: Size::new(800.0, 600.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         "v3→v4: the kind carries a size and nothing else"
     );
@@ -454,7 +460,9 @@ fn migration_moves_a_v3_frame_background_into_its_fill_list() {
     assert_eq!(
         frame.kind(),
         &NodeKind::Artboard {
-            size: Size::new(800.0, 600.0)
+            size: Size::new(800.0, 600.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         "the kind carries a size and nothing else"
     );
@@ -1537,6 +1545,7 @@ fn path_corner_radii_survive_a_save_and_an_old_file_still_loads() {
         kind: NodeKind::Path {
             path: p,
             corner_radii: vec![0.0, 6.0],
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,

@@ -14,6 +14,8 @@ use ondin_core::{
 fn artboard() -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(800.0, 600.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -232,12 +234,14 @@ fn a_polygon_and_star_corner_radius_applies_and_reverses() {
             size,
             sides: 6,
             corner_radius: 2.0,
+            corner_smoothing: 0.0,
         },
         NodeKind::Star {
             size,
             points: 5,
             inner_ratio: 0.4,
             corner_radius: 2.0,
+            corner_smoothing: 0.0,
         },
     ] {
         let id = ids.mint();
@@ -301,6 +305,7 @@ fn a_polygon_radius_is_saved_only_when_set() {
         size: Size::new(10.0, 10.0),
         sides: 5,
         corner_radius: 0.0,
+        corner_smoothing: 0.0,
     };
     let json = serde_json::to_string(&sharp).unwrap();
     assert!(!json.contains("corner_radius"), "{json}");
@@ -311,6 +316,7 @@ fn a_polygon_radius_is_saved_only_when_set() {
         points: 5,
         inner_ratio: 0.5,
         corner_radius: 1.25,
+        corner_smoothing: 0.0,
     };
     let json = serde_json::to_string(&rounded).unwrap();
     assert_eq!(serde_json::from_str::<NodeKind>(&json).unwrap(), rounded);
@@ -1938,6 +1944,8 @@ fn a_subtree_holding_an_orphan_is_refused() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

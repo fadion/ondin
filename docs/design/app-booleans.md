@@ -124,7 +124,7 @@ Lock and the proportion lock are dropped deliberately. None of the four has a ch
 | Verb | Admits | Result |
 | --- | --- | --- |
 | `build::flatten` (`Ctrl+E`) | one boolean, or two or more layers | one boolean → `Path` of its outline in place; a set → union in the parent's space at the topmost member's slot with the bottom member's paint (`build::flatten_union`, carries paint only) |
-| `build::outline` (*Outline shape*) | one Rect/Ellipse/Polygon/Star/Line/Path | `Path` of its own outline, per-anchor radii baked in; cut at the **drawn** (used) size, via a `Resolved` lookup |
+| `build::outline` (*Outline shape*) | one Rect/Ellipse/Polygon/Star/Line/Path | `Path` of its own outline (`local_path`), radii, smoothing and an ellipse's arc baked in; cut at the **drawn** (used) size, via a `Resolved` lookup |
 | `build::outline_stroke` (*Outline stroke*) | one Shape/Path/Boolean with a visible stroke | each visible stroke a `Path` filled with that stroke's brush (a bound brush stays bound), below |
 | `build::outline_text` (*Convert to path*) | one Text | `Path` from `ondin_core::text::outline` (glyph coords already node-local) |
 

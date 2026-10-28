@@ -51,6 +51,8 @@ fn fixture() -> F {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -537,6 +539,7 @@ fn a_custom_stroke_binds_only_where_it_draws_its_outline() {
                 index: 1,
                 kind: NodeKind::Ellipse {
                     size: Size::new(10.0, 10.0),
+                    arc: ondin_core::EllipseArc::default(),
                 },
                 transform: None,
                 name: None,

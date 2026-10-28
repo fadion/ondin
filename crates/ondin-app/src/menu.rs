@@ -5531,6 +5531,8 @@ mod restore_children_tests {
                 root,
                 NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             create(a, f, rect()),
@@ -5636,6 +5638,8 @@ mod restore_children_tests {
         };
         let frame = |w: f64| NodeKind::Artboard {
             size: Size::new(w, w),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(m, root, frame(100.0), "M"),
@@ -5776,6 +5780,8 @@ mod restore_children_tests {
         };
         let frame = |w: f64| NodeKind::Artboard {
             size: Size::new(w, w),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(m, root, 0, frame(100.0), "M"),
@@ -5951,6 +5957,8 @@ mod kit_rows_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(40.0, 30.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),

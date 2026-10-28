@@ -63,6 +63,8 @@ fn fixture() -> F {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1439,6 +1441,8 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(80.0, 80.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -1760,6 +1764,7 @@ fn a_bound_size_is_drawn_and_laid_out_at_the_variables_number() {
             index: 1,
             kind: NodeKind::Ellipse {
                 size: Size::new(10.0, 10.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: None,
@@ -1971,6 +1976,8 @@ fn column(f: &mut F) -> NodeId {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 200.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2363,4 +2370,60 @@ fn a_bound_width_in_another_mode_stretches_its_gradient() {
         got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-9),
         "stretched to Dark's 80: {got:?}"
     );
+}
+
+/// A star's one radius binds as a rect's uniform radius does: the variable in
+/// all four slots, drawn per mode, kept through a save, and detached to what it
+/// draws.
+/// flip: `NodeKind::corner_radii` answering `None` for a star → fails at
+/// "bound".
+#[test]
+fn a_stars_radius_takes_a_variable() {
+    let mut f = fixture();
+    let star = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: star,
+            parent: f.frame,
+            index: 1,
+            kind: NodeKind::Star {
+                size: Size::new(60.0, 60.0),
+                points: 5,
+                inner_ratio: 0.5,
+                corner_radius: 3.0,
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+    let ops = ondin_core::bind_corners_ops(&f.doc, star, [Some(f.radius); 4]);
+    assert!(!ops.is_empty(), "bound");
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(star).unwrap().corner_vars(), [Some(f.radius); 4]);
+    let drawn = |doc: &Document| {
+        let res = Resolved::rebuild(doc);
+        match res.used_kind(doc, star).unwrap() {
+            NodeKind::Star { corner_radius, .. } => *corner_radius,
+            k => panic!("not a star: {k:?}"),
+        }
+    };
+    assert_eq!(drawn(&f.doc), 4.0, "Light's radius");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    assert_eq!(drawn(&f.doc), 12.0, "Dark's radius");
+
+    let loaded = ondin_core::io::load(&ondin_core::io::save(&f.doc).unwrap())
+        .expect("a bound star's corners pass the load's rules");
+    assert_eq!(loaded.get(star).unwrap().corner_vars(), [Some(f.radius); 4]);
+
+    let ops = ondin_core::detach_corners_ops(&f.doc, star);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let node = f.doc.get(star).unwrap();
+    assert_eq!(node.corner_vars(), [None; 4]);
+    assert_eq!(node.kind().corner_radii().unwrap().top_left, 12.0);
 }

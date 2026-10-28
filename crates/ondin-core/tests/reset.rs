@@ -80,6 +80,8 @@ fn fixture() -> F {
             0,
             NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         create(
@@ -495,6 +497,8 @@ fn a_reset_reaches_a_nested_copy_and_not_a_local_instance() {
             0,
             NodeKind::Artboard {
                 size: Size::new(300.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         Operation::Reparent {
@@ -549,6 +553,8 @@ fn outer_instance(f: &mut F) -> (NodeId, NodeId) {
             0,
             NodeKind::Artboard {
                 size: Size::new(300.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         Operation::Reparent {
@@ -672,6 +678,8 @@ fn resetting_a_nested_copy_inside_a_main_reaches_the_mains_instances() {
             0,
             NodeKind::Artboard {
                 size: Size::new(300.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         Operation::Reparent {

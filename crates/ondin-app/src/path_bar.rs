@@ -57,7 +57,10 @@ impl OffsetCard {
     /// what it last committed. An undo, a redo, a landed *Simplify* or any other
     /// edit makes it neither, and the card's next write would undo that edit.
     fn owns(&self, doc: &ondin_core::Document) -> bool {
-        let Some(NodeKind::Path { path, corner_radii }) = doc.get(self.id).map(|n| n.kind()) else {
+        let Some(NodeKind::Path {
+            path, corner_radii, ..
+        }) = doc.get(self.id).map(|n| n.kind())
+        else {
             return false;
         };
         let now = (path, corner_radii);
@@ -432,12 +435,16 @@ impl OndinApp {
         if self.offset_card.take().is_some() {
             return;
         }
-        let Some(NodeKind::Path { path, corner_radii }) =
-            self.session.doc.get(id).map(|n| n.kind().clone())
+        let Some(NodeKind::Path {
+            path,
+            corner_radii,
+            corner_smoothing,
+        }) = self.session.doc.get(id).map(|n| n.kind().clone())
         else {
             return;
         };
-        let drawn = ondin_core::geometry::round_corners(&path, &corner_radii);
+        let drawn =
+            ondin_core::geometry::round_corners_smoothed(&path, &corner_radii, corner_smoothing);
         let rule = self
             .session
             .doc
@@ -623,6 +630,7 @@ mod tests {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: radii,
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -640,7 +648,9 @@ mod tests {
     }
 
     fn stored(app: &OndinApp, id: NodeId) -> (BezPath, Vec<f64>) {
-        let Some(NodeKind::Path { path, corner_radii }) = app.session.doc.get(id).map(|n| n.kind())
+        let Some(NodeKind::Path {
+            path, corner_radii, ..
+        }) = app.session.doc.get(id).map(|n| n.kind())
         else {
             panic!("a Path");
         };

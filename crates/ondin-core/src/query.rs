@@ -665,6 +665,8 @@ mod tests {
     fn frame() -> NodeKind {
         NodeKind::Artboard {
             size: Size::new(800.0, 600.0),
+            corner_radii: kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     }
 

@@ -52,6 +52,8 @@ fn frame(id: NodeId, parent: NodeId, index: usize, name: &str) -> Operation {
         index,
         kind: NodeKind::Artboard {
             size: Size::new(100.0, 100.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: Some(name.into()),

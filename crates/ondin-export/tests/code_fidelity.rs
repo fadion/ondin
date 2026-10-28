@@ -95,6 +95,8 @@ impl Doc {
             parent,
             NodeKind::Artboard {
                 size: Size::new(w, h),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             Affine::translate((x, y)),
             name,
@@ -556,6 +558,7 @@ fn shapes_match_the_canvas() {
         Some(f),
         NodeKind::Ellipse {
             size: Size::new(90.0, 60.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         Affine::translate((90.0, 60.0)),
         "Dot",
@@ -692,6 +695,7 @@ fn stroked_ellipses_match_the_canvas() {
             Some(f),
             NodeKind::Ellipse {
                 size: Size::new(50.0, 50.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             Affine::translate((20.0, y)),
             "Dot",
@@ -702,6 +706,7 @@ fn stroked_ellipses_match_the_canvas() {
             Some(f),
             NodeKind::Ellipse {
                 size: Size::new(180.0, 50.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             Affine::translate((100.0, y)),
             "Oval",
@@ -848,6 +853,8 @@ fn rotation_matches_the_canvas() {
         Some(f),
         NodeKind::Artboard {
             size: Size::new(70.0, 60.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         Affine::translate((140.0, 90.0)) * Affine::rotate(-0.3),
         "Inner",
@@ -1004,6 +1011,7 @@ fn pictures_match_the_canvas() {
             points: 5,
             inner_ratio: 0.5,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         Affine::translate((20.0, 20.0)),
         "Star",
@@ -1019,6 +1027,7 @@ fn pictures_match_the_canvas() {
         NodeKind::Path {
             path: p,
             corner_radii: vec![],
+            corner_smoothing: 0.0,
         },
         Affine::translate((100.0, 30.0)),
         "Blob",
@@ -1063,6 +1072,7 @@ fn a_pinned_picture_sits_where_layout_puts_it() {
             points: 5,
             inner_ratio: 0.5,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         Affine::IDENTITY,
         "Star",
@@ -1688,6 +1698,8 @@ fn variables_match_the_canvas_in_every_mode() {
                 Some(f),
                 NodeKind::Artboard {
                     size: Size::new(40.0, 40.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 Affine::IDENTITY,
                 "Light again",
@@ -2445,6 +2457,7 @@ fn a_property_drawn_as_a_picture_is_not_frozen_at_the_mains_value() {
             Some(g),
             NodeKind::Ellipse {
                 size: Size::new(32.0, 32.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             Affine::IDENTITY,
             "Mask",
@@ -2543,6 +2556,7 @@ fn a_use_in_another_mode_draws_that_modes_values() {
                 points: 5,
                 inner_ratio: 0.5,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             },
             Affine::translate((120.0, 18.0)),
             "Star",

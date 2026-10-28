@@ -562,6 +562,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(24.0, 24.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Badge".into()),

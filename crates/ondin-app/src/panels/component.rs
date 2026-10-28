@@ -1105,9 +1105,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
             | G::CornerRadii(_)
             | G::CornerSmoothing(_)
             | G::Sides(_)
-            | G::InnerRatio(_) => {
-                Some("Appearance")
-            }
+            | G::InnerRatio(_)
+            | G::Arc(_) => Some("Appearance"),
             G::TextSizing(_) => Some("Type"),
             G::Path { .. }
             | G::TextPath(_)
@@ -2019,6 +2018,8 @@ mod tests {
                 root,
                 NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 "Button",
             ),
@@ -3410,6 +3411,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(500.0, 500.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3451,7 +3454,7 @@ mod tests {
         click(&mut f.app, &ctx, chip);
         let node = f.app.session.doc.get(f.i).unwrap();
         assert!(
-            matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(100.0, 100.0)),
+            matches!(node.kind(), NodeKind::Artboard { size, .. } if *size == Size::new(100.0, 100.0)),
             "the main's size is back"
         );
         assert_eq!(node.insets(), &pin, "and the instance's own pin stays");
@@ -3481,7 +3484,7 @@ mod tests {
         click(&mut f.app, &ctx, w);
         let node = f.app.session.doc.get(f.i).unwrap();
         assert!(
-            matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(100.0, 100.0)),
+            matches!(node.kind(), NodeKind::Artboard { size, .. } if *size == Size::new(100.0, 100.0)),
             "W's reset puts the main's width back"
         );
         assert_eq!(node.insets(), &pin, "W keeps the instance's own pin");
@@ -3652,6 +3655,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(40.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(ondin_core::kurbo::Affine::translate((300.0, 40.0))),
                 name: Some("Tag".into()),
@@ -3758,7 +3763,7 @@ mod tests {
         click(&mut n.app, &ctx, chip);
         let node = n.app.session.doc.get(n.r).unwrap();
         assert!(
-            matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(30.0, 30.0)),
+            matches!(node.kind(), NodeKind::Artboard { size, .. } if *size == Size::new(30.0, 30.0)),
             "the slot's size is back: {:?}",
             node.kind()
         );
@@ -4063,6 +4068,8 @@ mod tests {
         let [set, small, label, large, llabel] = [(); 5].map(|_| ids.mint());
         let frame = |w| NodeKind::Artboard {
             size: Size::new(w, 30.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
             id,
@@ -4587,6 +4594,8 @@ mod tests {
         };
         let frame = |w| NodeKind::Artboard {
             size: Size::new(w, 30.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let item = ids.mint_item();
         doc.apply(&Transaction(vec![
@@ -4763,6 +4772,8 @@ mod tests {
                 index,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Badges".into()),
@@ -6826,6 +6837,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(50.0, 50.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Card".into()),

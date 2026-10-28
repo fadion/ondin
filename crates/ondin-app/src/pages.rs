@@ -862,6 +862,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((x, 0.0))),
             name: None,

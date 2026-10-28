@@ -2453,7 +2453,7 @@ impl OndinApp {
     pub(super) fn content_extent(&self, id: NodeId, horizontal: bool) -> Option<f64> {
         let node = self.session.display_node(id)?;
         let size = match node.kind() {
-            NodeKind::Artboard { size } => *size,
+            NodeKind::Artboard { size, .. } => *size,
             _ => self.session.preview_frame(id)?,
         };
         let pad = match node.display().map(|d| d.padding()) {
@@ -2789,6 +2789,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -2837,6 +2839,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(50.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((1000.0, 0.0))),
                 name: None,
@@ -2885,7 +2889,7 @@ mod tests {
         assert_eq!(node.item().grow, 1.0, "still grows");
         assert!(matches!(
             node.kind(),
-            NodeKind::Artboard { size } if size.width == 50.0
+            NodeKind::Artboard { size, .. } if size.width == 50.0
         ));
     }
 
@@ -3030,6 +3034,8 @@ mod tests {
         use SizeMode::*;
         let frame = NodeKind::Artboard {
             size: Size::new(1.0, 1.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let rect = NodeKind::Rect {
             size: Size::new(1.0, 1.0),
@@ -3039,6 +3045,7 @@ mod tests {
         let path = NodeKind::Path {
             path: Default::default(),
             corner_radii: Default::default(),
+            corner_smoothing: 0.0,
         };
         assert_eq!(size_modes(&frame, false, false), vec![Px], "no menu at all");
         assert_eq!(size_modes(&frame, true, false), vec![Px, FitContent]);
@@ -3563,7 +3570,9 @@ mod tests {
         assert_eq!(
             frame.kind(),
             &NodeKind::Artboard {
-                size: Size::new(150.0, 200.0)
+                size: Size::new(150.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             "the hugged width, now the frame's own"
         );
@@ -3975,6 +3984,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 300.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -4278,6 +4289,8 @@ mod tests {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((600.0, 0.0))),
                 name: None,
@@ -5138,6 +5151,8 @@ mod tests {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((600.0, 0.0))),
                 name: None,

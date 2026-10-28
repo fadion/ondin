@@ -7888,6 +7888,7 @@ mod tests {
     fn an_offset_moves_the_type_along_a_closed_rail_and_wraps_past_the_end() {
         let ring = crate::geometry::local_path(&crate::node::NodeKind::Ellipse {
             size: Size::new(200.0, 200.0),
+            arc: crate::node::EllipseArc::default(),
         })
         .expect("an ellipse has an outline");
 

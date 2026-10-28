@@ -1253,14 +1253,17 @@ impl Transaction {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum GeometryPatch {
     Size(Size),
-    /// The same radius on all four corners of a rect, or on every vertex of a
-    /// polygon or star.
+    /// The same radius on all four corners of a frame or rect, or on every
+    /// vertex of a polygon or star.
     CornerRadius(f64),
-    /// Per-corner radii. The inverse of *either* corner patch is always this one,
-    /// so a uniform set can be undone to four unequal values.
+    /// Per-corner radii. The inverse of *either* corner patch on a frame or rect
+    /// is always this one, so a uniform set can be undone to four unequal values.
+    /// A polygon or star takes the top-left, its four corners being one radius.
     CornerRadii(RoundedRectRadii),
-    /// A rect's corner smoothing, `0..=1` (`geometry::smoothed_rect`).
+    /// Corner smoothing of a frame, rect, polygon, star or path, `0..=1`.
     CornerSmoothing(f64),
+    /// An ellipse's arc, normalized on the way in.
+    Arc(crate::node::EllipseArc),
     /// Vertex count: a polygon's sides, or a star's points.
     Sides(u32),
     /// A star's inner radius as a fraction of its outer one, 0..=1.
@@ -1327,6 +1330,7 @@ impl GeometryPatch {
             GeometryPatch::CornerRadius(_)
             | GeometryPatch::CornerRadii(_)
             | GeometryPatch::CornerSmoothing(_)
+            | GeometryPatch::Arc(_)
             | GeometryPatch::Sides(_)
             | GeometryPatch::InnerRatio(_) => false,
         }
@@ -1359,6 +1363,7 @@ impl GeometryPatch {
             Self::CornerRadii(r) => [r.top_left, r.top_right, r.bottom_right, r.bottom_left]
                 .iter()
                 .all(|v| v.is_finite()),
+            Self::Arc(a) => a.is_finite(),
             Self::LineEnd(p) => p.x.is_finite() && p.y.is_finite(),
             Self::Path { path, corner_radii } => {
                 crate::node::path_is_finite(path) && corner_radii.iter().all(|v| v.is_finite())
@@ -1791,6 +1796,8 @@ mod changes_nothing_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

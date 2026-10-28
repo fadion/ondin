@@ -104,6 +104,7 @@ fn path_kind(path: &BezPath) -> NodeKind {
     NodeKind::Path {
         path: path.clone(),
         corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
     }
 }
 

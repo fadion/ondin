@@ -98,6 +98,8 @@ fn two_rect_doc() -> (Document, Resolved, NodeId, NodeId) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(2000.0, 2000.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -763,6 +765,8 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1346,6 +1350,8 @@ fn stroked_frame(strokes: Vec<ondin_core::Stroke>, opacity: f32) -> (Document, R
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 60.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2168,6 +2174,8 @@ fn a_group_masked_by_a_group_that_masks_internally_is_not_culled_away() {
                 0,
                 NodeKind::Artboard {
                     size: Size::new(2000.0, 2000.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
             ),
             node(g, ab, 0, NodeKind::Group),

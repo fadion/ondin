@@ -353,7 +353,7 @@ fn sizing_key(kind: &NodeKind) -> Option<SizingKey> {
 /// the laid-out box of a group with a layout. `None` for a parent with no edges.
 fn frame_box(used: &FxHashMap<NodeId, Used>, parent: &Node) -> Option<kurbo::Size> {
     match kind_in(used, parent) {
-        NodeKind::Artboard { size } => Some(*size),
+        NodeKind::Artboard { size, .. } => Some(*size),
         NodeKind::Group => used.get(&parent.id()).and_then(|u| u.frame),
         _ => None,
     }
@@ -480,7 +480,7 @@ fn with_bound_size(doc: &Document, id: NodeId, used: Option<Used>) -> Option<Use
     Some(u)
 }
 
-/// `used` with a rectangle's bound corners resolved into its kind, where every
+/// `used` with a layer's bound corners resolved into its kind, where every
 /// geometry reader already looks. Layout's size is kept; only the radii change.
 fn with_bound_corners(doc: &Document, id: NodeId, used: Option<Used>) -> Option<Used> {
     let Some(node) = doc.get(id) else {
@@ -489,33 +489,24 @@ fn with_bound_corners(doc: &Document, id: NodeId, used: Option<Used>) -> Option<
     if node.corner_vars().iter().all(Option::is_none) {
         return used;
     }
-    let kind = used
+    let mut kind = used
         .as_ref()
         .and_then(|u| u.kind.as_ref())
-        .unwrap_or_else(|| node.kind());
-    let NodeKind::Rect {
-        size,
-        corner_radii,
-        corner_smoothing,
-    } = kind
+        .unwrap_or_else(|| node.kind())
+        .clone();
+    let Some(drawn) = kind
+        .corner_radii()
+        .and_then(|radii| doc.resolve_corners(id, radii))
     else {
         return used;
     };
-    let corner_smoothing = *corner_smoothing;
-    let Some(drawn) = doc.resolve_corners(id, *corner_radii) else {
-        return used;
-    };
-    let size = *size;
+    kind.set_corner_radii(drawn);
     let mut u = used.unwrap_or(Used {
         local: None,
         kind: None,
         frame: None,
     });
-    u.kind = Some(NodeKind::Rect {
-        size,
-        corner_radii: drawn,
-        corner_smoothing,
-    });
+    u.kind = Some(kind);
     Some(u)
 }
 
@@ -1896,6 +1887,8 @@ mod used_geometry_tests {
             root,
             NodeKind::Artboard {
                 size: Size::new(300.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             Affine::IDENTITY,
         );
@@ -1940,7 +1933,7 @@ mod used_geometry_tests {
     fn install(f: &Fixture) -> probe::Guard {
         let (frame, rect, inner, text) = (f.frame, f.rect, f.inner, f.text);
         probe::set(move |doc, id| {
-            let NodeKind::Artboard { size } = doc.get(frame)?.kind() else {
+            let NodeKind::Artboard { size, .. } = doc.get(frame)?.kind() else {
                 return None;
             };
             let width = size.width;

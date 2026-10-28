@@ -2799,6 +2799,8 @@ mod tests {
                 index: i,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3280,6 +3282,8 @@ mod export_all_scope_tests {
                 index: 0,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Frame".into()),
@@ -3428,6 +3432,8 @@ mod export_all_scope_tests {
             index,
             kind: ondin_core::NodeKind::Artboard {
                 size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),
@@ -3472,6 +3478,8 @@ mod export_all_scope_tests {
                 index: 0,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Home".into()),
@@ -3482,6 +3490,8 @@ mod export_all_scope_tests {
                 index: 1,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Hidden".into()),
@@ -3814,6 +3824,8 @@ mod code_export_tests {
                 index: 0,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Hero".into()),

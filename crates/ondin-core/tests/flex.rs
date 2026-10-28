@@ -25,6 +25,8 @@ fn rect(w: f64, h: f64) -> NodeKind {
 fn frame(w: f64, h: f64) -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -1885,6 +1887,7 @@ fn a_resize_clears_the_basis_and_a_point_edit_keeps_growth() {
         NodeKind::Path {
             path: path.clone(),
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         },
         (0.0, 0.0),
     );

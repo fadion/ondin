@@ -399,6 +399,8 @@ pub fn why_not_wrap(doc: &Document, members: &[NodeId]) -> Option<NotMain> {
     }
     let frame = NodeKind::Artboard {
         size: kurbo::Size::ZERO,
+        corner_radii: kurbo::RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     if crate::variant::is_set(doc, parent) && !crate::variant::fits_set(doc, parent, &frame, None) {
         return Some(NotMain::SetKind);

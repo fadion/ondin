@@ -727,7 +727,7 @@ pub fn combine(
         match op {
             Operation::CreateNode {
                 id,
-                kind: NodeKind::Artboard { size },
+                kind: NodeKind::Artboard { size, .. },
                 transform: Some(t),
                 ..
             } if *id == set => {

@@ -1226,6 +1226,7 @@ mod tests {
     fn ring_kind() -> crate::node::NodeKind {
         crate::node::NodeKind::Ellipse {
             size: kurbo::Size::new(180.0, 180.0),
+            arc: crate::node::EllipseArc::default(),
         }
     }
 

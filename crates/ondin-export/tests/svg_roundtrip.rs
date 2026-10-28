@@ -114,6 +114,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
             index: 1,
             kind: NodeKind::Ellipse {
                 size: Size::new(50.0, 50.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((200.0, 15.0))),
             name: None,
@@ -135,6 +136,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((180.0, 140.0))),
             name: None,
@@ -222,12 +224,14 @@ fn a_rounded_polygon_and_star_round_trip_with_their_rounding() {
             size: Size::new(80.0, 80.0),
             sides: 6,
             corner_radius: 12.0,
+            corner_smoothing: 0.0,
         },
         NodeKind::Star {
             size: Size::new(90.0, 90.0),
             points: 5,
             inner_ratio: 0.45,
             corner_radius: 6.0,
+            corner_smoothing: 0.0,
         },
     ];
     let mut made = Vec::new();
@@ -877,6 +881,7 @@ fn a_radial_gradients_focal_point_round_trips_where_it_sits() {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(80.0, 80.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: None,
@@ -1101,6 +1106,8 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 120.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1330,6 +1337,8 @@ fn the_writers_own_clip_spelling_round_trips() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

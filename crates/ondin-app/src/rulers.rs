@@ -2757,7 +2757,11 @@ mod origin_tests {
                 id,
                 parent,
                 index: 0,
-                kind: NodeKind::Artboard { size },
+                kind: NodeKind::Artboard {
+                    size,
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
                 transform,
                 name: None,
             }]))

@@ -292,6 +292,10 @@ pub mod icon {
     pub const ALIGN_CENTER_VERTICAL: &str = "\u{e50c}";
     pub const ALIGN_BOTTOM: &str = "\u{e506}";
     pub const ARROW_CLOCKWISE: &str = "\u{e036}";
+    /// An ellipse's Sweep.
+    pub const CHART_PIE_SLICE: &str = "\u{e15a}";
+    /// An ellipse's Ratio, the hole.
+    pub const CIRCLE_DASHED: &str = "\u{e602}";
     pub const CORNERS_OUT: &str = "\u{e1d0}"; // zoom to fit
     pub const NUMBER_SQUARE_ONE: &str = "\u{e36c}"; // actual size (1:1 / 100%)
     pub const PLUS: &str = "\u{e3d4}";
@@ -685,6 +689,8 @@ pub mod icon {
         ("align-center-vertical", ALIGN_CENTER_VERTICAL),
         ("align-bottom", ALIGN_BOTTOM),
         ("arrow-clockwise", ARROW_CLOCKWISE),
+        ("chart-pie-slice", CHART_PIE_SLICE),
+        ("circle-dashed", CIRCLE_DASHED),
         ("corners-out", CORNERS_OUT),
         ("number-square-one", NUMBER_SQUARE_ONE),
         ("plus", PLUS),

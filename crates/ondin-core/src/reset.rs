@@ -228,10 +228,14 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
     let geo = |geometry: G| Operation::SetGeometry { id, geometry };
     match kind {
         NodeKind::Root | NodeKind::Group => Vec::new(),
-        NodeKind::Artboard { size } | NodeKind::Ellipse { size } | NodeKind::Slice { size } => {
-            vec![geo(G::Size(*size))]
+        NodeKind::Slice { size } => vec![geo(G::Size(*size))],
+        NodeKind::Ellipse { size, arc } => vec![geo(G::Size(*size)), geo(G::Arc(*arc))],
+        NodeKind::Artboard {
+            size,
+            corner_radii,
+            corner_smoothing,
         }
-        NodeKind::Rect {
+        | NodeKind::Rect {
             size,
             corner_radii,
             corner_smoothing,
@@ -244,27 +248,38 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
             size,
             sides,
             corner_radius,
+            corner_smoothing,
         } => vec![
             geo(G::Size(*size)),
             geo(G::Sides(*sides)),
             geo(G::CornerRadius(*corner_radius)),
+            geo(G::CornerSmoothing(*corner_smoothing)),
         ],
         NodeKind::Star {
             size,
             points,
             inner_ratio,
             corner_radius,
+            corner_smoothing,
         } => vec![
             geo(G::Size(*size)),
             geo(G::Sides(*points)),
             geo(G::InnerRatio(*inner_ratio)),
             geo(G::CornerRadius(*corner_radius)),
+            geo(G::CornerSmoothing(*corner_smoothing)),
         ],
         NodeKind::Line { end } => vec![geo(G::LineEnd(*end))],
-        NodeKind::Path { path, corner_radii } => vec![geo(G::Path {
-            path: path.clone(),
-            corner_radii: corner_radii.clone(),
-        })],
+        NodeKind::Path {
+            path,
+            corner_radii,
+            corner_smoothing,
+        } => vec![
+            geo(G::Path {
+                path: path.clone(),
+                corner_radii: corner_radii.clone(),
+            }),
+            geo(G::CornerSmoothing(*corner_smoothing)),
+        ],
         NodeKind::Boolean { op } => vec![geo(G::BoolOp(*op))],
         NodeKind::Text {
             content,
@@ -1137,6 +1152,8 @@ mod tests {
         let [a, b, ta, tb] = [(); 4].map(|_| ids.mint());
         let board = NodeKind::Artboard {
             size: Size::new(10.0, 10.0),
+            corner_radii: kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let text = |content: &str| NodeKind::Text {
             content: content.into(),

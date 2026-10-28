@@ -192,7 +192,7 @@ pub const STAR_DEFAULT_RATIO: f64 = 0.382;
 pub fn resizable_size(kind: &NodeKind) -> Option<Size> {
     match kind {
         NodeKind::Rect { size, .. }
-        | NodeKind::Ellipse { size }
+        | NodeKind::Ellipse { size, .. }
         | NodeKind::Polygon { size, .. }
         | NodeKind::Star { size, .. }
         | NodeKind::Artboard { size, .. }
@@ -1072,7 +1072,9 @@ fn scale_geometry(
                 });
                 carry_gradients(doc, id, csx, csy, ops);
             }
-            NodeKind::Path { path, corner_radii } => {
+            NodeKind::Path {
+                path, corner_radii, ..
+            } => {
                 let mut scaled = path.clone();
                 scaled.apply_affine(Affine::scale_non_uniform(csx, csy));
                 ops.push(Operation::SetGeometry {
@@ -1231,7 +1233,7 @@ fn scale_scalars(
     }
 
     match node.kind() {
-        NodeKind::Rect { corner_radii, .. } => {
+        NodeKind::Rect { corner_radii, .. } | NodeKind::Artboard { corner_radii, .. } => {
             let r = *corner_radii;
             if !ondin_core::geometry::is_square_cornered(&r) {
                 ops.push(Operation::SetGeometry {
@@ -1255,7 +1257,9 @@ fn scale_scalars(
         }
         // A path's per-anchor radii are absolute lengths like a rect's four:
         // the Scale tool multiplies them and a resize leaves them alone.
-        NodeKind::Path { path, corner_radii } if corner_radii.iter().any(|r| *r > 0.0) => {
+        NodeKind::Path {
+            path, corner_radii, ..
+        } if corner_radii.iter().any(|r| *r > 0.0) => {
             ops.push(Operation::SetGeometry {
                 id,
                 geometry: GeometryPatch::Path {
@@ -1659,6 +1663,8 @@ pub fn create_artboard(
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(size.width.max(1.0), size.height.max(1.0)),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(origin.to_vec2())),
             name: None,
@@ -1942,7 +1948,10 @@ pub fn create_ellipse(
             id,
             parent,
             index,
-            kind: NodeKind::Ellipse { size },
+            kind: NodeKind::Ellipse {
+                size,
+                arc: ondin_core::EllipseArc::default(),
+            },
             transform: Some(Affine::translate(origin.to_vec2())),
             name: None,
         },
@@ -1994,6 +2003,7 @@ pub fn create_polygon(
             size,
             sides: sides.clamp(geometry::MIN_SIDES, geometry::MAX_SIDES),
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         fill,
     )
@@ -2024,6 +2034,7 @@ pub fn create_star(
             points: points.clamp(geometry::MIN_SIDES, geometry::MAX_SIDES),
             inner_ratio: STAR_DEFAULT_RATIO,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         fill,
     )
@@ -2956,6 +2967,7 @@ pub fn create_path(
                     anchors: anchors.to_vec(),
                     closed: close,
                 }]),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(origin.to_vec2())),
             name: None,
@@ -3208,6 +3220,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3551,6 +3565,7 @@ mod tests {
             NodeKind::Path {
                 path: pen,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             }
         };
 
@@ -3710,6 +3725,7 @@ mod tests {
             kind: NodeKind::Path {
                 path: pen,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3907,6 +3923,7 @@ mod tests {
                 kind: NodeKind::Path {
                     path: pen,
                     corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -3991,6 +4008,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4077,6 +4096,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4291,6 +4312,7 @@ mod tests {
             kind: NodeKind::Path {
                 path: pen,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4381,6 +4403,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -4818,6 +4842,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((50.0, 20.0))),
             name: None,
@@ -4864,6 +4890,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((50.0, 20.0))),
             name: None,
@@ -4910,6 +4938,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((50.0, 20.0))),
             name: None,
@@ -5157,6 +5187,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((12.0, 34.0))),
             name: None,
@@ -5394,6 +5426,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((17.0, 23.0))),
             name: None,
@@ -5601,6 +5635,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((17.0, 23.0))),
             name: None,
@@ -6205,6 +6241,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 400.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((5.0, 7.0))),
             name: None,
@@ -6343,6 +6381,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -6896,6 +6936,7 @@ mod tests {
                     size: Size::new(50.0, 50.0),
                     sides: 6,
                     corner_radius: 5.0,
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((100.0, 100.0))),
                 name: None,
@@ -7038,6 +7079,8 @@ mod tests {
                     index: 0,
                     kind: NodeKind::Artboard {
                         size: Size::new(100.0, 50.0),
+                        corner_radii: RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -7080,7 +7123,7 @@ mod tests {
                 },
             ))
             .unwrap();
-            let NodeKind::Artboard { size } = doc.get(card).unwrap().kind() else {
+            let NodeKind::Artboard { size, .. } = doc.get(card).unwrap().kind() else {
                 panic!("not a frame")
             };
             assert_eq!(
@@ -8359,7 +8402,7 @@ mod tests {
             Color::BLACK,
         );
         match made(&tx) {
-            NodeKind::Ellipse { size } => assert_eq!(size, Size::new(50.0, 300.0)),
+            NodeKind::Ellipse { size, .. } => assert_eq!(size, Size::new(50.0, 300.0)),
             other => panic!("create_ellipse makes an ellipse, not {other:?}"),
         }
     }
@@ -8449,6 +8492,8 @@ mod guide_scale_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -8579,6 +8624,8 @@ mod guide_scale_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -8628,6 +8675,8 @@ mod guide_scale_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -8799,6 +8848,8 @@ mod overflow_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -8933,6 +8984,8 @@ mod unrepresentable_basis_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

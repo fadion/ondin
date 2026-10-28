@@ -67,6 +67,8 @@ fn fixture() -> F {
             0,
             NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         create(
@@ -383,6 +385,8 @@ fn an_edit_reaches_through_a_nested_instance() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 300.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -697,6 +701,8 @@ fn a_gained_child_reaches_through_a_nested_instance() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 300.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -763,6 +769,8 @@ fn a_nested_instance_moved_inside_its_outer_main_moves_in_its_instances() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 300.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -939,6 +947,8 @@ fn nest(f: &mut F) -> NodeId {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 300.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -1370,6 +1380,8 @@ fn a_mask_does_not_follow_onto_a_copy_holding_a_frame_of_its_own() {
             index: 1,
             kind: NodeKind::Artboard {
                 size: Size::new(5.0, 5.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

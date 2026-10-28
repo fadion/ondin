@@ -36,7 +36,7 @@ pub enum Operation {
     Reparent    { id, new_parent, index },
     Reorder     { id, index },
     SetTransform{ id, transform },
-    SetGeometry { id, geometry: GeometryPatch }, // size, corner radii, path, line end, text sizing
+    SetGeometry { id, geometry: GeometryPatch }, // size, corner radii and smoothing, arc, path, line end, text sizing
     SetText     { id, content, spans: CharSpans, para_spans: ParaSpans },
     SetTextStyle{ id, style: TextStyle, spans: Option<CharSpans> },         // character defaults
     SetTextSpans{ id, spans },                  // character overrides, content untouched
@@ -141,7 +141,7 @@ pub fn set_fills_all / set_strokes_all / retarget_fills_all / retarget_strokes_a
 pub fn edit_fill_at_all / edit_stroke_at_all;
 pub fn set_opacity_all / set_effects_all / set_corner_radius_all / shared_corner_radius;
 pub const OPACITY_AGREEMENT: f32; pub const RADIUS_AGREEMENT: f64;
-pub fn any_rect_in / any_paint_in;
+pub fn any_cornered_in / any_paint_in;
 pub fn properties_of(doc, id) -> Option<Properties>;   // None for a group
 pub fn paste_properties(doc, ids, props) -> Transaction;
 pub fn align / distribute / flip / z_order / skew_x / skew_y;
@@ -156,7 +156,7 @@ Two properties every builder upholds:
 Further rules:
 
 - **A builder dissolving several containers simulates rather than concatenates.** `ungroup_all` runs `ungroup` over a `Document` clone advanced by each transaction as built (and a `Resolved` advanced incrementally), because `ungroup` reads the container's index among its parent's children and later containers see child lists already changed. Concatenating against the original puts the second container's children at stale indices while every world position is still right, so position assertions cannot see it. The clone is skipped for a single container. `layers::plan_layer_move` and `insert_subtrees` follow the same rule.
-- **`subtree_nodes` vs `outermost`.** `outermost` alone is wrong for a colour (a group has no paint); members are reduced to outermost, then each subtree walked in full, in deterministic pre-order (children pushed in reverse) so op lists replay identically (§12). Roots are ordered by `all_in_document_order` when more than one. `set_opacity_all` takes `outermost` (opacity composes down the tree); `set_corner_radius_all` takes the subtree (a radius does not compose).
+- **`subtree_nodes` vs `outermost`.** `outermost` alone is wrong for a colour (a group has no paint); members are reduced to outermost, then each subtree walked in full, in deterministic pre-order (children pushed in reverse) so op lists replay identically (§12). Roots are ordered by `all_in_document_order` when more than one. `set_opacity_all` takes `outermost` (opacity composes down the tree); `set_corner_radius_all` takes the subtree (a radius does not compose). It, `shared_corner_radius` and `any_cornered_in` reach frames, rects, polygons and stars (private `multi_radii`); a path stays out, its radius being per anchor, so one value for all would round corners the user never chose.
 - `OPACITY_AGREEMENT` and `RADIUS_AGREEMENT` say how near two values must be for a readout to call them one (opacity prints as `{v:.0}%`; a radius is in document units). The panel's `_shown` twins read them.
 - **`colors_in`** is the census behind Group Colors and the picker's document-palette chips. The scope is the caller's: a single selected container is the box the question is asked *about*, so the panel passes its children (§9.4). **Solids only** (what `recolor` acts on, by exact RGBA bytes). **`gradients_in`** is its twin over the leftover paints, keyed by the whole `Brush` (stops *and* geometry). Both wrap one private `census(doc, ids, key)` so they agree on which paints and layers and in what order. `ColorUse` carries `uses` (paint slots) and `nodes` (distinct layers, document order); a row names the node the paint sits on, never its container. **Hidden paints are counted** so a recolour doesn't resurrect the old colour when toggled back.
 - **`PaintAt { node, target, index }`** (`Copy + Eq`) locates a paint: two lists and an index on every kind. `census` keeps the first place each entry was met. `paint_at` answers `None` when the place is gone (the signal for a slot to close). `repaint` changes every use of a whole brush; it is not a generalisation of `recolor` (two keys, two match rules).

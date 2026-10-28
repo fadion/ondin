@@ -2117,6 +2117,8 @@ fn starter_document() -> (Document, IdSource) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(800.0, 600.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             // `None`, so it is numbered like any other frame — "Frame 1".
@@ -2140,6 +2142,7 @@ fn starter_document() -> (Document, IdSource) {
             index: 1,
             kind: NodeKind::Ellipse {
                 size: Size::new(160.0, 160.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((360.0, 220.0))),
             name: None,
@@ -2598,6 +2601,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((1000.0, 0.0))),
                 name: Some("Card".into()),
@@ -2845,6 +2850,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(800.0, 400.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((0.0, 500.0))),
                 name: None,

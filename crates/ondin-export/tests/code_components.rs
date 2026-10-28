@@ -61,6 +61,8 @@ fn card(
             (parent, index),
             NodeKind::Artboard {
                 size: Size::new(200.0, 80.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             at,
             "Card",
@@ -303,6 +305,8 @@ fn a_use_keeps_the_mode_its_ancestors_set() {
                 (root, index),
                 NodeKind::Artboard {
                     size: Size::new(400.0, 400.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 (300.0, 0.0),
                 "Board",
@@ -434,6 +438,8 @@ fn button_set(badge: Badge) -> (Document, NodeId) {
     ] = [(); 7].map(|_| ids.mint());
     let frame = |w, h| NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     doc.apply(&Transaction(vec![
         create(set, (root, 0), frame(200.0, 120.0), (0.0, 0.0), "Button"),
@@ -692,6 +698,8 @@ fn swap_card() -> (Document, NodeId) {
     let mut doc = Document::new(root);
     let frame = |w, h| NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let dot = || NodeKind::Rect {
         size: Size::new(10.0, 10.0),
@@ -856,6 +864,8 @@ fn shown_card() -> (Document, [NodeId; 2]) {
     let mut doc = Document::new(root);
     let frame = |w, h| NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     let [button, button_label, card, slot, slot_label] = [(); 5].map(|_| ids.mint());
     let [button_icon, slot_icon] = [(); 2].map(|_| ids.mint());
@@ -1057,6 +1067,8 @@ fn kit_badge() -> (Document, NodeId) {
             (root, 0),
             NodeKind::Artboard {
                 size: Size::new(40.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             (0.0, 0.0),
             "Badge",
@@ -1151,6 +1163,8 @@ fn named_mains(names: &[&str]) -> (Document, Vec<NodeId>) {
                 (root, 0),
                 NodeKind::Artboard {
                     size: Size::new(40.0, 30.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 (x, i as f64 * 50.0),
                 name,

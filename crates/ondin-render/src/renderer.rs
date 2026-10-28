@@ -742,7 +742,7 @@ impl RenderOverrides {
             // A frame's box is its size; a group with a layout's is the box the
             // flex relayout just gave it, or the committed one.
             let size = match frame {
-                NodeKind::Artboard { size } => size,
+                NodeKind::Artboard { size, .. } => size,
                 NodeKind::Group => match self
                     .get(parent)
                     .and_then(|o| o.frame)
@@ -990,9 +990,9 @@ impl RenderOverrides {
             Operation::SetGeometry { id, geometry } => {
                 let base = self.current_kind(doc, *id)?;
                 let mut patched = geometry.applied_to(&base)?;
-                // Any geometry write on a rect with bound corners draws the ones the
-                // commit keeps at their variables (`build::kept_corner_vars`).
-                if let NodeKind::Rect { corner_radii, .. } = &mut patched
+                // Any geometry write on a layer with bound corners draws the ones
+                // the commit keeps at their variables (`build::kept_corner_vars`).
+                if let Some(corner_radii) = patched.corner_radii()
                     && doc
                         .get(*id)
                         .is_some_and(|n| n.corner_vars().iter().any(Option::is_some))
@@ -1004,7 +1004,12 @@ impl RenderOverrides {
                         corner_radii.bottom_left,
                     ];
                     let kept = ondin_core::build::kept_corner_vars(doc, *id, w);
-                    *corner_radii = doc.corners_drawn_in(doc.variables(), *id, *corner_radii, kept);
+                    patched.set_corner_radii(doc.corners_drawn_in(
+                        doc.variables(),
+                        *id,
+                        corner_radii,
+                        kept,
+                    ));
                 }
                 // A bound width or height is drawn where the commit puts it
                 // (`build::kept_size_vars`): an axis written what it draws keeps its
@@ -1353,23 +1358,12 @@ impl RenderOverrides {
                         let drawn = doc.resolved_paint_in(&t, n, &paint).into_owned();
                         self.set_paint(n, drawn);
                     }
-                    if let Some(NodeKind::Rect {
-                        size,
-                        corner_radii,
-                        corner_smoothing,
-                    }) = self.current_kind(doc, n)
+                    if let Some(mut kind) = self.current_kind(doc, n)
+                        && let Some(corner_radii) = kind.corner_radii()
                         && let Some(radii) = doc.resolve_corners_in(&t, n, corner_radii)
                     {
-                        self.set_kind(
-                            doc,
-                            res,
-                            n,
-                            NodeKind::Rect {
-                                size,
-                                corner_radii: radii,
-                                corner_smoothing,
-                            },
-                        );
+                        kind.set_corner_radii(radii);
+                        self.set_kind(doc, res, n, kind);
                         self.moved.insert(n);
                     }
                     // A bound width or height the same way, after the corners above,
@@ -1455,14 +1449,8 @@ impl RenderOverrides {
             // are resolved through the document (the mode in force is not previewed)
             // over the literal kind earlier ops left, `vars` being the whole binding.
             Operation::SetCornerVars { id, vars } => {
-                let NodeKind::Rect {
-                    size,
-                    mut corner_radii,
-                    corner_smoothing,
-                } = self.current_kind(doc, *id)?
-                else {
-                    return None;
-                };
+                let mut kind = self.current_kind(doc, *id)?;
+                let mut corner_radii = kind.corner_radii()?;
                 let slots = [
                     &mut corner_radii.top_left,
                     &mut corner_radii.top_right,
@@ -1477,16 +1465,8 @@ impl RenderOverrides {
                         *slot = n;
                     }
                 }
-                self.set_kind(
-                    doc,
-                    res,
-                    *id,
-                    NodeKind::Rect {
-                        size,
-                        corner_radii,
-                        corner_smoothing,
-                    },
-                );
+                kind.set_corner_radii(corner_radii);
+                self.set_kind(doc, res, *id, kind);
                 self.moved.insert(*id);
             }
             // A width's or height's binding previews as the size it will draw, over
@@ -1721,9 +1701,9 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
         let parent = self.doc.get(id)?.parent()?;
         let over = self.ov.get(parent);
         match over.and_then(|o| o.kind.as_ref()) {
-            Some(NodeKind::Artboard { size }) => Some(*size),
+            Some(NodeKind::Artboard { size, .. }) => Some(*size),
             _ => match self.res.used_kind(self.doc, parent)? {
-                NodeKind::Artboard { size } => Some(*size),
+                NodeKind::Artboard { size, .. } => Some(*size),
                 NodeKind::Group => over.and_then(|o| o.frame).or(self.res.used_frame(parent)),
                 _ => None,
             },
@@ -1822,25 +1802,19 @@ fn specified_kind(doc: &Document, id: NodeId) -> Option<NodeKind> {
     Some(with_corners_drawn(doc, doc.get(id)?, kind))
 }
 
-/// `kind` with `n`'s bound corners read in the mode in force, for a rect.
-fn with_corners_drawn(doc: &Document, n: &ondin_core::Node, kind: NodeKind) -> NodeKind {
-    match kind {
-        NodeKind::Rect {
-            size,
+/// `kind` with `n`'s bound corners read in the mode in force.
+fn with_corners_drawn(doc: &Document, n: &ondin_core::Node, mut kind: NodeKind) -> NodeKind {
+    if n.corner_vars().iter().any(Option::is_some)
+        && let Some(corner_radii) = kind.corner_radii()
+    {
+        kind.set_corner_radii(doc.corners_drawn_in(
+            doc.variables(),
+            n.id(),
             corner_radii,
-            corner_smoothing,
-        } if n.corner_vars().iter().any(Option::is_some) => NodeKind::Rect {
-            size,
-            corner_radii: doc.corners_drawn_in(
-                doc.variables(),
-                n.id(),
-                corner_radii,
-                n.corner_vars(),
-            ),
-            corner_smoothing,
-        },
-        k => k,
+            n.corner_vars(),
+        ));
     }
+    kind
 }
 
 /// Whether a captured node shows: its binding resolved through `doc` in the

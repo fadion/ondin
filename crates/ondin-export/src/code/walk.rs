@@ -1028,6 +1028,10 @@ impl Walk<'_> {
         let kind = self.res.used_kind_of(node);
         match kind {
             NodeKind::Artboard { .. } | NodeKind::Group | NodeKind::Rect { .. } => {}
+            // CSS has no arc: a wedge or a ring goes out as the outline.
+            NodeKind::Ellipse { arc, .. } if !arc.is_whole() => {
+                return Some("an arc, which CSS cannot draw".into());
+            }
             NodeKind::Ellipse { .. } => {}
             NodeKind::Text { on_path, .. } => {
                 if on_path.is_some() {
@@ -1142,13 +1146,13 @@ impl Walk<'_> {
         }
         // An outline offsets an ellipse's radii, which is its parallel curve
         // only for a circle.
-        if let NodeKind::Ellipse { size } = kind
+        if let NodeKind::Ellipse { size, .. } = kind
             && size.width != size.height
         {
             return Some("a stroked ellipse that is not a circle".into());
         }
         let (square, any_square) = match kind {
-            NodeKind::Rect { corner_radii, .. } => (
+            NodeKind::Rect { corner_radii, .. } | NodeKind::Artboard { corner_radii, .. } => (
                 ondin_core::geometry::is_square_cornered(corner_radii),
                 [
                     corner_radii.top_left,
@@ -1159,7 +1163,6 @@ impl Walk<'_> {
                 .iter()
                 .any(|r| *r <= 0.0),
             ),
-            NodeKind::Artboard { .. } => (true, true),
             _ => (false, false),
         };
         let sides = ondin_core::geometry::effective_sides(kind, s);
@@ -1233,64 +1236,22 @@ impl Walk<'_> {
                 size,
                 corner_smoothing,
             } => {
-                let bound = node.corner_vars();
-                let r = [
-                    corner_radii.top_left,
-                    corner_radii.top_right,
-                    corner_radii.bottom_right,
-                    corner_radii.bottom_left,
-                ];
-                // A bound corner may read 0 in this mode and not in another, so it
-                // is rounded wherever `border-radius` is written, and noted alike.
-                let rounded = r.iter().any(|r| *r > 0.0) || bound.iter().any(Option::is_some);
-                if *corner_smoothing > 0.0 && rounded {
-                    self.report.approximate(format!(
-                        "{} {}: CSS has no corner smoothing, so its corners are circular",
-                        kind_word(node),
-                        label(node)
-                    ));
-                }
-                let half = size.width.min(size.height).max(0.0) * 0.5;
-                // Clamped per corner as the outline is, so CSS's own proportional
-                // scaling never has an overlap to resolve — against the bound size
-                // when there is one, since it changes with the mode.
-                let sized = node.size_vars().iter().any(Option::is_some);
-                let half_css = if sized {
-                    let w = self.axis_size(node, 0, size.width);
-                    let h = self.axis_size(node, 1, size.height);
-                    format!("calc(min({w}, {h}) / 2)")
-                } else {
-                    px(half)
-                };
-                if rounded {
-                    let all: Vec<String> = r
-                        .iter()
-                        .zip(bound)
-                        .map(|(r, var)| match var {
-                            Some(v) => format!("min({}, {half_css})", self.tokens.px_floored(v)),
-                            None if sized && *r > 0.0 => format!("min({}, {half_css})", px(*r)),
-                            None => px(r.clamp(0.0, half)),
-                        })
-                        .collect();
-                    el.set(
-                        "border-radius",
-                        if all.iter().all(|x| *x == all[0]) {
-                            all[0].clone()
-                        } else {
-                            all.join(" ")
-                        },
-                    );
-                }
+                self.border_radius(&mut el, node, *size, *corner_radii, *corner_smoothing);
                 self.paint(&mut el, node, *size);
             }
-            NodeKind::Ellipse { size } => {
+            NodeKind::Ellipse { size, .. } => {
                 el.set("border-radius", "50%");
                 self.paint(&mut el, node, *size);
             }
-            NodeKind::Artboard { size } => {
+            NodeKind::Artboard {
+                size,
+                corner_radii,
+                corner_smoothing,
+            } => {
                 if node.clip() {
                     el.set("overflow", "hidden");
                 }
+                self.border_radius(&mut el, node, *size, *corner_radii, *corner_smoothing);
                 over_children = self.paint(&mut el, node, *size);
             }
             NodeKind::Text { .. } => {
@@ -1522,7 +1483,7 @@ impl Walk<'_> {
                     (Some(hug(item.width)), Some(hug(item.height)))
                 }
             }
-            NodeKind::Artboard { size } if node.display().is_some() => (
+            NodeKind::Artboard { size, .. } if node.display().is_some() => (
                 Some(match (item.width, bound_w) {
                     (Dimension::Auto, Some(v)) => self.tokens.px_floored(v),
                     (d, _) => own_or(d, size.width),
@@ -1563,6 +1524,66 @@ impl Walk<'_> {
                 (None, Dimension::Auto) => {}
                 (None, d) => el.set(prop, dimension(d)),
             }
+        }
+    }
+
+    /// A frame's or rect's corners as `border-radius`, smoothing reported as
+    /// approximated.
+    fn border_radius(
+        &mut self,
+        el: &mut Element,
+        node: &Node,
+        size: Size,
+        corner_radii: ondin_core::kurbo::RoundedRectRadii,
+        corner_smoothing: f64,
+    ) {
+        let bound = node.corner_vars();
+        let r = [
+            corner_radii.top_left,
+            corner_radii.top_right,
+            corner_radii.bottom_right,
+            corner_radii.bottom_left,
+        ];
+        // A bound corner may read 0 in this mode and not in another, so it
+        // is rounded wherever `border-radius` is written, and noted alike.
+        let rounded = r.iter().any(|r| *r > 0.0) || bound.iter().any(Option::is_some);
+        if corner_smoothing > 0.0 && rounded {
+            self.report.approximate(format!(
+                "{} {}: CSS has no corner smoothing, so its corners are circular",
+                kind_word(node),
+                label(node)
+            ));
+        }
+        let half = size.width.min(size.height).max(0.0) * 0.5;
+        // Clamped per corner as the outline is, so CSS's own proportional
+        // scaling never has an overlap to resolve — against the bound size
+        // when there is one, since it changes with the mode.
+        let sized = node.size_vars().iter().any(Option::is_some);
+        let half_css = if sized {
+            let w = self.axis_size(node, 0, size.width);
+            let h = self.axis_size(node, 1, size.height);
+            format!("calc(min({w}, {h}) / 2)")
+        } else {
+            px(half)
+        };
+        if rounded {
+            let all: Vec<String> = r
+                .iter()
+                .zip(bound)
+                .map(|(r, var)| match var {
+                    Some(v) => format!("min({}, {half_css})", self.tokens.px_floored(v)),
+                    None if sized && *r > 0.0 => format!("min({}, {half_css})", px(*r)),
+                    None => px(r.clamp(0.0, half)),
+                })
+                .collect();
+            el.set(
+                "border-radius",
+                if all.iter().all(|x| *x == all[0]) {
+                    all[0].clone()
+                } else {
+                    all.join(" ")
+                },
+            );
         }
     }
 

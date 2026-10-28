@@ -13,9 +13,6 @@ reads true.
 - **Background blur.** Canvas and raster draw the backdrop; SVG cannot express it and the code export
   has `backdrop-filter`, so the SVG writer owes an answer (a reported approximation, at least).
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
-- **Shapes**: ellipse arcs and donuts; corner smoothing on frames, polygons, stars and paths (a rect
-  has it). A polygon's and star's corner radius takes no variable yet, and the multi-selection radius
-  field skips them.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **PDF import.**
 - **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers

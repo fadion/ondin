@@ -76,6 +76,8 @@ fn pinned() -> (Document, Vec<NodeId>) {
         root,
         NodeKind::Artboard {
             size: Size::new(300.0, 200.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         (20.0, 30.0),
     );
@@ -103,6 +105,8 @@ fn pinned() -> (Document, Vec<NodeId>) {
         frame,
         NodeKind::Artboard {
             size: Size::new(80.0, 40.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         (10.0, 150.0),
     );
@@ -175,7 +179,7 @@ fn baked(doc: &Document, pinned: &[NodeId]) -> Document {
             transform: res.used_local(doc, id).unwrap(),
         });
         match res.used_kind(doc, id).unwrap() {
-            NodeKind::Rect { size, .. } | NodeKind::Artboard { size } => {
+            NodeKind::Rect { size, .. } | NodeKind::Artboard { size, .. } => {
                 ops.push(Operation::SetGeometry {
                     id,
                     geometry: GeometryPatch::Size(*size),

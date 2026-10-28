@@ -28,6 +28,8 @@ fn fills(r: u8) -> Vec<Keyed<Fill>> {
 fn frame(w: f64, h: f64) -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -694,7 +696,7 @@ fn switching_a_variant_carries_overrides_and_keeps_ids() {
     );
     assert_eq!(f.link(after[2]), Some(f.shine));
     match f.doc.get(f.i).unwrap().kind() {
-        NodeKind::Artboard { size } => assert_eq!(*size, Size::new(120.0, 40.0)),
+        NodeKind::Artboard { size, .. } => assert_eq!(*size, Size::new(120.0, 40.0)),
         _ => unreachable!(),
     }
     // And back: Shine is untouched, so it goes with its source's absence.

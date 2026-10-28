@@ -548,9 +548,14 @@ impl BoolOp {
 pub enum NodeKind {
     Root,
     /// A frame. Its fill is [`Node::paint`]'s fill list, like every painted
-    /// layer's.
+    /// layer's. Its corners round and smooth as a rect's do, and the rounded
+    /// outline is also its clip.
     Artboard {
         size: Size,
+        #[serde(default, skip_serializing_if = "is_square")]
+        corner_radii: RoundedRectRadii,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     Group,
     /// `corner_radii` is per corner (§5.3). A uniform radius is the same value
@@ -563,18 +568,25 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "is_zero")]
         corner_smoothing: f64,
     },
+    /// An ellipse filling `size`, or the part of it `arc` keeps: a wedge, a ring
+    /// or a ring sector (`geometry::ellipse_path`).
     Ellipse {
         size: Size,
+        #[serde(default, skip_serializing_if = "EllipseArc::is_default")]
+        arc: EllipseArc,
     },
     /// A regular polygon inscribed in `size`, first vertex at the top. `sides`
     /// below 3 is not a shape; the outline builder clamps rather than the model,
     /// so dragging the field through 2 and back does not lose the count.
-    /// `corner_radius` rounds every vertex alike, as a path's anchor radius does.
+    /// `corner_radius` rounds every vertex alike, as a path's anchor radius does,
+    /// and `corner_smoothing` eases every rounded vertex as a rect's does.
     Polygon {
         size: Size,
         sides: u32,
         #[serde(default, skip_serializing_if = "is_zero")]
         corner_radius: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     /// A star inscribed in `size`, first point at the top. `points` outer
     /// vertices alternate with inner ones at `inner_ratio` of the radius, so
@@ -586,6 +598,8 @@ pub enum NodeKind {
         inner_ratio: f64,
         #[serde(default, skip_serializing_if = "is_zero")]
         corner_radius: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     /// Start is always the local origin; only the endpoint is stored (§5.3).
     Line {
@@ -598,11 +612,14 @@ pub enum NodeKind {
     /// (invariant 9). An anchor's identity is its index (§15 D114), so the app
     /// carries the radius on its anchor struct (`preview::PenAnchor::radius`) and
     /// flattens to this list only at the model boundary. Resolved at read time by
-    /// [`crate::geometry::local_path`], never baked.
+    /// [`crate::geometry::local_path`], never baked. `corner_smoothing` is one
+    /// value for the whole path, not one per anchor.
     Path {
         path: BezPath,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         corner_radii: Vec<f64>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner_smoothing: f64,
     },
     /// A container whose children are combined into one outline (`boolean.rs`).
     ///
@@ -670,6 +687,70 @@ pub enum NodeKind {
 /// `serde`'s skip predicate for a `f64` that means "no offset".
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+/// `serde`'s skip predicate for a frame's corners: all four zero.
+fn is_square(r: &RoundedRectRadii) -> bool {
+    *r == RoundedRectRadii::default()
+}
+
+/// The part of an ellipse an [`NodeKind::Ellipse`] keeps. Angles are degrees
+/// clockwise from three o'clock, taken on the circle before it is stretched to
+/// the box, so 90° is the bottom of the box whatever its proportions.
+///
+/// The default, 0 · 360 · 0, is the whole ellipse and is not written to a file.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EllipseArc {
+    /// Where the arc begins, `0..360`.
+    pub start: f64,
+    /// How far it runs clockwise, `0..=360`.
+    pub sweep: f64,
+    /// The hole, as a fraction of the radius, `0..=MAX_RATIO`.
+    pub ratio: f64,
+}
+
+impl Default for EllipseArc {
+    fn default() -> Self {
+        Self {
+            start: 0.0,
+            sweep: 360.0,
+            ratio: 0.0,
+        }
+    }
+}
+
+impl EllipseArc {
+    /// The largest hole: 99%, so a ring always keeps some width.
+    pub const MAX_RATIO: f64 = 0.99;
+
+    /// Whether this is the whole ellipse as stored by default.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Whether the outline is the plain ellipse: the full sweep and no hole,
+    /// wherever it starts.
+    pub fn is_whole(&self) -> bool {
+        self.sweep >= 360.0 && self.ratio <= 0.0
+    }
+
+    /// The arc in range: `start` wrapped into `0..360`, `sweep` held to
+    /// `0..=360`, `ratio` to `0..=MAX_RATIO`.
+    #[must_use]
+    pub fn normalized(self) -> Self {
+        let start = self.start.rem_euclid(360.0);
+        Self {
+            // `rem_euclid` can round up to the modulus itself.
+            start: if start >= 360.0 { 0.0 } else { start },
+            sweep: self.sweep.clamp(0.0, 360.0),
+            ratio: self.ratio.clamp(0.0, Self::MAX_RATIO),
+        }
+    }
+
+    pub fn is_finite(&self) -> bool {
+        self.start.is_finite() && self.sweep.is_finite() && self.ratio.is_finite()
+    }
 }
 
 /// Whether every coordinate in a path is finite.
@@ -760,9 +841,9 @@ impl NodeKind {
     /// a text box included: its size is its sizing mode's.
     pub fn box_size(&self) -> Option<Size> {
         match self {
-            NodeKind::Artboard { size }
+            NodeKind::Artboard { size, .. }
             | NodeKind::Rect { size, .. }
-            | NodeKind::Ellipse { size }
+            | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. } => Some(*size),
             _ => None,
@@ -772,11 +853,70 @@ impl NodeKind {
     /// [`Self::box_size`], to write.
     pub fn box_size_mut(&mut self) -> Option<&mut Size> {
         match self {
-            NodeKind::Artboard { size }
+            NodeKind::Artboard { size, .. }
             | NodeKind::Rect { size, .. }
-            | NodeKind::Ellipse { size }
+            | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. } => Some(size),
+            _ => None,
+        }
+    }
+
+    /// The radii a corner variable binds against, as four corners: a frame's
+    /// or rect's own, a polygon's or star's one radius four times. `None` for
+    /// every other kind, a path included — its radius is per anchor.
+    pub fn corner_radii(&self) -> Option<RoundedRectRadii> {
+        match self {
+            NodeKind::Artboard { corner_radii, .. } | NodeKind::Rect { corner_radii, .. } => {
+                Some(*corner_radii)
+            }
+            NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. } => {
+                Some(RoundedRectRadii::from_single_radius(*corner_radius))
+            }
+            _ => None,
+        }
+    }
+
+    /// Write [`Self::corner_radii`] back: a polygon or star takes the top-left,
+    /// its four corners being one radius. `false` for a kind without them.
+    pub fn set_corner_radii(&mut self, radii: RoundedRectRadii) -> bool {
+        match self {
+            NodeKind::Artboard { corner_radii, .. } | NodeKind::Rect { corner_radii, .. } => {
+                *corner_radii = radii;
+                true
+            }
+            NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. } => {
+                *corner_radius = radii.top_left;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this kind has four corners of its own — a frame or a rect — as
+    /// against one radius for every vertex.
+    pub fn has_four_corners(&self) -> bool {
+        matches!(self, NodeKind::Artboard { .. } | NodeKind::Rect { .. })
+    }
+
+    /// The corner smoothing of a frame, rect, polygon, star or path, `0..=1`.
+    pub fn corner_smoothing(&self) -> Option<f64> {
+        match self {
+            NodeKind::Artboard {
+                corner_smoothing, ..
+            }
+            | NodeKind::Rect {
+                corner_smoothing, ..
+            }
+            | NodeKind::Polygon {
+                corner_smoothing, ..
+            }
+            | NodeKind::Star {
+                corner_smoothing, ..
+            }
+            | NodeKind::Path {
+                corner_smoothing, ..
+            } => Some(*corner_smoothing),
             _ => None,
         }
     }
@@ -798,15 +938,20 @@ impl NodeKind {
         }
         match self {
             NodeKind::Root | NodeKind::Group | NodeKind::Boolean { .. } => true,
-            NodeKind::Artboard { size: s }
-            | NodeKind::Ellipse { size: s }
-            | NodeKind::Slice { size: s } => size(s),
+            NodeKind::Slice { size: s } => size(s),
+            NodeKind::Ellipse { size: s, arc } => size(s) && arc.is_finite(),
             NodeKind::Polygon {
                 size: s,
                 corner_radius,
+                corner_smoothing,
                 ..
-            } => size(s) && corner_radius.is_finite(),
-            NodeKind::Rect {
+            } => size(s) && corner_radius.is_finite() && corner_smoothing.is_finite(),
+            NodeKind::Artboard {
+                size: s,
+                corner_radii,
+                corner_smoothing,
+            }
+            | NodeKind::Rect {
                 size: s,
                 corner_radii,
                 corner_smoothing,
@@ -826,11 +971,23 @@ impl NodeKind {
                 size: s,
                 inner_ratio,
                 corner_radius,
+                corner_smoothing,
                 ..
-            } => size(s) && inner_ratio.is_finite() && corner_radius.is_finite(),
+            } => {
+                size(s)
+                    && inner_ratio.is_finite()
+                    && corner_radius.is_finite()
+                    && corner_smoothing.is_finite()
+            }
             NodeKind::Line { end } => end.x.is_finite() && end.y.is_finite(),
-            NodeKind::Path { path, corner_radii } => {
-                path_is_finite(path) && corner_radii.iter().all(|r| r.is_finite())
+            NodeKind::Path {
+                path,
+                corner_radii,
+                corner_smoothing,
+            } => {
+                path_is_finite(path)
+                    && corner_radii.iter().all(|r| r.is_finite())
+                    && corner_smoothing.is_finite()
             }
             NodeKind::Text {
                 sizing,
@@ -1386,24 +1543,33 @@ pub(crate) mod kind_fixture {
         let one = Size::new(1.0, 1.0);
         vec![
             NodeKind::Root,
-            NodeKind::Artboard { size: one },
+            NodeKind::Artboard {
+                size: one,
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
             NodeKind::Group,
             NodeKind::Rect {
                 size: one,
                 corner_radii: RoundedRectRadii::default(),
                 corner_smoothing: 0.0,
             },
-            NodeKind::Ellipse { size: one },
+            NodeKind::Ellipse {
+                size: one,
+                arc: EllipseArc::default(),
+            },
             NodeKind::Polygon {
                 size: one,
                 sides: 3,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             },
             NodeKind::Star {
                 size: one,
                 points: 5,
                 inner_ratio: 0.5,
                 corner_radius: 0.0,
+                corner_smoothing: 0.0,
             },
             NodeKind::Line {
                 end: Point::new(1.0, 0.0),
@@ -1411,6 +1577,7 @@ pub(crate) mod kind_fixture {
             NodeKind::Path {
                 path: BezPath::new(),
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             NodeKind::Boolean { op: BoolOp::Union },
             NodeKind::Text {

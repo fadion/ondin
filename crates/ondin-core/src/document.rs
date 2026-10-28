@@ -3276,7 +3276,7 @@ pub(crate) fn apply_geometry_patch(
     }
     match (kind, patch) {
         (NodeKind::Rect { size, .. }, G::Size(new))
-        | (NodeKind::Ellipse { size }, G::Size(new))
+        | (NodeKind::Ellipse { size, .. }, G::Size(new))
         | (NodeKind::Polygon { size, .. }, G::Size(new))
         | (NodeKind::Star { size, .. }, G::Size(new))
         | (NodeKind::Artboard { size, .. }, G::Size(new))
@@ -3290,14 +3290,28 @@ pub(crate) fn apply_geometry_patch(
         }
         // Both corner patches invert to `CornerRadii`: a uniform set flattens
         // four values into one, so only the per-corner form can put them back.
-        (NodeKind::Rect { corner_radii, .. }, G::CornerRadius(new)) => Ok(G::CornerRadii(
+        (NodeKind::Rect { corner_radii, .. }, G::CornerRadius(new))
+        | (NodeKind::Artboard { corner_radii, .. }, G::CornerRadius(new)) => Ok(G::CornerRadii(
             std::mem::replace(corner_radii, RoundedRectRadii::from_single_radius(*new)),
         )),
-        (NodeKind::Rect { corner_radii, .. }, G::CornerRadii(new)) => {
+        (NodeKind::Rect { corner_radii, .. }, G::CornerRadii(new))
+        | (NodeKind::Artboard { corner_radii, .. }, G::CornerRadii(new)) => {
             Ok(G::CornerRadii(std::mem::replace(corner_radii, *new)))
         }
         (
             NodeKind::Rect {
+                corner_smoothing, ..
+            }
+            | NodeKind::Artboard {
+                corner_smoothing, ..
+            }
+            | NodeKind::Polygon {
+                corner_smoothing, ..
+            }
+            | NodeKind::Star {
+                corner_smoothing, ..
+            }
+            | NodeKind::Path {
                 corner_smoothing, ..
             },
             G::CornerSmoothing(new),
@@ -3309,11 +3323,21 @@ pub(crate) fn apply_geometry_patch(
         | (NodeKind::Star { corner_radius, .. }, G::CornerRadius(new)) => {
             Ok(G::CornerRadius(std::mem::replace(corner_radius, *new)))
         }
+        // One radius held as four corners, so a corner variable's writes land
+        // here as they do on a rect. Inverts to the same form.
+        (NodeKind::Polygon { corner_radius, .. }, G::CornerRadii(new))
+        | (NodeKind::Star { corner_radius, .. }, G::CornerRadii(new)) => Ok(G::CornerRadii(
+            RoundedRectRadii::from_single_radius(std::mem::replace(corner_radius, new.top_left)),
+        )),
+        (NodeKind::Ellipse { arc, .. }, G::Arc(new)) => {
+            Ok(G::Arc(std::mem::replace(arc, new.normalized())))
+        }
         (NodeKind::Line { end }, G::LineEnd(new)) => Ok(G::LineEnd(std::mem::replace(end, *new))),
         (
             NodeKind::Path {
                 path,
                 corner_radii: radii,
+                ..
             },
             G::Path {
                 path: new,
@@ -3367,6 +3391,8 @@ mod tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -3439,6 +3465,8 @@ mod tests {
             vec![],
             NodeKind::Artboard {
                 size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         )
     }
@@ -3527,6 +3555,8 @@ mod tests {
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(5.0, 5.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         doc.apply(&Transaction(vec![
             create(plain, ab, NodeKind::Group),

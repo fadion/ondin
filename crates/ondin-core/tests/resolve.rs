@@ -46,6 +46,8 @@ fn text(content: &str, size: f64) -> NodeKind {
 fn artboard() -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(800.0, 600.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -179,6 +181,7 @@ fn hit_test_uses_exact_geometry_not_bounds() {
         0,
         NodeKind::Ellipse {
             size: Size::new(100.0, 100.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         Affine::IDENTITY,
     );
@@ -370,6 +373,8 @@ fn run_random_session_with(seed: u64, layout: bool, grid: bool) {
                                     20.0 + rng.next_range(80) as f64,
                                     20.0 + rng.next_range(80) as f64,
                                 ),
+                                corner_radii: RoundedRectRadii::default(),
+                                corner_smoothing: 0.0,
                             },
                             transform,
                             name: None,
@@ -914,6 +919,8 @@ fn a_frame_that_does_not_clip_lends_its_group_the_overflow() {
         0,
         NodeKind::Artboard {
             size: Size::new(100.0, 100.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         Affine::IDENTITY,
     );
@@ -1094,7 +1101,8 @@ fn stroke_alignment_only_applies_to_closed_shapes() {
     // An ellipse's path is four cubics with no explicit `ClosePath`; it still
     // has an inside.
     assert!(stroke_align_applies(&NodeKind::Ellipse {
-        size: Size::new(10.0, 10.0)
+        size: Size::new(10.0, 10.0),
+        arc: ondin_core::EllipseArc::default(),
     }));
     assert!(!stroke_align_applies(&NodeKind::Line {
         end: Point::new(10.0, 0.0)
@@ -1106,13 +1114,15 @@ fn stroke_alignment_only_applies_to_closed_shapes() {
     assert!(!stroke_align_applies(&NodeKind::Path {
         path: open.clone(),
         corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
     }));
 
     let mut closed = open;
     closed.close_path();
     assert!(stroke_align_applies(&NodeKind::Path {
         path: closed,
-        corner_radii: Vec::new()
+        corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
     }));
 }
 
@@ -1378,6 +1388,8 @@ fn only_a_box_takes_a_per_side_stroke() {
     // asserts for the square-cornered rect they share a code path with.
     let frame = NodeKind::Artboard {
         size: Size::new(10.0, 20.0),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     };
     assert!(stroke_sides_apply(&frame));
     let sides: f64 = Side::ALL
@@ -1396,11 +1408,13 @@ fn only_a_box_takes_a_per_side_stroke() {
     for kind in [
         NodeKind::Ellipse {
             size: Size::new(10.0, 10.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         NodeKind::Polygon {
             size: Size::new(10.0, 10.0),
             sides: 3,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         },
         NodeKind::Line {
             end: Point::new(10.0, 0.0),
@@ -1408,6 +1422,7 @@ fn only_a_box_takes_a_per_side_stroke() {
         NodeKind::Path {
             path: BezPath::new(),
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         },
         NodeKind::Group,
         // Text is the one worth naming: its outline is its glyphs', which have no
@@ -1789,6 +1804,7 @@ fn bounds_allow_for_a_stroke_the_walk_will_actually_draw() {
     // outline at full width — and the bounds have to say so.
     let ellipse = NodeKind::Ellipse {
         size: Size::new(50.0, 50.0),
+        arc: ondin_core::EllipseArc::default(),
     };
     assert_eq!(
         effective_sides(&ellipse, &nowhere),
@@ -2988,6 +3004,7 @@ fn a_group_masks_with_the_union_of_its_contents() {
             .to_path(0.1)
             .reverse_subpaths(),
         corner_radii: Vec::new(),
+        corner_smoothing: 0.0,
     };
     create(
         &mut doc,
@@ -3050,6 +3067,7 @@ fn ring_boolean(op: ondin_core::BoolOp, n: usize) -> (Document, NodeId) {
             i,
             NodeKind::Ellipse {
                 size: Size::new(180.0, 180.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             Affine::translate((c.x - 90.0, c.y - 90.0)),
         );
@@ -3073,6 +3091,7 @@ fn disjoint_intersection() -> (Document, NodeId) {
             i,
             NodeKind::Ellipse {
                 size: Size::new(20.0, 20.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             Affine::translate((x, 0.0)),
         );
@@ -3411,6 +3430,7 @@ fn outline_at_finds_an_edge_where_hit_test_finds_an_interior() {
         0,
         NodeKind::Ellipse {
             size: Size::new(200.0, 200.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         Affine::translate((100.0, 100.0)),
     );
@@ -3537,6 +3557,7 @@ fn a_many_segment_outline_answers_the_same_with_the_segment_reject() {
         NodeKind::Path {
             path,
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         },
         Affine::IDENTITY,
     );

@@ -163,9 +163,9 @@ pub(super) struct AppearanceMarks {
     pub(super) corners: [Option<Mark>; 4],
     pub(super) count: Option<Mark>,
     pub(super) ratio: Option<Mark>,
-    /// A polygon's or star's one radius; a rect's is `radius`.
-    pub(super) vertex_radius: Option<Mark>,
-    /// A rect's corner smoothing.
+    /// An ellipse's Start, Sweep and Ratio.
+    pub(super) arc: [Option<Mark>; 3],
+    /// Corner smoothing of a frame, rect, polygon, star or path.
     pub(super) smoothing: Option<Mark>,
     pub(super) clip: Option<Mark>,
 }
@@ -1333,7 +1333,7 @@ impl OndinApp {
         let (glyph, _) = super::layers_icon(node.kind());
         let size0 = match node.kind() {
             NodeKind::Rect { size, .. }
-            | NodeKind::Ellipse { size }
+            | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
             | NodeKind::Artboard { size, .. }
@@ -1348,15 +1348,11 @@ impl OndinApp {
         };
         // As drawn: a bound corner's literal is 0, so the fields read its
         // variable's number in the mode in force.
-        let corners0 = match node.kind() {
-            NodeKind::Rect { corner_radii, .. } => Some(
-                self.session
-                    .doc
-                    .resolve_corners(id, *corner_radii)
-                    .unwrap_or(*corner_radii),
-            ),
-            _ => None,
-        };
+        let corners0 = node
+            .kind()
+            .corner_radii()
+            .filter(|_| node.kind().has_four_corners())
+            .map(|r| self.session.doc.resolve_corners(id, r).unwrap_or(r));
         let vertices0 = match node.kind() {
             NodeKind::Polygon {
                 sides,
@@ -1609,10 +1605,12 @@ impl OndinApp {
         let picked: Vec<PointRef> = self.subject_points(id);
         let scope = (!picked.is_empty()).then_some(picked);
         let radius0 = self.corner_radius_of(id, scope.as_deref());
+        let marks = self.appearance_marks(id);
         self.panel(ui, "Appearance", None, |app, ui| {
+            let smoothing = app.corner_smoothing_open.contains(&id);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                let fw = (ui.available_width() - 28.0 - ui::CARD_COL_GAP * 2.0) / 2.0;
+                let fw = (ui.available_width() - 2.0 * 28.0 - ui::CARD_COL_GAP * 3.0) / 2.0;
                 // The layer's own opacity field, chip and all.
                 app.opacity_field(ui, id, opacity0, fw, &None);
 
@@ -1648,7 +1646,12 @@ impl OndinApp {
                     ui::FieldButton::enabled_if(false),
                 )
                 .on_hover_text("Per-corner radii: select the points you want and set each");
+                // One smoothing for the whole path, not one per anchor.
+                app.smoothing_toggle(ui, id, smoothing);
             });
+            if smoothing {
+                app.corner_smoothing_field(ui, id, &marks.smoothing);
+            }
         });
     }
 
@@ -2573,33 +2576,36 @@ impl OndinApp {
             }
         });
     }
-    /// Opacity, and corner radius when the selection holds any rect.
+    /// Opacity, and corner radius when the selection holds any frame, rect,
+    /// polygon or star.
     ///
     /// Both are absolute. Opacity reaches only the outermost members, since it
-    /// composes down the tree (`build::set_opacity_all`); radius every rect in scope.
+    /// composes down the tree (`build::set_opacity_all`); radius every such shape
+    /// in scope. Paths stay out: their radius is per anchor.
     fn inspector_multi_appearance(&mut self, ui: &mut egui::Ui) {
         let ids = self.session.selection.ids().to_vec();
         let opacity = self.shared_opacity_shown();
         let radius = self.shared_radius_shown();
-        let has_rect = ondin_core::any_rect_in(&self.session.doc, &ids);
-        let (opacity_mark, radius_mark) = self.multi_appearance_marks(&ids, has_rect);
+        let has_corners = ondin_core::any_cornered_in(&self.session.doc, &ids);
+        let (opacity_mark, radius_mark) = self.multi_appearance_marks(&ids, has_corners);
         self.multi_appearance_card(
             ui,
             &ids,
             opacity,
             radius,
-            has_rect,
+            has_corners,
             opacity_mark,
             radius_mark,
         );
     }
 
     /// The several-layer Appearance card's override marks: opacity over `ids`,
-    /// the radius over every rect in their subtree, each its binding's first.
+    /// the radius over every shape in their subtree it writes, each its binding's
+    /// first.
     fn multi_appearance_marks(
         &self,
         ids: &[NodeId],
-        has_rect: bool,
+        has_corners: bool,
     ) -> (Option<Mark>, Option<Mark>) {
         let table = self.session.doc.variables();
         let say_vars = |v: &[Option<ondin_core::VarId>]| match v {
@@ -2638,15 +2644,15 @@ impl OndinApp {
                 |v| format!("{}%", super::component::mark_num(f64::from(*v) * 100.0)),
             ),
         );
-        // Every rect the field writes, compared on all four radii.
-        let rects: Vec<NodeId> = match has_rect {
+        // Every shape the field writes, compared on all four radii.
+        let rects: Vec<NodeId> = match has_corners {
             true => ondin_core::subtree_nodes(&self.session.doc, ids)
                 .into_iter()
                 .filter(|id| {
                     self.session
                         .doc
                         .get(*id)
-                        .is_some_and(|n| matches!(n.kind(), NodeKind::Rect { .. }))
+                        .is_some_and(|n| n.kind().corner_radii().is_some())
                 })
                 .collect(),
             false => Vec::new(),
@@ -2672,12 +2678,13 @@ impl OndinApp {
                         geometry: GeometryPatch::CornerRadii(r),
                         ..
                     } => Some(*r),
+                    Operation::SetGeometry {
+                        geometry: GeometryPatch::CornerRadius(r),
+                        ..
+                    } => Some(ondin_core::kurbo::RoundedRectRadii::from_single_radius(*r)),
                     _ => None,
                 },
-                |n| match n.kind() {
-                    NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
-                    _ => None,
-                },
+                |n| n.kind().corner_radii(),
                 |r| *r,
                 |c, v| *c = v,
                 |id, r| Operation::SetGeometry {
@@ -2698,7 +2705,7 @@ impl OndinApp {
         ids: &[NodeId],
         opacity: Option<f32>,
         radius: Option<f64>,
-        has_rect: bool,
+        has_corners: bool,
         opacity_mark: Option<Mark>,
         radius_mark: Option<Mark>,
     ) {
@@ -2706,12 +2713,12 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 // The single-layer panel's arithmetic, so fields do not shift.
-                let button_space = if has_rect {
+                let button_space = if has_corners {
                     2.0 * (28.0 + ui::CARD_COL_GAP)
                 } else {
                     0.0
                 };
-                let fields = if has_rect { 2.0 } else { 1.0 };
+                let fields = if has_corners { 2.0 } else { 1.0 };
                 let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP * (fields - 1.0))
                     / fields;
                 let mixed = opacity.is_none();
@@ -2751,7 +2758,7 @@ impl OndinApp {
                     ops.extend(set.0);
                     app.named_valve("Opacity", icon::DROP_HALF, &ro, Transaction(ops));
                 }
-                if !has_rect {
+                if !has_corners {
                     return;
                 }
                 let mixed = radius.is_none();
@@ -2778,7 +2785,7 @@ impl OndinApp {
                 let rr = tip_unless_marked(
                     rr,
                     &radius_mark,
-                    "Corner radius of every rectangle in the selection",
+                    "Corner radius of every shape in the selection",
                 );
                 app.reset_marked(hit, &radius_mark);
                 if interacting(&rr) {
@@ -2910,24 +2917,24 @@ impl OndinApp {
         }
         shared
     }
-    /// The uniform corner radius every rect in scope shares, read through any live
-    /// edit, within `build::RADIUS_AGREEMENT`. `None` when they differ, one is
-    /// unevenly rounded, or there is no rect.
+    /// The uniform corner radius every frame, rect, polygon and star in scope
+    /// shares, read through any live edit, within `build::RADIUS_AGREEMENT`.
+    /// `None` when they differ, one is unevenly rounded, or there is none.
     fn shared_radius_shown(&self) -> Option<f64> {
         let mut shared: Option<f64> = None;
         for id in ondin_core::subtree_nodes(&self.session.doc, self.session.selection.ids()) {
             let Some(node) = self.session.display_node(id) else {
                 continue;
             };
-            let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+            let Some(corner_radii) = node.kind().corner_radii() else {
                 continue;
             };
             // As drawn, a bound corner's 0 literal aside.
             let drawn = self
                 .session
                 .doc
-                .resolve_corners(id, *corner_radii)
-                .unwrap_or(*corner_radii);
+                .resolve_corners(id, corner_radii)
+                .unwrap_or(corner_radii);
             let r = uniform(drawn)?;
             match shared {
                 None => shared = Some(r),
@@ -3639,10 +3646,10 @@ impl OndinApp {
         }
         let size_of = |k: &NodeKind| match k {
             NodeKind::Rect { size, .. }
-            | NodeKind::Ellipse { size }
+            | NodeKind::Ellipse { size, .. }
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
-            | NodeKind::Artboard { size } => Some(*size),
+            | NodeKind::Artboard { size, .. } => Some(*size),
             _ => None,
         };
         if let (Some(mine), Some(main)) = (size_of(copy.kind()), size_of(src.kind())) {
@@ -4239,17 +4246,19 @@ impl OndinApp {
     pub(super) fn appearance_marks(&self, id: NodeId) -> AppearanceMarks {
         use super::component::mark_num;
         let s = &[id];
+        // A polygon's or star's reset writes its one radius.
         let radii_of = |op: &Operation| match op {
             Operation::SetGeometry {
                 geometry: GeometryPatch::CornerRadii(r),
                 ..
             } => Some(*r),
+            Operation::SetGeometry {
+                geometry: GeometryPatch::CornerRadius(r),
+                ..
+            } => Some(RoundedRectRadii::from_single_radius(*r)),
             _ => None,
         };
-        let my_radii = |n: &ondin_core::Node| match n.kind() {
-            NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
-            _ => None,
-        };
+        let my_radii = |n: &ondin_core::Node| n.kind().corner_radii();
         let write_radii = |id, r| Operation::SetGeometry {
             id,
             geometry: GeometryPatch::CornerRadii(r),
@@ -4294,25 +4303,25 @@ impl OndinApp {
             NodeKind::Star { inner_ratio, .. } => Some(*inner_ratio),
             _ => None,
         };
-        let vertex_radius = patch(|g| match g {
-            GeometryPatch::CornerRadius(r) => Some(*r),
-            _ => None,
-        });
-        let my_vertex_radius = |n: &ondin_core::Node| match n.kind() {
-            NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. } => {
-                Some(*corner_radius)
-            }
-            _ => None,
-        };
         let smoothing = patch(|g| match g {
             GeometryPatch::CornerSmoothing(s) => Some(*s),
             _ => None,
         });
-        let my_smoothing = |n: &ondin_core::Node| match n.kind() {
-            NodeKind::Rect {
-                corner_smoothing, ..
-            } => Some(*corner_smoothing),
+        let my_smoothing = |n: &ondin_core::Node| n.kind().corner_smoothing();
+        let arc_of = |op: &Operation| match op {
+            Operation::SetGeometry {
+                geometry: GeometryPatch::Arc(a),
+                ..
+            } => Some(*a),
             _ => None,
+        };
+        let my_arc = |n: &ondin_core::Node| match n.kind() {
+            NodeKind::Ellipse { arc, .. } => Some(*arc),
+            _ => None,
+        };
+        let write_arc = |id, arc| Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Arc(arc),
         };
         AppearanceMarks {
             // The binding first: a bound literal is 0, so a copy can differ by it alone.
@@ -4409,18 +4418,35 @@ impl OndinApp {
                 },
                 |v| format!("{}%", mark_num(*v * 100.0)),
             ),
-            vertex_radius: self.sub_mark(
-                s,
-                vertex_radius,
-                my_vertex_radius,
-                |v| *v,
-                |c, v| *c = v,
-                |id, r| Operation::SetGeometry {
-                    id,
-                    geometry: GeometryPatch::CornerRadius(r),
-                },
-                |v| mark_num(*v),
-            ),
+            arc: [
+                self.sub_mark(
+                    s,
+                    arc_of,
+                    my_arc,
+                    |a| a.start,
+                    |a, v| a.start = v,
+                    write_arc,
+                    |v| format!("{}°", mark_num(*v)),
+                ),
+                self.sub_mark(
+                    s,
+                    arc_of,
+                    my_arc,
+                    |a| a.sweep,
+                    |a, v| a.sweep = v,
+                    write_arc,
+                    |v| format!("{}°", mark_num(*v)),
+                ),
+                self.sub_mark(
+                    s,
+                    arc_of,
+                    my_arc,
+                    |a| a.ratio,
+                    |a, v| a.ratio = v,
+                    write_arc,
+                    |v| format!("{}%", mark_num(*v * 100.0)),
+                ),
+            ],
             smoothing: self.sub_mark(
                 s,
                 smoothing,
@@ -4496,27 +4522,36 @@ impl OndinApp {
         clip0: Option<bool>,
     ) {
         let marks = self.appearance_marks(id);
+        let arc0 = match self.session.display_node(id).map(|n| n.kind()) {
+            Some(NodeKind::Ellipse { arc, .. }) => Some(*arc),
+            _ => None,
+        };
         self.panel(ui, "Appearance", None, |app, ui| {
             let per_corner = app.per_corner_radius.contains(&id);
             let smoothing = app.corner_smoothing_open.contains(&id);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                // Opacity always; radius and its two toggles only on a rect.
-                let button_space = if corners0.is_some() {
-                    2.0 * (28.0 + ui::CARD_COL_GAP)
-                } else {
-                    0.0
+                // Opacity always; radius and its two toggles on a frame or rect,
+                // radius and the smoothing toggle on a polygon or star.
+                let buttons = match (corners0.is_some(), vertices0.is_some()) {
+                    (true, _) => 2.0,
+                    (_, true) => 1.0,
+                    _ => 0.0,
                 };
-                let fields = if corners0.is_some() { 2.0 } else { 1.0 };
-                let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP * (fields - 1.0))
-                    / fields;
+                let button_space = buttons * (28.0 + ui::CARD_COL_GAP);
+                // Two columns either way, so an ellipse's opacity lines up with the
+                // arc row under it.
+                let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP) / 2.0;
                 if let Some(vertices) = vertices0 {
-                    let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
                     app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
-                    app.vertex_radius_field(ui, id, vertices.radius(), fw, &marks.vertex_radius);
+                    app.vertex_radius_field(ui, id, vertices.radius(), fw, &marks.radius);
+                    app.smoothing_toggle(ui, id, smoothing);
                     return;
                 }
                 app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
+                if let Some(arc) = arc0 {
+                    app.arc_field(ui, id, arc, 1, fw, &marks.arc[1]);
+                }
                 let Some(corners) = corners0 else { return };
                 // Bound, the field is a chip.
                 let key = super::binding::FieldKey::Radius { id };
@@ -4562,21 +4597,16 @@ impl OndinApp {
                 {
                     app.toggle_corner_disclosure(id, false);
                 }
-                if ui::field_button(
-                    ui,
-                    icon::CIRCLE,
-                    28.0,
-                    15.0,
-                    ui::FieldButton::on_if(smoothing),
-                )
-                .on_hover_text("Corner smoothing")
-                .clicked()
-                {
-                    app.toggle_corner_disclosure(id, true);
-                }
+                app.smoothing_toggle(ui, id, smoothing);
             });
             if let Some(vertices) = vertices0 {
+                if smoothing {
+                    app.corner_smoothing_field(ui, id, &marks.smoothing);
+                }
                 app.vertex_fields(ui, id, vertices, &marks);
+            }
+            if let Some(arc) = arc0 {
+                app.arc_fields(ui, id, arc, &marks.arc);
             }
             // A frame's "clip content", as a switch. An overridden clip is reset by
             // the toggle itself, so its tooltip names the main's value.
@@ -4668,12 +4698,23 @@ impl OndinApp {
             other.remove(&id);
         }
     }
-    /// A rect's corner smoothing as a percentage, full width under the radius row:
-    /// how far each rounded corner eases into its sides (`geometry::smoothed_rect`).
+    /// The button beside a radius that opens the corner smoothing field.
+    fn smoothing_toggle(&mut self, ui: &mut egui::Ui, id: NodeId, open: bool) {
+        if ui::field_button(ui, icon::CIRCLE, 28.0, 15.0, ui::FieldButton::on_if(open))
+            .on_hover_text("Corner smoothing")
+            .clicked()
+        {
+            self.toggle_corner_disclosure(id, true);
+        }
+    }
+    /// A layer's corner smoothing as a percentage, full width under the radius row:
+    /// how far each rounded corner eases into its sides
+    /// (`geometry::round_corners_smoothed`).
     fn corner_smoothing_field(&mut self, ui: &mut egui::Ui, id: NodeId, mark: &Option<Mark>) {
-        let Some(NodeKind::Rect {
-            corner_smoothing, ..
-        }) = self.session.display_node(id).map(|n| n.kind())
+        let Some(corner_smoothing) = self
+            .session
+            .display_node(id)
+            .and_then(|n| n.kind().corner_smoothing())
         else {
             return;
         };
@@ -4706,8 +4747,8 @@ impl OndinApp {
             );
         });
     }
-    /// A polygon's or star's corner radius, one value for every vertex. Unlike a
-    /// rect's it takes no variable, so it has no binding doors.
+    /// A polygon's or star's corner radius, one value for every vertex. It binds
+    /// as a rect's uniform radius does, so bound it is the same chip.
     fn vertex_radius_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -4716,6 +4757,10 @@ impl OndinApp {
         fw: f32,
         mark: &Option<Mark>,
     ) {
+        let key = super::binding::FieldKey::Radius { id };
+        if self.bound_field_ui(ui, key, fw, mark) {
+            return;
+        }
         let mut r = radius0;
         let (rr, hit) = ui::value_field_marked(
             ui,
@@ -4735,6 +4780,92 @@ impl OndinApp {
             Transaction(vec![Operation::SetGeometry {
                 id,
                 geometry: GeometryPatch::CornerRadius(r.max(0.0)),
+            }]),
+        );
+        self.field_doors(ui, key, &rr);
+    }
+    /// An ellipse's arc fields, a 2 × 2 grid with opacity: Sweep beside opacity
+    /// (drawn by the first row), then Start and Ratio on this row. The polygon's
+    /// pattern: an icon in each field, no labels.
+    fn arc_fields(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        arc: ondin_core::EllipseArc,
+        marks: &[Option<Mark>; 3],
+    ) {
+        let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+            self.arc_field(ui, id, arc, 0, fw, &marks[0]);
+            self.arc_field(ui, id, arc, 2, fw, &marks[2]);
+        });
+    }
+    /// One arc field, `fw` wide: 0 Start and 1 Sweep in degrees, 2 Ratio, the
+    /// hole, as a percentage.
+    fn arc_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        arc: ondin_core::EllipseArc,
+        k: usize,
+        fw: f32,
+        mark: &Option<Mark>,
+    ) {
+        let (glyph, name, tip, v0, scrub, unit, decimals) = match k {
+            0 => (
+                icon::ARROW_CLOCKWISE,
+                "Start",
+                "Where the arc starts, clockwise from three o'clock",
+                arc.start,
+                Scrub::whole(0.5),
+                "°",
+                1,
+            ),
+            1 => (
+                icon::CHART_PIE_SLICE,
+                "Sweep",
+                "How far the arc runs",
+                arc.sweep,
+                Scrub::whole(0.5).range(0.0..=360.0),
+                "°",
+                1,
+            ),
+            _ => (
+                icon::CIRCLE_DASHED,
+                "Ratio",
+                "The hole, as a share of the radius",
+                arc.ratio * 100.0,
+                Scrub::whole(0.5).range(0.0..=ondin_core::EllipseArc::MAX_RATIO * 100.0),
+                "%",
+                0,
+            ),
+        };
+        let mut v = v0;
+        let (resp, hit) = ui::value_field_marked(
+            ui,
+            egui::vec2(fw, 28.0),
+            Prefix::Icon(glyph),
+            mark.as_ref().map(Mark::field),
+            &mut v,
+            scrub,
+            |d| d.suffix(unit).max_decimals(decimals),
+        );
+        let resp = tip_unless_marked(resp, mark, tip);
+        self.reset_marked(hit, mark);
+        let mut next = arc;
+        match k {
+            0 => next.start = v,
+            1 => next.sweep = v,
+            _ => next.ratio = v / 100.0,
+        }
+        self.named_valve(
+            name,
+            glyph,
+            &resp,
+            Transaction(vec![Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::Arc(next.normalized()),
             }]),
         );
     }
@@ -6528,7 +6659,7 @@ impl OndinApp {
     fn inset_placement(&self, id: NodeId) -> Option<InsetPlacement> {
         let parent = self.session.doc.get(id)?.parent()?;
         let frame = match *self.session.display_node(parent)?.kind() {
-            NodeKind::Artboard { size } => size,
+            NodeKind::Artboard { size, .. } => size,
             NodeKind::Group => self.session.preview_frame(parent)?,
             _ => return None,
         };
@@ -6598,7 +6729,7 @@ impl OndinApp {
                 continue;
             };
             let frame = match res_after.used_kind(&after, parent) {
-                Some(NodeKind::Artboard { size }) => *size,
+                Some(NodeKind::Artboard { size, .. }) => *size,
                 Some(NodeKind::Group) => match res_after.used_frame(parent) {
                     Some(size) => size,
                     None => continue,
@@ -12160,20 +12291,25 @@ mod polish_tests {
             size: Size::new(10.0, 10.0),
             sides: 3,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         }));
         assert!(stroke_join_applies(&NodeKind::Star {
             size: Size::new(10.0, 10.0),
             points: 5,
             inner_ratio: 0.382,
             corner_radius: 0.0,
+            corner_smoothing: 0.0,
         }));
         assert!(stroke_join_applies(&NodeKind::Path {
             path: BezPath::new(),
             corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
         }));
         assert!(
             stroke_join_applies(&NodeKind::Artboard {
                 size: Size::new(10.0, 10.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             }),
             "a frame is a box, and it strokes now (§15 D144), so its four corners \
              take a join like a rect's"
@@ -12182,6 +12318,7 @@ mod polish_tests {
         for kind in [
             NodeKind::Ellipse {
                 size: Size::new(10.0, 10.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             NodeKind::Line {
                 end: ondin_core::kurbo::Point::new(10.0, 0.0),
@@ -12224,6 +12361,8 @@ mod polish_tests {
         // A frame paints: `inspector_paint_panels` gates both of its cards on this.
         let frame = NodeKind::Artboard {
             size: ondin_core::kurbo::Size::new(10.0, 10.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         assert!(
             frame.takes_paint(),
@@ -12531,6 +12670,8 @@ mod mask_card_tests {
             root,
             NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         );
         let row = t.add(root, NodeKind::Group);
@@ -12538,6 +12679,8 @@ mod mask_card_tests {
             row,
             NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         );
         app.session.adopt_document(t.doc.clone(), None);
@@ -12617,6 +12760,8 @@ mod mask_card_tests {
             holder,
             NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         );
         app.session.adopt_document(t.doc.clone(), None);
@@ -13338,6 +13483,8 @@ mod frame_fill_tests {
 
         let frame = panel_titles(NodeKind::Artboard {
             size: Size::new(200.0, 200.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         });
         assert!(
             !frame.iter().any(|t| t == "FRAME BACKGROUND"),
@@ -13463,6 +13610,8 @@ mod frame_fill_tests {
         };
         let frame = NodeKind::Artboard {
             size: Size::new(200.0, 200.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
 
         let hexes = |texts: Vec<String>| -> Vec<String> {
@@ -13532,6 +13681,8 @@ mod frame_fill_tests {
         let texts = galleys_holding(
             NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             solid(0x01, 0x02, 0x03),
             solid(0x07, 0x08, 0x09),
@@ -13620,6 +13771,8 @@ mod frame_fill_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -14641,6 +14794,8 @@ mod several_layer_binding_tests {
                     index: 0,
                     kind: NodeKind::Artboard {
                         size: Size::new(50.0, 50.0),
+                        corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                        corner_smoothing: 0.0,
                     },
                     transform: None,
                     name: None,
@@ -14744,6 +14899,8 @@ mod several_layer_binding_tests {
                 index: 2,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -14805,6 +14962,8 @@ mod several_layer_binding_tests {
                 index: 2,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -17419,6 +17578,8 @@ mod rhythm_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(393.0, 852.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -17466,6 +17627,8 @@ mod rhythm_tests {
                 index: i,
                 kind: NodeKind::Artboard {
                     size: Size::new(393.0, 852.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 // Side by side: coincident frames would make "the union grew" vacuous.
                 transform: Some(Affine::translate((500.0 * i as f64, 0.0))),
@@ -19356,6 +19519,7 @@ mod subject_tests {
             kind: NodeKind::Path {
                 path: bez,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -19708,6 +19872,8 @@ mod paint_write_tests {
             index,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -21449,6 +21615,8 @@ mod select_by_color_lock_tests {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 200.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,
@@ -21588,6 +21756,8 @@ mod inset_card_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(300.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -21654,6 +21824,8 @@ mod inset_card_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -22316,6 +22488,8 @@ mod multi_xy_flex_tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(400.0, 200.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::IDENTITY),
                 name: None,
@@ -22438,6 +22612,8 @@ mod multi_xy_flex_tests {
         };
         let frame = || NodeKind::Artboard {
             size: Size::new(200.0, 100.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         };
         let flex = |id| Operation::SetDisplay {
             id,

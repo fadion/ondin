@@ -86,6 +86,7 @@ mod job;
 mod kits;
 mod lasso;
 mod loose_spacing;
+mod shape_handles;
 // No blanket `dead_code` allow here: the plain build is the gate that catches an
 // unwired item. `store::versions` (test-only callers) carries its own allow.
 mod library;
@@ -1484,6 +1485,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(300.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Card".into()),
@@ -1575,6 +1578,7 @@ mod tests {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: Some("Dot".into()),
@@ -1709,6 +1713,7 @@ mod tests {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: Some("Dot".into()),
@@ -2039,6 +2044,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(32.0, 24.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2118,6 +2125,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(32.0, 24.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -2343,6 +2352,8 @@ mod tests {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(64.0, 64.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Board".into()),

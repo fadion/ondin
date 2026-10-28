@@ -1374,6 +1374,8 @@ mod tests {
                 index: i,
                 kind: NodeKind::Artboard {
                     size: Size::new(120.0, 120.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -1470,6 +1472,7 @@ mod tests {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(10.0, 10.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: None,

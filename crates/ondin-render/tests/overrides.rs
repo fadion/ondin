@@ -242,6 +242,8 @@ fn fixture() -> Fixture {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(800.0, 600.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((30.0, 20.0))),
             name: None,
@@ -557,6 +559,7 @@ fn a_shape_being_drawn_matches_the_shape_that_lands() {
             index,
             kind: NodeKind::Ellipse {
                 size: Size::new(80.0, 45.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((200.0, 200.0))),
             name: None,
@@ -862,6 +865,8 @@ fn values_the_commit_would_reject_are_refused() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -903,6 +908,8 @@ fn values_the_commit_would_reject_are_refused() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -940,6 +947,8 @@ fn values_the_commit_would_reject_are_refused() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -1652,6 +1661,7 @@ fn a_ghost_operand_folds_in_the_slot_its_insert_names() {
             index: i as usize,
             kind: NodeKind::Ellipse {
                 size: Size::new(180.0, 180.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((c.x - 90.0, c.y - 90.0))),
             name: None,
@@ -2728,6 +2738,8 @@ fn pinned_fixture() -> (Document, NodeId, NodeId) {
         root,
         NodeKind::Artboard {
             size: Size::new(300.0, 200.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         (0.0, 0.0),
     );
@@ -2755,6 +2767,8 @@ fn pinned_fixture() -> (Document, NodeId, NodeId) {
         frame,
         NodeKind::Artboard {
             size: Size::new(80.0, 40.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         (10.0, 150.0),
     );
@@ -2911,6 +2925,8 @@ fn flex_fixture() -> (Document, NodeId, NodeId, NodeId) {
         root,
         NodeKind::Artboard {
             size: Size::new(400.0, 200.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
     );
     let first = add(&mut doc, frame, rect(40.0, 30.0));
@@ -3196,6 +3212,8 @@ fn a_layout_nested_in_a_plain_group_previews_as_it_commits() {
             0,
             NodeKind::Artboard {
                 size: Size::new(400.0, 200.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         create(p, f, 0, NodeKind::Group),
@@ -3460,6 +3478,8 @@ fn grid_fixture() -> (Document, NodeId, [NodeId; 4]) {
         index: 0,
         kind: NodeKind::Artboard {
             size: Size::new(400.0, 200.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: Some(Affine::translate((500.0, 500.0))),
         name: None,
@@ -3668,6 +3688,8 @@ fn painted(
 fn sized_frame(w: f64, h: f64) -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -4347,6 +4369,8 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 60.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4551,6 +4575,8 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 60.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4807,6 +4833,8 @@ fn a_copy_bound_on_its_own_previews_its_mains_resize_as_committed() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -4960,6 +4988,8 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(300.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -5093,6 +5123,8 @@ fn a_rect_with_bound_corners_previews_rounded_when_relaid_or_ghosted() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(300.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

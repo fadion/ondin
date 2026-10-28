@@ -43,6 +43,8 @@ fn consumer() -> (Document, Vec<String>) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(40.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("Badge".into()),

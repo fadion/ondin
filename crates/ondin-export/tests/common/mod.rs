@@ -64,6 +64,8 @@ pub fn fixture() -> Fixture {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: Some("Board".into()),
@@ -93,6 +95,7 @@ pub fn fixture() -> Fixture {
             index: 1,
             kind: NodeKind::Ellipse {
                 size: Size::new(50.0, 50.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((120.0, 20.0))),
             name: None,
@@ -134,6 +137,7 @@ pub fn fixture() -> Fixture {
             kind: NodeKind::Path {
                 path: p,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate((120.0, 120.0))),
             name: None,

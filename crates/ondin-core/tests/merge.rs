@@ -48,6 +48,8 @@ fn base() -> Base {
             0,
             NodeKind::Artboard {
                 size: Size::new(400.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             "Frame",
         ),
@@ -203,6 +205,7 @@ fn layers_added_on_both_sides_both_arrive() {
         index,
         kind: NodeKind::Ellipse {
             size: Size::new(5.0, 5.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         transform: None,
         name: Some(name.into()),
@@ -459,6 +462,7 @@ fn a_removed_image_a_new_layer_uses_is_kept() {
                 index: 0,
                 kind: NodeKind::Ellipse {
                     size: Size::new(5.0, 5.0),
+                    arc: ondin_core::EllipseArc::default(),
                 },
                 transform: None,
                 name: Some("N2".into()),
@@ -594,6 +598,7 @@ fn a_paths_outline_and_radii_are_one_value() {
             kind: NodeKind::Path {
                 path: square(false),
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some("P".into()),
@@ -629,6 +634,7 @@ fn theirs_reorder_lands_beside_ours_addition() {
             index: 3,
             kind: NodeKind::Ellipse {
                 size: Size::new(5.0, 5.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: Some("Y".into()),
@@ -725,6 +731,7 @@ fn a_page_removed_by_ours_and_used_by_theirs_is_a_conflict() {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(5.0, 5.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: Some("R".into()),
@@ -935,6 +942,8 @@ fn a_variants_values_merge_by_position() {
                 index: 1,
                 kind: NodeKind::Artboard {
                     size: Size::new(200.0, 100.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Button".into()),
@@ -945,6 +954,8 @@ fn a_variants_values_merge_by_position() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(80.0, 30.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Variant".into()),
@@ -1004,6 +1015,7 @@ fn an_empty_base_merges_two_ways() {
             index: 3,
             kind: NodeKind::Ellipse {
                 size: Size::new(5.0, 5.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: None,
             name: Some("Y".into()),

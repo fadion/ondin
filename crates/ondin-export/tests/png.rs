@@ -27,6 +27,8 @@ fn red_square_doc() -> (Document, Resolved) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -126,6 +128,8 @@ fn text_rasterizes_ink_pixels() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -222,6 +226,8 @@ fn stroked_rect_doc(align: StrokeAlign) -> (Document, Resolved) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -391,6 +397,8 @@ fn an_open_shape_ignores_alignment_rather_than_half_drawing_itself() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -610,6 +618,8 @@ fn decorated_doc(content: &str, style: ondin_core::TextStyle) -> (Document, Reso
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -811,6 +821,8 @@ fn a_very_wide_stroke_buries_the_middle_of_the_shape() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(f64::from(N), f64::from(N)),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,
@@ -856,6 +868,7 @@ fn a_very_wide_stroke_buries_the_middle_of_the_shape() {
             "ellipse",
             NodeKind::Ellipse {
                 size: Size::new(200.0, 120.0),
+                arc: ondin_core::EllipseArc::default(),
             },
         ),
         (
@@ -947,7 +960,11 @@ fn framed_doc(
             id: ab,
             parent: root,
             index: 0,
-            kind: NodeKind::Artboard { size },
+            kind: NodeKind::Artboard {
+                size,
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
             transform: None,
             name: None,
         },
@@ -1303,6 +1320,7 @@ fn ring_doc(op: ondin_core::BoolOp, n: usize) -> (Document, NodeId) {
             index: i,
             kind: NodeKind::Ellipse {
                 size: Size::new(180.0, 180.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((cx - 90.0, cy - 90.0))),
             name: None,
@@ -1379,6 +1397,7 @@ fn a_boolean_the_arithmetic_gave_up_on_paints_the_placeholder() {
                 index: i,
                 kind: NodeKind::Ellipse {
                     size: Size::new(20.0, 20.0),
+                    arc: ondin_core::EllipseArc::default(),
                 },
                 transform: Some(Affine::translate((x, 0.0))),
                 name: None,
@@ -1627,6 +1646,8 @@ fn overlapping_siblings() -> (Document, Resolved, ondin_core::NodeId) {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -1644,6 +1665,7 @@ fn overlapping_siblings() -> (Document, Resolved, ondin_core::NodeId) {
             index: 0,
             kind: NodeKind::Ellipse {
                 size: Size::new(40.0, 40.0),
+                arc: ondin_core::EllipseArc::default(),
             },
             transform: Some(Affine::translate((10.0, 10.0))),
             name: None,
@@ -1949,6 +1971,8 @@ fn a_gradient_on_railed_type_runs_across_the_whole_node() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(200.0, 120.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -2071,6 +2095,8 @@ fn a_squashed_radial_gradient_paints_an_ellipse_rather_than_a_circle() {
             root,
             NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
         ),
         square(
@@ -2412,6 +2438,8 @@ fn a_gradient_with_descending_stops_draws_the_ramp_svg_says_it_means() {
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(100.0, 20.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: None,

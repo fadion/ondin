@@ -23,6 +23,8 @@ fn fills(r: u8) -> Vec<Keyed<Fill>> {
 fn frame(w: f64, h: f64) -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 
@@ -223,7 +225,7 @@ impl F {
 
     fn size(&self, id: NodeId) -> Size {
         match self.node(id).kind() {
-            NodeKind::Artboard { size } => *size,
+            NodeKind::Artboard { size, .. } => *size,
             _ => panic!("not a frame"),
         }
     }

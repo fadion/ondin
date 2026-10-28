@@ -67,11 +67,11 @@ pub use peniko;
 
 pub use boolean::evaluate as evaluate_boolean;
 pub use build::{
-    ColorUse, GradientUse, PaintAt, PaintShown, PaintTarget, Placement, any_paint_in, any_rect_in,
-    bind_brush_at_all, bind_corners_ops, bind_effect_ops, bind_opacity_ops, bind_size_ops,
-    bind_spacing_ops, bind_stroke_width_ops, bind_text_ops, bind_visible_ops, bindable_size_axes,
-    boolean, can_parent, colors_in, detach_brush_at_all, detach_corner_ops, detach_corners_ops,
-    detach_effect_ops, detach_opacity_ops, detach_size_ops, detach_spacing_ops,
+    ColorUse, GradientUse, PaintAt, PaintShown, PaintTarget, Placement, any_cornered_in,
+    any_paint_in, bind_brush_at_all, bind_corners_ops, bind_effect_ops, bind_opacity_ops,
+    bind_size_ops, bind_spacing_ops, bind_stroke_width_ops, bind_text_ops, bind_visible_ops,
+    bindable_size_axes, boolean, can_parent, colors_in, detach_brush_at_all, detach_corner_ops,
+    detach_corners_ops, detach_effect_ops, detach_opacity_ops, detach_size_ops, detach_spacing_ops,
     detach_stroke_width_ops, detach_text_ops, detach_visible_ops, edit_brush_at_all,
     edit_brushes_all, edit_fill_at_all, edit_fills_all, edit_stroke_at_all, edit_strokes_all,
     edit_strokes_at_all, edited_brush, gradients_in, group, insert_subtrees, keep_corner_bindings,
@@ -110,9 +110,9 @@ pub use layout::{
 pub use meta::DocumentMeta;
 pub use naming::{copy_name, created_name, free_name, is_boolean_label, numbered};
 pub use node::{
-    BoolOp, DashStyle, Fill, FillRule, MIN_MITER_DEGREES, MaskMode, Node, NodeKind, Paint, Pivot,
-    Side, Stroke, StrokeAlign, StrokeSides, TextRef, TextSizing, miter_degrees_of_ratio,
-    miter_ratio_of_degrees,
+    BoolOp, DashStyle, EllipseArc, Fill, FillRule, MIN_MITER_DEGREES, MaskMode, Node, NodeKind,
+    Paint, Pivot, Side, Stroke, StrokeAlign, StrokeSides, TextRef, TextSizing,
+    miter_degrees_of_ratio, miter_ratio_of_degrees,
 };
 pub use op::{ApplyOutcome, Described, DirtySet, GeometryPatch, OpError, Operation, Transaction};
 pub use query::{

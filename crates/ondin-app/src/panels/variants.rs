@@ -3537,6 +3537,8 @@ mod tests {
                 index: 2,
                 kind: ondin_core::NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(160.0, 30.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: None,
                 name: Some("Huge".into()),
@@ -3685,6 +3687,8 @@ mod tests {
             index,
             kind: ondin_core::NodeKind::Artboard {
                 size: ondin_core::kurbo::Size::new(24.0, 24.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: Some(name.into()),

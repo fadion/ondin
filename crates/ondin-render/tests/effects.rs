@@ -265,6 +265,7 @@ fn an_inner_shadow_stays_within_the_layers_ink_not_merely_its_box() {
     let (px, w) = render_kind(
         NodeKind::Ellipse {
             size: Size::new(40.0, 40.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         vec![Effect::new(EffectKind::InnerShadow(Shadow {
             offset: Vec2::new(0.0, 8.0),
@@ -292,6 +293,7 @@ fn an_inner_shadow_stays_within_the_layers_ink_not_merely_its_box() {
     let (plain, _) = render_kind(
         NodeKind::Ellipse {
             size: Size::new(40.0, 40.0),
+            arc: ondin_core::EllipseArc::default(),
         },
         vec![],
     );
@@ -498,6 +500,8 @@ fn render_with(opacity: f32, clip: bool, effects: Vec<Effect>) -> (Vec<u8>, usiz
     let kind = if clip {
         NodeKind::Artboard {
             size: Size::new(40.0, 40.0),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         }
     } else {
         NodeKind::Rect {

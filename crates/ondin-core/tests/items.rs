@@ -30,6 +30,8 @@ fn rects(n: usize) -> (Document, IdSource, Vec<NodeId>) {
         index: 0,
         kind: NodeKind::Artboard {
             size: Size::new(400.0, 400.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: None,
@@ -254,6 +256,8 @@ fn a_v4_file_numbers_every_item_list() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -351,6 +355,8 @@ fn reserving_ids_skips_past_item_ids() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,
@@ -392,6 +398,8 @@ fn reserving_ids_skips_past_property_ids() {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: None,
             name: None,

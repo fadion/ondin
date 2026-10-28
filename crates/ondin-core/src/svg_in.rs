@@ -1268,6 +1268,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     index,
                     NodeKind::Ellipse {
                         size: Size::new(rx * 2.0, ry * 2.0),
+                        arc: crate::node::EllipseArc::default(),
                     },
                     // Our ellipse is a box at the origin; SVG's is a centre and radii.
                     Affine::translate((cx - rx, cy - ry)),
@@ -1312,6 +1313,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     NodeKind::Path {
                         path,
                         corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
                     },
                     Affine::IDENTITY,
                     &style,
@@ -1424,6 +1426,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     NodeKind::Path {
                         path,
                         corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
                     },
                     Affine::IDENTITY,
                     &style,
@@ -1847,7 +1850,10 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 el,
                 parent,
                 index,
-                NodeKind::Ellipse { size },
+                NodeKind::Ellipse {
+                    size,
+                    arc: crate::node::EllipseArc::default(),
+                },
                 Affine::translate((x, y)),
                 style,
             );
@@ -1873,6 +1879,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             NodeKind::Path {
                 path,
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             Affine::translate((x, y)),
             style,
@@ -3684,7 +3691,7 @@ mod tests {
         let ids = shapes(&doc, &out);
         let kind = |i: usize| doc.get(ids[i]).unwrap().kind().clone();
         assert!(
-            matches!(kind(0), NodeKind::Ellipse { size } if size == Size::new(15.0, 130.0)),
+            matches!(kind(0), NodeKind::Ellipse { size, .. } if size == Size::new(15.0, 130.0)),
             "both radii reach half their side: {:?}",
             kind(0)
         );

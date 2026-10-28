@@ -37,6 +37,8 @@ fn fixture() -> F {
             index: 0,
             kind: NodeKind::Artboard {
                 size: Size::new(400.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::IDENTITY),
             name: None,

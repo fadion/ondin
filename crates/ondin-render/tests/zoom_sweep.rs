@@ -85,6 +85,8 @@ fn synthetic(paths: usize) -> (Document, Rect) {
         index: 0,
         kind: NodeKind::Artboard {
             size: Size::new(w, h),
+            corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
         },
         transform: None,
         name: Some("Artboard".into()),
@@ -148,6 +150,7 @@ fn synthetic(paths: usize) -> (Document, Rect) {
             kind: NodeKind::Path {
                 path: blob(&mut rng, Point::ZERO, r, segs),
                 corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
             },
             transform: Some(Affine::translate(centre.to_vec2())),
             name: None,

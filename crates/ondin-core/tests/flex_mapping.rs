@@ -32,6 +32,8 @@ fn rect(w: f64, h: f64) -> NodeKind {
 fn frame(w: f64, h: f64) -> NodeKind {
     NodeKind::Artboard {
         size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
     }
 }
 

@@ -1190,13 +1190,13 @@ fn emit_node(
     let own_pad = "  ".repeat(depth + usize::from(wrap));
     if wrap {
         let clip = match res.used_kind_of(node) {
-            NodeKind::Artboard { size, .. } if node.clip() => {
+            kind @ NodeKind::Artboard { .. } if node.clip() => {
                 let cid = format!("clip-{}", id.to_wire().replace(':', "_"));
+                // The rounded outline, as the canvas clips to it.
+                let (tag, attrs) = box_shape(kind);
                 let _ = writeln!(
                     out,
-                    "{pad}<clipPath id=\"{cid}\"><rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\"/></clipPath>",
-                    fmt(size.width),
-                    fmt(size.height),
+                    "{pad}<clipPath id=\"{cid}\"><{tag}{attrs}/></clipPath>",
                 );
                 format!(r#" clip-path="url(#{cid})""#)
             }
@@ -1229,7 +1229,8 @@ fn emit_node(
     // follow via `emit_strokes`, outside the clip. Each is a fill like any other
     // (letterbox clip, `emit_missing` placeholder). The slot `fill-{i}` must match
     // what `collect_defs` wrote.
-    if let NodeKind::Artboard { size } = res.used_kind_of(node) {
+    if let kind @ NodeKind::Artboard { .. } = res.used_kind_of(node) {
+        let (tag, attrs) = box_shape(kind);
         for (i, f) in visible_fills(&paint) {
             let slot = format!("fill-{i}");
             if missing_picture(doc, f.brush.drawn()) {
@@ -1240,9 +1241,7 @@ fn emit_node(
             with_image_clip(out, clip, id, &slot, &content_pad, |out, pad| {
                 let _ = writeln!(
                     out,
-                    "{pad}<rect x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\"{fill}/>",
-                    w = fmt(size.width),
-                    h = fmt(size.height),
+                    "{pad}<{tag}{attrs}{fill}/>",
                     fill = paint_attr("fill", f.brush.drawn(), id, &slot, defs),
                 );
             });
@@ -1758,6 +1757,48 @@ fn emit_strokes(
     }
 }
 
+/// A frame's or rect's outline as an element name and its geometry attributes.
+/// `<rect rx>` can only say one circular radius, so unequal or smoothed corners
+/// go out as the canvas's own outline (`local_path`).
+fn box_shape(kind: &NodeKind) -> (&'static str, String) {
+    let (NodeKind::Rect {
+        size,
+        corner_radii,
+        corner_smoothing,
+    }
+    | NodeKind::Artboard {
+        size,
+        corner_radii,
+        corner_smoothing,
+    }) = kind
+    else {
+        return ("path", String::new());
+    };
+    match geometry::uniform_radius(corner_radii).filter(|r| *r <= 0.0 || *corner_smoothing <= 0.0) {
+        Some(r) => {
+            let rx = if r > 0.0 {
+                format!(r#" rx="{}""#, fmt(r))
+            } else {
+                String::new()
+            };
+            (
+                "rect",
+                format!(
+                    r#" x="0" y="0" width="{w}" height="{h}"{rx}"#,
+                    w = fmt(size.width),
+                    h = fmt(size.height),
+                ),
+            )
+        }
+        None => {
+            let d = geometry::local_path(kind)
+                .map(|p| path_d(&p))
+                .unwrap_or_default();
+            ("path", format!(r#" d="{d}""#))
+        }
+    }
+}
+
 /// The node as one SVG element, with the paint, transform and opacity attributes
 /// already built.
 ///
@@ -1778,35 +1819,10 @@ fn write_element(
     op: &str,
 ) {
     match kind {
-        // `<rect rx>` can only say one circular radius, so unequal or smoothed
-        // corners go out as the canvas's own outline (`local_path`).
-        NodeKind::Rect {
-            size,
-            corner_radii,
-            corner_smoothing,
-        } => match geometry::uniform_radius(corner_radii)
-            .filter(|r| *r <= 0.0 || *corner_smoothing <= 0.0)
-        {
-            Some(r) => {
-                let rx = if r > 0.0 {
-                    format!(r#" rx="{}""#, fmt(r))
-                } else {
-                    String::new()
-                };
-                let _ = writeln!(
-                    out,
-                    r#"{pad}<rect{t} x="0" y="0" width="{w}" height="{h}"{rx}{fill}{stroke}{op}/>"#,
-                    w = fmt(size.width),
-                    h = fmt(size.height),
-                );
-            }
-            None => {
-                let d = geometry::local_path(kind)
-                    .map(|p| path_d(&p))
-                    .unwrap_or_default();
-                let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
-            }
-        },
+        NodeKind::Rect { .. } => {
+            let (tag, attrs) = box_shape(kind);
+            let _ = writeln!(out, r#"{pad}<{tag}{t}{attrs}{fill}{stroke}{op}/>"#);
+        }
         // A rounded one has curves a `<polygon>` cannot carry.
         NodeKind::Polygon { corner_radius, .. } | NodeKind::Star { corner_radius, .. }
             if *corner_radius > 0.0 =>
@@ -1839,7 +1855,14 @@ fn write_element(
                 r#"{pad}<polygon{t} points="{points}"{fill}{stroke}{op}/>"#
             );
         }
-        NodeKind::Ellipse { size } => {
+        // An arc has no element of its own; its outline goes out as a path.
+        NodeKind::Ellipse { arc, .. } if !arc.is_whole() => {
+            let d = geometry::local_path(kind)
+                .map(|p| path_d(&p))
+                .unwrap_or_default();
+            let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
+        }
+        NodeKind::Ellipse { size, .. } => {
             let _ = writeln!(
                 out,
                 r#"{pad}<ellipse{t} cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}"{fill}{stroke}{op}/>"#,
@@ -1956,13 +1979,9 @@ fn write_element(
             }
         }
         // Only a frame's stroke asks for this; `emit_node` writes the background.
-        NodeKind::Artboard { size, .. } => {
-            let _ = writeln!(
-                out,
-                r#"{pad}<rect{t} x="0" y="0" width="{w}" height="{h}"{fill}{stroke}{op}/>"#,
-                w = fmt(size.width),
-                h = fmt(size.height),
-            );
+        NodeKind::Artboard { .. } => {
+            let (tag, attrs) = box_shape(kind);
+            let _ = writeln!(out, r#"{pad}<{tag}{t}{attrs}{fill}{stroke}{op}/>"#);
         }
         // `emit_node` never reaches here with a slice.
         NodeKind::Root | NodeKind::Group | NodeKind::Slice { .. } => {}

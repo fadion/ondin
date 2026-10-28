@@ -548,6 +548,8 @@ mod tests {
                 index,
                 kind: NodeKind::Artboard {
                     size: ondin_core::kurbo::Size::new(400.0, 300.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(ondin_core::kurbo::Affine::translate((6000.0, 2000.0))),
                 name: Some("Far".into()),
@@ -739,6 +741,8 @@ mod tests {
                 index,
                 kind: NodeKind::Artboard {
                     size: Size::new(1000.0, 2000.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((20_000.0, 0.0))),
                 name: Some("Home".into()),

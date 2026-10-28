@@ -8467,8 +8467,12 @@ impl OndinApp {
         let (resp, x_pct, y_pct) = edit?;
         let kind = self.session.display_node(id).map(|n| n.kind().clone())?;
         let pivot = origin_pivot(&kind, box_, x_pct, y_pct);
-        self.session.name_step("Move pivot", icon::CROSSHAIR_SIMPLE);
-        self.edit_valve(&resp, Transaction(vec![Operation::SetPivot { id, pivot }]));
+        self.named_valve(
+            "Move pivot",
+            icon::CROSSHAIR_SIMPLE,
+            &resp,
+            Transaction(vec![Operation::SetPivot { id, pivot }]),
+        );
         Some(())
     }
 

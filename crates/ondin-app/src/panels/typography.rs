@@ -3536,8 +3536,9 @@ impl OndinApp {
                 max_lines: lines.round().clamp(0.0, f64::from(MAX_LINE_LIMIT)) as u32,
                 ..b
             };
-            self.session.name_step("Max lines", icon::LIST_NUMBERS);
-            self.edit_valve(
+            self.named_valve(
+                "Max lines",
+                icon::LIST_NUMBERS,
                 &resp,
                 Transaction(vec![Operation::SetBlockStyle {
                     id: subject.id,
@@ -4206,9 +4207,8 @@ impl OndinApp {
             return;
         }
         let (label, glyph) = para_step_name(&attr);
-        self.session.name_step(label, glyph);
         let (tx, _) = para_attrs_tx(subject, vec![attr]);
-        self.edit_valve(resp, tx);
+        self.named_valve(label, glyph, resp, tx);
         self.text_session_restyled();
     }
 

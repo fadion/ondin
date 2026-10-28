@@ -213,7 +213,7 @@ const KNOWN: [(&str, &str); 4] = [
 ];
 
 /// Every operand set under every operation matches the oracle and is well formed,
-/// but for [`KNOWN`].
+/// but for `KNOWN`.
 #[test]
 fn booleans_match_the_oracle() {
     let cases: Vec<(String, (Vec<BezPath>, BoolOp))> = sets()

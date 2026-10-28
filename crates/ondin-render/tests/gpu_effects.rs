@@ -79,13 +79,13 @@ struct Gpu {
 static ADAPTER: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 thread_local! {
-    /// This thread's hold on [`ADAPTER`] and how many devices share it — a test
+    /// This thread's hold on `ADAPTER` and how many devices share it — a test
     /// that makes a second device to compare against must not wait on itself.
     static HELD: std::cell::RefCell<(usize, Option<std::sync::MutexGuard<'static, ()>>)> =
         const { std::cell::RefCell::new((0, None)) };
 }
 
-/// One device's share of this thread's hold on [`ADAPTER`].
+/// One device's share of this thread's hold on `ADAPTER`.
 struct Serial;
 
 impl Serial {

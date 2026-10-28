@@ -3,8 +3,8 @@
 //! An oracle answers where a point belongs from first principles, without the
 //! arithmetic under test: a shape's fill by its winding number over a fine
 //! flattening, a stroke's ink as each segment's slab plus each join and cap. It
-//! stays silent within [`TOL`] of any edge it draws, so the arithmetic's own
-//! tolerance never reads as a failure. [`check`] samples a grid against an oracle
+//! stays silent within `TOL` of any edge it draws, so the arithmetic's own
+//! tolerance never reads as a failure. `check` samples a grid against an oracle
 //! and adds the structural checks a fill test cannot make: specks, edges with the
 //! fill on both sides or neither (stray lines and points when the result is edited),
 //! and runaway segment counts.
@@ -299,7 +299,7 @@ pub fn check(
     check_read(result, area, max_segments, false, 1.0, expected)
 }
 
-/// [`check`], reading the result even-odd where `even_odd` says so, and taking a
+/// `check`, reading the result even-odd where `even_odd` says so, and taking a
 /// subpath of less than `speck` square units for junk.
 pub fn check_read(
     result: Option<&BezPath>,
@@ -401,7 +401,7 @@ pub fn run_all<T: Sync>(items: &[(String, T)], case: impl Fn(&T) -> Vec<String> 
     run_all_known(items, &[], case)
 }
 
-/// [`run_all`], excusing the failures of `known`: a case's name and a phrase its
+/// `run_all`, excusing the failures of `known`: a case's name and a phrase its
 /// failure contains. Each must still fail, so one that is fixed is struck off the
 /// list rather than left to excuse a regression later.
 pub fn run_all_known<T: Sync>(
@@ -498,7 +498,7 @@ pub fn end_dir(s: &PathSeg) -> Vec2 {
         .normalize()
 }
 
-/// `path` flattened finely, for [`winding`]: kurbo's own ray cast over cubics
+/// `path` flattened finely, for `winding`: kurbo's own ray cast over cubics
 /// miscounts some points near a curve's top, which a grid finds.
 pub fn flat(path: &BezPath) -> Vec<(Point, Point)> {
     let mut edges = Vec::new();

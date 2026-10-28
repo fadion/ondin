@@ -24,7 +24,7 @@ const MAX_DASHED_SEGMENTS: usize = 300;
 
 const WIDTHS: [f64; 3] = [3.0, 24.0, 110.0];
 
-/// The widths of a thin stroke, laid on the catalogue shrunk by [`THIN_SCALE`].
+/// The widths of a thin stroke, laid on the catalogue shrunk by `THIN_SCALE`.
 const THIN_WIDTHS: [f64; 2] = [0.5, 1.0];
 
 /// How much the catalogue is shrunk for a thin stroke, so the oracle's grid still
@@ -117,7 +117,7 @@ fn stroke(width: f64, join: kurbo::Join, cap: kurbo::Cap, align: StrokeAlign) ->
     }
 }
 
-/// `path` shrunk about the origin by [`THIN_SCALE`].
+/// `path` shrunk about the origin by `THIN_SCALE`.
 fn thin(path: &BezPath) -> BezPath {
     kurbo::Affine::scale(THIN_SCALE) * path
 }

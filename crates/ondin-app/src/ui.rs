@@ -3956,7 +3956,7 @@ mod prefix_tests {
     }
 
     /// At 100% the circle prefix (corner smoothing) inks to the same bottom row as
-    /// the square prefix glyphs once [`prefix_top`] lifts it.
+    /// the square prefix glyphs once `prefix_top` lifts it.
     ///
     /// flip: no lift in `prefix_top` → fails at the bottom-row assertion, a row low.
     #[test]

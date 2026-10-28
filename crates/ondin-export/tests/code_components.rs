@@ -404,7 +404,7 @@ fn a_vue_page_never_shares_a_class_with_a_component_root_it_uses() {
     assert!(app.contains("\n.card-3 {"), "its rule moved with it: {app}");
 }
 
-/// Where [`button_set`]'s *Badge* is.
+/// Where `button_set`'s *Badge* is.
 #[derive(Clone, Copy, PartialEq)]
 enum Badge {
     None,

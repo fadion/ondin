@@ -2,7 +2,7 @@
 //! curves, each result checked against what simplify promises rather than a stored
 //! answer: it stays within reach of the outline both ways, keeps the corners, keeps
 //! the subpaths, and never loops. A refit with no fewer segments is not written, as
-//! `simplify_path` refuses it, so the drawn shape stands; [`simplify_reduces_drawn_polylines`]
+//! `simplify_path` refuses it, so the drawn shape stands; `simplify_reduces_drawn_polylines`
 //! pins that the polylines it exists for do come back smaller.
 
 mod common;
@@ -158,7 +158,7 @@ fn furthest(pts: &[Point], edges: &[(Point, Point)]) -> (f64, Point) {
         .fold((0.0, Point::ZERO), |m, x| if x.0 > m.0 { x } else { m })
 }
 
-/// The corners of `path` sharper than [`SHARP_DEG`]: where one segment ends and the
+/// The corners of `path` sharper than `SHARP_DEG`: where one segment ends and the
 /// next leaves at that much of a turn.
 fn sharp_corners(path: &BezPath) -> Vec<Point> {
     let mut out = Vec::new();

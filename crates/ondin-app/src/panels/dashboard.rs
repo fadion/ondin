@@ -5306,7 +5306,7 @@ mod tests {
         click_with(app, ctx, at, egui::PointerButton::Primary);
     }
 
-    /// [`click_at`] with `button`.
+    /// `click_at` with `button`.
     fn click_with(
         app: &mut OndinApp,
         ctx: &egui::Context,

@@ -150,7 +150,7 @@ impl Doc {
         }]);
     }
 
-    /// [`Self::stroke`] on all sides, with `join` at its corners.
+    /// `Self::stroke` on all sides, with `join` at its corners.
     fn stroke_joined(&mut self, id: NodeId, width: f64, align: StrokeAlign, join: Join) {
         self.stroke(id, width, align, StrokeSides::All);
         let mut strokes = self.doc.get(id).expect("stroked").paint().strokes.clone();
@@ -457,12 +457,12 @@ const MAX_TEXT_MEAN_ERROR: f64 = if cfg!(target_os = "macos") {
     MAX_MEAN_ERROR
 };
 
-/// [`holds`], comparing after `passes` of `blurred` with `limit` per cell.
+/// `holds`, comparing after `passes` of `blurred` with `limit` per cell.
 fn holds_within(test: &str, doc: &Document, res: &Resolved, passes: usize, limit: f64) {
     holds_as(test, doc, res, passes, limit, html_of);
 }
 
-/// [`holds_within`] for the page `export` writes.
+/// `holds_within` for the page `export` writes.
 fn holds_as(
     test: &str,
     doc: &Document,
@@ -2415,7 +2415,7 @@ fn component_uses_match_the_canvas() {
     holds_components("component-uses", &doc, &res);
 }
 
-/// [`holds`] for [`html_of_components`], after three passes of `blurred`: a
+/// `holds` for `html_of_components`, after three passes of `blurred`: a
 /// component's text lands at whatever x its use puts it, and at some offsets
 /// glyph antialiasing alone passes the two-pass limit (8.9 on the default use
 /// in `component_uses_match_the_canvas`).

@@ -18,6 +18,7 @@ use ondin_core::{Document, NodeId, Resolved};
 
 mod css;
 mod dom;
+pub mod fidelity;
 pub mod html;
 mod image;
 mod jsx;

@@ -27,23 +27,17 @@ use ondin_core::{
     TextStyle, Transaction, VerticalAlign, keyed_by_position,
 };
 use ondin_export::code::CodeExport;
+use ondin_export::code::fidelity::{
+    self, Image, MAX_CELL_ERROR, MAX_MEAN_ERROR, blurred, cell_errors,
+};
 use ondin_export::code::html::{html_of, html_of_components};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// The cell size and the two limits. Matching pages peak at 14.6 (an inline-SVG
-/// inner shadow) and 12.1 (rotated edges). flip: a blur written as its radius →
-/// 23.6 in `effects`; a sweep started at +x → 126 in `gradients`; a centred stroke
-/// written as an outside one → 115 in `strokes`. A flat colour error under 16/255
-/// over a small layer passes.
-const CELL: u32 = 8;
-const MAX_CELL_ERROR: f64 = 16.0;
-const MAX_MEAN_ERROR: f64 = 1.5;
-
-/// The bundled Inter, both styles, for the page under test.
-const INTER_FACES: &str = r#"
-@font-face { font-family: "Inter"; src: url(inter.ttf); font-weight: 100 900; font-style: normal; }
-@font-face { font-family: "Inter"; src: url(inter-italic.ttf); font-weight: 100 900; font-style: italic; }
-"#;
+// The limits are `fidelity`'s, which the `ondin check code` command holds a page
+// to as well. Matching pages peak at 14.6 (an inline-SVG inner shadow) and 12.1
+// (rotated edges). flip: a blur written as its radius → 23.6 in `effects`; a sweep
+// started at +x → 126 in `gradients`; a centred stroke written as an outside one →
+// 115 in `strokes`.
 
 /// A document under construction: a root and helpers that apply one op each.
 struct Doc {
@@ -209,35 +203,9 @@ fn ramp(kind: GradientKind, extend: Extend) -> Brush {
 // The browser
 // ---------------------------------------------------------------------------
 
-fn browser() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("ONDIN_BROWSER") {
-        return Some(PathBuf::from(p));
-    }
-    let fixed = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ];
-    if let Some(p) = fixed.iter().map(PathBuf::from).find(|p| p.is_file()) {
-        return Some(p);
-    }
-    let names = [
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-    ];
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
-        .find(|p| p.is_file())
-}
-
 /// The browser, or `None` after saying why the comparison is skipped. Fails on CI.
 fn browser_or_skip(test: &str) -> Option<PathBuf> {
-    let b = browser();
+    let b = fidelity::browser();
     if b.is_none() {
         assert!(
             std::env::var_os("CI").is_none(),
@@ -257,178 +225,12 @@ fn scratch(test: &str) -> PathBuf {
     dir
 }
 
-/// Straight-alpha RGBA8 and its size.
-struct Image {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
-}
-
-fn decode(bytes: &[u8]) -> Image {
-    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    let mut reader = decoder.read_info().expect("png header");
-    let mut buf = vec![0; reader.output_buffer_size().expect("png size")];
-    let info = reader.next_frame(&mut buf).expect("png frame");
-    buf.truncate(info.buffer_size());
-    let rgba = match info.color_type {
-        png::ColorType::Rgba => buf,
-        png::ColorType::Rgb => buf
-            .chunks(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255])
-            .collect(),
-        other => panic!("unexpected screenshot colour type {other:?}"),
-    };
-    Image {
-        rgba,
-        width: info.width,
-        height: info.height,
-    }
-}
-
-/// The top-left `width`×`height` of `img`.
-fn crop(img: &Image, width: u32, height: u32) -> Image {
-    assert!(
-        img.width >= width && img.height >= height,
-        "the screenshot is {}×{}, smaller than the page's {width}×{height}",
-        img.width,
-        img.height
-    );
-    let row = |y: u32| {
-        let at = (y * img.width * 4) as usize;
-        &img.rgba[at..at + (width * 4) as usize]
-    };
-    Image {
-        rgba: (0..height).flat_map(row).copied().collect(),
-        width,
-        height,
-    }
-}
-
-/// `dir/index.html` screenshotted at `width`×`height` CSS px, one device pixel each.
-///
-/// Headless Chrome's viewport is narrower and shorter than `--window-size` (at least 500 px
-/// wide, less a toolbar's height), and from Chrome 156 nothing outside the viewport is
-/// painted, so the window is oversized and the shot cropped to the page.
-fn screenshot(browser: &Path, dir: &Path, width: u32, height: u32) -> Image {
-    let shot = dir.join("shot.png");
-    let url = format!(
-        "file:///{}",
-        dir.join("index.html")
-            .to_string_lossy()
-            .replace('\\', "/")
-            .trim_start_matches('/')
-    );
-    let out = std::process::Command::new(browser)
-        .arg("--headless=new")
-        .arg("--disable-gpu")
-        .arg("--hide-scrollbars")
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--force-device-scale-factor=1")
-        .arg("--force-color-profile=srgb")
-        .arg("--font-render-hinting=none")
-        .arg("--disable-lcd-text")
-        // Without it the shot can come before the web font has loaded, and the
-        // text is not drawn at all.
-        .arg("--virtual-time-budget=10000")
-        .arg("--default-background-color=00000000")
-        .arg(format!("--user-data-dir={}", dir.join("profile").display()))
-        .arg(format!("--window-size={},{}", width.max(500), height + 200))
-        .arg(format!("--screenshot={}", shot.display()))
-        .arg(url)
-        .output()
-        .expect("the browser runs");
-    let bytes = std::fs::read(&shot).unwrap_or_else(|_| {
-        panic!(
-            "no screenshot from the browser:\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        )
-    });
-    crop(&decode(&bytes), width, height)
-}
-
-/// One channel of a straight-alpha pixel composited over white.
-fn over_white(c: u8, a: u8) -> f64 {
-    let a = f64::from(a) / 255.0;
-    f64::from(c) * a + 255.0 * (1.0 - a)
-}
-
-/// One cell's mean channel error and its top-left pixel.
-type Cell = (f64, (u32, u32));
-
 /// The worst cells, worst first, and the whole image's mean channel error.
-fn compare(a: &Image, b: &Image) -> (Vec<Cell>, f64) {
-    let (w, h) = (a.width.min(b.width), a.height.min(b.height));
-    let mut total = 0.0;
-    let mut cells = Vec::new();
-    for cy in (0..h).step_by(CELL as usize) {
-        for cx in (0..w).step_by(CELL as usize) {
-            let mut sum = 0.0;
-            let mut n = 0.0;
-            for y in cy..(cy + CELL).min(h) {
-                for x in cx..(cx + CELL).min(w) {
-                    let ia = ((y * a.width + x) * 4) as usize;
-                    let ib = ((y * b.width + x) * 4) as usize;
-                    for c in 0..3 {
-                        let va = over_white(a.rgba[ia + c], a.rgba[ia + 3]);
-                        let vb = over_white(b.rgba[ib + c], b.rgba[ib + 3]);
-                        sum += (va - vb).abs();
-                    }
-                    n += 3.0;
-                }
-            }
-            total += sum;
-            cells.push((sum / n, (cx, cy)));
-        }
-    }
+fn compare(a: &Image, b: &Image) -> (Vec<fidelity::Cell>, f64) {
+    let (mut cells, mean) = cell_errors(a, b);
     cells.sort_by(|x, y| y.0.total_cmp(&x.0));
     cells.truncate(5);
-    (cells, total / f64::from(w * h * 3))
-}
-
-/// `img` composited over white and box-blurred `passes` times with a 3×3 kernel,
-/// back as opaque RGBA.
-fn blurred(img: &Image, passes: usize) -> Image {
-    let (w, h) = (img.width as usize, img.height as usize);
-    let mut px: Vec<[f64; 3]> = img
-        .rgba
-        .chunks(4)
-        .map(|p| [0, 1, 2].map(|c| over_white(p[c], p[3])))
-        .collect();
-    for _ in 0..passes {
-        let src = px.clone();
-        for y in 0..h {
-            for x in 0..w {
-                let mut acc = [0.0; 3];
-                let mut n = 0.0;
-                for yy in y.saturating_sub(1)..(y + 2).min(h) {
-                    for xx in x.saturating_sub(1)..(x + 2).min(w) {
-                        let s = src[yy * w + xx];
-                        for c in 0..3 {
-                            acc[c] += s[c];
-                        }
-                        n += 1.0;
-                    }
-                }
-                px[y * w + x] = acc.map(|v| v / n);
-            }
-        }
-    }
-    Image {
-        rgba: px
-            .iter()
-            .flat_map(|p| {
-                [
-                    p[0].round() as u8,
-                    p[1].round() as u8,
-                    p[2].round() as u8,
-                    255,
-                ]
-            })
-            .collect(),
-        width: img.width,
-        height: img.height,
-    }
+    (cells, mean)
 }
 
 /// Export the whole document, screenshot it, and hold it to the canvas.
@@ -484,24 +286,7 @@ fn holds_as(
         return;
     };
     let dir = scratch(test);
-    for f in &export.files {
-        let path = dir.join(&f.path);
-        std::fs::create_dir_all(path.parent().expect("a file in a folder")).expect("folder");
-        let mut bytes = f.bytes.clone();
-        // The export ships no fonts; the page is given the face the CPU renderer
-        // shapes with, so text is compared as well as boxes.
-        if f.path == "styles.css" {
-            bytes.extend_from_slice(INTER_FACES.as_bytes());
-        }
-        std::fs::write(&path, &bytes).expect("export file");
-    }
-    for (name, from) in [
-        ("inter.ttf", "Inter-Variable.ttf"),
-        ("inter-italic.ttf", "Inter-Italic-Variable.ttf"),
-    ] {
-        let fonts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../ondin-core/assets/fonts");
-        std::fs::copy(fonts.join(from), dir.join(name)).expect("bundled font");
-    }
+    fidelity::write_page(&export, &dir).expect("the page is written");
     let cpu = ondin_export::png::raster_of(doc, res, &origins, &Default::default())
         .expect("the fixture has ink");
     let cpu = Image {
@@ -514,7 +299,8 @@ fn holds_as(
         ondin_export::png::encode_rgba8(&cpu.rgba, cpu.width, cpu.height),
     )
     .expect("cpu png");
-    let page = screenshot(&browser, &dir, cpu.width, cpu.height);
+    let page = fidelity::screenshot(&browser, &dir, cpu.width, cpu.height)
+        .unwrap_or_else(|e| panic!("{test}: {e}"));
     assert_eq!(
         (page.width, page.height),
         (cpu.width, cpu.height),
@@ -572,6 +358,80 @@ fn shapes_match_the_canvas() {
     }]);
     let (doc, res) = d.done();
     holds("shapes", &doc, &res);
+}
+
+/// `fidelity::check`, the command's door, finds nothing on a page that matches —
+/// white type on a blue fill included, which Chrome draws heavier — names the
+/// layers of one a stray rule moved, and names the type by its ink when a rule
+/// spaces its letters.
+///
+/// flip: `compare_page` ignoring cells past the limit → fails at "the frame is
+/// named" (the page's mean still fails it). flip: `misplaced_ink` reading ink
+/// without the one-pixel allowance → fails at "a page that matches".
+#[test]
+fn the_check_names_what_a_page_draws_differently() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 240.0, 140.0, "Board");
+    let a = d.rect(f, 20.0, 20.0, 120.0, 40.0, 0.0);
+    d.fill(a, solid(37, 99, 235, 255));
+    let white = text_node("Button", TextSizing::Auto, body_style(), |_| {});
+    let w = d.add(Some(f), white, Affine::translate((40.0, 28.0)), "Label");
+    d.fill(w, solid(255, 255, 255, 255));
+    let dark = text_node("Heading", TextSizing::Auto, body_style(), |_| {});
+    d.add(Some(f), dark, Affine::translate((20.0, 84.0)), "Heading");
+    let (doc, res) = d.done();
+    let Some(browser) = browser_or_skip("check") else {
+        return;
+    };
+    let origins: Vec<NodeId> = doc.get(doc.first_page()).expect("root").children().to_vec();
+
+    let dir = scratch("check");
+    let found = fidelity::check(&doc, &res, &origins, &browser, &dir).expect("the check runs");
+    assert!(found.holds(), "a page that matches: {found:?}");
+
+    let mut export = html_of(&doc, &res, &origins);
+    let css = export
+        .files
+        .iter_mut()
+        .find(|f| f.path == "styles.css")
+        .expect("a stylesheet");
+    css.bytes
+        .extend_from_slice(b"\nbody { margin: 0 0 0 12px !important; }\n");
+    let dir = scratch("check-moved");
+    let found = fidelity::check_export(&doc, &res, &origins, &export, &browser, &dir)
+        .expect("the check runs");
+    assert!(!found.holds(), "a moved page drifts: {found:?}");
+    let labels: Vec<&str> = found.drifted.iter().map(|d| d.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("Board")),
+        "the frame is named: {labels:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut export = html_of(&doc, &res, &origins);
+    let css = export
+        .files
+        .iter_mut()
+        .find(|f| f.path == "styles.css")
+        .expect("a stylesheet");
+    css.bytes
+        .extend_from_slice(b"\n* { letter-spacing: 4px !important; }\n");
+    let dir = scratch("check-spaced");
+    let found = fidelity::check_export(&doc, &res, &origins, &export, &browser, &dir)
+        .expect("the check runs");
+    // Wider type also spills past its own box, onto what is drawn there.
+    let ink: Vec<&str> = found
+        .drifted
+        .iter()
+        .filter(|d| matches!(d.how, fidelity::How::Ink { .. }))
+        .map(|d| d.label.as_str())
+        .collect();
+    assert_eq!(
+        ink,
+        ["text “Label”", "text “Heading”"],
+        "spaced type is named by its ink: {found:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Blend modes as the browser draws them: a separable and a non-separable mode

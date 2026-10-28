@@ -61,6 +61,12 @@ use parley::{
 static INTER_UPRIGHT: &[u8] = include_bytes!("../assets/fonts/Inter-Variable.ttf");
 static INTER_ITALIC: &[u8] = include_bytes!("../assets/fonts/Inter-Italic-Variable.ttf");
 
+/// The bundled Inter faces' bytes, upright then italic — for a page that has to
+/// shape type as the canvas does without the family installed.
+pub fn bundled_inter() -> [&'static [u8]; 2] {
+    [INTER_UPRIGHT, INTER_ITALIC]
+}
+
 /// The brush parley carries for us: the index of the run in [`Shaped::runs`].
 type RunIndex = u32;
 

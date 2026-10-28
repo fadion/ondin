@@ -35,6 +35,11 @@
 //!                                every text layer (and small shape) against what
 //!                                is drawn behind it, in every mode; exit 0 all
 //!                                pass, 1 some fail, 2 unreadable
+//! ondin check code <file> [--page <name|n>]
+//!                                the page's HTML export in a headless browser,
+//!                                held to the canvas; names each layer drawn
+//!                                differently; exit 0 it matches, 1 it drifts,
+//!                                2 unreadable or no browser
 //! ondin merge <base> <ours> <theirs> [-o out]
 //!                                three-way merge, written over ours unless -o;
 //!                                exit 0 clean, 1 with conflicts (ours kept at
@@ -174,6 +179,12 @@ enum Command {
         file: String,
         page: Option<String>,
         options: ondin_export::contrast::Options,
+    },
+    /// Open the page's HTML export in a headless browser and name every layer it
+    /// draws differently from the canvas (`ondin_export::code::fidelity`).
+    CheckCode {
+        file: String,
+        page: Option<String>,
     },
     /// Three-way merge of a document (`ondin_core::merge`), the result written to
     /// `out`, by default over `ours` as git's merge driver expects.
@@ -319,16 +330,19 @@ fn parse_diff(args: &[String]) -> Result<Command, String> {
 
 fn parse_check(args: &[String]) -> Result<Command, String> {
     use ondin_export::contrast::{Level, Options};
-    const USAGE: &str =
-        "usage: ondin check contrast <file.ondin> [--page <name|n>] [--aaa|--apca] [--non-text]";
-    if args.first().map(String::as_str) != Some("contrast") {
-        return Err(USAGE.to_string());
-    }
+    const USAGE: &str = "usage: ondin check contrast <file.ondin> [--page <name|n>] \
+                         [--aaa|--apca] [--non-text]\n       \
+                         ondin check code <file.ondin> [--page <name|n>]";
+    let code = match args.first().map(String::as_str) {
+        Some("contrast") => false,
+        Some("code") => true,
+        _ => return Err(USAGE.to_string()),
+    };
     let (mut file, mut page, mut options) = (None, None, Options::default());
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            level @ ("--aaa" | "--apca") => {
+            level @ ("--aaa" | "--apca") if !code => {
                 if options.level != Level::Aa {
                     return Err(format!("one level at a time\n{USAGE}"));
                 }
@@ -338,7 +352,7 @@ fn parse_check(args: &[String]) -> Result<Command, String> {
                     Level::Apca
                 };
             }
-            "--non-text" => options.non_text = true,
+            "--non-text" if !code => options.non_text = true,
             "--page" => {
                 i += 1;
                 let value = args.get(i).filter(|v| !v.starts_with('-'));
@@ -360,8 +374,12 @@ fn parse_check(args: &[String]) -> Result<Command, String> {
         }
         i += 1;
     }
+    let file = file.ok_or_else(|| USAGE.to_string())?;
+    if code {
+        return Ok(Command::CheckCode { file, page });
+    }
     Ok(Command::CheckContrast {
-        file: file.ok_or_else(|| USAGE.to_string())?,
+        file,
         page,
         options,
     })
@@ -415,6 +433,64 @@ fn run_check_contrast(
         level.label()
     ));
     Ok((out, failed == 0))
+}
+
+/// `ondin check code`: the report as text, and whether the page draws as the
+/// canvas does. On a drift the page is kept in a temp folder and named, so the
+/// screenshot can be compared with `cpu.png` by eye.
+fn run_check_code(file: &str, page: Option<&str>) -> Result<(String, bool), String> {
+    use ondin_export::code::fidelity;
+    let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
+    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
+    let res = ondin_core::Resolved::rebuild(&doc);
+    let page = chosen_page(&doc, page)?;
+    let origins = doc
+        .get(page)
+        .map(|r| r.children().to_vec())
+        .unwrap_or_default();
+    let browser = fidelity::browser().ok_or(
+        "no headless browser found: install Chrome, Chromium or Edge, or set ONDIN_BROWSER",
+    )?;
+    let dir = std::env::temp_dir().join(format!("ondin-check-code-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    let export = ondin_export::code::html::html_of(&doc, &res, &origins);
+    let found = fidelity::check_export(&doc, &res, &origins, &export, &browser, &dir)?;
+    let mut out = String::new();
+    for d in &found.drifted {
+        let how = match d.how {
+            fidelity::How::Cell { error, at } => format!("{error:.1}/255 at {at:?}"),
+            fidelity::How::Ink { misplaced } => {
+                format!("{:.0}% of its ink is off the canvas's", misplaced * 100.0)
+            }
+        };
+        out.push_str(&format!("drift  {}: {how}\n", d.label));
+    }
+    if found.unclaimed > 0 {
+        out.push_str(&format!(
+            "drift  {} cells where no layer has ink\n",
+            found.unclaimed
+        ));
+    }
+    for a in &export.approximated {
+        out.push_str(&format!("noted  {a}\n"));
+    }
+    let holds = found.holds();
+    if holds {
+        let _ = std::fs::remove_dir_all(&dir);
+        out.push_str(&format!(
+            "the page draws as the canvas does (mean {:.2}/255)\n",
+            found.mean
+        ));
+    } else {
+        out.push_str(&format!(
+            "{} layers drawn differently, mean {:.2}/255; the page is kept in {}\n",
+            found.drifted.len(),
+            found.mean,
+            dir.display()
+        ));
+    }
+    Ok((out, holds))
 }
 
 fn parse_merge(args: &[String]) -> Result<Command, String> {
@@ -780,6 +856,18 @@ fn main() {
                 print!("{report}");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 std::process::exit(i32::from(!passed));
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+        },
+        // `diff`'s codes: 1 is "a layer drifts", so a check that cannot run is 2.
+        Ok(Command::CheckCode { file, page }) => match run_check_code(&file, page.as_deref()) {
+            Ok((report, holds)) => {
+                print!("{report}");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                std::process::exit(i32::from(!holds));
             }
             Err(msg) => {
                 eprintln!("{msg}");
@@ -1454,6 +1542,31 @@ mod tests {
             &["contrast", "a.ondin", "--page"],
             &["contrast", "a.ondin", "--aa"],
             &["contrast", "a.ondin", "--aaa", "--apca"],
+        ] {
+            assert!(check(refused).is_err(), "{refused:?}");
+        }
+    }
+
+    /// `check code` takes one document and a page, and refuses contrast's levels.
+    #[test]
+    fn check_code_takes_one_document_and_a_page() {
+        let check = |s: &[&str]| {
+            let mut v = vec!["check".to_string()];
+            v.extend(s.iter().map(|a| a.to_string()));
+            parse(&v)
+        };
+        assert_eq!(
+            check(&["code", "a.ondin", "--page", "Home"]),
+            Ok(Command::CheckCode {
+                file: "a.ondin".into(),
+                page: Some("Home".into()),
+            })
+        );
+        for refused in [
+            &["code"][..],
+            &["code", "a.ondin", "b.ondin"],
+            &["code", "a.ondin", "--aaa"],
+            &["code", "a.ondin", "--non-text"],
         ] {
             assert!(check(refused).is_err(), "{refused:?}");
         }

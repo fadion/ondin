@@ -42,9 +42,9 @@ reads true.
 - **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
   open is a visual diff marking the changed regions over the canvas, and the same compare in the
   version history card (`versions.rs`). The git merge driver is built (`ondin merge`).
-- **A fidelity report for code export.** Render the HTML output in a browser, as `code_fidelity.rs`
-  does, and report to the user what did not translate (background blur in SVG, a property with no
-  CSS) instead of drifting silently.
+- **The code fidelity check in the app.** `ondin check code` reports what the HTML export draws
+  differently (`code::fidelity`); the export dialog could run it when a browser is found and list
+  the drifted layers beside the approximated ones. React and Vue pages need a bundler to be checked.
 - **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
   as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
   mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,

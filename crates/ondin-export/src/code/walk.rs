@@ -275,7 +275,7 @@ struct Signature {
 }
 
 /// What a layer's name reads as in the report: its name in quotes, or its kind.
-fn label(node: &Node) -> String {
+pub(super) fn label(node: &Node) -> String {
     if node.name().is_empty() {
         node.kind().default_name().to_lowercase()
     } else {
@@ -2472,7 +2472,7 @@ fn right_to_left(c: char) -> bool {
 }
 
 /// What a layer is, for the report.
-fn kind_word(node: &Node) -> &'static str {
+pub(super) fn kind_word(node: &Node) -> &'static str {
     match node.kind() {
         NodeKind::Text { .. } => "text",
         NodeKind::Artboard { .. } => "frame",

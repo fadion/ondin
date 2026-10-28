@@ -837,8 +837,8 @@ impl OndinApp {
             } else {
                 remembered.template
             },
-            match_case: false,
-            pattern: false,
+            match_case: remembered.match_case,
+            pattern: remembered.pattern,
             keep_case: false,
             numbering: Numbering {
                 from: remembered.from,
@@ -854,7 +854,10 @@ impl OndinApp {
             s.set_scope(Scope::Page);
         }
         if let Some(text) = search {
+            // The tree's search is plain text, and finds in any case.
             s.find = text.trim().to_string();
+            s.match_case = false;
+            s.pattern = false;
         }
         let snap = Arc::new(Snapshot::take(
             doc,
@@ -877,11 +880,13 @@ impl OndinApp {
     }
 
     /// Rename every layer the plan changes, as one undo step, and remember the
-    /// box's Find, template and numbering for next time. Called only when the plan
-    /// is whole and changes something.
+    /// box's Find with its switches, template and numbering for next time. Called
+    /// only when the plan is whole and changes something.
     fn commit_batch_rename(&mut self, b: &BatchRename) {
         let br = &mut self.prefs.batch_rename;
         br.find = b.s.find.clone();
+        br.match_case = b.s.match_case;
+        br.pattern = b.s.pattern;
         br.template = b.s.template.clone();
         br.from = b.s.numbering.from;
         br.step = b.s.numbering.step;
@@ -2260,6 +2265,41 @@ mod tests {
         app.open_batch_rename(&ctx, Some(" button ".into()));
         let b = app.batch_rename.take().unwrap();
         assert_eq!((b.s.scope, b.s.find.as_str()), (Scope::Page, "button"));
+    }
+
+    /// The remembered Find reopens with its *.\** and *Aa*, so a pattern still
+    /// matches; the layers search's text opens with both off.
+    ///
+    /// flip: `open_batch_rename` opening with `pattern` off → fails at "the pattern
+    /// is remembered".
+    #[test]
+    fn the_remembered_find_keeps_its_switches() {
+        let (ctx, mut app) = app();
+        let a = named(&mut app, "1 · Intro");
+        let b = named(&mut app, "2 · Outro");
+        app.session.selection.set(vec![a, b]);
+        let mut bx = opened(&ctx, &mut app, r"^(\d+) · ", "Step [Group 1]: ");
+        (bx.s.pattern, bx.s.match_case) = (true, true);
+        bx.plan = planned(&app, &bx);
+        assert_eq!(bx.plan.changes.len(), 2, "the pattern matched");
+        app.commit_batch_rename(&bx);
+        assert_eq!(app.session.doc.get(a).unwrap().name(), "Step 1: Intro");
+        let c = named(&mut app, "3 · Close");
+        app.session.selection.set_one(c);
+        app.open_batch_rename(&ctx, None);
+        let bx = app.batch_rename.take().unwrap();
+        assert_eq!(
+            (bx.s.pattern, bx.s.match_case),
+            (true, true),
+            "the pattern is remembered"
+        );
+        assert_eq!(
+            new_names(&app, &planned(&app, &bx)),
+            [("3 · Close".to_string(), "Step 3: Close".to_string())]
+        );
+        app.open_batch_rename(&ctx, Some("close".into()));
+        let bx = app.batch_rename.take().unwrap();
+        assert_eq!((bx.s.pattern, bx.s.match_case), (false, false));
     }
 
     /// Typed short forms become their tokens with the caret moved past them, and

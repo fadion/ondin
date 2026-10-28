@@ -104,6 +104,10 @@ impl Default for ContrastPrefs {
 #[serde(default)]
 pub struct BatchRenamePrefs {
     pub find: String,
+    /// Find's *Aa* and *.\**, kept with it: a pattern means nothing read as
+    /// literal text.
+    pub match_case: bool,
+    pub pattern: bool,
     /// *Rename to*, its tokens spelled `[Name]`, `[Number]`, `[Group k]`; empty
     /// reads as one Name token.
     pub template: String,
@@ -122,6 +126,8 @@ impl Default for BatchRenamePrefs {
     fn default() -> Self {
         Self {
             find: String::new(),
+            match_case: false,
+            pattern: false,
             template: String::new(),
             from: 1,
             step: 1,

@@ -412,8 +412,9 @@ document. The preview keeps the previous plan until the new one's first part lan
   Settings modal's footer buttons (`settings::text_button`). Rename dims, its tooltip saying why,
   while the plan is still matching, when the pattern does not parse (its reason), when nothing
   matches Find, when every match would come out empty, when every match is a variant, or when
-  nothing would change. Find, template, from, step, pad and order are kept in
-  `prefs.batch_rename` when a rename runs.
+  nothing would change. Find with its *Aa* and *.\** (a pattern means nothing read as literal
+  text), template, from, step, pad and order are kept in `prefs.batch_rename` when a rename runs;
+  the Layers header's search opens Find as plain text with both switches off.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)
 

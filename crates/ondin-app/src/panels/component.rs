@@ -2503,6 +2503,33 @@ mod tests {
         assert!(marks.corners[bl].is_none(), "the bottom left follows");
     }
 
+    /// A copy's corner smoothing that differs from its main's is marked, and the
+    /// mark's reset puts the main's back.
+    /// flip: `appearance_marks` without its `smoothing` mark → fails at "marked".
+    #[test]
+    fn a_copys_smoothing_is_marked_and_resets() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetGeometry {
+                    id: f.ir,
+                    geometry: ondin_core::GeometryPatch::CornerSmoothing(0.6),
+                }]))
+        );
+        f.app.session.selection.set_one(f.ir);
+        f.app.gather_card_overrides();
+        let mark = f.app.appearance_marks(f.ir).smoothing.expect("marked");
+        assert!(f.app.session.commit(mark.tx));
+        f.app.gather_card_overrides();
+        assert!(f.app.appearance_marks(f.ir).smoothing.is_none(), "reset");
+        assert!(matches!(
+            f.app.session.doc.get(f.ir).unwrap().kind(),
+            NodeKind::Rect { corner_smoothing, .. } if *corner_smoothing == 0.0
+        ));
+    }
+
     /// **A copy's width bound as its main's draws the chip; resized, it detaches
     /// and W is marked; the ↺ binds it back.** The main's rect is bound to *size/w*
     /// (30); a width written on the copy detaches it (`keep_size_bindings`).

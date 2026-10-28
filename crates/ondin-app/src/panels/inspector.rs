@@ -165,6 +165,8 @@ pub(super) struct AppearanceMarks {
     pub(super) ratio: Option<Mark>,
     /// A polygon's or star's one radius; a rect's is `radius`.
     pub(super) vertex_radius: Option<Mark>,
+    /// A rect's corner smoothing.
+    pub(super) smoothing: Option<Mark>,
     pub(super) clip: Option<Mark>,
 }
 
@@ -4295,6 +4297,16 @@ impl OndinApp {
             }
             _ => None,
         };
+        let smoothing = patch(|g| match g {
+            GeometryPatch::CornerSmoothing(s) => Some(*s),
+            _ => None,
+        });
+        let my_smoothing = |n: &ondin_core::Node| match n.kind() {
+            NodeKind::Rect {
+                corner_smoothing, ..
+            } => Some(*corner_smoothing),
+            _ => None,
+        };
         AppearanceMarks {
             // The binding first: a bound literal is 0, so a copy can differ by it alone.
             opacity: Mark::and(
@@ -4401,6 +4413,18 @@ impl OndinApp {
                     geometry: GeometryPatch::CornerRadius(r),
                 },
                 |v| mark_num(*v),
+            ),
+            smoothing: self.sub_mark(
+                s,
+                smoothing,
+                my_smoothing,
+                |v| *v,
+                |c, v| *c = v,
+                |id, v| Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::CornerSmoothing(v),
+                },
+                |v| format!("{}%", mark_num(*v * 100.0)),
             ),
             clip: self.sub_mark(
                 s,
@@ -4562,7 +4586,7 @@ impl OndinApp {
             }
             let Some(corners) = corners0 else { return };
             if smoothing {
-                app.corner_smoothing_field(ui, id);
+                app.corner_smoothing_field(ui, id, &marks.smoothing);
             }
             if !per_corner {
                 return;
@@ -4639,7 +4663,7 @@ impl OndinApp {
     }
     /// A rect's corner smoothing as a percentage, full width under the radius row:
     /// how far each rounded corner eases into its sides (`geometry::smoothed_rect`).
-    fn corner_smoothing_field(&mut self, ui: &mut egui::Ui, id: NodeId) {
+    fn corner_smoothing_field(&mut self, ui: &mut egui::Ui, id: NodeId, mark: &Option<Mark>) {
         let Some(NodeKind::Rect {
             corner_smoothing, ..
         }) = self.session.display_node(id).map(|n| n.kind())
@@ -4649,17 +4673,21 @@ impl OndinApp {
         let mut pct = corner_smoothing * 100.0;
         let fw = ui.available_width();
         ui.horizontal(|ui| {
-            let (resp, _) = ui::value_field_marked(
+            let (resp, hit) = ui::value_field_marked(
                 ui,
                 egui::vec2(fw, 28.0),
                 Prefix::Icon(icon::CIRCLE),
-                None,
+                mark.as_ref().map(Mark::field),
                 &mut pct,
                 Scrub::whole(0.5).range(0.0..=100.0),
                 |d| d.suffix("%").max_decimals(0),
             );
-            let resp =
-                resp.on_hover_text("Corner smoothing: how gradually each corner meets its sides");
+            let resp = tip_unless_marked(
+                resp,
+                mark,
+                "Corner smoothing: how gradually each corner meets its sides",
+            );
+            self.reset_marked(hit, mark);
             self.named_valve(
                 "Corner smoothing",
                 icon::CIRCLE,

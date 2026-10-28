@@ -47,8 +47,9 @@
 //! layers row shows the warning colour, and a commit that trips it says so in the
 //! status bar.
 //!
-//! The guard depends on unwinding; under `panic = "abort"` it is inert, which is a
-//! build failure (see `compile_error!` below).
+//! The guard depends on unwinding, as do `build`'s two round i_overlay
+//! (`offset_outline`, `stroke_ink`); under `panic = "abort"` they are inert, which
+//! is a build failure (see `compile_error!` below).
 
 use crate::node::BoolOp;
 use flo_curves::Coord2;
@@ -138,13 +139,15 @@ fn within_bool_range(path: &BezPath) -> bool {
         .all(|v| v.is_finite() && v.abs() <= MAX_BOOL_COORD)
 }
 
-// The guard below is inert under `panic = "abort"` (`catch_unwind` never returns),
-// so the setting is a build failure rather than a note in a manifest.
+// The guard below, and build's around i_overlay, are inert under `panic = "abort"`
+// (`catch_unwind` never returns), so the setting is a build failure rather than a
+// note in a manifest.
 #[cfg(panic = "abort")]
 compile_error!(
-    "ondin-core requires panic = \"unwind\": boolean::guarded's catch_unwind is the only thing \
-     between a boolean over degenerate geometry and the editor dying with the document open. \
-     Under panic = \"abort\" it is inert. See Cargo.toml's profile note and §15 D239."
+    "ondin-core requires panic = \"unwind\": its catch_unwind guards — boolean::guarded \
+     round flo_curves, and build::offset_outline and build::stroke_ink round i_overlay — \
+     are the only thing between degenerate geometry and the editor dying with the document \
+     open. Under panic = \"abort\" they are inert. See Cargo.toml's profile note and §15 D239."
 );
 
 /// The unwind guard and the failure counter, round whichever fold the caller wants.

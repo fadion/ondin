@@ -286,3 +286,22 @@ fn outline_stroke_matches_the_oracle_per_side() {
     }
     common::run_all(&cases, |(kind, s)| stroke_case(kind, s));
 }
+
+/// A stroke i_overlay cannot scale (it panics with `CoordinatesOutOfRange`)
+/// lays no ink, the unwind caught inside `stroke_ink`.
+///
+/// flip: `stroke_ink` calling its closure without `catch_unwind` → the panic
+/// escapes and the test fails.
+#[test]
+fn a_stroke_past_i_overlays_range_lays_nothing_not_a_panic() {
+    let square = kurbo::Rect::new(0.0, 0.0, 10.0, 10.0).to_path(0.1);
+    let kind = path_kind(&square);
+    for align in [
+        StrokeAlign::Center,
+        StrokeAlign::Inside,
+        StrokeAlign::Outside,
+    ] {
+        let s = stroke(1e300, kurbo::Join::Miter, kurbo::Cap::Butt, align);
+        assert!(stroke_ink(&kind, &square, &s).is_none(), "{align:?}");
+    }
+}

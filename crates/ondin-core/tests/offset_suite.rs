@@ -262,3 +262,20 @@ fn a_dense_wave_offsets_in_a_moment() {
         assert!(took.as_secs_f64() < 10.0, "{d}: {took:?}");
     }
 }
+
+/// An offset i_overlay cannot scale (it panics with `CoordinatesOutOfRange`) is
+/// refused as `EmptyGeometry`, the unwind caught inside `offset_outline`.
+///
+/// flip: `offset_outline` calling its closure without `catch_unwind` → the panic
+/// escapes and the test fails.
+#[test]
+fn an_offset_past_i_overlays_range_is_refused_not_a_panic() {
+    let square = kurbo::Rect::new(0.0, 0.0, 10.0, 10.0).to_path(0.1);
+    for d in [1e300, -1e300] {
+        let out = offset_outline(&square, d, FillRule::NonZero);
+        assert!(
+            matches!(out, Err(ondin_core::OpError::EmptyGeometry)),
+            "{d}: {out:?}"
+        );
+    }
+}

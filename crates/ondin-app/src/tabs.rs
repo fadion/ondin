@@ -783,9 +783,7 @@ impl OndinApp {
             return;
         };
         let key = p.recovery_key.take();
-        let path = p.session.path.clone();
-        p.session
-            .mark_saved(path.unwrap_or_else(|| PathBuf::from("Untitled.ondin")));
+        p.session.mark_clean();
         if let Some(key) = key {
             self.forget_snapshot(&key);
         }
@@ -1816,6 +1814,37 @@ mod tests {
             app.session.camera.zoom, 3.0,
             "the same session, not a reload"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Discarding a never-filed tab's work leaves it with no path, so the tab
+    /// list does not remember an invented `Untitled.ondin`.
+    /// flip: `forget_tab_work` giving the session a path → fails at "no path".
+    #[test]
+    fn discarded_untitled_work_is_not_remembered_as_a_file() {
+        let ctx = egui::Context::default();
+        let root = temp_root("discard-untitled");
+        let mut app = app_at(&ctx, &root);
+        let a = file(&root, "a");
+        edit(&mut app);
+        let untitled = app.tabs.active.unwrap();
+        assert!(
+            app.session.path.is_none(),
+            "fixture: the starter is unfiled"
+        );
+        app.open_path(&a);
+        app.forget_tab_work(untitled);
+        let Some(Tab {
+            body: Body::Parked(p),
+            ..
+        }) = app.tabs.get(untitled)
+        else {
+            panic!("fixture: the starter is parked");
+        };
+        assert!(!p.session.is_dirty(), "clean");
+        assert!(p.session.path.is_none(), "no path");
+        app.remember_tabs();
+        assert_eq!(app.prefs.open_tabs, vec![a.clone()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

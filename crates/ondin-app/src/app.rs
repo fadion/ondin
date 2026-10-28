@@ -5700,9 +5700,7 @@ impl OndinApp {
                 }
                 self.drop_recovery();
                 self.disk_settle();
-                let path = self.session.path.clone();
-                self.session
-                    .mark_saved(path.unwrap_or_else(|| std::path::PathBuf::from("Untitled.ondin")));
+                self.session.mark_clean();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Some(CloseChoice::Cancel) => {

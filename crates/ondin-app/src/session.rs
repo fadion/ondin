@@ -1654,7 +1654,8 @@ impl EditorSession {
     /// edit having been made.
     ///
     /// **Deliberately one-way**: it cannot clear the flag, since
-    /// [`Self::mark_saved`] is the only road back to clean. `saved_at` goes too, or
+    /// [`Self::mark_saved`] (or [`Self::mark_clean`] for work thrown away) is the
+    /// only road back to clean. `saved_at` goes too, or
     /// the save dot would go green over a document that differs from its file (see
     /// [`Self::saved_ago`]).
     ///
@@ -1677,6 +1678,19 @@ impl EditorSession {
         // practice; clearing anyway stops the tooltip sticking on *Saving…* if that
         // order changes.
         self.saving = None;
+    }
+
+    /// Count the document clean without saying where it is: its work was thrown
+    /// away (*Discard*), and a never-filed one keeps no path, which the tab list
+    /// would otherwise remember.
+    pub fn mark_clean(&mut self) {
+        match self.path.clone() {
+            Some(path) => self.mark_saved(path),
+            None => {
+                self.dirty = false;
+                self.saved_step = Some(self.history.current());
+            }
+        }
     }
 
     /// A write of `at` has been queued: the save dot's tooltip says *Saving…* until

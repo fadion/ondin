@@ -360,6 +360,9 @@ pub enum ViewSwitch {
     /// Text baselines. Deliberately unbound: no app has this, so there is no
     /// convention to match; the three above are Illustrator's.
     SnapBaselines,
+    /// `Q` — the marquee draws a loop instead of a box, for Select and the Node
+    /// tool alike (`crate::lasso`). Q is free: no tool uses it.
+    Lasso,
 }
 
 impl ViewSwitch {
@@ -382,6 +385,7 @@ impl ViewSwitch {
             Self::SnapGuides => "Snap to guides",
             Self::SnapGrid => "Snap to grid",
             Self::SnapBaselines => "Snap to baselines",
+            Self::Lasso => "Lasso select",
         }
     }
 
@@ -407,6 +411,7 @@ impl ViewSwitch {
             Self::SnapShapes => "Ctrl+U",
             Self::SnapGuides => "Ctrl+Shift+;",
             Self::SnapGrid => "Ctrl+Shift+'",
+            Self::Lasso => "Q",
             Self::LayoutGrid
             | Self::Outline
             | Self::History
@@ -421,8 +426,8 @@ impl ViewSwitch {
     /// rulers, then the guides that are pulled out of them, then the grid — and
     /// then the layout grid, adjacent so the two grid rows read against each other;
     /// then the panes (layers, history, minimap, toolbar, messages); then the modes,
-    /// Outline before Focus.
-    pub const VIEW_MENU: [Self; 12] = [
+    /// Outline before Focus, then the marquee's shape.
+    pub const VIEW_MENU: [Self; 13] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -435,6 +440,7 @@ impl ViewSwitch {
         Self::StatusMessages,
         Self::Outline,
         Self::Focus,
+        Self::Lasso,
     ];
 
     /// Every variant, for the tests that have to walk them.
@@ -447,7 +453,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -464,6 +470,7 @@ impl ViewSwitch {
         Self::SnapGuides,
         Self::SnapGrid,
         Self::SnapBaselines,
+        Self::Lasso,
     ];
 
     /// The Snap menu's rows.
@@ -1377,6 +1384,11 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         if plain && m.shift && i.key_pressed(egui::Key::F) {
             out.push(Action::ChooseTool(Tool::Slice));
         }
+        on(
+            plain && !m.shift && i.key_pressed(egui::Key::Q),
+            Action::ToggleView(ViewSwitch::Lasso),
+            &mut out,
+        );
 
         out
     })
@@ -1739,6 +1751,19 @@ mod tests {
         );
         // A typed D stays a D.
         assert!(actions(Mode::TextInsert, vec![key(egui::Key::D, shift)], shift).is_empty());
+    }
+
+    /// `Q` alone switches the marquee's shape; with Shift or Ctrl it does nothing.
+    #[test]
+    fn q_switches_the_marquee_to_a_lasso() {
+        let none = egui::Modifiers::NONE;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::Q, none)], none),
+            vec![Action::ToggleView(ViewSwitch::Lasso)]
+        );
+        for m in [egui::Modifiers::SHIFT, egui::Modifiers::COMMAND] {
+            assert!(actions(Mode::Normal, vec![key(egui::Key::Q, m)], m).is_empty());
+        }
     }
 
     #[test]

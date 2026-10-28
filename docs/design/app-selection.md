@@ -1,6 +1,7 @@
 # Selection on the canvas and in the layers panel
 
-Group-first picking, entering groups, the lock rule for every selecting door, double-click, key-layer
+Group-first picking, entering groups, the lock rule for every selecting door, the marquee and the
+lasso, double-click, key-layer
 designation, the Alt measure overlay, and the layers panel's range selection and rename. Part of §9.4.
 
 ## 9.4 Selection
@@ -31,12 +32,8 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   `OndinApp::marquee_candidates`, filtered by `OndinApp::may_select_in_bulk`
   (`query::is_effectively_locked`, and never a slice: a slice is picked on its own, by its edge, its
   row or the Slice tool, never swept up with the art). The visibility filter is `apply_marquee`'s own and uses the
-  node's own flag: a layer inside a hidden group *can* be marqueed. The modifier held at the press
-  decides what the band does (`preview::MarqueeMode`): none replaces the selection, `Shift`
-  toggles each layer it covers, `Alt` removes them. It selects **live**, every frame of the drag,
-  applied to the selection held at the press (`Drag::Marquee::base`), so a toggle does not flip
-  back and forth and a cancel restores that selection. The node tool's point marquee follows the
-  same modes but resolves on release.
+  node's own flag: a layer inside a hidden group *can* be marqueed. A lasso takes the same
+  candidates (below).
 - `Ctrl+A` (`OndinApp::select_all`): same candidates (locked and slices excluded, hidden included), all on the
   current page. With the candidate range empty it selects the page's frames themselves
   (`root_artboards`), filtered too. Emptiness is
@@ -67,6 +64,33 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - Otherwise the lock is enforced at **selection time only** — `delete_selection`, the keyboard
   nudge, restacks and aligns do not read it — so every selecting door must carry the filter
   (`Selection::set_one` filters nothing).
+
+### The marquee and the lasso
+
+- **Modes.** The modifier held at the press decides what the marquee does (`preview::MarqueeMode`):
+  none replaces the selection, `Shift` toggles what it covers, `Alt` removes it. A `Shift` or `Alt`
+  marquee shows a white `+` or `−` on a 6pt-radius selection-blue disc 16pt below-right of the
+  pointer, drawn as canvas chrome rather than a cursor bitmap.
+- **Live.** Every frame of the drag applies the marquee afresh to what was selected at the press
+  (`Drag::Marquee::base`, and in the node tool `Drag::Marquee::points`), so a toggle does not flip
+  back and forth, and a cancel (`cancel_gesture`) restores both.
+- **Box.** Takes a layer by its world bounds (`apply_marquee`), and in the node tool the anchors
+  inside it.
+- **Lasso.** `Q` (`ViewSwitch::Lasso`, `OndinApp::lasso`, remembered in `prefs.view`, off by default)
+  makes the marquee a loop; it is a shape for the marquee, not a tool, so it starts wherever a
+  marquee would, in Select and the node tool, with the same candidates and modes. The loop is
+  `Drag::Marquee::lasso`, world points from the press, one taken each time the pointer has moved
+  2 screen pt (`OndinApp::extend_lasso`). A layer is taken when its **shape** touches the loop's
+  area (`ondin_core::touches_loop`, curves flattened at half a screen pt): what a click hits, so a
+  line by its stroke and a group by its children (`core-ops.md` §5.10). In the node tool it takes
+  the anchors inside the loop (`ondin_core::inside_loop`); a handle is never taken on its own.
+- **Lasso chrome** (`OndinApp::draw_lasso`): a 1pt selection-blue line over a 6% selection-blue fill,
+  closed by a dashed (3/3) straight run back to the start. The fill is non-zero scanline spans
+  (`lasso::fill_spans`), since egui fills only convex paths. While on, the Select rail button wears
+  Phosphor `lasso` (`icon::LASSO`) and its tooltip reads *Select, lasso (V · Q for box)*; toggling
+  says *Lasso select · Q for a box* or *Box select · Q for a lasso*. The switch is a View menu row
+  (last of the switches, before *Present mode*), a palette row and a shortcut-sheet row under
+  Tools; it is not on the canvas menu, being a tool setting rather than a view.
 
 ### Double-click (`canvas::double_click_pick`)
 

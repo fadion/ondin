@@ -152,8 +152,8 @@ pub enum Drag {
     Pivot {
         id: NodeId,
     },
-    /// Rubber-band selection from `origin` to the current pointer. A layer marquee
-    /// selects live; a point marquee (node tool) resolves on release.
+    /// Rubber-band selection from `origin` to the current pointer, of layers or,
+    /// in the node tool, of points. Either selects live.
     Marquee {
         origin: Point,
         mode: MarqueeMode,
@@ -161,6 +161,12 @@ pub enum Drag {
         /// afresh, or a Shift marquee would flip a layer on every frame; a cancel
         /// puts it back.
         base: Box<crate::session::Selection>,
+        /// The node tool's points at the press, kept for `base`'s reason; `None`
+        /// for a layer marquee.
+        points: Option<Box<PointSet>>,
+        /// The loop drawn so far in world space, from `origin`, when the marquee
+        /// is a lasso (`crate::lasso`); `None` for a box.
+        lasso: Option<Vec<Point>>,
     },
     /// Drawing a new shape. `id` is minted up front so the preview is stable
     /// across frames; committed once on release.
@@ -814,7 +820,7 @@ pub type PointRef = (usize, usize);
 ///
 /// **Anchors *or* segments, never both**: Delete needs a single subject. The two
 /// sets live in one type and every mutator clears the other.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PointSet {
     id: Option<NodeId>,
     points: BTreeSet<PointRef>,

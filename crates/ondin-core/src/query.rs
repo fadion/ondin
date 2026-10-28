@@ -35,44 +35,171 @@ pub fn hit_test(res: &Resolved, doc: &Document, page: NodeId, p: Point, slop: f6
         .into_iter()
         .filter(|id| is_effectively_interactable(doc, *id))
         .filter(|id| !masked_away(doc, res, *id, p))
-        .filter(|id| {
-            let Some(world) = res.world_transform(*id) else {
-                return false;
-            };
-            let Some(node) = doc.get(*id) else {
-                return false;
-            };
-            let local_p = world.inverse() * p;
-            // A boolean is tested against its derived outline, which only the
-            // `Resolved` cache holds (`contains_local` cannot build it), and under
-            // the node's own fill rule (§15 D239): an `Exclude` is even-odd, so a
-            // winding test would hit its holes.
-            if let Some(path) = res.boolean_path(*id) {
-                return node.fill_rule().contains(path, local_p);
-            }
-            // With no outline, the failure placeholder is the target (§15 D298):
-            // `boolean_placeholder` is `None` for a merely empty boolean, so a
-            // target exists exactly where something is drawn.
-            if let Some(b) = boolean_placeholder(doc, res, *id) {
-                return b.inflate(slop, slop).contains(local_p);
-            }
-            let Some(kind) = res.used_kind(doc, *id) else {
-                return false;
-            };
-            geometry::contains_local(
-                node,
-                &doc.resolved_paint(*id, node.paint()),
-                kind,
-                local_p,
-                res.text_layout(*id),
-                slop,
-            )
-        })
+        .filter(|id| hits_own_shape(res, doc, *id, p, slop))
         .collect();
 
     // Topmost first: later paint order = larger child-index path.
     hits.sort_by_key(|id| std::cmp::Reverse(paint_path(doc, *id)));
     hits
+}
+
+/// Whether world point `p` lands on `id`'s own painted area, children aside: the
+/// exact half of [`hit_test`], which [`touches_loop`] shares.
+fn hits_own_shape(res: &Resolved, doc: &Document, id: NodeId, p: Point, slop: f64) -> bool {
+    let Some(world) = res.world_transform(id) else {
+        return false;
+    };
+    let Some(node) = doc.get(id) else {
+        return false;
+    };
+    let local_p = world.inverse() * p;
+    // A boolean is tested against its derived outline, which only the `Resolved`
+    // cache holds (`contains_local` cannot build it), and under the node's own fill
+    // rule: an `Exclude` is even-odd, so a winding test would hit its holes.
+    if let Some(path) = res.boolean_path(id) {
+        return node.fill_rule().contains(path, local_p);
+    }
+    // With no outline, the failure placeholder is the target: `boolean_placeholder`
+    // is `None` for a merely empty boolean, so a target exists exactly where
+    // something is drawn.
+    if let Some(b) = boolean_placeholder(doc, res, id) {
+        return b.inflate(slop, slop).contains(local_p);
+    }
+    let Some(kind) = res.used_kind(doc, id) else {
+        return false;
+    };
+    geometry::contains_local(
+        node,
+        &doc.resolved_paint(id, node.paint()),
+        kind,
+        local_p,
+        res.text_layout(id),
+        slop,
+    )
+}
+
+/// Whether `id`'s shape touches the area of the closed loop `lasso` (world space,
+/// read non-zero, so a figure-eight covers both lobes): what a lasso picks.
+///
+/// Shape is what a click hits: the fill area, a line's or open path's stroke, a
+/// text box, a boolean's result, a frame's box. A group or frame also touches
+/// through any shown child, and a slice never does. Masks are not consulted. The two touch when their outlines cross or
+/// either holds a point of the other. `flatness` is how finely curves are
+/// flattened, in world units.
+pub fn touches_loop(
+    res: &Resolved,
+    doc: &Document,
+    id: NodeId,
+    lasso: &[Point],
+    flatness: f64,
+) -> bool {
+    let (Some(&first), true) = (lasso.first(), lasso.len() >= 3) else {
+        return false;
+    };
+    let reach = lasso
+        .iter()
+        .fold(Rect::from_points(first, first), |r, p| r.union_pt(*p));
+    touches_within(res, doc, id, lasso, reach, flatness)
+}
+
+/// [`touches_loop`] with the loop's bounds, `reach`, worked out once for a whole
+/// group.
+fn touches_within(
+    res: &Resolved,
+    doc: &Document,
+    id: NodeId,
+    lasso: &[Point],
+    reach: Rect,
+    flatness: f64,
+) -> bool {
+    let Some(node) = doc.get(id) else {
+        return false;
+    };
+    // Inclusive, since a horizontal line's bounds have no height.
+    let near = res.world_bounds(id).is_some_and(|b| {
+        b.x0 <= reach.x1 && b.x1 >= reach.x0 && b.y0 <= reach.y1 && b.y1 >= reach.y0
+    });
+    if !near {
+        return false;
+    }
+    let outline = res
+        .boolean_path(id)
+        .cloned()
+        .or_else(|| boolean_placeholder(doc, res, id).map(|b| b.to_path(0.1)))
+        .or_else(|| {
+            let kind = res.used_kind(doc, id)?;
+            match kind {
+                crate::NodeKind::Text { .. } => {
+                    geometry::local_bounds(kind, res.text_layout(id)).map(|b| b.to_path(0.1))
+                }
+                _ => geometry::local_path(kind),
+            }
+        });
+    if let (Some(outline), Some(world)) = (outline, res.world_transform(id)) {
+        let inside = |p: Point| inside_loop(lasso, p);
+        let mut crossed = false;
+        let mut start = Point::ZERO;
+        let mut last = Point::ZERO;
+        kurbo::flatten(world * outline, flatness, |el| {
+            if crossed {
+                return;
+            }
+            let to = match el {
+                kurbo::PathEl::MoveTo(p) => {
+                    start = p;
+                    last = p;
+                    crossed = inside(p);
+                    return;
+                }
+                kurbo::PathEl::LineTo(p) => p,
+                kurbo::PathEl::ClosePath => start,
+                // `flatten` emits only moves, lines and closes.
+                _ => return,
+            };
+            crossed = inside(to) || crosses_loop(last, to, lasso);
+            last = to;
+        });
+        // No crossing and no outline point inside: the loop may still lie wholly
+        // within the shape.
+        if crossed || hits_own_shape(res, doc, id, lasso[0], 0.0) {
+            return true;
+        }
+    }
+    node.children()
+        .iter()
+        .any(|c| doc.shown(*c) && touches_within(res, doc, *c, lasso, reach, flatness))
+}
+
+/// Whether `p` lies in the area of the closed loop `lasso`, read non-zero: what a
+/// lasso holds. A loop of fewer than three points has no area.
+pub fn inside_loop(lasso: &[Point], p: Point) -> bool {
+    let n = lasso.len();
+    if n < 3 {
+        return false;
+    }
+    let mut w = 0;
+    for i in 0..n {
+        let (a, b) = (lasso[i], lasso[(i + 1) % n]);
+        let side = (b - a).cross(p - a);
+        if a.y <= p.y && b.y > p.y && side > 0.0 {
+            w += 1;
+        } else if b.y <= p.y && a.y > p.y && side < 0.0 {
+            w -= 1;
+        }
+    }
+    w != 0
+}
+
+/// Whether segment `a`–`b` crosses any edge of the closed loop `lasso`.
+fn crosses_loop(a: Point, b: Point, lasso: &[Point]) -> bool {
+    let n = lasso.len();
+    (0..n).any(|i| segments_cross(a, b, lasso[i], lasso[(i + 1) % n]))
+}
+
+/// Whether segments `a`–`b` and `c`–`d` cross at a point inside both.
+fn segments_cross(a: Point, b: Point, c: Point, d: Point) -> bool {
+    let side = |p: Point, q: Point, r: Point| (q - p).cross(r - p);
+    side(c, d, a) * side(c, d, b) < 0.0 && side(a, b, c) * side(a, b, d) < 0.0
 }
 
 /// World bounds of a node, if known.

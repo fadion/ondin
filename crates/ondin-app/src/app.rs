@@ -868,6 +868,9 @@ pub struct OndinApp {
     /// Text baselines: its own switch, since every line of copy in view is a candidate
     /// and that is far more magnetism than the other three. On by default.
     pub(crate) snap_baselines: bool,
+    /// The marquee draws a loop rather than a box (`crate::lasso`), for Select and
+    /// the Node tool alike. Remembered with the view switches.
+    pub(crate) lasso: bool,
 }
 
 /// Which top-bar dropdown is showing.
@@ -1405,6 +1408,7 @@ impl OndinApp {
             snap_guides: view.snap_guides,
             snap_grid: view.snap_grid,
             snap_baselines: view.snap_baselines,
+            lasso: view.lasso,
             clones: None,
             entered_group: None,
             gesture_cancelled: false,
@@ -2280,8 +2284,11 @@ impl OndinApp {
             return false;
         }
         // A live marquee has been selecting as it went; put back what it started from.
-        if let Drag::Marquee { base, .. } = std::mem::replace(&mut self.drag, Drag::None) {
+        if let Drag::Marquee { base, points, .. } = std::mem::replace(&mut self.drag, Drag::None) {
             self.session.selection = *base;
+            if let Some(points) = points {
+                self.points = *points;
+            }
         }
         // Guide and variable-cell previews live outside `RenderOverrides`.
         self.guide_previews.clear();
@@ -7035,6 +7042,7 @@ impl OndinApp {
             snap_guides: self.snap_guides,
             snap_grid: self.snap_grid,
             snap_baselines: self.snap_baselines,
+            lasso: self.lasso,
         };
         if now != self.prefs.view {
             self.prefs.view = now;
@@ -7061,6 +7069,7 @@ impl OndinApp {
             ViewSwitch::SnapGuides => self.snap_guides,
             ViewSwitch::SnapGrid => self.snap_grid,
             ViewSwitch::SnapBaselines => self.snap_baselines,
+            ViewSwitch::Lasso => self.lasso,
         }
     }
 
@@ -7107,6 +7116,15 @@ impl OndinApp {
             ViewSwitch::SnapGuides => self.snap_guides = on,
             ViewSwitch::SnapGrid => self.snap_grid = on,
             ViewSwitch::SnapBaselines => self.snap_baselines = on,
+            ViewSwitch::Lasso => {
+                self.lasso = on;
+                self.session.info(if on {
+                    "Lasso select · Q for a box"
+                } else {
+                    "Box select · Q for a lasso"
+                });
+                return;
+            }
         }
         self.session
             .info(format!("{} {}", sw.label(), if on { "on" } else { "off" }));
@@ -7285,8 +7303,18 @@ impl OndinApp {
             Sep,
             Btn(&'static str, Option<Tool>, &'static str),
         }
+        // The lasso glyph while the marquee is a loop, so the mode never hides.
+        let select = if self.lasso {
+            E::Btn(
+                icon::LASSO,
+                Some(Tool::Select),
+                "Select, lasso (V · Q for box)",
+            )
+        } else {
+            E::Btn(icon::CURSOR, Some(Tool::Select), "Select (V)")
+        };
         let rail = [
-            E::Btn(icon::CURSOR, Some(Tool::Select), "Select (V)"),
+            select,
             E::Btn(
                 icon::HAND,
                 Some(Tool::Hand),

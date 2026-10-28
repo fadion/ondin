@@ -1775,6 +1775,8 @@ impl OndinApp {
                     origin: grab_world,
                     mode: MarqueeMode::from_modifiers(shift, ui.input(|i| i.modifiers.alt)),
                     base: Box::new(self.session.selection.clone()),
+                    points: None,
+                    lasso: self.lasso.then(|| vec![grab_world]),
                 };
             }
         }
@@ -1886,9 +1888,20 @@ impl OndinApp {
                 }
             }
             // Selects as it goes, so the layers it takes light up under it.
-            Drag::Marquee { origin, mode, base } => {
-                let (origin, mode, base) = (*origin, *mode, base.clone());
-                self.apply_marquee(origin, world, mode, &base);
+            Drag::Marquee { .. } => {
+                self.extend_lasso(world);
+                let Drag::Marquee {
+                    origin,
+                    mode,
+                    base,
+                    lasso,
+                    ..
+                } = &self.drag
+                else {
+                    return;
+                };
+                let (origin, mode, base, lasso) = (*origin, *mode, base.clone(), lasso.clone());
+                self.apply_marquee(origin, world, mode, &base, lasso.as_deref());
             }
             // Guide and crop drags are owned by `guide_input`/`image_edit_input`;
             // a pivot drag has nothing to preview through the renderer; a gradient's
@@ -2057,7 +2070,13 @@ impl OndinApp {
                     self.place_image_at(start);
                 }
             }
-            Drag::Marquee { origin, mode, base } => self.apply_marquee(origin, world, mode, &base),
+            Drag::Marquee {
+                origin,
+                mode,
+                base,
+                lasso,
+                ..
+            } => self.apply_marquee(origin, world, mode, &base, lasso.as_deref()),
             // `pivot_at` answers `None` back at the centre, which clears the field.
             Drag::Pivot { id } => {
                 let pivot = self.pivot_at(id, world);
@@ -2923,17 +2942,19 @@ impl OndinApp {
         (delta + result.adjust, result.marks)
     }
 
-    /// Selects by the band from `origin` to `end`, applied by `mode` to `base`,
-    /// the selection the marquee started from. Leaves the selection untouched
-    /// when the answer is what it already holds, and gives `base` back whole
-    /// (key layer included) when the band changes nothing. A Shift or Alt band
-    /// keeps `base`'s key while it is still selected.
-    fn apply_marquee(
+    /// Selects by the band from `origin` to `end`, or by the `lasso` loop when the
+    /// marquee is one, applied by `mode` to `base`, the selection the marquee
+    /// started from. Leaves the selection untouched when the answer is what it
+    /// already holds, and gives `base` back whole (key layer included) when the
+    /// band changes nothing. A Shift or Alt band keeps `base`'s key while it is
+    /// still selected.
+    pub(crate) fn apply_marquee(
         &mut self,
         origin: Point,
         end: Point,
         mode: MarqueeMode,
         base: &crate::session::Selection,
+        lasso: Option<&[Point]>,
     ) {
         let area = KRect::new(
             origin.x.min(end.x),
@@ -2941,14 +2962,26 @@ impl OndinApp {
             origin.x.max(end.x),
             origin.y.max(end.y),
         );
+        // Half a screen pt: finer than the loop's own sampling.
+        let flatness = 0.5 / self.points_per_world();
         // A marquee picks frame contents, not the frames, plus loose layers.
         let mut picked = Vec::new();
         for child in self.marquee_candidates() {
-            let inside = self
-                .session
-                .resolved
-                .world_bounds(child)
-                .is_some_and(|b| overlaps(b, area));
+            // A box takes a layer by its bounds, a lasso by its shape.
+            let inside = match lasso {
+                Some(trail) => ondin_core::touches_loop(
+                    &self.session.resolved,
+                    &self.session.doc,
+                    child,
+                    trail,
+                    flatness,
+                ),
+                None => self
+                    .session
+                    .resolved
+                    .world_bounds(child)
+                    .is_some_and(|b| overlaps(b, area)),
+            };
             // Locks are filtered in `marquee_candidates`. Visibility is the node's
             // own flag only, so a layer in a hidden group stays selectable
             // (`context-menus.md` §5.9).
@@ -4172,9 +4205,12 @@ impl OndinApp {
                     self.session.commit(tx);
                 }
             }
-            Drag::Marquee { origin, mode, .. } if released => {
-                self.drag = Drag::None;
+            Drag::Marquee { origin, mode, .. } => {
+                self.extend_lasso(world);
                 self.marquee_points(origin, world, mode);
+                if released {
+                    self.drag = Drag::None;
+                }
             }
             _ => {}
         }
@@ -4389,40 +4425,57 @@ impl OndinApp {
                     origin: world,
                     mode: MarqueeMode::from_modifiers(shift, alt),
                     base: Box::new(self.session.selection.clone()),
+                    points: Some(Box::new(self.points.clone())),
+                    lasso: self.lasso.then(|| vec![world]),
                 };
             }
         }
     }
 
-    /// Select the anchors inside the marquee, on release, by `mode` as the layer
-    /// marquee does. Anchors only: a handle belongs to its point.
+    /// Select the anchors inside the marquee's box or loop, live, by `mode` as the
+    /// layer marquee does, applied afresh each frame to the points held at the
+    /// press. Anchors only: a handle belongs to its point.
     fn marquee_points(&mut self, origin: Point, end: Point, mode: MarqueeMode) {
         let Some(id) = self.edited_path() else { return };
         let Some((_, subpaths)) = self.edited_subpaths(id) else {
             return;
         };
+        let Drag::Marquee {
+            points: Some(base),
+            lasso,
+            ..
+        } = &self.drag
+        else {
+            return;
+        };
+        let mut next = (**base).clone();
         let area = KRect::new(
             origin.x.min(end.x),
             origin.y.min(end.y),
             origin.x.max(end.x),
             origin.y.max(end.y),
         );
+        let inside = |p: Point| match lasso {
+            Some(trail) => ondin_core::inside_loop(trail, p),
+            None => area.contains(p),
+        };
         if mode == MarqueeMode::Replace {
-            self.points.clear();
+            next.clear();
         }
         for (s, sub) in subpaths.iter().enumerate() {
             for (a, an) in sub.anchors.iter().enumerate() {
-                let on = self.points.contains(id, (s, a));
+                let on = next.contains(id, (s, a));
                 let flip = match mode {
                     MarqueeMode::Replace => !on,
                     MarqueeMode::Toggle => true,
                     MarqueeMode::Subtract => on,
                 };
-                if area.contains(an.at) && flip {
-                    self.points.toggle(id, (s, a));
+                if inside(an.at) && flip {
+                    next.toggle(id, (s, a));
                 }
             }
         }
+        self.points = next;
     }
 
     /// Whether `id` is a `Path` — the node tool's only subject.
@@ -8108,7 +8161,13 @@ impl OndinApp {
             );
         }
 
-        if let Drag::Marquee { origin, .. } = &self.drag
+        if let Drag::Marquee {
+            lasso: Some(trail), ..
+        } = &self.drag
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            self.draw_lasso(painter, rect, ppp, trail, self.to_world(p, rect, ppp));
+        } else if let Drag::Marquee { origin, .. } = &self.drag
             && let Some(p) = resp.interact_pointer_pos()
         {
             let end = self.to_world(p, rect, ppp);
@@ -8130,6 +8189,26 @@ impl OndinApp {
                 egui::CornerRadius::ZERO,
                 egui::Stroke::new(1.0, color::SELECT),
                 egui::StrokeKind::Middle,
+            );
+        }
+        // A Shift marquee carries a + beside the pointer, an Alt one a −, on a
+        // selection-blue badge so it reads on any ground.
+        if let Drag::Marquee { mode, .. } = &self.drag
+            && let Some(p) = resp.interact_pointer_pos()
+            && let Some(sign) = match mode {
+                MarqueeMode::Toggle => Some("+"),
+                MarqueeMode::Subtract => Some("−"),
+                MarqueeMode::Replace => None,
+            }
+        {
+            let at = p + egui::vec2(16.0, 16.0);
+            painter.circle_filled(at, 6.0, color::SELECT);
+            painter.text(
+                at,
+                egui::Align2::CENTER_CENTER,
+                sign,
+                egui::FontId::proportional(11.0),
+                egui::Color32::WHITE,
             );
         }
 
@@ -11699,6 +11778,8 @@ mod autopan_tests {
                 origin: ondin_core::kurbo::Point::ZERO,
                 mode: MarqueeMode::Replace,
                 base: Default::default(),
+                points: None,
+                lasso: None,
             }
             .autopans()
         );
@@ -17560,6 +17641,135 @@ mod select_drag_tests {
             "a cancel restores the press-time selection"
         );
     }
+
+    /// Press, move through `path` and stay at its last point, with `modifiers` held;
+    /// the button stays down.
+    fn drag_through(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        modifiers: egui::Modifiers,
+        path: &[Point],
+    ) {
+        let at = |app: &OndinApp, p: Point| app.to_screen(p, AREA, 1.0);
+        let start = at(app, path[0]);
+        let press = egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers,
+        };
+        frame_with(ctx, app, modifiers, vec![egui::Event::PointerMoved(start)]);
+        frame_with(
+            ctx,
+            app,
+            modifiers,
+            vec![egui::Event::PointerMoved(start), press],
+        );
+        for p in &path[1..] {
+            let p = at(app, *p);
+            frame_with(ctx, app, modifiers, vec![egui::Event::PointerMoved(p)]);
+        }
+    }
+
+    /// A lasso takes what its loop goes round, mid-drag, where a box from its press
+    /// to the pointer would take nothing.
+    /// flip: `apply_marquee` ignoring `lasso` → fails at "the loop took a".
+    #[test]
+    fn a_lasso_selects_what_its_loop_goes_round() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        app.session.camera.center -= Vec2::new(200.0, 200.0);
+        app.lasso = true;
+        // Round a only, ending straight below the press: the box would have no width.
+        let round_a = [
+            Point::new(-20.0, -20.0),
+            Point::new(60.0, -20.0),
+            Point::new(150.0, -20.0),
+            Point::new(150.0, 150.0),
+            Point::new(60.0, 150.0),
+            Point::new(-20.0, 150.0),
+        ];
+        drag_through(&ctx, &mut app, egui::Modifiers::NONE, &round_a);
+        let Drag::Marquee {
+            lasso: Some(trail), ..
+        } = &app.drag
+        else {
+            panic!("the press has to start a lasso");
+        };
+        assert!(trail.len() >= 4, "the loop took the moves: {trail:?}");
+        assert_eq!(app.session.selection.ids(), &[a], "the loop took a");
+    }
+
+    /// In the node tool a marquee selects anchors as it is dragged, and a cancel
+    /// puts the points back; a lasso takes only the anchors inside its loop.
+    /// flip: `node_input` applying the point marquee only on release → fails at
+    /// "mid-drag".
+    #[test]
+    fn a_point_marquee_selects_live_and_a_lasso_takes_what_it_rounds() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        app.session.camera.center -= Vec2::new(200.0, 200.0);
+        let root = app.session.doc.first_page();
+        let id = app.session.ids.mint();
+        let mut p = ondin_core::kurbo::BezPath::new();
+        p.move_to((0.0, 300.0));
+        p.line_to((40.0, 300.0));
+        p.line_to((40.0, 330.0));
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 2,
+            kind: NodeKind::Path {
+                path: p,
+                corner_radii: Vec::new(),
+            },
+            transform: None,
+            name: None,
+        }])));
+        app.session.selection.set_one(id);
+        app.choose_tool(Tool::Node);
+        let picked = |app: &OndinApp| app.points.on(id).collect::<Vec<_>>();
+
+        drag_through(
+            &ctx,
+            &mut app,
+            egui::Modifiers::NONE,
+            &[Point::new(-10.0, 290.0), Point::new(10.0, 310.0)],
+        );
+        assert!(
+            matches!(app.drag, Drag::Marquee { .. }),
+            "the press has to start a marquee"
+        );
+        assert_eq!(picked(&app), vec![(0, 0)], "mid-drag");
+        let wider = app.to_screen(Point::new(50.0, 310.0), AREA, 1.0);
+        frame_with(
+            &ctx,
+            &mut app,
+            egui::Modifiers::NONE,
+            vec![egui::Event::PointerMoved(wider)],
+        );
+        assert_eq!(picked(&app), vec![(0, 0), (0, 1)]);
+        assert!(app.cancel_gesture(&ctx));
+        assert!(picked(&app).is_empty(), "a cancel puts the points back");
+
+        app.lasso = true;
+        app.gesture_cancelled = false;
+        // Round the two right-hand anchors, ending straight below the press.
+        drag_through(
+            &ctx,
+            &mut app,
+            egui::Modifiers::NONE,
+            &[
+                Point::new(30.0, 290.0),
+                Point::new(50.0, 290.0),
+                Point::new(50.0, 340.0),
+                Point::new(30.0, 340.0),
+            ],
+        );
+        assert_eq!(picked(&app), vec![(0, 1), (0, 2)]);
+    }
 }
 
 #[cfg(test)]
@@ -18522,6 +18732,7 @@ mod marquee_selectability_tests {
             Point::new(200.0, 200.0),
             MarqueeMode::Replace,
             &Default::default(),
+            None,
         );
         let got = app.session.selection.ids().to_vec();
 
@@ -18565,7 +18776,13 @@ mod marquee_selectability_tests {
         app.session.adopt_document(doc, None);
         let band = |app: &mut OndinApp, x0: f64, x1: f64, mode| {
             let base = app.session.selection.clone();
-            app.apply_marquee(Point::new(x0, -5.0), Point::new(x1, 15.0), mode, &base);
+            app.apply_marquee(
+                Point::new(x0, -5.0),
+                Point::new(x1, 15.0),
+                mode,
+                &base,
+                None,
+            );
             let mut got = app.session.selection.ids().to_vec();
             got.sort();
             got
@@ -18621,7 +18838,13 @@ mod marquee_selectability_tests {
         app.session.adopt_document(doc, None);
         let band = |app: &mut OndinApp, x0: f64, x1: f64, mode| {
             let base = app.session.selection.clone();
-            app.apply_marquee(Point::new(x0, -5.0), Point::new(x1, 15.0), mode, &base);
+            app.apply_marquee(
+                Point::new(x0, -5.0),
+                Point::new(x1, 15.0),
+                mode,
+                &base,
+                None,
+            );
             app.session.selection.key()
         };
         app.session.selection.set(vec![a, b]);

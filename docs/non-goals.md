@@ -16,7 +16,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 
 ## Canvas and interaction
 
-- **Modifier badges on the cursor** — modifiers sit on stock cursors, so a badge has no base to draw on (§15 D233).
+- **Modifier badges composited into the cursor** — modifiers sit on stock cursors, so a badge has no base to draw on (§15 D233). A Shift or Alt marquee's `+`/`−` is canvas chrome beside the pointer instead.
 - **Nudging the transform origin from the keyboard** — the origin pills take typed values (§15 D308).
 - **Aligning a multi-selection to its container** — select and align one at a time; mixed parents have no one container (§15 D309).
 - **A lock blocking inspector edits** — a lock guards against canvas accidents, not deliberate panel edits (§15 D323).
@@ -32,6 +32,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Batch renaming pages, styles or variables** — the box renames layers only.
 - **Letter-case switches in batch rename** (*Title Case*, *UPPER*, …) — *Keep case* carries a match's case, and nothing else changes it.
 - **A grid's `baseline` alignment in the cards** (§15 D919).
+- **A polygonal (click-by-click) lasso, a contain-only lasso rule, or shape-testing for the box marquee** — the lasso touches shapes, the box keeps its bounds rule.
 
 ## Booleans and paths
 

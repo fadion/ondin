@@ -506,7 +506,8 @@ impl ViewState {
             | ViewSwitch::SnapShapes
             | ViewSwitch::SnapGuides
             | ViewSwitch::SnapGrid
-            | ViewSwitch::SnapBaselines => None,
+            | ViewSwitch::SnapBaselines
+            | ViewSwitch::Lasso => None,
         }
     }
 }
@@ -962,6 +963,7 @@ impl Item {
                     // The glyph the Layout grid card already draws for columns.
                     ViewSwitch::LayoutGrid => icon::COLUMNS,
                     ViewSwitch::Outline => icon::SQUARE,
+                    ViewSwitch::Lasso => icon::LASSO,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
                     ViewSwitch::Layers
@@ -4056,8 +4058,9 @@ mod tests {
         assert!(rows.contains(&Item::ViewSwitch(ViewSwitch::GuideLock)));
     }
 
-    /// The canvas menu's View rows are the View menu's less the four chrome-wide
-    /// switches §6.1 keeps out, all live in focus mode too. The expected set is
+    /// The canvas menu's View rows are the View menu's less the chrome-wide
+    /// switches §6.1 keeps out and the marquee's shape, which is a tool setting
+    /// rather than a view, all live in focus mode too. The expected set is
     /// derived from `ViewSwitch::VIEW_MENU`, so a new switch either appears here
     /// or fails here.
     ///
@@ -4086,6 +4089,7 @@ mod tests {
                         | ViewSwitch::Toolbar
                         | ViewSwitch::StatusMessages
                         | ViewSwitch::Focus
+                        | ViewSwitch::Lasso
                 )
             })
             .collect();

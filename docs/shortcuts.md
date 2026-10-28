@@ -104,6 +104,7 @@ and the slice's `Shift+F`, are read after the letters under `plain && m.shift`.
 | `A` | Node | ✅ Illustrator/Sketch direct-selection letter (Figma's `A` is Frame). **No lock check in the key's arm, and none wanted**: a locked layer can join the selection from the layers panel, so the refusal is in `canvas::edited_path` — the tool arms and finds no subject, as `A` over a rectangle does (§15 D321) |
 | `T` | Text — **click** plants an auto-width node, **drag** draws a fixed box | ✅ (§15 D170) |
 | `I` | Eyedropper — one shot; a second `I` hands back to the tool it was armed from (`choose_tool`) | ✅ Figma |
+| `Q` | Lasso select — not a tool: toggles the marquee between box and loop for Select and Node (`ViewSwitch::Lasso`) | ✅ no tool held the letter |
 
 **`C` is unbound** (§15 D268): Crop's letter until image editing replaced the crop tool, which has
 neither rail slot nor letter. It is the letter a comment tool would want.
@@ -333,7 +334,8 @@ skew snap · `Ctrl`+click deep select · `Alt`+`Shift`+click key layer · `Ctrl`
 measure (`measure.rs`; the overlay is in `canvas.rs`) · middle-mouse pan in **both** modes (Space
 is not the alias in a text session, where it is a character) · `Alt`+click eyedropper onto the
 top stroke · `Shift`+click eyedropper stays armed · `Shift`+marquee toggles what it covers ·
-`Alt`+marquee removes it (layers and path points alike, read at the press).
+`Alt`+marquee removes it (box or lasso, layers and path points alike, read at the press; a `+` or
+`−` badge beside the pointer shows which).
 
 - **`Space` held mid-draw repositions the uncommitted shape** (Figma, Adobe): `Drag::Create`
   carries the previous pointer, so the shape moves by the delta while Space was held.
@@ -569,8 +571,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, and the snap
-  switches.
+  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, the
+  marquee's shape (lasso) and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
   drives stay in step while the chord is a second caller that never sees the row.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,

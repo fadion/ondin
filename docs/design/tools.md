@@ -6,7 +6,7 @@ resize, drop outlines and the transform origin (pivot).
 
 ## 9.4 v1 tools
 
-- **Select** (click, shift-click, marquee, select-all) and **Hand** (pan).
+- **Select** (click, shift-click, marquee as a box or a lasso, select-all) and **Hand** (pan).
 - **Move and rotate** (`SetTransform`): Shift locks a move to one axis and a rotation to 15° steps.
 - **Resize** by corners or sides (`SetGeometry`, §5.6): Shift locks the ratio, or releases it on a proportion-locked layer; Alt scales about the box centre. Group resize is recursive; a multi-selection gets one box for resize, rotate and skew.
 - **Skew**: `Ctrl`-drag a side; Shift holds 15° steps. **Transform origin**: a draggable pivot marker with two numeric fields. **Scale** (`K`): the same gestures, but stroke widths, radii and type scale too.

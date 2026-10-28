@@ -180,7 +180,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
   layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, then the modes: *Check
-  contrast* (ticked while on and never remembered), *Outline mode*, *Focus mode*, then *Present mode* — a verb,
+  contrast* (ticked while on and never remembered), *Outline mode*, *Focus mode*, then the marquee's
+  shape, *Lasso select* (`app-selection.md`), then *Present mode* — a verb,
   not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
   *Show minimap* follows *Show history* so the two rows about the layers pane stay together.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
@@ -208,7 +209,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
-  *Show history*, *Show minimap*, outline view and focus mode; a launch never opens in focus mode
+  *Show history*, *Show minimap*, *Lasso select*, outline view and focus mode; a launch never opens in focus mode
   or outline view.
 
 ### Settings
@@ -435,7 +436,8 @@ worded for the scope that plan was made for (`Plan::scope`).
   so the chord test, which drives the keymap, cannot cover them.
 - **Sections** (`sections`): Tools, Zoom, Pages, Edit, Structure, Arrange, Layer, View, Components and
   kits, File, Tabs, Text editing, Mouse, Library, dealt in order into three columns, each filled to about
-  its share; a section is never split. A narrow window deals into two or one, so no column is under
+  its share; a section is never split. *Lasso select* sits in Tools, beside the tools whose marquee
+  it shapes. A narrow window deals into two or one, so no column is under
   220 wide (`column_count`). Opened from the library, its section leads, followed by an *In a
   file* divider; opened in a text session, the text keys lead.
 - **Filter and hold.** Every filter word must start a label word or a key name. Holding modifiers

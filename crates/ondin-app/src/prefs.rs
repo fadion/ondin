@@ -50,10 +50,12 @@ pub struct ViewPrefs {
     pub snap_guides: bool,
     pub snap_grid: bool,
     pub snap_baselines: bool,
+    /// The marquee's shape: a lasso when on, a box when off.
+    pub lasso: bool,
 }
 
 impl Default for ViewPrefs {
-    /// Every switch on but the guide lock, History and the minimap.
+    /// Every switch on but the guide lock, History, the minimap and the lasso.
     fn default() -> Self {
         Self {
             rulers: true,
@@ -70,6 +72,7 @@ impl Default for ViewPrefs {
             snap_guides: true,
             snap_grid: true,
             snap_baselines: true,
+            lasso: false,
         }
     }
 }

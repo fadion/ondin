@@ -116,8 +116,8 @@ pub use node::{
 };
 pub use op::{ApplyOutcome, Described, DirtySet, GeometryPatch, OpError, Operation, Transaction};
 pub use query::{
-    boolean_placeholder, group_chain, hit_test, is_effectively_locked, is_within, local_box,
-    nodes_in_view, outline_at, pivot_world,
+    boolean_placeholder, group_chain, hit_test, inside_loop, is_effectively_locked, is_within,
+    local_box, nodes_in_view, outline_at, pivot_world, touches_loop,
 };
 pub use resolve::Resolved;
 pub use text::{

@@ -31,7 +31,7 @@ pub const PHASE_1: [&str; 13] = [
 ///
 /// `create_node`, `insert_subtree`, `duplicate` and `add_image` return the new
 /// ids: the handler minted them, so it knows them.
-pub const PHASE_2: [&str; 33] = [
+pub const PHASE_2: [&str; 34] = [
     "create_node",
     "insert_subtree",
     "delete_node",
@@ -47,6 +47,7 @@ pub const PHASE_2: [&str; 33] = [
     "set_visible",
     "set_locked",
     "set_opacity",
+    "set_blend",
     "set_clip",
     "set_mask",
     "set_text",

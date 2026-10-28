@@ -35,7 +35,7 @@ Phase 1 — read/export (ship first):
 Phase 2 — write (1:1 with operations/composites):
 `create_node`, `insert_subtree`, `delete_node`, `reparent`, `reorder`, `group(ids)`, `ungroup(id)`,
 `duplicate(id)`, `set_transform`, `set_pivot`, `set_geometry`, `set_name`, `set_visible`,
-`set_locked`, `set_opacity`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
+`set_locked`, `set_opacity`, `set_blend(ids, mode)`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
 `set_text_spans`, `set_paragraph_style`, `set_block_style`, `set_fills`, `set_strokes`,
 `set_effects`, `add_image(bytes) -> ImageId`, `set_display`, `set_layout_item`, `set_insets`,
 `set_exports`, `undo()`, `redo()`, `set_selection(ids)`.
@@ -64,6 +64,7 @@ Which of this is built: the `ondin-mcp` crate holds the tool list (`PHASE_1` to 
 
 - `create_node`, `insert_subtree` and `duplicate` return the new ids (the handler minted them); so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`, `add_mode` and `add_style`.
 - The snapshot exposes world transforms so agents can compute local placements; a `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
+- `set_blend(ids, mode)` takes the mode as the snapshot names it (`"Multiply"`, `"Pass through"`) and writes through `build::set_blend_all`, as the inspector and `Shift`+digits do: the outermost members only, and Pass through landing as Normal on a layer that is not a frame or group.
 - `insert_subtree` is the tool a whole layout goes through: a page of a few hundred layers is a handful of calls, one tree per section, where `create_node` is a round trip per layer.
 - `export_png` is the agent's eyes: placement errors no read tool reports (a card under the band below it, a label over a button) show only in the render. A client that can see images is expected to export, look and correct.
 

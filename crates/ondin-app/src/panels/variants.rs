@@ -1818,7 +1818,7 @@ impl OndinApp {
                 PropKind::Boolean => {
                     let on = matches!(value, PropValue::Boolean(true));
                     // **Every layer the property views bound, the switch sits in
-                    // the capsule** (§15 D1060), D1038 A4's rule as the fields
+                    // the capsule** (§15 D1060), the *Mixed* rule as the fields
                     // keep it (§15 D1045): one variable, the chip's tooltip —
                     // *name · value · Mode*, or *name · Mixed* where modes give
                     // the layers different values; several, the capsule over the
@@ -2926,7 +2926,7 @@ fn plural(n: usize, what: &str) -> String {
 }
 
 /// A property row's chip over `roots` (§15 D1060; D1070's amendment for a Text
-/// property), D1038 A4's rule as the fields keep it (§15 D1045): **every layer
+/// property), the *Mixed* rule as the fields keep it (§15 D1045): **every layer
 /// the property views bound**, by `var_of`, or none — a binding on some and not
 /// others draws D130's plain row. One variable, its name and the chip's tooltip
 /// — *name · value · Mode*, or *name · Mixed* where modes give the layers

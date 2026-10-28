@@ -1,4 +1,4 @@
-//! Binding an inspector field to a variable (§5.3f, D1038 A1–D3; §15 D1041).
+//! Binding an inspector field to a variable (§5.3f, D1038; §15 D1041).
 //!
 //! **The chip** — a bound field's value is a capsule naming its variable at the
 //! field's own width, the only fully round thing in the inspector (*the capsule
@@ -288,7 +288,7 @@ pub(crate) struct Complete {
 }
 
 /// A bound field's chip text, re-typed: what replaces the chip once a key other
-/// than `Backspace` or `--` lands on it (D1038 A3).
+/// than `Backspace` or `--` lands on it (D1038).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Retype {
     pub(crate) key: FieldKey,
@@ -305,7 +305,7 @@ pub(crate) struct ChipOut {
     pub(crate) menu: Option<egui::Pos2>,
 }
 
-/// The chip's capsule: 20 tall, fully round (D1038 A1).
+/// The chip's capsule: 20 tall, fully round (D1038).
 const CHIP_H: f32 = 20.0;
 const LIST_ROW_H: f32 = 26.0;
 const LIST_W: f32 = 256.0;
@@ -341,7 +341,7 @@ pub(crate) fn chip(
         (color::text_a(28), color::TEXT)
     };
     p.rect_filled(cap, CHIP_H / 2.0, fill);
-    // The hover ×, in the chip's last 14 points (A7).
+    // The hover ×, in the chip's last 14 points.
     let xr = egui::Rect::from_center_size(
         egui::pos2(cap.right() - 3.0 - 7.0, cap.center().y),
         egui::vec2(14.0, 14.0),
@@ -435,7 +435,7 @@ pub(crate) fn chip_slot(ui: &mut egui::Ui) -> egui::Rect {
 }
 
 /// `name` fitted to `width`: whole groups cut from the left first —
-/// `…/width-collapsed` — then the leaf, with an ellipsis (D1038 A5).
+/// `…/width-collapsed` — then the leaf, with an ellipsis (D1038).
 pub(crate) fn elide_groups(ui: &egui::Ui, name: &str, font: &egui::FontId, width: f32) -> String {
     let fits = |s: &str| {
         ui.fonts_mut(|f| {
@@ -811,7 +811,7 @@ impl OndinApp {
         self.commit_edit(tx);
     }
 
-    /// A key typed onto a focused chip (A3): `-` starts the `--` list, anything
+    /// A key typed onto a focused chip: `-` starts the `--` list, anything
     /// else starts a literal that replaces the binding when it is committed.
     pub(crate) fn chip_typed(&mut self, key: FieldKey, text: String) {
         self.var_retype = Some(Retype {
@@ -947,7 +947,7 @@ impl OndinApp {
     }
 
     /// The variables `key`'s targets are bound to, in name order and each once,
-    /// when **every** target is bound and they are not all one — A4's *Mixed*
+    /// when **every** target is bound and they are not all one — the *Mixed*
     /// capsule (§15 D1045). `None` when one is unbound (the plain grey *Mixed*,
     /// D130's), or all share one (`field_var`'s chip).
     pub(crate) fn field_mixed_vars(&self, key: FieldKey) -> Option<Vec<VarId>> {
@@ -1002,7 +1002,7 @@ impl OndinApp {
         (vars.len() > 1).then_some(vars)
     }
 
-    /// A4's *Mixed* capsule in `rect`: the selected layers bound to different
+    /// The *Mixed* capsule in `rect`: the selected layers bound to different
     /// variables, its tooltip listing them (§15 D1045). D1038 rules the look and
     /// not the keys, so they are the chip's: `Backspace` detaches every layer to
     /// what it draws, another key starts a literal for them all, `--` rebinds them
@@ -1475,8 +1475,8 @@ impl OndinApp {
         reset
     }
 
-    /// A bindable number field while bound or typed over (D1038 A1–A4): the
-    /// buffer a key on its chip began, the chip, or A4's *Mixed* capsule — `true`
+    /// A bindable number field while bound or typed over (D1038): the
+    /// buffer a key on its chip began, the chip, or the *Mixed* capsule — `true`
     /// when it drew one, and the caller's plain field is not drawn. `mark` is the
     /// field's whole override mark, binding and literal. Every bindable number
     /// field draws its bound face here.
@@ -1536,7 +1536,7 @@ impl OndinApp {
         }
     }
 
-    /// A number field typed over (A3) — a radius, a gap or a padding: the buffer
+    /// A number field typed over — a radius, a gap or a padding: the buffer
     /// the chip's first key began. `Enter` writes the number and detaches; `--`
     /// reopens the list.
     pub(crate) fn number_retype(
@@ -2747,7 +2747,7 @@ mod tests {
 
     /// *Extract into variable…* files the value as a new variable, binds the
     /// field to it in the same transaction — one undo takes both — and opens the
-    /// browser on its name (D1–D3).
+    /// browser on its name.
     #[test]
     fn extract_files_the_value_and_binds_the_field() {
         let (_ctx, mut app, rect, _, _) = fixture();
@@ -3103,7 +3103,7 @@ mod tests {
         assert_eq!(app.field_var(k), None);
     }
 
-    /// **A4: two layers bound to different variables read *Mixed* in a capsule**,
+    /// **Two layers bound to different variables read *Mixed* in a capsule**,
     /// its tooltip the two names; one unbound, or both on one variable, is not
     /// that case (§15 D1045). Focused, `Backspace` detaches both, each to what it
     /// draws.
@@ -3513,7 +3513,7 @@ mod tests {
     }
 
     /// **A number typed over a spacing *Mixed* capsule writes it on every slot**
-    /// (§15 D1058, A4): the left padding bound to one variable and the right to
+    /// (§15 D1058): the left padding bound to one variable and the right to
     /// another, `0` typed — the capsule is a chip, so both detach first and the
     /// pair lays out at 0, though 0 is each slot's own literal.
     ///
@@ -3677,7 +3677,7 @@ mod tests {
         });
     }
 
-    /// Long names elide from the left by whole groups, then the leaf (A5).
+    /// Long names elide from the left by whole groups, then the leaf.
     #[test]
     fn a_long_name_elides_from_the_left_by_groups() {
         let ctx = egui::Context::default();

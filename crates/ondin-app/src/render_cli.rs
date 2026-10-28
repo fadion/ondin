@@ -1195,4 +1195,281 @@ mod tests {
         .expect("the trimmed value is a variant's");
         assert!(svg(&out[0]).contains("width=\"120\""), "{}", svg(&out[0]));
     }
+
+    /// Two rows naming one file — `cta` and `CTA`, one file on Windows and macOS
+    /// — get two names, and a row named by number is zero-padded to the row
+    /// count's width.
+    ///
+    /// flip: `render_rows` naming without `de_collide` → fails at the names, the
+    /// second `CTA.svg`; without the `0width` padding → `Button-3.svg`.
+    #[test]
+    fn rows_named_alike_are_told_apart_and_numbered_to_width() {
+        let mut s = button();
+        let mut text = String::from("Size,Slug\n,cta\n,CTA\n");
+        for _ in 3..=11 {
+            text.push_str(",\n");
+        }
+        let out = render_rows(&mut s, "Button", &table(&text), Some("Slug"), &svg_spec())
+            .expect("every row renders");
+        let names: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
+        let mut want = vec!["cta.svg".to_string(), "CTA (2).svg".into()];
+        want.extend((3..=11).map(|n| format!("Button-{n:02}.svg")));
+        assert_eq!(names, want);
+    }
+
+    /// Three pages — a frame `Card` on the first; `Hero` and a hidden `Ghost` on
+    /// the second; `Sketch` on the third, a draft — and two modes whose names
+    /// differ only by case, adopted into a session. With `modes: false`, none.
+    fn paged(modes: bool) -> EditorSession {
+        use ondin_core::variable::Mode;
+        let mut ids = IdSource::new(0x30E);
+        let first = ids.mint();
+        let mut doc = Document::new(first);
+        let [second, third, card, hero, ghost, sketch] = [(); 6].map(|_| ids.mint());
+        let page = |id, index, name: &str| Operation::AddPage {
+            id,
+            index,
+            name: name.into(),
+            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            draft: false,
+            mode: None,
+        };
+        let frame = |id, parent, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 40.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        let mut ops = vec![
+            page(second, 1, "Second"),
+            page(third, 2, "Drafts"),
+            Operation::SetPageDraft {
+                id: third,
+                draft: true,
+            },
+            frame(card, first, "Card"),
+            frame(hero, second, "Hero"),
+            frame(ghost, second, "Ghost"),
+            Operation::SetVisible {
+                id: ghost,
+                visible: false,
+            },
+            frame(sketch, third, "Sketch"),
+        ];
+        if modes {
+            for (index, name) in ["Dark", "dark"].into_iter().enumerate() {
+                ops.push(Operation::AddMode {
+                    mode: Mode {
+                        id: ids.mint_mode(),
+                        name: name.into(),
+                    },
+                    index,
+                    cells: vec![],
+                });
+            }
+        }
+        doc.apply(&Transaction(ops)).expect("three pages");
+        let mut s = EditorSession::new();
+        s.adopt_document(doc, None);
+        s
+    }
+
+    /// `--all-modes` renders the frames of every page that is not a draft, a
+    /// hidden frame left out; `--page` narrows it to one page; two modes named
+    /// alike get two files; a document with no modes is refused.
+    ///
+    /// flip: `render_modes` reading `page_ids()` for `gathered_pages()`, skipping
+    /// no frame `shown` refuses, or naming without `de_collide` → each fails at
+    /// "no draft, no hidden frame".
+    #[test]
+    fn all_modes_reads_the_pages_asked_for() {
+        let names = |out: &[Rendered]| -> Vec<String> { out.iter().map(|r| r.0.clone()).collect() };
+        let mut s = paged(true);
+        let out = render_modes(&mut s, None, &svg_spec()).expect("renders");
+        assert_eq!(
+            names(&out),
+            [
+                "Card-Dark.svg",
+                "Card-dark (2).svg",
+                "Hero-Dark.svg",
+                "Hero-dark (2).svg"
+            ],
+            "every page but the draft, no draft, no hidden frame"
+        );
+        let out = render_modes(&mut s, Some("2"), &svg_spec()).expect("renders");
+        assert_eq!(names(&out), ["Hero-Dark.svg", "Hero-dark (2).svg"]);
+        let out = render_modes(&mut s, Some("Second"), &svg_spec()).expect("renders");
+        assert_eq!(
+            names(&out),
+            ["Hero-Dark.svg", "Hero-dark (2).svg"],
+            "by name"
+        );
+        let err = render_modes(&mut s, Some("9"), &svg_spec()).unwrap_err();
+        assert!(err.contains("no page \"9\""), "{err}");
+
+        let mut s = paged(false);
+        let err = render_modes(&mut s, None, &svg_spec()).unwrap_err();
+        assert!(err.contains("the document has no modes"), "{err}");
+    }
+
+    /// A component with a swap property — a `Card` holding an instance of the
+    /// frame main `Dot` — renders each row's swap, a set showing its first
+    /// variant, and refuses a main that cannot stand in the slot (a group's).
+    ///
+    /// flip: `row_edits` keeping the set rather than its first variant → fails
+    /// at "every row renders", the set refused; `apply_row` without its `fits`
+    /// check → the group row renders, and the refusal's `unwrap_err` fails.
+    #[test]
+    fn a_swap_column_shows_the_component_it_names() {
+        let mut ids = IdSource::new(0x5A7);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [dot, set, up, down, blob, inside, card] = [(); 7].map(|_| ids.mint());
+        // A set's variants are frames, so every icon is one.
+        let icon = || NodeKind::Artboard {
+            size: Size::new(10.0, 10.0),
+        };
+        let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        let fill = |id, rgb: [u8; 3]| Operation::SetFills {
+            id,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255)).into(),
+                visible: true,
+            }]),
+        };
+        let main = |id| Operation::SetComponent {
+            id,
+            component: true,
+        };
+        doc.apply(&Transaction(vec![
+            create(dot, root, 0, icon(), "Dot"),
+            fill(dot, [255, 0, 0]),
+            create(
+                set,
+                root,
+                1,
+                NodeKind::Artboard {
+                    size: Size::new(60.0, 30.0),
+                },
+                "Arrow",
+            ),
+            create(up, set, 0, icon(), "Up"),
+            fill(up, [0, 255, 0]),
+            create(down, set, 1, icon(), "Down"),
+            fill(down, [0, 0, 255]),
+            // A group main, which a frame's slot cannot take.
+            create(blob, root, 2, NodeKind::Group, "Blob"),
+            create(
+                inside,
+                blob,
+                0,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                "Inside",
+            ),
+            create(
+                card,
+                root,
+                3,
+                NodeKind::Artboard {
+                    size: Size::new(30.0, 30.0),
+                },
+                "Card",
+            ),
+            main(dot),
+            main(up),
+            main(down),
+            main(blob),
+            main(card),
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Dir".into(),
+                        values: vec!["Up".into(), "Down".into()],
+                    }],
+                }),
+            },
+            Operation::SetVariant {
+                id: up,
+                values: vec!["Up".into()],
+            },
+            Operation::SetVariant {
+                id: down,
+                values: vec!["Down".into()],
+            },
+        ]))
+        .expect("mains, a set and a card");
+        let template = doc.capture_subtree(dot).unwrap();
+        let (tx, made) = ondin_core::insert_subtrees(
+            &doc,
+            &mut ids,
+            &[ondin_core::build::Placement {
+                nodes: template,
+                parent: card,
+                index: None,
+            }],
+            Default::default(),
+        );
+        doc.apply(&tx).unwrap();
+        let slot = made[0];
+        doc.apply(&Transaction(vec![Operation::SetProperties {
+            id: card,
+            props: vec![Keyed::new(
+                ids.mint_item(),
+                Property {
+                    name: "Icon".into(),
+                    kind: PropKind::Swap,
+                    bound: vec![slot],
+                    filter: String::new(),
+                    preferred: Vec::new(),
+                },
+            )],
+        }]))
+        .expect("a swap property");
+        let mut s = EditorSession::new();
+        s.adopt_document(doc, None);
+
+        let out = render_rows(
+            &mut s,
+            "Card",
+            &table("Icon\nDot\nArrow\n"),
+            None,
+            &svg_spec(),
+        )
+        .expect("every row renders");
+        assert!(svg(&out[0]).contains("#ff0000"), "{}", svg(&out[0]));
+        assert!(
+            svg(&out[1]).contains("#00ff00"),
+            "the set shows its first variant: {}",
+            svg(&out[1])
+        );
+
+        let err = render_rows(
+            &mut s,
+            "Card",
+            &table("Icon\nDot\nBlob\n"),
+            None,
+            &svg_spec(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("row 2, column \"Icon\": \"Blob\" cannot be shown there"),
+            "a group cannot: {err}"
+        );
+    }
 }

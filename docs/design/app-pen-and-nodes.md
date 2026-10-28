@@ -128,7 +128,13 @@ nothing the canvas does not already offer except the last two.
 - Both run on a worker thread (`crate::job::Job`), so the frame loop never waits on the arithmetic.
   The Offset card keeps one offset in flight; the preview shows the newest that has landed, and a
   scrub that moved on asks again when it does. Only the release waits, for the distance it ends on,
-  so the commit is what the field says. A *Simplify* that lands after its path changed is dropped.
+  so the commit is what the field says. A *Simplify* that lands after its path changed is dropped,
+  and says so; one landing during a drag or a pen run waits for it to end; a second ask while one
+  runs says *Still simplifying*; leaving the document drops it.
+- The Offset card writes only over the path it opened on or last committed (`OffsetCard::owns`):
+  an undo, a redo, a landed *Simplify* or any other edit of the path closes it, committing nothing.
+  Closed by a press elsewhere while its field still holds a typed distance, it commits that
+  distance, as any field does on losing focus; Escape closes it committing nothing.
 
 ## Path corner radii
 

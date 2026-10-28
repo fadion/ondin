@@ -2363,7 +2363,7 @@ impl OndinApp {
             // which a valved field's cancel must still reach to set `gesture_cancelled`.
         } else if self.offset_card.is_some() {
             // The path bar's card, above the pen bias and the points it was opened over.
-            self.offset_card = None;
+            self.drop_offset_card();
         } else if self.pen_bias {
             // The bias, above the points it was armed over.
             self.pen_bias = false;

@@ -45,9 +45,37 @@ pub(crate) struct OffsetCard {
     /// The offset on the worker, and its distance. One at a time: a scrub that moves
     /// on meanwhile asks again when it lands, so the worker never falls behind.
     working: Option<(f64, Job<Option<BezPath>>)>,
+    /// The path the card last committed, beside `stored` the one other state of
+    /// the path it may write over.
+    wrote: Option<(BezPath, Vec<f64>)>,
+    /// The distance field's id, whose valve latch closing the card clears.
+    field: Option<egui::Id>,
 }
 
 impl OffsetCard {
+    /// Whether the path is still one this card left it as: what it opened on or
+    /// what it last committed. An undo, a redo, a landed *Simplify* or any other
+    /// edit makes it neither, and the card's next write would undo that edit.
+    fn owns(&self, doc: &ondin_core::Document) -> bool {
+        let Some(NodeKind::Path { path, corner_radii }) = doc.get(self.id).map(|n| n.kind()) else {
+            return false;
+        };
+        let now = (path, corner_radii);
+        now == (&self.stored.0, &self.stored.1)
+            || self.wrote.as_ref().is_some_and(|(p, r)| now == (p, r))
+    }
+
+    /// What [`Self::tx`] writes, as `wrote` keeps it.
+    fn writes(&self) -> Option<(BezPath, Vec<f64>)> {
+        match self.tx().0.first() {
+            Some(Operation::SetGeometry {
+                geometry: GeometryPatch::Path { path, corner_radii },
+                ..
+            }) => Some((path.clone(), corner_radii.clone())),
+            _ => None,
+        }
+    }
+
     /// Take in an offset that has landed and set the worker on the field's distance
     /// if it is not already done; whether anything landed.
     fn pump(&mut self, ctx: &egui::Context) -> bool {
@@ -153,11 +181,19 @@ impl OndinApp {
     /// Draw the path bar and its Offset card while a path's points are being edited.
     pub(crate) fn path_bar(&mut self, ctx: &egui::Context) {
         let Some(id) = self.edited_path() else {
-            self.offset_card = None;
+            self.close_offset_card();
             return;
         };
         if self.offset_card.as_ref().is_some_and(|c| c.id != id) {
-            self.offset_card = None;
+            self.close_offset_card();
+        }
+        if self
+            .offset_card
+            .as_ref()
+            .is_some_and(|c| !c.owns(&self.session.doc))
+        {
+            // Not committed: what it would write is from before the change.
+            self.drop_offset_card();
         }
         let has_points = !self.subject_points(id).is_empty();
         let bar = [
@@ -309,6 +345,7 @@ impl OndinApp {
     pub(crate) fn simplify_edited_path(&mut self, ctx: &egui::Context) {
         let Some(id) = self.edited_path() else { return };
         if self.simplifying.is_some() {
+            self.session.info("Still simplifying");
             return;
         }
         let Some(asked) = self.session.doc.get(id).map(|n| n.kind().clone()) else {
@@ -333,6 +370,11 @@ impl OndinApp {
     /// it ran or the refit has no fewer segments. Every frame, focus mode included.
     pub(crate) fn poll_simplify(&mut self) {
         let Some(s) = &self.simplifying else { return };
+        // Held while a drag or a pen run is live: either writes back a path from
+        // before the refit when it ends, and a handle drag names old anchors.
+        if !self.drag.is_none() || self.pen.is_some() {
+            return;
+        }
         let fitted = match s.job.poll() {
             Ok(None) => return,
             Ok(Some(fitted)) => Some(fitted),
@@ -351,6 +393,8 @@ impl OndinApp {
             return;
         };
         if self.session.doc.get(id).map(|n| n.kind()) != Some(asked) {
+            self.session
+                .info("Simplify was dropped: the path changed while it ran");
             return;
         }
         let NodeKind::Path { path: stored, .. } = asked else {
@@ -408,7 +452,54 @@ impl OndinApp {
             distance: 0.0,
             landed: None,
             working: None,
+            wrote: None,
+            field: None,
         });
+    }
+
+    /// Close the Offset card. A distance still previewed (typed, then a press
+    /// elsewhere) is committed, as any field commits on losing focus.
+    pub(crate) fn close_offset_card(&mut self) {
+        let Some(mut card) = self.offset_card.take() else {
+            return;
+        };
+        let held = card.field.is_some_and(|field| {
+            let latch = field.with("valve-engaged");
+            self.egui_ctx
+                .data(|d| d.get_temp::<bool>(latch))
+                .unwrap_or(false)
+        });
+        if held && card.owns(&self.session.doc) {
+            card.settle();
+            let tx = card.tx();
+            if !tx.0.is_empty() && card.writes() != card.wrote {
+                self.session.name_step("Offset", icon::ARROWS_OUT_CARDINAL);
+                if self.session.commit(tx) {
+                    self.points.clear();
+                }
+            }
+        }
+        self.forget_offset_card(card);
+    }
+
+    /// Close the Offset card committing nothing (Escape, leaving the document).
+    pub(crate) fn drop_offset_card(&mut self) {
+        if let Some(card) = self.offset_card.take() {
+            self.forget_offset_card(card);
+        }
+    }
+
+    /// Drop `card` with nothing committed: its preview while its field was held,
+    /// and the field's valve latch, which would otherwise commit on the next
+    /// card's first frame.
+    fn forget_offset_card(&mut self, card: OffsetCard) {
+        if let Some(field) = card.field {
+            let latch = field.with("valve-engaged");
+            if self.egui_ctx.data(|d| d.get_temp::<bool>(latch)) == Some(true) {
+                self.session.clear_gesture_preview();
+            }
+            self.egui_ctx.data_mut(|d| d.remove::<bool>(latch));
+        }
     }
 
     /// The Offset card: beside the bar, its top on the Offset button's. A press
@@ -437,6 +528,7 @@ impl OndinApp {
                             |d| d.custom_formatter(|v, _| ui::number(2)(v, 0..=0)),
                         )
                         .on_hover_text("Distance — negative shrinks the outline");
+                        card.field = Some(resp.id);
                         field = Some(resp);
                         if card.empty() {
                             ui.label(
@@ -459,6 +551,7 @@ impl OndinApp {
             }
             self.session.name_step("Offset", icon::ARROWS_OUT_CARDINAL);
             if self.edit_valve(&resp, card.tx()) {
+                card.wrote = card.writes();
                 self.points.clear();
             }
         }
@@ -469,8 +562,9 @@ impl OndinApp {
                     .interact_pos()
                     .is_some_and(|p| !card_rect.contains(p) && !button.contains(p))
         });
-        if !pressed_away {
-            self.offset_card = Some(card);
+        self.offset_card = Some(card);
+        if pressed_away {
+            self.close_offset_card();
         }
     }
 }
@@ -664,6 +758,70 @@ mod tests {
         }]));
         app.settle_simplify();
         assert_eq!(stored(&app, id).0, moved, "dropped");
+        assert!(app.session.status().text.contains("dropped"), "and said so");
+    }
+
+    /// The Offset card closes when the path changes under it (an undo, another
+    /// edit) and stays while the path is what it opened on or last wrote.
+    ///
+    /// flip: `path_bar` without its `owns` check → fails at "closed".
+    #[test]
+    fn the_offset_card_closes_when_the_path_changes_under_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, id) = app_with_a_ring(&ctx);
+        app.canvas_rect =
+            egui::Rect::from_min_max(egui::pos2(46.0, 40.0), egui::pos2(900.0, 700.0));
+        app.pen_button =
+            egui::Rect::from_center_size(egui::pos2(23.0, 300.0), egui::vec2(30.0, 30.0));
+        let run = |app: &mut OndinApp| {
+            let _ = ctx.run_ui(Default::default(), |ui| app.path_bar(ui.ctx()));
+        };
+        app.toggle_offset_card(id);
+        let card = app.offset_card.as_mut().expect("opened");
+        card.distance = 10.0;
+        card.settle();
+        let tx = card.tx();
+        card.wrote = card.writes();
+        assert!(app.session.commit(tx), "fixture: the card wrote");
+        run(&mut app);
+        assert!(app.offset_card.is_some(), "its own write keeps it");
+
+        let mut moved = stored(&app, id).0;
+        moved.apply_affine(ondin_core::kurbo::Affine::translate((5.0, 0.0)));
+        app.session.commit(Transaction(vec![Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Path {
+                path: moved,
+                corner_radii: Vec::new(),
+            },
+        }]));
+        run(&mut app);
+        assert!(app.offset_card.is_none(), "closed");
+    }
+
+    /// Closing the card while its field still holds a typed distance commits that
+    /// distance and leaves no preview behind.
+    ///
+    /// flip: `close_offset_card` committing nothing → fails at "committed".
+    #[test]
+    fn closing_the_offset_card_commits_a_held_distance() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = app_with_a_ring(&ctx);
+        app.toggle_offset_card(id);
+        let field = egui::Id::new("offset-field");
+        let card = app.offset_card.as_mut().expect("opened");
+        card.distance = 12.0;
+        card.field = Some(field);
+        let preview = card.tx();
+        ctx.data_mut(|d| d.insert_temp(field.with("valve-engaged"), true));
+        app.session.set_preview(&preview);
+        app.close_offset_card();
+        let b = stored(&app, id).0.bounding_box();
+        assert!((b.width() - 124.0).abs() < 0.5, "committed: {b:?}");
+        assert!(!app.session.has_gesture_preview(), "no preview left");
+        let latch = ctx.data(|d| d.get_temp::<bool>(field.with("valve-engaged")));
+        assert_eq!(latch, None, "the latch is spent");
     }
 
     /// The bar shows only while a path's points are edited, beside the rail and

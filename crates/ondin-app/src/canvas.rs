@@ -1737,6 +1737,15 @@ impl OndinApp {
             return;
         }
 
+        // A selected slice's inside, ahead of the art under it the press would
+        // otherwise pass through to.
+        if self.selected_slice_at(grab_world).is_some() {
+            if !self.selection_locked() {
+                self.drag = Drag::Move { anchor: world };
+            }
+            return;
+        }
+
         // A click's `pick_at_pointer` chain, plus a selected frame's whole box.
         let grabbed = self
             .frame_label_at(ui, grab, rect, ppp)
@@ -18852,6 +18861,51 @@ mod frame_edge_tests {
             app.entered_group,
             Some(board),
             "and does not clear the entered group, which only the marquee arm does"
+        );
+    }
+
+    /// A press inside the selected slice, over the rect, moves the slice; with the
+    /// slice let go the same press passes through to the rect.
+    /// flip: `begin_select_drag` without its selected-slice arm → fails at "keeps the slice".
+    #[test]
+    fn a_press_inside_the_selected_slice_moves_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, board, inside) = fixture(&ctx);
+        let slice = app.session.ids.mint();
+        let tx = tools::create_slice(
+            slice,
+            board,
+            1,
+            Affine::IDENTITY,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 150.0),
+        );
+        assert!(app.session.commit(tx), "the slice is cut");
+        app.session.selection.set_one(slice);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let screen = app.to_screen(Point::new(95.0, 95.0), rect, 1.0);
+        let press = |app: &mut OndinApp| {
+            app.drag = Drag::None;
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                app.begin_select_drag(ui, screen, rect, 1.0, &None, false);
+            });
+        };
+
+        press(&mut app);
+        assert!(matches!(app.drag, Drag::Move { .. }));
+        assert_eq!(
+            app.session.selection.single(),
+            Some(slice),
+            "keeps the slice"
+        );
+
+        app.session.selection.clear();
+        press(&mut app);
+        assert_eq!(
+            app.session.selection.single(),
+            Some(inside),
+            "passes through"
         );
     }
 }

@@ -3,7 +3,8 @@
 //!
 //! A slice is picked by a 4 pt band along its edge (`geometry::contains_local`),
 //! by its row in the layers tree, or by a click anywhere inside it with the Slice
-//! tool on ([`OndinApp::slice_at`]). A marquee and select-all skip slices
+//! tool on ([`OndinApp::slice_at`]). Once selected, a press anywhere inside it
+//! moves it ([`OndinApp::selected_slice_at`]). A marquee and select-all skip slices
 //! (`OndinApp::may_select_in_bulk`).
 
 use crate::app::OndinApp;
@@ -13,8 +14,8 @@ use eframe::egui;
 use ondin_core::kurbo::Point;
 use ondin_core::{NodeId, NodeKind};
 
-/// How strong the outline of a slice that is neither hovered nor selected is while
-/// the Slice tool is on, so what is already cut shows.
+/// How strong the outline of a slice that is neither hovered nor selected is, so
+/// what is already cut shows.
 const FAINT: f32 = 0.45;
 
 impl OndinApp {
@@ -40,20 +41,35 @@ impl OndinApp {
     /// The topmost shown, unlocked slice whose box holds `world`: what a click with
     /// the Slice tool picks, where any other tool's click passes through it.
     pub(crate) fn slice_at(&self, world: Point) -> Option<NodeId> {
+        self.page_slices()
+            .into_iter()
+            .rev()
+            .find(|id| self.slice_holds(*id, world))
+    }
+
+    /// The topmost selected slice whose box holds `world`: a press there moves it,
+    /// where an unselected slice's inside passes the press through.
+    pub(crate) fn selected_slice_at(&self, world: Point) -> Option<NodeId> {
+        self.page_slices()
+            .into_iter()
+            .rev()
+            .find(|id| self.session.selection.contains(*id) && self.slice_holds(*id, world))
+    }
+
+    /// Whether `world` lies in slice `id`'s box, shown and unlocked.
+    fn slice_holds(&self, id: NodeId, world: Point) -> bool {
         let doc = &self.session.doc;
-        let res = &self.session.resolved;
-        self.page_slices().into_iter().rev().find(|id| {
-            if !doc.shown_through(*id) || ondin_core::is_effectively_locked(doc, *id) {
-                return false;
-            }
-            let (Some(world_t), Some(NodeKind::Slice { size })) =
-                (res.world_transform(*id), doc.get(*id).map(|n| n.kind()))
-            else {
-                return false;
-            };
-            let p = world_t.inverse() * world;
-            (0.0..=size.width).contains(&p.x) && (0.0..=size.height).contains(&p.y)
-        })
+        if !doc.shown_through(id) || ondin_core::is_effectively_locked(doc, id) {
+            return false;
+        }
+        let (Some(world_t), Some(NodeKind::Slice { size })) = (
+            self.session.resolved.world_transform(id),
+            doc.get(id).map(|n| n.kind()),
+        ) else {
+            return false;
+        };
+        let p = world_t.inverse() * world;
+        (0.0..=size.width).contains(&p.x) && (0.0..=size.height).contains(&p.y)
     }
 
     /// *Slice selection*: a slice fitted to the selection (`build::slice_selection`),
@@ -82,8 +98,8 @@ impl OndinApp {
         }
     }
 
-    /// The dashed outline of every slice that shows: in the selection blue when it
-    /// is hovered or selected, and faintly for the rest while the Slice tool is on.
+    /// The dashed outline of every slice that shows, at its live size: in the
+    /// selection blue when it is hovered or selected, and faintly for the rest.
     pub(crate) fn draw_slices(
         &self,
         ui: &egui::Ui,
@@ -103,14 +119,15 @@ impl OndinApp {
                 continue;
             }
             let lit = hovered == Some(id) || self.session.selection.contains(id);
-            let ink = match (lit, slicing) {
-                (true, _) => color::SELECT,
-                (false, true) => color::SELECT.gamma_multiply(FAINT),
-                (false, false) => continue,
+            let ink = if lit {
+                color::SELECT
+            } else {
+                color::SELECT.gamma_multiply(FAINT)
             };
+            // The display node, so a resize or a W/H scrub shows as it happens.
             let (Some(world), Some(NodeKind::Slice { size })) = (
                 self.session.preview_world_transform(id),
-                self.session.doc.get(id).map(|n| n.kind()),
+                self.session.display_node(id).map(|n| n.kind()),
             ) else {
                 continue;
             };

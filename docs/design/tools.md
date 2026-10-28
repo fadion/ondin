@@ -266,12 +266,14 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
 - **Picking.** With the tool on, a click inside a slice picks it (`OndinApp::slice_at`: the topmost
   shown, unlocked slice whose box holds the point); elsewhere it does nothing. With any other tool a
   click inside passes through to what lies under it, and the slice is picked by its edge band
-  (`PICK_SLOP_PX`, §5.10) or its layers row; that band drags it, and once selected its handles resize
-  it. The marquee and the other bulk doors skip slices (`app-selection.md`).
+  (`PICK_SLOP_PX`, §5.10) or its layers row; that band drags it. Once selected, a press anywhere inside
+  it moves it (`OndinApp::selected_slice_at`, ahead of the art under it in `begin_select_drag`) and its
+  handles resize it. The marquee and the other bulk doors skip slices (`app-selection.md`).
 - **Chrome** (`OndinApp::draw_slices`, after the hover outline). A slice draws nothing in a render,
-  so the canvas draws a dashed 1 pt outline (4 on, 3 off) in `color::SELECT` round one that is hovered
-  (Select's hover target, or with the Slice tool the slice under the pointer) or selected. While the
-  tool is on, every other shown slice on the page is outlined at 45%, so what is already cut shows.
+  so the canvas draws a dashed 1 pt outline (4 on, 3 off) round every shown slice on the page, at its
+  live size (the display node, so a resize or a W/H scrub shows as it happens): in `color::SELECT`
+  when it is hovered (Select's hover target, or with the Slice tool the slice under the pointer) or
+  selected, at 45% otherwise, so what is already cut shows.
   *Shown* here and in `slice_at` is `Document::shown_through`: a slice in a hidden group is hidden.
 - **Slice selection** (the layer menu's Export group, and the palette) cuts a slice fitted to the
   selection instead of dragging one (`OndinApp::slice_selection` → `build::slice_selection`): the

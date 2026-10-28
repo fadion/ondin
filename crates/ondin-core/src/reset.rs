@@ -355,8 +355,8 @@ pub fn placement_is_own(doc: &Document, id: NodeId) -> bool {
 ///
 /// **A swapped copy** (§15 D983) compares its slot's fields — placement, size,
 /// visibility — with its link and the rest with its swap, and the **swap itself
-/// is an override** (the maintainer's ruling (2)): one unit, reset by clearing it,
-/// which the commit expands back into the slot's own contents (`swap::settle`).
+/// is an override**: one unit, reset by clearing it, which the commit expands
+/// back into the slot's own contents (`swap::settle`).
 pub fn overrides(doc: &Document, id: NodeId) -> Vec<Override> {
     let (Some(copy), Some(src)) = (doc.get(id), source_of(doc, id).and_then(|s| doc.get(s))) else {
         return Vec::new();
@@ -611,15 +611,15 @@ fn item_units<T: PartialEq>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> usize {
 }
 
 /// A list reset: **the source's list, exactly** — its items, its order, its values,
-/// and none of the copy's own (§15 D994, the maintainer's ruling: *"reset the whole
-/// fill card to the original's … removing anything the user added"*).
+/// and none of the copy's own (§15 D994: *"reset the whole fill card to the
+/// original's … removing anything the user added"*).
 ///
-/// ⚠️ **This overturns D981's clarification (1) for lists**, which kept a copy's
-/// own items through every reset, reinserted after the item they followed. That
-/// left the recoloured case broken in the way that matters: an instance whose fill
-/// was replaced holds its own item where the main's was, and a reset that put the
-/// main's back *after* it left the instance's colour on top and nothing on screen
-/// changed. Local **layers** still survive every reset; this is about lists.
+/// ⚠️ **A list does not keep a copy's own items** reinserted after the item they
+/// followed: that would leave the recoloured case broken in the way that matters —
+/// an instance whose fill was replaced holds its own item where the main's was, and
+/// a reset that put the main's back *after* it would leave the instance's colour on
+/// top and nothing on screen changed. Local **layers** still survive every reset;
+/// this is about lists.
 fn reset_items<T: Clone>(src: &[Keyed<T>]) -> Vec<Keyed<T>> {
     src.to_vec()
 }

@@ -1307,8 +1307,7 @@ mod tests {
     /// D1016's fix (c)): two groups, each a 30-tall square, are stacked down the
     /// right of the content — each by its own laid-out box, `LOCAL_GAP` apart.
     ///
-    /// Flip, run: a group's height counted as 0, as the first cut did, fails
-    /// *"no overlap"*.
+    /// Flip, run: a group's height counted as 0 fails *"no overlap"*.
     #[test]
     fn mains_made_local_stack_without_overlapping() {
         let mut ids = IdSource::new(0xC0);
@@ -1425,8 +1424,8 @@ mod tests {
     /// *Card* nesting one; making *Icon* local reaches the page's *Icon* and not
     /// *Card*'s nested copy, which reaches it through the kit's *Card* and now
     /// keeps the kit's — and the kit's *Card* is the one component that keeps
-    /// it. The first cut split `instances_of` by `in_vault`, which it never
-    /// lists: it counted both instances, and never drew the sentence.
+    /// it. Splitting `instances_of` by `in_vault`, which it never lists, would
+    /// count both instances and never draw the sentence.
     ///
     /// Flip, run: counting every instance fails *"the page's Icon alone"* with
     /// 2.

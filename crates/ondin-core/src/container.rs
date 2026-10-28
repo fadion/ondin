@@ -12,9 +12,9 @@
 //! its transform gives it, which is the *implicit* `left`/`top`, so every document
 //! written before this module is unchanged by it.
 //!
-//! Three of the maintainer's rulings shape the arithmetic, and one decision
-//! frames it (§15 D874 — the fourth ruling is the inspector's pin diagram and
-//! fields, which is `panels::inspector`'s business):
+//! Three rules shape the arithmetic, and one decision frames it (§15 D874 — a
+//! fourth rule, the inspector's pin diagram and fields, is `panels::inspector`'s
+//! business):
 //!
 //! - **Both insets on an axis stretch** the child between them — frame size less
 //!   both insets — for every kind with a size of its own. CSS keeps a *replaced*
@@ -324,11 +324,11 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
 }
 
 /// A text node's kind at the `size` a flex or grid container gave it, **each
-/// sizing mode keeping its meaning** (§15 D875, the maintainer's ruling; D913's
-/// first for grid): auto width stays auto (one line) unless the container
-/// stretched or grew it, when it becomes a fixed box at that size — **never
-/// narrower than its line**, so it cannot wrap (§15 D917: a stretch can give less
-/// room as well as more); auto height wraps at the width it was given, becoming
+/// sizing mode keeping its meaning** (§15 D875; D913 for grid): auto width stays
+/// auto (one line) unless the container stretched or grew it, when it becomes a
+/// fixed box at that size — **never narrower than its line**, so it cannot wrap
+/// (§15 D917: a stretch can give less room as well as more); auto height wraps at
+/// the width it was given, becoming
 /// fixed only if the container also made it taller than its lines; a fixed box
 /// takes the size whole.
 ///
@@ -724,13 +724,12 @@ pub struct Grid {
     pub auto_flow: GridAutoFlow,
     #[serde(default, skip_serializing_if = "is_default")]
     pub justify_content: AlignContent,
-    /// `justify-items` — each item across its area, horizontally. **Not in
-    /// §5.3c's first cut, and added with grid** (§15 D914): in a grid
-    /// `align-items` is the vertical axis alone, so without it the only way to
-    /// stop every item stretching sideways is `justify-self` on each one.
+    /// `justify-items` — each item across its area, horizontally (§15 D914): in
+    /// a grid `align-items` is the vertical axis alone, so without it the only
+    /// way to stop every item stretching sideways is `justify-self` on each one.
     ///
-    /// **`None` is CSS's `normal`**, and it is not `stretch` (§15 D915, the
-    /// maintainer's CSS-parity ruling): a replaced item — a shape (§15 D872) —
+    /// **`None` is CSS's `normal`**, and it is not `stretch` (§15 D915, CSS
+    /// parity): a replaced item — a shape (§15 D872) —
     /// sits at the start of its area at its own size, and a box (text, a laid
     /// group) stretches across it. `Some(Stretch)` stretches both. Flex keeps a
     /// plain [`AlignItems`], its `normal` being `stretch` for everything.
@@ -1548,16 +1547,16 @@ pub fn is_layout_root(view: &dyn LayoutView, id: crate::NodeId) -> bool {
 /// ⚠️ **The first hop counts for any child of a flex container, in flow or not**:
 /// a layer pinned, hidden or made a mask *leaves* the flow, and its siblings close
 /// up — so a change to it is a change to its container's layout even though, by
-/// then, it is not in it. The rebuild comparison caught the first cut, which asked
-/// the dirty node whether it was in flow and stopped at itself. Only the hops
-/// above need the container to be in its own parent's flow.
+/// then, it is not in it — asking the dirty node whether it is in flow would stop
+/// at itself. Only the hops above need the container to be in its own parent's
+/// flow.
 ///
 /// 🚨 **And the chain runs through a group or a boolean with no layout of its
 /// own** (§15 D899): such a node is one atomic box to its container, measured
 /// from its children ([`atomic_box`]), so moving a shape inside it resizes it and
-/// reflows the row it sits in. Stopping there left `update` re-laying nothing —
-/// found by the randomized layout guard at its seventh seed, a rect moved inside
-/// a plain group in a flex column, the group's slot stale until a rebuild. **The
+/// reflows the row it sits in. Stopping there would leave `update` re-laying
+/// nothing — a rect moved inside a plain group in a flex column, the group's slot
+/// stale until a rebuild. **The
 /// climb only counts if it reaches a layout**: `root` moves only on a hop into a
 /// container that lays its children out, so a deep tree of plain groups — an SVG
 /// import — still answers the node itself, and an edit there re-derives what it
@@ -2274,7 +2273,7 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
 }
 
 /// Whether `item`, in a `flex` container, is **`fit-content` across the line and
-/// would be stretched** — so it must not be (§15 D893, the maintainer's ruling).
+/// would be stretched** — so it must not be (§15 D893).
 ///
 /// CSS stretches an item across its line only when its cross size is `auto`; a
 /// definite one, which `fit-content` is, makes `stretch` behave as `flex-start`

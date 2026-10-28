@@ -308,10 +308,9 @@ impl Plan {
         };
         // A bound number's variable, likewise: a stroke's width (§15 D1073), an
         // effect's numbers (§15 D1074), a layout's gaps and padding (§15 D1075).
-        // ⚠️ Missing from D1073's and D1074's first cuts:
-        // a kit's stroke or effects style holding a bound number was vendored
-        // naming the kit's variable ids, which `style::check` refused — the
-        // whole insert of a main styled by it failed.
+        // ⚠️ Without this, a kit's stroke or effects style holding a bound
+        // number would be vendored naming the kit's variable ids, which
+        // `style::check` refuses — the whole insert of a main styled by it fails.
         let num = |v: Option<VarId>| v.map(|v| *self.vars.get(&v).unwrap_or(&v));
         match value {
             StyleValue::Fills(v) => StyleValue::Fills(

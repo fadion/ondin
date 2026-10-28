@@ -3695,10 +3695,9 @@ fn every_refusal_the_clipboard_door_makes_has_a_test() {
             "duplicate image id",
         ),
         (
-            // §15 D852 — the maintainer's ruling that linked
-            // pictures stay out of v1, enforced at the one door that could make
-            // one. The URL is the attack: it was written verbatim into every
-            // SVG export as an `href`.
+            // §15 D852 — linked pictures stay out of v1, enforced at the one
+            // door that could make one. The URL is the attack: it would be
+            // written verbatim into every SVG export as an `href`.
             "a linked picture",
             clip_wrap(
                 &[vec![ok.clone()]],

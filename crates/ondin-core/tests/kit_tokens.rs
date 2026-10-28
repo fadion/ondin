@@ -404,10 +404,10 @@ fn a_second_insert_reuses_the_held_variables() {
 /// mains to `brand`, which no longer travels — and D's own layer bound to it
 /// keeps the colour it drew, detached (*keep its values*), and the variable goes.
 ///
-/// 🚨 **The plain instance follows its main rather than detaching**, and the
-/// first build did not: the removal detached every user, the instance among
-/// them, and the commit read that write as an override, so the instance kept red
-/// where its main turned white. Flip, run: `tokens::plan`'s removal without its
+/// 🚨 **The plain instance follows its main rather than detaching**: a removal
+/// that detached every user, the instance among them, would have the commit read
+/// that write as an override, so the instance would keep red where its main
+/// turned white. Flip, run: `tokens::plan`'s removal without its
 /// follow filter fails at *"the instance follows its main"*, red.
 #[test]
 fn an_update_rewrites_the_kits_variables_and_removes_what_it_dropped() {
@@ -1252,7 +1252,7 @@ fn make_local(d: &mut Document, ids: &mut IdSource, inst: NodeId) -> (NodeId, ki
 }
 
 /// **A main made local forks the kit's variables and styles it reads** (§15
-/// D1066, the maintainer's ruling): D gains its own *Atlas/brand* and
+/// D1066): D gains its own *Atlas/brand* and
 /// *Atlas/Accent*, marked with the kit's identity they were forked from, every
 /// mode of D given the cell the per-kit mapping read there — *Light*, with no
 /// kit mode of its name, the kit's first (*Day*, white); *Night* the kit's

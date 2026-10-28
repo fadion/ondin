@@ -126,10 +126,9 @@ impl OndinApp {
     ///
     /// An instance that reaches the main **through** one of those — a page
     /// *Card*'s nested *Icon*, linked to the vault *Card*'s — is the kit's, not
-    /// the instance count's. `instances_of` never lists a vault node, so the
-    /// first cut, which split its answer by `in_vault`, counted those instances
-    /// and never said the kit kept anything (the record's reading of
-    /// `b50de00`).
+    /// the instance count's. `instances_of` never lists a vault node, so
+    /// splitting its answer by `in_vault` would count those instances and never
+    /// say the kit kept anything.
     pub(crate) fn make_local_reach(&self, top: NodeId) -> (usize, usize) {
         let doc = &self.session.doc;
         let mains = match doc.get(top) {

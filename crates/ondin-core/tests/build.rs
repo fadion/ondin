@@ -1092,10 +1092,8 @@ fn z_order_at_the_end_of_the_stack_is_not_an_edit() {
     // both reverses the selection's internal order and spends an undo step
     // doing it.
     //
-    // ⚠️ **This was found by a flip that did *not* bite.** Dropping the clause
-    // left all six `z_order` tests green, including the two written this session
-    // for the neighbouring gap; the arm it guards was reachable by no assertion
-    // in the workspace.
+    // ⚠️ **No other assertion reaches this arm**: dropping the clause leaves
+    // every other `z_order` test green.
     assert!(
         build::z_order(&f.doc, &[a, b], build::ZMove::Forward)
             .0

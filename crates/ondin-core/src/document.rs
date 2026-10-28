@@ -3187,7 +3187,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
 }
 
 /// Whether `node` bars a frame from sitting anywhere beneath it: a boolean or a
-/// mask (§15 D876, the maintainer's ruling).
+/// mask (§15 D876).
 ///
 /// **An ancestor rule, which is why it is not [`crate::build::can_parent`]'s.**
 /// A frame may sit in a group (§15 D870), which can sit in a boolean or under a

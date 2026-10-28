@@ -643,8 +643,8 @@ pub fn propagate_structure(
     // **The ops go out as inserts, then moves, then deletes, then reorders.** A move
     // can target a copy the inserts make (the new group's), and a delete must come
     // after the moves out of what it deletes — *Ungroup* lifts the children before
-    // the group goes, and deleting an untouched group copy first took the children's
-    // counterparts with it (the first build: `NoSuchNode`).
+    // the group goes, and deleting an untouched group copy first would take the
+    // children's counterparts with it (`NoSuchNode`).
     let mut deletes: Vec<NodeId> = Vec::new();
     let mut deleted: FxHashSet<NodeId> = FxHashSet::default();
 
@@ -1166,8 +1166,8 @@ pub(crate) fn untouched(
 /// whose placement is its own. Not every instance root: a nested copy inside an
 /// outer main is an instance root by its chain, and its place inside that main is
 /// the main's to move, so its outer instances follow it (`check`'s and
-/// `settle_links`' predicate — the first build asked `instance_root` here, and a
-/// nested instance moved inside its outer main stayed put in every outer instance).
+/// `settle_links`' predicate — asking `instance_root` here would leave a nested
+/// instance moved inside its outer main put in every outer instance).
 pub(crate) fn linked_to_main(doc: &Document, id: NodeId) -> bool {
     doc.get(id)
         .and_then(|n| n.link)
@@ -1645,8 +1645,8 @@ mod tests {
         *v == 0
     }
 
-    /// The case the first build got wrong: the copy overrode `c`, the main pins `a`
-    /// (from its default) and drops `b` (to its default) — the copy takes both and
+    /// The hard case: the copy overrode `c`, the main pins `a` (from its default)
+    /// and drops `b` (to its default) — the copy takes both and
     /// keeps its `c`. Flip: recursing only on identical key sets keeps all of `cur`.
     #[test]
     fn fields_follow_with_skipped_defaults() {

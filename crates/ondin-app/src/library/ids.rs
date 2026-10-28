@@ -50,12 +50,12 @@ pub fn mint() -> String {
 /// (a hand-built `Entry`, a future reader that does not go through
 /// `io::load` or `io::probe`) refuses rather than escaping the library folder.
 ///
-/// ⚠️ **That fourth route is not hypothetical: there were two boundaries, not
+/// ⚠️ **That fourth route is not hypothetical: there are two boundaries, not
 /// one.** `library::scan::read_meta` answers from `io::probe::meta_in_prefix`
 /// and never loads the document at all, and it is the reader behind
 /// `cover::key` — the path that runs for every card the dashboard draws, with
-/// nothing clicked. It was found by grepping the field rather than by reading
-/// the load path.
+/// nothing clicked. Grep the field to find such readers; the load path does not
+/// show them.
 pub fn is_minted(s: &str) -> bool {
     ondin_core::DocumentMeta::is_wellformed_id(s)
 }

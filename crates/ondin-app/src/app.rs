@@ -275,7 +275,7 @@ mod in_flight_tests {
                 },
             ),
             (
-                "paint_drag — the one §15 D588 found the gate reaching last",
+                "paint_drag",
                 InFlight {
                     paint_drag: Some(crate::panels::PaintDrag {
                         anchor: id,

@@ -6,9 +6,9 @@
 //! Every fixture's numbers can be checked by hand: tracks in px or in `fr` of a
 //! round remainder, and items aligned to the start wherever a stretch would
 //! muddy them — **on both axes, `justify-items` as well as `align-items`**,
-//! since in a grid `align-items` is the vertical axis alone (the first cut of
-//! the first test set only `align-items`, and item a came back 100 wide: CSS's
-//! reading, and the reason `Grid::justify_items` exists, §15 D914).
+//! since in a grid `align-items` is the vertical axis alone (with only
+//! `align-items` set, an item stretches across its area's width: CSS's reading,
+//! and the reason `Grid::justify_items` exists, §15 D914).
 
 use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
 use ondin_core::{
@@ -1074,10 +1074,10 @@ fn several_items_of_a_grid_move_as_a_block() {
 /// (§15 D918's amendment) — three 50px columns, and `a` placed at `-5`: line −1
 /// is line 4, so −5 is the line before line 1, and the grid grows a leading
 /// implicit track for it, 20 wide around `a`. Dragged one row down, `a` is
-/// written `-5` again on the axis the drag left alone, and stays at x 0; the
-/// first cut wrote line 1 there and moved it a column right.
+/// written `-5` again on the axis the drag left alone, and stays at x 0; writing
+/// line 1 there would move it a column right.
 ///
-/// **Flip run**, `grid_drop_many`'s `line` clamping to 1 as it did: fails on
+/// **Flip run**, `grid_drop_many`'s `line` clamping to 1: fails on
 /// *"its column kept"* with `Line(1)`, the predicted site.
 #[test]
 fn an_area_before_the_explicit_grid_keeps_its_negative_line() {

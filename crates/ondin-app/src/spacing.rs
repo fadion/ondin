@@ -2142,10 +2142,8 @@ mod canvas_tests {
     /// first gap and the top padding picking.
     ///
     /// Flip, run: the mask kept in the children list fails *"and the padding"* —
-    /// a padding band yields to any child. (The second amendment's first cut also
-    /// read *pinned* as *"not a flex item"*, which made a mask stop the gap too;
-    /// pinned is authored insets now, so the gap assertion alone no longer sees
-    /// the mask.)
+    /// a padding band yields to any child. Pinned is authored insets, not *"not a
+    /// flex item"*, so the gap assertion alone does not see the mask.
     #[test]
     fn a_mask_across_the_container_does_not_hide_its_bands() {
         let ctx = egui::Context::default();

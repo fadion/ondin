@@ -1854,10 +1854,10 @@ fn a_size_written_over_a_bound_axis_detaches_it() {
 }
 
 /// **Only a hand-set axis binds, and an axis an edit makes computed is
-/// detached** (§15 D1061, the maintainer's ruling): in a flex row the rect's
-/// width — its main axis — binds; given growth it is the line's, so the commit
-/// detaches it to the width it drew; and with growth already set, the bind
-/// refuses the width and takes the height, which `align-self: start` keeps from
+/// detached** (§15 D1061): in a flex row the rect's width — its main axis —
+/// binds; given growth it is the line's, so the commit detaches it to the width
+/// it drew; and with growth already set, the bind refuses the width and takes the
+/// height, which `align-self: start` keeps from
 /// the row's stretch.
 ///
 /// Flip, run: `keep_size_bindings` without its layout half (the `touched`

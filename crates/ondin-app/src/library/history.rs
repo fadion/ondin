@@ -126,7 +126,8 @@ pub fn remove(root: &Path, id: &str) {
 /// `history` cut to at most `max` bytes as serialised: a step that alone is over
 /// `max` goes first, with every step beyond it that needs it (older undo steps,
 /// farther redo steps); then the oldest undo steps, then the farthest redo steps.
-/// Without the first cut, one undone large picture would drain every small step.
+/// Without the oversized step going first, one undone large picture would drain
+/// every small step.
 fn within(mut history: SavedHistory, max: usize) -> SavedHistory {
     let size =
         |step: &ondin_core::SavedStep| serde_json::to_vec(step).map_or(usize::MAX, |b| b.len());

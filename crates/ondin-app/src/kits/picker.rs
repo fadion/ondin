@@ -119,10 +119,10 @@ struct Ghost {
 /// The tile pictures of this document's own mains, rendered on a worker.
 ///
 /// **Only the mains whose own subtree changed are rendered again, once the
-/// edits have settled** (§15 D1034). The first cut rendered every main on every
-/// revision with the picker open — a whole-document clone on the frame and a
+/// edits have settled** (§15 D1034). Rendering every main on every revision
+/// with the picker open would cost a whole-document clone on the frame and a
 /// layout and raster per main on the worker, for each nudge of an unrelated
-/// layer. Now a new revision waits [`SETTLE`] for the next, then each main's
+/// layer. Instead a new revision waits [`SETTLE`] for the next, then each main's
 /// subtree is compared with the one its picture was drawn from, and the
 /// document is cloned only when one differs. A nested instance's copies are
 /// written into its main's subtree at the commit, so a change to the inner

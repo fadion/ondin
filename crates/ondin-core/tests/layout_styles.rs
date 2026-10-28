@@ -266,10 +266,9 @@ fn a_layout_style_round_trips_and_its_deletes_detach() {
 /// keeps the style's binding and its 0 literal; written 30, the style's gap
 /// detaches at 30.
 ///
-/// Flip, run: `edit_through` taking the user's bindings whole (the first cut)
-/// fails *"the drawn gap keeps the binding"* — bound, but over a literal of 12
-/// rather than 0. Predicted at *"30 detaches the style's gap"*, which the same
-/// cut also breaks; the first assertion reads first.
+/// Flip, run: `edit_through` taking the user's bindings whole fails *"the drawn
+/// gap keeps the binding"* — bound, but over a literal of 12 rather than 0. It
+/// also breaks *"30 detaches the style's gap"*; the first assertion reads first.
 #[test]
 fn an_edit_through_a_user_judges_a_bound_gap() {
     let mut f = fixture();

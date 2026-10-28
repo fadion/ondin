@@ -750,7 +750,7 @@ fn a_gained_child_reaches_through_a_nested_instance() {
 /// A nested instance moved inside its outer main moves in every outer instance:
 /// its place there is the outer main's, not its own. Only an instance linked
 /// **straight to a main** keeps its placement. Flip: asking `instance_root` for
-/// the placement rule (the first build) leaves the outer instance's copy put.
+/// the placement rule leaves the outer instance's copy put.
 #[test]
 fn a_nested_instance_moved_inside_its_outer_main_moves_in_its_instances() {
     let mut f = fixture();
@@ -804,10 +804,9 @@ fn a_nested_instance_moved_inside_its_outer_main_moves_in_its_instances() {
 
 /// *Group selection* inside a main: the instance's **own** counterpart moves into
 /// a copy of the new group — it is not replaced by a fresh copy, which would lose
-/// whatever the instance had changed on it (the first build's "loss plus gain").
-/// Then *Ungroup* takes it back out, and the commit goes through (the first build
-/// deleted the untouched group copy, and the counterpart with it, before moving
-/// it — `NoSuchNode`).
+/// whatever the instance had changed on it ("loss plus gain"). Then *Ungroup*
+/// takes it back out, and the commit goes through (deleting the untouched group
+/// copy, and the counterpart with it, before moving it would be `NoSuchNode`).
 #[test]
 fn grouping_and_ungrouping_inside_a_main_moves_the_instances_own_layers() {
     let mut f = fixture();

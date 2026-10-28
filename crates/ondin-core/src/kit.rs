@@ -666,8 +666,8 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
         }
         // Every top's place, not only `top`'s: a main nesting another reaches it,
         // and moving the nested one across the canvas changes neither for a
-        // consumer — the first cut blanked `top` alone and counted Card changed
-        // when Icon moved.
+        // consumer — blanking `top` alone would count Card changed when Icon
+        // moved.
         //
         // 🚨 **And all of a top's place, not only its transform**: an instance
         // root's insets, its layout item and its visibility are its own as its
@@ -1768,7 +1768,7 @@ fn update_in_order(
 /// version, and the revealed one is the user's own fork.
 ///
 /// 🚨 **And the variables and styles it reads are forked with it** (§15
-/// D1066, the maintainer's ruling): a main that no longer follows its kit
+/// D1066): a main that no longer follows its kit
 /// would otherwise go on reading the kit's variables — rewritten by every
 /// update while another of the kit's mains is held, orphaned once none is.
 /// The document gains its own copies (`crate::tokens::fork`), every mode's

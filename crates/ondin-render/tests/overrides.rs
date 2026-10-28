@@ -2692,8 +2692,8 @@ fn pinned_fixture() -> (Document, NodeId, NodeId) {
     let root = ids.mint();
     let mut doc = Document::new(root);
     // **Every shape is painted**, or it draws nothing and the differential has
-    // nothing to compare: the first cut of this fixture left them unfilled, and
-    // the inset-edit test passed with `relayout` switched off entirely.
+    // nothing to compare: with the shapes unfilled, the inset-edit test passes
+    // with `relayout` switched off entirely.
     let mut add = |doc: &mut Document, parent: NodeId, kind: NodeKind, at: (f64, f64)| {
         let id = ids.mint();
         let index = doc.get(parent).unwrap().children().len();
@@ -2817,10 +2817,8 @@ fn a_frame_resize_previews_its_pinned_children_where_the_commit_puts_them() {
 /// the inspector's scrub over an inset field is this.
 ///
 /// **Flip:** returning early from `relayout` fails *"pinned and stretched"*.
-/// ⚠️ **It did not, on the fixture's first cut** — the shapes were unfilled and
-/// drew nothing, so both streams were empty and equal; the resize test above only
-/// failed because its text draws. Painting every shape is what gave this one
-/// teeth.
+/// ⚠️ **It bites only because the fixture paints every shape**: unfilled shapes
+/// draw nothing, so both streams would be empty and equal.
 #[test]
 fn an_inset_edit_previews_as_its_commit() {
     let (doc, _, free) = pinned_fixture();
@@ -3263,15 +3261,15 @@ fn a_left_handle_resize_of_a_flex_item_previews_as_its_commit() {
 }
 
 /// **Rotating a flex item about a pivot other than its centre previews as its
-/// commit** (§15 D896, the maintainer's ruling that an in-flow item turns about
-/// its box centre in its slot). The fixture's first rect turned 30° about a point
-/// far off to its lower right — the `SetTransform` a rotate tool writes for a
-/// pivot that is not the centre, translation and all.
+/// commit** (§15 D896: an in-flow item turns about its box centre in its slot).
+/// The fixture's first rect turned 30° about a point far off to its lower right —
+/// the `SetTransform` a rotate tool writes for a pivot that is not the centre,
+/// translation and all.
 ///
 /// The layout keeps the item in its slot and turns it about its box centre with
-/// the new linear part, ignoring the translation; the preview used to treat the
-/// `SetTransform` as a drag and draw it about the tool's pivot, which jumped on
-/// release (§15 D877's second amendment, measured nowhere until this).
+/// the new linear part, ignoring the translation; a preview that treated the
+/// `SetTransform` as a drag would draw it about the tool's pivot and jump on
+/// release (§15 D877).
 ///
 /// **Flip run**, `flex_relayout`'s `turned` exemption deleted: fails on the
 /// differential, the predicted site.
@@ -3326,9 +3324,9 @@ fn resizing_a_flex_item_previews_the_row_it_commits() {
 /// row to a column, and taking the frame's layout away altogether.
 ///
 /// **Flip:** the same early return fails here at *"an item grown"*. ⚠️ **Taking a
-/// layout away failed on the first cut with `flex_relayout` running**: a container
-/// with no layout roots no pass, so its former items kept the committed flex
-/// placement until `flex_relayout` learned to put back what it no longer lays out.
+/// layout away fails even with `flex_relayout` running** unless it puts back what
+/// it no longer lays out: a container with no layout roots no pass, so its former
+/// items would keep the committed flex placement.
 #[test]
 fn layout_and_item_edits_preview_as_their_commits() {
     use ondin_core::container::{Display, Flex, FlexDirection};
@@ -5345,9 +5343,9 @@ fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
 /// Flip, run: the renderer's `SetStrokes` arm storing the list without
 /// `build::kept_stroke_widths` fails *"a width past the binding: preview
 /// diverged from commit"* — the preview still bound, its resolve drawing 9.
-/// And `Document::resolved_paint_in` leaving `width_var` on its output — the
-/// first cut — fails *"the bound width's cell edited"*, 9 against 4: the scene
-/// resolved the cell preview's override again against the committed table.
+/// And `Document::resolved_paint_in` leaving `width_var` on its output fails
+/// *"the bound width's cell edited"*, 9 against 4: the scene resolved the cell
+/// preview's override again against the committed table.
 #[test]
 fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
     use ondin_core::variable::{Cell, Mode, VarKind, Variable};

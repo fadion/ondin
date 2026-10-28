@@ -1461,10 +1461,10 @@ impl OndinApp {
                 }
                 // **The prefix does not scrub while bound** (D1038 (3), §15
                 // D1046): unbound it is the scrub handle; bound, a drag would
-                // detach by accident. Its cursor is the plain arrow (§15 D1092,
-                // the maintainer's ruling over D1046's `NotAllowed`): the scrub
-                // arrows' absence is the affordance, and a refusal read as an
-                // error over a field that is working as meant.
+                // detach by accident. Its cursor is the plain arrow, not
+                // `NotAllowed` (§15 D1092): the scrub arrows' absence is the
+                // affordance, and a refusal reads as an error over a field that
+                // is working as meant.
                 None => {
                     ui::paint_prefix(&p, strip, lead, theme::text::FAINT);
                 }
@@ -2488,9 +2488,9 @@ mod tests {
     }
 
     /// **Extracting a translucent fill draws what it drew**: the variable takes
-    /// the colour opaque and the fill keeps its `%`. The first cut filed the
-    /// alpha into the variable as well, and the bind kept it as the `%` too — a
-    /// 50% fill drew at 25%.
+    /// the colour opaque and the fill keeps its `%`. Filing the alpha into the
+    /// variable as well, with the bind keeping it as the `%` too, would draw a
+    /// 50% fill at 25%.
     ///
     /// Flip, run: filing the resolved colour with its alpha fails *"drawn as
     /// before"*.
@@ -3469,8 +3469,8 @@ mod tests {
     /// buffer writes as the plain field does, through `keep_corner_bindings`, and
     /// only a chip's retype detaches every corner first.
     ///
-    /// Flip, run: detaching first whatever the field (the first cut) fails
-    /// *"the bound corner written 6 stays bound"*.
+    /// Flip, run: detaching first whatever the field fails *"the bound corner
+    /// written 6 stays bound"*.
     #[test]
     fn a_number_typed_back_keeps_a_partly_bound_rects_binding() {
         let (ctx, mut app, rect, _, radius) = fixture();

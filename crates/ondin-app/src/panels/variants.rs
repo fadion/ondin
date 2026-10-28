@@ -3744,8 +3744,8 @@ mod tests {
     /// version held.
     ///
     /// Flips, run: `swap_list` leaving out the shelves' offers fails *"offered
-    /// before any use"*; the first cut's headings — an offer reading the
-    /// library's version, nothing evening them out — fail *"one heading per
+    /// before any use"*; headings where an offer reads the library's version,
+    /// nothing evening them out, fail *"one heading per
     /// kit"*, *Large* and *Small* at v5 beside *Badge* at v4.
     #[test]
     fn the_swap_list_offers_unused_kit_mains_under_one_heading() {

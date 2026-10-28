@@ -368,9 +368,22 @@ impl Plan {
     }
 }
 
+/// Whether `outer` holds `inner` and is the larger, so two equal boxes hold
+/// neither.
+fn holds(outer: kurbo::Rect, inner: kurbo::Rect) -> bool {
+    outer.x0 <= inner.x0
+        && outer.y0 <= inner.y0
+        && inner.x1 <= outer.x1
+        && inner.y1 <= outer.y1
+        && outer.area() > inner.area()
+}
+
 /// `ids` in reading order: rows (or columns, `!rows`) gathered by bands — a layer
-/// joins the first band its centre falls in — then each band read along. Layers
-/// with no bounds keep their order at the end.
+/// joins the first band its centre falls in — then each band read along. A layer
+/// whose box holds another's (a frame round its cards) would stretch a band over
+/// every row it spans, so it forms no band with them: those layers come first,
+/// read among themselves the same way. Layers with no bounds keep their order at
+/// the end.
 fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
     /// A row or column: the span of the layer that started it, and its layers
     /// with where each starts along it.
@@ -382,11 +395,29 @@ fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
     let (mut boxed, mut rest) = (Vec::new(), Vec::new());
     for l in layers {
         match l.bounds {
-            Some(r) if rows => boxed.push((l, (r.y0, r.y1), r.x0)),
-            Some(r) => boxed.push((l, (r.x0, r.x1), r.y0)),
+            Some(_) => boxed.push(l),
             None => rest.push(l),
         }
     }
+    // `holds` is strict, so some layer holds no other and each call reads fewer.
+    let (outer, inner): (Vec<&'a Layer>, Vec<&'a Layer>) = boxed.iter().copied().partition(|l| {
+        let r = l.bounds.unwrap_or_default();
+        boxed.iter().any(|o| o.bounds.is_some_and(|o| holds(r, o)))
+    });
+    let mut out = match outer.is_empty() {
+        true => Vec::new(),
+        false => by_bands(outer, rows),
+    };
+    let mut boxed: Vec<(&'a Layer, (f64, f64), f64)> = inner
+        .into_iter()
+        .filter_map(|l| {
+            let r = l.bounds?;
+            Some(match rows {
+                true => (l, (r.y0, r.y1), r.x0),
+                false => (l, (r.x0, r.x1), r.y0),
+            })
+        })
+        .collect();
     boxed.sort_by(|a, b| a.1.0.total_cmp(&b.1.0));
     let mut bands: Vec<Band<'a>> = Vec::new();
     for (l, (lo, hi), along) in boxed {
@@ -400,7 +431,6 @@ fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
             }),
         }
     }
-    let mut out = Vec::new();
     for mut band in bands {
         band.members.sort_by(|a, b| a.1.total_cmp(&b.1));
         out.extend(band.members.into_iter().map(|m| m.0));
@@ -1893,6 +1923,68 @@ mod tests {
             .map(|c| c.1)
             .collect();
         assert_eq!(got, ["a1", "d2", "b3", "e4", "c5", "f6"]);
+    }
+
+    /// A frame renamed with the grid inside it forms no band with its cards: it
+    /// comes first, and the cards still read row by row, or column by column.
+    ///
+    /// flip: `by_bands` banding every boxed layer, holders included → fails at the
+    /// left-to-right order, the frame's band swallowing both rows.
+    #[test]
+    fn a_frame_round_its_grid_does_not_swallow_the_rows() {
+        let (ctx, mut app) = app();
+        let s = &mut app.session;
+        let (frame, page) = (s.ids.mint(), s.page);
+        let mut ops = vec![Operation::CreateNode {
+            id: frame,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(300.0, 200.0),
+            },
+            transform: None,
+            name: Some("Grid".into()),
+        }];
+        // Made out of order, so the tree's order is not the answer.
+        let cards = [
+            ("BM", (100.0, 100.0)),
+            ("TR", (200.0, 0.0)),
+            ("TL", (0.0, 0.0)),
+            ("BR", (200.0, 100.0)),
+            ("TM", (100.0, 0.0)),
+            ("BL", (0.0, 100.0)),
+        ];
+        for (i, (name, at)) in cards.into_iter().enumerate() {
+            ops.push(Operation::CreateNode {
+                id: s.ids.mint(),
+                parent: frame,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(80.0, 80.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate(at)),
+                name: Some(name.into()),
+            });
+        }
+        assert!(s.commit(Transaction(ops)));
+        app.session.selection.set_one(frame);
+        let mut bx = opened(&ctx, &mut app, "", "[Name][Number]");
+        assert!(bx.s.inside, "one frame opens with its insides");
+        let names = |bx: &BatchRename| -> Vec<String> {
+            planned(&app, bx).changes.into_iter().map(|c| c.1).collect()
+        };
+        bx.s.order = Order::LeftToRight;
+        assert_eq!(
+            names(&bx),
+            ["Grid1", "TL2", "TM3", "TR4", "BL5", "BM6", "BR7"]
+        );
+        bx.s.order = Order::TopToBottom;
+        assert_eq!(
+            names(&bx),
+            ["Grid1", "TL2", "BL3", "TM4", "BM5", "TR6", "BR7"]
+        );
     }
 
     /// A name that would come out empty is kept and says so; it takes no number

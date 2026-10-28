@@ -387,7 +387,10 @@ document. The preview keeps the previous plan until the new one's first part lan
   The orders: *Layers order*
   (tree top to bottom, the default), *Layers order, reversed*, *Left to right* (rows: a layer joins
   the first band its centre falls in, bands taken top to bottom, each read left to right by left
-  edge) and *Top to bottom* (columns, the same way). Each page's run is ordered and the pages follow
+  edge) and *Top to bottom* (columns, the same way). A layer whose box holds another run layer's —
+  a frame round its cards, a background under a grid — forms no band with them, since its span
+  would swallow every row it covers: such layers come first, read among themselves the same way,
+  and the rest are banded without them. Each page's run is ordered and the pages follow
   the Pages list; the number runs on across pages. Only a layer Find matches takes a number, so a
   skipped one leaves no gap; a matched layer whose name already is its result keeps that number, so
   no two layers are given the same one.

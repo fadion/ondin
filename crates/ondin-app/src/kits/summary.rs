@@ -1,7 +1,6 @@
-//! 5A's extended summary (G21, D1038's *Kit updates*, built in §15 D1065's
-//! second amendment): what accepting
-//! the waiting kit updates would change, read off the update before it is
-//! taken — the components it rewrites, and the kits' variables and styles it
+//! The kit update notice's extended summary (§15 D1038's *Kit updates*, D1065):
+//! what accepting the waiting kit updates would change, read off the update
+//! before it is taken — the components it rewrites, and the kits' variables and styles it
 //! changes, adds and removes, each changed colour old → new and each changed
 //! number old → new, and how many layers each removal detaches.
 //!
@@ -53,7 +52,7 @@ pub(crate) struct KitSummary {
 }
 
 impl KitSummary {
-    /// The headline's counts (G21): components, variables, styles.
+    /// The headline's counts: components, variables, styles.
     pub(crate) fn counts(&self) -> (usize, usize, usize) {
         let all = || self.changed.iter().chain(&self.added).chain(&self.removed);
         let vars = all()
@@ -316,7 +315,7 @@ const MAX_ROWS: usize = 6;
 /// A row's height.
 const ROW_H: f32 = 20.0;
 
-/// The headline under a kit's name (G21): *2 components · 4 variables · 1
+/// The headline under a kit's name: *2 components · 4 variables · 1
 /// style*, the empty kinds left out.
 pub(crate) fn headline(k: &KitSummary) -> String {
     let (c, v, s) = k.counts();
@@ -535,7 +534,7 @@ mod tests {
         }
     }
 
-    /// **The summary names what the update changes** (G21): v2 turns `brand`
+    /// **The summary names what the update changes**: v2 turns `brand`
     /// white → navy, adds `gap` (Dot's corner) and removes `old` — which a layer
     /// on the consumer's page is bound to, and Badge's instance reads only as
     /// its main does. So: both mains changed, `brand` old → new, `gap` added

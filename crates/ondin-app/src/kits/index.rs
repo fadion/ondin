@@ -38,9 +38,9 @@ pub(crate) struct KitEntry {
     pub name: String,
     pub path: PathBuf,
     pub modified: u64,
-    /// The version it last published; 0 when it never has (3H).
+    /// The version it last published; 0 when it never has.
     pub version: u32,
-    /// The last publish's note, when it had one — the update notice shows it (5A).
+    /// The last publish's note, when it had one — the update notice shows it.
     pub note: Option<String>,
 }
 
@@ -109,7 +109,7 @@ pub(crate) fn kit_file<'a>(lib: &'a Library, id: &str) -> Option<&'a Entry> {
     })
 }
 
-/// A kit as a list heading names it (4F, 3I).
+/// A kit as a list heading names it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct KitHeading {
     /// The kit's id — what a list groups by, since two kits can share a name
@@ -123,7 +123,7 @@ pub(crate) struct KitHeading {
 
 /// Which kit a vendored main came from, as a list heading says it: the kit's name
 /// and, on the right, its version — or *unavailable* when the library cannot find
-/// it (4F, 3I). `None` for a main of the document's own.
+/// it. `None` for a main of the document's own.
 pub(crate) fn kit_heading(
     doc: &ondin_core::Document,
     library: &[KitEntry],
@@ -160,7 +160,7 @@ pub(crate) fn kit_heading(
 pub(crate) enum Load {
     /// Asked for; the worker has it.
     Pending,
-    /// Loaded. `None` when the kit has published nothing (3H).
+    /// Loaded. `None` when the kit has published nothing.
     Ready(Option<Arc<Published>>),
     /// The file could not be read or loaded.
     Failed,

@@ -58,7 +58,7 @@ pub struct Origin {
     pub version: u32,
     /// The kit's name when this copy was vendored — **on a vault main's top
     /// node only**, `None` below it (§15 D1014). What the picker calls a kit the
-    /// library can no longer find (3I): the id alone names nothing a person
+    /// library can no longer find: the id alone names nothing a person
     /// recognises, and the kit is exactly what is missing. A label, so not part
     /// of [`Self::key`].
     pub name: Option<String>,
@@ -212,7 +212,7 @@ pub struct Published {
     /// pages (§15 D1011 (4)). Absent for one outside any frame.
     groups: Vec<(NodeId, String)>,
     /// The kit's typed name at the publish, which each vendored main records
-    /// ([`Origin::name`]) so a consumer can still say which kit it lost (3I).
+    /// ([`Origin::name`]) so a consumer can still say which kit it lost.
     name: Option<String>,
 }
 
@@ -547,7 +547,7 @@ fn frozen_tables<'a>(
     (variables, styles)
 }
 
-/// What a publish would change (§5.3e, 2A–2C): the kit's mains and sets against
+/// What a publish would change (§5.3e): the kit's mains and sets against
 /// what it last published, by id — added, changed, removed. Never published,
 /// every one is added.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -560,7 +560,7 @@ pub struct Changes {
     /// consumers keep them as local copies (D1011 (3)).
     pub removed: Vec<NodeId>,
     /// The kit's name changed since its last publish — what a consumer calls it
-    /// once the kit is lost (3I), so worth a publish though no component changed.
+    /// once the kit is lost, so worth a publish though no component changed.
     pub renamed: bool,
     /// The published mains' order changed — the order a consumer's picker lists
     /// them in, so worth a publish as the name is: §15 D1015 counts what changes
@@ -703,7 +703,7 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
     out
 }
 
-/// Publish `doc` as a kit (§5.3e, 2B): freeze it, bump its mark's version, stamp
+/// Publish `doc` as a kit (§5.3e): freeze it, bump its mark's version, stamp
 /// `date` and `note`, and keep the frozen copy beside the working document. The
 /// new version, or `None` when the document is not a kit or has nothing to
 /// publish.
@@ -1331,7 +1331,7 @@ pub fn relink(nodes: &mut [Node], map: &FxHashMap<NodeId, NodeId>) {
 /// and which it made local.
 #[derive(Clone, Debug)]
 pub struct Update {
-    /// One transaction for the whole kit — undone in one step (5B).
+    /// One transaction for the whole kit — undone in one step.
     pub tx: Transaction,
     /// The vault mains rewritten to the new publish, by their id here.
     pub updated: Vec<NodeId>,
@@ -1349,7 +1349,7 @@ pub struct Update {
     /// detached by the commit, and the caller says so.
     pub removed: Vec<NodeId>,
     /// The kits' variables the update added or rewrote, and those it removed —
-    /// their users detached, values kept (§15 D1064, 5A).
+    /// their users detached, values kept (§15 D1064).
     pub vars_changed: Vec<crate::variable::VarId>,
     pub vars_removed: Vec<crate::variable::VarId>,
     /// The same for the kits' styles.
@@ -1358,7 +1358,7 @@ pub struct Update {
 }
 
 /// Bring every main this document vendored from `kit` up to `published`, at
-/// `version` (§5.3e, 5B; §15 D1016) — **a diff plus an ordinary commit**.
+/// `version` (§5.3e; §15 D1016) — **a diff plus an ordinary commit**.
 ///
 /// Each vendored main is rewritten in place to match its node in the new
 /// publish: a field that differs is set, a layer the publish added is inserted, a
@@ -1389,7 +1389,7 @@ pub fn update(
     update_all(doc, ids, page, &[(kit, version, published)])
 }
 
-/// [`update`] for several kits as **one** transaction — *Accept all* (5B), one
+/// [`update`] for several kits as **one** transaction — *Accept all*, one
 /// undo step. Built on one scratch, each kit against the state the ones before
 /// it leave, so the commit's propagation runs once over the whole of it.
 pub fn update_all(
@@ -1749,7 +1749,7 @@ fn update_in_order(
     })
 }
 
-/// ***Make local*** (§5.3e, 4D/4E, 6B; §15 D1011 (3), D1016): reveal each of
+/// ***Make local*** (§5.3e; §15 D1011 (3), D1016): reveal each of
 /// `mains` — children of the vault — as an ordinary main of the document, last
 /// on `page`, every origin in it cleared. It no longer follows its kit.
 ///

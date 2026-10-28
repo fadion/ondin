@@ -1,4 +1,4 @@
-//! A kit instance's chrome (§5.3e, 4A–4E; §15 D1016): the Component card's
+//! A kit instance's chrome (§5.3e; §15 D1016): the Component card's
 //! source line — *Atlas kit · v8 · v9 waiting* — the ⋯ menu's kit rows (drawn by
 //! `panels::component`'s reset row from [`KitLine`]), *Make local*'s
 //! confirmation, *Go to main in the kit*, and the kit's link back to the
@@ -56,7 +56,7 @@ impl OndinApp {
         })
     }
 
-    /// *Go to main in the kit* (4D): open the kit with the selected instance's
+    /// *Go to main in the kit*: open the kit with the selected instance's
     /// main selected there, and leave its top bar a link back here (D1011 (7)).
     pub(crate) fn go_to_kit_main(&mut self) {
         let doc = &self.session.doc;
@@ -170,7 +170,7 @@ impl OndinApp {
         (instances, nested_in_kit)
     }
 
-    /// *Make Button local?* (4E): reveal the vendored main as the document's own,
+    /// *Make Button local?*: reveal the vendored main as the document's own,
     /// every instance and override as it was, undoable.
     pub(crate) fn make_local_dialog(&mut self, ctx: &egui::Context) {
         let Some(top) = self.making_local else {
@@ -320,7 +320,7 @@ pub(crate) fn forked_note((vars, styles): (usize, usize), kit_frames: usize) -> 
     out
 }
 
-/// The card's source line under the main's name (4A, 4B): the kit glyph, *Atlas
+/// The card's source line under the main's name: the kit glyph, *Atlas
 /// kit · v8*, and *· v9 waiting* when an update waits — no badge, no colour.
 pub(crate) fn source_line(ui: &mut egui::Ui, k: &KitLine) {
     ui.horizontal(|ui| {

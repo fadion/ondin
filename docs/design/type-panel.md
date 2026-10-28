@@ -32,8 +32,8 @@ could not tell which is the real setting. Horizontal and vertical alignment are 
 - These generated sections sit at the bottom, so changing family does not move the controls above them.
 - Character tab order: Case, Decoration, Baseline & word spacing, Optical size, Language, Axes, OpenType.
 
-**Sections are 15 apart.** The design uses 10. Against the in-section gap of 5, a 3:1 ratio groups;
-2:1 does not.
+**Sections are 15 apart**, not 10. Against the in-section gap of 5, a 3:1 ratio groups; 2:1 does
+not.
 
 **The body scrolls when it has to.** A variable font, with decoration and Manual `opsz` showing, can
 push the Character tab past 700pt.

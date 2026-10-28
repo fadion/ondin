@@ -166,7 +166,7 @@ comes from the committed document.
 
 - **Rows.** One per effect: kind glyph, name, one headline number and ✕, with the eye outside the field. The headline is a shadow's alpha %, a blur's radius, or the count of off-neutral channels for Filters. `+` adds a drop shadow.
 - **Order.** Model order, first at the top: effects are a pipeline (§6.4). Fill draws upside down because paints stack in space.
-- **Popover.** The design's card with its title replaced by a kind combo; retyping carries shared fields over (`EffectKind::retyped`). It sits in the shared popover lane and dismisses through `panels::dismissed_by_click`.
+- **Popover.** A card whose title is a kind combo; retyping carries shared fields over (`EffectKind::retyped`). It sits in the shared popover lane and dismisses through `panels::dismissed_by_click`.
 - **Shadow colour** is a Fill row (chip, hex, %) on `PaintSlot::Effect(i)`; the % *is* the alpha.
 - **A Filters row** uses `ui::value_field_metered`, a bar growing from the middle, plus a per-channel reset. Ranges are 0…200%, symmetric about the 100% neutral, so the meter reads `factor − 1.0`.
 - Opens on a layer with effects and shuts on one without, through its own `synced_selection` *Effects* entry.

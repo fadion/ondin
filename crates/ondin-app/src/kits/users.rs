@@ -1,4 +1,4 @@
-//! How many documents use a kit — the count *Stop sharing* says (§5.3e, 1D; §15
+//! How many documents use a kit — the count *Stop sharing* says (§5.3e; §15
 //! D1021).
 //!
 //! **Read by loading every file, on a thread of its own** — the maintainer's
@@ -110,7 +110,7 @@ fn uses(path: &std::path::Path, kit: &str) -> bool {
     })
 }
 
-/// The dialog's first sentence (1D): how many documents use the kit and what
+/// The dialog's first sentence: how many documents use the kit and what
 /// happens to them — the count's own sentence while it is still arriving.
 pub(crate) fn sentence(name: &str, count: Option<usize>) -> String {
     match count {

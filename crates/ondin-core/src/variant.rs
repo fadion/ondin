@@ -2263,7 +2263,7 @@ pub fn slot_is_shown(doc: &Document, slot: NodeId) -> bool {
 }
 
 /// The nested instances inside `owner`'s main — its first variant's, for a set —
-/// that a showing could take (4L): every layer linked straight to a main and not
+/// that a showing could take: every layer linked straight to a main and not
 /// itself inside such a layer, in layers order, each with whether it is shown.
 pub fn nested_slots(doc: &Document, owner: NodeId) -> Vec<(NodeId, bool)> {
     let main = match doc.get(owner) {
@@ -2290,11 +2290,10 @@ pub fn nested_slots(doc: &Document, owner: NodeId) -> Vec<(NodeId, bool)> {
     out
 }
 
-/// Show or stop showing the slot `slot` on its owner's instances (4K) — and, in
+/// Show or stop showing the slot `slot` on its owner's instances — and, in
 /// a set, the slot at the same name path in **every** variant, so the switch
-/// means what 4K's caption says, *"appears on every Button"* (the session's: a
-/// showing per variant would make a set's instances disagree about a slot they
-/// all hold). The owner's one `PropKind::Nested` is made on the first showing
+/// means what its caption says, *"appears on every Button"*: a showing per
+/// variant would make a set's instances disagree about a slot they all hold. The owner's one `PropKind::Nested` is made on the first showing
 /// and goes with the last. `None` for a slot outside a main or a change that
 /// changes nothing.
 pub fn set_shown(

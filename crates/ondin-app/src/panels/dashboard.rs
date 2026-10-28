@@ -2131,7 +2131,7 @@ impl OndinApp {
                 egui::Align2::LEFT_TOP,
             );
         }
-        // The star sits on the cover (`top:7px;right:7px`) so a grid can be scanned for
+        // The star sits on the cover's top-right corner so a grid can be scanned for
         // it. Outline, as the bundled Phosphor has only Regular; the gold carries the state.
         if self.is_starred(entry) {
             let at = egui::pos2(thumb.right() - 14.0, thumb.top() + 14.0);

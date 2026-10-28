@@ -1,4 +1,4 @@
-//! *Kits used…* (§5.3e, 6A) and *Make all local* (6B; §15 D1016).
+//! *Kits used…* (§5.3e) and *Make all local* (§15 D1016).
 //!
 //! From the document menu: one row per kit the document vendors from, with where
 //! it lives, how many instances use it, and its status — *v9 waiting*, *Up to
@@ -30,7 +30,7 @@ pub(crate) struct Used {
 }
 
 impl Used {
-    /// The row's status on the right (6A).
+    /// The row's status on the right.
     pub(crate) fn status(&self) -> String {
         match self.latest {
             None => "Unavailable".into(),
@@ -109,7 +109,7 @@ impl OndinApp {
         out
     }
 
-    /// The *Kits used* dialog (6A), while it is open.
+    /// The *Kits used* dialog, while it is open.
     pub(crate) fn kits_used_dialog(&mut self, ctx: &egui::Context) {
         if !self.kits_used_open {
             return;
@@ -237,7 +237,7 @@ impl OndinApp {
         self.make_all_local_dialog(ctx);
     }
 
-    /// *Make all Marketing components local?* (6B): the whole kit at once, every
+    /// *Make all Marketing components local?*: the whole kit at once, every
     /// instance and override kept, undoable. The kit then leaves the list and the
     /// picker's used group.
     pub(crate) fn make_all_local_dialog(&mut self, ctx: &egui::Context) {

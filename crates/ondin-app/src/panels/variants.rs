@@ -488,7 +488,7 @@ impl SwapTarget {
 }
 
 /// A main the swap picker offers: what it swaps to, its name, and the kit it
-/// comes from as a heading — or `None` for one of the document's own (§5.3e, 4F).
+/// comes from as a heading — or `None` for one of the document's own (§5.3e).
 type SwapOption = (SwapTarget, String, Option<KitHeading>);
 
 /// The heading key of a swap property's preferred mains, which no kit id can be.
@@ -819,7 +819,7 @@ impl OndinApp {
         renamed
     }
 
-    /// The **Variants** card's body for the set `set` (3A–3C): its name and
+    /// The **Variants** card's body for the set `set`: its name and
     /// instance count, a clash note, each property with its values as chips, and the
     /// verbs that add to it.
     pub(super) fn set_body(&mut self, ui: &mut egui::Ui, set: NodeId) {
@@ -1119,8 +1119,8 @@ impl OndinApp {
         }
     }
 
-    /// The confirmation for deleting a value variants use (§15 D996, replacing
-    /// 3C's warning inside the chip's menu): what goes and what detaches, then
+    /// The confirmation for deleting a value variants use (§15 D996), a dialog
+    /// rather than a warning inside the chip's menu: what goes and what detaches, then
     /// *Cancel* and *Delete*. `Escape`, the backdrop and the ✕ cancel — the safe
     /// arm, §15 D377's reading and the close confirmation's (§15 D525) — and a
     /// value that is no longer there by the time *Delete* is pressed deletes
@@ -1190,7 +1190,7 @@ impl OndinApp {
         }
     }
 
-    /// A variant's rows inside the Component card (3D, 3E): one dropdown per
+    /// A variant's rows inside the Component card: one dropdown per
     /// property — choosing a value moves this main to that combination, a taken
     /// one showing the clash rather than being refused — and the clash note.
     pub(super) fn variant_rows(&mut self, ui: &mut egui::Ui, main: NodeId) {
@@ -1277,7 +1277,7 @@ impl OndinApp {
     }
 
     /// The rows an instance — or several sharing one owner — gets between the
-    /// card's heading and *Reset all* (4A–4E): a dropdown per variant property,
+    /// card's heading and *Reset all*: a dropdown per variant property,
     /// switching the instances (a missing combination greyed, with the reason),
     /// then each component property, with its override mark — and then **the
     /// nested instances it shows**, each under a sub-heading of its own with the
@@ -1296,10 +1296,10 @@ impl OndinApp {
     /// line naming what hides it gone since §15 D1000); its dot still shows, and
     /// *Reset all* and ⋯ still reach it.
     ///
-    /// **No Swap row inside a group** (4O): the copy's swap is an outer swap
+    /// **No Swap row inside a group**: the copy's swap is an outer swap
     /// property's row where one drives it, and otherwise is made from the copy's
-    /// own card (4G) — the group holds the copy's own properties alone, 4O's
-    /// *Badge · Count* drawn with *Count* and *Dot only* and nothing else. The
+    /// own card — the group holds the copy's own properties alone, a
+    /// *Badge · Count* group drawn with *Count* and *Dot only* and nothing else. The
     /// main is named as its set where it is a variant — *Icon · Arrow right*, not
     /// the variant's derived *Regular* (4M).
     fn shown_groups(&mut self, ui: &mut egui::Ui, roots: &[NodeId]) {
@@ -1402,7 +1402,7 @@ impl OndinApp {
         }
     }
 
-    /// *Chosen by Icon* (4G, 4K): a nested instance whose main a swap property
+    /// *Chosen by Icon*: a nested instance whose main a swap property
     /// sets says which, the main's own property inside a main, and *on Sign up*
     /// after it for a copy inside an outer instance. Nothing for an instance no
     /// swap property drives.
@@ -1445,7 +1445,7 @@ impl OndinApp {
         });
     }
 
-    /// *Show properties on instances* (4K): on a nested instance inside a main,
+    /// *Show properties on instances*: on a nested instance inside a main,
     /// the switch that shows its own properties on every instance of the main —
     /// every variant's, in a set ([`variant::set_shown`]) — with a caption naming
     /// them. Nothing for an instance that is not a slot inside a main.
@@ -1516,7 +1516,7 @@ impl OndinApp {
                 .map(|n| n.name().to_string())
                 .unwrap_or_default()
         };
-        // The library's kits, for the swap pickers' headings (4F): which kit a
+        // The library's kits, for the swap pickers' headings: which kit a
         // vendored main is from, and whether the library can still find it.
         let kits = crate::kits::index::kits_in(&self.library, doc.meta().id.as_deref());
         // And their published states, for the mains a swap could vendor (§15
@@ -2131,7 +2131,7 @@ impl OndinApp {
         if self.commit_edit(Transaction(ops))
             && let Some(doc) = self.session.doc.meta().id.clone()
         {
-            // A kit used now, first in the insert picker's order (3A).
+            // A kit used now, first in the insert picker's order.
             let order = self.library.local.kit_use.entry(doc).or_default();
             order.retain(|k| *k != s.kit.id);
             order.insert(0, s.kit.id.clone());
@@ -2139,9 +2139,9 @@ impl OndinApp {
         }
     }
 
-    /// The **Properties** card on a main or a set (3G, 3H): each property's kind,
+    /// The **Properties** card on a main or a set: each property's kind,
     /// name and default, and what it is bound to; a row's name renames it and its ×
-    /// deletes it. **One is added from the header's `+`** (§15 D1005, 3H), a menu
+    /// deletes it. **One is added from the header's `+`** (§15 D1005), a menu
     /// of *Boolean*, *Text*, an *Instance swap* for each nested instance no swap
     /// property drives, and on a lone main *Variant*, which wraps it in a set.
     pub(super) fn inspector_properties(&mut self, ui: &mut egui::Ui) {
@@ -2162,7 +2162,7 @@ impl OndinApp {
         if owner != id {
             return;
         }
-        // The showing is listed apart, under *Shown from nested* (4L).
+        // The showing is listed apart, under *Shown from nested*.
         let props: Vec<Keyed<Property>> = doc
             .get(owner)
             .map(|o| o.props().to_vec())
@@ -2230,7 +2230,7 @@ impl OndinApp {
                 }
                 property_row(ui, doc, owner, p, &mut edits);
             }
-            // **Shown from nested** (4L): the nested instances whose properties
+            // **Shown from nested**: the nested instances whose properties
             // the main's instances show, with what they show and a − to stop — a
             // click on a name selects it. **Only those, and only when there are
             // any** (§15 D1000): a heading over a list of *Not shown* rows read
@@ -2242,7 +2242,7 @@ impl OndinApp {
                 for slot in &shown {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
-                        // The instance's own mark (§15 D1005, 4L): the swap glyph
+                        // The instance's own mark (§15 D1005): the swap glyph
                         // is a swap property's, and this row is not one.
                         ui.label(
                             egui::RichText::new(icon::HEXAGON)
@@ -2431,7 +2431,7 @@ impl OndinApp {
         }
     }
 
-    /// The binding line on a layer inside a main (3J–3L, drawn as one line): its
+    /// The binding line on a layer inside a main, drawn as one line: its
     /// visibility, and for text its content, each a dropdown of the owner's
     /// properties of that kind — *None*, each property, and *New property*.
     pub(super) fn bind_line(&mut self, ui: &mut egui::Ui, node: NodeId) {
@@ -2595,8 +2595,8 @@ fn rebind(
     next
 }
 
-/// The properties a shown nested instance `slot` brings to the card (4K's
-/// caption, 4L's rows): its main's set's variant properties, then its own
+/// The properties a shown nested instance `slot` brings to the card (the
+/// switch's caption, the *Shown from nested* rows): its main's set's variant properties, then its own
 /// component properties — what [`OndinApp::instance_rows`] draws for it.
 fn shown_names(doc: &ondin_core::Document, slot: NodeId) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
@@ -2682,8 +2682,7 @@ fn property_row(
                 match p.kind {
                     PropKind::Boolean => "visibility",
                     PropKind::Text => "content",
-                    // *main*, the field a swap sets (§15 D1005, 3G's
-                    // *Icon · main*), where it read *instance*.
+                    // *main*, the field a swap sets (§15 D1005): *Icon · main*.
                     PropKind::Swap => "main",
                     PropKind::Nested => "shown",
                 }

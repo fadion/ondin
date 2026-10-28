@@ -1,4 +1,4 @@
-//! Publishing a kit (§5.3e, 2A–2D; §15 D1015).
+//! Publishing a kit (§5.3e; §15 D1015).
 //!
 //! A kit's top bar carries *Publish N* — the components changed since the last
 //! publish, the working document frozen against the published state
@@ -14,7 +14,7 @@ use eframe::egui;
 use ondin_core::kit::Changes;
 use ondin_core::{Document, NodeId};
 
-/// How many components a first publish lists before *+ N more* (2C).
+/// How many components a first publish lists before *+ N more*.
 const FIRST_LISTED: usize = 6;
 
 /// The publish dialog's state while it is open.
@@ -42,11 +42,11 @@ impl OndinApp {
         Some(c)
     }
 
-    /// *Publish N* in a kit's top bar (2A), with the count; hovering gives the
+    /// *Publish N* in a kit's top bar, with the count; hovering gives the
     /// breakdown, and at 0 it stays, disabled, saying why.
     ///
-    /// **The accent button the library's *New file* is** (§15 D1025, the
-    /// maintainer's call over 2A's neutral): publishing is the one thing a kit's
+    /// **The accent button the library's *New file* is** (§15 D1025), not a
+    /// neutral one: publishing is the one thing a kit's
     /// bar is for. Disabled, it falls back to the neutral ground, so a kit with
     /// nothing to send does not wear the colour of an action.
     pub(crate) fn publish_button(&mut self, ui: &mut egui::Ui) {
@@ -143,7 +143,7 @@ impl OndinApp {
     }
 
     /// Open the publish dialog — *Publish N*, *Publish kit…*, `Ctrl+Alt+P`. With
-    /// nothing to publish it says so instead (2D).
+    /// nothing to publish it says so instead.
     pub(crate) fn open_publish(&mut self) {
         // The one seam for the button, the menu row and the chord: a publish
         // under a live text session froze the main without what was typed and
@@ -164,7 +164,7 @@ impl OndinApp {
         self.publishing = Some(PublishDraft::default());
     }
 
-    /// The publish dialog (2B, 2C), while it is open.
+    /// The publish dialog, while it is open.
     pub(crate) fn publish_dialog(&mut self, ctx: &egui::Context) {
         if self.publishing.is_none() {
             return;
@@ -302,7 +302,7 @@ impl OndinApp {
         }
     }
 
-    /// Publish: freeze, bump, stamp, save — and say so (2D).
+    /// Publish: freeze, bump, stamp, save — and say so.
     pub(crate) fn publish_now(&mut self, note: String) {
         // `open_publish` finished it; this is the verb, and any other caller.
         self.finish_text_first();
@@ -503,7 +503,7 @@ mod tests {
     }
 
     /// **A kit publishes from its dialog, and what it published is in the file**
-    /// (§5.3e, 2A–2D; §15 D1015). Never published, the count is every component
+    /// (§5.3e; §15 D1015). Never published, the count is every component
     /// and the dialog's verb names it; publishing bumps the mark to v1, stamps it,
     /// keeps the note, saves — so the library scan reads v1 from the file's first
     /// 4 KB — and leaves nothing to publish, which the next ask says instead of

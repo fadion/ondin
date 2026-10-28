@@ -151,7 +151,7 @@ pub fn move_to_project(
 }
 
 /// Make a closed document a kit, or stop it sharing — the card menu's *Make a
-/// kit* / *Stop sharing as kit* (§5.3e, 1B, 1D). The editor's verbs
+/// kit* / *Stop sharing as kit* (§5.3e). The editor's verbs
 /// (`OndinApp::make_kit`, `OndinApp::stop_sharing_kit`) do the same to the
 /// open document.
 ///

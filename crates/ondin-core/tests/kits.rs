@@ -411,7 +411,7 @@ fn a_transitive_main_keeps_the_kit_it_came_from() {
 /// **A third kit's main never takes the name of the kit it came through.** K
 /// published with no name — a pre-library file has none — and L, *Atlas*, nests
 /// K's main in its own; a consumer's copy of K's main must not read *Atlas*,
-/// which is what the picker would then call K once K is lost (3I).
+/// which is what the picker would then call K once K is lost.
 ///
 /// Flip, run: `vendor`'s `o.kit == kit` guard removed fails the assertion, the
 /// badge's copy named *Atlas*.
@@ -1100,7 +1100,7 @@ fn a_copy_of_a_kit_instance_is_an_instance_without_an_origin() {
     assert!(d.get(dup).unwrap().origin().is_none());
 }
 
-/// **The change count is what consumers would receive** (§5.3e, 2A): nothing
+/// **The change count is what consumers would receive** (§5.3e): nothing
 /// right after a publish; nothing for moving a main across the kit's canvas,
 /// which no consumer's copy can see; a main whose layer changed is *changed*, a
 /// new one *added*, a deleted one *removed*. Publishing bumps the version, stamps
@@ -1337,7 +1337,7 @@ fn accept(d: &mut Document, ids: &mut IdSource, k: &Kit) -> (kit::Update, Transa
     (u, undo)
 }
 
-/// **An update is a diff plus an ordinary commit** (§5.3e, 5B; §15 D1016): the
+/// **An update is a diff plus an ordinary commit** (§5.3e; §15 D1016): the
 /// kit changes Icon's dot and gives Icon a second layer; accepting the new
 /// publish rewrites the vendored Icon in place, and the main-edit passes carry
 /// it to the instances — the one that matched the main follows, **the one with

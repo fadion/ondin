@@ -1,4 +1,4 @@
-//! Kit updates in a consumer (§5.3e, 5A–5C; §15 D1016).
+//! Kit updates in a consumer (§5.3e; §15 D1016).
 //!
 //! A document notices a newer publish of a kit it vendors from by comparing what
 //! the library scan says each kit last published (`meta.kit.version`, read from
@@ -34,7 +34,7 @@ pub(crate) struct Waiting {
     pub mains: usize,
     /// How many instances of them this document has.
     pub instances: usize,
-    /// Told *Later* for this version (5C).
+    /// Told *Later* for this version.
     pub later: bool,
 }
 
@@ -238,7 +238,7 @@ impl OndinApp {
         out
     }
 
-    /// The pill beside the save state (5A, 5C): *N kit updates*, or after
+    /// The pill beside the save state: *N kit updates*, or after
     /// *Later* its glyph and count; its popover summarises them.
     pub(crate) fn kit_update_pill(&mut self, ui: &mut egui::Ui) {
         let open = self.open_menu == TopMenu::KitUpdates;
@@ -310,7 +310,7 @@ impl OndinApp {
         let ready = waiting
             .iter()
             .all(|w| !matches!(self.kit_shelf.load(&w.kit.id), Some(Load::Pending)));
-        // What accepting would change (G21) — once every publish is loaded.
+        // What accepting would change — once every publish is loaded.
         let summary = if ready {
             self.update_summary(&waiting)
         } else {
@@ -336,7 +336,7 @@ impl OndinApp {
             }
             let instances: usize = waiting.iter().map(|w| w.instances).sum();
             ui.add_space(4.0);
-            // The layers the kits' removals detach keep their values (G21).
+            // The layers the kits' removals detach keep their values.
             if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
                 && n > 0
             {
@@ -384,7 +384,7 @@ impl OndinApp {
     }
 
     /// Open the update popover from elsewhere than its pill — a kit header's
-    /// *v8 → v9* in the browser (G22) — asking the shelf for the publishes its
+    /// *v8 → v9* in the variables browser — asking the shelf for the publishes its
     /// summary and *Accept all* read, as the pill's click does.
     pub(crate) fn open_kit_updates(&mut self) {
         if self.open_menu == TopMenu::KitUpdates {
@@ -396,7 +396,7 @@ impl OndinApp {
         self.toggle_menu(TopMenu::KitUpdates);
     }
 
-    /// What accepting the `waiting` kits would change (G21), from a dry run of
+    /// What accepting the `waiting` kits would change, from a dry run of
     /// `kit::update_all` over the shelf's publishes — kept until the document
     /// or a waiting version moves. `None` while a publish is not loaded, or
     /// when the dry run fails (the accept then says why).
@@ -435,7 +435,7 @@ impl OndinApp {
         s
     }
 
-    /// *Later* (5C): remember the versions waiting now, so the pill shrinks and
+    /// *Later*: remember the versions waiting now, so the pill shrinks and
     /// stays shrunk until a kit publishes past them.
     pub(crate) fn later_kit_updates(&mut self) {
         let Some(doc) = self.session.doc.meta().id.clone() else {
@@ -450,7 +450,7 @@ impl OndinApp {
     }
 
     /// Accept the waiting updates — every kit's, or only `only`'s — in one
-    /// transaction (5B). Mains a kit removed are made local and stacked at the
+    /// transaction. Mains a kit removed are made local and stacked at the
     /// top right of the content (D1011 (3)); the toast says what changed and that
     /// overrides were kept, and names `Ctrl+Z` (D981 (d): toasts are text).
     pub(crate) fn accept_kit_updates(&mut self, only: Option<&str>) {
@@ -604,7 +604,7 @@ impl OndinApp {
                 plural(*n)
             );
         }
-        // And the kits' variables and styles (5A's counts, §15 D1065): what came
+        // And the kits' variables and styles (the notice's counts, §15 D1065): what came
         // new or changed, and what the kit removed — its users keeping the values.
         let tokens = |vars: usize, styles: usize| match (vars, styles) {
             (0, 0) => None,
@@ -684,8 +684,8 @@ pub(crate) fn stack_local(
 }
 
 /// One kit in the popover: its name and *v8 → v9*, how many components, and
-/// its publish note (5A) — and, once the dry run has read it, what the update
-/// changes (G21): the headline's counts and the *Changed*, *Added* and
+/// its publish note — and, once the dry run has read it, what the update
+/// changes: the headline's counts and the *Changed*, *Added* and
 /// *Removed* rows (`kits::summary`).
 fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::KitSummary>) {
     ui.horizontal(|ui| {
@@ -919,7 +919,7 @@ mod tests {
     }
 
     /// **A newer publish waits, *Later* quiets it, *Accept all* takes it in one
-    /// step** (§5.3e, 5A–5C; §15 D1016). The kit re-publishes with its dot
+    /// step** (§5.3e; §15 D1016). The kit re-publishes with its dot
     /// changed; the consumer sees one kit waiting, v4 → v5, with the note; *Later*
     /// keeps it waiting but quiet; *Accept all* rewrites the vendored main and the
     /// instance follows, nothing waits, the toast says so, and one undo takes it
@@ -1093,7 +1093,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A kit instance's card says where its main lives** (4A, 4B): *Atlas kit
+    /// **A kit instance's card says where its main lives**: *Atlas kit
     /// · v4*, and *· v5 waiting* once the kit publishes again — painted, read off
     /// the frame. Its own *Accept kit updates* takes its kit **with nothing loaded
     /// beforehand**: the accept reads the kit's file itself when the shelf has
@@ -1153,7 +1153,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ***Make local* from the card** (4D/4E): the vendored main is revealed down
+    /// ***Make local* from the card**: the vendored main is revealed down
     /// the right of the content, the instance still linked, the toast saying
     /// where; one undo. And *Go to main in the kit* opens the kit with the main
     /// selected there and leaves the way back, which leaving the kit ends.
@@ -1201,7 +1201,7 @@ mod tests {
     }
 
     /// ***Kits used…* lists each kit with its status, and *Make all local* empties
-    /// it** (§5.3e, 6A/6B): *Up to date · v4*, then *v5 waiting* once the kit
+    /// it** (§5.3e): *Up to date · v4*, then *v5 waiting* once the kit
     /// publishes, then *Unavailable* — still named, from what its copies recorded —
     /// once the file is gone; the dialog paints its title and the kit; making the
     /// kit's components local takes it off the list.

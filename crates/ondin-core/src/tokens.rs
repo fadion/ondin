@@ -728,7 +728,7 @@ pub(crate) fn plan<'a>(
     }
 
     // An update's removals: what this document holds of the kit and the
-    // publish no longer has — detached from every user, values kept (5A).
+    // publish no longer has — detached from every user, values kept.
     if let Some(kit) = sync {
         let kept_v: FxHashSet<VarId> = plan.vars.values().copied().collect();
         plan.removed_vars = t

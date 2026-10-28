@@ -35,11 +35,11 @@ pub struct LocalIndex {
     /// stale query is a string that refers to nothing.
     pub recent_searches: Vec<String>,
     /// For each document, the kits it inserted from here, most recent first —
-    /// the insert picker's last-use order (§5.3e, 3E; §15 D1014). Local for
+    /// the insert picker's last-use order (§5.3e; §15 D1014). Local for
     /// `opened`'s reason.
     pub kit_use: HashMap<String, Vec<String>>,
     /// For each document, the kit versions its update notice was told *Later*
-    /// for; a newer publish brings the notice back (§5.3e, 5C; §15 D1016).
+    /// for; a newer publish brings the notice back (§5.3e; §15 D1016).
     pub kit_later: HashMap<String, HashMap<String, u32>>,
     /// For each document, the page it was last left on here (a page root's wire
     /// id), so it reopens there (`crate::pages`). Local for `opened`'s reason:

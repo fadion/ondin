@@ -42,7 +42,7 @@ impl OndinApp {
 
     /// This document's kit mark, when it is a kit that is sharing — what the top
     /// bar's tag and the menu's kit rows ask. A mark that stopped sharing is kept
-    /// for its version (1D) and answers `None` here.
+    /// for its version and answers `None` here.
     pub(crate) fn shared_kit(&self) -> Option<&KitMark> {
         self.session
             .doc
@@ -52,7 +52,7 @@ impl OndinApp {
             .filter(|k| k.is_shared())
     }
 
-    /// The document's title as the **document menu's head** (§5.3e, 1A) — the
+    /// The document's title as the **document menu's head** (§5.3e) — the
     /// caret beside the name.
     ///
     /// ⚠️ **The menu holds only rows whose verbs exist**: *Rename*, *Duplicate* and
@@ -98,7 +98,7 @@ impl OndinApp {
         };
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
             const H: f32 = crate::ui::MENU_ITEM_H;
-            // The document's own verbs, above the kit's (1A).
+            // The document's own verbs, above the kit's.
             if item(ui, Item::VersionHistory).clicked() {
                 app.open_menu = TopMenu::None;
                 app.versions_open = true;
@@ -106,7 +106,7 @@ impl OndinApp {
             crate::ui::menu_sep(ui);
             if shared {
                 // *Publish kit…*, disabled with its reason when nothing would go
-                // out (2D).
+                // out.
                 let row = crate::ui::MenuRow {
                     accel: Some(if publishable {
                         "Ctrl+Alt+P"
@@ -121,14 +121,14 @@ impl OndinApp {
                     app.open_publish();
                 }
             }
-            // *Kits used…* (6A), between the publish and the mark (7A) — offered
+            // *Kits used…*, between the publish and the mark — offered
             // when the document vendors from any kit.
             if uses_kits && item(ui, Item::KitsUsed).clicked() {
                 app.open_menu = TopMenu::None;
                 app.kits_used_open = true;
             }
             if shared {
-                // Asks first (1D), as the card's row does — so an ellipsis, as on
+                // Asks first, as the card's row does — so an ellipsis, as on
                 // this menu's other dialog rows.
                 if item(ui, Item::StopSharingKit).clicked() {
                     app.unsharing_kit = Some(None);
@@ -149,7 +149,7 @@ impl OndinApp {
         });
     }
 
-    /// *Make this a kit* (§5.3e, 1A): write the mark and save. One click and safe —
+    /// *Make this a kit* (§5.3e): write the mark and save. One click and safe —
     /// nothing is shared until the first publish.
     ///
     /// **An unfiled document is given its identity here** (§15 D1013, D1010's
@@ -158,10 +158,10 @@ impl OndinApp {
     /// is minted the way filing mints one (`library::store::file_document`), and
     /// the save that follows files a document that has no path yet. A mark that
     /// stopped sharing is turned back on with its version kept, so a re-made kit
-    /// continues from its last publish (1D).
+    /// continues from its last publish.
     pub(crate) fn make_kit(&mut self) {
         // The save below is of `session.doc`, which holds no typed text until
-        // the session ends (`[X3.2-L5-01]`).
+        // the session ends.
         self.finish_text_first();
         let mut meta = self.session.doc.meta().clone();
         if meta.id.is_none() {
@@ -212,7 +212,7 @@ impl OndinApp {
         }
     }
 
-    /// *Stop sharing as kit* (1D): the mark stays, no longer sharing, so its
+    /// *Stop sharing as kit*: the mark stays, no longer sharing, so its
     /// version carries on if the document is made a kit again. Documents that use
     /// it keep their copies; they read it as no longer a kit. Reached through
     /// [`OndinApp::stop_sharing_dialog`], which asks first.
@@ -238,10 +238,10 @@ impl OndinApp {
         ));
     }
 
-    /// The card menu's *Make a kit* / *Stop sharing as kit* on a library file
-    /// (1B). The open document goes through the editor's own verbs, which save
-    /// it; a closed one has its mark written into the file
-    /// (`library::store::set_kit`). Stopping is confirmed first (1D) — this is
+    /// The card menu's *Make a kit* / *Stop sharing as kit* on a library file.
+    /// The open document goes through the editor's own verbs, which save it; a
+    /// closed one has its mark written into the file
+    /// (`library::store::set_kit`). Stopping is confirmed first — this is
     /// what the confirmation runs.
     ///
     /// **On the dashboard every file is closed**, the one the session holds
@@ -289,7 +289,7 @@ impl OndinApp {
         });
     }
 
-    /// *Stop sharing as kit*'s confirmation (§5.3e, 1D), for the document menu
+    /// *Stop sharing as kit*'s confirmation (§5.3e), for the document menu
     /// and the card menu alike: how many documents use the kit and what happens
     /// to them, and that making it a kit again continues from its last version.
     ///
@@ -337,10 +337,9 @@ impl OndinApp {
             && self.kit_users.as_ref().is_none_or(|u| u.kit != id)
         {
             // From the editor the library is as last scanned, and nothing
-            // rescans a kit's own window — a consumer filed since went
-            // uncounted and the card said no document used the kit (the v0.5.0
-            // release review's `[X3.1-L1-02]`). The dashboard refreshed on the
-            // way in.
+            // rescans a kit's own window, so without this a consumer filed since
+            // goes uncounted and the card says no document uses the kit. The
+            // dashboard refreshed on the way in.
             if self.view != crate::app::View::Dashboard {
                 self.library.refresh();
             }
@@ -416,7 +415,7 @@ impl OndinApp {
     }
 }
 
-/// The neutral *Kit* tag after the save dot (1C): a package glyph and the word
+/// The neutral *Kit* tag after the save dot: a package glyph and the word
 /// on an 8% chip — so the author always knows this file reaches others. Neutral
 /// rather than the component violet, which belongs to selection (§15 D1001,
 /// D1011 (1)).

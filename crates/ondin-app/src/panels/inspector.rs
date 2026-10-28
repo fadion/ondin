@@ -10394,8 +10394,6 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
 }
 
 /// A template's name, and the size under it.
-///
-/// Half a point over the mock's 10.5 and 9, as `ui`'s `PREFIX_PT` is.
 const TEMPLATE_NAME_PT: f32 = 11.0;
 /// See [`TEMPLATE_NAME_PT`].
 const TEMPLATE_DIMS_PT: f32 = 9.5;

@@ -1,11 +1,11 @@
-//! The floating insert picker (§5.3e, 3A–3I; §15 D1014).
+//! The floating insert picker (§5.3e; §15 D1014).
 //!
 //! A panel beside the vertical toolbar, bottom-aligned with the hexagon at its
 //! foot — `Shift+I` or the button opens it, `Escape` or the button closes it, and
-//! nothing else closes or moves (3A). Browsing lists the kits this document uses
+//! nothing else closes or moves. Browsing lists the kits this document uses
 //! first, by last use, each open to its sets and lone mains grouped by the
-//! top-level frame they sat in; then the library's other kits (3E). Typing turns
-//! it into one flat list across every kit, best match first (3F). A click places
+//! top-level frame they sat in; then the library's other kits. Typing turns
+//! it into one flat list across every kit, best match first. A click places
 //! an instance at the viewport's centre, at the document's top level; a tile dragged
 //! out of the panel and let go over the canvas places it centred there, inside the
 //! frame or layout group under the pointer if there is one.
@@ -31,7 +31,7 @@ const H: f32 = 460.0;
 /// The search box's height and the gap below it.
 const SEARCH_H: f32 = 30.0;
 const SEARCH_GAP: f32 = 8.0;
-/// A tile: three to a row, 52 tall, 8 apart across and 10 down (3E).
+/// A tile: three to a row, 52 tall, 8 apart across and 10 down.
 const COLS: usize = 3;
 const TILE_H: f32 = 52.0;
 const GAP_X: f32 = 8.0;
@@ -286,7 +286,7 @@ impl LocalTiles {
 #[derive(Clone)]
 enum Source {
     /// This document's own main — in its tree, or a copy in its vault of a kit
-    /// that cannot be found (3I).
+    /// that cannot be found.
     Local(NodeId),
     /// A kit's published main or set.
     Kit {
@@ -316,7 +316,7 @@ struct Item {
 enum Act {
     Place(Source),
     Toggle(String),
-    /// 3G's *Open library*: the dashboard, on its *Kits* filter.
+    /// The empty picker's *Open library*: the dashboard, on its *Kits* filter.
     OpenLibrary,
     /// A tile let go at this screen point — placed there when it is over the
     /// canvas and not over the panel itself.
@@ -332,7 +332,7 @@ struct Shown {
     used: bool,
     /// Its components, grouped by the top-level frame they sat in, in order.
     groups: Vec<(String, Vec<Item>)>,
-    /// What the open kit says instead of tiles (3H, 3I), when it says something.
+    /// What the open kit says instead of tiles, when it says something.
     note: Option<String>,
 }
 
@@ -345,7 +345,7 @@ impl OndinApp {
         self.kit_picker = match self.kit_picker {
             Some(_) => None,
             None => {
-                // The variables browser shares the place (§5.3f, G11).
+                // The variables browser shares the place (§5.3f).
                 self.var_browser = None;
                 // A rescan reads each file's first 4 KB, so a kit published since
                 // the last one — in this window or synced in — is seen at once
@@ -424,7 +424,7 @@ impl OndinApp {
             }
         }
 
-        // Beside the toolbar, bottom-aligned with the button (3A); with the
+        // Beside the toolbar, bottom-aligned with the button; with the
         // toolbar hidden, at the canvas's bottom-left.
         let anchor = if self.kit_button.is_finite() && self.show_toolbar {
             egui::pos2(self.kit_button.right() + 8.0, self.kit_button.bottom())
@@ -589,7 +589,7 @@ impl OndinApp {
     /// vendored main behind (it is what an undo or a paste needs), and the kit
     /// went on reading as used — no *"In your library, not used here"* — however
     /// long the document had none of it. A kit whose copies are vendored but
-    /// whose file the library cannot find is still listed, by its copies (3I).
+    /// whose file the library cannot find is still listed, by its copies.
     fn shown_kits(&mut self, ctx: &egui::Context, library: &[KitEntry]) -> Vec<Shown> {
         let doc = &self.session.doc;
         let mut vaulted: Vec<String> = Vec::new();
@@ -618,7 +618,7 @@ impl OndinApp {
         let mut used: Vec<String> = live.iter().cloned().collect();
         used.sort_by_key(by_use);
         // Vendored, not on the page, and not in the library: listed after the
-        // used ones, unused, so its copies can still be inserted (3I).
+        // used ones, unused, so its copies can still be inserted.
         let mut lost: Vec<String> = vaulted
             .into_iter()
             .filter(|k| !live.contains(k) && !library.iter().any(|e| &e.id == k))
@@ -702,7 +702,7 @@ impl OndinApp {
         shown
     }
 
-    /// A kit this document uses that the library does not have (3I) — its
+    /// A kit this document uses that the library does not have — its
     /// copies here still insert, because they are local.
     fn shown_unavailable(&self, id: &str, used: bool) -> Shown {
         let doc = &self.session.doc;
@@ -756,7 +756,7 @@ impl OndinApp {
     }
 
     /// This document's own mains and sets, in document order — the *This
-    /// document* section that leads the picker (§15 D1031, 3G's before it), and
+    /// document* section that leads the picker (§15 D1031), and
     /// search's local results.
     fn local_items(&self) -> Vec<Item> {
         let doc = &self.session.doc;
@@ -784,8 +784,7 @@ impl OndinApp {
         out
     }
 
-    /// Place an instance of `source` at the viewport's centre — a tile's click
-    /// (3A).
+    /// Place an instance of `source` at the viewport's centre — a tile's click.
     ///
     /// The tests' door: the picker's own clicks go through `Self::ask_place`,
     /// which waits a frame for the dim (§15 D1030). Plain backticks: a
@@ -1088,7 +1087,7 @@ struct Out<'a> {
 }
 
 impl Out<'_> {
-    /// A tile's or a result's click and drag (3A, §15 D1028): a click places at
+    /// A tile's or a result's click and drag (§15 D1028): a click places at
     /// the viewport's centre, a drag carries the component under the pointer
     /// and places where it is let go — unless a right-click cancelled it, as
     /// every drag in the app is (§15 D1033). Returns how opaque the row draws —
@@ -1254,7 +1253,7 @@ fn draw_ghost(
 }
 
 /// Every name `top` is found by: its own, and for a set each variant's name and
-/// value — *primary* finds *Button* (3F).
+/// value — *primary* finds *Button*.
 fn aliases(doc: &Document, top: NodeId) -> Vec<String> {
     let Some(n) = doc.get(top) else {
         return Vec::new();
@@ -1280,7 +1279,7 @@ fn push_grouped(groups: &mut Vec<(String, Vec<Item>)>, group: String, item: Item
 
 /// The search: every component of every kit, this document's own first among
 /// equals, ranked — a name that starts with the query, then one that holds it,
-/// then a match through a set's variants (3F).
+/// then a match through a set's variants.
 fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
     let mut scored: Vec<(u8, Item)> = Vec::new();
     let items = local.iter().chain(
@@ -1393,13 +1392,12 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
 }
 
 /// Browsing: this document's own mains first, then each kit, used ones first,
-/// then the library's others under their heading (3E).
+/// then the library's others under their heading.
 ///
-/// ***This document* leads whenever it has anything** (§15 D1031, the
-/// maintainer's idea, sparred and taken): it was 3G's, shown only when the
-/// library held no kit, so a document with its own components and a kit beside
-/// them had no way to insert its own from here. The picker is the one place to
-/// insert any component now.
+/// ***This document* leads whenever it has anything** (§15 D1031), not only
+/// when the library holds no kit: the picker is the one place to insert any
+/// component, so a document with its own components and a kit beside them must
+/// reach its own from here.
 fn browse(
     ui: &mut egui::Ui,
     local: &[Item],
@@ -1457,7 +1455,7 @@ fn browse(
 }
 
 /// A kit's header: the disclosure caret, the kit glyph, its name, and its status
-/// on the right (3E).
+/// on the right.
 fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), ROW_H),
@@ -1508,7 +1506,7 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
     resp
 }
 
-/// The tile grid: three to a row, each a picture and a name (3E).
+/// The tile grid: three to a row, each a picture and a name.
 fn tiles(ui: &mut egui::Ui, items: &[Item], out: &mut Out<'_>) {
     let w = ui.available_width();
     let tile_w = (w - GAP_X * (COLS as f32 - 1.0)) / COLS as f32;
@@ -1590,7 +1588,7 @@ fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
     p.with_clip_rect(cell).galley(at, text, color::text_a(204));
 }
 
-/// A search result: a small picture, the name, and the kit on the right (3F).
+/// A search result: a small picture, the name, and the kit on the right.
 /// **Dragged as a tile is** (§15 D1028): clicking was the only way, and a drag
 /// is the reach a result invites.
 fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut Out<'_>) {
@@ -1672,7 +1670,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
     }
 }
 
-/// A section's label and its count (3G's *This document · 2*).
+/// A section's label and its count (*This document · 2*).
 fn section_row(ui: &mut egui::Ui, label: &str, count: &str) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), ROW_H),
@@ -1702,7 +1700,7 @@ fn section_row(ui: &mut egui::Ui, label: &str, count: &str) {
     );
 }
 
-/// The small-caps heading over the kits this document does not use (3E).
+/// The small-caps heading over the kits this document does not use.
 fn caps(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text.to_uppercase())
@@ -1712,7 +1710,7 @@ fn caps(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// No kit anywhere in the library (3G): how one comes to exist, and *Open
+/// No kit anywhere in the library: how one comes to exist, and *Open
 /// library* — the dashboard's *Kits* filter, where any file can be made one
 /// from its card. Answers whether *Open library* was clicked.
 fn empty_note(ui: &mut egui::Ui) -> bool {
@@ -2090,7 +2088,7 @@ pub(crate) mod tests {
     }
 
     /// **The picker places a kit's component at the viewport's centre, in one
-    /// undoable step** (§5.3e, 3A; §15 D1014): a set places its default variant —
+    /// undoable step** (§5.3e; §15 D1014): a set places its default variant —
     /// *Small*, first in reading order — vendored into the vault, the instance
     /// selected and centred, and the kit moved to the front of this document's
     /// last-use order. One undo takes all of it back, vault included.
@@ -2142,7 +2140,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A vendored main names its kit, found or not** (4F, 3I): with the kit in
+    /// **A vendored main names its kit, found or not**: with the kit in
     /// the library the heading is its name and the copy's version; with the file
     /// gone it is the name the copy recorded when it was vendored
     /// (`Origin::name`), and *unavailable*. A main of the document's own has none.
@@ -2248,7 +2246,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **Browsing lists a kit by what it is to this document** (3E): one not used
+    /// **Browsing lists a kit by what it is to this document**: one not used
     /// here sits under *In your library, not used here* with its component count,
     /// closed; once something from it is placed it moves above that heading, open,
     /// with its version and count, its components under the frame they sat in.
@@ -2294,8 +2292,8 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A tile dragged onto the canvas places there, and 3G's *Open library*
-    /// goes to the dashboard's *Kits*** (§5.3e, 3A, 3G; §15 D1018). With no kit
+    /// **A tile dragged onto the canvas places there, and the empty picker's
+    /// *Open library* goes to the dashboard's *Kits*** (§5.3e; §15 D1018). With no kit
     /// in the library the document's own main is a tile under *This document*;
     /// pressed, carried out of the panel and let go over the canvas, it places an
     /// instance centred on the point of release — driven by real pointer events.
@@ -3040,7 +3038,7 @@ pub(crate) mod tests {
     }
 
     /// **Search runs through a set's variants and `Enter` places the highlighted
-    /// result** (3F): *primary* is one of Button's values and no component's name,
+    /// result**: *primary* is one of Button's values and no component's name,
     /// so it finds the set; the picker is driven for real, two frames, then
     /// `Enter`.
     ///
@@ -3165,7 +3163,7 @@ pub(crate) mod tests {
             "the size it lands at"
         );
 
-        // A vault main: an unavailable kit's copy, listed by itself (3I).
+        // A vault main: an unavailable kit's copy, listed by itself.
         let mut d = Document::new(IdSource::new(0xD1).mint());
         let mut dids = IdSource::new(0xD2);
         let mut kdoc = doc.clone();
@@ -3284,8 +3282,7 @@ pub(crate) mod tests {
     }
 
     /// **A kit the library lost is still listed by its copies, and its set
-    /// places its default variant** (3I; the v0.5.0 release review's
-    /// `[X4.2-L6-04]` — no picker test made a kit unavailable). *Atlas*' set and
+    /// places its default variant**. *Atlas*' set and
     /// *Badge* are placed, both instances deleted — the copies stay in the vault
     /// — and the kit's file is removed. With no instance on the page and no file,
     /// only `shown_kits`' lost list keeps it: *Unavailable*, not used, its note
@@ -3360,8 +3357,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A kit that never published, and one whose file cannot be read, say so**
-    /// (3H; the v0.5.0 release review's `[X4.2-L6-04]` — no fixture had either).
+    /// **A kit that never published, and one whose file cannot be read, say so**.
     /// *Beacon* is marked a kit and has published nothing; *Atlas*' file is
     /// overwritten with bytes no document parses after the library listed it.
     /// Each kit's header reads its status and the open kit its note instead of
@@ -3422,9 +3418,8 @@ pub(crate) mod tests {
 
     /// **Search ranks a name that starts with the query, then one that holds
     /// it, then a set found through its variants — this document's own first
-    /// among equal names — and stops at `MAX_RESULTS`** (3F; §15 D1031; the
-    /// v0.5.0 release review's `[X4.2-L6-04]`, which found the only search test
-    /// holding a single result). Asked of `search` itself, over items built here.
+    /// among equal names — and stops at `MAX_RESULTS`** (§15 D1031). Asked of
+    /// `search` itself, over items built here.
     ///
     /// Flip, run: every match scored 0 fails *"ranked"*, the five sorted by name
     /// alone. Flip, run: the kits chained before this document's own fails
@@ -3487,8 +3482,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// **`↓` moves the highlight and `Enter` places what it lit** (3F; the
-    /// v0.5.0 release review's `[X4.2-L6-04]`: the arrows were never pressed).
+    /// **`↓` moves the highlight and `Enter` places what it lit**.
     /// *b* finds *Badge* and *Button*, both by their names' start, in that
     /// order; one `↓` with the field focused, then `Enter`, places *Button* —
     /// its default variant, *Small*.

@@ -92,7 +92,7 @@ enum Face {
         drift: Drift,
         props: PropDrift,
         /// The roots, when they share one owner — one main, or variants of one
-        /// set (4E, 4F): what earns them the variant and property rows.
+        /// set: what earns them the variant and property rows.
         shared: Option<Vec<NodeId>>,
     },
     /// Instances among ordinary layers — summarised, with a way to narrow to them.

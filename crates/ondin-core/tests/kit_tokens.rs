@@ -399,7 +399,7 @@ fn a_second_insert_reuses_the_held_variables() {
     assert_eq!(d.variables().kits().len(), 1);
 }
 
-/// **An update rewrites what D holds of the kit** (5A): L adds a mode and
+/// **An update rewrites what D holds of the kit**: L adds a mode and
 /// recolours `brand`'s *Day*; the instance follows. Then L stops binding its
 /// mains to `brand`, which no longer travels — and D's own layer bound to it
 /// keeps the colour it drew, detached (*keep its values*), and the variable goes.

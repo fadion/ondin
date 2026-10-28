@@ -17,7 +17,6 @@ reads true.
   has it). A polygon's and star's corner radius takes no variable yet, and the multi-selection radius
   field skips them.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
-- **Canvas**: spacing handles on a loose multi-selection (`spacing.rs` covers containers).
 - **PDF import.**
 - **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
   Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when

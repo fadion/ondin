@@ -60,7 +60,7 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   no line endpoint, rail handle or pivot marker (`grab_line_end`, `grab_rail_handle`, `on_pivot`
   answer `None`), `begin_select_drag` starts no move (the press still selects), and it offers no
   spacing band (`spacing_subject` drops a locked selected container as `spacing_hover` drops a
-  hovered one). The handles are still drawn; the size badge's padlock labels the refusal.
+  hovered one; a loose selection with a locked member has no `loose_run`). The handles are still drawn; the size badge's padlock labels the refusal.
 - Otherwise the lock is enforced at **selection time only** — `delete_selection`, the keyboard
   nudge, restacks and aligns do not read it — so every selecting door must carry the filter
   (`Selection::set_one` filters nothing).

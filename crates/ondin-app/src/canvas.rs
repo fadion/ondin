@@ -1228,6 +1228,9 @@ impl OndinApp {
             Drag::LineEnd { .. } => return (egui::CursorIcon::Grabbing, None),
             Drag::RailOffset { .. } => return (egui::CursorIcon::Grabbing, None),
             Drag::Spacing { id, band, .. } => return (self.spacing_cursor(*id, *band), None),
+            Drag::LooseGap { .. } | Drag::LooseReorder { .. } => {
+                return (self.loose_cursor(None).unwrap_or_default(), None);
+            }
             _ => {}
         }
 
@@ -1256,6 +1259,11 @@ impl OndinApp {
             && let Some((s, i)) = self.spacing_at(p, rect, ppp)
         {
             return (self.spacing_cursor(s.id, s.bands[i].kind), None);
+        }
+        if let Some(p) = resp.hover_pos()
+            && let Some(icon) = self.loose_cursor(self.loose_at(p, rect, ppp))
+        {
+            return (icon, None);
         }
 
         let (Some(p), Some(h)) = (resp.hover_pos(), handles) else {
@@ -1653,6 +1661,7 @@ impl OndinApp {
                 .as_ref()
                 .is_some_and(|h| h.armed(screen, false).is_some())
             || self.spacing_at(screen, rect, ppp).is_some()
+            || self.loose_at(screen, rect, ppp).is_some()
     }
 
     fn begin_select_drag(
@@ -1734,6 +1743,10 @@ impl OndinApp {
         // A selected container's gap or padding band, ahead of the artwork, whose
         // Alt+Shift drag is a constrained duplicate.
         if self.begin_spacing_drag(grab, rect, ppp) {
+            return;
+        }
+        // A loose run's gap band or centre dot, ahead of the layers it lies over.
+        if self.begin_loose_drag(grab, rect, ppp) {
             return;
         }
 
@@ -1839,6 +1852,11 @@ impl OndinApp {
             // Modifiers are read every frame, so they can change mid-drag.
             Drag::Spacing { .. } => {
                 if let Some((tx, ..)) = self.band_drag_tx(world, shift, alt) {
+                    self.session.set_preview(&tx);
+                }
+            }
+            Drag::LooseGap { .. } | Drag::LooseReorder { .. } => {
+                if let Some((tx, _)) = self.loose_drag_tx(world, shift) {
                     self.session.set_preview(&tx);
                 }
             }
@@ -2016,6 +2034,10 @@ impl OndinApp {
                     }
                     _ => self.session.clear_preview(),
                 }
+            }
+            drag @ (Drag::LooseGap { .. } | Drag::LooseReorder { .. }) => {
+                self.drag = drag;
+                self.finish_loose_drag(world, shift);
             }
             // `node_input` commits its own release.
             Drag::Points { .. }
@@ -7979,6 +8001,7 @@ impl OndinApp {
 
         self.draw_grid_tracks(painter, rect, ppp);
         self.draw_spacing_bands(painter, rect, ppp);
+        self.draw_loose_spacing(painter, rect, ppp);
 
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
         self.draw_slices(ui, painter, rect, ppp, resp);

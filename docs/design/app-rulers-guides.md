@@ -117,7 +117,7 @@ press from every tool), then guide lines (Select tool only). A gesture already i
 pointer.
 
 - `chrome_claims(point)` walks the same rungs as `canvas::begin_select_drag`'s press ladder: pivot
-  marker, the edited gradient's handles and guide (`gradient_claims`), line endpoints, rail handle, box handles, then a container's spacing band (`spacing_at`).
+  marker, the edited gradient's handles and guide (`gradient_claims`), line endpoints, rail handle, box handles, a container's spacing band (`spacing_at`), then a loose selection's gap band or centre dot (`loose_at`).
   It takes the point as a parameter: hover position here, `press_origin` there.
 - A new rung in `begin_select_drag` owes `chrome_claims` a term; tests sweep strips of points to bind
   the two.

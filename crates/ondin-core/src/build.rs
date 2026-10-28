@@ -5937,6 +5937,168 @@ pub fn distribute_spacing(
     Transaction(ops)
 }
 
+/// How far two gaps may differ and still read as one, in world units.
+const EVEN_GAP: f64 = 0.5;
+
+/// A loose set of boxes read as a row, a column or a grid with even gaps: what a
+/// selection's spacing handles drag ([`arrangement`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Arrangement {
+    /// Each box's cell, `(row, column)`, in the order the boxes were given.
+    pub cells: Vec<(usize, usize)>,
+    /// Each column's extent along x, left to right: its boxes' union.
+    pub cols: Vec<(f64, f64)>,
+    /// Each row's extent along y, top to bottom.
+    pub rows: Vec<(f64, f64)>,
+    /// The gap between neighbouring columns, `None` with one column.
+    pub col_gap: Option<f64>,
+    /// The gap between neighbouring rows, `None` with one row.
+    pub row_gap: Option<f64>,
+}
+
+impl Arrangement {
+    /// The bands of `axis` (`X`: the columns) and that axis's gap.
+    pub fn bands(&self, axis: Axis) -> (&[(f64, f64)], Option<f64>) {
+        match axis {
+            Axis::X => (&self.cols, self.col_gap),
+            Axis::Y => (&self.rows, self.row_gap),
+        }
+    }
+
+    /// The boxes in reading order, row by row: the slots a reorder moves through.
+    pub fn reading_order(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.cells.len()).collect();
+        order.sort_by_key(|i| self.cells[*i]);
+        order
+    }
+}
+
+/// `boxes` as a row, a column or a grid whose gaps are even, or `None`.
+///
+/// Rows and columns are *Tidy up*'s clusters ([`tidy_bands`]). Each box must have
+/// a cell of its own, no column may overlap the next nor any row, and the gaps
+/// between neighbouring columns must agree to [`EVEN_GAP`], as must those between
+/// rows; uneven gaps answer `None`, since dragging them would first snap them even.
+/// Needs two boxes.
+pub fn arrangement(boxes: &[kurbo::Rect]) -> Option<Arrangement> {
+    if boxes.len() < 2 {
+        return None;
+    }
+    let row_of = tidy_bands(boxes, Axis::Y);
+    let col_of = tidy_bands(boxes, Axis::X);
+    let cells: Vec<(usize, usize)> = row_of.into_iter().zip(col_of).collect();
+    let mut taken = std::collections::HashSet::new();
+    if !cells.iter().all(|c| taken.insert(*c)) {
+        return None;
+    }
+    let spans = |axis: Axis, band: &dyn Fn(usize) -> usize| {
+        let count = (0..boxes.len()).map(|i| band(i) + 1).max().unwrap_or(0);
+        let mut out = vec![(f64::INFINITY, f64::NEG_INFINITY); count];
+        for (i, b) in boxes.iter().enumerate() {
+            let s = &mut out[band(i)];
+            s.0 = s.0.min(lead(b, axis));
+            s.1 = s.1.max(lead(b, axis) + extent(b, axis));
+        }
+        out
+    };
+    let cols = spans(Axis::X, &|i| cells[i].1);
+    let rows = spans(Axis::Y, &|i| cells[i].0);
+    let even = |bands: &[(f64, f64)]| -> Option<Option<f64>> {
+        let gaps: Vec<f64> = bands.windows(2).map(|w| w[1].0 - w[0].1).collect();
+        if gaps.is_empty() {
+            return Some(None);
+        }
+        let (lo, hi) = gaps
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), g| {
+                (l.min(*g), h.max(*g))
+            });
+        (lo >= 0.0 && hi - lo <= EVEN_GAP)
+            .then(|| Some(gaps.iter().sum::<f64>() / gaps.len() as f64))
+    };
+    let col_gap = even(&cols)?;
+    let row_gap = even(&rows)?;
+    Some(Arrangement {
+        cells,
+        cols,
+        rows,
+        col_gap,
+        row_gap,
+    })
+}
+
+/// How far each box of `arr` moves for every gap along `axis` to be `gap`, the
+/// band holding box `anchor` staying put: the bands before it pack backwards from
+/// it and those after forwards, as [`distribute_spacing`] packs a row.
+pub fn respaced(arr: &Arrangement, axis: Axis, anchor: usize, gap: f64) -> Vec<Vec2> {
+    let (bands, _) = arr.bands(axis);
+    let band_of = |i: usize| match axis {
+        Axis::X => arr.cells[i].1,
+        Axis::Y => arr.cells[i].0,
+    };
+    let a = arr.cells.get(anchor).map_or(0, |_| band_of(anchor));
+    let mut start: Vec<f64> = bands.iter().map(|b| b.0).collect();
+    for k in a + 1..bands.len() {
+        start[k] = start[k - 1] + (bands[k - 1].1 - bands[k - 1].0) + gap;
+    }
+    for k in (0..a).rev() {
+        start[k] = start[k + 1] - gap - (bands[k].1 - bands[k].0);
+    }
+    (0..arr.cells.len())
+        .map(|i| {
+            let k = band_of(i);
+            along(axis, start[k] - bands[k].0)
+        })
+        .collect()
+}
+
+/// How far each of `boxes` (read as `arr`) moves for box `from` to take slot `to`
+/// of the reading order, the boxes between sliding over one slot.
+///
+/// A row or a column is packed again from its first slot at its own gap, so
+/// boxes of different sizes keep the gap; each box keeps its place across the
+/// run. In a grid a box lands centred on where the slot's box was.
+pub fn reordered(boxes: &[kurbo::Rect], arr: &Arrangement, from: usize, to: usize) -> Vec<Vec2> {
+    let slots = arr.reading_order();
+    let mut order = slots.clone();
+    let Some(at) = order.iter().position(|i| *i == from) else {
+        return vec![Vec2::ZERO; boxes.len()];
+    };
+    order.remove(at);
+    order.insert(to.min(order.len()), from);
+    let mut moves = vec![Vec2::ZERO; boxes.len()];
+    let line = match (arr.cols.len(), arr.rows.len()) {
+        (_, 1) => Some(Axis::X),
+        (1, _) => Some(Axis::Y),
+        _ => None,
+    };
+    match line {
+        Some(axis) => {
+            let gap = arr.bands(axis).1.unwrap_or(0.0);
+            let mut cursor = lead(&boxes[slots[0]], axis);
+            for i in order {
+                moves[i] = along(axis, cursor - lead(&boxes[i], axis));
+                cursor += extent(&boxes[i], axis) + gap;
+            }
+        }
+        None => {
+            for (slot, i) in slots.iter().zip(order) {
+                moves[i] = boxes[*slot].center() - boxes[i].center();
+            }
+        }
+    }
+    moves
+}
+
+/// The moves `deltas` (world space, one per member of `ids`) as one transaction.
+pub fn offsets(doc: &Document, res: &Resolved, ids: &[NodeId], deltas: &[Vec2]) -> Transaction {
+    let mut ops = Vec::new();
+    for (id, d) in ids.iter().zip(deltas) {
+        push_offset(doc, res, *id, *d, &mut ops);
+    }
+    Transaction(ops)
+}
+
 /// Mirror `ids` across the centreline of the box they occupy.
 ///
 /// `Axis::X` is the horizontal flip (the mirror line is vertical). One layer flips

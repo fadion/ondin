@@ -144,6 +144,20 @@ pub enum Drag {
         anchor: Point,
         base: f64,
     },
+    /// Dragging the gaps of a loose selection's row, column or grid along `axis`
+    /// (`crate::loose_spacing`): `press` in world space, `base` the gap there.
+    /// Each frame previews the moves and the release commits them.
+    LooseGap {
+        axis: ondin_core::build::Axis,
+        press: Point,
+        base: f64,
+    },
+    /// Dragging member `id` of a loose selection's run through its slots by its
+    /// centre dot, from world `press`.
+    LooseReorder {
+        id: NodeId,
+        press: Point,
+    },
     /// Moving a layer's transform origin ([`ondin_core::Pivot`]).
     ///
     /// Carries no preview: the pivot is not scene content, so the canvas draws the

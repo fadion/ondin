@@ -23,7 +23,7 @@ use ondin_core::{NodeId, Operation, Transaction};
 
 /// A band thinner than this on screen is not drawn and does not pick: at
 /// that size the band is a line, and a handle on it would be guesswork.
-const MIN_BAND_PX: f64 = 6.0;
+pub(crate) const MIN_BAND_PX: f64 = 6.0;
 /// How thick a band's pick area is on screen at least — so a gap of 0 can
 /// still be grabbed and dragged open.
 const MIN_PICK_PX: f64 = 8.0;
@@ -944,7 +944,12 @@ impl OndinApp {
 
 /// The pill at a band's middle: lying along the band, across the
 /// direction it drags.
-fn paint_pill(painter: &egui::Painter, quad: [egui::Pos2; 4], kind: BandKind, hue: egui::Color32) {
+pub(crate) fn paint_pill(
+    painter: &egui::Painter,
+    quad: [egui::Pos2; 4],
+    kind: BandKind,
+    hue: egui::Color32,
+) {
     let centre = egui::pos2(
         quad.iter().map(|p| p.x).sum::<f32>() / 4.0,
         quad.iter().map(|p| p.y).sum::<f32>() / 4.0,

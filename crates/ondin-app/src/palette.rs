@@ -381,6 +381,7 @@ impl OndinApp {
         self.export_menu = false;
         self.export_row_open = None;
         self.type_menu = None;
+        self.close_fix();
         let target = self.palette_target();
         let publish_why = match self.kit_changes() {
             None => Some("Make this document a kit first"),

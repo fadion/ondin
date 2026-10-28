@@ -547,7 +547,8 @@ runs (`pages` names each frame's page, index for index).
   which would otherwise open the selected text layer for editing
   (`enter_applies_the_card_s_first_fix`), and before the palette's keys, so it stands aside while
   the palette, a modal or a text field has the keyboard
-  (`the_palette_keeps_its_enter_over_the_fix_card`). `contrast_badges` runs after `canvas_ui` in the same
+  (`the_palette_keeps_its_enter_over_the_fix_card`); opening the palette closes the card, as it
+  closes every other floating thing. `contrast_badges` runs after `canvas_ui` in the same
   panel; called before it, the canvas takes the badge's press
   (`a_click_on_a_failing_badge_opens_the_card`).
 - Deriving the escape clip from overrides makes resized children pop out of their frame.

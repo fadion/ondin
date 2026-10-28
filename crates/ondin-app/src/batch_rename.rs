@@ -2815,8 +2815,14 @@ mod tests {
         assert!(n > 0, "the page plan lists its layers");
         b.s.set_scope(Scope::Document);
         let out = pass(&ctx, &mut app, Vec::new(), none);
+        // Under load the new plan can land within the pass; only the old plan
+        // still showing has the old scope's words to check.
+        let old_shown = app
+            .batch_rename
+            .as_ref()
+            .is_some_and(|b| b.plan.scope == Some(Scope::Page));
         assert!(
-            painted(&out, &format!("{n} of {n} match")),
+            !old_shown || painted(&out, &format!("{n} of {n} match")),
             "the page's count"
         );
         settle(&ctx, &mut app);

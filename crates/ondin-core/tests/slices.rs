@@ -140,6 +140,63 @@ fn export_all_leaves_out_a_hidden_slice_only() {
     );
 }
 
+/// *Slice selection* fits the selection's bounds rounded out to whole units, goes
+/// just above the topmost selected layer in their common parent, and takes a lone
+/// layer's name.
+/// flip: `slice_selection`'s index without its `+ 1` → fails at "above the
+/// topmost".
+#[test]
+fn slice_selection_fits_rounds_out_and_sits_above_the_topmost() {
+    let (mut doc, page, group, rect, _) = fixture();
+    let other = IdSource::new(0x0711).mint();
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: other,
+        parent: page,
+        index: 1,
+        kind: NodeKind::Rect {
+            size: Size::new(20.0, 20.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(Affine::translate((200.3, 10.6))),
+        name: Some("Badge".into()),
+    }]))
+    .expect("a second rect");
+    let res = Resolved::rebuild(&doc);
+
+    let new = IdSource::new(0x0712).mint();
+    let tx = build::slice_selection(&doc, &res, &[rect, other], new).expect("a slice");
+    doc.apply(&tx).expect("apply");
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(
+        res.world_bounds(new),
+        Some(Rect::new(0.0, 0.0, 221.0, 100.0)),
+        "rounded out"
+    );
+    let children = doc.get(page).unwrap().children().to_vec();
+    assert_eq!(
+        children,
+        vec![group, other, new],
+        "in their common parent, above the topmost"
+    );
+    let name = doc.get(new).unwrap().name().to_string();
+    assert!(name.starts_with("Slice"), "a slice's own name: {name}");
+
+    let lone = IdSource::new(0x0713).mint();
+    let tx = build::slice_selection(&doc, &res, &[other], lone).expect("a slice");
+    doc.apply(&tx).expect("apply");
+    assert_eq!(
+        doc.get(lone).unwrap().name(),
+        "Badge",
+        "a lone layer's name"
+    );
+    assert_eq!(
+        ondin_core::item::values(doc.get(lone).unwrap().exports()).len(),
+        1,
+        "one export spec"
+    );
+}
+
 /// A slice saves and loads as it was.
 #[test]
 fn a_slice_survives_a_save() {

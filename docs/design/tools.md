@@ -272,6 +272,12 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
   so the canvas draws a dashed 1 pt outline (4 on, 3 off) in `color::SELECT` round one that is hovered
   (Select's hover target, or with the Slice tool the slice under the pointer) or selected. While the
   tool is on, every other shown slice on the page is outlined at 45%, so what is already cut shows.
+  *Shown* here and in `slice_at` is `Document::shown_through`: a slice in a hidden group is hidden.
+- **Slice selection** (the layer menu's Export group, and the palette) cuts a slice fitted to the
+  selection instead of dragging one (`OndinApp::slice_selection` → `build::slice_selection`): the
+  selection's world bounds rounded out to whole units, just above the topmost selected layer in their
+  nearest common container, a lone layer's name, one PNG 1× spec, selected afterwards. It dims, and
+  does nothing, on a selection of slices only.
 
 ### The eyedropper (`eyedropper.rs`)
 

@@ -84,7 +84,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | 6 | Transform | Flip H · Flip V · Reset origin |
 | 7 | State | Hide/Show · Lock/Unlock · Rename · Batch rename… |
 | 8 | Navigate | Zoom to selection |
-| 9 | Export | Copy as SVG · Copy as CSS · Copy as PNG · Copy as PNG 2× |
+| 9 | Export | Copy as SVG · Copy as CSS · Copy as PNG · Copy as PNG 2× · Slice selection |
 | 10 | View | the canvas menu's view switches (§6.1, §6.3 only) |
 
 - **Head at the top**: it holds the "one level in" verbs that are otherwise double-click only.
@@ -94,8 +94,8 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 30 rows, text 33, a boolean 36, railed text 35, a main frame 29, an
-  instance frame 30; component roles reach 38, a linked boolean in an instance
+- **Length**: a primitive is 31 rows, text 34, a boolean 37, railed text 36, a main frame 30, an
+  instance frame 31; component roles reach 39, a linked boolean in an instance
   (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
   Navigate goes first, then Export.
 
@@ -200,6 +200,7 @@ and *Duplicate as component* draw the filled hexagon.
 | Copy as CSS | — | always live; under a `/* name */` comment, a leaf's own declarations, a container's rules for its whole subtree (`export.md`) |
 | Copy as PNG | — | always live; 1×, transparent, raw RGBA; the status line gives the pixel size |
 | Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`); a flat row (§7, *Submenus*) |
+| Slice selection | — | live for any selection, dims on one of slices only (a slice on a slice cuts nothing new). `build::slice_selection`: a slice fitted to the selection's world bounds rounded out to whole units, just above the topmost selected layer in their nearest common container (a boolean's operands counting as the boolean), with one PNG 1× spec; a lone layer's name; selected afterwards. Also a palette row |
 
 ---
 
@@ -243,7 +244,7 @@ The four operations stay in Structure as checkable rows (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-No head. The baseline menu, 30 rows.
+No head. The baseline menu, 31 rows.
 
 ### 5.6 Text
 

@@ -2728,13 +2728,89 @@ pub fn in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
 
 /// Whether *Export all* (and `ondin export --all`) takes `id`: it carries export
 /// settings and is not a hidden slice, by its own eye or an ancestor's. A hidden
-/// slice is one switched off; any other
-/// hidden layer still exports, its settings being a deliberate instruction.
+/// slice is one switched off; any other hidden layer still exports, its settings
+/// being a deliberate instruction.
 pub fn exported_in_bulk(doc: &Document, id: NodeId) -> bool {
     doc.get(id).is_some_and(|n| {
         !n.exports().is_empty()
             && !(matches!(n.kind(), NodeKind::Slice { .. }) && !doc.shown_through(id))
     })
+}
+
+/// *Slice selection*: a new slice `id` fitted to the world bounds of `ids`, rounded
+/// out to whole units, with one PNG 1× export spec. It goes just above the topmost
+/// of them in their nearest common container, a boolean's operands counting as
+/// the boolean, and takes the name of a lone layer. `None` with nothing to fit.
+pub fn slice_selection(
+    doc: &Document,
+    res: &Resolved,
+    ids: &[NodeId],
+    id: NodeId,
+) -> Option<Transaction> {
+    let bounds = ids
+        .iter()
+        .filter_map(|i| res.world_bounds(*i))
+        .reduce(|a, b| a.union(b))?;
+    let world = kurbo::Rect::new(
+        bounds.x0.floor(),
+        bounds.y0.floor(),
+        bounds.x1.ceil(),
+        bounds.y1.ceil(),
+    );
+    // Strict ancestors, nearest first.
+    let above = |n: NodeId| -> Vec<NodeId> {
+        std::iter::successors(doc.get(n).and_then(Node::parent), |p| {
+            doc.get(*p).and_then(Node::parent)
+        })
+        .collect()
+    };
+    let mut parent = above(ids[0])
+        .into_iter()
+        .find(|a| ids.iter().all(|i| above(*i).contains(a)))?;
+    // A slice under a boolean would be one of its operands.
+    while matches!(doc.get(parent)?.kind(), NodeKind::Boolean { .. }) {
+        parent = doc.get(parent)?.parent()?;
+    }
+    let siblings = doc.get(parent)?.children();
+    let index = ids
+        .iter()
+        .filter_map(|i| {
+            let mut at = *i;
+            while doc.get(at)?.parent()? != parent {
+                at = doc.get(at)?.parent()?;
+            }
+            siblings.iter().position(|s| *s == at)
+        })
+        .max()?
+        + 1;
+    let inv = res
+        .world_transform(parent)
+        .unwrap_or(Affine::IDENTITY)
+        .inverse();
+    let local = crate::geometry::transform_rect(inv, world);
+    let name = match ids {
+        [one] => doc.get(*one).map(|n| n.name().to_string()),
+        _ => None,
+    };
+    Some(Transaction(vec![
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Slice {
+                size: kurbo::Size::new(local.width().max(1.0), local.height().max(1.0)),
+            },
+            transform: Some(Affine::translate(local.origin().to_vec2())),
+            name,
+        },
+        Operation::SetExports {
+            id,
+            exports: crate::item::keyed_by_position([crate::ExportSpec::new(
+                crate::ExportFormat::Png,
+                crate::ExportScale::Times(1.0),
+            )]),
+        },
+    ]))
 }
 
 /// `ids` in document order, keeping a member that sits inside another.

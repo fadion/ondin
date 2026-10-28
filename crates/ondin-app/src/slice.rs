@@ -56,6 +56,32 @@ impl OndinApp {
         })
     }
 
+    /// *Slice selection*: a slice fitted to the selection (`build::slice_selection`),
+    /// selected afterwards. A selection of slices only cuts nothing new.
+    pub(crate) fn slice_selection(&mut self) {
+        let ids: Vec<NodeId> = self.session.selection.ids().to_vec();
+        let doc = &self.session.doc;
+        if ids
+            .iter()
+            .all(|i| matches!(doc.get(*i).map(|n| n.kind()), Some(NodeKind::Slice { .. })))
+        {
+            return;
+        }
+        let id = self.session.ids.mint();
+        let Some(tx) =
+            ondin_core::build::slice_selection(&self.session.doc, &self.session.resolved, &ids, id)
+        else {
+            return;
+        };
+        self.session
+            .name_step("Slice selection", crate::theme::icon::KNIFE);
+        if self.session.commit(tx) {
+            self.session.selection.set_one(id);
+            self.session
+                .info("Sliced the selection; it exports PNG at 1×");
+        }
+    }
+
     /// The dashed outline of every slice that shows: in the selection blue when it
     /// is hovered or selected, and faintly for the rest while the Slice tool is on.
     pub(crate) fn draw_slices(
@@ -213,6 +239,33 @@ mod tests {
         assert!(
             !all.contains(&id),
             "select-all leaves the slice out: {all:?}"
+        );
+    }
+
+    /// *Slice selection* cuts a slice over the selected rect and selects it; over a
+    /// selection of slices only it does nothing.
+    #[test]
+    fn slice_selection_selects_its_slice_and_does_not_slice_a_slice() {
+        let ctx = egui::Context::default();
+        let (mut app, _, rect) = app_with_a_frame(&ctx);
+        app.session.selection.set_one(rect);
+        app.slice_selection();
+        let id = app.session.selection.single().expect("the new slice");
+        assert!(matches!(
+            app.session.doc.get(id).map(|n| n.kind()),
+            Some(NodeKind::Slice { .. })
+        ));
+        assert_eq!(
+            app.session.resolved.world_bounds(id),
+            app.session.resolved.world_bounds(rect)
+        );
+
+        let steps = app.session.history.done().len();
+        app.slice_selection();
+        assert_eq!(
+            app.session.history.done().len(),
+            steps,
+            "a slice on a slice"
         );
     }
 }

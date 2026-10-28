@@ -3446,7 +3446,7 @@ mod tests {
         let at = combo(&painted, "Swap");
         let open = click_at(&mut app, &ctx, at);
         assert!(
-            open.iter().any(|(t, _)| t == "Row"),
+            open.iter().any(|(t, _)| t == "Search…"),
             "the fixture: the list is open: {open:?}"
         );
         app.kit_shelf.settle();
@@ -3801,10 +3801,9 @@ mod tests {
                 row("Badge", true, Some("v4")),
                 row("Glyph", false, None),
                 row("Large", true, Some("v4")),
-                row("Row", false, None),
                 row("Small", true, Some("v4")),
             ],
-            "offered before any use"
+            "offered before any use, never the Row the slot's instance shows"
         );
         assert!(matches!(list[1].0, SwapTarget::Here(m) if m == glyph));
 
@@ -3833,7 +3832,6 @@ mod tests {
                 row("Badge", false, Some("v4")),
                 row("Glyph", false, None),
                 row("Large", true, Some("v4")),
-                row("Row", false, None),
                 row("Small", true, Some("v4")),
             ],
             "one heading per kit"

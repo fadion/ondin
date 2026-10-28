@@ -663,7 +663,10 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   **filter** is a case-insensitive prefix of a main's name (empty = all), prefilled by
   `swap::suggested_filter` (shown main's name less its last segment), edited in its own row; the
   picker searches within it. Every nested copy also gets a *Swap* row offering every main of its kind,
-  unfiltered. The filter scopes what is offered, never what is valid.
+  unfiltered. The filter scopes what is offered, never what is valid. Neither offers a main that
+  reaches, through its instances, the main the copy sits in or a main any instance around it shows,
+  on a page or not (`swap::can_swap_to`): there the copy would hold its own slot, which the rewrite
+  never copies into it.
 - A swap property's **preferred mains** (`Property::preferred`, ids of mains, saved as wire ids) lead
   its picker under a *Preferred* heading with a star, in their own order and past the filter
   (`swap::preferred`); the rest of the list leaves them out. One that is no longer a main the slot

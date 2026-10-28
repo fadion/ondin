@@ -705,6 +705,37 @@ fn a_swap_into_its_own_container_is_not_offered() {
     assert!(swap::options(&f.doc, r2, "", "").contains(&f.heart));
 }
 
+/// Inside a page-level instance, a swap to the main that instance shows, or to a
+/// main holding it, is not offered: `r` would hold its own slot and draw a Button
+/// without its Star.
+/// flip: `would_cycle` seeding only the enclosing main → fails at "b1 shows Button".
+#[test]
+fn a_swap_to_the_main_an_outer_instance_shows_is_not_offered() {
+    let mut f = fixture();
+    assert!(
+        f.node(f.b1).parent() == Some(f.root) && !f.node(f.b1).component(),
+        "b1 sits on the page, inside no main"
+    );
+    assert!(!swap::can_swap_to(&f.doc, f.r, f.button), "b1 shows Button");
+    assert!(!swap::options(&f.doc, f.r, "", "").contains(&f.button));
+    assert!(swap::swap(&f.doc, f.r, f.button).is_none());
+
+    let wrap = f.ids.mint();
+    let root = f.root;
+    f.commit(vec![create(wrap, root, 4, frame(200.0, 200.0), "Wrap")]);
+    let (tx, _) = instance(&f.doc, &mut f.ids, f.button, wrap);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: wrap,
+        component: true,
+    }]);
+    assert!(!swap::can_swap_to(&f.doc, f.r, wrap), "Wrap holds Button");
+    assert!(
+        swap::can_swap_to(&f.doc, f.r, f.heart),
+        "an unrelated main still swaps"
+    );
+}
+
 /// The picker's list: a prefix filter, a search anywhere, both without case;
 /// only mains of the slot's kind.
 #[test]

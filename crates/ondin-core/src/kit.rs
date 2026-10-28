@@ -2397,9 +2397,9 @@ pub fn vendored(
 /// from a third kit — its published vault — is not offered: it is that kit's,
 /// and the third kit lists it. ⚠️ **No cycle check here**, unlike
 /// `swap::can_swap_to`: a kit main reaches only kit mains, never one of `doc`'s
-/// own, so it cannot hold the main `root` sits in — and the swap verb's own
-/// check runs on the scratch [`vendored`] leaves, so a wrong argument here is
-/// refused there rather than committed.
+/// own, so it cannot hold the main `root` sits in. It can hold a kit main an
+/// instance around `root` shows; the swap verb's own check runs on the scratch
+/// [`vendored`] leaves, so such an offer is refused there rather than committed.
 pub fn swap_offers(
     doc: &Document,
     kit: &str,

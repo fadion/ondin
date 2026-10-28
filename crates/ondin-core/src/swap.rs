@@ -117,21 +117,30 @@ pub fn can_relink_to(doc: &Document, root: NodeId, main: NodeId) -> bool {
         && !would_cycle(doc, root, main)
 }
 
-/// Whether showing `main` at `root` would put a main inside itself: `root` sits
-/// in a main that `main` already reaches, through the instances inside it.
+/// Whether showing `main` at `root` would put a main inside itself: `main` already
+/// reaches, through the instances inside it, the main `root` sits in or a main an
+/// instance around `root` shows. The instances count wherever they sit: a copy
+/// inside a page-level Card showing Card would hold its own slot, which the
+/// rewrite never copies into it, and draw a Card with that layer missing.
 fn would_cycle(doc: &Document, root: NodeId, main: NodeId) -> bool {
     let nodes = doc.node_map();
     let parent = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
-    let Some(outer) =
-        std::iter::successors(Some(root), |a| parent(*a)).find(|a| nodes[a].component)
-    else {
+    let mut outer: FxHashSet<NodeId> = FxHashSet::default();
+    for a in std::iter::successors(parent(root), |a| parent(*a)) {
+        if nodes[&a].component {
+            outer.insert(a);
+            break;
+        }
+        outer.extend(shown_main(nodes, a));
+    }
+    if outer.is_empty() {
         return false;
-    };
+    }
     let uses = crate::component::uses(nodes);
     let mut stack = vec![main];
     let mut seen: FxHashSet<NodeId> = FxHashSet::default();
     while let Some(m) = stack.pop() {
-        if m == outer {
+        if outer.contains(&m) {
             return true;
         }
         if seen.insert(m) {

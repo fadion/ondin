@@ -306,6 +306,9 @@ pub(crate) struct Plan {
     pub(crate) groups: usize,
     /// Why Find renames nothing: a pattern that does not parse.
     pub(crate) error: Option<String>,
+    /// The scope the plan was made for, which labels it while a plan for another
+    /// is in flight; `None` before any plan.
+    pub(crate) scope: Option<Scope>,
     /// The row of the newest page heading, which the rows after it count into.
     head: Option<usize>,
 }
@@ -337,6 +340,7 @@ impl Plan {
         if part.error.is_some() {
             self.error = part.error;
         }
+        self.scope = part.scope.or(self.scope);
     }
 
     /// Why Rename has nothing to do, when it has not.
@@ -450,7 +454,11 @@ fn by_bands<'a>(layers: Vec<&'a Layer>, rows: bool) -> Vec<&'a Layer> {
 /// The plan goes to `emit` in parts, every [`PART`] layers; `emit` answering false
 /// stops it.
 pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan) -> bool) {
-    let mut part = Plan::default();
+    let blank = || Plan {
+        scope: Some(s.scope),
+        ..Plan::default()
+    };
+    let mut part = blank();
     let rule = match Find::new(&s.find, s.match_case, s.pattern) {
         Ok(find) => {
             part.groups = find.groups();
@@ -538,7 +546,7 @@ pub(crate) fn plan_into(snap: &Snapshot, s: &Settings, emit: &mut dyn FnMut(Plan
             since += 1;
             if since == PART {
                 since = 0;
-                if !emit(std::mem::take(&mut part)) {
+                if !emit(std::mem::replace(&mut part, blank())) {
                     return;
                 }
             }
@@ -988,7 +996,9 @@ impl OndinApp {
                     });
                 ui.add_space(8.0);
                 divider(ui);
-                preview(ui, b.s.scope, &b.plan, b.landed);
+                // Labelled by the scope it was made for: until the new plan's first
+                // part lands, the shown plan is the previous scope's.
+                preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
                 divider(ui);
                 if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
                     act = a;
@@ -2671,5 +2681,39 @@ mod tests {
         let out = pass(&ctx, &mut app, Vec::new(), none);
         assert!(!painted(&out, "Matching…"), "no flash");
         assert!(painted(&out, "No layer matches"));
+    }
+
+    /// While a new scope's plan is in flight, the count still describes the plan
+    /// shown, in its own scope's words. Racy in the passing direction only, as
+    /// `an_empty_preview_does_not_flash_while_matching` is.
+    ///
+    /// flip: `batch_rename_ui` labelling the preview by `b.s.scope` → fails at "the
+    /// page's count", reading `· 0 pages`.
+    #[test]
+    fn a_plan_in_flight_keeps_its_own_scope_label() {
+        let (ctx, mut app) = app();
+        let none = egui::Modifiers::NONE;
+        named(&mut app, "Rectangle 1");
+        pass(&ctx, &mut app, Vec::new(), none);
+        app.open_batch_rename(&ctx, None);
+        settle(&ctx, &mut app);
+        let painted = |out: &egui::FullOutput, s: &str| {
+            out.shapes
+                .iter()
+                .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == s))
+        };
+        let b = app.batch_rename.as_mut().unwrap();
+        assert_eq!(b.s.scope, Scope::Page);
+        let n = b.plan.listed;
+        assert!(n > 0, "the page plan lists its layers");
+        b.s.set_scope(Scope::Document);
+        let out = pass(&ctx, &mut app, Vec::new(), none);
+        assert!(
+            painted(&out, &format!("{n} of {n} match")),
+            "the page's count"
+        );
+        settle(&ctx, &mut app);
+        let out = pass(&ctx, &mut app, Vec::new(), none);
+        assert!(painted(&out, &format!("{n} of {n} match · 1 page")));
     }
 }

@@ -329,7 +329,8 @@ page it can reach, in tree order, with name, bounds, glyph, and whether each is 
 or under the selection — is taken once at open (`Snapshot`). A worker thread plans from that copy
 whenever a setting changes, taking only the newest request and abandoning a plan once a newer one is
 asked for, and sends the rows back in parts of 500 layers, so typing never waits on a large
-document. The preview keeps the previous plan until the new one's first part lands.
+document. The preview keeps the previous plan until the new one's first part lands, its count
+worded for the scope that plan was made for (`Plan::scope`).
 
 - **Two verbs.** *Rename* (`Ctrl+R`, `F2`) is the layers tree's one-layer field (`app-selection.md`).
   *Batch rename…* (`Ctrl+Shift+R`, `Action::BatchRename`, `Item::BatchRename`, State group,

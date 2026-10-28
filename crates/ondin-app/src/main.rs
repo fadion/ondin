@@ -5,11 +5,15 @@
 //!
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
-//! ondin export <file> [--svg|--png|--json|--html|--react|--vue] [-o out]
-//!            [--scale <n> | --width <px> | --height <px>] [--page <name|n>]
+//! ondin export <file> [--svg|--pdf|--png|--json|--html|--react|--vue] [-o out]
+//!            [--outlines] [--frames] [--scale <n> | --width <px> | --height <px>]
+//!            [--page <name|n>]
 //!                                render a page with no GPU and no window, by
 //!                                default the first that is not a draft;
 //!                                the three sizes are --png only, and one at a time;
+//!                                --outlines sets an SVG's or a PDF's text as
+//!                                paths; --pdf --frames writes a page per
+//!                                top-level frame;
 //!                                --html writes a zip of HTML and CSS,
 //!                                --react and --vue a zip of components;
 //!                                --json describes every page

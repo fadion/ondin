@@ -12,6 +12,8 @@ ondin-render/src/
 ├─ cpu.rs          # VelloCpuRenderer (vello_cpu) - PNG export, CI, headless
 ├─ scene.rs        # trait ScenePainter + the one document->scene walk, culled
 ├─ effects.rs      # the effect passes, read by both backends (§6.4)
+├─ fx_gpu.rs       # the same passes as compute shaders (fx.wgsl) for the GPU backend
+├─ images.rs       # the decode cache: encoded bytes to peniko::ImageData, once per image
 └─ color.rs        # the ONLY color conversion point
 ```
 

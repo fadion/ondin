@@ -50,7 +50,7 @@ How `ondin-app` draws its window and panels: the toolkit choice, the shared widg
 
 ```
 ondin-app/src/
-├─ main.rs          CLI: gui (default) | <file> | export | render | diff | serve | mcp-proxy; Velopack hook; eframe bootstrap
+├─ main.rs          CLI: gui (default) | <file> | export | render | diff | check | merge | tokens | serve | mcp-proxy; Velopack hook; eframe bootstrap
 ├─ file_type.rs     Windows: the .ondin file type, registered by Velopack's install/update hooks
 ├─ render_cli.rs    `ondin render`: a component per CSV row, every frame per mode
 ├─ bin/ondin-cli.rs console twin (ondin.com on Windows)
@@ -65,6 +65,9 @@ ondin-app/src/
 ├─ tabs.rs          document tabs: the strip, parking and unparking, opening and closing, the tab keys, next launch
 ├─ pages.rs         the Pages section and the page verbs (below)
 ├─ atomic.rs        write(): temp, sync_all, rename (every record the app keeps)
+├─ job.rs           Job: one computation on a worker thread, picked up by the frame loop when it lands
+├─ library/         the library folder: store, project, scan, recovery, cover, cache; history.rs undo kept between sessions (library.md)
+├─ kits/            kit chrome: the kit menu and tag, the library's kit index, the insert picker, publish and updates (kits.md)
 ├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback) + canvas interaction and overlays
 ├─ cursor.rs        canvas cursor bitmaps
 ├─ eyedropper.rs    the eyedropper: arming, the frozen window, the pending pick, the write, the loupe (§9.4)
@@ -76,6 +79,9 @@ ondin-app/src/
 ├─ minimap.rs       the minimap card at the canvas's bottom left (app-canvas-chrome.md)
 ├─ path_bar.rs      the path bar beside the rail while points are edited (app-pen-and-nodes.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
+├─ batch_rename.rs  the batch rename box: picks, orders and numbers the layers, previews, commits (app-canvas-chrome.md)
+├─ contrast.rs      contrast check mode: badges, the fix card, the bar; measured on a worker (app-canvas-chrome.md)
+├─ spacing.rs       spacing handles: a flex or grid container's gaps and padding dragged on the canvas
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
 ├─ present.rs       present mode: top-level frames one at a time, page by page, fullscreen (app-canvas-chrome.md)
 ├─ preview.rs       in-flight gesture state (Drag, Handle, Pen*, TextSession) + PointSet
@@ -88,6 +94,9 @@ ondin-app/src/
 ├─ tools/           pure transaction builders (create *, resize, rotate, pen_outline/pen_anchors, ...)
 ├─ panels/          layers.rs, history.rs, inspector.rs, picker.rs, paint.rs (pure Brush algebra + list reorder)
 ├─ ui.rs            shared widgets (cards, fields, segmented, ramps, Hsv, dropdown frame/rows)
+├─ colour_text.rs   the one parser for a typed or pasted colour (hex, CSS Color 4 sRGB forms)
+├─ expr.rs          arithmetic typed into a numeric field
+├─ thumbs.rs        layer and paint-row thumbnails: decoded pixels to egui textures
 └─ theme.rs         Nocturne tokens as egui Style/Visuals/fonts
 ```
 

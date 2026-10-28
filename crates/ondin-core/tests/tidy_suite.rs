@@ -363,6 +363,32 @@ fn bricks_are_refilled_in_reading_order() {
     assert!((after[3].x0 - after[1].x0).abs() < EPS, "{after:?}");
 }
 
+/// Refilled rows keep the gap the user left between neighbours in a row, and
+/// tidying again moves nothing.
+///
+/// flip: `tidy_moves` measuring refilled columns band to band → fails at the gap.
+#[test]
+fn refilled_rows_keep_their_gaps() {
+    let after = moved(&[
+        r(0.0, 0.0, 40.0, 20.0),
+        r(50.0, 0.0, 40.0, 20.0),
+        r(100.0, 0.0, 40.0, 20.0),
+        r(25.0, 30.0, 40.0, 20.0),
+        r(75.0, 30.0, 40.0, 20.0),
+        r(125.0, 30.0, 40.0, 20.0),
+    ]);
+    for (a, b) in [(0, 1), (1, 2), (3, 4), (4, 5)] {
+        assert!(
+            (after[b].x0 - after[a].x1 - 10.0).abs() < EPS,
+            "a 10 gap between {a} and {b}: {after:?}"
+        );
+    }
+    let again = moved(&after);
+    for (a, b) in after.iter().zip(&again) {
+        assert!((a.x0 - b.x0).abs() < EPS && (a.y0 - b.y0).abs() < EPS);
+    }
+}
+
 /// One box, or none, never moves.
 #[test]
 fn fewer_than_two_boxes_move_nothing() {

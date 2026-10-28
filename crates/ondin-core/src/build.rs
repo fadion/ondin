@@ -5640,7 +5640,23 @@ pub fn tidy_moves(boxes: &[kurbo::Rect]) -> Vec<Vec2> {
         }
         gaps
     };
-    let mut h_gaps = band_gaps(col_count, &|i| cell[i].1, |b| b.x0, |b| b.x1);
+    // Refilled columns are not bands the user made (a brick's row sits between
+    // the next row's columns), so the gaps across are read box to box within
+    // each row instead.
+    let mut h_gaps = if fits {
+        band_gaps(col_count, &|i| cell[i].1, |b| b.x0, |b| b.x1)
+    } else {
+        let mut gaps = Vec::new();
+        for r in 0..row_count {
+            let mut row: Vec<&kurbo::Rect> = (0..n)
+                .filter(|i| cell[*i].0 == r)
+                .map(|i| &boxes[i])
+                .collect();
+            row.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+            gaps.extend(row.windows(2).map(|w| w[1].x0 - w[0].x1));
+        }
+        gaps
+    };
     let mut v_gaps = band_gaps(row_count, &|i| cell[i].0, |b| b.y0, |b| b.y1);
     let (h, v) = (median(&mut h_gaps), median(&mut v_gaps));
     let (h, v) = match (h, v) {

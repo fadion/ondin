@@ -17,7 +17,7 @@ resize, drop outlines and the transform origin (pivot).
   - **Rows and columns** are clusters of box centres. A box joins a band while it is within half the band's largest box of the band's mean centre.
   - **Cells** are kept, holes included, when no cell holds two boxes and some row spans every column. Otherwise each row is refilled from the left, which is what happens to bricks.
   - **Sizes**: a column is as wide as its widest box and a row as tall as its tallest, and each box is centred in its cell.
-  - **Gaps** are the median of the current gaps between neighbouring bands, never negative; an axis with no gaps takes the other's. They are measured band to band rather than box to box, so a box inset in its cell does not read as a wider gap next time.
+  - **Gaps** are the median of the current gaps between neighbouring bands, never negative; an axis with no gaps takes the other's. They are measured band to band rather than box to box, so a box inset in its cell does not read as a wider gap next time — except across refilled rows, whose columns are not bands the user made: there the gap across is read box to box within each row.
   - **Stability**: the union's top-left holds still, and tidying twice moves nothing. `tidy_suite.rs` checks these properties over hand cases and seeded random layouts.
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, focus mode.

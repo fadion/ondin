@@ -27,6 +27,14 @@ reads true.
   **Penpot** (open source, so its format can be read from its code). Pixso works with `.fig`;
   Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
+- **A union of two open paths sharing an edge keeps the seam.** flo_curves hands back two operands
+  wound the same way with the shared edge walked once, and `boolean::spliced` keeps it: the fill is
+  right, a stroke draws a line along it. Exclude does the same where operands share part of an edge
+  (`exclude_of` concatenates). Both are `boolean_suite.rs`'s `KNOWN` cases.
+- **Batch rename's reading order around a sidebar.** `batch_rename::by_bands` sets aside a layer
+  whose box holds another's, but a tall layer beside the rows that holds none of them (a sidebar)
+  starts the first band when its top is highest, and every row whose centre falls in its span
+  joins that one band, read along as a single row.
 
 ## Later · Second
 

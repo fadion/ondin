@@ -247,6 +247,9 @@ struct FxFrame {
     /// How many ordinary layers are open inside this one; what tells `pop_layer`
     /// which kind of layer it is closing (see [`CpuPainter::opened_ordinary`]).
     depth: usize,
+    /// Whether the layer itself is composited, or only the shadows it casts
+    /// (`push_shadow_layer`).
+    layer: bool,
 }
 
 impl CpuPainter<'_> {
@@ -565,7 +568,20 @@ impl ScenePainter for CpuPainter<'_> {
             scale: (scale.0 / k, scale.1 / k),
             downscale: k,
             depth: 0,
+            layer: true,
         });
+    }
+
+    fn push_shadow_layer(
+        &mut self,
+        transform: Affine,
+        bounds: Rect,
+        effects: &[ondin_core::Keyed<Effect>],
+    ) {
+        self.push_effect_layer(transform, bounds, effects);
+        if let Some(f) = self.fx.last_mut() {
+            f.layer = false;
+        }
     }
 
     fn pop_layer(&mut self) {
@@ -598,7 +614,10 @@ impl ScenePainter for CpuPainter<'_> {
             // borrow, not a conversion, so the backends cannot round differently.
             let (w, h) = (pixmap.width() as usize, pixmap.height() as usize);
             let mut surface = crate::effects::Surface::new(pixmap.data_as_u8_slice_mut(), w, h);
-            crate::effects::run(&mut surface, &frame.effects, frame.scale);
+            match frame.layer {
+                true => crate::effects::run(&mut surface, &frame.effects, frame.scale),
+                false => crate::effects::run_shadows(&mut surface, &frame.effects, frame.scale),
+            }
         }
 
         let ctx = self.ctx();

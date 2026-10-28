@@ -2231,6 +2231,7 @@ fn an_effect_on_a_boolean_does_not_take_the_rest_of_the_canvas_with_it() {
             blur: 4.0,
             spread: 0.0,
             color: Color::from_rgba8(0, 0, 0, 128),
+            blend: ondin_core::BlendMode::Normal,
         },
     ));
     let vp = Viewport {

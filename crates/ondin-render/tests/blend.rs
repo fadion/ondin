@@ -260,3 +260,101 @@ fn a_top_level_frame_isolates_what_blends_inside_it() {
         "the top-level frame isolates; the nested one passes through"
     );
 }
+
+/// A hard shadow `dx` to the right in `rgb`, in `blend`.
+fn hard(inner: bool, dx: f64, rgb: [u8; 3], blend: BlendMode) -> ondin_core::Effect {
+    let shadow = ondin_core::Shadow {
+        offset: ondin_core::kurbo::Vec2::new(dx, 0.0),
+        blur: 0.0,
+        spread: 0.0,
+        color: Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255),
+        blend,
+    };
+    ondin_core::Effect::new(match inner {
+        true => ondin_core::EffectKind::InnerShadow(shadow),
+        false => ondin_core::EffectKind::DropShadow(shadow),
+    })
+}
+
+fn shadows(doc: &mut Document, id: NodeId, effects: Vec<ondin_core::Effect>) {
+    doc.apply(&Transaction(vec![Operation::SetEffects {
+        id,
+        effects: keyed_by_position(effects),
+    }]))
+    .unwrap();
+}
+
+/// The board's case: a Multiply drop shadow deepens the ground it falls on
+/// where a Normal one covers it — which takes the shadow out of the layer's
+/// effect buffer, where there is no ground to multiply.
+/// flip: `shadow_passes` answering `None` → fails at "multiplied".
+#[test]
+fn a_multiply_drop_shadow_deepens_the_ground() {
+    let mut d = frame(Some([63, 154, 107]));
+    let frame = d.frame;
+    let card = rect(&mut d, frame, 20.0, 60.0, [242, 242, 245]);
+    let red = [200, 40, 40];
+    shadows(
+        &mut d.doc,
+        card,
+        vec![hard(false, 20.0, red, BlendMode::Normal)],
+    );
+    assert!(near(pixel(&d.doc, 70), red), "Normal covers");
+    shadows(
+        &mut d.doc,
+        card,
+        vec![hard(false, 20.0, red, BlendMode::Multiply)],
+    );
+    let got = pixel(&d.doc, 70);
+    assert!(near(got, [49, 24, 17]), "multiplied: got {got:?}");
+    assert!(near(pixel(&d.doc, 40), [242, 242, 245]), "the card on top");
+}
+
+/// Two drop shadows stack as the one buffer stacks them, the later behind the
+/// earlier: the Multiply red, listed first, multiplies the Normal blue under it.
+/// flip: `shadow_passes` drawing drop shadows in list order → fails at "over
+/// the blue".
+#[test]
+fn drop_shadows_keep_their_stacking_when_one_blends() {
+    let mut d = frame(Some([63, 154, 107]));
+    let frame = d.frame;
+    let card = rect(&mut d, frame, 20.0, 60.0, [242, 242, 245]);
+    shadows(
+        &mut d.doc,
+        card,
+        vec![
+            hard(false, 20.0, [200, 40, 40], BlendMode::Multiply),
+            hard(false, 30.0, [0, 0, 200], BlendMode::Normal),
+        ],
+    );
+    let got = pixel(&d.doc, 70);
+    assert!(near(got, [0, 0, 31]), "over the blue: got {got:?}");
+    assert!(near(pixel(&d.doc, 85), [0, 0, 200]), "the blue alone");
+}
+
+/// An inner shadow blends with the layer it is cast inside: Screen lightens a
+/// dark card where Normal paints it red.
+#[test]
+fn an_inner_shadow_blends_with_its_layer() {
+    let mut d = frame(Some([63, 154, 107]));
+    let frame = d.frame;
+    let card = rect(&mut d, frame, 20.0, 60.0, [40, 40, 40]);
+    let red = [200, 40, 40];
+    shadows(
+        &mut d.doc,
+        card,
+        vec![hard(true, 10.0, red, BlendMode::Normal)],
+    );
+    assert!(near(pixel(&d.doc, 25), red), "Normal covers");
+    shadows(
+        &mut d.doc,
+        card,
+        vec![hard(true, 10.0, red, BlendMode::Screen)],
+    );
+    let got = pixel(&d.doc, 25);
+    assert!(near(got, [209, 74, 74]), "screened: got {got:?}");
+    assert!(
+        near(pixel(&d.doc, 45), [40, 40, 40]),
+        "the card past the band"
+    );
+}

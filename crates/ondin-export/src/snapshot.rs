@@ -32,7 +32,8 @@ use std::collections::BTreeMap;
 ///   `world_transform`, `world_bounds`) is written at the SVG writer's four places.
 /// - **12** pages: `root` became `pages`, and every node says which page it is on.
 /// - **13** the `"slice"` kind and `Geometry::Slice`.
-/// - **14** `NodeSnapshot::blend`, absent at the kind's default.
+/// - **14** `NodeSnapshot::blend`, absent at the kind's default, and
+///   `EffectSummary::blend`, absent at Normal.
 pub const SNAPSHOT_VERSION: u32 = 14;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,6 +147,9 @@ pub struct EffectSummary {
     /// as `PaintSummary::Solid` splits a fill's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f32>,
+    /// Shadows only: the blend mode as the menu names it, absent at Normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<String>,
     /// `Filters` only: factors with 1.0 neutral, and degrees for the hue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<f64>,
@@ -456,6 +460,7 @@ fn effect_summary(e: &ondin_core::Effect) -> EffectSummary {
         spread: None,
         color: None,
         opacity: None,
+        blend: None,
         brightness: None,
         contrast: None,
         saturation: None,
@@ -470,6 +475,7 @@ fn effect_summary(e: &ondin_core::Effect) -> EffectSummary {
                 spread: Some(s.spread),
                 color: Some(color),
                 opacity: Some(alpha),
+                blend: s.blends().then(|| s.blend.label().to_string()),
                 ..base(match e.kind {
                     EffectKind::DropShadow(_) => "DropShadow",
                     _ => "InnerShadow",

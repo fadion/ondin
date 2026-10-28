@@ -1067,6 +1067,19 @@ fn report_node(
     {
         report.approximate("a shadow's spread, drawn with a square kernel");
     }
+    // A filter reads only its own element, never what lies beneath it, so a
+    // shadow's mode has nothing to blend with there.
+    if filter_written
+        && effects.iter().any(|e| {
+            e.visible
+                && match e.kind {
+                    EffectKind::DropShadow(ref s) | EffectKind::InnerShadow(ref s) => s.blends(),
+                    _ => false,
+                }
+        })
+    {
+        report.approximate("a shadow's blend mode, drawn normal");
+    }
     // Everything below is about `<text>`; outlined text is our own glyphs, placed.
     if outlined {
         return;

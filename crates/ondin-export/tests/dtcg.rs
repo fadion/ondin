@@ -302,6 +302,7 @@ fn styles_become_composite_tokens_or_a_note() {
         blur: 12.0,
         spread: 0.0,
         color: Color::from_rgba8(0, 0, 0, 64),
+        blend: ondin_core::BlendMode::Normal,
     };
     let ops = vec![
         style(

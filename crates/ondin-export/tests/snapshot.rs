@@ -427,6 +427,7 @@ fn the_snapshot_carries_a_layers_effects_in_the_units_the_panel_shows() {
                     blur: 12.0,
                     spread: 1.5,
                     color: ondin_core::peniko::Color::from_rgba8(0, 0, 0, 102),
+                    blend: ondin_core::BlendMode::Normal,
                 })),
                 // Hidden, so the filter that keeps it out is exercised alongside.
                 Effect {

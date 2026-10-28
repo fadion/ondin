@@ -9114,7 +9114,7 @@ impl OndinApp {
     /// One effect's numbers, behind its row.
     ///
     /// An `Area` in the popover lane ([`OndinApp::popover_anchor`]), so opening it
-    /// does not push the card down. No `Blend` row: a shadow has no mode of its own yet.
+    /// does not push the card down. A shadow's last row is its blend mode.
     fn effect_menu_popup(
         &mut self,
         ui: &mut egui::Ui,
@@ -9140,6 +9140,7 @@ impl OndinApp {
         let ctx = ui.ctx().clone();
         let mut close = false;
         let mut retype: Option<EffectKind> = None;
+        let mut shadow_blend: Option<BlendMode> = None;
         // The kind combo's list is its own `Area` above this one, so a pick there
         // misses `contains_pointer`; asked by layer order.
         let over_overlay = ctx
@@ -9259,6 +9260,41 @@ impl OndinApp {
                                 s.color,
                                 "Edit this shadow's colour",
                             );
+                            // --- how it mixes with what is beneath it ---------
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = COL;
+                                ui.spacing_mut().interact_size.y = CELL;
+                                ui.spacing_mut().button_padding.y = 0.0;
+                                ui.add_sized(
+                                    egui::vec2(half, CELL),
+                                    egui::Label::new(
+                                        egui::RichText::new("Blend")
+                                            .size(11.0)
+                                            .color(theme::text::MUTED),
+                                    ),
+                                );
+                                egui::ComboBox::from_id_salt(("shadow-blend", index))
+                                    .icon(ui::combo_chevron)
+                                    .width(half - 18.0)
+                                    .selected_text(s.blend.label())
+                                    .show_ui(ui, |ui| {
+                                        ui::menu_rows(ui);
+                                        ui.spacing_mut().button_padding.y = 2.0;
+                                        // A shadow is no container: no Pass through.
+                                        for mode in &BlendMode::ALL[1..] {
+                                            let on = s.blend == *mode;
+                                            if ui.selectable_label(on, mode.label()).clicked() && !on
+                                            {
+                                                shadow_blend = Some(*mode);
+                                            }
+                                            if BlendMode::FAMILY_ENDS.contains(mode) {
+                                                ui::menu_sep(ui);
+                                            }
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text("How the shadow mixes with what is beneath it");
+                            });
                         }
                         EffectKind::LayerBlur { radius } => {
                             if let Some(r) = self.effect_number_field(
@@ -9388,6 +9424,22 @@ impl OndinApp {
             self.effect_menu = None;
         }
         // After the `Area`, whose closure holds `&mut self`.
+        if let Some(mode) = shadow_blend {
+            let mut effects = match self.session.display_node(id) {
+                Some(n) => n.effects().to_vec(),
+                None => return,
+            };
+            if let Some(EffectKind::DropShadow(s) | EffectKind::InnerShadow(s)) =
+                effects.get_mut(index).map(|e| &mut e.kind)
+            {
+                s.blend = mode;
+                self.session.name_step(
+                    format!("Shadow blend · {}", mode.label()),
+                    icon::INTERSECT_THREE,
+                );
+                self.write_effects(subjects, effects);
+            }
+        }
         if let Some(kind) = retype {
             let mut effects = match self.session.display_node(id) {
                 Some(n) => n.effects().to_vec(),
@@ -15917,6 +15969,41 @@ mod effects_panel_tests {
         );
     }
 
+    /// A shadow's popover ends on its blend mode, Normal at first; a pick in the list writes the
+    /// mode in one named step and leaves every number alone.
+    /// flip: the popover dropping `shadow_blend` → fails at "the pick landed".
+    #[test]
+    fn a_shadows_blend_row_writes_its_mode() {
+        let mut card = Card::new(vec![EffectKind::DropShadow(Default::default())]);
+        card.app.effect_menu = Some((card.id, 0));
+        let out = card.settle();
+        let at = |out: &egui::FullOutput, text: &str| {
+            ink(out)
+                .into_iter()
+                .find(|(t, _)| t == text)
+                .unwrap_or_else(|| panic!("no {text:?}"))
+                .1
+                .center()
+        };
+        let _ = at(&out, "Blend");
+        card.click(at(&out, "Normal"));
+        let out = card.settle();
+        card.click(at(&out, "Multiply"));
+        let EffectKind::DropShadow(s) = &card.committed()[0].kind else {
+            panic!("the kind changed");
+        };
+        assert_eq!(s.blend, BlendMode::Multiply, "the pick landed");
+        assert_eq!(s.blur, ondin_core::Shadow::default().blur);
+        assert_eq!(
+            card.app
+                .session
+                .history
+                .current_note_mut()
+                .map(|n| n.label.clone()),
+            Some("Shadow blend · Multiply".into())
+        );
+    }
+
     /// Each kind's popover holds that kind's numbers and no others: a field a kind does not have
     /// is absent rather than dimmed. Field prefixes are checked, not the title.
     #[test]
@@ -15975,6 +16062,7 @@ mod effects_panel_tests {
             blur: 21.0,
             spread: 4.0,
             color: ondin_core::peniko::Color::from_rgba8(10, 20, 30, 200),
+            blend: ondin_core::BlendMode::Normal,
         };
         let mut card = Card::new(vec![EffectKind::DropShadow(tuned.clone())]);
         card.app.effect_menu = Some((card.id, 0));
@@ -16523,6 +16611,7 @@ mod effects_multi_tests {
                 blur: 4.0,
                 spread: 0.0,
                 color: c,
+                blend: ondin_core::BlendMode::Normal,
             })
         };
         let red = Brush::Solid(Color::from_rgba8(255, 0, 0, 255));

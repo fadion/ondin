@@ -643,6 +643,7 @@ fn shadowed(f: &mut F) -> ondin_core::ItemId {
         blur: 2.0,
         spread: 0.0,
         color: ondin_core::peniko::Color::BLACK,
+        blend: ondin_core::BlendMode::Normal,
     };
     f.doc
         .apply(&Transaction(vec![Operation::SetEffects {

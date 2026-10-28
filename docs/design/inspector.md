@@ -169,6 +169,7 @@ comes from the committed document.
 - **Order.** Model order, first at the top: effects are a pipeline (§6.4). Fill draws upside down because paints stack in space.
 - **Popover.** A card whose title is a kind combo; retyping carries shared fields over (`EffectKind::retyped`). It sits in the shared popover lane and dismisses through `panels::dismissed_by_click`.
 - **Shadow colour** is a Fill row (chip, hex, %) on `PaintSlot::Effect(i)`; the % *is* the alpha.
+- **Shadow blend** is a shadow popover's last row: a combo of the sixteen modes in families, no Pass through. A pick writes the effect list through `write_effects` as one step, *Shadow blend · Mode*. It has no hover preview, unlike the Appearance header's menu.
 - **A Filters row** uses `ui::value_field_metered`, a bar growing from the middle, plus a per-channel reset. Ranges are 0…200%, symmetric about the 100% neutral, so the meter reads `factor − 1.0`.
 - Opens on a layer with effects and shuts on one without, through its own `synced_selection` *Effects* entry.
 - **Multi-selection.** Export's shape: one agreed stack, or *"These layers have different effects"*, where `+` replaces every stack. The `Effect(i)` write reads each subject's own list rather than cloning the anchor's, because the detached picker can outlive an agreeing state.

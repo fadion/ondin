@@ -139,6 +139,18 @@ pub trait ScenePainter {
         self.push_layer(transform, None, ClipRule::NonZero, 1.0);
     }
 
+    /// [`Self::push_effect_layer`] keeping only the shadows `effects` casts, the
+    /// layer itself left out (`effects::run_shadows`): one pass of a layer whose
+    /// shadows blend ([`shadow_passes`]). The default keeps the layer too.
+    fn push_shadow_layer(
+        &mut self,
+        transform: Affine,
+        bounds: Rect,
+        effects: &[ondin_core::Keyed<Effect>],
+    ) {
+        self.push_effect_layer(transform, bounds, effects);
+    }
+
     /// Begin an unclipped layer composited over the enclosing one by `mode`
     /// ([`ondin_core::Node::blend`]). Normal is an isolation group. The default
     /// composites plainly; shipping backends override.
@@ -632,6 +644,79 @@ struct Painted<'a> {
     rule: ClipRule,
 }
 
+/// One pass of a layer whose effect stack holds a blending shadow
+/// ([`shadow_passes`]): the stack it is drawn with, whether only the shadows it
+/// casts are kept, and the mode they composite by.
+struct FxPass {
+    effects: Vec<ondin_core::Keyed<Effect>>,
+    shadows: bool,
+    blend: BlendMode,
+}
+
+/// The passes a layer is drawn in when a visible shadow of `effects` blends, or
+/// `None` when the one effect layer does. Bottom to top: each drop shadow alone,
+/// the last first since `effects::run` stacks a later one behind an earlier;
+/// then the layer with its own appearance and no shadow; then each inner shadow
+/// alone, in list order. A shadow's pass keeps the appearance effects, which
+/// shape the silhouette it is cast from.
+///
+/// Alone, a shadow composites through its own blend layer onto what lies under
+/// the layer, which the one effect buffer does not hold.
+fn shadow_passes(effects: &[ondin_core::Keyed<Effect>]) -> Option<Vec<FxPass>> {
+    use ondin_core::EffectKind;
+    fn shadow(e: &ondin_core::Keyed<Effect>) -> Option<&ondin_core::Shadow> {
+        match &e.kind {
+            EffectKind::DropShadow(s) | EffectKind::InnerShadow(s)
+                if e.visible && s.color.components[3] > 0.0 =>
+            {
+                Some(s)
+            }
+            _ => None,
+        }
+    }
+    if !effects.iter().filter_map(shadow).any(|s| s.blends()) {
+        return None;
+    }
+    let appearance: Vec<_> = effects
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e.kind,
+                EffectKind::DropShadow(_) | EffectKind::InnerShadow(_)
+            )
+        })
+        .cloned()
+        .collect();
+    let alone = |e: &ondin_core::Keyed<Effect>, s: &ondin_core::Shadow| {
+        let mut effects = appearance.clone();
+        effects.push(e.clone());
+        FxPass {
+            effects,
+            shadows: true,
+            blend: s.blend,
+        }
+    };
+    let drop = |e: &&ondin_core::Keyed<Effect>| matches!(e.kind, EffectKind::DropShadow(_));
+    let mut passes: Vec<FxPass> = effects
+        .iter()
+        .rev()
+        .filter(drop)
+        .filter_map(|e| shadow(e).map(|s| alone(e, s)))
+        .collect();
+    passes.push(FxPass {
+        effects: appearance.clone(),
+        shadows: false,
+        blend: BlendMode::Normal,
+    });
+    passes.extend(
+        effects
+            .iter()
+            .filter(|e| !drop(e))
+            .filter_map(|e| shadow(e).map(|s| alone(e, s))),
+    );
+    Some(passes)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn paint_node<P: ScenePainter>(
     doc: &Document,
@@ -642,6 +727,23 @@ fn paint_node<P: ScenePainter>(
     view: Rect,
     base: Affine,
     painter: &mut P,
+) {
+    paint_node_pass(doc, res, ov, id, parent_world, view, base, painter, None);
+}
+
+/// [`paint_node`], or one of its [`FxPass`]es when `pass` is given — drawn
+/// inside the node's blend layer, which the first call pushed.
+#[allow(clippy::too_many_arguments)]
+fn paint_node_pass<P: ScenePainter>(
+    doc: &Document,
+    res: &Resolved,
+    ov: &RenderOverrides,
+    id: NodeId,
+    parent_world: Affine,
+    view: Rect,
+    base: Affine,
+    painter: &mut P,
+    pass: Option<&FxPass>,
 ) {
     let Some(node) = doc.get(id) else { return };
     let over = ov.get(id);
@@ -743,29 +845,55 @@ fn paint_node<P: ScenePainter>(
     let frame_stroke = matches!(painted.kind, NodeKind::Artboard { .. })
         && painted.paint.strokes.iter().any(|s| s.visible);
     // The effect layer is outermost but for the blend layer, in two load-bearing
-    // positions: outside the
-    // clip, so a clipping frame's drop shadow is not cut off, and outside the
-    // opacity, so a half-transparent layer casts a half-transparent shadow.
-    let effects = doc.resolved_effects(
+    // positions: outside the clip, so a clipping frame's drop shadow is not cut
+    // off, and outside the opacity, so a half-transparent layer casts a
+    // half-transparent shadow.
+    let stack = doc.resolved_effects(
         id,
         over.and_then(|o| o.effects.as_deref())
             .unwrap_or(node.effects()),
     );
-    let effects: &[ondin_core::Keyed<ondin_core::Effect>] = &effects;
+    let stack: &[ondin_core::Keyed<ondin_core::Effect>] = &stack;
+    let effects = pass.map_or(stack, |p| &p.effects[..]);
     // `Some` exactly when a layer was pushed; a node with no cached bounds yet
-    // draws unfiltered rather than not at all.
+    // draws unfiltered rather than not at all. Sized from the whole stack, so
+    // every pass reads its silhouette from the same buffer box.
     let effect_layer = crate::effects::any_ink(effects)
-        .then(|| effect_bounds(res, id, &painted, world, effects))
+        .then(|| effect_bounds(res, id, &painted, world, stack))
         .flatten();
     // The blend layer is outside even the effect layer: a layer's shadow blends
-    // with it.
+    // with it. A pass is drawn inside the one its first call pushed.
     let blend = over.and_then(|o| o.blend).unwrap_or(node.blend());
-    let blend_layer = blend_layer(doc, ov, id, painted.kind, blend);
+    let blend_layer = match pass {
+        None => blend_layer(doc, ov, id, painted.kind, blend),
+        Some(_) => None,
+    };
     if let Some(mode) = blend_layer {
         painter.push_blend_layer(mode);
     }
+    if pass.is_none()
+        && effect_layer.is_some()
+        && let Some(passes) = shadow_passes(stack)
+    {
+        for p in &passes {
+            if blends(p.blend) {
+                painter.push_blend_layer(p.blend);
+            }
+            paint_node_pass(doc, res, ov, id, parent_world, view, base, painter, Some(p));
+            if blends(p.blend) {
+                painter.pop_layer();
+            }
+        }
+        if blend_layer.is_some() {
+            painter.pop_layer();
+        }
+        return;
+    }
     if let Some(ink) = effect_layer {
-        painter.push_effect_layer(world, ink, effects);
+        match pass {
+            Some(p) if p.shadows => painter.push_shadow_layer(world, ink, effects),
+            _ => painter.push_effect_layer(world, ink, effects),
+        }
     }
 
     let outer_opacity = frame_stroke && opacity < 1.0;
@@ -838,7 +966,7 @@ fn paint_node<P: ScenePainter>(
                 reopen(painter, &mut open, &mut mask);
             }
             let top = matches!(node.kind(), NodeKind::Root);
-            paint_ghost(doc, ov, &ghost.node, top, world, base, painter);
+            paint_ghost(doc, ov, &ghost.node, top, world, base, painter, None);
             next_ghost += 1;
         }
         let Some(child) = children.get(pos) else {
@@ -1039,7 +1167,8 @@ fn ghost_ink(ghost: &GhostNode, world: Affine) -> Option<Rect> {
 
 /// Draw a ghost subtree: [`paint_node`]'s walk with children inline and no
 /// culling. `doc` supplies the image table that framing reads; `top` says the
-/// ghost lands directly on a page, for [`blend_layer`]'s top-level frame.
+/// ghost lands directly on a page, for [`blend_layer`]'s top-level frame; `pass`
+/// is one of its [`FxPass`]es, as for [`paint_node_pass`].
 #[allow(clippy::too_many_arguments)]
 fn paint_ghost<P: ScenePainter>(
     doc: &Document,
@@ -1049,6 +1178,7 @@ fn paint_ghost<P: ScenePainter>(
     parent_world: Affine,
     base: Affine,
     painter: &mut P,
+    pass: Option<&FxPass>,
 ) {
     if !ghost.visible {
         return;
@@ -1071,7 +1201,9 @@ fn paint_ghost<P: ScenePainter>(
         && ghost.paint.strokes.iter().any(|s| s.visible);
     // Measured via [`ghost_ink`], not `local_path`, which answers `None` for
     // groups, text and booleans and omits the stroke expansion.
-    let ghost_effects = crate::effects::any_ink(&ghost.effects)
+    // A pass's own stack, in a box sized from the whole one, as in `paint_node_pass`.
+    let effects = pass.map_or(&ghost.effects[..], |p| &p.effects[..]);
+    let ghost_effects = crate::effects::any_ink(effects)
         .then(|| ghost_ink(ghost, world))
         .flatten()
         .map(|base| {
@@ -1082,7 +1214,9 @@ fn paint_ghost<P: ScenePainter>(
             );
             world.inverse().transform_rect_bbox(ink)
         });
-    let blend_layer = if ghost.blend.isolates(&ghost.kind) {
+    let blend_layer = if pass.is_some() {
+        None
+    } else if ghost.blend.isolates(&ghost.kind) {
         Some(ghost.blend)
     } else {
         let top_frame = top && matches!(ghost.kind, NodeKind::Artboard { .. });
@@ -1091,8 +1225,29 @@ fn paint_ghost<P: ScenePainter>(
     if let Some(mode) = blend_layer {
         painter.push_blend_layer(mode);
     }
+    if pass.is_none()
+        && ghost_effects.is_some()
+        && let Some(passes) = shadow_passes(&ghost.effects)
+    {
+        for p in &passes {
+            if blends(p.blend) {
+                painter.push_blend_layer(p.blend);
+            }
+            paint_ghost(doc, ov, ghost, top, parent_world, base, painter, Some(p));
+            if blends(p.blend) {
+                painter.pop_layer();
+            }
+        }
+        if blend_layer.is_some() {
+            painter.pop_layer();
+        }
+        return;
+    }
     if let Some(ink) = ghost_effects {
-        painter.push_effect_layer(world, ink, &ghost.effects);
+        match pass {
+            Some(p) if p.shadows => painter.push_shadow_layer(world, ink, effects),
+            _ => painter.push_effect_layer(world, ink, effects),
+        }
     }
 
     let outer_opacity = frame_stroke && ghost.opacity < 1.0;
@@ -1143,7 +1298,7 @@ fn paint_ghost<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun, ghost: &GhostNode| {
         if mask.alpha_to_composite().is_some() {
             painter.push_mask_layer();
-            paint_ghost(doc, ov, ghost, false, world, base, painter);
+            paint_ghost(doc, ov, ghost, false, world, base, painter, None);
             painter.pop_layer();
         }
         mask.close(painter);
@@ -1170,7 +1325,7 @@ fn paint_ghost<P: ScenePainter>(
             continue;
         }
         mask.reopen(painter, world);
-        paint_ghost(doc, ov, child, false, world, base, painter);
+        paint_ghost(doc, ov, child, false, world, base, painter, None);
     }
     if let Some(g) = alpha_ghost.take() {
         end_run(painter, &mut mask, g);

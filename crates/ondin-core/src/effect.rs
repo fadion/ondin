@@ -6,12 +6,11 @@
 //!
 //! **Four effects**: drop shadow, inner shadow, layer blur and colour filters
 //! are the ones that agree across the canvas (vello on wgpu), the raster export
-//! (`vello_cpu`) and the SVG writer. **Background blur** and a **shadow's own
-//! blend mode** are planned but not built: SVG cannot express a backdrop
-//! (`BackgroundImage` was never implemented by any renderer), so that writer owes
-//! an answer, and a shadow's mode blends with what is beneath the layer, which the
-//! effect buffer does not hold. A layer's mode is `crate::Node::blend`. **Noise**
-//! is a non-goal: one generator written three
+//! (`vello_cpu`) and the SVG writer. **Background blur** is planned but not
+//! built: SVG cannot express a backdrop (`BackgroundImage` was never implemented
+//! by any renderer), so that writer owes an answer — the reason it draws a
+//! [`Shadow::blend`] Normal and reports it. A layer's mode is
+//! `crate::Node::blend`. **Noise** is a non-goal: one generator written three
 //! times would have to agree to the pixel, and it belongs in the fill list.
 
 use crate::item::Keyed;
@@ -52,9 +51,10 @@ pub fn blur_within_cap(effect: &Effect) -> bool {
     }
 }
 
-/// Lowers every blur in `effect` past [`MAX_BLUR`] to it: what the loader does
-/// with a file written before the cap or by another tool, so a loaded document
-/// never holds a radius `Document::apply` refuses.
+/// Lowers every blur in `effect` past [`MAX_BLUR`] to it, and reads a shadow's
+/// Pass through as Normal: what the loader does with a file written before the
+/// cap or by another tool, so a loaded document never holds a value
+/// `Document::apply` refuses.
 pub(crate) fn clamp_blur(effect: &mut Effect) {
     let clamp = |r: &mut f64| {
         if *r > MAX_BLUR {
@@ -62,7 +62,12 @@ pub(crate) fn clamp_blur(effect: &mut Effect) {
         }
     };
     match &mut effect.kind {
-        EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => clamp(&mut s.blur),
+        EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
+            clamp(&mut s.blur);
+            if s.blend == crate::BlendMode::PassThrough {
+                s.blend = crate::BlendMode::Normal;
+            }
+        }
         EffectKind::LayerBlur { radius } => clamp(radius),
         EffectKind::Filters(_) => {}
     }
@@ -421,7 +426,7 @@ impl EffectKind {
     }
 }
 
-/// A drop or inner shadow's five authored numbers.
+/// A drop or inner shadow's five authored numbers and its blend mode.
 ///
 /// The opacity is the colour's alpha and not a field of its own, as for fills
 /// (`paint::alpha_of`/`with_alpha`); a second spelling of alpha would disagree
@@ -440,6 +445,28 @@ pub struct Shadow {
     /// Straight (non-premultiplied) sRGB, alpha carrying the opacity
     /// (invariant 7).
     pub color: Color,
+    /// How the shadow mixes with what is beneath it: a drop shadow with what lies
+    /// under the layer, an inner one with the layer and what shows through it.
+    /// Never Pass through (`build::effect_is_finite`); skipped in the file at
+    /// Normal, which is what every earlier file meant.
+    #[serde(default = "normal_blend", skip_serializing_if = "is_normal_blend")]
+    pub blend: crate::BlendMode,
+}
+
+fn normal_blend() -> crate::BlendMode {
+    crate::BlendMode::Normal
+}
+
+fn is_normal_blend(b: &crate::BlendMode) -> bool {
+    *b == crate::BlendMode::Normal
+}
+
+impl Shadow {
+    /// Whether this shadow mixes with what is beneath rather than covering it,
+    /// which takes it out of its layer's effect buffer (`scene::shadow_passes`).
+    pub fn blends(&self) -> bool {
+        self.blend != crate::BlendMode::Normal
+    }
 }
 
 impl Default for Shadow {
@@ -453,6 +480,7 @@ impl Default for Shadow {
             blur: DEFAULT_BLUR_RADIUS,
             spread: 0.0,
             color: Color::from_rgba8(0, 0, 0, 102),
+            blend: crate::BlendMode::Normal,
         }
     }
 }
@@ -840,6 +868,7 @@ mod tests {
             blur: 0.0,
             spread: 0.0,
             color: Color::BLACK,
+            blend: crate::BlendMode::Normal,
         }));
         let i = e.escape();
         assert_eq!(i.y1, 10.0, "reaches 10 down");
@@ -897,6 +926,7 @@ mod tests {
                 blur: 4.0,
                 spread: 0.0,
                 color: Color::BLACK,
+                blend: crate::BlendMode::Normal,
             })),
         ]);
         let i = stack_escape(&stack);
@@ -921,6 +951,7 @@ mod tests {
                 blur: 4.0,
                 spread: 0.0,
                 color: Color::BLACK,
+                blend: crate::BlendMode::Normal,
             })),
         ]);
         assert_eq!(
@@ -952,6 +983,7 @@ mod tests {
             blur: 40.0,
             spread: 10.0,
             color: Color::BLACK,
+            blend: crate::BlendMode::Normal,
         }))
         .escape();
         assert_eq!(i, Insets::ZERO);
@@ -980,6 +1012,7 @@ mod tests {
             blur: 0.0,
             spread: 0.0,
             color: Color::BLACK,
+            blend: crate::BlendMode::Normal,
         }));
         let out = escaped(
             kurbo::Rect::new(0.0, 0.0, 50.0, 50.0),
@@ -1011,6 +1044,7 @@ mod tests {
             blur: 21.0,
             spread: 5.0,
             color: Color::from_rgba8(10, 20, 30, 40),
+            blend: crate::BlendMode::Normal,
         };
         let [drop, inner, blur, filters] = EffectKind::all_defaults();
 

@@ -441,6 +441,17 @@ pub fn device_sigma(radius: f64, scale_x: f64, scale_y: f64) -> (f32, f32) {
 /// a drop shadow would take its silhouette from the layer plus the shadow. Reorder
 /// the stages and both followers must move too; nothing fails if only one does.
 pub fn run(s: &mut Surface<'_>, effects: &[Keyed<Effect>], scale: (f64, f64)) {
+    run_keeping(s, effects, scale, true);
+}
+
+/// [`run`] keeping only the shadows the stack casts, the layer left out: one
+/// pass of a layer whose shadows blend (`scene::shadow_passes`), composited by
+/// its own blend layer.
+pub fn run_shadows(s: &mut Surface<'_>, effects: &[Keyed<Effect>], scale: (f64, f64)) {
+    run_keeping(s, effects, scale, false);
+}
+
+fn run_keeping(s: &mut Surface<'_>, effects: &[Keyed<Effect>], scale: (f64, f64), layer: bool) {
     for e in effects.iter().filter(|e| e.visible) {
         match &e.kind {
             EffectKind::Filters(f) if !f.is_neutral() => apply_matrix(s, &filter_matrix(f)),
@@ -454,7 +465,10 @@ pub fn run(s: &mut Surface<'_>, effects: &[Keyed<Effect>], scale: (f64, f64)) {
 
     // The layer as the shadows see it, before anything is composited over or under.
     let graphic = s.px.to_vec();
-    let mut out = graphic.clone();
+    let mut out = match layer {
+        true => graphic.clone(),
+        false => vec![0; graphic.len()],
+    };
     for e in effects.iter().filter(|e| e.visible) {
         let (sh, inner) = match &e.kind {
             EffectKind::DropShadow(sh) => (sh, false),
@@ -831,6 +845,7 @@ mod tests {
                 spread: 10.0,
                 offset: ondin_core::kurbo::Vec2::ZERO,
                 color: Color::BLACK,
+                blend: ondin_core::BlendMode::Normal,
             }))];
             run(
                 &mut Surface::new(&mut px, w, h),
@@ -868,6 +883,7 @@ mod tests {
                 spread,
                 offset: ondin_core::kurbo::Vec2::ZERO,
                 color: Color::BLACK,
+                blend: ondin_core::BlendMode::Normal,
             }))];
             let effects = keyed_by_position(effects);
             let started = std::time::Instant::now();

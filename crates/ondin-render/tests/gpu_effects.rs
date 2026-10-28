@@ -254,6 +254,7 @@ fn red_shadow(dy: f64, blur: f64) -> Effect {
         blur,
         spread: 0.0,
         color: Color::from_rgba8(255, 0, 0, 255),
+        blend: ondin_core::BlendMode::Normal,
     }))
 }
 
@@ -470,6 +471,7 @@ fn a_layer_needing_more_than_the_texture_limit_still_draws() {
         blur: 4.0,
         spread: 0.0,
         color: Color::from_rgba8(255, 0, 0, 255),
+        blend: ondin_core::BlendMode::Normal,
     }))]);
     // 6×: 1600 units across 9600 pixels, and 12 units of banner is 72 down.
     let vp = Viewport {
@@ -510,6 +512,7 @@ fn the_canvas_draws_an_inner_shadow_on_a_rect() {
             blur: 8.0,
             spread: 0.0,
             color: Color::from_rgba8(255, 0, 0, 255),
+            blend: ondin_core::BlendMode::Normal,
         }))],
         1.0,
     );
@@ -621,6 +624,7 @@ fn a_hidden_shadow_draws_nothing_extra() {
             blur: 0.0,
             spread: 0.0,
             color: Color::from_rgba8(255, 0, 0, 255),
+            blend: ondin_core::BlendMode::Normal,
         }),
         visible: false,
         vars: Default::default(),
@@ -649,6 +653,7 @@ fn a_layer_scrolled_off_the_top_still_casts_into_view() {
             blur: 6.0,
             spread: 0.0,
             color: Color::from_rgba8(255, 0, 0, 255),
+            blend: ondin_core::BlendMode::Normal,
         }))],
         1.0,
     );
@@ -719,6 +724,7 @@ fn a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour() {
                     blur: 0.0,
                     spread: 0.0,
                     color: Color::from_rgba8(0, 0, 0, 255),
+                    blend: ondin_core::BlendMode::Normal,
                 }))]),
             },
         ]
@@ -1323,6 +1329,7 @@ fn card_grid(n: usize) -> (Document, Resolved) {
         blur: 0.0,
         spread: 0.0,
         color: Color::from_rgba8(0, 0, 0, 64),
+        blend: ondin_core::BlendMode::Normal,
     }));
     let ops: Vec<Operation> = layered
         .into_iter()
@@ -1569,6 +1576,7 @@ fn a_pooled_texture_carries_nothing_from_the_frame_before() {
             blur: 0.0,
             spread: 0.0,
             color: Color::from_rgba8(255, 0, 0, 255),
+            blend: ondin_core::BlendMode::Normal,
         }))],
         1.0,
     );
@@ -1700,6 +1708,53 @@ fn blended(mode: ondin_core::BlendMode, effects: Vec<Effect>) -> (Document, Reso
     .unwrap();
     let res = Resolved::rebuild(&doc);
     (doc, res)
+}
+
+/// The GPU backend draws a blending shadow's passes as the CPU reference does:
+/// a Multiply drop shadow and a Screen inner shadow on one square, over blue.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn both_backends_blend_a_shadow_alike() {
+    use ondin_core::BlendMode as B;
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let shadow = |inner: bool, mode: B| {
+        let s = Shadow {
+            offset: Vec2::new(0.0, 12.0),
+            blur: 0.0,
+            spread: 0.0,
+            color: Color::from_rgba8(255, 60, 0, 255),
+            blend: mode,
+        };
+        Effect::new(match inner {
+            true => EffectKind::InnerShadow(s),
+            false => EffectKind::DropShadow(s),
+        })
+    };
+    let (doc, res) = blended(
+        B::Normal,
+        vec![shadow(false, B::Multiply), shadow(true, B::Screen)],
+    );
+    let gpu_px = render_gpu(&mut g, &doc, &res);
+    let cpu_px = render_cpu(&doc, &res);
+    let below = at(&cpu_px, 50, 78);
+    assert!(
+        below.0 < 100 && below.2 < 100,
+        "the fixture multiplies the blue under the square: {below:?}"
+    );
+    for (x, y) in [(50, 78), (50, 35), (50, 60), (10, 10)] {
+        let (a, b) = (at(&gpu_px, x, y), at(&cpu_px, x, y));
+        let close = [
+            a.0.abs_diff(b.0),
+            a.1.abs_diff(b.1),
+            a.2.abs_diff(b.2),
+            a.3.abs_diff(b.3),
+        ]
+        .iter()
+        .all(|d| *d <= 2);
+        assert!(close, "at ({x}, {y}): gpu {a:?} vs cpu {b:?}");
+    }
 }
 
 /// The GPU backend draws a blend layer as the CPU reference does, a separable

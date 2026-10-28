@@ -2289,6 +2289,7 @@ fn previewing_a_bigger_effect_asks_for_the_bigger_buffer() {
                 blur: 4.0,
                 spread: 0.0,
                 color: Color::BLACK,
+                blend: ondin_core::BlendMode::Normal,
             }))],
         ),
         (
@@ -2298,6 +2299,7 @@ fn previewing_a_bigger_effect_asks_for_the_bigger_buffer() {
                 blur: 0.0,
                 spread: 40.0,
                 color: Color::BLACK,
+                blend: ondin_core::BlendMode::Normal,
             }))],
         ),
     ] {
@@ -2363,6 +2365,7 @@ fn shadowed_layer() -> (Document, NodeId) {
                 blur: 2.0,
                 spread: 0.0,
                 color: Color::BLACK,
+                blend: ondin_core::BlendMode::Normal,
             }))]),
         },
     ]))
@@ -2378,6 +2381,7 @@ fn big_shadow() -> Effect {
         blur: 12.0,
         spread: 4.0,
         color: Color::BLACK,
+        blend: ondin_core::BlendMode::Normal,
     }))
 }
 
@@ -5541,6 +5545,7 @@ fn an_effect_binding_previews_as_the_number_it_will_draw() {
                     blur: 2.0,
                     spread: 0.0,
                     color: Color::BLACK,
+                    blend: ondin_core::BlendMode::Normal,
                 })),
             )],
         },

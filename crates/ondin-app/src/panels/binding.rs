@@ -4139,6 +4139,7 @@ mod tests {
                     blur: 2.0,
                     spread: 0.0,
                     color: Color::BLACK,
+                    blend: ondin_core::BlendMode::Normal,
                 })),
             )],
         }]));

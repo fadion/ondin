@@ -624,6 +624,9 @@ pub struct Item<'a> {
     pub effects: &'a [ondin_core::Keyed<Effect>],
     /// Device pixels per document unit along each axis — see [`run`].
     pub scale: (f64, f64),
+    /// Whether the layer itself is kept, or only the shadows it casts — the
+    /// CPU's `effects::run` against `effects::run_shadows`.
+    pub layer: bool,
 }
 
 /// Slots in the scratch, named so the sequence below reads as the reference does.
@@ -674,6 +677,7 @@ pub fn run(
         dst_at: (0, 0),
         effects,
         scale,
+        layer: true,
     };
     run_batch(device, queue, fx, &mut pool, &src, &dst, &[item]);
     Some(dst.texture)
@@ -840,6 +844,7 @@ impl Runner<'_> {
             dst_at,
             effects,
             scale,
+            layer,
         } = *item;
         let run = self;
 
@@ -880,7 +885,13 @@ impl Runner<'_> {
         run.slot(Pass::Copy, cur, cur, GRAPHIC, Params::default());
         let mut out = O0;
         let mut out_alt = O1;
-        run.slot(Pass::Copy, cur, cur, out, Params::default());
+        if layer {
+            run.slot(Pass::Copy, cur, cur, out, Params::default());
+        } else {
+            // Shadows only: start from nothing. A tint of no colour at no alpha
+            // writes exact zeros, the CPU's empty buffer.
+            run.slot(Pass::Tint, cur, cur, out, Params::default());
+        }
 
         // --- the shadows, cast from that ------------------------------------
         for e in effects.iter().filter(|e| e.visible) {

@@ -82,6 +82,7 @@ fn red_shadow(dy: f64, blur: f64) -> Effect {
         blur,
         spread: 0.0,
         color: Color::from_rgba8(255, 0, 0, 255),
+        blend: ondin_core::BlendMode::Normal,
     }))
 }
 
@@ -197,6 +198,7 @@ fn a_positive_spread_grows_the_shadow_beyond_the_layer() {
         blur: 0.0,
         spread: 5.0,
         color: Color::from_rgba8(255, 0, 0, 255),
+        blend: ondin_core::BlendMode::Normal,
     }))]);
     let out = at(&px, w, 50, 73);
     assert!(
@@ -272,6 +274,7 @@ fn an_inner_shadow_stays_within_the_layers_ink_not_merely_its_box() {
             blur: 4.0,
             spread: 0.0,
             color: Color::from_rgba8(255, 0, 0, 255),
+            blend: ondin_core::BlendMode::Normal,
         }))],
     );
     // Inside the top of the ellipse, where a shadow cast downwards piles up.
@@ -334,6 +337,7 @@ fn an_inner_shadow_on_a_rect_reaches_all_four_edges() {
         blur: 8.0,
         spread: 0.0,
         color: Color::from_rgba8(255, 0, 0, 255),
+        blend: ondin_core::BlendMode::Normal,
     }))];
     let (px, w) = render(inner);
     let (plain, _) = render(vec![]);
@@ -398,6 +402,7 @@ fn a_positive_spread_thickens_an_inner_shadow_inwards() {
             blur: 0.0,
             spread,
             color: Color::from_rgba8(255, 0, 0, 255),
+            blend: ondin_core::BlendMode::Normal,
         }))])
     };
     let (none, w) = spread_of(0.0);
@@ -614,6 +619,7 @@ fn a_layer_scrolled_off_the_left_still_casts_to_the_right() {
         blur: 4.0,
         spread: 0.0,
         color: Color::from_rgba8(255, 0, 0, 255),
+        blend: ondin_core::BlendMode::Normal,
     }))];
     // The square is world x 30…70; its shadow runs to x 106. Panned right by 75,
     // the square is off the left edge and the shadow's tail is still in view.

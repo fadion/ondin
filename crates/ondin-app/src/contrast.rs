@@ -2652,6 +2652,7 @@ mod tests {
                     blur: 20.0,
                     spread: 0.0,
                     color,
+                    blend: ondin_core::BlendMode::Normal,
                 }),
                 visible: true,
                 vars: Default::default(),

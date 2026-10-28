@@ -307,6 +307,7 @@ fn shadow(dx: f64, dy: f64, blur: f64, spread: f64, rgba: [u8; 4]) -> Shadow {
         blur,
         spread,
         color: Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3]),
+        blend: ondin_core::BlendMode::Normal,
     }
 }
 

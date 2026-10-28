@@ -1119,6 +1119,10 @@ impl Walk<'_> {
         for e in effects.iter().filter(|e| e.visible) {
             match &e.kind {
                 EffectKind::LayerBlur { .. } => {}
+                // `drop-shadow()` has no blend mode of its own.
+                EffectKind::DropShadow(s) if s.blends() => {
+                    return Some("a shadow with a blend mode".into());
+                }
                 EffectKind::DropShadow(s) if s.spread == 0.0 => shadows += 1,
                 EffectKind::DropShadow(_) => return Some("a shadow with spread".into()),
                 EffectKind::InnerShadow(_) => return Some("an inner shadow".into()),

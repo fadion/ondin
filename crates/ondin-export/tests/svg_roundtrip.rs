@@ -1106,6 +1106,7 @@ fn an_effect_stack_round_trips_as_the_same_stack() {
                 blur: 8.0,
                 spread: 0.0,
                 color: Color::from_rgba8(0, 0, 0, 128),
+                blend: ondin_core::BlendMode::Normal,
             }))]),
         },
     ]))

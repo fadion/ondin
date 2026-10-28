@@ -102,6 +102,7 @@ fn everything_lossy() -> common::Fixture {
                     blur: 3.0,
                     spread: 4.0,
                     color: Color::BLACK,
+                    blend: ondin_core::BlendMode::Normal,
                 }))]),
             },
             // Flipped type on a rail: one approximation and one round-trip loss.
@@ -361,6 +362,7 @@ fn a_shadow_with_no_spread_is_not_reported() {
                 blur: 3.0,
                 spread: 0.0,
                 color: Color::BLACK,
+                blend: ondin_core::BlendMode::Normal,
             }))]),
         }]))
         .expect("a plain drop shadow");
@@ -391,6 +393,7 @@ fn an_invisible_shadow_is_not_reported() {
                     blur: 3.0,
                     spread: 4.0,
                     color: Color::BLACK,
+                    blend: ondin_core::BlendMode::Normal,
                 }),
                 visible: false,
                 vars: Default::default(),

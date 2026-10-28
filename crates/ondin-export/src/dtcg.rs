@@ -469,6 +469,11 @@ impl Writer<'_> {
                             );
                         }
                     };
+                    if s.blends() {
+                        self.notes.push(format!(
+                            "{name}: a shadow's blend mode has no DTCG field, so it is written without it."
+                        ));
+                    }
                     let mut slot = |k: usize, literal: f64| -> Option<Json> {
                         match e.vars[k] {
                             Some(v) => self.dimension_to(v, name),

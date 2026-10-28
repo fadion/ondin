@@ -932,6 +932,7 @@ fn effects_match_the_canvas() {
             blur: 10.0,
             spread: 0.0,
             color: Color::from_rgba8(0, 0, 0, a),
+            blend: ondin_core::BlendMode::Normal,
         })
     };
     d.effects(b, vec![shadow(140)]);
@@ -1098,6 +1099,7 @@ fn pictures_match_the_canvas() {
             blur: 6.0,
             spread: 0.0,
             color: Color::from_rgba8(0, 0, 0, 160),
+            blend: ondin_core::BlendMode::Normal,
         })],
     );
     let b = d.rect(g, 10.0, 50.0, 40.0, 30.0, 0.0);
@@ -1734,6 +1736,7 @@ fn variables_match_the_canvas_in_every_mode() {
                     blur: 0.0,
                     spread: 0.0,
                     color: Color::from_rgba8(0, 0, 0, 120),
+                    blend: ondin_core::BlendMode::Normal,
                 }));
                 shadow.vars[2] = Some(soft);
                 d.apply(vec![Operation::SetEffects {
@@ -2353,6 +2356,7 @@ fn an_approximated_layer_is_reported() {
             blur: 4.0,
             spread: 6.0,
             color: Color::BLACK,
+            blend: ondin_core::BlendMode::Normal,
         })],
     );
     let (doc, res) = d.done();

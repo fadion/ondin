@@ -437,12 +437,14 @@ fn golden_document() -> (Document, Resolved) {
                     blur: 6.0,
                     spread: 1.0,
                     color: Color::from_rgba8(0, 0, 0, 90),
+                    blend: ondin_core::BlendMode::Normal,
                 })),
                 ondin_core::Effect::new(ondin_core::EffectKind::InnerShadow(ondin_core::Shadow {
                     offset: ondin_core::kurbo::Vec2::new(-2.0, -1.0),
                     blur: 4.0,
                     spread: 0.0,
                     color: Color::from_rgba8(20, 20, 40, 120),
+                    blend: ondin_core::BlendMode::Normal,
                 })),
                 ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 2.0 }),
                 ondin_core::Effect::new(ondin_core::EffectKind::Filters(ondin_core::Filters {

@@ -21,7 +21,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D68** A rectangle's stroke can sit on one side; a side is an open path. **D69** Dash mode is classified from the stored pattern, never stored beside it.
 - **D144** Frames stroke over their contents and outside their own clip. Type can be stroked, which is how outlined type is expressed.
 - **D282** A mask is a layer that paints nothing and clips the run of siblings above it. Alpha masking only. A mask is never hit, and what it masks is hit only inside it.
-- **D333** Layer effects are an ordered stack (drop shadow, inner shadow, layer blur, colour filters) on any node but the root, listed in model order. `Resolved::ink_bounds` is the drawn box and `world_bounds` the editing box. A layer carries a blend mode; background blur and a blend mode per shadow are planned; noise is a non-goal.
+- **D333** Layer effects are an ordered stack (drop shadow, inner shadow, layer blur, colour filters) on any node but the root, listed in model order. `Resolved::ink_bounds` is the drawn box and `world_bounds` the editing box. A layer and each shadow carry a blend mode; background blur is planned; noise is a non-goal.
 - **D340** The effect stack is reordered by dragging its rows, as fills and strokes are, though order changes pixels only between `Filters` and `LayerBlur` and between two shadows on one side.
 - **D176** Image fills use `peniko::Brush<ImageBrush<ImageRef>>` with our reference in place of pixels; there is no brush enum of our own. **D178** peniko has no transparent extend, so a fitted picture needs a clip as well as a brush transform.
 - **D412** A gradient carries its own affine on the brush. An elliptical radial is a circular gradient under a squash. **D767** Gradient opacity is a field separate from the stops.
@@ -97,6 +97,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D742** An inner shadow complements the tint, not the silhouette.
 - **A blend mode is the outermost layer of a node**, outside the effect layer, so a layer's shadow blends with it; the SVG writer's blend wrapper sits outside its filter wrapper for the same reason. Only the sixteen modes CSS, SVG and PDF share are offered, so every export agrees with the canvas.
 - **A top-level frame isolates when it holds a blended layer**, so what is inside blends with the frame's content and never the canvas ground: the frame looks the same on the canvas as exported alone.
+- **A shadow with a blend mode is drawn in its own pass**, since it blends with what lies under the layer and the effect buffer does not hold that; a stack without one keeps the single effect layer. An SVG filter cannot see beneath its element, so the SVG writer draws the shadow Normal and reports it.
 - **D414** `vello_cpu` is pinned exactly; raster goldens are per architecture and version. **D434** Raster output is capped at 65408 px per side.
 - **D702** SVG export uses `ondin_render::effects` for effect arithmetic, so there is one implementation of it.
 - **D780** SVG export reports its losses (`svg_of_reported`).

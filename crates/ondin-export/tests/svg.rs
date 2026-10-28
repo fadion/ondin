@@ -3339,6 +3339,57 @@ fn shadow(blur: f64, dy: f64) -> Shadow {
     }
 }
 
+/// A shadow's blend mode cannot reach what lies beneath a `<filter>`'s element,
+/// so the file draws it Normal and says so; code export, whose `drop-shadow()`
+/// has no mode either, draws the layer as a picture and says why; and the
+/// snapshot reports the mode.
+/// flip: `report_node` without the blend note → fails at the SVG report.
+#[test]
+fn a_shadows_blend_mode_is_reported_where_it_cannot_be_written() {
+    const NOTE: &str = "a shadow's blend mode, drawn normal";
+    let mut f = common::fixture();
+    let multiply = Shadow {
+        blend: ondin_core::BlendMode::Multiply,
+        ..shadow(0.0, 6.0)
+    };
+    for (blend, reported) in [
+        (ondin_core::BlendMode::Normal, false),
+        (multiply.blend, true),
+    ] {
+        f.doc
+            .apply(&Transaction(vec![Operation::SetEffects {
+                id: f.rect,
+                effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
+                    blend,
+                    ..multiply.clone()
+                }))]),
+            }]))
+            .unwrap();
+        f.res = Resolved::rebuild(&f.doc);
+        let out =
+            ondin_export::svg::svg_with(&f.doc, &f.res, &[f.rect], ondin_core::ExportText::Live);
+        assert_eq!(
+            out.approximated.iter().any(|s| s == NOTE),
+            reported,
+            "{blend:?}: {:?}",
+            out.approximated
+        );
+    }
+    let code = ondin_export::code::html::html_of(&f.doc, &f.res, &[f.artboard]);
+    assert!(
+        code.approximated.iter().any(|s| s.contains(NOTE)),
+        "{:?}",
+        code.approximated
+    );
+    let snap = ondin_export::snapshot::snapshot(&f.doc, &f.res);
+    let rect = snap
+        .nodes
+        .iter()
+        .find(|n| n.id == f.rect.to_wire())
+        .unwrap();
+    assert_eq!(rect.effects[0].blend.as_deref(), Some("Multiply"));
+}
+
 /// **The viewBox has to grow to hold the shadow**, which is the visible half of
 /// why `world_bounds` and `ink_bounds` are two questions (§5.3a).
 ///

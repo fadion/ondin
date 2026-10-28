@@ -71,6 +71,9 @@ struct FxFrame {
     /// How many effect layers enclose this one. Siblings share a level and are
     /// rasterized in one pass; see `VelloGpuRenderer::resolve_effects`.
     level: usize,
+    /// Whether the layer itself is composited, or only the shadows it casts
+    /// (`push_shadow_layer`).
+    layer: bool,
 }
 
 /// A subtree that has to be rasterized, filtered and handed back as an image
@@ -90,6 +93,8 @@ pub struct EffectJob {
     /// How many effect layers enclose this one; `VelloGpuRenderer::resolve_effects`
     /// batches a level at a time.
     level: usize,
+    /// Whether the layer itself is kept, or only its shadows ([`FxFrame::layer`]).
+    layer: bool,
     /// The atlas slot the enclosing scene draws.
     ///
     /// Built with a **fake, empty blob**, as `Renderer::register_texture` does:
@@ -352,7 +357,20 @@ impl ScenePainter for GpuScenePainter<'_> {
             downscale: k,
             depth: 0,
             level: self.fx.len(),
+            layer: true,
         });
+    }
+
+    fn push_shadow_layer(
+        &mut self,
+        transform: Affine,
+        bounds: Rect,
+        effects: &[ondin_core::Keyed<ondin_core::Effect>],
+    ) {
+        self.push_effect_layer(transform, bounds, effects);
+        if let Some(f) = self.fx.last_mut() {
+            f.layer = false;
+        }
     }
 
     fn pop_layer(&mut self) {
@@ -409,6 +427,7 @@ impl ScenePainter for GpuScenePainter<'_> {
             effects: frame.effects,
             scale: frame.scale,
             level: frame.level,
+            layer: frame.layer,
             image,
         });
     }
@@ -711,6 +730,7 @@ impl VelloGpuRenderer {
                         dst_at: at,
                         effects: &jobs[i].effects,
                         scale: jobs[i].scale,
+                        layer: jobs[i].layer,
                     })
                     .collect();
                 fx_gpu::run_batch(

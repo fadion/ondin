@@ -2486,6 +2486,7 @@ fn effects_of<'a>(
                     blur: dev / crate::effect::BLUR_DEVIATION,
                     spread: 0.0,
                     color: flood_color(p, css, current)?,
+                    blend: crate::BlendMode::Normal,
                 }),
             ));
             i += 1;
@@ -2637,6 +2638,7 @@ fn shadow_chain<'a>(
             blur,
             spread,
             color,
+            blend: crate::BlendMode::Normal,
         },
         inner,
         i,

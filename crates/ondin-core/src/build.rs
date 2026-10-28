@@ -103,6 +103,8 @@ pub fn effect_is_finite(effect: &crate::Effect) -> bool {
             && s.blur.is_finite()
             && s.spread.is_finite()
             && s.color.components.iter().all(|f| f.is_finite())
+            // A shadow is no container, so it has nothing to pass through.
+            && s.blend != crate::BlendMode::PassThrough
     }
     match &effect.kind {
         crate::EffectKind::DropShadow(s) | crate::EffectKind::InnerShadow(s) => shadow_ok(s),

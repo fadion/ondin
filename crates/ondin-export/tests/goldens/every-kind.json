@@ -7,6 +7,13 @@
       "ground": "#171718",
       "draft": false,
       "mode": null
+    },
+    {
+      "id": "601d:16",
+      "name": "Drafts",
+      "ground": "#1e1e22",
+      "draft": true,
+      "mode": "601d:15"
     }
   ],
   "nodes": [
@@ -321,6 +328,96 @@
       "strokes": []
     },
     {
+      "id": "601d:16",
+      "kind": "root",
+      "name": "Drafts",
+      "page": "601d:16",
+      "parent": null,
+      "children": [
+        "601d:17"
+      ],
+      "artboard": null,
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_bounds": [
+        0.0,
+        0.0,
+        120.0,
+        80.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "None"
+      },
+      "fills": [],
+      "strokes": []
+    },
+    {
+      "id": "601d:17",
+      "kind": "artboard",
+      "name": "Sketch",
+      "page": "601d:16",
+      "parent": "601d:16",
+      "children": [],
+      "artboard": null,
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_bounds": [
+        0.0,
+        0.0,
+        120.0,
+        80.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": true,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Artboard",
+        "width": 120.0,
+        "height": 80.0
+      },
+      "fills": [],
+      "strokes": []
+    },
+    {
       "id": "601d:2",
       "kind": "artboard",
       "name": "Board",
@@ -427,7 +524,8 @@
           "top_right": 4.0,
           "bottom_right": 0.0,
           "bottom_left": 12.0
-        }
+        },
+        "corner_smoothing": 0.6
       },
       "fills": [
         {
@@ -595,7 +693,8 @@
         "type": "Polygon",
         "width": 60.0,
         "height": 60.0,
-        "sides": 6
+        "sides": 6,
+        "corner_radius": 6.0
       },
       "fills": [
         {
@@ -657,7 +756,8 @@
         "width": 60.0,
         "height": 60.0,
         "points": 5,
-        "inner_ratio": 0.382
+        "inner_ratio": 0.382,
+        "corner_radius": 4.0
       },
       "fills": [
         {

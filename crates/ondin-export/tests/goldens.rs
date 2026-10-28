@@ -144,7 +144,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Rect {
                 size: Size::new(90.0, 50.0),
                 corner_radii: RoundedRectRadii::new(8.0, 4.0, 0.0, 12.0),
-                corner_smoothing: 0.0,
+                corner_smoothing: 0.6,
             },
             transform: Some(Affine::translate((20.0, 20.0))),
             name: Some("Rounded".into()),
@@ -166,7 +166,7 @@ fn golden_document() -> (Document, Resolved) {
             kind: NodeKind::Polygon {
                 size: Size::new(60.0, 60.0),
                 sides: 6,
-                corner_radius: 0.0,
+                corner_radius: 6.0,
             },
             transform: Some(Affine::translate((240.0, 20.0))),
             name: None,
@@ -179,7 +179,7 @@ fn golden_document() -> (Document, Resolved) {
                 size: Size::new(60.0, 60.0),
                 points: 5,
                 inner_ratio: 0.382,
-                corner_radius: 0.0,
+                corner_radius: 4.0,
             },
             transform: Some(Affine::translate((310.0, 20.0))),
             name: None,
@@ -456,6 +456,39 @@ fn golden_document() -> (Document, Resolved) {
     ]))
     .expect("paint the golden fixture");
 
+    // A second page, a draft with a mode of its own, holding a frame: the
+    // snapshot's `pages` and each node's `page` are watched past the first.
+    let (mode, second, frame) = (ids.mint_mode(), ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::AddMode {
+            mode: ondin_core::variable::Mode {
+                id: mode,
+                name: "Dark".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddPage {
+            id: second,
+            index: 1,
+            name: "Drafts".into(),
+            ground: Color::from_rgb8(30, 30, 34),
+            draft: true,
+            mode: Some(mode),
+        },
+        Operation::CreateNode {
+            id: frame,
+            parent: second,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(120.0, 80.0),
+            },
+            transform: None,
+            name: Some("Sketch".into()),
+        },
+    ]))
+    .expect("the second page");
+
     let res = Resolved::rebuild(&doc);
     (doc, res)
 }
@@ -626,6 +659,40 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
     assert!(
         any_pivot(&doc, doc.first_page()),
         "no node carries a pivot, so `NodeSnapshot::pivot` is unwatched: {}",
+        regenerate_hint()
+    );
+
+    // And the keys that are written only when not zero, and a page past the first.
+    let geometry = |id| doc.get(id).map(|n| n.kind().clone());
+    let kids: Vec<_> = doc
+        .get(doc.first_page())
+        .and_then(|p| p.children().first().copied())
+        .and_then(|frame| doc.get(frame))
+        .map(|f| f.children().to_vec())
+        .unwrap_or_default();
+    let watched = |pick: &dyn Fn(&NodeKind) -> bool| {
+        kids.iter()
+            .any(|id| geometry(*id).is_some_and(|k| pick(&k)))
+    };
+    assert!(
+        watched(
+            &|k| matches!(k, NodeKind::Rect { corner_smoothing, .. } if *corner_smoothing > 0.0)
+        ) && watched(
+            &|k| matches!(k, NodeKind::Polygon { corner_radius, .. } if *corner_radius > 0.0)
+        ) && watched(
+            &|k| matches!(k, NodeKind::Star { corner_radius, .. } if *corner_radius > 0.0)
+        ),
+        "corner smoothing or a polygon's or star's radius is zero everywhere: {}",
+        regenerate_hint()
+    );
+    let pages = doc.pages();
+    assert!(
+        pages.len() > 1
+            && pages.iter().any(|p| p.draft)
+            && pages
+                .iter()
+                .any(|p| doc.get(p.id).is_some_and(|n| n.mode().is_some())),
+        "no second, draft or moded page, so `pages` is watched for one: {}",
         regenerate_hint()
     );
 }

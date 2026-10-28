@@ -1911,7 +1911,7 @@ fn write_element(
                     out,
                     // `r##`, because `href="#` contains the `"#` that would close
                     // an `r#` string on the spot.
-                    r##"{pad}<text{t}{fill}{stroke}{op}{anchor}><textPath href="#{rail}" startOffset="{offset}">{spans}</textPath></text>"##,
+                    r##"{pad}<text{t} xml:space="preserve"{fill}{stroke}{op}{anchor}><textPath href="#{rail}" startOffset="{offset}">{spans}</textPath></text>"##,
                     // The same id `collect_defs` named the rail with.
                     rail = rail_id(node.id()),
                 );
@@ -1929,9 +1929,11 @@ fn write_element(
                         text = escape_xml(&run.text),
                     );
                 }
+                // `xml:space`: a viewer collapses runs of spaces and drops an
+                // indent by default, and the PDF converter is such a viewer.
                 let _ = writeln!(
                     out,
-                    r#"{pad}<text{t} x="{x}" y="{y}"{fill}{stroke}{op}>{spans}</text>"#,
+                    r#"{pad}<text{t} x="{x}" y="{y}" xml:space="preserve"{fill}{stroke}{op}>{spans}</text>"#,
                     x = fmt(line.x),
                     y = fmt(line.baseline),
                 );

@@ -172,8 +172,8 @@ pub(crate) struct InFlight {
     /// writes its own draft, not `RenderOverrides`). Also keeps the cancel gate armed
     /// after egui clears `ctx.dragged_id()` on any button's release.
     pub(crate) settings_scrub: Option<crate::input::NudgeStep>,
-    /// The batch rename box's numbering as it was when a From or Step scrub began,
-    /// for the same reasons as [`Self::settings_scrub`].
+    /// The batch rename box's numbering as it was when a From, Step or Pad scrub
+    /// began, for the same reasons as [`Self::settings_scrub`].
     pub(crate) rename_scrub: Option<ondin_core::rename::Numbering>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,

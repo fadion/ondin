@@ -571,6 +571,7 @@ fn outer_instance(f: &mut F) -> (NodeId, NodeId) {
 /// its source — so a restore that looked for it only under the nested copy (the
 /// nearest instance root) found it absent and inserted a second node on the same
 /// source, under another root, where `LinkRule::SharedSource` cannot see it.
+/// flip: `outermost_root` stops at the nearest root → fails at `removed` 0 (reads 1).
 #[test]
 fn a_member_dragged_out_of_a_nested_copy_is_not_restored_twice() {
     let mut f = fixture();
@@ -596,6 +597,8 @@ fn a_member_dragged_out_of_a_nested_copy_is_not_restored_twice() {
 /// source, so a restore that looked for held links under the outer root found it
 /// "held" and restored nothing. The climb to the outermost root is for a nested
 /// copy's members; it stops at a root linked straight to a main.
+/// flip: `outermost_root` climbs past a root linked to a main → fails at `removed` 1
+/// (reads 0).
 #[test]
 fn a_local_instances_removed_child_is_not_masked_by_its_host() {
     let mut f = fixture();
@@ -615,6 +618,8 @@ fn a_local_instances_removed_child_is_not_masked_by_its_host() {
 /// unlinked duplicate). ⚠️ The scope inside must be a **parent of the missing
 /// child** — the first spelling of this test scoped a childless rect beside it
 /// and passed against the defect.
+/// flip: `reset` passes its scopes on without `build::outermost` → fails at
+/// `inserts` 1 (reads 2).
 #[test]
 fn overlapping_scopes_restore_a_child_once() {
     let mut f = fixture();

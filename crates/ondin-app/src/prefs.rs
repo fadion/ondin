@@ -242,6 +242,11 @@ pub struct Prefs {
     /// preferences file cannot make a real app stop saving.
     #[serde(skip)]
     pub ephemeral: bool,
+    /// Set in a window that keeps its tabs private (another Ondin was running at
+    /// launch): a save keeps the tab fields the file already holds, which the other
+    /// window writes. Never written.
+    #[serde(skip)]
+    pub tabs_private: bool,
     /// Set when `prefs.json` exists but could not be read.
     ///
     /// A latch on writing: an unparseable file makes [`Prefs::load`] answer
@@ -358,6 +363,7 @@ impl Default for Prefs {
             // strings would be nav and sort ids matching nothing.
             base_folder: None,
             ephemeral: false,
+            tabs_private: false,
             // False: `Default` is also a first launch's value, which must write.
             // Only `load_from` sets it.
             unreadable: false,
@@ -445,9 +451,25 @@ impl Prefs {
         if self.unreadable {
             return;
         }
+        // A window keeping its tabs private writes the tab fields already on disk,
+        // which another window owns, not its own copies from launch.
+        let mut owned;
+        let mut this = self;
+        if self.tabs_private
+            && let Some(disk) = std::fs::read(path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Prefs>(&b).ok())
+        {
+            owned = self.clone();
+            owned.open_tabs = disk.open_tabs;
+            owned.front_tab = disk.front_tab;
+            owned.pinned_tabs = disk.pinned_tabs;
+            owned.tabs_remembered = disk.tabs_remembered;
+            this = &owned;
+        }
         // Atomic (`crate::atomic`): this record is written from more places than
         // any other, so it has the most chances to meet a crash mid-write.
-        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(this) {
             let _ = crate::atomic::write(path, &bytes);
         }
     }
@@ -502,6 +524,43 @@ mod tests {
             !back.ephemeral,
             "and a loaded one always persists, whatever the file said"
         );
+    }
+
+    /// A window keeping its tabs private saves everything of its own but the tab
+    /// fields, which keep what the other window wrote.
+    /// flip: `save_to` without its `tabs_private` arm → fails at "the other
+    /// window's tabs".
+    #[test]
+    fn a_private_window_keeps_the_other_windows_tabs() {
+        let dir = std::env::temp_dir().join(format!("ondin-prefs-private-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = dir.join("prefs.json");
+        let theirs = Prefs {
+            open_tabs: vec![PathBuf::from("/x/theirs.ondin")],
+            front_tab: Some(0),
+            tabs_remembered: true,
+            ..Default::default()
+        };
+        theirs.save_to(&at);
+        let mine = Prefs {
+            tabs_private: true,
+            reopen_last: !theirs.reopen_last,
+            ..Default::default()
+        };
+        mine.save_to(&at);
+        let back: Prefs = serde_json::from_slice(&std::fs::read(&at).unwrap()).unwrap();
+        assert_eq!(back.open_tabs, theirs.open_tabs, "the other window's tabs");
+        assert_eq!(back.front_tab, Some(0));
+        assert_eq!(
+            back.reopen_last, mine.reopen_last,
+            "and this window's own change"
+        );
+        assert!(
+            !serde_json::to_string(&back)
+                .unwrap()
+                .contains("tabs_private")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// An ephemeral `save` writes nothing and never asks where the file lives;

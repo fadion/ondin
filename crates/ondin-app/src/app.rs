@@ -1219,6 +1219,7 @@ impl OndinApp {
         // Another window may hold the last quit's documents open, and two sessions
         // saving one file overwrite each other.
         self.tabs.private = crate::instances::others() > 0;
+        self.prefs.tabs_private = self.tabs.private;
         if !self.tabs.private {
             self.restore_tabs();
         }

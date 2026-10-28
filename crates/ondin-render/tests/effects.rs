@@ -308,7 +308,7 @@ fn an_inner_shadow_stays_within_the_layers_ink_not_merely_its_box() {
 }
 
 /// **The shape the test above calls vacuous is the one that draws nothing at
-/// all**, and a rectangle is most of what is on a page (`[S10.2-L1-01]`).
+/// all**, and a rectangle is most of what is on a page.
 ///
 /// An inner shadow's escape is `Insets::ZERO` (§5.3a), so the offscreen buffer is
 /// exactly the layer's bounding box — and on a rect the ink *is* that box, so the
@@ -369,8 +369,8 @@ fn an_inner_shadow_on_a_rect_reaches_all_four_edges() {
     );
 }
 
-/// **A positive spread thickens an inner shadow inwards**, which is the direction
-/// nothing pinned and which was drawn backwards until `[S10.2-L1-01]`'s repair.
+/// **A positive spread thickens an inner shadow inwards** — a direction that is
+/// easy to draw backwards and that nothing else pins.
 ///
 /// `spread_alpha`'s `grow` flag reads `(spread > 0) != inner` — grow the *shape's*
 /// alpha for a drop shadow, erode it for an inner one — and it was being applied

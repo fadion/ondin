@@ -2175,8 +2175,8 @@ fn boolean_then_sibling(effects: Vec<ondin_core::Effect>) -> (Document, Resolved
     (doc, res)
 }
 
-/// **`[S11.1-L1-01]`'s loss: a drop shadow on a boolean took the boolean *and
-/// every layer painted after it* off the canvas.**
+/// **A drop shadow on a boolean must not take the boolean *and every layer
+/// painted after it* off the canvas.**
 ///
 /// `paint_node` pushes a node's effect layer near the top and pops it at the very
 /// end; the `Boolean` arm returns from the middle, and it unwound the clip layer,
@@ -2186,8 +2186,8 @@ fn boolean_then_sibling(effects: Vec<ondin_core::Effect>) -> (Document, Resolved
 ///
 /// ⚠️ **The sibling is the assertion that names the damage.** A boolean that
 /// vanishes reads as "the effect is broken"; a boolean that takes an unrelated
-/// rectangle with it is a different bug, and it is the one that was happening.
-/// So it is asserted first.
+/// rectangle with it is a different bug, and the worse one. So it is asserted
+/// first.
 ///
 /// **The control is the same effect on a `Rect`**, and it is what makes this the
 /// early `return` rather than `any_ink` or `effect_bounds`: the identical stack
@@ -2250,8 +2250,8 @@ fn an_effect_on_a_boolean_does_not_take_the_rest_of_the_canvas_with_it() {
     );
 }
 
-/// **`[S11.2-L1-03]`'s loss: the CPU backend drew type it could not paint in the
-/// *previous* node's colour.**
+/// **The CPU backend must not draw type it cannot paint in the *previous* node's
+/// colour.**
 ///
 /// `apply_paint` answers `false` when a brush resolves to nothing — a fill whose
 /// image the store has no pixels for — and `fill_path` and `stroke_path` both
@@ -2366,13 +2366,11 @@ fn text_whose_picture_is_missing_draws_nothing_rather_than_the_last_paint() {
 
 /// **A gradient whose stop offsets descend is not a wrong ramp, it is *no* ramp.**
 ///
-/// `[S11.1-L1-02]` (High), and the settling of `[S7.2-L…]`'s hand-off: that pass
-/// measured that `<stop offset="0"/><stop offset="0.8"/><stop offset="0.2"/><stop
-/// offset="1"/>` imported as `[0, 0.8, 0.2, 1]` where SVG requires each offset to
-/// be clamped up to the running maximum, and could not measure the picture. The
-/// picture was **a flat fill of the first stop's colour in all 100 columns** — a
-/// descent of one part in ten million was enough, while *equal* offsets (exactly
-/// what SVG's clamp produces) were always fine.
+/// `<stop offset="0"/><stop offset="0.8"/><stop offset="0.2"/><stop offset="1"/>`
+/// imports as `[0, 0.8, 0.2, 1]`, where SVG requires each offset to be clamped up
+/// to the running maximum. Drawn unclamped, it is **a flat fill of the first
+/// stop's colour in all 100 columns** — a descent of one part in ten million is
+/// enough, while *equal* offsets (exactly what SVG's clamp produces) are fine.
 ///
 /// The two rows this asserts identical are the same file read two ways: what
 /// Ondin stored, and what SVG says the file means. §15 D455 makes the first

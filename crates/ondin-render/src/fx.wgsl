@@ -175,7 +175,7 @@ fn blur(@builtin(global_invocation_id) gid: vec3<u32>) {
 // instead leaves a bright rim down two sides of every resampled shadow.
 //
 // 🚨 **The loop is bounded by the source, and that is the whole of D403's
-// promise** (§15 D743, `[S10.2-L4-02]`). The sentence above — one read per source
+// promise** (§15 D743). The sentence above — one read per source
 // pixel however large the block is — holds only while `k ≤ min(w, h)`. Past that
 // the coarse grid is 1×1, one thread iterates `k²` times over a buffer of `w·h`,
 // and the pass **becomes** the full-size spelling D403 says it was not writing:
@@ -246,9 +246,9 @@ fn upsample(@builtin(global_invocation_id) gid: vec3<u32>) {
 // offset. Colour is discarded — a shadow is its own colour everywhere, and
 // `tint` supplies it.
 //
-// 🚨 **An inner shadow is complemented at the `tint`, not here** (§15 D742,
-// `[S10.2-L1-01]`) — `effects::shadow_layer` says why at length, and this is the
-// half that has to agree with it. Inverting here made this pass's edge rule
+// 🚨 **An inner shadow is complemented at the `tint`, not here** (§15 D742) —
+// `effects::shadow_layer` says why at length, and this is the half that has to
+// agree with it. Inverting here made this pass's edge rule
 // ("outside the buffer is fully casting") the opposite of `blur`'s, `spread`'s
 // and `coarsen`'s, which all read outside as transparent; on a shape whose ink is
 // its own bounding box the inverted silhouette is zero everywhere the buffer

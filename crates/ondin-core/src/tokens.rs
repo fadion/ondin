@@ -447,7 +447,7 @@ pub(crate) fn plan<'a>(
     // them** (`crate::kit::find`'s own-kit arm, §15 D1023, made for the tables):
     // a kit instance pasted back into its kit links to the live main, and kit
     // copies of the kit's variables beside the originals would make every bound
-    // field of it an override (`arch-scribe`'s reading of the first build).
+    // field of it an override.
     let own = doc.meta().id.as_deref();
     for kit in &kits {
         let (src_modes, name) = match src.modes_of(kit) {
@@ -469,8 +469,8 @@ pub(crate) fn plan<'a>(
         // A held record **covering** the source's modes takes its variables: a
         // consumer holding a third kit at a newer version — a mode more — than
         // the kit that carries it is the ordinary case, as a main held at any
-        // version is reused (`arch-scribe`'s reading: refusing it named an
-        // update no update could give).
+        // version is reused (refusing it would name an update no update could
+        // give).
         let covers = held.is_some_and(|h| {
             src_modes
                 .iter()
@@ -764,9 +764,9 @@ pub(crate) fn plan<'a>(
         let gone = &plan.removed_styles;
         // Alike as the variables' filter has it (`alike`): the same style, or
         // — on a vault source, which only the up-front fork rebinds to one of
-        // the document's own — the document's fork of it (`arch-scribe`'s
-        // reading (e) of D1066's fixes: the copy was unbound from a style its
-        // main reads, an override).
+        // the document's own — the document's fork of it (§15 D1066: read as
+        // unlike, the copy would be unbound from a style its main reads, an
+        // override).
         let styles = doc.styles();
         let forked_of = |mine: Option<StyleId>, kits: StyleId| {
             mine.and_then(|m| styles.get(m)?.forked.as_ref())
@@ -837,27 +837,26 @@ fn alike(t: &Variables, x: VarId, y: Option<VarId>) -> bool {
 /// Whether every field of copy `n` bound to one of `gone` is bound alike on its
 /// source `s` — so the commit's follow, not a detach, is what rewrites it.
 ///
-/// **Alike counts a fork** (§15 D1066, `arch-scribe`'s reading (a) of its
-/// fixes): a main the kit removes is forked before this plan runs
-/// (`kit::update_in_order`), so its binding is the document's fork of the
-/// variable the copy still reads — and that copy follows the main's rewrite
-/// onto the fork. Read as unlike, the copy was detached to one mode's literal,
-/// which the commit took for an override. And **paints match by item id**
-/// (D980), as the follow does — by position, a drifted copy's own fill could be
-/// spared onto a variable the plan removes, and the whole update was refused
-/// (`BadBinding`). ⚠️ **The answer is the node's, and one `SetFills` covers a
+/// **Alike counts a fork** (§15 D1066): a main the kit removes is forked before
+/// this plan runs (`kit::update_in_order`), so its binding is the document's
+/// fork of the variable the copy still reads — and that copy follows the main's
+/// rewrite onto the fork. Read as unlike, the copy would be detached to one
+/// mode's literal, which the commit takes for an override. And **paints match
+/// by item id** (D980), as the follow does — by position, a drifted copy's own
+/// fill could be spared onto a variable the plan removes, and the whole update
+/// refused (`BadBinding`). ⚠️ **The answer is the node's, and one `SetFills` covers a
 /// whole list**: a drifted copy with an own fill to detach has its followed
 /// fill detached with it, to the colour it drew — an override where its main
 /// moves on. Leaving that item bound for the follow does not work: the follow
 /// takes no item of a list the transaction also wrote, and the commit refuses
 /// the binding. Measured; kept as the edge it is.
 ///
-/// 🚨 **The fork counts only on a source in the vault** (`vault`;
-/// `arch-scribe`'s reading (d)): a vault node binds kits' variables alone, so
-/// a fork there is one the up-front block just wrote, and this update's sync
-/// or `make_local` carries it. A main made local before is outside the vault
-/// and no edit of this update's — counting its fork alike spared a copy the
-/// follow then never rewrote, left bound to a removed variable (`BadBinding`).
+/// 🚨 **The fork counts only on a source in the vault** (`vault`): a vault node
+/// binds kits' variables alone, so a fork there is one the up-front block just
+/// wrote, and this update's sync or `make_local` carries it. A main made local
+/// before is outside the vault and no edit of this update's — counting its fork
+/// alike would spare a copy the follow then never rewrites, left bound to a
+/// removed variable (`BadBinding`).
 fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault: bool) -> bool {
     let hit = |v: Option<VarId>| v.is_some_and(|v| gone.contains(&v));
     let alike = |x: VarId, y: Option<VarId>| y == Some(x) || (vault && alike(t, x, y));
@@ -973,8 +972,8 @@ fn own<T: PartialEq>(x: Option<T>, at_src: Option<T>) -> Option<T> {
 
 /// The variable the fill of item `id` reads on source `s` — **by item id, as the
 /// follow matches items (§15 D980)**, never by position: in a copy whose list
-/// drifted, a positional match forked a followed fill into an override and left
-/// a local one on the kit's variable (`arch-scribe`'s reading 2 of D1066).
+/// drifted, a positional match forks a followed fill into an override and leaves
+/// a local one on the kit's variable.
 fn src_fill(s: &Node, id: crate::ItemId) -> Option<VarId> {
     s.paint.fills.iter().find(|k| k.id == id)?.brush.var()
 }
@@ -1139,13 +1138,12 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
                 cells: Vec::new(),
             });
         }
-        // 🚨 **Every other kit held keeps the column it read** (`arch-scribe`'s
-        // reading 1 of D1066's first cut). With no mode of its own the document
-        // read each kit's **first**; the adopted first mode is now the default,
-        // and a kit with a mode of that name elsewhere in its list — *Night,
-        // Day* beside *Day, Night* — would read that one by name. So the new
-        // default is pinned, by hand, to the first of each kit whose name match
-        // differs: what it drew is what it draws.
+        // 🚨 **Every other kit held keeps the column it read** (§15 D1066). With
+        // no mode of its own the document read each kit's **first**; the adopted
+        // first mode is now the default, and a kit with a mode of that name
+        // elsewhere in its list — *Night, Day* beside *Day, Night* — would read
+        // that one by name. So the new default is pinned, by hand, to the first
+        // of each kit whose name match differs: what it drew is what it draws.
         let default = modes.modes.first().map(|m| m.id);
         let adopted = fresh
             .first()

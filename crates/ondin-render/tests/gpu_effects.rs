@@ -1124,7 +1124,7 @@ fn how_many_effect_passes_a_nested_document_demands() {
         let (doc, res) = nested(stacks);
         let _ = render_gpu(&mut g, &doc, &res);
         println!(
-            "[S11.2-L4-05] K after {label}: {} pass(es) — {} vello Renderer(s) held",
+            "[fx] K after {label}: {} pass(es) — {} vello Renderer(s) held",
             g.renderer.pass_high_water(),
             g.renderer.pass_high_water(),
         );
@@ -1166,7 +1166,7 @@ fn how_many_effect_passes_a_level_of_siblings_demands() {
 
     let _ = render_gpu_vp(&mut small, &doc, &res, &page(100));
     let crowded = small.renderer.pass_high_water();
-    println!("[S11.2-L4-05] 32 sibling effect layers on a 100×100 page: {crowded} pass(es)");
+    println!("[fx] 32 sibling effect layers on a 100×100 page: {crowded} pass(es)");
 
     // A fresh renderer: the count is a high-water mark.
     let Some(mut large) = gpu() else {
@@ -1174,13 +1174,13 @@ fn how_many_effect_passes_a_level_of_siblings_demands() {
     };
     let _ = render_gpu_vp(&mut large, &doc, &res, &page(400));
     let roomy = large.renderer.pass_high_water();
-    println!("[S11.2-L4-05] the same 32 layers on a 400×400 page: {roomy} pass(es)");
+    println!("[fx] the same 32 layers on a 400×400 page: {roomy} pass(es)");
 
     assert!(
         crowded > 1,
         "one level of 32 effect layers demanded {crowded} pass(es), so the pass \
-         count does not grow with sibling count and `[S11.2-L4-05]`'s worry is \
-         answered by nesting depth alone"
+         count does not grow with sibling count and is bounded by nesting \
+         depth alone"
     );
     assert_eq!(
         roomy, 1,
@@ -1222,7 +1222,7 @@ fn a_vello_renderer_costs_about_six_milliseconds_to_build() {
         let t = std::time::Instant::now();
         let built = vello::Renderer::new(&device, vello::RendererOptions::default()).is_ok();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        println!("[S11.2-L4-05] Renderer::new #{i}: {ms:.2} ms (ok={built})");
+        println!("[fx] Renderer::new #{i}: {ms:.2} ms (ok={built})");
         assert!(built, "vello refused to build a Renderer on build #{i}");
         // The first is the cold one; the rest are what an extra effect pass costs.
         if i > 0 {
@@ -1235,7 +1235,7 @@ fn a_vello_renderer_costs_about_six_milliseconds_to_build() {
     let worst = marginal.iter().copied().fold(f64::MIN, f64::max);
     let best = marginal.iter().copied().fold(f64::MAX, f64::min);
     println!(
-        "[S11.2-L4-05] marginal build: {best:.2}–{worst:.2} ms over {} samples \
+        "[fx] marginal build: {best:.2}–{worst:.2} ms over {} samples \
          (6–8 ms on an idle adapter; ~48–65 under suite contention — §15 D777)",
         marginal.len()
     );

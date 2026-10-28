@@ -8,19 +8,18 @@ repository.workspace = true
 # SVG needs core plus `ondin_render::effects` for the filter maths; PNG and JPEG
 # additionally use the CPU renderer (§3).
 #
-# This said "SVG needs core only" and was false in three places (§15 D702,
-# `[A2-L3-06]`): the SVG writer calls `effects::filter_matrix` once from the
-# `<filter>` emitter and `effects::any_ink` twice. Sharing the effect maths is
-# the right choice — duplicating it is the opposite and worse mistake — so the
-# code is not the problem; the sentence was, because it is the one a reader
-# would cite to budget an SVG-only path (a `--svg` build, a wasm target, an MCP
-# `export_svg` handler) for `ondin-core` alone and get the whole GPU tree.
+# SVG does not need core only (§15 D702): the SVG writer calls
+# `effects::filter_matrix` once from the `<filter>` emitter and `effects::any_ink`
+# twice. Sharing the effect maths is the right choice — duplicating it is the
+# opposite and worse mistake — and the line above says so because it is the one a
+# reader would cite to budget an SVG-only path (a `--svg` build, a wasm target, an
+# MCP `export_svg` handler); budgeting `ondin-core` alone gets the whole GPU tree.
 #
-# ⚠️ **The other repair is open and now costed.** Moving `filter_matrix` and
-# `any_ink` into `ondin-core` would make the original sentence true rather than
-# soften it: both are pure functions of `&[Effect]` / `&Filters` over
-# `ondin_core::effect` types — no device, no texture — so it is two functions and
-# their call sites. **Count those rather than trusting a number here**:
+# ⚠️ **The other repair, costed.** Moving `filter_matrix` and `any_ink`
+# into `ondin-core` would make *"SVG needs core only"* true: both are pure
+# functions of `&[Effect]` / `&Filters` over `ondin_core::effect` types — no
+# device, no texture — so it is two functions and their call sites. **Count those
+# rather than trusting a number here**:
 # `grep -rnE '\b(any_ink|filter_matrix) *\(' crates/` read 14 on 2026-09-09,
 # eleven of them inside `ondin-render` — two in `scene.rs`, two in `fx_gpu.rs`,
 # one in `effects::run` and six in that module's own tests — and three in

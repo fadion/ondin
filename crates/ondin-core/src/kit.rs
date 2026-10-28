@@ -609,7 +609,7 @@ pub fn changes(doc: &Document) -> Changes {
             && (reach(n.document(), *t) != reach(b.document(), *t)
                 // Its top-level frame is a consumer's picker grouping (D1011
                 // (4)), so moving it into another frame is a change downstream
-                // though no node is (`arch-scribe`'s reading of the first cut).
+                // though no node is.
                 || n.group(*t) != b.group(*t))
         {
             out.changed.push(*t);
@@ -1034,9 +1034,9 @@ fn held_index(doc: &Document) -> FxHashMap<(String, NodeId), NodeId> {
 /// The second arm is what keeps a kit from vendoring itself: a kit instance
 /// pasted back into its kit, or its own main inserted from the picker, would
 /// otherwise land a frozen copy of the kit's own main in its own vault, and the
-/// instance would stop following the main it was made from (`arch-scribe`'s
-/// reading of the first build). An origin's `node` is the kit's own id
-/// ([`Origin`]), so in the kit it names the live main directly.
+/// instance would stop following the main it was made from. An origin's `node`
+/// is the kit's own id ([`Origin`]), so in the kit it names the live main
+/// directly.
 fn find(
     doc: &Document,
     held: &FxHashMap<(String, NodeId), NodeId>,
@@ -1122,12 +1122,12 @@ pub fn adopt(
         if template.iter().any(|n| n.origin.is_none()) {
             continue;
         }
-        // 🚨 **A kit never vendors itself, by paste either** (§15 D1023, the kits
-        // QA review's finding): a main of this very kit that is no longer here —
-        // deleted, then an instance copied from a consumer pasted back — is not
-        // `landed`, and copying it in opened a vault in the kit holding a copy of
-        // its own main, two frozen nodes later carrying one origin key. Left out,
-        // the paste lands detached, as a link to any missing source does.
+        // 🚨 **A kit never vendors itself, by paste either** (§15 D1023): a main
+        // of this very kit that is no longer here — deleted, then an instance
+        // copied from a consumer pasted back — is not `landed`, and copying it in
+        // would open a vault in the kit holding a copy of its own main, two frozen
+        // nodes later carrying one origin key. Left out, the paste lands
+        // detached, as a link to any missing source does.
         if top
             .origin
             .as_ref()
@@ -1398,11 +1398,11 @@ pub fn update_all(
     kits: &[(&str, u32, &Published)],
 ) -> Result<Update, KitError> {
     // 🚨 **A kit carrying a third kit's newer modes waits for that kit's
-    // update when both are accepted** (§15 D1064, `arch-scribe`'s reading):
-    // each kit is planned against what the ones before it leave, so `[A, B]`
-    // with A carrying B's new mode was refused as `Modes(B)` where `[B, A]`
-    // took. The refused kit's own update is moved first, and the whole built
-    // again — the failed attempts spend ids and leave gaps, nothing else.
+    // update when both are accepted** (§15 D1064): each kit is planned against
+    // what the ones before it leave, so `[A, B]` with A carrying B's new mode
+    // is refused as `Modes(B)` where `[B, A]` takes. The refused kit's own
+    // update is moved first, and the whole built again — the failed attempts
+    // spend ids and leave gaps, nothing else.
     let mut order: Vec<(&str, u32, &Published)> = kits.to_vec();
     for _ in 0..kits.len() {
         match update_in_order(doc, ids, page, &order) {
@@ -1469,13 +1469,13 @@ fn update_in_order(
         (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
         let src = published.document();
         // 🚨 **A main the kit removed forks what it reads before the kit's
-        // tables are rewritten** (§15 D1066, `arch-scribe`'s reading 3): a
-        // variable only that main read is one the new publish no longer
-        // carries, so the plan below removes it and detaches its users — the
-        // main among them — and `make_local` at the end found only one mode's
-        // literals, the outcome D1066 rules out. A top whose kit node the
-        // publish no longer holds at all is made local for certain; the moved
-        // ones classified below fork there, by `make_local`, as before.
+        // tables are rewritten** (§15 D1066): a variable only that main read is
+        // one the new publish no longer carries, so the plan below removes it and
+        // detaches its users — the main among them — and `make_local` at the end
+        // would find only one mode's literals, the outcome D1066 rules out. A top
+        // whose kit node the publish no longer holds at all is made local for
+        // certain; the moved ones classified below fork there, by `make_local`,
+        // as before.
         let gone: Vec<Node> = b
             .scratch
             .vault()
@@ -1541,11 +1541,11 @@ fn update_in_order(
             })
             .collect();
         // 🚨 **A main the kit moved between a set and the top level is moved
-        // here, never deleted and vendored again** (§15 D1022, the kits QA
-        // review's finding). A variant taken out of its set left its set's sync
-        // deleting the copy — every instance of it cut loose, the toast saying
-        // overrides were kept — and a lone main combined into a set was made
-        // local, though still published, its instances no longer following it.
+        // here, never deleted and vendored again** (§15 D1022). Otherwise a
+        // variant taken out of its set leaves its set's sync deleting the copy —
+        // every instance of it cut loose, the toast saying overrides were kept —
+        // and a lone main combined into a set is made local, though still
+        // published, its instances no longer following it.
         //
         // A published top held below the vault's top level — the variant taken
         // out — is lifted to it, and synced as a top.
@@ -1593,9 +1593,9 @@ fn update_in_order(
         }
         // Every top classified before any is synced: a main the kit removed is
         // made local **whole** — kept as a copy where used — so no sync may move a
-        // layer out of it, which one that ran first did (§15 D1024, the kits QA
-        // review's second pass: a layer the kit moved from a removed main into
-        // another was taken out of the local copy, and its instances lost it).
+        // layer out of it, as one that ran first would (§15 D1024: a layer the kit
+        // moved from a removed main into another would be taken out of the local
+        // copy, and its instances lose it).
         let mut syncing: Vec<(NodeId, NodeId)> = Vec::new();
         for t in tops {
             if moving.contains(&t) {
@@ -1652,12 +1652,10 @@ fn update_in_order(
         // as an override. 🚨 **Not a copy that set it as its main did** — the
         // main is rewritten by its sync and the commit's follow carries that;
         // this write would be read as the user's and keep the copy off its main
-        // (`arch-scribe`'s reading, the removal's follow filter's shape).
-        // The main must still be there for the follow to come from — a variant
-        // this update deletes takes its copies off it, and the commit detaches
-        // them on the mode this reset is for (`arch-scribe`'s reading of the
-        // first cut, which asked the old document) — and must have set the
-        // copy's mode before the update.
+        // (the removal's follow filter's shape). The main must still be there
+        // for the follow to come from — a variant this update deletes takes its
+        // copies off it, and the commit detaches them on the mode this reset is
+        // for — and must have set the copy's mode before the update.
         let follows = |n: &Node| {
             let before = doc.get(n.id).map(|x| x.mode);
             let main = n
@@ -1929,11 +1927,11 @@ struct Builder<'a> {
     /// synced, so a main that nests it — synced first by vault order, which a
     /// paste or a later vendoring can leave either way round, or a variant
     /// nesting a later sibling — has nothing to link its new layer's copy to.
-    /// The update failed there as `Incomplete`, on every accept, for good (the
-    /// kits QA review's finding, reproduced). Such a link, swap or binding is
-    /// written empty and recorded here, and [`update_all`] points it once
-    /// every main of every kit accepted is synced. The ops between apply
-    /// unchecked, so nothing sees the gap; the commit's checks see the end.
+    /// The update would fail there as `Incomplete`, on every accept, for good.
+    /// Such a link, swap or binding is written empty and recorded here, and
+    /// [`update_all`] points it once every main of every kit accepted is synced.
+    /// The ops between apply unchecked, so nothing sees the gap; the commit's
+    /// checks see the end.
     later: Vec<(NodeId, NodeId, usize)>,
     /// A child a sync found its published parent no longer holding, though the
     /// publish still has it elsewhere, and the parent it was dropped from: deleted
@@ -2139,9 +2137,8 @@ impl Builder<'_> {
             // under another parent may be moved there by that parent's sync, and
             // one gone may still hold layers that were moved out of it — a group
             // the kit ungrouped, whose layers its parent's sync lifts out (§15
-            // D1024, the kits QA review's second pass; deleted here at once, it
-            // took them with it, and the instances kept the old ones detached
-            // beside fresh copies).
+            // D1024; deleted here at once, it would take them with it, and the
+            // instances keep the old ones detached beside fresh copies).
             self.dropped.push((*dc, d));
         }
         for (i, pc) in pn.children.iter().enumerate() {
@@ -2202,10 +2199,9 @@ impl Builder<'_> {
         self.tokens.apply(&mut want);
         // 🚨 **Only the fields this kind carries** (§15 D1024): `state_ops`
         // writes every field, and `changes_nothing` never calls paint on a kind
-        // that takes none a no-op, so a group's `SetFills` was applied, refused
-        // as `WrongKindForOp`, and every update of a kit main holding a group
-        // failed — found by the kits QA review's grouping probe, the group being
-        // what that edit makes. What `apply` refuses by kind is skipped.
+        // that takes none a no-op, so a group's `SetFills` would be applied,
+        // refused as `WrongKindForOp`, and fail every update of a kit main
+        // holding a group. What `apply` refuses by kind is skipped.
         for op in crate::reset::state_ops(&want) {
             if op.changes_nothing(&self.scratch) {
                 continue;
@@ -2223,9 +2219,8 @@ impl Builder<'_> {
         let (link, swap, props) = (pointed.link, pointed.swap, pointed.props);
         // A top carries the kit's name (`Origin::name`): this kit's tops take the
         // name it publishes now — a rename is what `Changes::renamed` lets
-        // through, and it must arrive (`arch-scribe`'s reading of D1016's first
-        // cut, which kept each copy's first name) — and a third kit's top keeps
-        // the one it arrived with. Below the top, none.
+        // through, and it must arrive — and a third kit's top keeps the one it
+        // arrived with. Below the top, none.
         let base = source_origin(src, self.kit, self.version, &pn);
         let is_top = self.scratch.get(d).and_then(|n| n.parent) == self.scratch.vault();
         let name = match (is_top, base.kit == self.kit) {
@@ -2273,12 +2268,12 @@ impl Builder<'_> {
     /// and fill it by [`Self::sync`]. Answers the new node's id.
     ///
     /// 🚨 **A shell and a sync, never the published subtree copied whole** (§15
-    /// D1024, the kits QA review's second pass): a node new to the publish may
-    /// hold layers the document already has — a group or a frame the kit made
-    /// around existing layers (*Group selection*, *Frame selection*) — and a
-    /// whole copy minted them a second time while the held ones were dropped, so
-    /// every instance kept its overridden layer detached beside a fresh one. The
-    /// sync moves a held layer in and copies only what is new.
+    /// D1024): a node new to the publish may hold layers the document already
+    /// has — a group or a frame the kit made around existing layers (*Group
+    /// selection*, *Frame selection*) — and a whole copy would mint them a second
+    /// time while the held ones are dropped, so every instance keeps its
+    /// overridden layer detached beside a fresh one. The sync moves a held layer
+    /// in and copies only what is new.
     fn insert_new(
         &mut self,
         ids: &mut IdSource,

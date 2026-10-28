@@ -671,8 +671,7 @@ fn set_proportions_locked_applies_and_reverses() {
     assert!(doc.get(r).unwrap().proportions_locked());
 }
 
-/// **A duplicate is the same layer with different ids** (`[S2.1-L6-03]`,
-/// §15 D502).
+/// **A duplicate is the same layer with different ids** (§15 D502).
 ///
 /// This asserted ids and shape and **nothing about content**. `remap_subtree`
 /// writes a `Node` literal enumerating nineteen fields by hand, sixteen of them
@@ -745,7 +744,7 @@ fn capture_remap_insert_duplicates_a_subtree_with_fresh_ids() {
     )
     .unwrap();
 
-    // **Give the subtree something to lose** (`[S2.1-L6-03]`, §15 D502).
+    // **Give the subtree something to lose** (§15 D502).
     // `remap_subtree` writes a `Node` literal enumerating nineteen fields by
     // hand, sixteen of them copied one at a time, and until this fixture existed
     // the template carried a default in every one of them — so the assertions
@@ -1260,7 +1259,7 @@ fn deleting_a_frame_collects_the_guides_of_every_frame_inside_it() {
 }
 
 /// **An export scale that cannot be a size is refused by the model, and dropped
-/// by the loader** (§15 D492, `[S8.2-L1-03]`).
+/// by the loader** (§15 D492).
 ///
 /// `op_set_exports` was six lines and bounded nothing. A `.ondin` carrying
 /// `"scale": {"Width": 0}` loaded, and `ondin export --all` wrote **`Button@0w.png`
@@ -1350,7 +1349,7 @@ fn an_export_scale_that_cannot_be_a_size_is_refused() {
 }
 
 /// **Deleting a frame without its guides is refused, rather than producing a
-/// document that never opens again** (§15 D491, `[S2.2-L2-05]`).
+/// document that never opens again** (§15 D491).
 ///
 /// `Document::check_guide_owner` states the rule — *"a guide may only be scoped to
 /// a frame that is in the document"* — and enforced it on `AddGuide` and
@@ -1371,17 +1370,14 @@ fn an_export_scale_that_cannot_be_a_size_is_refused() {
 /// `build::can_outline`, `flatten_union` and `text_on_new_path` refuse it by kind (§15
 /// D453), `ungroup` deletes a group, and the canvas's two delete a text node.
 ///
-/// ⚠️ **This paragraph said "both that can name an `Artboard`" and there is one**
-/// — corrected by `arch-scribe` counting the sites rather than reading the claim.
-/// The conclusion is unchanged and in fact stronger: what existed was an invariant
-/// enforced by a convention **one** caller knows about, which a second would have
-/// to be told. So the check is at the end of `apply`,
-/// where the document becomes real, and catches the next op that breaks the rule
-/// as well as this one.
+/// ⚠️ **So what existed was an invariant enforced by a convention one caller
+/// knows about**, which a second would have to be told. So the check is at the
+/// end of `apply`, where the document becomes real, and catches the next op that
+/// breaks the rule as well as this one.
 ///
-/// **The round trip is the assertion, not the error type.** What the finding is
-/// about is a file that will not load; asserting `Err(BadGuideOwner)` would pin
-/// the mechanism and let a future spelling that corrupts differently through.
+/// **The round trip is the assertion, not the error type.** What is at stake is
+/// a file that will not load; asserting `Err(BadGuideOwner)` would pin the
+/// mechanism and let a future spelling that corrupts differently through.
 ///
 /// ⚠️ **The `guides_of` order is the control**, and it has to stay green: this
 /// refusal is worthless if it also refuses the correct spelling. The test above
@@ -1906,8 +1902,8 @@ fn effects_go_on_a_container_but_never_on_the_root() {
 /// *from each node to its listed children* — so `X` is not a root, is not
 /// claimed, and is inserted anyway.
 ///
-/// **Three panics and one unopenable file came out of that state**, all measured
-/// by the review: `DeleteNode`, `Reparent` and `Reorder` on `X` each hit an
+/// **Three panics and one unopenable file came out of that state**:
+/// `DeleteNode`, `Reparent` and `Reorder` on `X` each hit an
 /// `expect("child must be listed in its parent")`, and `io::save` succeeded onto
 /// a file whose `load` fails with *"node(s) are not reachable from the root"*.
 /// The loader has enforced this since it was written — check (5) — so the two

@@ -2108,7 +2108,7 @@ fn a_word_of_nothing_but_descenders_still_keeps_a_rule() {
 /// **A group whose mask masks internally is culled on the box its own children
 /// draw under, and it used to be culled on a tenth of it.**
 ///
-/// `[S4.1-L2-01]`, §15 D460, and this is the half that names the symptom.
+/// §15 D460, and this is the half that names the symptom.
 /// `Resolved::mask_path`'s `Group` arm skips a mask *inside* a mask group and
 /// unions the rest un-narrowed — so the outline that clips kept 400×400 — while
 /// all three bounds computations applied the inner mask and kept 40×40. This walk
@@ -2365,8 +2365,7 @@ fn parked_fills(kind: NodeKind, n: usize) -> usize {
     painter.fills.len()
 }
 
-/// **An off-screen boolean is culled, exactly as an off-screen group is** —
-/// `[S11.1-L4-05]`, §15 D536.
+/// **An off-screen boolean is culled, exactly as an off-screen group is** (§15 D536).
 ///
 /// `paint_node`'s `bounds_cover_subtree` enumerates the kinds whose cached
 /// bounds may stand for their whole subtree, and `Boolean` was missing from the
@@ -2427,7 +2426,7 @@ fn an_off_screen_boolean_is_culled_like_an_off_screen_group() {
 /// still cost O(n); this pins the shape rather than the total. Asserted as a
 /// count of fills at two sizes rather than as a time, because a timing assertion
 /// in this suite would be a flake — the 0.106 ms against 0.0116 ms measurement
-/// lives in the doc above and in the finding, where nothing has to re-run it.
+/// lives in the doc above, where nothing has to re-run it.
 #[test]
 fn the_boolean_cull_does_not_grow_with_the_number_parked() {
     let one = parked_fills(NodeKind::Boolean { op: BoolOp::Union }, 1);

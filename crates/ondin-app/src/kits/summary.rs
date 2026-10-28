@@ -95,8 +95,8 @@ impl Summary {
 /// any variable an alias names and `kits` the kit mode records to read by in
 /// place of the document's — the update's own (`SetKitModes`), for a value
 /// after it: a kit held for the first time has no record in the document, and
-/// one whose modes changed is read in its new columns (`arch-scribe`'s reading
-/// (c) of the first cut, which listed a new kit's variables with no value).
+/// one whose modes changed is read in its new columns. Reading the document's
+/// records alone would list a new kit's variables with no value.
 fn read<'a>(
     doc: &Document,
     var: &'a Variable,

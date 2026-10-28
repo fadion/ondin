@@ -17,12 +17,12 @@
 //!
 //! [`ExportSpec`]: ondin_core::ExportSpec
 
-// ⚠️ **`#![allow(dead_code)]` was here and is gone** (§15 D732, `[A8-L3-06]`). It
-// switched the lint off for the **whole crate**, private items included — which is
-// stronger than the `pub`-in-a-library blind spot `CLAUDE.md` records, because
-// there the lint *cannot* fire and here it was *forbidden* to. A private helper
-// that lost its last caller, and its now-false doc comment with it, would have sat
-// here with all six gates green.
+// ⚠️ **`#![allow(dead_code)]` was here and is gone** (§15 D732). It switched
+// the lint off for the **whole crate**, private items included — which is stronger
+// than the `pub`-in-a-library blind spot `CLAUDE.md` records, because there the lint
+// *cannot* fire and here it was *forbidden* to. A private helper that lost its last
+// caller, and its now-false doc comment with it, would have sat here with all six
+// gates green.
 //
 // **It was hiding nothing.** Removing it produced zero warnings under
 // `-p --all-targets`, under `--workspace --all-targets` and under a plain `check`

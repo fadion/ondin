@@ -96,7 +96,7 @@ fn key_of(source: &Source) -> Key {
 
 /// A placement asked for and not yet run (§15 D1030) — held on the app, not on
 /// [`Picker`], so `Escape` closing the picker in the frames it waits does not
-/// lose a click already made (`arch-scribe`'s reading of the first cut).
+/// lose a click already made.
 pub(crate) struct Placing {
     key: Key,
     source: Source,
@@ -237,7 +237,7 @@ impl LocalTiles {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         } else {
             // Not drawn after all: compared afresh on the next revision rather
-            // than counted as drawn (`arch-scribe`'s reading).
+            // than counted as drawn.
             self.forget(&changed);
         }
     }
@@ -441,13 +441,13 @@ impl OndinApp {
         } else {
             search(&query, &local, &shown)
         };
-        // **Only while the search field holds the keyboard** (§15 D1023, the
-        // kits QA review's finding): the field gives the keyboard back for good
-        // (`D1014`'s fix (b)), and read from anywhere, `Enter` stepping into a
-        // group, committing an inspector field or a dialog's note also placed the
-        // highlighted result, and the arrows nudged the selection and moved the
-        // highlight at once. Asked before the field is drawn, which is before a
-        // single-line field lets go of the keyboard on `Enter`.
+        // **Only while the search field holds the keyboard** (§15 D1023): the
+        // field gives the keyboard back for good (`D1014`'s fix (b)), and read
+        // from anywhere, `Enter` stepping into a group, committing an inspector
+        // field or a dialog's note would also place the highlighted result, and
+        // the arrows would nudge the selection and move the highlight at once.
+        // Asked before the field is drawn, which is before a single-line field
+        // lets go of the keyboard on `Enter`.
         let typing = ctx.memory(|m| m.has_focus(egui::Id::new(SEARCH_ID)));
         if typing && !results.is_empty() {
             let (down, up, enter) = ctx.input(|i| {
@@ -1054,11 +1054,10 @@ fn kits_on_the_page(doc: &Document) -> HashSet<String> {
         }
         let Some(n) = doc.get(id) else { continue };
         for main in [n.link(), n.swap()].into_iter().flatten() {
-            // **Followed to the end of its chain** (`arch-scribe`'s reading of
-            // the first cut): a link points one level up (§5.3d), so a page copy
-            // of a kit-A main holding a nested kit-B instance links to the
-            // nested copy *inside A's vault main*, and only that copy's own link
-            // reaches B. Every kit on the way is on the page.
+            // **Followed to the end of its chain**: a link points one level up
+            // (§5.3d), so a page copy of a kit-A main holding a nested kit-B
+            // instance links to the nested copy *inside A's vault main*, and only
+            // that copy's own link reaches B. Every kit on the way is on the page.
             let mut cur = Some(main);
             for _ in 0..=doc.len() {
                 let Some(m) = cur else { break };
@@ -1360,9 +1359,9 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
     // ⚠️ **No `Escape` arm here.** egui clears focus on `Escape` in `begin_pass`
     // (§15 D317), so the press reaches the keymap and the escape ladder's rung
     // closes the picker — and an arm here, reading the field's `lost_focus`,
-    // closed it a second time beside whatever the ladder had closed instead (an
-    // open dropdown, the colour picker): `D1014`'s fix (a) again, through a
-    // narrower door (`arch-scribe`'s reading).
+    // would close it a second time beside whatever the ladder had closed instead
+    // (an open dropdown, the colour picker): `D1014`'s fix (a) again, through a
+    // narrower door.
     let mut changed = edit.changed();
     if !query.is_empty() {
         let x = egui::Rect::from_center_size(
@@ -2731,8 +2730,8 @@ pub(crate) mod tests {
     }
 
     /// **A placement waiting its dimmed frame survives the picker closing**
-    /// (§15 D1030, `arch-scribe`'s reading of the first cut): `Escape` in the
-    /// wait used to drop the click with the picker that held it.
+    /// (§15 D1030): `Escape` in the wait must not drop the click with the picker
+    /// that held it.
     ///
     /// Flip, run: the due test without its `|| closed` fails *"the click
     /// still places"*.

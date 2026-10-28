@@ -328,7 +328,7 @@ fn reset_item_restores_one_item_at_its_anchor() {
     // With no counterpart on either side, first — the list rule
     // (`propagate::items`; `reset_items` followed it too until §15 D994 made it
     // the source's list exactly), where the children's anchor falls back
-    // to topmost. `arch-scribe` found the doc and the code disagreeing here.
+    // to topmost.
     assert_eq!(
         reset::reset_item(&src, &[local], src[1].id),
         vec![src[1], local]
@@ -571,8 +571,6 @@ fn outer_instance(f: &mut F) -> (NodeId, NodeId) {
 /// its source — so a restore that looked for it only under the nested copy (the
 /// nearest instance root) found it absent and inserted a second node on the same
 /// source, under another root, where `LinkRule::SharedSource` cannot see it.
-/// Found by `arch-scribe` reading `missing` against `settle_links`; failed before
-/// the held links were read under the outermost root.
 #[test]
 fn a_member_dragged_out_of_a_nested_copy_is_not_restored_twice() {
     let mut f = fixture();
@@ -597,8 +595,7 @@ fn a_member_dragged_out_of_a_nested_copy_is_not_restored_twice() {
 /// copy of the rect. The outer instance's own copy of the rect links to the same
 /// source, so a restore that looked for held links under the outer root found it
 /// "held" and restored nothing. The climb to the outermost root is for a nested
-/// copy's members; it stops at a root linked straight to a main. Found by
-/// `arch-scribe` reading the fix for the test above; failed with `removed` 0 before.
+/// copy's members; it stops at a root linked straight to a main.
 #[test]
 fn a_local_instances_removed_child_is_not_masked_by_its_host() {
     let mut f = fixture();
@@ -615,8 +612,7 @@ fn a_local_instances_removed_child_is_not_masked_by_its_host() {
 /// **Overlapping scopes reset once.** An outer instance and the nested copy
 /// inside it, scoped together, with a child of the nested copy deleted: one
 /// restore, not two (the second would be cut by `settle_links` and land an
-/// unlinked duplicate). Found by `arch-scribe`; failed before `reset` took the
-/// outermost of its scopes. ⚠️ The scope inside must be a **parent of the missing
+/// unlinked duplicate). ⚠️ The scope inside must be a **parent of the missing
 /// child** — the first spelling of this test scoped a childless rect beside it
 /// and passed against the defect.
 #[test]

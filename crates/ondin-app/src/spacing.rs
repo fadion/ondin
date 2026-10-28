@@ -545,11 +545,11 @@ impl OndinApp {
             Drag::Spacing { id, .. } => *id,
             _ => hovered.or(selected)?,
         };
-        // Only under a tool that selects (`arch-scribe`'s read of the first cut):
-        // the press reaches `begin_select_drag` for no other, so under a create
-        // tool a band drawn strong would promise a drag the press turns into a
-        // shape. Here, so the drawing, the cursor, the guide gate and the press
-        // all read the one answer — `draw_hover_outline`'s precedent.
+        // Only under a tool that selects: the press reaches `begin_select_drag`
+        // for no other, so under a create tool a band drawn strong would promise
+        // a drag the press turns into a shape. Here, so the drawing, the cursor,
+        // the guide gate and the press all read the one answer —
+        // `draw_hover_outline`'s precedent.
         if !self.selecting() || self.editing_in_place() || !self.shown_visible(id) {
             return None;
         }
@@ -574,9 +574,8 @@ impl OndinApp {
             };
             // **A mask is no child a band yields to**: it draws nothing of its
             // own, it clips, and it usually spans the whole container — counted,
-            // every padding band and (as out of flow) every gap band yielded to
-            // it and the handles vanished (`arch-scribe`'s read of the second
-            // amendment, and the padding half found by its test).
+            // every padding band and (as out of flow) every gap band would yield
+            // to it and the handles would vanish.
             if doc.get(*c).is_some_and(|n| n.mask()) {
                 continue;
             }
@@ -602,12 +601,11 @@ impl OndinApp {
         let c = world.as_coeffs();
         let ppw = self.points_per_world();
         let scale = Vec2::new(c[0].hypot(c[1]) * ppw, c[2].hypot(c[3]) * ppw);
-        // **The bands a drag is writing stay, however thin** (`arch-scribe`'s
-        // read of the first cut): a padding dragged to 3 px at 100% would leave
-        // the list mid-drag, its strong band and its label gone at the values a
-        // designer is most likely reading. Every band of the dragged kind is
-        // kept — every padding for a padding drag, the modifiers choosing which
-        // sides it writes frame by frame.
+        // **The bands a drag is writing stay, however thin**: a padding dragged
+        // to 3 px at 100% would leave the list mid-drag, its strong band and its
+        // label gone at the values a designer is most likely reading. Every band
+        // of the dragged kind is kept — every padding for a padding drag, the
+        // modifiers choosing which sides it writes frame by frame.
         let mut all = bands(&shown_display, bx, &items, grid.as_ref());
         // **An unselected container's padding is not a handle** (§15 D1093, the
         // maintainer's ruling over D1089's every band on hover): its padding is
@@ -616,7 +614,7 @@ impl OndinApp {
         // hover, and the padding waits for the container to be selected —
         // through a gap drag on it too: no padding drag starts on an unselected
         // container, so sparing the dragged one would only bring its padding
-        // back mid-drag (`arch-scribe`'s read of the first cut).
+        // back mid-drag.
         let hovered_only = selected != Some(id);
         if hovered_only {
             all.retain(|b| !matches!(b.kind, BandKind::Padding(_)));
@@ -1259,10 +1257,9 @@ mod canvas_tests {
     /// the band its hover showed did not take the click either — a press
     /// released where it was pressed is a click, not a band drag.
     ///
-    /// Written to pin a reading of `arch-scribe`'s that the band would take the
-    /// click; it did not. A selection added in the band release's no-op arm
-    /// was flipped out and the test stayed green, the click path selecting the
-    /// row on its own — so there is no such arm.
+    /// The band does not take the click, and there is no selection arm in the
+    /// band release's no-op path: one added there and flipped out leaves this
+    /// green, the click path selecting the row on its own.
     #[test]
     fn a_click_in_an_empty_containers_padding_selects_it() {
         let ctx = egui::Context::default();

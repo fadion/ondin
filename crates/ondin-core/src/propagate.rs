@@ -788,13 +788,13 @@ pub fn propagate_structure(
     // still linked; an untouched copy ungroups as the main did. Judged ignoring
     // the children being lifted, whose own changes travel with them.
     //
-    // **At every depth** (`arch-scribe`'s reading of the first build): "the old
-    // parent goes" was asked of the tree the transaction leaves, and one level
-    // down — an outer main's instance, holding a copy of the nested instance's
-    // copy of the group — the old parent is a copy this pass deletes and the
-    // transaction does not, so a changed copy there was lifted out of and left
-    // empty. The flag travels with the move instead: a copy lifted out of goes
-    // (it was untouched), so its own copies' old parent goes too.
+    // **At every depth**: asked of the tree the transaction leaves, "the old
+    // parent goes" fails one level down — an outer main's instance, holding a
+    // copy of the nested instance's copy of the group — where the old parent is
+    // a copy this pass deletes and the transaction does not, so a changed copy
+    // there would be lifted out of and left empty. The flag travels with the
+    // move instead: a copy lifted out of goes (it was untouched), so its own
+    // copies' old parent goes too.
     let lifted_source = |s: NodeId| {
         let mut at = Some(s);
         for _ in 0..=before.len() {
@@ -1431,11 +1431,10 @@ fn merge(old: &Value, new: &Value, cur: &Value) -> Value {
 /// old missing key, so it takes the main's new one, and a key the main dropped is
 /// dropped from a copy that still held the main's old value.
 ///
-/// ⚠️ **The first build recursed only when all three had the same keys**, so any
-/// field at or moving to its default made the struct compare whole and a copy with
-/// one override stopped following every other field — the common case, and
-/// `arch-scribe` found it by reading the merge against D979 (a). A test struct that
-/// skips nothing could not see it; `fields_follow_with_skipped_defaults` uses one
+/// ⚠️ **Recursing only when all three have the same keys is wrong**: any field at
+/// or moving to its default would make the struct compare whole, and a copy with
+/// one override stop following every other field — the common case. A test struct
+/// that skips nothing cannot see it; `fields_follow_with_skipped_defaults` uses one
 /// that does.
 ///
 /// **An enum is never mixed**: an object keyed by a variant name (serde's external

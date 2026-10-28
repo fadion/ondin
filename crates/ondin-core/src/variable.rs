@@ -1127,8 +1127,8 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
     // 🚨 **Into the kit itself, the kit's own variable or nothing** (D1023's
     // own-kit arm, `crate::tokens::plan`'s): a carried variable of `doc`'s own
     // kit lands on the original, and one the kit has since deleted detaches
-    // here, by D1038's rule — kept for the plan, it had nothing to be pointed
-    // at and the commit refused the paste (`arch-scribe`'s reading).
+    // here, by D1038's rule — kept for the plan, it would have nothing to be
+    // pointed at and the commit would refuse the paste.
     let own = doc.meta().id.as_deref();
     let own_var = |v: VarId| {
         let o = carried.vars.iter().find(|c| c.id == v)?.origin.as_ref()?;

@@ -851,7 +851,7 @@ mod tests {
         covers.settle(&ctx);
         assert!(
             covers.get(&ctx, &entry).is_some(),
-            "a fresh worker draws it — the whole of the finding"
+            "a fresh worker draws it"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

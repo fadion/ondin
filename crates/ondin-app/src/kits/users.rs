@@ -27,9 +27,8 @@ pub(crate) struct KitUsers {
     /// The number, once the worker has it.
     pub count: Option<usize>,
     /// Set when the count is dropped, so the worker stops between files rather
-    /// than loading the rest of the library for nobody — each reopening of the
-    /// dialog started another whole-library load beside it (§15 D1024, the kits
-    /// QA review's second pass).
+    /// than loading the rest of the library for nobody — otherwise each reopening
+    /// of the dialog starts another whole-library load beside it (§15 D1024).
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 

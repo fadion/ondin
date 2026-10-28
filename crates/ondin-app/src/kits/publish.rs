@@ -83,7 +83,7 @@ impl OndinApp {
         let chip_w = (count.size().x + 10.0).max(18.0);
         // The count's chip only when it counts something: a rename alone is
         // publishable with no component changed, and *Publish 0* would say there
-        // is nothing to send (`arch-scribe`'s reading of D1015's fix).
+        // is nothing to send.
         let chip = enabled && n > 0;
         let w = 10.0
             + 13.0
@@ -362,8 +362,7 @@ fn not_a_component(c: &Changes) -> String {
     let mut s = joined(&[
         (c.renamed, "the kit's name"),
         (c.reordered, "the order of its components"),
-        // A variable or a style its components read (§15 D1064) — worded as a
-        // rename until `arch-scribe` read the zero arm against `Changes::tokens`.
+        // A variable or a style its components read (§15 D1064) — not a rename.
         (c.tokens, "the variables and styles its components read"),
     ]);
     if let Some(first) = s.get(..1) {
@@ -459,8 +458,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
     let right = match (aside, n.set().is_some()) {
         (Some(a), _) => Some(a.to_string()),
         (None, true) => {
-            // Its variants, not its children — a set may hold a plain layer too
-            // (`arch-scribe`'s reading of the first cut).
+            // Its variants, not its children — a set may hold a plain layer too.
             let k = ondin_core::variant::variants(doc, id).len();
             Some(format!("{k} variant{}", plural(k)))
         }

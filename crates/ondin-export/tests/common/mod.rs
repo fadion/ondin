@@ -10,9 +10,9 @@
 //! grow where a shared one does not.
 
 // **The one `dead_code` allow in this workspace that is load-bearing**, and it is
-// worth saying which kind it is (§15 D732, `[A8-L3-06]`). A `tests/common` module
-// is compiled **once per integration test file** that declares it, and each file
-// uses a different subset — so `fixture_with_stroke_align` is genuinely unused in
+// worth saying which kind it is (§15 D732). A `tests/common` module is compiled
+// **once per integration test file** that declares it, and each file uses a
+// different subset — so `fixture_with_stroke_align` is genuinely unused in
 // `snapshot` and genuinely used in `svg_roundtrip`. Measured by removing this
 // line: four warnings across two targets, every one of them a false report.
 //

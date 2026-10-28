@@ -333,12 +333,12 @@ fn thin_rect(w: f64, h: f64) -> (Document, Resolved, NodeId) {
     (doc, res, rect)
 }
 
-/// **`[S8.2-L1-01]`'s loss: the clamp handed the renderer the one size it panics
-/// at.** `MAX_RASTER_SIDE` was `u16::MAX`, and `vello_common`'s
-/// `snap_to_tile_coordinates` carries a comment saying in as many words that
-/// `u16::MAX` is the viewport size it cannot take. So `ondin export --png
-/// --width 65535` aborted, and so did a plain 1× export of a document whose one
-/// rect is `1e30` wide — no flag involved, only geometry a `.ondin` can carry.
+/// **The clamp must not hand the renderer the one size it panics at.**
+/// `vello_common`'s `snap_to_tile_coordinates` carries a comment saying in as many
+/// words that `u16::MAX` is the viewport size it cannot take. With
+/// `MAX_RASTER_SIDE` at `u16::MAX`, `ondin export --png --width 65535` aborts, and
+/// so does a plain 1× export of a document whose one rect is `1e30` wide — no flag
+/// involved, only geometry a `.ondin` can carry.
 ///
 /// ⚠️ **This test is also the only thing that re-measures the constant.** Neither
 /// `DEPTH_BUCKET_WIDTH` nor `Tile::WIDTH` is public, so `511 * 128` is derived by
@@ -377,8 +377,8 @@ fn a_raster_at_the_cap_renders_on_either_axis() {
     }
 }
 
-/// A pad at an ordinary size still lands where it did — the control for
-/// `[S8.2-L1-02]`'s widening, which must not have moved anything.
+/// A pad at an ordinary size still lands where it did — the control for the padded
+/// buffer's widening to `usize`, which must not move anything.
 ///
 /// ⚠️ **The overflow itself is asserted in `png.rs`, not here.** The smallest
 /// raster that reaches it is `32768 × 1`, whose square is 4 GB, so a test that

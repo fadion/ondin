@@ -505,9 +505,8 @@ fn a_copied_main_and_instance_stay_linked_to_each_other() {
 /// Only a link **straight to a main** is placed freely. A layer at the canvas root
 /// linked to the nested instance *inside* another main is an instance root by its
 /// chain, but it was never copied with that main, so it belongs nowhere and is
-/// refused. Flip: exempting every instance root from membership (the first build,
-/// `is_root(n)` → `continue`) accepts it — `arch-scribe` found that looseness by
-/// reading the rule against §5.3d.
+/// refused. Flip: exempting every instance root from membership (`is_root(n)` →
+/// `continue`) accepts it.
 #[test]
 fn a_link_to_a_nested_copy_is_held_to_membership() {
     let mut f = fixture();

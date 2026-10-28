@@ -1294,10 +1294,9 @@ fn group_a(f: &mut F) -> (NodeId, NodeId) {
 /// **The ungroup wrapper holds at every depth** (§15 D1003 (2)): an outer main's
 /// instance whose copy of the group — a copy of the nested instance's copy — it
 /// changed keeps it as a wrapper, while the nested instance's own untouched copy
-/// ungroups. The first build asked whether the old parent was gone in the tree
-/// the *transaction* leaves, and one level down the old parent is a copy this pass
-/// deletes, so the changed copy there was lifted out of and left empty
-/// (`arch-scribe`'s reading).
+/// ungroups. Asking whether the old parent is gone in the tree the *transaction*
+/// leaves is wrong: one level down the old parent is a copy this pass deletes, so
+/// the changed copy there would be lifted out of and left empty.
 ///
 /// Flip: the moves' `goes` flag read off the transaction's tree again (`!
 /// after_nodes.contains_key(&old)` at every level) fails "still inside its group,
@@ -1356,7 +1355,7 @@ fn an_ungroup_keeps_a_changed_group_copy_two_levels_down() {
 /// frame of the instance's own** — the copy keeps its value, and the edit
 /// commits. `Document::peek` read off the node alone, where `op_set_mask`'s
 /// refusal (`holds_a_frame`, §15 D876) cannot see the frame, so the follow was
-/// written and `apply` refused the user's whole edit (`arch-scribe`'s reading).
+/// written and `apply` refused the user's whole edit.
 ///
 /// Flip: `peek`'s scratch without the subtree for a `SetMask` fails the commit,
 /// `ArtboardPlacement`, the `expect` in `commit_all`.

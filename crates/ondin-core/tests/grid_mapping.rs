@@ -451,11 +451,11 @@ fn rows_are_refused_as_columns_are() {
 /// so the single-track arm's room check was reached by nothing.
 ///
 /// **Flip runs** in `template`'s single-track arm: the `if room > 0` guard
-/// dropped, as the review named it, panics in this debug build at its own
-/// `room -= 1`, *"attempt to subtract with overflow"* — not the predicted 1001,
-/// though a failure all the same; with the guard dropped and the decrement
-/// saturating instead — the version that lays past the cap in any profile — it
-/// fails on *"laid to the cap"*, 1001 against 1000, as predicted.
+/// dropped panics in this debug build at its own `room -= 1`, *"attempt to
+/// subtract with overflow"* — not the predicted 1001, though a failure all the
+/// same; with the guard dropped and the decrement saturating instead — the
+/// version that lays past the cap in any profile — it fails on *"laid to the
+/// cap"*, 1001 against 1000, as predicted.
 #[test]
 fn a_track_after_a_capped_repeat_is_not_laid() {
     let mut s = Scene::new();

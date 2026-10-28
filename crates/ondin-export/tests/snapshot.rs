@@ -80,8 +80,8 @@ fn wire(id: ondin_core::NodeId) -> String {
 /// An agent asked to "centre that heading" needs to know what the alignment and
 /// box already are; the earlier snapshot omitted all three.
 ///
-/// ⚠️ **This test could not fail until §15 D480** (`[S8.3-L6-03]`). Two of its
-/// three assertions checked the projection's output against the projection's own
+/// ⚠️ **This test could not fail until §15 D480.** Two of its three assertions
+/// checked the projection's output against the projection's own
 /// **codomain** — `line_height` is one of `"auto"` / `…%` / `…px` because the
 /// `match` producing it has exactly those three arms, and `align` is one of six
 /// strings because its `match` is exhaustive over `TextAlign` — and the third,
@@ -103,7 +103,7 @@ fn wire(id: ondin_core::NodeId) -> String {
 /// to prove a little.
 ///
 /// ⚠️ **Flip-check, run: `align`'s `match` replaced by `"start".to_string()` and
-/// `sizing`'s by `TextSizingSummary::Auto`**, which is the finding's own diff.
+/// `sizing`'s by `TextSizingSummary::Auto`**, the constant projection itself.
 /// Fails on the non-default `align` assertion — the predicted site — and on the
 /// `sizing` assertion behind it. The default-valued half stays green under that
 /// flip, which is exactly why it cannot be the whole test.
@@ -460,20 +460,16 @@ fn the_snapshot_carries_a_layers_effects_in_the_units_the_panel_shows() {
 }
 
 /// **A pivot reaches the snapshot as a resolved point, and a node that has not
-/// moved its pivot carries no key at all** — §15 D651, `[S8.2-L6-06]`.
+/// moved its pivot carries no key at all** — §15 D651.
 ///
 /// 🚨 **`pivot` was the one field of the MCP surface with no test and no golden.**
 /// Every other schema addition since version 4 has both halves covered —
 /// `Image`/`fit`/`alpha`, `adjust`, `effects` — and `pivot` had neither: no reader
 /// outside `snapshot.rs` workspace-wide, and `golden_document()` set no pivot on
 /// any of its **fourteen** nodes, so `json_snapshot_matches_its_golden` was silent
-/// about it. (⚠️ **The finding says "eleven" and this comment did too until
-/// `arch-scribe` counted**: `golden_document` issues thirteen `CreateNode`s and
-/// `every-kind.json` holds fourteen node snapshots, the document root included. No
-/// spelling of it is eleven, and the argument does not depend on the figure —
-/// which is exactly why it went unchecked.) **Past tense from §15 D658**, which
-/// gave the fixture a `Normalized(0.25, 0.75)` pivot on the ellipse; the golden
-/// now watches this field, and this test is what says what the number means.
+/// about it. **Past tense from §15 D658**, which gave the fixture a
+/// `Normalized(0.25, 0.75)` pivot on the ellipse; the golden now watches this
+/// field, and this test is what says what the number means.
 ///
 /// **It is also the only field in `node_snapshot` that *derives* rather than
 /// projects.** The others read the node; this one measures

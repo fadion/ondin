@@ -782,8 +782,8 @@ mod tests {
     ///
     /// **Flip-check, run**: deleting `self.staged = Some(asset)` fails on
     /// *"a found update is what a click applies"* — the chip it leaves says
-    /// *Restart to update* and does nothing, which was the finding; deleting
-    /// the re-arm fails on *"nothing found arms the next round"*.
+    /// *Restart to update* and does nothing; deleting the re-arm fails on
+    /// *"nothing found arms the next round"*.
     #[test]
     fn a_settled_round_stages_the_update_and_rearms_only_while_it_can_change() {
         let ctx = egui::Context::default();

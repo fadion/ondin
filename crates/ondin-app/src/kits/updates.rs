@@ -507,11 +507,11 @@ impl OndinApp {
         let update = match ondin_core::kit::update_all(doc, &mut self.session.ids, page, &args) {
             Ok(u) => u,
             // **This kit's publish reaches a newer version of a third kit's
-            // main than the document holds** (§15 D1024, the kits QA review's
-            // second pass): from the card or the canvas menu, which accept one
-            // kit, it failed for good. When more updates wait, all of them are
-            // accepted together — the third kit's among them — as *Accept all*
-            // does; otherwise the third kit is not in the library to update from.
+            // main than the document holds** (§15 D1024): from the card or the
+            // canvas menu, which accept one kit, it would fail for good. When more
+            // updates wait, all of them are accepted together — the third kit's
+            // among them — as *Accept all* does; otherwise the third kit is not in
+            // the library to update from.
             // A third kit's modes held at another version than this publish
             // read are the same owed update (§15 D1064).
             Err(
@@ -643,8 +643,8 @@ impl OndinApp {
 ///
 /// **Measured on the document `tx` leaves**, laid out: until the transaction
 /// lands the mains are in the vault, which nothing resolves, and a group's box
-/// is its children's — the first cut placed a group by its origin at height 0, so
-/// a tall one overlapped the next (`arch-scribe`'s reading of D1016).
+/// is its children's — placed by its origin at height 0, a tall group would
+/// overlap the next.
 pub(crate) fn stack_local(
     doc: &ondin_core::Document,
     tx: &ondin_core::Transaction,
@@ -1022,10 +1022,10 @@ mod tests {
     }
 
     /// **A publish read past the scan's version is not passed off as it** (§15
-    /// D1023, the kits QA review's finding): the library scanned the kit at v4,
-    /// the kit published v5, and the shelf then read the file. Its content is
-    /// v5's, so it is not the current publish of an entry that says v4 — an
-    /// accept would have written v5's mains labelled v4.
+    /// D1023): the library scanned the kit at v4, the kit published v5, and the
+    /// shelf then read the file. Its content is v5's, so it is not the current
+    /// publish of an entry that says v4 — an accept would write v5's mains
+    /// labelled v4.
     ///
     /// Flip, run: `current` without its version comparison fails *"not v4's"*.
     #[test]

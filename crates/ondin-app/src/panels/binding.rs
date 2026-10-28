@@ -1833,8 +1833,7 @@ impl OndinApp {
                 match doc.resolve_brush(id, b).into_owned() {
                     // **The colour without its `%`**: the `%` stays the fill's own
                     // field, which the bind keeps (`bind_brush_at_all`), so filing
-                    // the alpha too drew a 50% fill at 25% (`arch-scribe`'s
-                    // reading of the first cut).
+                    // the alpha too would draw a 50% fill at 25%.
                     ondin_core::Brush::Solid(c) => Some(Cell::Color(c.with_alpha(1.0))),
                     _ => None,
                 }
@@ -3386,7 +3385,7 @@ mod tests {
     ///
     /// Flip, run: without the hex field's `refused_enter` arm it fails *"the hex
     /// buffer is kept"* — the `TextEdit` gave the keyboard up on `Enter` and
-    /// `lost_focus` dropped the text, the defect `arch-scribe` read. And without
+    /// `lost_focus` dropped the text. And without
     /// `number_retype`'s arm it fails *"the radius buffer is kept"*.
     #[test]
     fn enter_on_a_refusal_leaves_the_field_as_typed() {

@@ -65,10 +65,10 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
             by_id.insert(id, winner);
         }
     }
-    // **Sharing is asked of the file that won, not before** (§15 D1024, the
-    // kits QA review's second pass): filtered first, a kit that stopped sharing
-    // left its conflict copy — still marked sharing — standing in for it, and
-    // consumers went on seeing the kit, usually at a stale publish.
+    // **Sharing is asked of the file that won, not before** (§15 D1024):
+    // filtered first, a kit that stopped sharing would leave its conflict copy —
+    // still marked sharing — standing in for it, and consumers would go on seeing
+    // the kit, usually at a stale publish.
     let mut out: Vec<KitEntry> = by_id
         .into_iter()
         .filter(|(_, e)| e.meta.kit.as_ref().is_some_and(|k| k.is_shared()))
@@ -113,7 +113,7 @@ pub(crate) fn kit_file<'a>(lib: &'a Library, id: &str) -> Option<&'a Entry> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct KitHeading {
     /// The kit's id — what a list groups by, since two kits can share a name
-    /// and two lost ones both read *Kit* (`arch-scribe`'s reading).
+    /// and two lost ones both read *Kit*.
     pub kit: String,
     /// What the heading reads.
     pub name: String,
@@ -377,14 +377,13 @@ impl KitShelf {
     ///
     /// ⚠️ **What an accept must ask, not [`Self::load`]**: a copy read before the
     /// kit published again would be written into the document under the new
-    /// version, and the update it was meant to bring would never arrive
-    /// (`arch-scribe`'s reading of D1016's first cut).
+    /// version, and the update it was meant to bring would never arrive.
     ///
     /// ⚠️ **And `None` when the file read had published past the scan's
-    /// version** (§15 D1023, the kits QA review's finding): a kit that published
-    /// between the scan and the read gave the newer content under the older
-    /// number, written into the document as that version — a mislabel the next
-    /// pill re-offered. The library rescans and the shelf is asked again.
+    /// version** (§15 D1023): a kit that published between the scan and the read
+    /// would give the newer content under the older number, written into the
+    /// document as that version — a mislabel the next pill re-offers. The library
+    /// rescans and the shelf is asked again.
     pub(crate) fn current(&self, kit: &KitEntry) -> Option<Arc<Published>> {
         let s = self.shelves.get(&kit.id)?;
         match &s.load {

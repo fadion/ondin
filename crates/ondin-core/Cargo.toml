@@ -41,7 +41,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 # Path booleans (`boolean::evaluate`). **`=`-pinned, on the maintainer's ruling**
-# (§15 D703, `[S22-L3-05]`): this is the crate whose non-transitive comparator
+# (§15 D703): this is the crate whose non-transitive comparator
 # panics on some operand geometries, so it is the library §15 D239's
 # `catch_unwind` guard and the `panic = "abort"` note in the workspace manifest
 # are both written about — and it was the one dependency behind a safety guard

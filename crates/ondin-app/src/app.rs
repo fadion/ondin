@@ -243,14 +243,14 @@ mod in_flight_tests {
                 },
             ),
             (
-                "export_quality_scrub — one of the two `[A1-L2-02]` found missing",
+                "export_quality_scrub",
                 InFlight {
                     export_quality_scrub: Some((0, 0.8)),
                     ..Default::default()
                 },
             ),
             (
-                "guide_position_drag — the other one",
+                "guide_position_drag",
                 InFlight {
                     guide_position_drag: Some((ondin_core::GuideAxis::Vertical, 100.0)),
                     ..Default::default()
@@ -12471,7 +12471,7 @@ mod library_wiring_tests {
             brought.meta.project, None,
             "an import taken while standing on an archived project's grid filed \
              every copied document into it — the refused destination reached in \
-             bulk, and the door `[S20.3-L1-03]` did not name"
+             bulk"
         );
         let _ = std::fs::remove_dir_all(&outside);
 

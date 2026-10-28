@@ -961,10 +961,10 @@ fn a_third_kits_version_alone_is_no_change_to_publish() {
 }
 
 /// 🚨 **A kit instance pasted back into its own kit reads the kit's own
-/// variables** (D1023's own-kit arm made for the tables, `arch-scribe`'s reading
-/// of the first build): L holds no copy of its own `brand`, and the pasted Icon's
-/// dot reads the original — before the fix L gained a kit record of itself and
-/// a second `brand`, and every bound field of the paste was an override.
+/// variables** (D1023's own-kit arm made for the tables): L holds no copy of its
+/// own `brand`, and the pasted Icon's dot reads the original — not a kit record
+/// of L in L and a second `brand`, which would make every bound field of the
+/// paste an override.
 ///
 /// Flip, run: `tokens::plan`'s `own` taken as `None` fails at *"no copy of its
 /// own variables"*, three variables where two were.
@@ -997,9 +997,9 @@ fn a_kit_instance_pasted_back_into_its_kit_reads_its_own_variables() {
 }
 
 /// And a kit instance pasted back into a kit that has **deleted** the variable
-/// it reads detaches to what it drew, by D1038's rule (`arch-scribe`'s reading of
-/// the own-kit fix: kept for a plan with nothing to point it at, the commit
-/// refused the paste as a binding to nothing).
+/// it reads detaches to what it drew, by D1038's rule (kept for a plan with
+/// nothing to point it at, the commit would refuse the paste as a binding to
+/// nothing).
 ///
 /// Flip, run: `land` keeping an own-kit binding as any carried one (`own_var`
 /// answering `None`) fails in `paste`, the commit refusing a `BadBinding`.
@@ -1021,8 +1021,8 @@ fn a_paste_back_into_a_kit_that_deleted_the_variable_detaches() {
 
 /// **A consumer holding a third kit newer than the kit carrying it** — L with
 /// *Dusk*, where A vendored L before it — inserts A's Card all the same: the
-/// held record covers what A read (`arch-scribe`'s reading: refused for good as
-/// an update owed, which no update could give).
+/// held record covers what A read (refused, it would be an update owed for good,
+/// which no update could give).
 ///
 /// Flip, run: `covers` made the old equal-sets test fails at *"inserts"*,
 /// `Err(Modes(L))`.
@@ -1049,8 +1049,7 @@ fn a_third_kit_held_newer_than_the_kit_carrying_it_is_reused() {
 }
 
 /// **Accept all takes a kit carrying a third kit's new mode beside that kit's
-/// own update, in either order** (`arch-scribe`'s reading: `[A, L]` refused
-/// where `[L, A]` took).
+/// own update, in either order**: `[A, L]` as well as `[L, A]`.
 ///
 /// Flip, run: `update_all` without its retry fails at *"A first, L second"*,
 /// `Err(Modes(L))`.
@@ -1095,11 +1094,10 @@ fn accept_all_takes_a_kit_carrying_a_newer_third_kit_in_either_order() {
     assert_eq!(d.variables().kits()[L_ID].modes.len(), 3);
 }
 
-/// **The stale-mode reset spares a copy that set the mode as its main did**
-/// (`arch-scribe`'s reading): L's Icon set to *Night*, an instance of it in D
-/// with it; then L moves Icon to *Dusk* and removes *Night*. The instance
-/// follows to *Dusk* — the reset's write had made it an override, left on
-/// *Inherit*.
+/// **The stale-mode reset spares a copy that set the mode as its main did**: L's
+/// Icon set to *Night*, an instance of it in D with it; then L moves Icon to
+/// *Dusk* and removes *Night*. The instance follows to *Dusk* — the reset's write
+/// would make it an override, left on *Inherit*.
 ///
 /// Flip, run: the reset without its `follows` filter fails at *"follows"*,
 /// `None`.
@@ -1525,8 +1523,7 @@ fn make_local_matches_a_drifted_copys_fills_by_item() {
 /// **A main the kit removes is made local with its variables forked**, even
 /// one only it read — which the new publish therefore no longer carries, so
 /// the update removes it: the fork is taken before the kit's tables are
-/// rewritten, or the main kept only a literal (`arch-scribe`'s reading 3 of
-/// D1066's first cut).
+/// rewritten, or the main keeps only a literal (§15 D1066).
 ///
 /// Flip, run: `update_in_order`'s up-front fork of the removed tops dropped
 /// fails at *"tag forked"* — nothing was: by `make_local`'s turn the main held
@@ -1602,7 +1599,7 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
     );
     assert_eq!(fork.cells[&dm[1]], Cell::Color(GOLD), "every mode kept");
     // And the page's instance follows its main onto the fork — never cut to a
-    // literal the commit reads as an override (`arch-scribe`'s reading (a)).
+    // literal the commit reads as an override.
     assert_eq!(
         d.get(inst).unwrap().paint().fills[0].brush.var(),
         Some(fork.id),
@@ -1633,9 +1630,9 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
 }
 
 /// **A removal detaches a drifted copy's own fill, matched by item id** (D980,
-/// `arch-scribe`'s reading (b) of D1066's fixes): *Badge* has two fills bound
-/// to `tag`, and the page's copy has replaced the first with one of its own,
-/// bound alike — so by position every bound fill lines up with its main's.
+/// D1066): *Badge* has two fills bound to `tag`, and the page's copy has replaced
+/// the first with one of its own, bound alike — so by position every bound fill
+/// lines up with its main's.
 /// When the kit drops `tag`, the update commits and the own fill is detached.
 /// ⚠️ The followed fill is detached with it — an override where its main went
 /// white: the detach is one `SetFills` for the node, and the follow takes no
@@ -1709,9 +1706,9 @@ fn a_removal_matches_a_drifted_copys_fills_by_item() {
     );
 }
 
-/// **Only this update's fork counts as alike** (`arch-scribe`'s reading (d) of
-/// D1066's fixes): *Badge* was made local before, so it reads *Atlas/brand*,
-/// and a page instance of it has been bound back to the kit's `brand` by hand.
+/// **Only this update's fork counts as alike** (§15 D1066): *Badge* was made
+/// local before, so it reads *Atlas/brand*, and a page instance of it has been
+/// bound back to the kit's `brand` by hand.
 /// When the kit drops `brand`, that copy is detached, values kept — its main is
 /// outside the vault and no edit of this update's, so nothing would follow it.
 ///

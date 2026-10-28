@@ -511,8 +511,8 @@ impl OndinApp {
     /// `tail` is the card's rows **the style does not hold**, drawn live under
     /// whatever `body` is in — the Type card's alignment row and its popup's
     /// opener, since a text style holds the character defaults and not the
-    /// paragraph or the box (§15 D1067). Without it a styled card locked fields
-    /// its style never writes (`arch-scribe`'s read of the first cut).
+    /// paragraph or the box (§15 D1067). Without it a styled card would lock
+    /// fields its style never writes.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn style_card_live(
         &mut self,
@@ -609,7 +609,7 @@ impl OndinApp {
                     // Over a selection — under an *Edit* too: what the rows
                     // write there is the one layer's spans, which `edit_through`
                     // passes by, so the edit's footer would promise a reach
-                    // they do not have (`arch-scribe`'s read).
+                    // they do not have.
                     body(app, ui);
                     footer(ui, icon::TEXT_AA, "Styles the selection — the style stays");
                 } else {
@@ -808,7 +808,7 @@ impl OndinApp {
             let selected = self.session.selection.ids();
             // Every selected layer a user: one that is not would read the card
             // as *Partial* while the door still turned its writes into the
-            // style's (`arch-scribe`'s read of the first cut).
+            // style's.
             if doc.styles().get(s).is_none()
                 || selected.is_empty()
                 || !selected.iter().all(|n| users.contains(n))

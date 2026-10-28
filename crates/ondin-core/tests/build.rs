@@ -147,8 +147,8 @@ fn group_takes_the_z_position_of_its_topmost_member() {
     assert_eq!(f.children_of(f.artboard), vec![back, g]);
 }
 
-/// **`[S3.1-L2-01]`'s loss: the placement rule was the *bottom-most* member's
-/// slot, on all five container verbs.**
+/// **All five container verbs place at the *topmost* member's slot, never the
+/// bottom-most member's.**
 ///
 /// ⚠️ **`group_takes_the_z_position_of_its_topmost_member` above cannot see it,
 /// and neither can `a_frame_takes_the_z_position_of_its_topmost_member`.** The
@@ -971,9 +971,9 @@ fn setting_a_world_position_lands_exactly_there_under_a_rotated_parent() {
 
 /// Bring-forward on a middle layer trades places with exactly one neighbour.
 ///
-/// 🚨 **The `Backward` half was here and could not fail** (§15 D645,
-/// `[S3.2-L6-06]`). It ran on `a` sitting at index 1, and index 1 is the one
-/// place `Backward`'s loop direction is unobservable: the arm is
+/// 🚨 **The `Backward` half was here and could not fail** (§15 D645). It ran on
+/// `a` sitting at index 1, and index 1 is the one place `Backward`'s loop
+/// direction is unobservable: the arm is
 /// `for i in 1..out.len() { if sel.contains(out[i]) && !sel.contains(out[i-1])
 /// { swap } }`, and reversing it to `.rev()` makes a swapped member match again
 /// on the next iteration and walk all the way to 0 — *Send backward* becomes
@@ -1019,7 +1019,7 @@ fn z_order_one_step_swaps_with_the_nearest_unselected_neighbour() {
 }
 
 /// **A non-contiguous multi-selection moves as two runs, not as one block**, and
-/// nothing reached this arm of `restacked` before (§15 D645, `[S3.2-L6-06]`).
+/// nothing else reaches this arm of `restacked` (§15 D645).
 ///
 /// `z_order_preserves_relative_order_within_the_selection` covers an *adjacent*
 /// pair, where the whole selection is one run and the question does not arise.
@@ -1034,20 +1034,18 @@ fn z_order_one_step_swaps_with_the_nearest_unselected_neighbour() {
 /// with, or whether a run of adjacent members moves as a unit. The comment in
 /// `restacked` was the only record, and it was checked on one of two arms.
 ///
-/// 🚨 **Two flips, and neither bites here — which is the finding.** The
-/// `Forward` arm's `.rev()` dropped, and the `!sel.contains(&out[i + 1])` clause
-/// dropped: both leave this test **green**, and the prediction written before
-/// running them said the first would fail with `[b, d, a, c]`. It does not.
-/// With `{a, c}` in `[a, b, c, d]` neither selected member is ever adjacent to
+/// 🚨 **Two flips, and neither bites here.** The `Forward` arm's `.rev()`
+/// dropped, and the `!sel.contains(&out[i + 1])` clause dropped: both leave this
+/// test **green** — the first does not fail with `[b, d, a, c]`, as it would seem
+/// to. With `{a, c}` in `[a, b, c, d]` neither selected member is ever adjacent to
 /// the other in the direction of travel, so the loop order and the neighbour
 /// clause are both unobservable — every spelling gives `[b, a, d, c]`.
 ///
-/// ⚠️ **So this test covers the *shape* the finding named and pins no mutation
-/// of its own**, and saying so is worth more than the assertion. What the
-/// clause-dropping flip did find is
-/// `z_order_at_the_end_of_the_stack_is_not_an_edit`'s new last assertion — a
-/// whole selection already at the top — which was the one case in the workspace
-/// that could tell the two spellings apart, and had no test.
+/// ⚠️ **So this test covers the split-selection *shape* and pins no mutation of
+/// its own.** The clause-dropping flip is caught by
+/// `z_order_at_the_end_of_the_stack_is_not_an_edit`'s last assertion — a whole
+/// selection already at the top — the one case in the workspace that tells the
+/// two spellings apart.
 #[test]
 fn z_order_moves_each_run_of_a_split_selection_on_its_own() {
     let mut f = Fixture::new();
@@ -1085,7 +1083,7 @@ fn z_order_at_the_end_of_the_stack_is_not_an_edit() {
             .is_empty()
     );
     // 🚨 **The whole selection already at the top, which is what the
-    // `!sel.contains(&out[i + 1])` clause is for** (§15 D645, `[S3.2-L6-06]`).
+    // `!sel.contains(&out[i + 1])` clause is for** (§15 D645).
     // Every other case in this file leaves that clause **redundant**: the loop
     // runs `.rev()`, so by the time index `i` is reached a selected `i + 1` has
     // already moved up and the neighbour under test is unselected either way.
@@ -1170,9 +1168,9 @@ fn z_order_ignores_members_inside_other_members() {
 /// translated artboard those differ, which is the whole point of routing
 /// through `local_for_world`.
 ///
-/// **All six `(axis, edge)` cells, not one** (`[S3.2-L6-02]`, §15 D499). This
-/// test asserted `(X, Min)` alone, and a census of every test and production
-/// caller of an arrangement builder in the workspace found **every one of them
+/// **All six `(axis, edge)` cells, not one** (§15 D499). This test asserted
+/// `(X, Min)` alone, and a census of every test and production caller of an
+/// arrangement builder in the workspace found **every one of them
 /// `Axis::X`, and every `align` call `Edge::Min`** — so five of the six arms of
 /// `align`'s coordinate table were executed by nothing, while `input.rs` binds
 /// `(Y, Max)` to a key and the inspector's align grid paints all four Y cells.
@@ -1280,8 +1278,8 @@ fn align_that_changes_nothing_is_an_empty_transaction() {
 /// Equal gaps, not equal centres: the outer two stay put and differently-sized
 /// layers still end up with identical space between them.
 ///
-/// **Both axes** (`[S3.2-L6-02]`, §15 D499). Every arrangement call in the whole
-/// workspace — production and test — passed `Axis::X`, so `lead(_, Axis::Y)`,
+/// **Both axes** (§15 D499). Every arrangement call in the whole workspace —
+/// production and test — passed `Axis::X`, so `lead(_, Axis::Y)`,
 /// `extent(_, Axis::Y)` and `along(Axis::Y, _)` were executed by nothing, while
 /// `input.rs` binds vertical distribute to a key. Rewriting `along`'s
 /// `Axis::Y => Vec2::new(0.0, d)` as `Vec2::new(d, 0.0)` — *Distribute vertical*
@@ -1360,8 +1358,7 @@ fn distribute_equalises_the_gaps_and_leaves_the_ends_alone() {
     }
 }
 
-/// **Distributing overlapping layers does not reorder them** (§15 D487,
-/// `[S3.2-L1-01]`).
+/// **Distributing overlapping layers does not reorder them** (§15 D487).
 ///
 /// A background rect 800 wide at x=0 with two 40-wide icons at 10 and 100 — the
 /// most ordinary overlapping selection there is. Equal gaps put the gap at
@@ -1384,15 +1381,14 @@ fn distribute_equalises_the_gaps_and_leaves_the_ends_alone() {
 /// back under each other evenly" read as true. It is true for equal extents and
 /// for nothing else.
 ///
-/// ⚠️ **Three flips, and the first two did not bite** — which is the finding this
-/// test is worth more than its fix. Restoring the old `span` alone leaves it
-/// green; restoring the gap-only loop alone leaves it green; **only both together
-/// reproduce the defect**, at `[50, 60, 150]` → `[50, 480, 150]`, the middle layer
-/// landing past the one that had been in front of it.
+/// ⚠️ **Three flips, and the first two did not bite.** Restoring the old `span`
+/// alone leaves it green; restoring the gap-only loop alone leaves it green;
+/// **only both together reproduce the defect**, at `[50, 60, 150]` →
+/// `[50, 480, 150]`, the middle layer landing past the one that had been in front
+/// of it.
 ///
 /// So the two halves are not one fix and a refinement — **either one alone closes
-/// this fixture**, and the review's write-up, which proposed them as alternatives,
-/// was right to. They are kept together for different reasons: the span is a plain
+/// this fixture**. They are kept together for different reasons: the span is a plain
 /// arithmetic error (the trailing edge of the box with the greatest *lead* is not
 /// the greatest trailing edge), and the fallback is what makes the promise hold
 /// for a set the corrected span still cannot fit.
@@ -1823,14 +1819,14 @@ fn a_basis_splits_into_a_storable_orientation_and_a_scale() {
 /// green, both were about `Basis::of`, and between them they left the caller with
 /// no way to tell which of the two regimes it was in.
 ///
-/// 🚨 **That is the whole defect `[S13.1-L1-07]` names, and it is not an
-/// arithmetic bug.** `Orientation::to_affine` is `R · skewX · mirror`, whose
-/// determinant is always ±1, so `orientation · diag(sx, sy)` can only ever
-/// produce a second column of **zero** when `sy` is zero. A rank-1 basis has a
-/// second column that is emphatically *not* zero — `[1, 2, 2, 4]`'s is `(2, 4)` —
-/// so no return value of `Basis::of` could have been exact. The function had no
-/// way to say *"I cannot represent this"*, so it returned something plausible and
-/// the caller acted on it.
+/// 🚨 **That is the whole defect, and it is not an arithmetic bug.**
+/// `Orientation::to_affine` is `R · skewX · mirror`, whose determinant is always
+/// ±1, so `orientation · diag(sx, sy)` can only ever produce a second column of
+/// **zero** when `sy` is zero. A rank-1 basis has a second column that is
+/// emphatically *not* zero — `[1, 2, 2, 4]`'s is `(2, 4)` — so no return value of
+/// `Basis::of` could have been exact. The function had no way to say *"I cannot
+/// represent this"*, so it returned something plausible and the caller acted on
+/// it.
 ///
 /// **The threshold is not re-derived here.** `exact` reads the very numbers
 /// `of`'s two degenerate arms tested — `scale.x` and `scale.y` against
@@ -2420,7 +2416,7 @@ fn flattening_a_selection_is_the_union_of_its_outlines() {
 }
 
 /// **An abandoned boolean and an empty one are two different refusals, and the
-/// message the user gets has to say which** (§15 D736, `[S10.1-L2-06]`).
+/// message the user gets has to say which** (§15 D736).
 ///
 /// `boolean::evaluate` answers `None` for both — a correct empty result and a
 /// `catch_unwind` out of flo_curves — so the counter is the only thing that
@@ -2478,8 +2474,7 @@ fn a_flatten_says_the_boolean_was_abandoned_rather_than_that_the_geometry_was_em
     );
 }
 
-/// **The one-boolean door asks the same question of the cache** (§15 D736,
-/// `[S10.1-L2-06]`).
+/// **The one-boolean door asks the same question of the cache** (§15 D736).
 ///
 /// `flatten_boolean` never calls `evaluate` — it reads `Resolved::boolean_path`,
 /// filled on some earlier pass — so this thread's counter has nothing to say about
@@ -2487,8 +2482,8 @@ fn a_flatten_says_the_boolean_was_abandoned_rather_than_that_the_geometry_was_em
 /// instead is §15 D298's own mark: `Resolved` brackets every `evaluate_node` and
 /// records the id in `failed`, so a `Boolean` with no cached outline is an abandoned
 /// one exactly when the layers row is already wearing its warning colour. **The two
-/// doors need different mechanisms for the same distinction**, which is why the
-/// finding's *"just bracket the four sites"* would have been wrong at one of them.
+/// doors need different mechanisms for the same distinction**, which is why
+/// bracketing all four sites alike would be wrong at one of them.
 ///
 /// ⚠️ **`poison_next(1)` before `f.resolved()`, not before `flatten`.** The failure
 /// has to happen while the cache is being built; arming it at the flatten would leave
@@ -4345,7 +4340,7 @@ fn clicking_an_outline_makes_a_railed_node_in_the_shapes_own_slot() {
 }
 
 /// **The way back gives the curve back, unchanged, in the space the text is in**
-/// (`[S3.1-L6-04]`, §15 D498).
+/// (§15 D498).
 ///
 /// ⚠️ **`build::detach_text_path` had no test caller anywhere in the workspace.**
 /// Its outbound twin above has four stated claims and a ⚠️ on the one that fails
@@ -4454,9 +4449,9 @@ fn detaching_a_railed_node_gives_the_curve_back_above_the_text() {
 
 /// **A boolean's operand is not a rail, and is not even offered as one.**
 ///
-/// `[S3.1-L1-02]`. The fixture is the ordinary geometry rather than a contrived
-/// one: two rects overlapping, combined with `Subtract`, so the subtrahend's edge
-/// lies **exactly on the result's silhouette** — which is what a boolean *is*.
+/// The fixture is the ordinary geometry rather than a contrived one: two rects
+/// overlapping, combined with `Subtract`, so the subtrahend's edge lies **exactly
+/// on the result's silhouette** — which is what a boolean *is*.
 /// A Text-tool click on that edge used to pick the operand, and
 /// `text_on_new_path` consumes what it is handed.
 ///
@@ -4550,11 +4545,9 @@ fn a_boolean_operand_is_neither_offered_as_a_rail_nor_accepted_as_one() {
 
 /// **A frame is not a rail either, and the ancestry guard does not reach it.**
 ///
-/// `[S3.1-L2-03]`, the other half of §15 D453 — filed as closed by the same
-/// builder refusal and **not**: `arch-scribe` found it reading D453's brief
-/// against the code. The guard that shipped tests the *parent's* kind, and a
-/// frame's parent is never a boolean (§15 D876), so a frame walks straight
-/// through it.
+/// The other half of §15 D453, which the same builder refusal does **not**
+/// close: the ancestry guard tests the *parent's* kind, and a frame's parent is
+/// never a boolean (§15 D876), so a frame walks straight through it.
 ///
 /// ⚠️ **The damage is a file that never opens again, and that is what this
 /// asserts first.** `geometry::local_path` answers `Some` for an `Artboard`
@@ -4624,7 +4617,7 @@ fn a_frame_is_not_a_rail_and_taking_one_would_strand_its_guides() {
 }
 
 /// **`can_frame` agrees with `frame`, which is the whole reason it exists** —
-/// §15 D661, `[S3.1-L6-05]`.
+/// §15 D661.
 ///
 /// 🚨 **`can_frame` had zero test callers workspace-wide.** Its doc states its
 /// contract in one sentence — *"the builder's own question, so a row cannot offer
@@ -4635,8 +4628,6 @@ fn a_frame_is_not_a_rail_and_taking_one_would_strand_its_guides() {
 /// way the flag's *provenance* is never exercised — what those tests prove is
 /// that the row reacts to the boolean, not that the boolean is right — and the
 /// path from a real document to a dimmed *Frame selection* row did not exist.
-/// (⚠️ This said *"`menu.rs`'s two tests"* until `arch-scribe` looked; the
-/// conclusion survives and the argument was one test wide, not two.)
 ///
 /// **Asserted as the contract rather than as plain equality**, because the two
 /// deliberately disagree in one place and a test that demanded equality would
@@ -4646,13 +4637,13 @@ fn a_frame_is_not_a_rail_and_taking_one_would_strand_its_guides() {
 ///
 /// 🚨 **Flip run, and the first one does not bite — which is a finding about the
 /// code rather than a failed experiment.** Deleting `can_frame`'s
-/// `matches!(node.kind(), NodeKind::Root)` arm, which is the mutation the review
-/// proposed, leaves every row here green. The reason is the guard two lines below
-/// it: **`Root` is the only node in a `Document` that has no parent** —
-/// `Document::new` is the one place a `Node` is built with `parent: None` — so
+/// `matches!(node.kind(), NodeKind::Root)` arm, the plausible mutation, leaves
+/// every row here green. The reason is the guard two lines below it: **`Root` is
+/// the only node in a `Document` that has no parent** — `Document::new` is the
+/// one place a `Node` is built with `parent: None` — so
 /// `let Some(p) = node.parent() else { return false }` already refuses it, and the
-/// kind test is expressive rather than load-bearing. It is worth keeping for
-/// exactly that reason, and worth knowing that nothing would notice if it went.
+/// kind test is expressive rather than load-bearing. It is worth keeping for exactly that
+/// reason, and worth knowing that nothing would notice if it went.
 ///
 /// ⚠️ **A flip that does bite**, for the row that has no other guard behind it:
 /// neutering the shared-parent comparison (`let _ = *parent.get_or_insert(p) != p;`)

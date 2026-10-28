@@ -780,7 +780,7 @@ pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transact
     // the whole layer (§15 D164) — right for a plain layer, wrong here: the style's
     // other users keep their spans when it changes, so the edited one must too,
     // or *Body*'s size edit flattens a 30px word on the layer it was typed on and
-    // nowhere else (`arch-scribe`'s read of D1068's first cut).
+    // nowhere else.
     let restyled: FxHashSet<NodeId> = if slot == StyleSlot::Text {
         tx.0.iter()
             .filter_map(|op| match op {

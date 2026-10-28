@@ -1219,9 +1219,9 @@ fn boolean_fixture(op: ondin_core::BoolOp) -> (Document, NodeId, NodeId, NodeId)
 /// two overlapping squares, the base moved on top, so the result is the *other*
 /// square's leftover.
 ///
-/// The third reader of the preview's child order, which `arch-scribe` found
-/// missing from the first cut: the walk and the layout view read the new order
-/// and the operands did not, so the preview would have drawn the old cut.
+/// The third reader of the preview's child order: with only the walk and the
+/// layout view reading the new order and the operands not, the preview would draw
+/// the old cut.
 ///
 /// **Flip run**, `operand_children` answering the committed order: fails on the
 /// differential, the predicted site. With the reordered parent dropped from
@@ -1470,7 +1470,7 @@ fn a_ghost_evaluates_a_boolean_inside_a_boolean() {
 /// **Dragging an operand of the *inner* boolean re-evaluates the outer one too,
 /// and in the right order.**
 ///
-/// `[S11.2-L1-02]`, §15 D461. `renderer::reevaluate_booleans` counted its sort
+/// §15 D461. `renderer::reevaluate_booleans` counted its sort
 /// key **upward from the seed**, so a boolean nearer the root carried the larger
 /// number and `Reverse` evaluated the **outermost** first — the opposite of the
 /// rule its own comment states. Measured in release on `Subtract(Union(r1, r2),

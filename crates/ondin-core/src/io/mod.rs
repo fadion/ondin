@@ -42,11 +42,10 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 /// that module's own words *"as untrusted as input gets"*.
 ///
 /// ⚠️ **The operation layer does not enforce it**, so a document built by
-/// repeated `CreateNode` can still exceed what the loader will read back. That
-/// is the review's G1 class — a value the op layer accepts and the loader
-/// rejects — and it is recorded rather than closed here: unlike the two doors
-/// above, no measured route reaches it (nothing in the app nests without a user
-/// click per level).
+/// repeated `CreateNode` can still exceed what the loader will read back — a
+/// value the op layer accepts and the loader rejects — and that gap is left
+/// open here: unlike the two doors above, no measured route reaches it (nothing
+/// in the app nests without a user click per level).
 pub const MAX_TREE_DEPTH: usize = 256;
 
 #[derive(thiserror::Error, Debug)]

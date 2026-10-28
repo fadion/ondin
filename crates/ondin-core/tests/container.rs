@@ -291,7 +291,7 @@ fn resizing_a_stretched_child_moves_its_far_inset() {
 /// Rounding a stretched rect's corners leaves it stretched. A corner radius is
 /// applied to a kind still at its *stored* size, so treating it as a resize — as
 /// `keep_insets` did until `GeometryPatch::resizes` — re-pinned the far edge at
-/// that size and drew the rect 100 wide (`arch-scribe`'s finding).
+/// that size and drew the rect 100 wide.
 ///
 /// **Flip:** `resizes` answering `true` for `CornerRadius` fails the insets
 /// assertion, `right` rewritten to 190.

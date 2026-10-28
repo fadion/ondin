@@ -231,7 +231,7 @@ fn migration_chain_upgrades_v0_to_current() {
 }
 
 /// **The chain composes: one genuinely old file through all four steps**
-/// (`[S1.1-L6-02]`, §15 D501).
+/// (§15 D501).
 ///
 /// ⚠️ **Nothing anywhere fed a migration step the output of the step before it.**
 /// `migration_chain_upgrades_v0_to_current` above says so in its own comment —
@@ -250,9 +250,8 @@ fn migration_chain_upgrades_v0_to_current() {
 /// number.
 ///
 /// **This is coverage, not a bug**: the composition works today. What it costs
-/// when it stops is the failure mode the review named — *"this old file will not
-/// open"*, which is data loss by a different road, landing on exactly the files
-/// that have been around longest.
+/// when it stops is *"this old file will not open"*, which is data loss by a
+/// different road, landing on exactly the files that have been around longest.
 ///
 /// ⚠️ **The rewinds are the exact inverses of the migrations**, taken from the
 /// three single-step tests below rather than written afresh, so this is a round
@@ -515,7 +514,7 @@ fn load_rejects_future_version() {
 /// actually claims, rather than truncated into a version the chain will migrate
 /// (§15 D638).
 ///
-/// Three headers, one per measured row of the finding. `8589934592` is 2³³,
+/// Three headers, one per way the cast goes wrong. `8589934592` is 2³³,
 /// whose low 32 bits are **zero**: cast first, it read as v0 and ran the whole
 /// v0→v4 chain, so the file opened. `4294967300` is 2³²+4, which truncated to
 /// `CURRENT_SCHEMA_VERSION` and returned early, and the failure then arrived
@@ -1379,19 +1378,17 @@ fn the_text_attributes_round_trip_defaults_spans_and_all_three_scopes() {
     assert_eq!(io::save(&loaded).unwrap(), bytes, "byte-stable re-save");
 }
 
-/// **A unit chosen at amount zero survives the file**, which is the test
-/// `[S6.2-L1-03]` asks for and which nothing had (§15 D603).
+/// **A unit chosen at amount zero survives the file** (§15 D603).
 ///
 /// A designer who works in percent sets the unit before the number, so one click
-/// on the `%` chip at the stock `Px(0.0)` is an ordinary first move. The finding
-/// measured that click costing an undo step and then being *silently reverted by
-/// the next save*: reopen the file and the chip reads `px` again.
+/// on the `%` chip at the stock `Px(0.0)` is an ordinary first move. Elided at
+/// zero, that click would cost an undo step and then be *silently reverted by the
+/// next save*: reopen the file and the chip reads `px` again.
 ///
-/// ⚠️ **That half no longer reproduces, and this test is the proof rather than a
-/// new fix.** `[S6.1-L1-03]`'s core repair moved all seven of these fields from
-/// `skip_serializing_if = "Length::is_zero"` — which elides `Em(0.0)` and
-/// `Px(0.0)` alike — to `Length::is_default_zero`, which elides only the `Px(0.0)`
-/// an absent key reads back as. The unit is a value now, at zero as at any other
+/// ⚠️ **This test is a guard, not a new fix.** All seven of these fields use
+/// `skip_serializing_if = "Length::is_default_zero"`, which elides only the
+/// `Px(0.0)` an absent key reads back as — not `Length::is_zero`, which elides
+/// `Em(0.0)` and `Px(0.0)` alike. The unit is a value now, at zero as at any other
 /// amount, and this is the guard that says so.
 ///
 /// **All seven fields, because they were changed together and would regress
@@ -2173,7 +2170,7 @@ fn a_mask_on_a_frame_does_not_survive_being_loaded() {
 }
 
 /// **An inert `clip` never reaches the file, so a document does not change on
-/// disk the first time it is opened and saved** — §15 D663, `[S1.1-L1-06]`.
+/// disk the first time it is opened and saved** — §15 D663.
 ///
 /// 🚨 **Two halves that are each right and were wrong together.** `op_set_clip`
 /// deliberately accepts `clip: true` on a `Group` — §15 D282: *"an inert `clip`
@@ -2183,11 +2180,9 @@ fn a_mask_on_a_frame_does_not_survive_being_loaded() {
 /// away: `load(save(d)) != d`, and `save(load(save(d))) != save(d)`, one byte
 /// **longer** — `clip` carries a named serde default and no
 /// `skip_serializing_if`, so the key is always written and `"clip":true` becomes
-/// `"clip":false` — on **every** group carrying it, with no edit made. (⚠️ This
-/// said *shorter* until `arch-scribe` read the DTO; the direction is not what
-/// makes it a defect, which is why it went unchecked.) Neither §5.11 nor
-/// D282 says the model therefore holds a state the format discards; each
-/// documents its own end.
+/// `"clip":false` — on **every** group carrying it, with no edit made. Neither
+/// §5.11 nor D282 says the model therefore holds a state the format discards;
+/// each documents its own end.
 ///
 /// **Fixed at the writer, and the loader's normalization stays.** That one is the
 /// guard against a hand-edited or foreign file and is what
@@ -2196,14 +2191,13 @@ fn a_mask_on_a_frame_does_not_survive_being_loaded() {
 /// *"clips its children"*. The model is untouched, so D282's property is
 /// untouched — which is the first assertion below.
 ///
-/// 🚨 **The finding's third fix option would have been a live bug and the entry
-/// records it**: *"the loader stops normalizing and the readers keep asking the
-/// kind — which they already do"*. They do not. `scene.rs`'s and `canvas.rs`'s
-/// `bounds_cover_subtree` are `node.children().is_empty() || node.clip() ||
-/// matches!(kind, Group | Root | Boolean)` — **not** kind-gated on the `clip`
-/// term — so a group arriving with the flag live would have had its children
-/// culled against its own bounds. `menu.rs`'s `clips:` row is the same shape.
-/// Two of the three options were safe and the one that reads as cheapest was not.
+/// 🚨 **Dropping the loader's normalization would be a live bug**, on the premise
+/// that *"the readers keep asking the kind"*. They do not. `scene.rs`'s and
+/// `canvas.rs`'s `bounds_cover_subtree` are `node.children().is_empty() ||
+/// node.clip() || matches!(kind, Group | Root | Boolean)` — **not** kind-gated on
+/// the `clip` term — so a group arriving with the flag live would have its
+/// children culled against its own bounds. `menu.rs`'s `clips:` row is the same
+/// shape.
 ///
 /// ⚠️ **Flip run**, the writer's `&& n.kind().clips_children()` removed.
 /// Predicted failing assertion: the byte-stability one. It fails one earlier, on
@@ -2712,8 +2706,8 @@ fn an_svg_with_an_infinite_coordinate_still_saves_a_document_that_opens() {
     // first spelling of this test asserted the saved JSON held no `null` at all
     // and failed on `"parent": null`, which is the *root's* parent and entirely
     // correct — so the crude version was wrong in the direction that costs an
-    // afternoon. Re-opening the document is the property the finding is about
-    // and it is exact.
+    // afternoon. Re-opening the document is the property at stake and it is
+    // exact.
     let loaded = io::load(&bytes).unwrap_or_else(|e| {
         panic!(
             "the saved document must open again, got {e}\n{}",
@@ -2737,13 +2731,11 @@ fn an_svg_with_an_infinite_coordinate_still_saves_a_document_that_opens() {
 /// can be rejected while the user still has their work. A loader check alone
 /// means the document is already on disk and already unopenable.
 ///
-/// **Every arm is a door somebody found, not a sweep for symmetry**:
-/// `SetTransform` (`[A1-L2-01]`, reached from a singular SVG matrix),
-/// `SetGeometry` and `CreateNode` (`[S2.1-L2-01]`, reached from an SVG path),
-/// and the three guide writers (`[A1-L2-06]`, where the loader had refused the
-/// value since it was written and the operation never had), `SetPivot`
-/// (`[S2.2-L1-06]`, §15 D639) and `SetEffects` (`[S10.1-L1-05]`, §15 D641 —
-/// the one value on this list that does damage before the file is written).
+/// **Every arm is a real door, not a sweep for symmetry**: `SetTransform`
+/// (reached from a singular SVG matrix), `SetGeometry` and `CreateNode` (reached
+/// from an SVG path), the three guide writers (a value the loader refuses), and
+/// `SetPivot` (§15 D639) and `SetEffects` (§15 D641 — the one value on this list
+/// that does damage before the file is written).
 ///
 /// ⚠️ **"At every door" is a claim about the code and it has been false twice.**
 /// D451 found paint outside it; D639 found the pivot, which is a *coordinate* —
@@ -2754,8 +2746,7 @@ fn an_svg_with_an_infinite_coordinate_still_saves_a_document_that_opens() {
 /// Flip-check, run: removing the guard from `apply_geometry_patch` fails on the
 /// `SetGeometry` assertion; removing it from `op_create` fails on the
 /// `CreateNode` one. **They do not cover each other** — which is the whole
-/// reason both are here, since `[A1-L2-01]`'s fix as originally sketched was
-/// scoped to `op_set_transform` and would have closed neither.
+/// reason both are here: a guard in `op_set_transform` alone closes neither.
 ///
 /// ⚠️ **Renamed from `…_a_coordinate_…` on 2026-09-07, because the rule was
 /// wider than the name and the code was narrower than the rule** (§15 D451).
@@ -3050,9 +3041,8 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             },
         ),
         (
-            // `stroke-dasharray="1e999 5"` was one of `[S7.2-L5-01]`'s five sinks
-            // and is closed at the importer; this is the same value arriving by
-            // the door the importer is not.
+            // `stroke-dasharray="1e999 5"` is closed at the importer; this is the
+            // same value arriving by the door the importer is not.
             "SetStrokes (dashes)",
             Operation::SetStrokes {
                 id: rect,
@@ -3067,7 +3057,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
         // ⚠️ **The pivot half, added 2026-09-09 (§15 D639), and it is a
         // *coordinate*** — so it was inside the rule this test's name states
         // from the day the rule was written, and outside the code the whole
-        // time. `[S2.2-L1-06]`. Both variants are here because the check has to
+        // time. Both variants are here because the check has to
         // read through the enum: a `Normalized` fraction and a `Local` point are
         // different types (`Vec2` and `Point`) and a guard written against one
         // does not see the other.
@@ -3090,8 +3080,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
         // saved: an infinite blur radius reaches `effect::escaped` through
         // `stack_escape`, and `f64::min` swallows it there, so the layer reports
         // an ink box identical to its geometry and the cull, the export plan and
-        // both buffer boxes believe an unbounded blur reaches nowhere
-        // (`[S10.1-L1-05]`).
+        // both buffer boxes believe an unbounded blur reaches nowhere.
         (
             "SetEffects (blur radius)",
             Operation::SetEffects {
@@ -3313,8 +3302,7 @@ fn a_file_already_holding_a_non_finite_number_is_reported_by_name() {
 /// changes the value the test would read.
 ///
 /// ⚠️ **The op door is driven as well as the loader**, because they are the same
-/// function and only one of them was in the finding's first fix sketch:
-/// `op_set_text` calls `Spans::clamped` too, so a repair placed at
+/// function: `op_set_text` calls `Spans::clamped` too, so a repair placed at
 /// `io::schema` alone would have left live editing open — retype the content
 /// under an existing span and the same panic comes back with no file involved.
 ///

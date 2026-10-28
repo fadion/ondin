@@ -12,8 +12,7 @@ repository.workspace = true
 # §3's "`ondin-mcp` contains no rendering or UI dependency" was false: the edge
 # `ondin-mcp → ondin-export → ondin-render` pulls vello, wgpu and naga into the
 # closure, and it was a manifest line with zero call sites. Deleting it makes
-# the documented rule true at no cost, which is the option the review's own fix
-# menu for that finding was missing.
+# the documented rule true at no cost.
 #
 # ⚠️ **No gate in this workspace can see an unused dependency.**
 # `unused_crate_dependencies` is a rustc lint, allow-by-default, and none of the

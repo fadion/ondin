@@ -10,7 +10,7 @@
 //! M0 scaffold: op-queue message types and the tool list are sketched; the
 //! socket listener and stdio proxy land at M6.
 
-// ⚠️ **`#![allow(dead_code)]` was here and is gone** (§15 D732, `[A8-L3-06]`) —
+// ⚠️ **`#![allow(dead_code)]` was here and is gone** (§15 D732) —
 // see `ondin_export`'s crate root, which carries the argument. It was hiding
 // nothing, and it mattered more here than there: this crate is *"an M0 scaffold"*
 // whose whole content is message types and a tool list waiting for M6, so it is

@@ -1448,8 +1448,8 @@ mod tests {
         assert_eq!(
             alpha_of(&brush),
             1.0,
-            "the ramp's multiplier is untouched by what its stops say; the \
-             finding's -1.0 was never reachable and now neither is 0.0"
+            "the ramp's multiplier is untouched by what its stops say: neither \
+             -1.0 nor 0.0 is reachable"
         );
     }
 

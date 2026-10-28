@@ -1009,8 +1009,8 @@ fn a_carried_main_left_out_detaches_what_nests_it() {
 /// **A kit never vendors itself.** A kit instance pasted back into the kit, or
 /// one of the kit's own mains inserted from its own published state, links to
 /// the live main — not to a frozen copy in a vault, which would stop following
-/// the main it was made from (`arch-scribe`'s reading of the first build). An
-/// origin's node is the kit's own id, so in the kit it names the main itself.
+/// the main it was made from. An origin's node is the kit's own id, so in the kit
+/// it names the main itself.
 ///
 /// Flip, run: `kit::find`'s own-kit arm removed fails *"links to the live main"*,
 /// the paste linked into a new vault.
@@ -1849,11 +1849,11 @@ fn a_swap_to_an_unused_kit_main_vendors_it_at_the_swap() {
     assert_eq!(ondin_core::component::main_of(&d, nested), Some(glyph));
 }
 
-/// **An update does not depend on the vault's order** (§15 D1022, the kits QA
-/// review's finding). A picker insert vendors dependencies first — *Icon*, then
-/// *Card* — but a paste lands them the other way round, and so does an update
-/// that newly reaches a main. The kit then gives *Icon* a ring, which reaches
-/// *Card*'s nested *Icon* too. **Two defects, one per order**:
+/// **An update does not depend on the vault's order** (§15 D1022). A picker
+/// insert vendors dependencies first — *Icon*, then *Card* — but a paste lands
+/// them the other way round, and so does an update that newly reaches a main.
+/// The kit then gives *Icon* a ring, which reaches *Card*'s nested *Icon* too.
+/// **Two defects, one per order**:
 ///
 /// - Out of order, syncing *Card* first met a new layer linked to a ring the
 ///   scratch did not hold yet, and the update failed to build, `Incomplete`, on
@@ -1947,10 +1947,10 @@ fn edit_and_publish(k: &mut Kit, ops: Vec<Operation>) {
 }
 
 /// **A variant the kit takes out of its set stays the main its instances
-/// follow** (§15 D1022, the kits QA review's finding). D placed *Small*; the kit
-/// drags *Small* out of *Button* to the top level and publishes. The update
-/// lifts D's copy out of its set copy to the vault's top level — the same node,
-/// so the instance is still its instance — and nothing is made local.
+/// follow** (§15 D1022). D placed *Small*; the kit drags *Small* out of *Button*
+/// to the top level and publishes. The update lifts D's copy out of its set copy
+/// to the vault's top level — the same node, so the instance is still its
+/// instance — and nothing is made local.
 ///
 /// Flip, run: without the lift, the set's sync drops *Small* and nothing moves
 /// it, so it is deleted — fails *"the same main, still followed"*, the instance
@@ -2044,10 +2044,10 @@ fn a_mains_instances_leave_out_the_vault() {
     );
 }
 
-/// **A kit never vendors its own main by paste** (§15 D1023, the kits QA
-/// review's finding): the kit deletes *Icon*, then an *Icon* instance copied from
-/// a consumer is pasted back in. No vault opens in the kit; the paste lands
-/// detached, as any copy of a main that is gone does.
+/// **A kit never vendors its own main by paste** (§15 D1023): the kit deletes
+/// *Icon*, then an *Icon* instance copied from a consumer is pasted back in. No
+/// vault opens in the kit; the paste lands detached, as any copy of a main that
+/// is gone does.
 ///
 /// Flip, run: `adopt` without its own-kit skip fails *"no vault in the kit"*.
 #[test]
@@ -2160,12 +2160,11 @@ fn shape(d: &Document, id: NodeId) -> Vec<(String, f32)> {
         .collect()
 }
 
-/// **An ungroup in the kit keeps the layers it lifts out** (§15 D1024, the kits
-/// QA review's second pass, reproduced by its probe): *Card* > *G* > *A*, the
-/// instance's *A* overridden; the kit ungroups *G*. The vault's *A* is the same
-/// node after, and the instance holds the one *A*, its override kept. Deleting
-/// *G* at once took *A* with it, and the instance kept the old *A* detached in
-/// the old *G* beside a fresh one.
+/// **An ungroup in the kit keeps the layers it lifts out** (§15 D1024): *Card* >
+/// *G* > *A*, the instance's *A* overridden; the kit ungroups *G*. The vault's
+/// *A* is the same node after, and the instance holds the one *A*, its override
+/// kept. Deleting *G* at once would take *A* with it, and the instance keep the
+/// old *A* detached in the old *G* beside a fresh one.
 ///
 /// Flip, run: a dropped child deleted at once, as it was, fails *"A kept its
 /// identity"*.
@@ -2268,13 +2267,12 @@ fn a_group_in_the_kit_keeps_the_layer_and_its_override() {
     );
 }
 
-/// **An accept leaves a pinned layer where the kit draws it** (§15 D1024, the
-/// kits QA review's second pass, reproduced): *Badge* pinned `right: 10` in a
-/// *Card* widened since its transform was stored, so drawn at x 170 from a
-/// stored 70. The kit changes *Badge*'s height and publishes; the commit door's
-/// `keep_insets`, with no resolved place for a vault node, read the stored
-/// transform as where it is drawn and re-pinned it `right: 110`, and the
-/// instance's badge jumped to x 70.
+/// **An accept leaves a pinned layer where the kit draws it** (§15 D1024):
+/// *Badge* pinned `right: 10` in a *Card* widened since its transform was
+/// stored, so drawn at x 170 from a stored 70. The kit changes *Badge*'s height
+/// and publishes; the commit door's `keep_insets`, with no resolved place for a
+/// vault node, read the stored transform as where it is drawn and re-pinned it
+/// `right: 110`, and the instance's badge jumped to x 70.
 ///
 /// Flip, run: `keep_insets` without its vault skip fails *"the kit's inset
 /// arrived unchanged"*.

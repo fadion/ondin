@@ -516,10 +516,10 @@ type Shelved = (
 /// — the document's own and its vault's — and each shelved kit's that the
 /// document does not hold yet (`kit::swap_offers`), sorted by name.
 ///
-/// **One heading per kit, whatever its rows** (`arch-scribe`'s reading of the
-/// first cut): `kit_heading` reads a vault copy's own version and an unused main
-/// would read the library's, so while an update waited a group shared by both
-/// read one or the other by which name sorted first. A kit the document holds
+/// **One heading per kit, whatever its rows**: `kit_heading` reads a vault copy's
+/// own version and an unused main would read the library's, so while an update
+/// waits a group shared by both would read one or the other by which name sorted
+/// first. A kit the document holds
 /// anything of reads the **oldest version held** — the version the update pill
 /// counts from (`Waiting::held`) — on every row; one it holds nothing of reads
 /// the library's, the version a pick would vendor.
@@ -603,8 +603,7 @@ fn swap_list(
 /// property's *Preferred* mains lead them all, under their own heading.
 ///
 /// **Grouped by the kit's id, not its heading's name**: two kits may share a
-/// name, and two the library has lost may both read *Kit* (`arch-scribe`'s
-/// reading of the first cut, which keyed on the name).
+/// name, and two the library has lost may both read *Kit*.
 fn swap_groups(found: Vec<SwapOption>) -> Vec<(Option<KitHeading>, Vec<SwapOption>)> {
     let mut preferred: Option<(KitHeading, Vec<SwapOption>)> = None;
     let mut own = Vec::new();
@@ -2141,11 +2140,11 @@ impl OndinApp {
     /// of *Boolean*, *Text*, an *Instance swap* for each nested instance no swap
     /// property drives, and on a lone main *Variant*, which wraps it in a set.
     pub(super) fn inspector_properties(&mut self, ui: &mut egui::Ui) {
-        // **Asked before the card decides whether to draw** (§15 D1005's
-        // 2026-10-08 amendment, `arch-scribe`'s find): a property is bound from a
-        // layer inside the main, a selection this card skips, and an edge that
-        // only moved when the card drew would read the main as the subject it
-        // already was — so the card stayed shut over the property just made.
+        // **Asked before the card decides whether to draw** (§15 D1005): a
+        // property is bound from a layer inside the main, a selection this card
+        // skips, and an edge that only moved when the card drew would read the
+        // main as the subject it already was — so the card would stay shut over
+        // the property just made.
         let fresh = self.subject_changed("Properties");
         let Some(id) = self.session.selection.single() else {
             return;
@@ -3074,7 +3073,7 @@ mod tests {
             })
         };
         // Two kits the library lost, both falling back to *Kit*: two groups,
-        // not one — the grouping is by id (`arch-scribe`'s reading).
+        // not one — the grouping is by id.
         let here = SwapTarget::Here;
         let found = vec![
             (here(a), "Icon / Arrow".to_string(), kit("k1", "Atlas")),

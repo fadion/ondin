@@ -2075,7 +2075,7 @@ fn a_picking_allowance_widens_every_kind_by_a_bounded_band() {
         "and asking for no allowance still means the exact interior"
     );
 
-    // **Text spends it too, and did not until §15 D483** (`[S4.2-L2-03]`). D115
+    // **Text spends it too, and did not until §15 D483**. D115
     // rewrote every arm of `contains_local` to add the tolerance and its own
     // enumeration of what it had rewritten — Rect/Artboard, Ellipse,
     // Polygon/Star/Path — never names Text, so the sweep skipped the kind users
@@ -2451,7 +2451,7 @@ fn a_mask_bounds_its_container_and_not_the_layer_it_masks() {
 
 /// **A mask larger than what it passes lends its container nothing.**
 ///
-/// `[S4.1-L2-04]`, §15 D494. `mask_fixture`'s mask is *smaller* than the layer
+/// §15 D494. `mask_fixture`'s mask is *smaller* than the layer
 /// beneath it, so `mask ∪ (layer ∩ mask)` is the mask's own square either way and
 /// `a_mask_bounds_its_container_and_not_the_layer_it_masks` holds whether or not
 /// the mask's rectangle is unioned into its container. **Turn the fixture round**
@@ -2581,15 +2581,15 @@ fn a_mask_larger_than_what_it_passes_lends_its_container_nothing() {
 }
 
 /// **One layer whose extent is not a number no longer poisons the document's**
-/// (`[S4.2-L1-01]`, §15 D495).
+/// (§15 D495).
 ///
 /// ⚠️ **`SetTransform` accepts this transform and is right to.** D421 guards the
 /// operation with `build::affine_is_finite`, and every coefficient of
 /// `scale(1e308)` **is** finite — the overflow happens later, in `transform_rect`'s
 /// corner multiply. So this is not a hole in D421's guard; it is the third shape
 /// of the same class, where a check on the *operands* cannot see what the
-/// *derived* value does. It is what `[S4.2-L1-01]` names and why the guard had to
-/// go at the bounds rather than at the op.
+/// *derived* value does. That is why the guard is at the bounds rather than at
+/// the op.
 ///
 /// The failure it prevents is the whole session's, not one layer's: an infinite
 /// box unions all the way to the root, so `world_bounds(root)` — which
@@ -2629,7 +2629,7 @@ fn a_layer_whose_box_overflows_is_left_out_rather_than_spread_up_the_tree() {
     let overflowing = Affine::new([1e308, 0.0, 0.0, 1e308, 0.0, 0.0]);
     assert!(
         ondin_core::build::affine_is_finite(overflowing),
-        "the fixture's own claim: D421's guard accepts this, which is the finding"
+        "the fixture's own claim: D421's guard accepts this"
     );
     doc.apply(&Transaction(vec![Operation::SetTransform {
         id: big,
@@ -2680,7 +2680,7 @@ fn a_layer_whose_box_overflows_is_left_out_rather_than_spread_up_the_tree() {
 /// **A mask group's box is the box it clips with, and it used to be a tenth of
 /// it.**
 ///
-/// `[S4.1-L2-01]`, §15 D460. `Resolved::mask_path`'s `Group | Root` arm skips a
+/// §15 D460. `Resolved::mask_path`'s `Group | Root` arm skips a
 /// mask *inside* a mask group and unions the rest **un-narrowed** — deliberately,
 /// since the exact answer needs a path intersection and *"a clip that is too
 /// generous"* is the safe direction. The three bounds computations did the
@@ -3455,8 +3455,7 @@ fn outline_at_finds_an_edge_where_hit_test_finds_an_interior() {
     );
 }
 
-/// **A per-segment box reject does not change the answer** (`[S4.1-L4-05]`,
-/// §15 D507).
+/// **A per-segment box reject does not change the answer** (§15 D507).
 ///
 /// `outline_at` solved the exact nearest point on **every** segment of every
 /// candidate, once per frame the Text or Pen tool is in hand — a quintic
@@ -3576,7 +3575,7 @@ fn a_many_segment_outline_answers_the_same_with_the_segment_reject() {
 
 /// **A mask is not a rail, and neither is ink the mask has clipped away.**
 ///
-/// `[S4.1-L1-02]`, §15 D456. `outline_at` asked two of `hit_test`'s three
+/// §15 D456. `outline_at` asked two of `hit_test`'s three
 /// questions and not the third, so the *same two clicks* answered differently
 /// through the two doors — and the Text tool acts on this one. Clicking the
 /// mask's edge lit the rail affordance on a layer that paints nothing;
@@ -3718,7 +3717,7 @@ fn deep_chain(depth: usize, wide: usize) -> (Document, NodeId) {
 }
 
 /// **The incremental `update` is not slower than the full `rebuild` it exists to
-/// avoid** (§15 D594, `[S4.1-L4-03]`).
+/// avoid** (§15 D594).
 ///
 /// `update` sorted its affected set by `depth`, with `sort_by_key` — which the
 /// standard library documents as calling the key function on **every
@@ -3735,16 +3734,15 @@ fn deep_chain(depth: usize, wide: usize) -> (Document, NodeId) {
 /// for a debug build's noise on a sub-millisecond measurement.
 ///
 /// ⚠️ **The fixture is deep and narrow on purpose.** Depth is the quantity that
-/// made this superlinear and `[A4-MAP]`'s cost model has no depth axis — 400
-/// nodes at depth 200 cost more here than 4,000 flat ones, so a wide fixture
-/// measures nothing.
+/// made this superlinear — 400 nodes at depth 200 cost more here than 4,000 flat
+/// ones, so a wide fixture measures nothing.
 ///
 /// **Three versions measured on this fixture in debug, three runs each and
 /// stable to two decimal places** — which is what says where the cost was and
 /// that the cheap-looking fix was not enough:
 ///
 /// ```text
-/// sort_by_key(depth-walk)         42.9x   <- the finding
+/// sort_by_key(depth-walk)         42.9x
 /// sort_by_cached_key(depth-walk)   3.2x   <- one word, and still 3x
 /// depth recorded on the way down   1.2x   <- this
 /// ```
@@ -3839,8 +3837,7 @@ fn group_of_text(n: usize) -> (Document, NodeId, Vec<NodeId>) {
     (doc, group, blocks)
 }
 
-/// **A translate on a group does not re-shape the text inside it** (§15 D590,
-/// `[A4-L4-03]`).
+/// **A translate on a group does not re-shape the text inside it** (§15 D590).
 ///
 /// `Resolved::update` expands the dirty set to whole subtrees — correctly, since
 /// a descendant's *world transform* depends on a dirty ancestor — and then ran
@@ -3861,11 +3858,10 @@ fn group_of_text(n: usize) -> (Document, NodeId, Vec<NodeId>) {
 ///
 /// 🚨 **Two flips, because the fix has two halves and *either one alone does
 /// nothing*.** `op_set_transform` was inserting the whole subtree into the dirty
-/// set itself — the finding's brief said `DirtySet` was minimal and it was not —
-/// so narrowing `update`'s text pass to the dirty ids changed no count at all
-/// until the op stopped doing the expansion `update` already performs. Run
-/// separately, each flip fails on *"a translate re-shaped the text"* at **3
-/// against 0**:
+/// set itself — `DirtySet` was not minimal — so narrowing `update`'s text pass to
+/// the dirty ids changed no count at all until the op stopped doing the expansion
+/// `update` already performs. Run separately, each flip fails on *"a translate
+/// re-shaped the text"* at **3 against 0**:
 ///
 /// - `reshape_text` put back over `affected`;
 /// - `op_set_transform` put back to `for d in self.subtree_ids(id)`.

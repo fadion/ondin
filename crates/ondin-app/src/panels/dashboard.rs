@@ -8661,7 +8661,7 @@ mod tests {
         assert_eq!(
             app.view,
             crate::app::View::Dashboard,
-            "the walk is not blocked — that is the ruling on the finding's half (a)"
+            "a failed save does not block the walk to the dashboard"
         );
         assert!(
             app.session.status().text.contains("Save failed"),

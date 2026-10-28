@@ -294,9 +294,8 @@ struct BreadthEdit {
 /// way from one keyword to another, as it is for the Item card's basis. `fr` is
 /// offered only where it may go — never as a `minmax()` minimum.
 ///
-/// ⚠️ **The first cut drew a clickable `–` under a keyword while this doc cited
-/// D906**, which is the unit that entry's ruling removed; found by `arch-scribe`
-/// reading the two against each other, and dropped (§15 D920's amendment).
+/// ⚠️ **No clickable `–` under a keyword**: a size field showing a keyword in its
+/// digits has no unit (§15 D906, D920).
 fn breadth_field(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -451,7 +450,6 @@ fn refuse(ui: &egui::Ui, key: egui::Id, shown: Option<&str>, why: String) {
 /// reads what it read when the text was refused** — an apply through any other
 /// door (a `+`, a cross, an undo) makes it about a list no longer there — and
 /// never once the field has been engaged again ([`css_field`] drops it).
-/// `arch-scribe` read the first cut's error staying up through all of those.
 fn refusal(ui: &egui::Ui, key: egui::Id, shown: Option<&str>) -> Option<String> {
     let (about, why) = ui
         .ctx()
@@ -779,7 +777,7 @@ impl OndinApp {
             // A drag that ended where no grip saw it — the selection changed under
             // it, or the list turned mixed — is over once no button is held;
             // otherwise its line would follow the pointer the next time this list
-            // was drawn (`arch-scribe`'s reading of the first cut).
+            // was drawn.
             let dragging = dragging.filter(|_| {
                 let held = ui.input(|i| i.pointer.any_down());
                 if !held && !released {
@@ -1167,8 +1165,8 @@ impl OndinApp {
                                 self.session.name_step(label, icon::GRID_FOUR);
                                 self.commit_edit(tx);
                             }
-                            // Said, not dropped — `arch-scribe` read the first cut
-                            // throwing an unreadable line away in silence.
+                            // Said, not dropped: an unreadable line is never thrown
+                            // away in silence.
                             None => refuse(
                                 ui,
                                 key,
@@ -1339,7 +1337,7 @@ mod tests {
         let rep = converted(&fr, Kind::Repeat);
         assert_eq!(converted(&rep, Kind::Fr), fr, "its track back out");
         // A maximum of 3fr, so its coming back out is not the default standing
-        // (`arch-scribe`: a 1fr maximum could not tell the two apart).
+        // (a 1fr maximum could not tell the two apart).
         let mm = Track::Size(TrackSize::MinMax {
             min: TrackBreadth::Px(200.0),
             max: TrackBreadth::Fr(3.0),

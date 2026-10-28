@@ -835,13 +835,13 @@ fn the_color_census_carries_the_layers_as_well_as_the_use_count() {
 /// order that depended on which paint was met first would shuffle as paints were
 /// added.
 ///
-/// 🚨 **The scope half is new and it is the half that was false** (§15 D646,
-/// `[S3.2-L2-05]`). This test passed a **single root** (`&[f.artboard]`), which
-/// is the one case where the claim holds for free: `subtree_nodes` is pre-order
-/// *within* a subtree, and with one subtree that is the whole answer. It paints
-/// out of order and calls that the discriminating half — but paint order was
-/// never what could break it, because the walk visits nodes and asks each one
-/// what it carries, so the paint sequence is not consulted at any point.
+/// 🚨 **The scope half is new and it is the half that was false** (§15 D646).
+/// This test passed a **single root** (`&[f.artboard]`), which is the one case
+/// where the claim holds for free: `subtree_nodes` is pre-order *within* a
+/// subtree, and with one subtree that is the whole answer. It paints out of order
+/// and calls that the discriminating half — but paint order was never what could
+/// break it, because the walk visits nodes and asks each one what it carries, so
+/// the paint sequence is not consulted at any point.
 ///
 /// The shape that was broken is the one the Group Colors panel actually passes:
 /// `group_color_scope` returns `node.children()` only for a *single* container
@@ -895,10 +895,10 @@ fn the_censuss_layers_come_back_in_document_order() {
 /// own row.
 ///
 /// ⚠️ **This test executed zero assertions between §15 D400 and D480, and its own
-/// doc comment is why** (`[S3.2-L6-04]`). It looped the census skipping the child's
-/// colour and asserted on whatever was left, on the stated premise that *"the
-/// fixture's artboard has a background"*. That was true while a frame's ground was
-/// a field on `NodeKind::Artboard`; D400 moved it into the fill list and
+/// doc comment is why**. It looped the census skipping the child's colour and
+/// asserted on whatever was left, on the stated premise that *"the fixture's
+/// artboard has a background"*. That was true while a frame's ground was a field
+/// on `NodeKind::Artboard`; D400 moved it into the fill list and
 /// `op_create` gives every node an **empty** one, so the loop ran on nothing. The
 /// rule the test is named for went unpinned, and the census could have walked a
 /// frame's contents into the frame's own row with this green.

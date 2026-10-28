@@ -552,8 +552,8 @@ pub fn removed_items<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> Vec<Keyed<
 /// It stays because it is right and tested, and is the shape a per-item restore
 /// would want if one is asked for again.
 ///
-/// ⚠️ It called `propagate::anchor` until `arch-scribe` read the fallback: that
-/// one ends at the end of the list, and this doc already said first.
+/// ⚠️ Not `propagate::anchor`: its fallback ends at the end of the list, and this
+/// one puts the item first.
 pub fn reset_item<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>], id: ItemId) -> Vec<Keyed<T>> {
     let Some(at_src) = src.iter().position(|s| s.id == id) else {
         return cur.to_vec();
@@ -848,16 +848,16 @@ fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
 /// into the outer instance keeps its link — `settle_links` claims it for the outer
 /// root, whose source contains its source — so a search under the nested copy
 /// alone found it missing and restored a second node on the same source, under a
-/// different root, where `LinkRule::SharedSource` cannot see it. Found by
-/// `arch-scribe`; `a_member_dragged_out_of_a_nested_copy_is_not_restored_twice`.
+/// different root, where `LinkRule::SharedSource` cannot see it
+/// (`a_member_dragged_out_of_a_nested_copy_is_not_restored_twice`).
 ///
 /// ⚠️ **And it climbs only out of nested copies**, stopping at a root linked
 /// straight to a main — an instance, or a local instance placed inside one. The
 /// first fix climbed through every root, so a local instance's deleted child was
 /// masked by the outer instance's own counterpart of the same source and never
-/// restored (`a_local_instances_removed_child_is_not_masked_by_its_host`, also
-/// `arch-scribe`'s). A member dragged out of a local instance is cut by
-/// `settle_links` anyway, so nothing past that root can hold its links.
+/// restored (`a_local_instances_removed_child_is_not_masked_by_its_host`). A
+/// member dragged out of a local instance is cut by `settle_links` anyway, so
+/// nothing past that root can hold its links.
 ///
 /// ⚠️ **Nor out of a swapped copy.** Its members link into its swap (§15 D983),
 /// which the outer instance's source does not hold, so `settle_links` cuts one
@@ -1068,10 +1068,10 @@ pub enum Kind {
 /// The operations the reset `kind` at each of `scopes` owes.
 ///
 /// **The outermost of the scopes only**: a scope inside another is already
-/// covered by it, and resetting both restored a missing child twice — the second
+/// covered by it, and resetting both restores a missing child twice — the second
 /// copy cut loose by `settle_links` and landing as an unlinked duplicate.
-/// `overlapping_scopes_restore_a_child_once`; found by `arch-scribe`. The four
-/// functions below take their scopes as given and are this one's parts.
+/// `overlapping_scopes_restore_a_child_once` pins it. The four functions below
+/// take their scopes as given and are this one's parts.
 pub fn reset(doc: &Document, kind: Kind, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
     let scopes = &crate::build::outermost(doc, scopes);
     match kind {

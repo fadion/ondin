@@ -379,8 +379,7 @@ fn a_resampled_drop_shadow_matches_the_reference() {
 }
 
 /// **The resample's cost is the buffer's, not the block's** — the one property
-/// §15 D403 was written to obtain, and the one `[S10.2-L4-02]` found the shader
-/// had never had.
+/// §15 D403 was written to obtain.
 ///
 /// `coarsen` is dispatched over the *coarse* grid, one thread per block, which
 /// makes the total work one read per source pixel — while `k ≤ min(w, h)`. Past

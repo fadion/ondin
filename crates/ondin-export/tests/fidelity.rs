@@ -1,14 +1,13 @@
-//! The SVG writer says what it could not say exactly (§15 D780, `[S8.1-L7-05]`).
+//! The SVG writer says what it could not say exactly (§15 D780).
 //!
 //! **Every assertion here checks a claim against the markup**, never against a
 //! second copy of the rule. `svg::report_node` reads the five features off the
 //! node, where the arms that *write* them are scattered through `gradient_def`,
 //! `shadow_graph`, `collect_defs` and `write_element` — so the report is a second
-//! statement of each rule, which is `[A1-L7-07]`'s shape and this project's
-//! most-recorded failure. What keeps the two in step is that a test saying
-//! *"it reported a sweep"* also says *"and there is a `<radialGradient>` in the
-//! file"*: a writer that stops approximating, or starts, fails here rather than
-//! lying quietly.
+//! statement of each rule, which is this project's most-recorded failure shape.
+//! What keeps the two in step is that a test saying *"it reported a sweep"* also
+//! says *"and there is a `<radialGradient>` in the file"*: a writer that stops
+//! approximating, or starts, fails here rather than lying quietly.
 //!
 //! (Plain backticks throughout per §15 D319 — nothing in `crates/*/tests/` is read
 //! by `cargo doc`.)
@@ -194,10 +193,9 @@ fn every_reported_approximation_is_visible_in_the_markup() {
 
 /// The other list: written exactly, and the *document* will not come back.
 ///
-/// ⚠️ **These two are the ones `[S8.1-L7-05]` filed as approximations and this
-/// writer's own comments argue are not.** A reversed rail is the identical
-/// drawing — `text::PathWarp::flip` *is* traversing the rail backwards — and the
-/// `<pattern>` was measured in a browser by the finding itself. Calling either
+/// ⚠️ **These two look like approximations and are not.** A reversed rail is the
+/// identical drawing — `text::PathWarp::flip` *is* traversing the rail backwards —
+/// and the `<pattern>` lands in a browser where the document puts it. Calling either
 /// "approximated" would tell a user their drawing is wrong when it is not.
 #[test]
 fn a_lossless_write_with_a_lossy_re_import_is_reported_separately() {

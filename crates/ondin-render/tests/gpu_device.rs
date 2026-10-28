@@ -3,7 +3,7 @@
 //! It proves the vello + wgpu wiring rasterizes the shared scene, **and reads the
 //! pixel back**, which is what §4's invariant 7 asks of it: *"a pin-time
 //! verification test asserts a known sRGB fill produces the expected output pixel
-//! through each backend"* (§15 D627, `[A1-L6-05]`).
+//! through each backend"* (§15 D627).
 //!
 //! ⚠️ **This paragraph used to say pixel correctness was "covered
 //! deterministically by the CPU tests, which share `scene.rs`", and stop there.**
@@ -126,7 +126,7 @@ fn gpu_renders_fixture_on_device() {
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
 
     // 🚨 **The pixel, which invariant 7 promises and this test did not read**
-    // (§15 D627, `[A1-L6-05]`). The invariant says *"a pin-time verification test
+    // (§15 D627). The invariant says *"a pin-time verification test
     // asserts a known sRGB fill produces the expected output pixel **through each
     // backend**"*, and only `ondin-export/tests/png.rs`'s
     // `color_boundary_produces_expected_pixel` did — the CPU one. This test built

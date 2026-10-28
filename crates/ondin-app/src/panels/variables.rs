@@ -545,8 +545,7 @@ impl OndinApp {
         // Past three modes the columns scroll sideways under the fixed name
         // column, by a horizontal wheel or `Shift` and the wheel.
         // Only where there are columns to scroll: the *Variables* tab with rows
-        // on it — not the *Styles* tab nor an empty state (`arch-scribe`'s read
-        // of §15 D1055's first cut).
+        // on it — not the *Styles* tab nor an empty state (§15 D1055).
         let columns = matches!(b.tab, Tab::Variables) && !lines.is_empty();
         let over = ctx.pointer_hover_pos().is_some_and(|p| panel.contains(p)) && columns;
         if over && modes.len() > MAX_COLS {
@@ -3521,10 +3520,9 @@ mod tests {
     }
 
     /// **A refused value keeps its field through a `Tab`** — the next mode's
-    /// cell opens only once the value has landed. Before, the commit and the
-    /// next cell's edit were two acts, and the second replaced the refused field
-    /// and cleared its sentence: the typed value vanished with nothing said
-    /// (`arch-scribe`'s reading of the first build).
+    /// cell opens only once the value has landed. Were the commit and the next
+    /// cell's edit two acts, the second would replace the refused field and clear
+    /// its sentence: the typed value would vanish with nothing said.
     ///
     /// Flip, run: opening `next` whatever `var_cell` answered fails
     /// *"the refused field is kept"*.

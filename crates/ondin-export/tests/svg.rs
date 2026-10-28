@@ -596,8 +596,8 @@ fn unequal_corners_are_exported_as_a_path_not_a_rounded_rect() {
     for line in mixed.lines().filter(|l| l.contains("<rect")) {
         assert!(!line.contains("rx="), "a rect kept its rx:\n{line}");
     }
-    // Order-independent: `[S8.1-L6-04]` put a `data-name` in front of the
-    // transform, and the claim is about the *element* and its position.
+    // Order-independent: a `data-name` sits in front of the transform, and the
+    // claim is about the *element* and its position.
     assert!(
         mixed.lines().any(|l| l.trim_start().starts_with("<path")
             && l.contains(r#"transform="matrix(1 0 0 1 20 20)""#)),
@@ -909,7 +909,7 @@ fn a_decorations_colour_thickness_and_style_are_exported() {
         "the shorthand must precede the longhands or it resets them:\n{out}"
     );
 
-    // ⚠️ **A negative thickness is floored here too** — `[S6.3-L1-02]`, §15 D546.
+    // ⚠️ **A negative thickness is floored here too** — §15 D546.
     // `core::text::decoration_ink` ends its resolve with `.max(0.0)`, so the
     // canvas drew nothing for a negative; this writer had no counterpart and
     // emitted `-5px` verbatim, so the file and the screen disagreed about whether
@@ -1364,10 +1364,10 @@ fn a_frames_border_is_written_outside_the_group_that_clips_it() {
     // frame's own user space.
     //
     // ⚠️ **Read as "the element with the transform has no clip on it" rather than
-    // as one exact string**, which is what it was until `[S8.1-L6-04]` gave every
-    // node's element a `data-name` in front of its transform. The claim was never
-    // about attribute *order*; spelling it as a literal made a test of the split
-    // fail for an attribute that has nothing to do with clipping.
+    // as one exact string**: every node's element carries a `data-name` in front of
+    // its transform. The claim is not about attribute *order*; spelling it as a
+    // literal would make a test of the split fail for an attribute that has nothing
+    // to do with clipping.
     let outer = out
         .lines()
         .find(|l| l.contains(r#"transform="matrix(1 0 0 1 10 10)""#))
@@ -2113,8 +2113,8 @@ fn an_image_fill_exports_as_a_pattern_over_the_encoded_original() {
         "the stored bytes, base64'd, not a re-encode:\n{out}"
     );
     // ⚠️ **No ` none` fallback after the reference, and that was tried** (§15
-    // D477): `[A5-L6-01]` reads the round-trip's black rectangle as the inherited
-    // fill showing through an unresolvable `url(…)`, which the fallback would fix.
+    // D477): the round-trip's black rectangle reads like the inherited fill showing
+    // through an unresolvable `url(…)`, which the fallback would fix.
     // Measured in Chrome, `fill="url(#nope)"` and `fill="url(#nope) none"` paint
     // the same **0** black pixels, and this app's own reader answers *unpainted*
     // for either. `paint_attr`'s comment carries the measurement.
@@ -3133,7 +3133,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
         "and a shape at the default adds no attribute"
     );
 
-    // ⚠️ **`[S8.1-L2-02]`: the same exclusion, on the *other* writing arm.**
+    // ⚠️ **The same exclusion, on the *other* writing arm.**
     // `emit_shape` writes a shape as one element only while it has at most one
     // fill, no alignment clip and no letterbox; past any of those it goes through
     // `emit_stacked`, which built its fill attribute without the rule. So whether
@@ -3421,8 +3421,7 @@ fn two_shadows_are_both_cast_from_the_layer_itself() {
 }
 
 /// **An inner shadow's filter region has to be bigger than the layer, or the
-/// inversion has nothing to invert** — the export half of `[S10.2-L1-01]`,
-/// §15 D742.
+/// inversion has nothing to invert** — the export half of §15 D742.
 ///
 /// Outside the filter region SVG defines every primitive's result as transparent
 /// black, so a region set to the layer's own ink bounds leaves
@@ -3678,16 +3677,14 @@ fn type_on_a_rail_exports_as_a_text_path() {
     let _ = &out;
 }
 
-/// **The SVG writer is §15 D455's third door, and it was the one that was missed.**
+/// **The SVG writer is §15 D455's third door.**
 ///
-/// `[S11.1-L1-02]`. D455 clamps a descending stop list up to the running maximum
-/// at the importer and at the render boundary — but **nothing clamps on load**, so
-/// a hand-edited `.ondin`, or any file imported before D455 landed, still holds
-/// one in the model. The canvas and a PNG export were right, both going through
-/// `color::brush_to_backend`; `gradient_def` wrote `g.stops` verbatim. So the app
-/// drew the ramp correctly and handed a browser **the flat fill** — the finding's
-/// own symptom, exported. Found by `arch-scribe` reading D455's brief against the
-/// code, which is the eighth brief in a row it has found something in.
+/// D455 clamps a descending stop list up to the running maximum at the importer
+/// and at the render boundary — but **nothing clamps on load**, so a hand-edited
+/// `.ondin`, or any file imported before D455, can still hold one in the model.
+/// The canvas and a PNG export go through `color::brush_to_backend`; a
+/// `gradient_def` that wrote `g.stops` verbatim would let the app draw the ramp
+/// correctly and hand a browser **the flat fill**.
 ///
 /// ⚠️ **The fixture has to bypass the importer**, or it is testing D455's first
 /// door over again: the stops are written straight onto a `GradientBrush` and
@@ -3806,7 +3803,7 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
 
 /// **An alpha mask's region is written in the space the mask is referenced in.**
 ///
-/// `[S8.1-L1-01]`, §15 D458. `<mask>` was emitted with `maskUnits="userSpaceOnUse"`
+/// §15 D458. `<mask>` was emitted with `maskUnits="userSpaceOnUse"`
 /// and **no** `x`/`y`/`width`/`height`. SVG's defaults for those are `-10%`,
 /// `-10%`, `120%`, `120%`, and under `userSpaceOnUse` a percentage is a fraction
 /// of the **viewport** read as a length in the *current* user space — which for a
@@ -3834,7 +3831,7 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
 ///
 /// ⚠️ **Flipped** by deleting the `region` interpolation from the `writeln!`:
 /// fails on the first assertion, on the **absence** of a `width` attribute rather
-/// than on a number — which is the state the finding measured.
+/// than on a number — which is what a writer that drops the region produces.
 ///
 /// ⚠️ **And confirmed in a real browser, which is the only thing that disagrees
 /// with a hand-written expectation about what SVG looks like** (§15 D394's third
@@ -3923,7 +3920,7 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
 
     let attr = |name: &str| -> f64 {
         let at = tag.find(&format!(r#" {name}=""#)).unwrap_or_else(|| {
-            panic!("no `{name}` on the mask tag — the state the finding measured:\n{tag}")
+            panic!("no `{name}` on the mask tag — the region was dropped:\n{tag}")
         });
         let rest = &tag[at + name.len() + 3..];
         rest[..rest.find('"').expect("a closed attribute")]
@@ -3948,8 +3945,7 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
     );
 }
 
-/// **A number that is not a number never reaches the markup** (`[S8.1-L1-03]`,
-/// §15 D508).
+/// **A number that is not a number never reaches the markup** (§15 D508).
 ///
 /// `fmt` is the single formatter every number in this writer goes through, and
 /// both of its arms printed a non-finite one verbatim: the fast path's
@@ -3966,8 +3962,8 @@ fn an_alpha_masks_region_is_written_in_the_space_it_is_referenced_in() {
 ///
 /// ⚠️ **The sibling is not decoration.** With a normal layer beside it the
 /// `viewBox` is honest and the file is plainly usable apart from the flattened
-/// node, which is what makes this the *worse* of the finding's two outcomes:
-/// nothing about the output looks wrong.
+/// node, which is what makes this the *worse* of the two outcomes: nothing about
+/// the output looks wrong.
 ///
 /// **Two assertions, because the two halves of the fix answer differently.** No
 /// `NaN` or `inf` anywhere is `fmt`'s floor. No `<filter>` at all is
@@ -4082,7 +4078,7 @@ fn shared_image_export(n: usize) -> String {
     svg(&doc, &res, doc.first_page(), None)
 }
 
-/// **One picture on ten shapes is written once** (§15 D595, `[S9.1-L4-03]`).
+/// **One picture on ten shapes is written once** (§15 D595).
 ///
 /// Every def was keyed per node per slot, so N shapes sharing one photograph
 /// wrote N full base64 copies. Measured in release on one embedded 200 KB image:
@@ -4105,7 +4101,7 @@ fn shared_image_export(n: usize) -> String {
 /// channels differing, worst delta 0.** That is what says `<use>` of an `<image>`
 /// in `<defs>` is not merely valid but identical, which matters because the
 /// round-trip suite cannot check it — `svg_in` has no `<pattern>` handling at all
-/// (`[A5-L6-01]`) and the §11 golden contains no image.
+/// and the §11 golden contains no image.
 ///
 /// **Flip run**, the `<use>` put back to an inline `<image href="data:…">`:
 /// fails on *"the payload is written once"* at **11 against 1** — eleven and not
@@ -4155,7 +4151,7 @@ fn one_picture_on_many_shapes_is_written_once() {
 
 /// **A sweep gradient's approximated radius is measured off the shape**, and off
 /// the *far* corner of it, so the last stop reaches the whole drawing wherever
-/// the centre sits (§15 D647, `[S8.1-L1-06]`).
+/// the centre sits (§15 D647).
 ///
 /// A sweep has no SVG 1.1 equivalent and is written as a `<radialGradient>`; a
 /// sweep's payload is a centre and two angles and carries no radius at all, so
@@ -4170,9 +4166,9 @@ fn one_picture_on_many_shapes_is_written_once() {
 ///   diagonal, `583.1`;
 /// - centred at `(0, 0)`, a corner, where it is the whole diagonal, `1166.2`.
 ///
-/// The obvious implementation — half the frame's diagonal, which is what the
-/// finding's own fix sketch proposed — is right for the first and short by a
-/// factor of two for the second, which is the case a sweep is most often put in.
+/// The obvious implementation — half the frame's diagonal — is right for the first
+/// and short by a factor of two for the second, which is the case a sweep is most
+/// often put in.
 ///
 /// ⚠️ **Flip run.** Predicted failing assertion: the corner one. Restoring the
 /// `r="50"` literal fails **both**, at `50` against 583.1 and 1166.2 — so the
@@ -4242,7 +4238,7 @@ fn a_sweep_gradients_radius_is_the_shapes_and_is_measured_from_its_centre() {
 }
 
 /// **A hidden mask masks nothing, in both modes** — §15 D566's rule, which the
-/// canvas got and this writer did not (§15 D648, `[S8.1-L3-07]`).
+/// canvas got and this writer did not (§15 D648).
 ///
 /// D282: *"`None` means masks nothing, never 'clip everything away': a **hidden
 /// mask**, an empty text node, an empty group and a cancelled boolean all answer
@@ -4261,7 +4257,7 @@ fn a_sweep_gradients_radius_is_the_shapes_and_is_measured_from_its_centre() {
 /// assertion: the `<g mask=` one, and that is what happens — `Alpha`'s
 /// *"a hidden mask leaves the run unwrapped"* fails first, with the identity
 /// assertion behind it. `Shape` stays green under the same flip, because its
-/// arm never reads the flag directly; that is the asymmetry the finding is about.
+/// arm never reads the flag directly; that is the asymmetry this test is about.
 #[test]
 fn a_hidden_mask_leaves_the_run_unwrapped_in_both_modes() {
     use ondin_core::kurbo::{Affine, Size};

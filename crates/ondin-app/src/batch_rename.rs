@@ -133,18 +133,24 @@ struct SnapPage {
     layers: Vec<Layer>,
 }
 
-/// What the plan reads of the document, every page in the Pages list's order.
+/// What the plan reads of the document, the pages in the Pages list's order: every
+/// page but a draft, which *All pages* leaves out as everything gathered from every
+/// page does, though the current page is kept, draft or not.
 #[derive(Debug)]
 pub(crate) struct Snapshot {
     pages: Vec<SnapPage>,
 }
 
 impl Snapshot {
-    /// Read every page of `doc`, marking `selection` and the layers under it.
-    pub(crate) fn take(doc: &Document, res: &Resolved, selection: &[NodeId]) -> Self {
+    /// Read the pages of `doc` the box can reach from page `here`, marking
+    /// `selection` and the layers under it.
+    pub(crate) fn take(doc: &Document, res: &Resolved, here: NodeId, selection: &[NodeId]) -> Self {
         let chosen: HashSet<NodeId> = selection.iter().copied().collect();
         let pages = doc
-            .page_ids()
+            .pages()
+            .iter()
+            .filter(|p| !p.draft || p.id == here)
+            .map(|p| p.id)
             .map(|page| {
                 let mut layers = Vec::new();
                 // `(id, under a selected layer)`, pushed in child order so the last
@@ -850,7 +856,12 @@ impl OndinApp {
         if let Some(text) = search {
             s.find = text.trim().to_string();
         }
-        let snap = Arc::new(Snapshot::take(doc, &self.session.resolved, &selection));
+        let snap = Arc::new(Snapshot::take(
+            doc,
+            &self.session.resolved,
+            self.session.page,
+            &selection,
+        ));
         self.batch_rename = Some(BatchRename {
             s,
             selected: selection.len(),
@@ -1812,7 +1823,7 @@ mod tests {
     /// What the box opened over: the snapshot its worker plans from.
     fn snapshot(app: &OndinApp) -> Snapshot {
         let s = &app.session;
-        Snapshot::take(&s.doc, &s.resolved, s.selection.ids())
+        Snapshot::take(&s.doc, &s.resolved, s.page, s.selection.ids())
     }
 
     fn planned(app: &OndinApp, b: &BatchRename) -> Plan {
@@ -2146,6 +2157,43 @@ mod tests {
         assert_eq!(heads, [1, 1]);
         let got: Vec<String> = plan.changes.into_iter().map(|c| c.1).collect();
         assert_eq!(got, ["Hero 1", "hero 2 image"]);
+    }
+
+    /// *All pages* leaves a draft page out, unless it is the page the box opened
+    /// on.
+    ///
+    /// flip: `Snapshot::take` reading every page → fails at "the draft is left
+    /// out", its layer numbered 2.
+    #[test]
+    fn all_pages_leaves_a_draft_out_but_the_current_one() {
+        let (ctx, mut app) = app();
+        named(&mut app, "Hero");
+        let first = app.session.page;
+        app.add_page();
+        let sketch = app.session.page;
+        named(&mut app, "hero sketch");
+        app.toggle_page_draft(sketch);
+        assert!(app.session.doc.page(sketch).is_some_and(|p| p.draft));
+        app.add_page();
+        named(&mut app, "hero image");
+        app.go_to_page(first);
+        let mut bx = opened(&ctx, &mut app, "hero", "[Name] [Number]");
+        bx.s.set_scope(Scope::Document);
+        let got: Vec<String> = planned(&app, &bx)
+            .changes
+            .into_iter()
+            .map(|c| c.1)
+            .collect();
+        assert_eq!(got, ["Hero 1", "hero 2 image"], "the draft is left out");
+        app.go_to_page(sketch);
+        let mut bx = opened(&ctx, &mut app, "hero", "[Name] [Number]");
+        bx.s.set_scope(Scope::Document);
+        let got: Vec<String> = planned(&app, &bx)
+            .changes
+            .into_iter()
+            .map(|c| c.1)
+            .collect();
+        assert_eq!(got, ["Hero 1", "hero 2 sketch", "hero 3 image"]);
     }
 
     /// A plan sent in parts adds up to the plan made at once, its page headings

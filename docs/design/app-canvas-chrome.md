@@ -324,8 +324,8 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 A box that renames many layers at once: the selection, the page or every page. The text rule is
 `ondin_core::rename`'s; `batch_rename::plan_into` picks, orders and numbers the layers.
 
-The document cannot change while the box is up, so what the plan reads of it — every page's layers
-in tree order, with name, bounds, glyph, and whether each is a variant, inside an instance, selected
+The document cannot change while the box is up, so what the plan reads of it — the layers of every
+page it can reach, in tree order, with name, bounds, glyph, and whether each is a variant, inside an instance, selected
 or under the selection — is taken once at open (`Snapshot`). A worker thread plans from that copy
 whenever a setting changes, taking only the newest request and abandoning a plan once a newer one is
 asked for, and sends the rows back in parts of 500 layers, so typing never waits on a large
@@ -350,7 +350,9 @@ document. The preview keeps the previous plan until the new one's first part lan
   something is selected, else on *This page*. *Selection* is the selection at open, and is disabled
   with nothing selected. One selected layer with children opens with *Include layers inside*
   ticked. The Layers header button, with text in the tree's search, opens on *This page* with Find
-  holding that text. *Keep case* is on at page and document scope and off at *Selection*; switching
+  holding that text. *All pages* leaves draft pages out, as everything gathered from every page
+  does (`core-model.md` §5.5), but keeps the current page when it is a draft, since the box was
+  opened from it. *Keep case* is on at page and document scope and off at *Selection*; switching
   scope resets it.
 - **Which layers.** *Selection*: the selected layers, and every layer under them with *Include
   layers inside*. *This page* and *All pages*: every layer except those inside an instance (an

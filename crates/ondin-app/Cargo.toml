@@ -56,6 +56,10 @@ log.workspace = true
 woff2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# *Import files* opens a `.sketch` file, a zip of JSON and pictures; core reads the
+# entries (`ondin_core::sketch_in`) and stays free of an archive reader. The
+# workspace's own, already built for the code export's zip.
+zip.workspace = true
 
 # Three uses, the workspace root's comment naming each feature and whose it is:
 # the desktop cursor position a Windows file drag never sends (`GetCursorPos`,

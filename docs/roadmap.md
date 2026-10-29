@@ -15,18 +15,13 @@ reads true.
   backdrop, so the SVG writer owes an answer (a reported approximation, at least).
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
-- **Other tools' documents in *Import files*.** The card takes `.ondin` only (`library.md`,
-  *Import files*). Each new format joins its field and offers the same options (name, project,
-  pages, what to bring over, pictures); its file becomes a new library document, only read, never
-  written back, and comes in one at a time. Its overview's report says what did not map, worded as
-  `svg_in` reports. A canvas drop is not a door for other tools' files. The formats, in this order:
-  **Sketch** (a published JSON spec; also covers Lunacy, which saves `.sketch`; pages, artboards,
-  symbols, shared styles and colour variables map to Ondin's own), **Figma** by link only, through the
-  REST API: the field becomes *File or Figma link*, a pasted `figma.com` link brings up the personal
-  access token and *Fetch*, the token is sent to Figma only and kept in the system keychain only when
-  asked; a `.fig` in the field gets a notice to paste its link instead (`non-goals.md`), then
-  **Penpot** (open source, so its format can be read from its code). Affinity and Illustrator arrive
-  through SVG and PDF.
+- **More tools' documents in *Import files*.** The card takes `.ondin` and `.sketch` (`library.md`,
+  *Import files*); a new format joins `Kind`, as Sketch does, with its own words for the options.
+  In this order: **Penpot** (open source, so its format can be read from its code), then **Figma**
+  by link only, through the REST API: the field becomes *File or Figma link*, a pasted `figma.com`
+  link brings up the personal access token and *Fetch*, the token is sent to Figma only and kept in
+  the system keychain only when asked; a `.fig` in the field gets a notice to paste its link instead
+  (`non-goals.md`). Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
 ## Later · Second

@@ -89,6 +89,12 @@ fn read_all(files: Vec<Incoming>, ids: &mut IdSource, parent: NodeId) -> Vec<Rea
 /// One file: a PDF or SVG by its bytes becomes layers, anything else a picture.
 fn read_one(file: Incoming, ids: &mut IdSource, parent: NodeId) -> Read {
     let name = file.name;
+    // Another tool's document is a new library document, never layers in this one.
+    if crate::panels::import_files::Kind::of(std::path::Path::new(&name)).imports() {
+        return Read::Refused(format!(
+            "{name} is a document: bring it in with Import files in the library"
+        ));
+    }
     let bytes = match (file.bytes, &file.path) {
         (Some(b), _) => Some(b.to_vec()),
         (None, Some(p)) => std::fs::read(p).ok(),
@@ -450,6 +456,25 @@ enum Vector {
 mod tests {
     use super::*;
     use ondin_core::{Brush, NodeKind};
+
+    /// A document dropped on a canvas is refused with a pointer to the library,
+    /// whoever's it is, rather than read as a picture that fails.
+    #[test]
+    fn a_document_dropped_on_a_canvas_points_to_the_library() {
+        let mut ids = IdSource::new(1);
+        let parent = ids.mint();
+        for name in ["Marketing.sketch", "Onboarding.ondin"] {
+            let file = Incoming {
+                name: name.into(),
+                bytes: Some(Arc::from(&b"PK\x03\x04"[..])),
+                path: None,
+            };
+            let Read::Refused(why) = read_one(file, &mut ids, parent) else {
+                panic!("{name} is refused");
+            };
+            assert!(why.contains("Import files"), "{why}");
+        }
+    }
 
     /// The nodes on the document's first page.
     fn page_nodes(app: &OndinApp) -> Vec<&ondin_core::Node> {

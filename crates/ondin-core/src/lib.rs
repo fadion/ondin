@@ -51,6 +51,7 @@ pub mod query;
 pub mod rename;
 pub mod reset;
 pub mod resolve;
+pub mod sketch_in;
 pub mod style;
 pub mod svg_in;
 pub mod swap;

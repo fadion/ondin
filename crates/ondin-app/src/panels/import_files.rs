@@ -14,6 +14,7 @@ use crate::settings;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
+use ondin_core::sketch_in::Part;
 use ondin_core::take::{Census, Keep};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +36,8 @@ const GROUP_GAP: f32 = 14.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ondin,
+    /// Sketch's own, which Lunacy saves too: read, never written back.
+    Sketch,
     /// A PDF, an SVG or a picture: placed on a canvas, never imported.
     Placed,
     /// Anything else.
@@ -50,9 +53,44 @@ impl Kind {
             .unwrap_or_default();
         match ext.as_str() {
             crate::library::scan::DOCUMENT_EXT => Self::Ondin,
+            "sketch" => Self::Sketch,
             "pdf" | "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff"
             | "avif" => Self::Placed,
             _ => Self::Other,
+        }
+    }
+
+    /// Whether the card imports this kind.
+    pub(crate) fn imports(self) -> bool {
+        matches!(self, Self::Ondin | Self::Sketch)
+    }
+
+    /// What the message line calls a file of this kind.
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Ondin => "Ondin document",
+            Self::Sketch => "Sketch document",
+            Self::Placed | Self::Other => "File",
+        }
+    }
+
+    /// The options' and the overview's words, in the tool's own terms.
+    fn words(self) -> Words {
+        match self {
+            Self::Sketch => Words {
+                frames: ("artboard", "artboards"),
+                components: "Symbols as components",
+                styles: "Shared styles",
+                variables: "Colour variables",
+                variables_off: "Off: each use keeps its colour as a raw value.",
+            },
+            _ => Words {
+                frames: ("frame", "frames"),
+                components: "Components",
+                styles: "Styles",
+                variables: "Variables",
+                variables_off: "Off: bound values become raw values in the current mode.",
+            },
         }
     }
 
@@ -60,6 +98,7 @@ impl Kind {
     fn badge(self, path: &Path) -> (String, egui::Color32) {
         match self {
             Self::Ondin => ("ONDIN".into(), egui::Color32::from_rgb(0x8b, 0xa5, 0xe0)),
+            Self::Sketch => ("SKETCH".into(), egui::Color32::from_rgb(0xe6, 0xb8, 0x66)),
             Self::Placed | Self::Other => (
                 path.extension()
                     .and_then(|e| e.to_str())
@@ -71,15 +110,32 @@ impl Kind {
     }
 }
 
+/// How a kind of file names what it holds.
+#[derive(Clone, Copy)]
+struct Words {
+    frames: (&'static str, &'static str),
+    components: &'static str,
+    styles: &'static str,
+    variables: &'static str,
+    variables_off: &'static str,
+}
+
 /// A document read for its options: the document itself, kept for the copy, and
 /// what it holds.
 pub(crate) struct Source {
     doc: Arc<ondin_core::Document>,
     census: Census,
+    kind: Kind,
     /// The name it will be filed under unless the field is edited.
     name: String,
     /// The file's size on disk, for the message line.
     bytes: u64,
+    /// What another tool's file held that did not come in as it was, each row
+    /// with the part it is about, so a part left out takes its rows along.
+    report: Vec<(Part, ReportRow)>,
+    /// The font families its text asks for, with how many runs ask, for the
+    /// landing to say which are not installed.
+    families: Vec<(String, usize)>,
 }
 
 /// What the field holds.
@@ -182,10 +238,14 @@ impl Counts {
         self.pictures += o.pictures;
     }
 
-    fn cells(self) -> [(usize, &'static str, &'static str); 6] {
+    /// Each count with its noun, frames called what `frames` calls them.
+    fn cells(
+        self,
+        frames: (&'static str, &'static str),
+    ) -> [(usize, &'static str, &'static str); 6] {
         [
             (self.pages, "page", "pages"),
-            (self.frames, "frame", "frames"),
+            (self.frames, frames.0, frames.1),
             (self.components, "component", "components"),
             (self.styles, "style", "styles"),
             (self.variables, "variable", "variables"),
@@ -207,6 +267,8 @@ pub(crate) struct Overview {
     pub(crate) title: String,
     pub(crate) sub: String,
     pub(crate) counts: Counts,
+    /// What the file's tool calls a frame.
+    frames: (&'static str, &'static str),
     pub(crate) report: Vec<ReportRow>,
     /// How many documents were written.
     pub(crate) written: usize,
@@ -218,7 +280,7 @@ impl Overview {
     /// The report as plain text, for *Copy report*.
     fn text(&self) -> String {
         let mut out = format!("{}\n{}\n\n", self.title, self.sub);
-        for (n, one, many) in self.counts.cells() {
+        for (n, one, many) in self.counts.cells(self.frames) {
             out.push_str(&format!("{n} {}\n", if n == 1 { one } else { many }));
         }
         if self.report.is_empty() {
@@ -291,14 +353,105 @@ fn foot_text(card: &ImportCard, projects: &project::Projects) -> String {
 /// Read one file for its options, on the worker.
 fn read_source(path: &Path) -> Result<Source, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Could not be read: {e}"))?;
-    let doc = ondin_core::io::load(&bytes).map_err(|e| format!("Not a readable document: {e}"))?;
+    let kind = Kind::of(path);
+    let (doc, report, families) = match kind {
+        Kind::Sketch => read_sketch(&bytes)?,
+        _ => (
+            ondin_core::io::load(&bytes).map_err(|e| format!("Not a readable document: {e}"))?,
+            Vec::new(),
+            Vec::new(),
+        ),
+    };
     let census = ondin_core::take::census(&doc);
     Ok(Source {
         name: document_name(&doc, path),
         census,
+        kind,
         bytes: bytes.len() as u64,
+        report,
+        families,
         doc: Arc::new(doc),
     })
+}
+
+/// The most a `.sketch` zip may inflate to, all its entries together, so a
+/// crafted file cannot exhaust memory.
+const ZIP_LIMIT: u64 = 2 << 30;
+
+/// A `.sketch` zip's entries, for `ondin_core::sketch_in`, and how much of
+/// [`ZIP_LIMIT`] they have used.
+struct SketchZip<'a> {
+    zip: zip::ZipArchive<std::io::Cursor<&'a [u8]>>,
+    read: u64,
+}
+
+impl ondin_core::sketch_in::Archive for SketchZip<'_> {
+    /// `None` for an entry that would pass the limit: whole or not at all, since a
+    /// cut entry would read as a broken one.
+    fn entry(&mut self, name: &str) -> Option<Vec<u8>> {
+        let entry = self.zip.by_name(name).ok()?;
+        let room = ZIP_LIMIT.saturating_sub(self.read);
+        if entry.size() > room {
+            return None;
+        }
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::Read::take(entry, room + 1), &mut out).ok()?;
+        // The declared size can lie; the bytes read cannot.
+        if out.len() as u64 > room {
+            return None;
+        }
+        self.read += out.len() as u64;
+        Some(out)
+    }
+}
+
+/// Pictures inside another tool's file, hashed and sized as a placed one is.
+struct Pictures;
+
+impl ondin_core::svg_in::ImageSink for Pictures {
+    fn place(
+        &mut self,
+        bytes: Vec<u8>,
+        format: ondin_core::ImageFormat,
+    ) -> Option<(ondin_core::ImageId, ondin_core::ImageEntry)> {
+        let (picture, _) =
+            crate::app::read_picture(bytes, Some(format.extension().to_owned()), None).ok()?;
+        Some((picture.id, picture.entry))
+    }
+}
+
+/// A `.sketch` file read into a document, with what did not map and the font
+/// families its text asks for.
+type Read = (
+    ondin_core::Document,
+    Vec<(Part, ReportRow)>,
+    Vec<(String, usize)>,
+);
+
+fn read_sketch(bytes: &[u8]) -> Result<Read, String> {
+    let zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|_| "Not a Sketch file: it does not open as one".to_owned())?;
+    // A fresh stream, as a new document's: nothing else holds ids under it.
+    let actor = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_nanos() as u64 | 1);
+    let mut ids = ondin_core::IdSource::new(actor);
+    let mut archive = SketchZip { zip, read: 0 };
+    let read = ondin_core::sketch_in::read(&mut archive, &mut ids, &mut Pictures)
+        .map_err(|e| format!("Could not be read: {e}"))?;
+    let report = read
+        .report
+        .into_iter()
+        .map(|u| {
+            let row = ReportRow {
+                what: u.what.to_owned(),
+                count: u.count,
+                how: u.how.to_owned(),
+            };
+            (u.part, row)
+        })
+        .collect();
+    Ok((read.doc, report, read.families.into_iter().collect()))
 }
 
 /// The name a document files under: its own, else its filename de-slugged as the
@@ -328,14 +481,15 @@ fn file_copy(
     store::file_document(root, project, name, &mut doc)
 }
 
-/// One document, trimmed to `keep` and filed. Stops before writing once `cancel`
-/// is set.
+/// One document, trimmed to `keep` and filed, `report` saying what its reading
+/// left out. Stops before writing once `cancel` is set.
 fn import_one(
     root: &Path,
     project: Option<&project::Project>,
     name: &str,
     doc: &ondin_core::Document,
     keep: &Keep,
+    report: Vec<ReportRow>,
     cancel: &AtomicBool,
 ) -> Landed {
     let mut doc = doc.clone();
@@ -344,7 +498,7 @@ fn import_one(
     let mut landed = Landed {
         written: Vec::new(),
         counts,
-        report: Vec::new(),
+        report,
     };
     if let Err(e) = trimmed {
         landed.counts = Counts::default();
@@ -462,35 +616,43 @@ impl OndinApp {
         }
         card.typed.clear();
         card.note = None;
-        let (docs, others): (Vec<PathBuf>, Vec<PathBuf>) =
+        let (docs, rest): (Vec<PathBuf>, Vec<PathBuf>) =
             paths.into_iter().partition(|p| Kind::of(p) == Kind::Ondin);
         let (docs, already): (Vec<PathBuf>, Vec<PathBuf>) = docs
             .into_iter()
             .partition(|p| in_library(&root, p).is_none());
-        card.field = match (docs.len(), others.first(), already.first()) {
-            (0, _, Some(path)) => Field::Refused {
+        let (mut tools, others): (Vec<PathBuf>, Vec<PathBuf>) =
+            rest.into_iter().partition(|p| Kind::of(p).imports());
+        // Documents come in together; another tool's file comes alone, the first.
+        let read = |path: &PathBuf| {
+            let from = path.clone();
+            Field::Reading {
+                job: Job::spawn("import-read", ctx, move || read_source(&from)),
+                path: path.clone(),
+            }
+        };
+        let taken_tool = docs.is_empty() && !tools.is_empty();
+        card.field = match (docs.len(), tools.first(), others.first(), already.first()) {
+            (1, ..) => read(&docs[0]),
+            (0, Some(path), ..) => read(path),
+            (0, None, _, Some(path)) => Field::Refused {
                 path: path.clone(),
                 why: in_library(&root, path).unwrap_or_default().into(),
             },
-            (0, Some(path), None) => Field::Refused {
+            (0, None, Some(path), None) => Field::Refused {
                 path: path.clone(),
                 why: refusal(Kind::of(path)).into(),
             },
-            (0, None, None) => Field::Empty,
-            (1, _, _) => {
-                let path = docs[0].clone();
-                let from = path.clone();
-                Field::Reading {
-                    job: Job::spawn("import-read", ctx, move || read_source(&from)),
-                    path,
-                }
-            }
+            (0, None, None, None) => Field::Empty,
             _ => Field::Many(docs.clone()),
         };
-        let left = others.len() + already.len();
+        if taken_tool {
+            tools.remove(0);
+        }
+        let left = others.len() + already.len() + tools.len();
         if left > 0 && !matches!(card.field, Field::Refused { .. }) {
             card.note = Some(format!(
-                "{left} other file{} left out: documents come in together, other files one at a time",
+                "{left} other file{} left out: Ondin documents come in together, other files one at a time",
                 if left == 1 { " was" } else { "s were" }
             ));
         }
@@ -499,7 +661,10 @@ impl OndinApp {
     /// *Browse…*: the system dialog, filtered to what the card imports.
     fn browse_for_import(&mut self, ctx: &egui::Context) {
         let Some(files) = rfd::FileDialog::new()
-            .add_filter("Ondin document", &[crate::library::scan::DOCUMENT_EXT])
+            .add_filter(
+                "Ondin and Sketch documents",
+                &[crate::library::scan::DOCUMENT_EXT, "sketch"],
+            )
             .add_filter("All files", &["*"])
             .set_title("Import into the library")
             .pick_files()
@@ -522,13 +687,27 @@ impl OndinApp {
             }
             Err(()) => false,
         });
+        let fonts = &self.fonts;
         let Some(card) = self.dash.import.as_mut() else {
             return;
         };
         if let Field::Reading { path, job } = &card.field {
             match job.poll() {
                 Ok(None) => {}
-                Ok(Some(Ok(source))) => {
+                Ok(Some(Ok(mut source))) => {
+                    // Here, not on the worker: the font list is the frame's.
+                    for (family, runs) in std::mem::take(&mut source.families) {
+                        if fonts.family_status(&family) == crate::fonts::FamilyStatus::Missing {
+                            source.report.push((
+                                Part::Layers,
+                                ReportRow {
+                                    what: family,
+                                    count: counted(runs, "run", "runs"),
+                                    how: "Not installed: drawn in Inter until it is".into(),
+                                },
+                            ));
+                        }
+                    }
                     let o = &mut card.options;
                     o.name.clone_from(&source.name);
                     o.pages = vec![true; source.census.pages.len()];
@@ -613,10 +792,21 @@ impl OndinApp {
                     pictures: !o.leave_pictures,
                 };
                 let doc = source.doc.clone();
+                // A row about a part left out says nothing about the copy.
+                let report = source
+                    .report
+                    .iter()
+                    .filter(|(part, _)| match part {
+                        Part::Components => o.components,
+                        Part::Pictures => !o.leave_pictures,
+                        Part::Layers => true,
+                    })
+                    .map(|(_, row)| row.clone())
+                    .collect();
                 let name = o.name.trim().to_owned();
                 let what = format!("Importing {name}…");
                 let job = Job::spawn("import-file", ctx, move || {
-                    import_one(&root, project.as_ref(), &name, &doc, &keep, &flag)
+                    import_one(&root, project.as_ref(), &name, &doc, &keep, report, &flag)
                 });
                 (job, what)
             }
@@ -756,8 +946,17 @@ fn refusal(kind: Kind) -> &'static str {
         Kind::Placed => {
             "Ondin places a PDF, an SVG or a picture onto a canvas rather than importing it. Open a document and use Place image."
         }
-        Kind::Ondin | Kind::Other => "Ondin cannot import this kind of file.",
+        Kind::Ondin | Kind::Sketch | Kind::Other => {
+            "Ondin imports Ondin and Sketch documents, and cannot read this kind of file."
+        }
     }
+}
+
+/// The last part of `path`, as the user named the file.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The overview of a finished copy.
@@ -767,6 +966,10 @@ fn overview(field: &Field, o: &Options, into: Option<String>, landed: Landed) ->
         (_, 0) => (
             "Nothing was imported".to_owned(),
             "The library is as it was".to_owned(),
+        ),
+        (Field::One { source, path }, _) if source.kind != Kind::Ondin => (
+            format!("{} is in {place}", o.name.trim()),
+            format!("From {}, which is unchanged", file_name(path)),
         ),
         (Field::One { .. }, _) => (
             format!("{} is in {place}", o.name.trim()),
@@ -784,6 +987,10 @@ fn overview(field: &Field, o: &Options, into: Option<String>, landed: Landed) ->
         title,
         sub,
         counts: landed.counts,
+        frames: match field {
+            Field::One { source, .. } => source.kind.words().frames,
+            _ => Kind::Ondin.words().frames,
+        },
         report: landed.report,
         written: landed.written.len(),
         open: match field {
@@ -811,8 +1018,9 @@ fn form(
         Field::One { source, .. } => {
             divider(ui);
             name_and_project(ui, &mut card.options, projects, true);
-            pages(ui, &source.census, &mut card.options.pages);
-            bring_over(ui, &source.census, &mut card.options);
+            let words = source.kind.words();
+            pages(ui, &source.census, words, &mut card.options.pages);
+            bring_over(ui, &source.census, words, &mut card.options);
             pictures(
                 ui,
                 source.census.pictures,
@@ -946,7 +1154,8 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                 ui,
                 icon::FILE,
                 &format!(
-                    "Ondin document · {folder} · {}",
+                    "{} · {folder} · {}",
+                    source.kind.noun(),
                     settings::human_bytes(source.bytes)
                 ),
                 theme::text::FAINT,
@@ -1142,7 +1351,7 @@ fn dotted(name: &str, hex: Option<&str>) -> egui::WidgetText {
 }
 
 /// One tick per page, with how many frames it holds.
-fn pages(ui: &mut egui::Ui, census: &Census, keep: &mut [bool]) {
+fn pages(ui: &mut egui::Ui, census: &Census, words: Words, keep: &mut [bool]) {
     ui.add_space(GROUP_GAP);
     group_label(ui, "Pages");
     egui::ScrollArea::vertical()
@@ -1150,7 +1359,7 @@ fn pages(ui: &mut egui::Ui, census: &Census, keep: &mut [bool]) {
         .max_height(PAGES_MAX_H)
         .show(ui, |ui| {
             for (page, on) in census.pages.iter().zip(keep.iter_mut()) {
-                let meta = counted(page.frames, "frame", "frames");
+                let meta = counted(page.frames, words.frames.0, words.frames.1);
                 if check_row(ui, &page.name, &meta, "", *on) {
                     *on = !*on;
                 }
@@ -1159,12 +1368,12 @@ fn pages(ui: &mut egui::Ui, census: &Census, keep: &mut [bool]) {
 }
 
 /// What to bring over besides the layers, each saying what leaving it does.
-fn bring_over(ui: &mut egui::Ui, census: &Census, o: &mut Options) {
+fn bring_over(ui: &mut egui::Ui, census: &Census, words: Words, o: &mut Options) {
     ui.add_space(GROUP_GAP);
     group_label(ui, "Bring over");
     if check_row(
         ui,
-        "Components",
+        words.components,
         &census.components.to_string(),
         "Off: instances become plain layers.",
         o.components,
@@ -1173,7 +1382,7 @@ fn bring_over(ui: &mut egui::Ui, census: &Census, o: &mut Options) {
     }
     if check_row(
         ui,
-        "Styles",
+        words.styles,
         &census.styles.to_string(),
         "Off: each use keeps the values it shows.",
         o.styles,
@@ -1185,13 +1394,7 @@ fn bring_over(ui: &mut egui::Ui, census: &Census, o: &mut Options) {
     } else {
         census.variables.to_string()
     };
-    if check_row(
-        ui,
-        "Variables",
-        &vars,
-        "Off: bound values become raw values in the current mode.",
-        o.variables,
-    ) {
+    if check_row(ui, words.variables, &vars, words.variables_off, o.variables) {
         o.variables = !o.variables;
     }
 }
@@ -1343,7 +1546,7 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
     ui.add_space(16.0);
     let gap = 8.0;
     let cell_w = (ui.available_width() - gap * 2.0) / 3.0;
-    for row in o.counts.cells().chunks(3) {
+    for row in o.counts.cells(o.frames).chunks(3) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for &(n, one, many) in row {
@@ -1895,11 +2098,158 @@ mod tests {
         assert!(in_library(&f.root, &trashed).is_some_and(|w| w.contains("trash")));
     }
 
+    /// A `.sketch` zip holding one page with an artboard, a rectangle and a picture.
+    fn a_sketch_file(f: &Fixture, name: &str) -> PathBuf {
+        let frame =
+            |x: f64, w: f64| serde_json::json!({ "x": x, "y": 0, "width": w, "height": 50 });
+        let page = serde_json::json!({
+            "_class": "page", "do_objectID": "P", "name": "Web",
+            "layers": [{
+                "_class": "artboard", "do_objectID": "A", "name": "Home", "frame": frame(0.0, 200.0),
+                "layers": [
+                    { "_class": "rectangle", "do_objectID": "R", "name": "Card", "frame": frame(10.0, 40.0),
+                      "flow": { "destinationArtboardID": "A" } },
+                    { "_class": "bitmap", "do_objectID": "B", "name": "Photo", "frame": frame(60.0, 40.0),
+                      "image": { "_ref": "images/photo.png" } },
+                ],
+            }],
+        });
+        let document =
+            serde_json::json!({ "_class": "document", "pages": [{ "_ref": "pages/P" }] });
+        let mut png = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut png),
+            &[255u8; 16],
+            2,
+            2,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        let zip = ondin_export::plan::zip(&[
+            ("document.json".into(), document.to_string().into_bytes()),
+            ("pages/P.json".into(), page.to_string().into_bytes()),
+            ("images/photo.png".into(), png),
+        ])
+        .unwrap();
+        let path = f.outside.join(name);
+        std::fs::write(&path, zip).unwrap();
+        path
+    }
+
+    /// A Sketch file is read into the card in Sketch's words, and comes in as a
+    /// new document whose overview says the file is unchanged and what did not
+    /// map.
+    #[test]
+    fn a_sketch_file_comes_in_through_the_card() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "sketch");
+        let source = a_sketch_file(&f, "Marketing site.sketch");
+        f.app.fill_import(&ctx, vec![source.clone()]);
+        f.app.settle_import();
+        let card = f.app.dash.import.as_ref().unwrap();
+        let Field::One { source: read, .. } = &card.field else {
+            panic!(
+                "the file reads: {:?}",
+                matches!(card.field, Field::Refused { .. })
+            );
+        };
+        assert_eq!(read.kind, Kind::Sketch);
+        assert_eq!(card.options.name, "Marketing site");
+        assert_eq!(read.census.frames, 1);
+        assert_eq!(read.census.pictures, 1, "the picture was read and sized");
+        f.app.start_copy(&ctx);
+        f.app.settle_import();
+        let Some(Step::Done(o)) = f.app.dash.import.as_ref().map(|c| &c.step) else {
+            panic!("the card shows the overview");
+        };
+        assert_eq!(o.sub, "From Marketing site.sketch, which is unchanged");
+        assert!(o.text().contains("1 artboard"), "{}", o.text());
+        assert!(
+            o.report.iter().any(|r| r.what == "Prototype links"),
+            "{:?}",
+            o.report
+        );
+        assert!(source.exists());
+        assert_eq!(listed(&f).len(), 1);
+    }
+
+    /// A report row about a part the import leaves out is dropped with it: an
+    /// unreadable picture is not reported once the pictures stay behind. flip:
+    /// keep every row in `start_copy` → fails at the second report.
+    #[test]
+    fn a_row_about_a_part_left_out_is_not_reported() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "sketch-rows");
+        let page = serde_json::json!({ "_class": "page", "do_objectID": "P", "name": "Web",
+            "layers": [{ "_class": "bitmap", "do_objectID": "B", "name": "Photo",
+                         "frame": { "x": 0, "y": 0, "width": 10, "height": 10 },
+                         "image": { "_ref": "images/gone.png" } }] });
+        let document = serde_json::json!({ "pages": [{ "_ref": "pages/P" }] });
+        let zip = ondin_export::plan::zip(&[
+            ("document.json".into(), document.to_string().into_bytes()),
+            ("pages/P.json".into(), page.to_string().into_bytes()),
+        ])
+        .unwrap();
+        let path = f.outside.join("Gone.sketch");
+        std::fs::write(&path, zip).unwrap();
+        let report = |f: &mut Fixture, leave: bool| {
+            f.app.dash.import = None;
+            f.app.fill_import(&ctx, vec![path.clone()]);
+            f.app.settle_import();
+            f.app.dash.import.as_mut().unwrap().options.leave_pictures = leave;
+            f.app.start_copy(&ctx);
+            f.app.settle_import();
+            match f.app.dash.import.as_ref().map(|c| &c.step) {
+                Some(Step::Done(o)) => o.report.iter().map(|r| r.what.clone()).collect::<Vec<_>>(),
+                _ => panic!("the card shows the overview"),
+            }
+        };
+        assert_eq!(
+            report(&mut f, false),
+            ["Pictures"],
+            "control: the row is there"
+        );
+        assert!(report(&mut f, true).is_empty());
+    }
+
+    /// A drop of several Sketch files takes the first, alone, and says so.
+    #[test]
+    fn another_tools_files_come_in_one_at_a_time() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "sketch-many");
+        let a = a_sketch_file(&f, "A.sketch");
+        let b = a_sketch_file(&f, "B.sketch");
+        f.app.fill_import(&ctx, vec![a.clone(), b]);
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(matches!(&card.field, Field::Reading { path, .. } if *path == a));
+        assert!(
+            card.note
+                .as_deref()
+                .is_some_and(|n| n.contains("1 other file"))
+        );
+        f.app.settle_import();
+    }
+
+    /// A zip that is not a Sketch file is refused in the field.
+    #[test]
+    fn a_broken_sketch_file_is_refused() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "sketch-bad");
+        let bad = f.outside.join("Broken.sketch");
+        std::fs::write(&bad, b"not a zip").unwrap();
+        f.app.fill_import(&ctx, vec![bad]);
+        f.app.settle_import();
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(matches!(&card.field, Field::Refused { why, .. } if why.contains("Sketch")));
+    }
+
     /// Files by extension: documents, files placed rather than imported, and the
     /// rest.
     #[test]
     fn a_file_is_known_by_its_extension() {
         assert_eq!(Kind::of(Path::new("a/B.ONDIN")), Kind::Ondin);
+        assert_eq!(Kind::of(Path::new("Site.sketch")), Kind::Sketch);
         assert_eq!(Kind::of(Path::new("poster.pdf")), Kind::Placed);
         assert_eq!(Kind::of(Path::new("logo.svg")), Kind::Placed);
         assert_eq!(Kind::of(Path::new("notes.txt")), Kind::Other);

@@ -758,7 +758,7 @@ pub struct OndinApp {
     /// The path bar's *Simplify*, while its worker runs.
     pub(crate) simplifying: Option<crate::path_bar::Simplifying>,
     /// Exports rendering and writing on workers (`panels::export`).
-    pub(crate) exports: Vec<crate::job::Job<crate::panels::Delivered>>,
+    pub(crate) exports: Vec<crate::panels::RunningExport>,
     /// Dropped and picked files being read on workers, oldest first (`crate::import`).
     pub(crate) imports: Vec<crate::import::Import>,
     /// *Copy as PNG*'s render on a worker, and how many layers it shows.
@@ -1557,7 +1557,7 @@ impl eframe::App for OndinApp {
         self.poll_open(ui.ctx());
         // Before every early return, so an export landing behind the library, a
         // tab still being read or present mode is reported when it lands.
-        self.poll_exports(&ctx);
+        self.poll_exports();
         if self.view == View::Dashboard {
             // The palette is the editor's; one left open must not greet the next file.
             self.palette = None;
@@ -1778,7 +1778,9 @@ impl eframe::App for OndinApp {
             })
             .response
             .rect;
-        self.status_bar(&ctx, canvas);
+        if self.status_bar(&ctx, canvas) {
+            self.cancel_exports();
+        }
         self.contrast_chrome(&ctx);
 
         self.watch_kits(&ctx);
@@ -7210,18 +7212,25 @@ impl OndinApp {
     /// The floating status bar at the canvas's bottom left, to the minimap's right when
     /// that shows: the mode when not the default, and the last status message for [`status_hold`], then a fade.
     /// *View ▸ Show messages* hides the message, never the mode. Drawn in focus
-    /// mode too (its Escape hint). Not interactable; truncated so it never runs under the
-    /// inspector.
-    fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) {
+    /// mode too (its Escape hint). Truncated so it never runs under the inspector.
+    ///
+    /// While exports run it also says so ([`Self::exporting`]) with *Cancel*, and
+    /// answers whether that was clicked. **Interactable only then**: the rest of the
+    /// time every click and drop passes through it to the canvas.
+    fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) -> bool {
         const MARGIN: f32 = 12.0;
         let status = self.session.status();
         let moded = self.mode != Mode::Normal;
+        let exporting = self.exporting();
         let age = status.at.elapsed().as_secs_f32();
         let hold = status_hold(status).as_secs_f32();
         let message = self.show_status && !status.text.is_empty() && age < hold;
-        if !moded && !message {
-            return;
+        if !moded && !message && exporting.is_none() {
+            return false;
         }
+        // A card that stays (a mode, an export) does not fade with the message.
+        let stays = moded || exporting.is_some();
+        let mut cancel = false;
         let fade = if message {
             ((hold - age) / STATUS_FADE).clamp(0.0, 1.0)
         } else {
@@ -7240,14 +7249,14 @@ impl OndinApp {
         let beside = self.minimap_clearance();
         egui::Area::new(egui::Id::new("status-bar"))
             .order(egui::Order::Middle)
-            .interactable(false)
+            .interactable(exporting.is_some())
             // Its own fade only: egui's appear fade would dim the mode.
             .fade_in(false)
             .pivot(egui::Align2::LEFT_BOTTOM)
             .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN + beside, -MARGIN))
             .show(ctx, |ui| {
                 // The card fades only when the message is all it holds.
-                let message_fade = if moded {
+                let message_fade = if stays {
                     fade
                 } else {
                     ui.set_opacity(fade);
@@ -7276,9 +7285,24 @@ impl OndinApp {
                                     .truncate(),
                                 );
                             }
+                            if let Some(exporting) = &exporting {
+                                ui.label(
+                                    egui::RichText::new(exporting)
+                                        .size(11.5)
+                                        .color(theme::text::MUTED),
+                                );
+                                let button = egui::Button::new(
+                                    egui::RichText::new("Cancel")
+                                        .size(11.5)
+                                        .color(color::ACCENT_300),
+                                )
+                                .frame(false);
+                                cancel = ui.add(button).clicked();
+                            }
                         });
                     });
             });
+        cancel
     }
 
     /// The 46px vertical tool rail.
@@ -13259,7 +13283,9 @@ mod library_wiring_tests {
             let mut out = Vec::new();
             for _ in 0..2 {
                 out = ctx
-                    .run_ui(Default::default(), |ui| app.status_bar(ui.ctx(), canvas))
+                    .run_ui(Default::default(), |ui| {
+                        app.status_bar(ui.ctx(), canvas);
+                    })
                     .shapes
                     .iter()
                     .filter_map(|s| match &s.shape {
@@ -13296,7 +13322,9 @@ mod library_wiring_tests {
         let mut faded = Vec::new();
         for _ in 0..2 {
             faded = ctx
-                .run_ui(Default::default(), |ui| app.status_bar(ui.ctx(), canvas))
+                .run_ui(Default::default(), |ui| {
+                    app.status_bar(ui.ctx(), canvas);
+                })
                 .shapes
                 .iter()
                 .filter_map(|s| match &s.shape {

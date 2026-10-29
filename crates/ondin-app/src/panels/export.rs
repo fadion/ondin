@@ -18,6 +18,8 @@ use ondin_core::{
     Transaction,
 };
 use ondin_export::{PlanOptions, PlannedFile};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The scale cell of the export row (7pt pitch, 256pt card).
 ///
@@ -1722,37 +1724,75 @@ impl OndinApp {
         let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
         let turn = self.export_turns.ticket();
         let asker = self.session.path.clone();
-        self.spawn_export(move || {
+        let label = match files.as_slice() {
+            [one] => file_name_of(&one.path),
+            many => format!("{} files", many.len()),
+        };
+        self.spawn_export(label, move |cancel| {
             // SVG and PDF shape live text again, with the faces the canvas used.
             ondin_core::text::register_font_data(&resolved.text_fonts());
             Delivered {
                 asker,
-                ..deliver(&doc, &resolved, &files, destination, &turn)
+                ..deliver(&doc, &resolved, &files, destination, &turn, cancel)
             }
         });
     }
 
-    /// Run `work` on an export worker, with *Exporting…* until it lands.
-    fn spawn_export(&mut self, work: impl FnOnce() -> Delivered + Send + 'static) {
+    /// Run `work` on an export worker, the status bar saying *Exporting ‹label›…*
+    /// with *Cancel* until it lands. `work` reads the flag
+    /// [`Self::cancel_exports`] sets, before each render and before it writes.
+    fn spawn_export(
+        &mut self,
+        label: String,
+        work: impl FnOnce(&AtomicBool) -> Delivered + Send + 'static,
+    ) {
         let ctx = self.egui_ctx.clone();
-        self.session.info(EXPORTING);
-        self.exports
-            .push(crate::job::Job::spawn("ondin-export", &ctx, work));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let job = crate::job::Job::spawn("ondin-export", &ctx, move || work(&flag));
+        self.exports.push(RunningExport { job, cancel, label });
+    }
+
+    /// What the status bar says while exports run, `None` when none does: the
+    /// file of one, the count of several. A cancelled one no longer counts.
+    pub(crate) fn exporting(&self) -> Option<String> {
+        let live: Vec<&RunningExport> = self.exports.iter().filter(|e| !e.cancelled()).collect();
+        match live.as_slice() {
+            [] => None,
+            [one] => Some(format!("Exporting {}…", one.label)),
+            many => Some(format!("Exporting {} exports…", many.len())),
+        }
+    }
+
+    /// Cancel every running export: none writes a file it has not started
+    /// writing. A render already under way finishes on its worker, unwritten, and
+    /// stays in [`Self::exports`] until it does, so quitting still waits for a
+    /// write in progress.
+    pub(crate) fn cancel_exports(&mut self) {
+        let mut n = 0;
+        for e in self.exports.iter().filter(|e| !e.cancelled()) {
+            e.cancel.store(true, Ordering::Relaxed);
+            n += 1;
+        }
+        match n {
+            0 => {}
+            1 => self.session.info("Export cancelled"),
+            n => self.session.info(format!("{n} exports cancelled")),
+        }
     }
 
     /// Wait for every export still running: quitting mid-write would leave a
     /// file torn. Their reports have nowhere left to go.
     pub(crate) fn drain_exports(&mut self) {
-        for job in std::mem::take(&mut self.exports) {
-            let _ = job.wait();
+        for e in std::mem::take(&mut self.exports) {
+            let _ = e.job.wait();
         }
     }
 
-    /// Report the exports that have landed, and keep *Exporting…* on the status
-    /// line while any is still running. Every frame.
-    pub(crate) fn poll_exports(&mut self, ctx: &egui::Context) {
+    /// Report the exports that have landed. Every frame.
+    pub(crate) fn poll_exports(&mut self) {
         let mut landed = Vec::new();
-        self.exports.retain(|job| match job.poll() {
+        self.exports.retain(|e| match e.job.poll() {
             Ok(None) => true,
             Ok(Some(d)) => {
                 landed.push(Some(d));
@@ -1769,30 +1809,25 @@ impl OndinApp {
                 None => self.session.fail("Could not export: the writer stopped"),
             }
         }
-        if !self.exports.is_empty() {
-            // Said again so it outlasts the status line's hold, but only while
-            // nothing newer has replaced it.
-            let status = self.session.status();
-            if status.text == EXPORTING && status.at.elapsed().as_secs_f32() > 1.0 {
-                self.session.info(EXPORTING);
-            }
-            ctx.request_repaint_after(std::time::Duration::from_secs(1));
-        }
     }
 
     /// Wait for every running export and report it (tests only).
     #[cfg(test)]
     pub(crate) fn settle_exports(&mut self) {
-        for job in std::mem::take(&mut self.exports) {
-            match job.wait() {
+        for e in std::mem::take(&mut self.exports) {
+            match e.job.wait() {
                 Some(d) => self.land_export(d),
                 None => self.session.fail("Could not export: the writer stopped"),
             }
         }
     }
 
-    /// Report a finished export, and remember where it went.
+    /// Report a finished export, and remember where it went; a cancelled one
+    /// says nothing, its cancel having said it.
     fn land_export(&mut self, d: Delivered) {
+        if d.cancelled {
+            return;
+        }
         let Delivered {
             written,
             skipped,
@@ -1802,6 +1837,8 @@ impl OndinApp {
             where_,
             head,
             asker,
+            name,
+            cancelled: _,
         } = d;
         // A report landing on another tab says which document it was for.
         let whose = match &asker {
@@ -1825,8 +1862,12 @@ impl OndinApp {
         }
         // The count first, the loss next, the path last: `OndinApp::status_bar`
         // truncates, and the folder can be re-derived from *Show in folder*.
+        // One file by its name, so a report is never mistaken for another export's.
         let head = match (head, to_folder, replaced) {
             (Some(head), ..) => head,
+            (None, false, _) | (None, true, 0) if written == 1 && name.is_some() => {
+                format!("Exported {}", name.unwrap_or_default())
+            }
             (None, false, _) | (None, true, 0) => export_count(written),
             (None, true, n) => format!("{} ({n} replaced)", export_count(written)),
         };
@@ -2050,21 +2091,21 @@ impl OndinApp {
         let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
         let turn = self.export_turns.ticket();
         let asker = self.session.path.clone();
-        self.spawn_export(move || {
+        let label = path
+            .file_name()
+            .map_or_else(|| "PDF".into(), |n| n.to_string_lossy().into_owned());
+        self.spawn_export(label, move |cancel| {
             ondin_core::text::register_font_data(&resolved.text_fonts());
             let mut out = Delivered {
-                written: 0,
-                skipped: 0,
-                replaced: 0,
-                to_folder: false,
-                failed: None,
-                where_: path.parent().map(Into::into).unwrap_or_default(),
-                head: None,
                 asker,
+                ..Delivered::empty(path.parent().map(Into::into).unwrap_or_default())
             };
             let made =
                 ondin_export::pdf::pdf_pages(&doc, &resolved, &pages, ondin_core::ExportText::Live);
             turn.wait();
+            if cancel.load(Ordering::Relaxed) {
+                return Delivered::cancelled();
+            }
             let Some(export) = made else {
                 out.failed = Some("the PDF could not be made".into());
                 return out;
@@ -2152,9 +2193,12 @@ impl OndinApp {
         };
         let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
         let asker = self.session.path.clone();
-        self.spawn_export(move || Delivered {
+        let label = path
+            .file_name()
+            .map_or_else(|| "code".into(), |n| n.to_string_lossy().into_owned());
+        self.spawn_export(label, move |cancel| Delivered {
             asker,
-            ..write_code(&doc, &resolved, &subjects, target, &path)
+            ..write_code(&doc, &resolved, &subjects, target, &path, cancel)
         });
     }
 }
@@ -2168,25 +2212,25 @@ fn code_archive_name(layer: &str) -> Option<String> {
 }
 
 /// Write `subjects` as `target` code into the zip at `path`, off the UI thread,
-/// reported as an export is.
+/// reported as an export is; nothing is written once `cancel` is set.
 fn write_code(
     doc: &ondin_core::Document,
     resolved: &ondin_core::Resolved,
     subjects: &[NodeId],
     target: ondin_export::code::Target,
     path: &std::path::Path,
+    cancel: &AtomicBool,
 ) -> Delivered {
     let export = target.export(doc, resolved, subjects);
+    if cancel.load(Ordering::Relaxed) {
+        return Delivered::cancelled();
+    }
     let written = export.zip().and_then(|bytes| std::fs::write(path, bytes));
     Delivered {
         written: usize::from(written.is_ok()),
-        skipped: 0,
-        replaced: 0,
-        to_folder: false,
         failed: written.err().map(|e| e.to_string()),
-        where_: path.parent().map(Into::into).unwrap_or_default(),
         head: Some(code_export_summary(target, &export)),
-        asker: None,
+        ..Delivered::empty(path.parent().map(Into::into).unwrap_or_default())
     }
 }
 
@@ -2364,9 +2408,6 @@ enum Destination {
     Archive(std::path::PathBuf),
 }
 
-/// The status line's word while an export runs.
-const EXPORTING: &str = "Exporting…";
-
 /// The order export workers write in: the order they were asked for. They render
 /// side by side, but each writes only once every earlier one has, so two
 /// re-exports on save leave the later save's files, never a mix.
@@ -2436,10 +2477,60 @@ pub(crate) struct Delivered {
     /// The file of the document that asked, so a report landing on another tab
     /// names it.
     asker: Option<std::path::PathBuf>,
+    /// The one file written by name, which the report shows instead of a count.
+    name: Option<String>,
+    /// Cancelled before it wrote anything ([`OndinApp::cancel_exports`]).
+    cancelled: bool,
+}
+
+impl Delivered {
+    /// Nothing written yet, to `where_`.
+    fn empty(where_: std::path::PathBuf) -> Self {
+        Self {
+            written: 0,
+            skipped: 0,
+            replaced: 0,
+            to_folder: false,
+            failed: None,
+            where_,
+            head: None,
+            asker: None,
+            name: None,
+            cancelled: false,
+        }
+    }
+
+    /// An export cancelled before it wrote.
+    fn cancelled() -> Self {
+        Self {
+            cancelled: true,
+            ..Self::empty(Default::default())
+        }
+    }
+}
+
+/// An export on its worker, with the flag that cancels it and what the status
+/// bar calls it.
+pub(crate) struct RunningExport {
+    job: crate::job::Job<Delivered>,
+    cancel: Arc<AtomicBool>,
+    label: String,
+}
+
+impl RunningExport {
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+}
+
+/// A planned path's file name, folders and all left off.
+fn file_name_of(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
 /// Render `files` and write them to `destination`, off the UI thread, writing
-/// when `turn` comes.
+/// when `turn` comes; nothing is rendered further or written once `cancel` is
+/// set.
 ///
 /// A failure stops nothing that has already succeeded, and is reported rather
 /// than raised.
@@ -2449,10 +2540,14 @@ fn deliver(
     files: &[PlannedFile],
     destination: Destination,
     turn: &Turn,
+    cancel: &AtomicBool,
 ) -> Delivered {
     let mut rendered: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
     let mut skipped = 0usize;
     for f in files {
+        if cancel.load(Ordering::Relaxed) {
+            return Delivered::cancelled();
+        }
         match ondin_export::plan::render(doc, resolved, f) {
             Some(bytes) => rendered.push((f.path.clone(), bytes)),
             // The one refusal both writers make: a subject with no bounds at
@@ -2461,19 +2556,17 @@ fn deliver(
         }
     }
     let mut out = Delivered {
-        written: 0,
         skipped,
-        replaced: 0,
-        to_folder: false,
-        failed: None,
-        where_: Default::default(),
-        head: None,
-        asker: None,
+        ..Delivered::empty(Default::default())
     };
     if rendered.is_empty() {
         return out;
     }
+    // Asked after the wait too: an earlier export can hold the turn a while.
     turn.wait();
+    if cancel.load(Ordering::Relaxed) {
+        return Delivered::cancelled();
+    }
     // The folder arm owes a replacement count (§15 D636): a File or Archive was
     // named in a save dialog, but a Folder export can arrive with no dialog
     // (`export_all` takes `prefs.export_dir`, and *Re-export on save* fires it
@@ -2490,6 +2583,7 @@ fn deliver(
                 Ok(()) => out.written = 1,
                 Err(e) => out.failed = Some(e.to_string()),
             }
+            out.name = path.file_name().map(|n| n.to_string_lossy().into_owned());
         }
         Destination::Archive(path) => {
             out.where_ = path.parent().map(Into::into).unwrap_or_default();
@@ -2523,6 +2617,9 @@ fn deliver(
             }
             out.to_folder = true;
             out.where_ = dir;
+            if let [(name, _)] = rendered.as_slice() {
+                out.name = Some(file_name_of(name));
+            }
         }
     }
     out
@@ -3643,7 +3740,11 @@ mod export_all_scope_tests {
         assert_eq!(layers.len(), 2, "fixture: both layers are collected");
         let files = app.export_plan(&layers);
         app.write_export(files, Destination::Folder(dir.clone()));
-        assert_eq!(app.session.status().text, EXPORTING, "it says it started");
+        assert_eq!(
+            app.exporting().as_deref(),
+            Some("Exporting 2 files…"),
+            "it says it started"
+        );
         app.settle_exports();
 
         let on_disk: Vec<String> = std::fs::read_dir(&dir)
@@ -3720,8 +3821,8 @@ mod export_all_scope_tests {
         app.settle_exports();
         let first = app.session.status().text.clone();
         assert!(
-            first.starts_with("Exported 1 file"),
-            "the first run writes it: {first:?}"
+            first.starts_with("Exported Icon"),
+            "the first run writes it, by name: {first:?}"
         );
         assert!(
             !first.contains("replaced"),
@@ -3751,10 +3852,75 @@ mod export_all_scope_tests {
         app.settle_exports();
         let file = app.session.status().text.clone();
         assert_eq!(
-            file, "Exported 1 file",
-            "a save-dialog destination reports as it always did"
+            file, "Exported named.png",
+            "a save-dialog destination names its file and not its folder"
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// *Cancel* stops an export from writing: the worker, held at its turn here,
+    /// finds the flag set and leaves the folder empty, the status bar no longer
+    /// counts it, and its landing says nothing over *Export cancelled*.
+    ///
+    /// flip: both of `deliver`'s flag checks removed → fails at "nothing written".
+    /// Either alone does not bite: which one the worker meets first depends on
+    /// whether its render started before the cancel, and the test cannot hold it
+    /// between the two without a sleep.
+    #[test]
+    fn a_cancelled_export_writes_nothing() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let parent = app.session.doc.first_page();
+        let rect = app.session.ids.mint();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: rect,
+                parent,
+                index: 0,
+                kind: ondin_core::NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: Some("Icon".into()),
+            },
+            ondin_core::Operation::SetExports {
+                id: rect,
+                exports: ondin_core::keyed_by_position([ExportSpec::new(
+                    ExportFormat::Png,
+                    ExportScale::Times(1.0),
+                )]),
+            },
+        ])));
+        let dir = std::env::temp_dir().join(format!("ondin-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // An earlier ticket, held: the export renders, then waits to write.
+        let held = app.export_turns.ticket();
+        app.write_export(
+            app.export_plan(&app.exportable_layers()),
+            Destination::Folder(dir.clone()),
+        );
+        assert_eq!(app.exporting().as_deref(), Some("Exporting Icon.png…"));
+        app.cancel_exports();
+        assert_eq!(app.exporting(), None, "a cancelled export is not counted");
+        assert_eq!(app.session.status().text, "Export cancelled");
+        drop(held);
+        app.settle_exports();
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "nothing written"
+        );
+        assert_eq!(
+            app.session.status().text,
+            "Export cancelled",
+            "landed unsaid"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3801,11 +3967,11 @@ mod export_all_scope_tests {
         assert_eq!(app.exports.len(), 1, "on a worker");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while !app.exports.is_empty() && std::time::Instant::now() < deadline {
-            app.poll_exports(&ctx);
+            app.poll_exports();
             std::thread::yield_now();
         }
         assert!(
-            app.session.status().text.starts_with("Exported 1 file"),
+            app.session.status().text.starts_with("Exported Icon"),
             "the frame loop reports it: {:?}",
             app.session.status().text
         );
@@ -3877,6 +4043,7 @@ mod code_export_tests {
             &subjects,
             Target::React,
             &zip,
+            &AtomicBool::new(false),
         );
         app.land_export(d);
         assert!(

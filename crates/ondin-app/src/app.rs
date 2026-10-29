@@ -761,6 +761,8 @@ pub struct OndinApp {
     pub(crate) exports: Vec<crate::job::Job<crate::panels::Delivered>>,
     /// Dropped and picked files being read on workers, oldest first (`crate::import`).
     pub(crate) imports: Vec<crate::import::Import>,
+    /// *Copy as PNG*'s render on a worker, and how many layers it shows.
+    pub(crate) png_copy: Option<(crate::job::Job<Option<ondin_export::png::Raster>>, usize)>,
     /// The order those exports write in.
     pub(crate) export_turns: crate::panels::ExportTurns,
     /// The window's context, for work that must wake the frame loop from a worker.
@@ -1368,6 +1370,7 @@ impl OndinApp {
             simplifying: None,
             exports: Vec::new(),
             imports: Vec::new(),
+            png_copy: None,
             export_turns: Default::default(),
             egui_ctx: ctx.clone(),
             var_browser: None,
@@ -1781,6 +1784,7 @@ impl eframe::App for OndinApp {
         self.watch_kits(&ctx);
         self.poll_simplify();
         self.poll_imports();
+        self.poll_png_copy();
         if !self.focus {
             self.inspector_panel(&ctx);
             self.path_bar(&ctx);
@@ -4127,7 +4131,9 @@ impl OndinApp {
     }
 
     /// *Copy as PNG* — the selection as a picture on the clipboard at `scale`×,
-    /// transparent.
+    /// transparent, rendered on a worker from a copy of the committed document;
+    /// [`Self::poll_png_copy`] hands it to the clipboard. A second copy replaces
+    /// one still rendering.
     ///
     /// `raster_of`, not `png_of`: `arboard::ImageData` takes raw RGBA, and encoded PNG
     /// bytes would paste as noise. Ordered as in [`Self::copy_as_svg`]. No
@@ -4137,9 +4143,35 @@ impl OndinApp {
         if ids.is_empty() {
             return;
         }
-        let Some(raster) =
-            Self::png_for_the_clipboard(&self.session.doc, &self.session.resolved, &ids, scale)
-        else {
+        // `arboard` directly, since egui's clipboard is text-only; refused on a headless app.
+        if !clipboard_is_reachable() {
+            self.session
+                .info("Copying to the clipboard is off in this build".to_string());
+            return;
+        }
+        let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
+        let n = ids.len();
+        let job = crate::job::Job::spawn("ondin-copy-png", &self.egui_ctx, move || {
+            Self::png_for_the_clipboard(&doc, &resolved, &ids, scale)
+        });
+        self.png_copy = Some((job, n));
+        self.session.info("Copying as PNG…");
+    }
+
+    /// Put *Copy as PNG*'s picture on the clipboard once its render lands.
+    fn poll_png_copy(&mut self) {
+        let Some((job, _)) = &self.png_copy else {
+            return;
+        };
+        let raster = match job.poll() {
+            Ok(None) => return,
+            Ok(Some(raster)) => raster,
+            Err(()) => None,
+        };
+        let Some((_, n)) = self.png_copy.take() else {
+            return;
+        };
+        let Some(raster) = raster else {
             self.session.info("Nothing to copy as PNG");
             return;
         };
@@ -4149,18 +4181,12 @@ impl OndinApp {
             height: h as usize,
             bytes: raster.rgba.into(),
         };
-        // `arboard` directly, since egui's clipboard is text-only; refused on a headless app.
-        if !clipboard_is_reachable() {
-            self.session
-                .info("Copying to the clipboard is off in this build".to_string());
-            return;
-        }
         let wrote = with_clipboard(|c| c.set_image(image))
             .unwrap_or(Err(arboard::Error::ClipboardNotSupported));
         match wrote {
             Ok(()) => self
                 .session
-                .info(format!("Copied {} layer(s) as PNG, {w}×{h}", ids.len())),
+                .info(format!("Copied {n} layer(s) as PNG, {w}×{h}")),
             Err(e) => self
                 .session
                 .info(format!("Could not copy the picture: {e}")),
@@ -9230,6 +9256,27 @@ mod copy_as_png_tests {
         .expect("paint");
         let res = Resolved::rebuild(&doc);
         (doc, res, rect)
+    }
+
+    /// With the clipboard out of reach (a headless app), *Copy as PNG* says so and
+    /// starts no render it could not deliver.
+    ///
+    /// flip: `copy_as_png` asking `clipboard_is_reachable` after spawning the render
+    /// → fails at "no render".
+    #[test]
+    fn copy_as_png_without_a_clipboard_renders_nothing() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let (doc, _, rect) = one_rect();
+        app.session.doc = doc;
+        app.session.resolved = Resolved::rebuild(&app.session.doc);
+        app.session.selection.set_one(rect);
+        app.copy_as_png(1);
+        assert_eq!(
+            app.session.status().text,
+            "Copying to the clipboard is off in this build"
+        );
+        assert!(app.png_copy.is_none(), "no render");
     }
 
     /// *Copy as PNG* hands the clipboard raw RGBA at one device pixel per world unit.

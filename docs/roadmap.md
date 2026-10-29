@@ -14,8 +14,6 @@ Each runs once per action on the frame and scales with a picture, a selection, t
 library, so a large one freezes the window. Files, pictures and SVG markup already read on a worker
 (`crate::import`).
 
-- **Copy as PNG** (`OndinApp::copy_as_png`): the selection is rendered on the CPU at the chosen scale
-  on the frame.
 - **Library refresh** (`library::state` `refresh`): `scan::scan` opens every document and may load
   one whole (`read_meta`), on the frame, from Duplicate, Move, the kit watch, `set_kit_at`, the kit
   picker and a pinning save. Slow on a cloud-synced folder.

@@ -627,6 +627,25 @@ impl ImageStore {
         }
     }
 
+    /// Hold `data`, decoded by [`decode`] elsewhere, under `id` unless it is held
+    /// already. Clears a failure recorded for `id`, since these pixels drew.
+    pub fn adopt(&mut self, id: &ImageId, data: ImageData) {
+        self.failed.remove(id);
+        if let Some(entry) = self.entries.get_mut(id) {
+            entry.touched = self.clock;
+            return;
+        }
+        let bytes = data.data.data().len();
+        self.entries.insert(
+            id.clone(),
+            Entry {
+                data,
+                bytes,
+                touched: self.clock,
+            },
+        );
+    }
+
     fn ensure(&mut self, id: &ImageId, bytes: &[u8], format: ImageFormat) {
         if let Some(entry) = self.entries.get_mut(id) {
             entry.touched = self.clock;
@@ -742,7 +761,8 @@ fn signature_is_accepted(bytes: &[u8]) -> bool {
     }
 }
 
-/// Encoded bytes to straight-alpha RGBA8.
+/// Encoded bytes to straight-alpha RGBA8, on any thread: an import decodes on a
+/// worker and hands the pixels to [`ImageStore::adopt`].
 ///
 /// The claimed format is a hint, not the authority: `image` sniffs the content.
 /// The entry's format still matters for what an SVG data URI and *Export original*
@@ -752,7 +772,7 @@ fn signature_is_accepted(bytes: &[u8]) -> bool {
 /// D600): cargo unifies features, so dependencies such as `arboard` add a decoder
 /// per platform and a mislabelled file would draw on one and not another; see
 /// [`signature_is_accepted`].
-fn decode(bytes: &[u8], format: ImageFormat) -> Result<ImageData, DecodeError> {
+pub fn decode(bytes: &[u8], format: ImageFormat) -> Result<ImageData, DecodeError> {
     let hinted = match format {
         ImageFormat::Png => image::ImageFormat::Png,
         ImageFormat::Jpeg => image::ImageFormat::Jpeg,
@@ -1387,6 +1407,24 @@ mod tests {
         assert_eq!(store.get(&id("bad")), None);
         assert_eq!(store.failure(&id("bad")), Some(&DecodeError::Corrupt));
         assert!(store.is_empty(), "a refusal must not occupy the budget");
+    }
+
+    /// Pixels decoded elsewhere are held under their id, answer `get` and replace a
+    /// refusal remembered for it.
+    ///
+    /// flip: `adopt` leaving `failed` alone → fails at "the refusal is forgotten".
+    #[test]
+    fn adopted_pixels_are_held_and_forget_a_refusal() {
+        let mut store = ImageStore::new();
+        let _ = store.insert(&id("a"), b"not an image", ImageFormat::Png);
+        let pixels = decode(&png_2x2(), ImageFormat::Png).expect("a PNG");
+        store.adopt(&id("a"), pixels);
+        assert_eq!(
+            store.get(&id("a")).map(|d| (d.width, d.height)),
+            Some((2, 2))
+        );
+        assert_eq!(store.failure(&id("a")), None, "the refusal is forgotten");
+        assert_eq!(store.insert(&id("a"), &[], ImageFormat::Png), Ok((2, 2)));
     }
 
     /// A mislabelled image decodes as what it is; the bytes are the authority.

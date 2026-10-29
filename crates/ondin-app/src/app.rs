@@ -759,6 +759,8 @@ pub struct OndinApp {
     pub(crate) simplifying: Option<crate::path_bar::Simplifying>,
     /// Exports rendering and writing on workers (`panels::export`).
     pub(crate) exports: Vec<crate::job::Job<crate::panels::Delivered>>,
+    /// Dropped and picked files being read on workers, oldest first (`crate::import`).
+    pub(crate) imports: Vec<crate::import::Import>,
     /// The order those exports write in.
     pub(crate) export_turns: crate::panels::ExportTurns,
     /// The window's context, for work that must wake the frame loop from a worker.
@@ -1365,6 +1367,7 @@ impl OndinApp {
             offset_card: None,
             simplifying: None,
             exports: Vec::new(),
+            imports: Vec::new(),
             export_turns: Default::default(),
             egui_ctx: ctx.clone(),
             var_browser: None,
@@ -1777,6 +1780,7 @@ impl eframe::App for OndinApp {
 
         self.watch_kits(&ctx);
         self.poll_simplify();
+        self.poll_imports();
         if !self.focus {
             self.inspector_panel(&ctx);
             self.path_bar(&ctx);
@@ -5780,8 +5784,9 @@ impl OndinApp {
         }
     }
 
-    /// Pick image files and load the cursor with them (`Tool::Image`). The tool is only
-    /// armed if something loaded; a placement tool with nothing to place would look hung.
+    /// Pick image files and import them off the frame (`crate::import`): pictures load
+    /// the cursor (`Tool::Image`), armed only if something loaded, since a placement
+    /// tool with nothing to place would look hung; vector art lands where a paste would.
     pub(crate) fn place_image_action(&mut self) {
         let Some(paths) = rfd::FileDialog::new()
             .add_filter(
@@ -5792,41 +5797,16 @@ impl OndinApp {
         else {
             return;
         };
-        let (mut loaded, mut failed, mut vector) = (Vec::new(), Vec::new(), Vec::new());
-        for path in paths {
-            // Vector art becomes layers now, where a paste would put them; only
-            // pictures go on the Image tool's cursor.
-            if let Ok(bytes) = std::fs::read(&path)
-                && is_vector(&bytes)
-            {
-                vector.push((image_name(&path), bytes));
-                continue;
-            }
-            match self.load_image_file(&path) {
-                Ok(image) => loaded.push(image),
-                Err(why) => failed.push(
-                    why.message(
-                        &path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| path.display().to_string()),
-                    ),
-                ),
-            }
-        }
-        if !failed.is_empty() {
-            self.session.fail(failed.join("; "));
-        }
-        let n = loaded.len();
-        if n > 0 {
-            self.pending_images = loaded;
-            self.choose_tool(Tool::Image);
-            self.session.info(match n {
-                1 => "Click to place the image".to_string(),
-                n => format!("Click to place {n} images"),
-            });
-        }
-        self.import_vector_files(vector, None, Vec::new(), n > 0);
+        let files = paths
+            .into_iter()
+            .map(|path| crate::import::Incoming {
+                name: image_name(&path),
+                bytes: None,
+                path: Some(path),
+            })
+            .collect();
+        let ctx = self.egui_ctx.clone();
+        self.start_import(&ctx, files, crate::import::Door::Place);
     }
 
     /// Pick one file and give it to the picture in `slot`; also the repair for a picture
@@ -5932,40 +5912,22 @@ impl OndinApp {
         self.load_image_bytes(bytes, file_extension(path), Some(image_name(path)))
     }
 
-    /// [`Self::load_image_file`] without the file: hash, sniff, decode and name bytes in
-    /// hand — the one path for pick, drop and paste. `ext` is a second opinion when the
-    /// magic number says nothing; `None` for a paste.
+    /// [`read_picture`] on the frame, its pixels straight into the decode cache: the
+    /// paste's and *Replace image*'s path.
     fn load_image_bytes(
         &mut self,
         bytes: Vec<u8>,
         ext: Option<String>,
         name: Option<String>,
     ) -> Result<LoadedImage, ImageRefusal> {
-        let Some(format) = image_format_of(ext.as_deref(), &bytes) else {
-            return Err(ImageRefusal::NotAnImage);
-        };
-        let id = content_hash(&bytes);
-        // Decoded here: gives the intrinsic size and proves the file drawable.
-        let (w, h) = self
-            .canvas
-            .images_mut()
-            .insert(&id, &bytes, format)
-            .map_err(ImageRefusal::Decode)?;
-        Ok(LoadedImage {
-            entry: ImageEntry {
-                source: ImageSource::Embedded(bytes.into()),
-                format,
-                width: w,
-                height: h,
-            },
-            id,
-            intrinsic: ondin_core::kurbo::Size::new(f64::from(w), f64::from(h)),
-            name,
-        })
+        let (image, pixels) = read_picture(bytes, ext, name)?;
+        self.canvas.images_mut().adopt(&image.id, pixels);
+        Ok(image)
     }
 
-    /// Take whatever was dropped on the window this frame and place it. Each
-    /// `DroppedFile` carries bytes (a browser drag) or a path (a file manager). The
+    /// Take whatever was dropped on the window this frame and import it off the frame
+    /// (`crate::import`). Each `DroppedFile` carries bytes (a browser drag) or a path
+    /// (a file manager), read on the worker. The
     /// point comes from [`Self::drop_point`] (no Windows drop event carries one), shared
     /// with [`Self::draw_drop_indicator`].
     pub(crate) fn take_dropped_images(&mut self, ctx: &egui::Context) {
@@ -5975,102 +5937,19 @@ impl OndinApp {
         }
         let at = self.drop_point(ctx);
         let alone = dropped.len() == 1;
-        let (mut loaded, mut failed, mut vector) = (Vec::new(), Vec::new(), Vec::new());
-        for file in dropped {
-            let name = file
-                .path
-                .as_deref()
-                .map(image_name)
-                .unwrap_or_else(|| file.name.clone());
-            let bytes = match (&file.bytes, &file.path) {
-                (Some(b), _) => Some(b.to_vec()),
-                (None, Some(p)) => std::fs::read(p).ok(),
-                (None, None) => None,
-            };
-            let ext = file.path.as_deref().and_then(file_extension);
-            match bytes {
-                // Vector art becomes layers, never a rasterized picture.
-                Some(b) if is_vector(&b) => vector.push((name, b)),
-                Some(b) => match self.load_image_bytes(b, ext, Some(name.clone())) {
-                    Ok(image) => loaded.push(image),
-                    Err(why) => failed.push(why.message(&name)),
-                },
-                None => failed.push(ImageRefusal::NotAnImage.message(&name)),
-            }
-        }
-        if !failed.is_empty() {
-            self.session.fail(failed.join("; "));
-        }
-        let mut selected = Vec::new();
-        let pictures = !loaded.is_empty();
-        if pictures {
-            self.drop_images_at(loaded, at, alone);
-            selected.extend_from_slice(self.session.selection.ids());
-        }
-        self.import_vector_files(vector, at, selected, pictures);
-    }
-
-    /// Import dropped or picked SVG and PDF files as layers, cascaded from `at` as
-    /// dropped pictures are, and select them beside `selected` (what the same gesture
-    /// placed already). Each file says what it made, after the gesture's own report
-    /// when `reported` says it wrote one; a file that will not read says why.
-    fn import_vector_files(
-        &mut self,
-        files: Vec<(String, Vec<u8>)>,
-        at: Option<Point>,
-        mut selected: Vec<NodeId>,
-        reported: bool,
-    ) {
-        if files.is_empty() {
-            return;
-        }
-        let (mut said, mut failed) = (Vec::new(), Vec::new());
-        for (i, (name, bytes)) in files.into_iter().enumerate() {
-            let step = DROP_CASCADE * i as f64;
-            let stem = std::path::Path::new(&name)
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| name.clone());
-            let at = at.map(|p| p + Vec2::new(step, step));
-            let pdf = ondin_export::pdf_in::looks_like_pdf(&bytes);
-            let outcome = match pdf {
-                true => self.import_pdf(bytes, at, &stem),
-                false => match String::from_utf8(bytes) {
-                    Ok(text) => self.import_svg(&text, at, Some(&stem)),
-                    Err(_) => crate::canvas::SvgImport::Unreadable,
-                },
-            };
-            let kind = if pdf { "PDF" } else { "SVG" };
-            match outcome {
-                crate::canvas::SvgImport::Placed(made) => {
-                    said.push(format!("Imported {name} — {made}"));
-                    selected.extend_from_slice(self.session.selection.ids());
-                }
-                crate::canvas::SvgImport::TooDeep => {
-                    failed.push(format!("{name} is nested too deeply to read"))
-                }
-                crate::canvas::SvgImport::Locked => {
-                    failed.push(format!("{name} is password-protected"))
-                }
-                crate::canvas::SvgImport::Unreadable => {
-                    failed.push(format!("{name} could not be read as {kind}"))
-                }
-            }
-        }
-        if !failed.is_empty() {
-            self.session.fail(failed.join("; "));
-        }
-        if said.is_empty() {
-            return;
-        }
-        // The gesture's own report goes first; an error joins on its own.
-        let shown = self.session.status();
-        let placed = (reported && shown.kind == StatusKind::Info)
-            .then(|| shown.text.clone())
-            .filter(|t| !t.is_empty());
-        said.splice(0..0, placed);
-        self.session.selection.set(selected);
-        self.session.info(said.join(crate::session::STATUS_JOIN));
+        let files = dropped
+            .into_iter()
+            .map(|file| crate::import::Incoming {
+                name: file
+                    .path
+                    .as_deref()
+                    .map(image_name)
+                    .unwrap_or_else(|| file.name.clone()),
+                bytes: file.bytes,
+                path: file.path,
+            })
+            .collect();
+        self.start_import(ctx, files, crate::import::Door::Drop { at, alone });
     }
 
     /// Place dropped images, or hand one to the shape under the pointer: onto a shape it
@@ -6078,7 +5957,12 @@ impl OndinApp {
     /// layers, cascaded since N files arrive at one point. `may_replace` says the
     /// whole drop was this one file, the gate the drop pill reads (`drop_label`): a
     /// picture that came with an SVG or a refused file never replaces.
-    fn drop_images_at(&mut self, loaded: Vec<LoadedImage>, at: Option<Point>, may_replace: bool) {
+    pub(crate) fn drop_images_at(
+        &mut self,
+        loaded: Vec<LoadedImage>,
+        at: Option<Point>,
+        may_replace: bool,
+    ) {
         let n = loaded.len();
         // A single picture replaces the fill under it, only with a real drop point:
         // the paste's selection-only `None` arm would replace whatever was selected.
@@ -6285,12 +6169,12 @@ pub(crate) fn bound_families(
 }
 
 /// A path's extension, lowercased later by [`image_format_of`].
-fn file_extension(path: &std::path::Path) -> Option<String> {
+pub(crate) fn file_extension(path: &std::path::Path) -> Option<String> {
     path.extension().and_then(|e| e.to_str()).map(str::to_owned)
 }
 
 /// World units between one dropped layer and the next, not scaled by zoom.
-const DROP_CASCADE: f64 = 24.0;
+pub(crate) const DROP_CASCADE: f64 = 24.0;
 
 /// What a layer made from this file is called: its own name.
 fn image_name(path: &std::path::Path) -> String {
@@ -6302,14 +6186,9 @@ fn image_name(path: &std::path::Path) -> String {
 /// Whether a byte run is SVG, sniffed from the bytes (a browser drop's name is not
 /// trustworthy). A byte adapter over `svg_in::looks_like_svg`, capped at 512 bytes and
 /// decoded lossily because the cap can split a multi-byte character.
-fn looks_like_svg(bytes: &[u8]) -> bool {
+pub(crate) fn looks_like_svg(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(512)];
     ondin_core::svg_in::looks_like_svg(&String::from_utf8_lossy(head))
-}
-
-/// Whether a byte run is vector art that becomes layers: SVG, or PDF by its header.
-fn is_vector(bytes: &[u8]) -> bool {
-    looks_like_svg(bytes) || ondin_export::pdf_in::looks_like_pdf(bytes)
 }
 
 /// Why a byte run did not become a placeable picture: not a picture at all, or one
@@ -6324,7 +6203,7 @@ pub(crate) enum ImageRefusal {
 
 impl ImageRefusal {
     /// What to tell the user about `name`, as one sentence with the numbers.
-    fn message(&self, name: &str) -> String {
+    pub(crate) fn message(&self, name: &str) -> String {
         use ondin_render::images::{DecodeError, MAX_DECODED_BYTES, MAX_EDGE};
         match self {
             Self::NotAnImage | Self::Decode(DecodeError::Corrupt) => {
@@ -6516,6 +6395,35 @@ pub(crate) fn content_hash(bytes: &[u8]) -> ImageId {
         let _ = write!(hex, "{b:02x}");
     }
     ImageId(hex)
+}
+
+/// Hash, sniff, decode and name a picture's bytes, on any thread — the one reader
+/// for pick, drop and paste. `ext` is a second opinion when the magic number says
+/// nothing; `None` for a paste. The pixels go to the decode cache when it lands.
+pub(crate) fn read_picture(
+    bytes: Vec<u8>,
+    ext: Option<String>,
+    name: Option<String>,
+) -> Result<(LoadedImage, ondin_core::peniko::ImageData), ImageRefusal> {
+    let Some(format) = image_format_of(ext.as_deref(), &bytes) else {
+        return Err(ImageRefusal::NotAnImage);
+    };
+    let id = content_hash(&bytes);
+    // Decoded here: gives the intrinsic size and proves the file drawable.
+    let pixels = ondin_render::images::decode(&bytes, format).map_err(ImageRefusal::Decode)?;
+    let (w, h) = (pixels.width, pixels.height);
+    let image = LoadedImage {
+        entry: ImageEntry {
+            source: ImageSource::Embedded(bytes.into()),
+            format,
+            width: w,
+            height: h,
+        },
+        id,
+        intrinsic: ondin_core::kurbo::Size::new(f64::from(w), f64::from(h)),
+        name,
+    };
+    Ok((image, pixels))
 }
 
 /// Which of the four formats a picked file is. The bytes decide, as the decoder
@@ -13963,6 +13871,7 @@ mod library_wiring_tests {
             let _ = ctx.run_ui(input, |ui| {
                 eframe::App::ui(app, ui, &mut frame);
             });
+            app.settle_imports();
         };
         // The revision, not a child count: `drop_images_at` picks the parent four ways.
         let kids = |app: &OndinApp| app.session.revision();
@@ -14008,10 +13917,10 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root_dir);
     }
 
-    /// One drop of an SVG, a picture and a file that is neither: the SVG becomes layers
-    /// in a group named for the file, the picture is placed, both end selected, and the
-    /// status keeps the refusal ahead of both reports.
-    /// flip: `take_dropped_images` skipping `import_vector_files` → fails at the group.
+    /// One drop of an SVG, a picture and a file that is neither, read off the frame:
+    /// the SVG becomes layers in a group named for the file, the picture is placed,
+    /// both end selected, and the status keeps the refusal ahead of both reports.
+    /// flip: `land_import` skipping `place_vectors` → fails at the group.
     #[test]
     fn a_dropped_svg_becomes_layers_beside_a_dropped_picture() {
         let ctx = egui::Context::default();
@@ -14042,10 +13951,17 @@ mod library_wiring_tests {
             ],
             ..Default::default()
         };
+        let before = app.session.revision();
         let _ = ctx.run_ui(input, |ui| {
             app.session.next_status_pass();
             app.take_dropped_images(ui.ctx());
         });
+        assert_eq!(
+            (app.session.revision(), app.session.status().text.as_str()),
+            (before, "Importing 3 files…"),
+            "read off the frame, landing at a later poll"
+        );
+        app.settle_imports();
 
         let doc = &app.session.doc;
         let group = ondin_core::subtree_nodes(doc, &[doc.first_page()])
@@ -14138,7 +14054,7 @@ mod library_wiring_tests {
     /// the file and the page, side by side, selected, in one undo step; a PDF of
     /// one page becomes one white frame named for the file.
     ///
-    /// flip: `import_vector_files` reading a PDF as SVG → fails at "two frames".
+    /// flip: `read_one` reading a PDF as SVG → fails at "two frames".
     #[test]
     fn a_dropped_pdf_becomes_a_frame_per_page() {
         use ondin_core::{NodeId, NodeKind};
@@ -14159,6 +14075,7 @@ mod library_wiring_tests {
                 app.session.next_status_pass();
                 app.take_dropped_images(ui.ctx());
             });
+            app.settle_imports();
         };
         let before = app
             .session
@@ -14317,6 +14234,7 @@ mod library_wiring_tests {
                 app.session.next_status_pass();
                 app.take_dropped_images(ui.ctx());
             });
+            app.settle_imports();
         };
         let image_fill = |app: &OndinApp| {
             matches!(
@@ -16252,7 +16170,7 @@ mod svg_sniff_tests {
     /// A picture Ondin will not draw is not reported as one it could not read; the
     /// negative assertion matters, since a message saying both would pass the others.
     ///
-    /// flip: `.ok().ok_or(ImageRefusal::NotAnImage)` back on `load_image_bytes`' `insert` → fails at the first assertion
+    /// flip: `.ok().ok_or(ImageRefusal::NotAnImage)` back on `read_picture`'s `decode` → fails at the first assertion
     #[test]
     fn a_picture_too_big_to_draw_says_so_rather_than_could_not_read() {
         let ctx = egui::Context::default();

@@ -66,6 +66,7 @@ ondin-app/src/
 ├─ pages.rs         the Pages section and the page verbs (below)
 ├─ atomic.rs        write(): temp, sync_all, rename (every record the app keeps)
 ├─ job.rs           Job: one computation on a worker thread, picked up by the frame loop when it lands
+├─ import.rs        files given by a drop or Place image: read on a worker, landed in their tab (app-image-editing.md)
 ├─ library/         the library folder: store, project, scan, recovery, cover, cache; history.rs undo kept between sessions (library.md)
 ├─ kits/            kit chrome: the kit menu and tag, the library's kit index, the insert picker, publish and updates (kits.md)
 ├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback) + canvas interaction and overlays

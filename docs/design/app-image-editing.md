@@ -118,7 +118,23 @@ window onto its picture. There is no crop tool, rail button or `C` key.
 
 - `take_dropped_images` runs every frame from `update`, whatever the tool, **unless
   `OndinApp::modal_is_up`**, reading `raw.dropped_files` (browser drags as bytes, file-manager drops
-  as paths, both to the file dialog's loader).
+  as paths). It and *Place image* (`place_image_action`) hand the files to `crate::import` as
+  `Incoming` (name, bytes or path); neither reads a file on the frame.
+- **An import is read off the frame** (`start_import`, a `crate::job::Job`), so a large PDF, SVG or
+  picture never freezes the window. The worker reads the bytes, decodes pictures
+  (`app::read_picture`) and builds SVG and PDF layers (`canvas::read_svg`, `canvas::read_pdf`) under
+  a stand-in parent the landing replaces, minting ids from an `IdSource` of its own
+  (`session::random_actor`); the session's `IdSource` stays the frame's. Meanwhile the status says
+  *Importing logo.svg…* or *Importing 3 files…*.
+- **`poll_imports` lands it** (editor frame, beside `poll_simplify`), oldest first, held while a drag
+  or a pen run is live, whose end would write back a document from before the import, and while a
+  modal is up, which may be asking about the document as it stands. It lands only in the tab in
+  front when it started (`Tabs::active`), and only while that tab is in front: a tab behind is never
+  written to (`library.md`). An import whose tab has closed is dropped without a word, as is one
+  started on the scratch session no tab shows, once a tab is active. `land_import` adopts the decoded pixels into the decode cache, then places as the door does,
+  against the document at landing: a drop's pictures through `drop_images_at` at the drop's world
+  point, *Place image*'s by arming the Image tool; SVG and PDF through `place_svg` / `place_pdf`
+  (`place_vectors`).
 - Lands at the pointer, cascaded 24 units per file; at the viewport centre with no pointer over the
   canvas. **One transaction per drop** — placements built via `canvas::image_tx` against a document
   advanced per picture (index, free name, embedded-blob check); every picture made is selected.
@@ -132,18 +148,19 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   or an inset canvas border), a pill naming the outcome, and the hover outline on a shape to be
   replaced.
 - SVG is never rasterized: a dropped or placed `.svg` (sniffed by its bytes, `app::looks_like_svg`)
-  is read by `svg_in::import` as a paste is (`canvas::import_svg`, shared with `paste_svg`): one
+  is read by `svg_in::import` through `canvas::read_svg`, the reader a pasted SVG (`import_svg`,
+  on the frame) uses too: one
   group named for the file's stem, centred on the drop point (cascaded `DROP_CASCADE` per file) or
   where a paste would land for the *Place image* dialog, which takes `.svg` and imports at once
   rather than loading the Image tool. Its report (*Imported logo.svg — 5 layers*) follows the
   pictures' in one status, and the drop selects both.
 - A PDF (its `%PDF-` header, `pdf_in::looks_like_pdf`) comes in by the same doors, the drop pill
-  saying *Import PDF* (`canvas::import_pdf`, through `import_vector_files`). Each page becomes a
+  saying *Import PDF* (`canvas::read_pdf`, placed by `place_pdf`). Each page becomes a
   white frame at the page's size — a frame even for one page, so the page keeps its paper and its
   edge — named *brochure*, or *brochure — page 2* of several, in a row `PDF_PAGE_GAP` apart on the
   page, centred where a paste would land: one step, the frames selected, *Imported brochure.pdf —
   340 layers on 12 pages*. Past `pdf_in::MAX_PAGES` the rest
-  are left out and the report says so; the import runs on the frame. A password-protected PDF is
+  are left out and the report says so. A password-protected PDF is
   refused by name.
 - `Ctrl+V` over a picture-only clipboard produces no egui event, so `input::normal_mode` also reads the
   key **release**; `Action::Paste` tries the picture before the in-app layer paste.

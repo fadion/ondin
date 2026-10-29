@@ -4,7 +4,7 @@ How pictures live in a document (`ondin_core::image`, §5.5a): the image table, 
 
 ## 5.5a Images (`image.rs`)
 
-Built: table, reference, brush, decode cache, framing, image editing (`Tool::ImageEdit`: crop gesture and mode strip), orientation, tile scale, reset crop, drop and paste, SVG export (an image fill becomes a `<pattern>` over the encoded original, written once per picture), the missing-image placeholder with *Replace...*, seven per-pixel adjustments in all three writers, and thumbnails. Not built: fetching a linked image. `ImageStore::prepare` skips linked entries (reading files is not `ondin-render`'s job); whoever has the bytes calls `ImageStore::insert`. A link therefore behaves exactly like a missing picture.
+Built: table, reference, brush, decode cache, framing, image editing (`Tool::ImageEdit`: crop gesture and mode strip), orientation, tile scale, reset crop, drop and paste, SVG export (an image fill becomes a `<pattern>` over the encoded original, written once per picture), the missing-image placeholder with *Replace...*, seven per-pixel adjustments in all three writers, and thumbnails. Not built: fetching a linked image. `ImageStore::prepare` skips linked entries (reading files is not `ondin-render`'s job); whoever has the bytes calls `ImageStore::insert`, or decodes them and calls `ImageStore::adopt`. A link therefore behaves exactly like a missing picture.
 
 ### Model
 
@@ -63,6 +63,7 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
 - Holds `peniko::ImageData` (straight RGBA8, `Arc` blob). The CPU `vello_cpu::ImageSource` premultiplies a whole buffer, so `cpu.rs` memoizes per render.
 - **`prepare(doc)` runs every frame** (a hash lookup per entry once decoded).
 - **Budget bounds waste, not the working set**: eviction only drops an image the document stopped carrying, oldest first.
+- **Pixels decoded elsewhere are adopted**: `images::decode` is public, so the app decodes where it reads (off the frame for an import), and `ImageStore::adopt(id, ImageData)` holds the pixels unless the id is held already and forgets a refusal remembered for it, since these pixels drew.
 - **A refused decode is remembered.** Edges above 65535 are refused (`MAX_EDGE`). `MAX_DECODED_BYTES` weighs `width * height * 4` before `into_rgba8` (a small grayscale PNG can expand hugely and abort); error variant `TooMuchPixelData` is separate from `TooLarge`.
 - **Every failure ends at the placeholder** (fills only). Strokes and text with a missing picture draw nothing.
 - **Derived pixels** keyed by `(ImageId, AdjustKey)` (the seven values' bit patterns; neutral never reaches a key), behind a `Mutex`, filled where read. `ImageStore::pixels(&ImageRef)` is what backends paint with; `get(&ImageId)` is the decode and the right question for `has_image`.
@@ -79,13 +80,13 @@ A picture sits in its frame by a fit: `ImageFit` on `ImageRef`, resolved by `Ima
 - **The cursor carries the count** (`Bitmap::Loaded(Remaining)`: crosshair plus chip, exact to 99, `99+` beyond; plain crosshair when empty).
 - **Loaded images live on the app**, cleared by `choose_tool` for anything but `Tool::Image`.
 - **A click fits, a drag draws.** Click: centred, `fitted_image_size` (shrink to fit, never scale up) against the frame under the point or the viewport. Drag: the picture fills the drawn box.
-- **Read, hashed and decoded before arming**, so an undrawable file never becomes a placement.
+- **Read, hashed and decoded before arming** (on the import worker), so an undrawable file never becomes a placement.
 - **Placing the same file twice adds a reference**: caller omits `AddImage` if `Document::has_image`; `build::missing_image_ops` does this for pastes. Ids from other documents are the same key for the same bytes.
 - **Layer name**: the filename, else `"Image N"` (`canvas::image_layer_name`).
 
 ## Dropping and pasting (§9.4)
 
-- `load_image_bytes(bytes, ext, name)` is the one loader (hash, sniff, decode, name); file reading wraps it. Format sniffing takes `Option<&str>` extension; name is `Option<String>`.
+- `app::read_picture(bytes, ext, name)` is the one reader (hash, sniff, decode, name), on any thread, returning the pixels beside the `LoadedImage`. The import worker calls it for a drop or *Place image* (`app-image-editing.md`); `load_image_bytes` calls it on the frame for a clipboard picture and *Replace image*. Pictures inside an SVG or PDF go through `canvas::Decoded` (the `svg_in::ImageSink`), hashed the same way. The extension is `Option<String>`, a second opinion when the magic number says nothing; name is `Option<String>`.
 - **Drop or paste onto a selected shape replaces its picture and keeps framing**; elsewhere makes a layer. Only a drop of one file replaces, counted before SVGs and unreadable files are sorted out, the count the drop pill shows: a picture dropped with an SVG is placed beside it. A locked layer is not a target (`canvas::image_drop_target` uses `query::is_effectively_locked`). A drop must land on the shape (the selection-alone arm is the chord paste). On Windows no drop event carries a position, so `canvas::drop_point` reads `GetCursorPos` mapped against the viewport `inner_rect`; fallback is the viewport centre. Context menu *Paste here* needs a selected shape under the press, else makes a layer at the press.
 - **Drag-over announcement**: `canvas::draw_drop_indicator` outlines the landing frame (`target_artboard`), shows a pill naming the outcome, and outlines the shape to be replaced; the count is of files.
 - **A pasted image is re-encoded to PNG before hashing** (clipboard RGBA has no original), so its id does not dedupe with a file placement.

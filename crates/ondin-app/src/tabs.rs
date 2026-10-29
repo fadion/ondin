@@ -1831,6 +1831,74 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A file dropped on one tab lands there: read while another tab is in front, it
+    /// waits, and lands once its tab comes back and no modal is up; a tab closed
+    /// first takes it unsaid.
+    ///
+    /// flip: `land_ready` landing whatever was read into the tab in front → fails
+    /// at "b untouched"; `poll_imports` without its `modal_is_up` hold → fails at
+    /// "held while a modal is up".
+    #[test]
+    fn an_import_lands_in_the_tab_it_was_dropped_on() {
+        use crate::import::{Door, Incoming};
+        let ctx = egui::Context::default();
+        let root = temp_root("import-tab");
+        let mut app = app_at(&ctx, &root);
+        let (a, b) = (file(&root, "a"), file(&root, "b"));
+        let drop_svg = |app: &mut OndinApp| {
+            let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>"#;
+            let file = Incoming {
+                name: "logo.svg".into(),
+                bytes: Some(std::sync::Arc::from(&svg[..])),
+                path: None,
+            };
+            app.start_import(
+                &ctx,
+                vec![file],
+                Door::Drop {
+                    at: None,
+                    alone: true,
+                },
+            );
+        };
+        let has_logo = |app: &OndinApp| {
+            let doc = &app.session.doc;
+            ondin_core::subtree_nodes(doc, &[doc.first_page()])
+                .into_iter()
+                .any(|id| doc.get(id).unwrap().name() == "logo")
+        };
+        app.open_path(&a);
+        drop_svg(&mut app);
+        app.open_path(&b);
+        let b_before = app.session.revision();
+        app.settle_imports();
+        assert_eq!(app.session.revision(), b_before, "b untouched");
+        assert_eq!(app.imports.len(), 1, "held for a");
+
+        app.activate_tab(app.tab_of_path(&a).unwrap());
+        app.confirming_close = true;
+        app.poll_imports();
+        assert!(!has_logo(&app), "held while a modal is up");
+        app.confirming_close = false;
+        app.poll_imports();
+        assert!(has_logo(&app), "landed in a once it is in front");
+        assert!(app.imports.is_empty());
+
+        app.session.undo();
+        drop_svg(&mut app);
+        app.activate_tab(app.tab_of_path(&b).unwrap());
+        app.close_tab(app.tab_of_path(&a).unwrap());
+        app.settle_imports();
+        assert!(app.imports.is_empty(), "dropped with its tab");
+        assert!(!has_logo(&app), "not into b");
+        assert!(
+            !app.session.status().text.contains("logo"),
+            "unsaid: {}",
+            app.session.status().text
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Opening a document that already has a tab brings that tab forward; the
     /// document is never open twice.
     /// flip: `open_path` skipping its `tab_of_path` lookup → fails at "the same

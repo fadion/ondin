@@ -881,14 +881,13 @@ pub(crate) enum SvgImport {
 /// The space between the frames a many-page PDF is laid out as, in world units.
 const PDF_PAGE_GAP: f64 = 40.0;
 
-/// Where the pictures inside a pasted SVG go (`ondin_core::svg_in::ImageSink`).
-/// The same steps as `OndinApp::load_image_bytes`, which cannot be called
-/// because the importer already borrows `self.session.ids` mutably.
-struct SvgImages<'a> {
-    images: &'a mut ondin_render::ImageStore,
-}
+/// The pictures inside imported SVG or PDF (`ondin_core::svg_in::ImageSink`),
+/// decoded where the import reads, for the decode cache once it lands
+/// ([`OndinApp::adopt_decoded`]), each under its `app::content_hash`.
+#[derive(Default)]
+pub(crate) struct Decoded(Vec<(ondin_core::ImageId, ondin_core::peniko::ImageData)>);
 
-impl ondin_core::svg_in::ImageSink for SvgImages<'_> {
+impl ondin_core::svg_in::ImageSink for Decoded {
     fn place(
         &mut self,
         bytes: Vec<u8>,
@@ -896,7 +895,15 @@ impl ondin_core::svg_in::ImageSink for SvgImages<'_> {
     ) -> Option<(ondin_core::ImageId, ondin_core::ImageEntry)> {
         let id = crate::app::content_hash(&bytes);
         // The decode both proves the file drawable and supplies its size.
-        let (w, h) = self.images.insert(&id, &bytes, format).ok()?;
+        let (w, h) = match self.0.iter().find(|(held, _)| *held == id) {
+            Some((_, data)) => (data.width, data.height),
+            None => {
+                let data = ondin_render::images::decode(&bytes, format).ok()?;
+                let size = (data.width, data.height);
+                self.0.push((id.clone(), data));
+                size
+            }
+        };
         Some((
             id,
             ondin_core::ImageEntry {
@@ -907,6 +914,123 @@ impl ondin_core::svg_in::ImageSink for SvgImages<'_> {
             },
         ))
     }
+}
+
+/// SVG markup read into layers under `parent`, on any thread: the root group named
+/// `name` when given, the pictures decoded into `images`.
+/// [`OndinApp::place_svg`] places and commits it.
+pub(crate) fn read_svg(
+    text: &str,
+    ids: &mut ondin_core::IdSource,
+    parent: NodeId,
+    name: Option<&str>,
+    images: &mut Decoded,
+) -> Result<ondin_core::svg_in::Import, SvgImport> {
+    let mut out = match ondin_core::svg_in::import(text, ids, parent, 0, Some(images)) {
+        Ok(out) => out,
+        Err(ondin_core::svg_in::SvgError::TooDeep) => return Err(SvgImport::TooDeep),
+        Err(_) => return Err(SvgImport::Unreadable),
+    };
+    if out.shapes == 0 {
+        return Err(SvgImport::Unreadable);
+    }
+    if let Some(name) = name
+        && let Some(Operation::CreateNode { name: root, .. }) = root_op(&mut out.tx, out.root)
+    {
+        *root = Some(name.to_string());
+    }
+    Ok(out)
+}
+
+/// The operation creating `root` in `tx`.
+fn root_op(tx: &mut Transaction, root: NodeId) -> Option<&mut Operation> {
+    tx.0.iter_mut()
+        .find(|op| matches!(op, Operation::CreateNode { id, .. } if *id == root))
+}
+
+/// A PDF read into one white frame per page under `parent`, on any thread
+/// ([`read_pdf`]); [`OndinApp::place_pdf`] places and commits it.
+pub(crate) struct PdfRead {
+    ops: Vec<Operation>,
+    /// The frames, in page order, laid out in a row from the origin.
+    frames: Vec<NodeId>,
+    /// The row's extent.
+    size: ondin_core::kurbo::Size,
+    left_out: usize,
+    shapes: usize,
+    skipped: Vec<String>,
+    approximated: Vec<String>,
+}
+
+/// Read a PDF (`ondin_export::pdf_in`) into one white frame per page, its size,
+/// named `name` or, of several, "`name` — page N", side by side under `parent`.
+/// A frame, not a group, so the page keeps its paper and its edge.
+pub(crate) fn read_pdf(
+    bytes: Vec<u8>,
+    ids: &mut ondin_core::IdSource,
+    parent: NodeId,
+    name: &str,
+    images: &mut Decoded,
+) -> Result<PdfRead, SvgImport> {
+    use ondin_export::pdf_in::{PdfInError, import};
+    let pdf = match import(bytes) {
+        Ok(pdf) => pdf,
+        Err(PdfInError::Encrypted) => return Err(SvgImport::Locked),
+        Err(PdfInError::Unreadable) => return Err(SvgImport::Unreadable),
+    };
+    let pages = pdf.pages;
+    let mut read = PdfRead {
+        ops: Vec::new(),
+        frames: Vec::new(),
+        size: ondin_core::kurbo::Size::new(
+            pages
+                .iter()
+                .map(|p| p.size.width + PDF_PAGE_GAP)
+                .sum::<f64>()
+                - PDF_PAGE_GAP,
+            pages.iter().map(|p| p.size.height).fold(0.0, f64::max),
+        ),
+        left_out: pdf.left_out,
+        shapes: 0,
+        skipped: Vec::new(),
+        approximated: Vec::new(),
+    };
+    let mut x = 0.0;
+    for (i, page) in pages.iter().enumerate() {
+        let frame = ids.mint();
+        read.ops.push(Operation::CreateNode {
+            id: frame,
+            parent,
+            index: i,
+            kind: NodeKind::Artboard {
+                size: page.size,
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((x, 0.0))),
+            name: Some(match pages.len() {
+                1 => name.to_string(),
+                _ => format!("{name} — page {}", i + 1),
+            }),
+        });
+        read.ops.push(Operation::SetFills {
+            id: frame,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::Brush::Solid(Color::WHITE).into(),
+                visible: true,
+            }]),
+        });
+        x += page.size.width + PDF_PAGE_GAP;
+        read.frames.push(frame);
+        // A page that will not read stays an empty frame, so the numbering holds.
+        if let Ok(page) = ondin_core::svg_in::import(&page.svg, ids, frame, 0, Some(images)) {
+            read.shapes += page.shapes;
+            read.ops.extend(page.tx.0);
+            read.skipped.extend(page.skipped);
+            read.approximated.extend(page.approximated);
+        }
+    }
+    Ok(read)
 }
 
 impl OndinApp {
@@ -5574,45 +5698,51 @@ impl OndinApp {
         }
     }
 
-    /// Build SVG markup's layers (`ondin_core::svg_in`) as one undo step, centred
-    /// where [`Self::paste_placement`] puts `at`, and select them; `name` names the
-    /// root group (a file's stem). Placed by applying to a clone, reading the bounds
-    /// and correcting the root's transform. The status is the caller's to write.
+    /// Build SVG markup's layers (`ondin_core::svg_in`) on the frame, as
+    /// [`read_svg`] then [`Self::place_svg`]: the paste's door, whose markup is
+    /// already in hand.
     pub(crate) fn import_svg(
         &mut self,
         text: &str,
         at: Option<Point>,
         name: Option<&str>,
     ) -> SvgImport {
-        let (centre, parent, parent_world) = self.paste_placement(at);
-
-        let index = self.child_count(parent);
-        // A sink, so the session's ids and the decode cache are borrowed at once.
-        let mut sink = SvgImages {
-            images: self.canvas.images_mut(),
-        };
-        let mut out = match ondin_core::svg_in::import(
-            text,
-            &mut self.session.ids,
-            parent,
-            index,
-            Some(&mut sink),
-        ) {
-            Ok(out) => out,
-            Err(ondin_core::svg_in::SvgError::TooDeep) => return SvgImport::TooDeep,
-            Err(_) => return SvgImport::Unreadable,
-        };
-        if out.shapes == 0 {
-            return SvgImport::Unreadable;
+        let parent = self.session.page;
+        let mut images = Decoded::default();
+        match read_svg(text, &mut self.session.ids, parent, name, &mut images) {
+            Ok(out) => {
+                self.adopt_decoded(images);
+                self.place_svg(out, at)
+            }
+            Err(why) => why,
         }
-        if let Some(name) = name
-            && let Some(Operation::CreateNode { name: root, .. }) = out
-                .tx
-                .0
-                .iter_mut()
-                .find(|op| matches!(op, Operation::CreateNode { id, .. } if *id == out.root))
+    }
+
+    /// Hand pictures an import decoded to the decode cache.
+    pub(crate) fn adopt_decoded(&mut self, images: Decoded) {
+        for (id, data) in images.0 {
+            self.canvas.images_mut().adopt(&id, data);
+        }
+    }
+
+    /// Commit layers [`read_svg`] built as one undo step, under the parent
+    /// [`Self::paste_placement`] picks for `at` and centred where it puts it, and
+    /// select them. Placed by applying to a clone, reading the bounds and correcting
+    /// the root's transform. The status is the caller's to write.
+    pub(crate) fn place_svg(
+        &mut self,
+        mut out: ondin_core::svg_in::Import,
+        at: Option<Point>,
+    ) -> SvgImport {
+        let (centre, parent, parent_world) = self.paste_placement(at);
+        let index = self.child_count(parent);
+        if let Some(Operation::CreateNode {
+            parent: under,
+            index: at_index,
+            ..
+        }) = root_op(&mut out.tx, out.root)
         {
-            *root = Some(name.to_string());
+            (*under, *at_index) = (parent, index);
         }
 
         let mut probe = self.session.doc.clone();
@@ -5622,12 +5752,7 @@ impl OndinApp {
         if let Some(bounds) = ondin_core::Resolved::rebuild(&probe).world_bounds(out.root) {
             let inv = parent_world.inverse();
             let delta = (inv * centre) - (inv * bounds.center());
-            if let Some(Operation::CreateNode { transform, .. }) = out
-                .tx
-                .0
-                .iter_mut()
-                .find(|op| matches!(op, Operation::CreateNode { id, .. } if *id == out.root))
-            {
+            if let Some(Operation::CreateNode { transform, .. }) = root_op(&mut out.tx, out.root) {
                 *transform = Some(Affine::translate(delta) * transform.unwrap_or(Affine::IDENTITY));
             }
         }
@@ -5654,100 +5779,56 @@ impl OndinApp {
         SvgImport::Placed(msg)
     }
 
-    /// Import a PDF as `svg_in` reads SVG (`ondin_export::pdf_in`): one white frame
-    /// per page, its size, named `name` or, of several, "`name` — page N", in a row
-    /// on the page centred where a paste would land: one step, the frames selected.
-    /// A frame, not a group, so the page keeps its paper and its edge.
-    pub(crate) fn import_pdf(
-        &mut self,
-        bytes: Vec<u8>,
-        at: Option<Point>,
-        name: &str,
-    ) -> SvgImport {
-        use ondin_export::pdf_in::{PdfInError, import};
-        let pdf = match import(bytes) {
-            Ok(pdf) => pdf,
-            Err(PdfInError::Encrypted) => return SvgImport::Locked,
-            Err(PdfInError::Unreadable) => return SvgImport::Unreadable,
-        };
+    /// Commit the frames [`read_pdf`] built as one undo step, on the page in a row
+    /// centred where a paste would land, and select them.
+    pub(crate) fn place_pdf(&mut self, read: PdfRead, at: Option<Point>) -> SvgImport {
+        let PdfRead {
+            mut ops,
+            frames,
+            size,
+            left_out,
+            shapes,
+            mut skipped,
+            mut approximated,
+        } = read;
         if !self.session.has_step_name() {
             self.session.name_step("Import PDF", icon::SHARE_NETWORK);
         }
-        let pages = pdf.pages;
         let (centre, _, _) = self.paste_placement(at);
-        let width = pages
-            .iter()
-            .map(|p| p.size.width + PDF_PAGE_GAP)
-            .sum::<f64>()
-            - PDF_PAGE_GAP;
-        let height = pages.iter().map(|p| p.size.height).fold(0.0, f64::max);
+        let corner = Vec2::new(centre.x - size.width / 2.0, centre.y - size.height / 2.0);
         let parent = self.session.page;
         let first = self.child_count(parent);
-        let mut sink = SvgImages {
-            images: self.canvas.images_mut(),
-        };
-        let (mut ops, mut frames) = (Vec::new(), Vec::new());
-        let (mut shapes, mut skipped, mut approximated) = (0, Vec::new(), Vec::new());
-        let mut x = centre.x - width / 2.0;
-        for (i, page) in pages.iter().enumerate() {
-            let frame = self.session.ids.mint();
-            ops.push(Operation::CreateNode {
-                id: frame,
-                parent,
-                index: first + i,
-                kind: NodeKind::Artboard {
-                    size: page.size,
-                    corner_radii: Default::default(),
-                    corner_smoothing: 0.0,
-                },
-                transform: Some(Affine::translate((x, centre.y - height / 2.0))),
-                name: Some(match pages.len() {
-                    1 => name.to_string(),
-                    _ => format!("{name} — page {}", i + 1),
-                }),
-            });
-            ops.push(Operation::SetFills {
-                id: frame,
-                fills: ondin_core::keyed_by_position([ondin_core::Fill {
-                    brush: ondin_core::Brush::Solid(Color::WHITE).into(),
-                    visible: true,
-                }]),
-            });
-            x += page.size.width + PDF_PAGE_GAP;
-            frames.push(frame);
-            // A page that will not read stays an empty frame, so the numbering holds.
-            if let Ok(page) = ondin_core::svg_in::import(
-                &page.svg,
-                &mut self.session.ids,
-                frame,
-                0,
-                Some(&mut sink),
-            ) {
-                shapes += page.shapes;
-                ops.extend(page.tx.0);
-                skipped.extend(page.skipped);
-                approximated.extend(page.approximated);
+        for op in &mut ops {
+            if let Operation::CreateNode {
+                id,
+                parent: under,
+                index,
+                transform,
+                ..
+            } = op
+                && let Some(i) = frames.iter().position(|f| f == id)
+            {
+                (*under, *index) = (parent, first + i);
+                *transform =
+                    Some(Affine::translate(corner) * transform.unwrap_or(Affine::IDENTITY));
             }
         }
         if !self.session.commit(Transaction(ops)) {
             return SvgImport::Unreadable;
         }
+        let pages = frames.len();
         self.session.selection.set(frames);
         for list in [&mut skipped, &mut approximated] {
             list.sort();
             list.dedup();
         }
         let plural = if shapes == 1 { "layer" } else { "layers" };
-        let mut msg = match pages.len() {
+        let mut msg = match pages {
             1 => format!("{shapes} {plural}"),
             n => format!("{shapes} {plural} on {n} pages"),
         };
-        if pdf.left_out > 0 {
-            msg.push_str(&format!(
-                ", the first {} of {}",
-                pages.len(),
-                pages.len() + pdf.left_out
-            ));
+        if left_out > 0 {
+            msg.push_str(&format!(", the first {pages} of {}", pages + left_out));
         }
         if !skipped.is_empty() {
             msg.push_str(&format!(", skipped {}", skipped.join(", ")));

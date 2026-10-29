@@ -2085,8 +2085,10 @@ pub(crate) fn said_detached(styles: Vec<String>, vars: Vec<String>) -> Option<St
 ///
 /// Core has no RNG policy, so the app supplies one: `RandomState` is OS-seeded
 /// per process and the clock breaks ties, enough for two sessions never to pick
-/// the same actor, which keeps ids from colliding across files and peers.
-fn random_actor() -> u64 {
+/// the same actor, which keeps ids from colliding across files and peers. An
+/// import's worker mints from one of its own, the session's `IdSource` being the
+/// frame's.
+pub(crate) fn random_actor() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
     h.write_u64(

@@ -85,6 +85,7 @@ mod file_type;
 mod fonts;
 mod gradient;
 mod grid;
+mod import;
 mod input;
 mod instances;
 mod job;

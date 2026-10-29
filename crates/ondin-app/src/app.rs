@@ -8122,12 +8122,13 @@ mod tests {
     /// widening the scan would self-match.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 15] = [
+        let panels: [(&str, &str); 16] = [
             ("binding.rs", include_str!("panels/binding.rs")),
             ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
             ("history.rs", include_str!("panels/history.rs")),
+            ("import_files.rs", include_str!("panels/import_files.rs")),
             ("inspector.rs", include_str!("panels/inspector.rs")),
             ("layers.rs", include_str!("panels/layers.rs")),
             ("layout.rs", include_str!("panels/layout.rs")),
@@ -12365,90 +12366,6 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Importing copies, keeps the name that arrived, and mints a fresh id (two
-    /// documents claiming one identity would share history and thumbnail).
-    #[test]
-    fn importing_copies_a_document_and_gives_it_a_new_identity() {
-        let ctx = egui::Context::default();
-        let root = temp_root("import");
-        let outside = temp_root("import-source");
-        let mut app = app_at(&ctx, root.clone());
-
-        let mut doc = ondin_core::Document::new(app.session.ids.mint());
-        let source =
-            crate::library::store::file_document(&outside, None, "My cool design", &mut doc)
-                .unwrap();
-        let original_id = doc.meta().id.clone().unwrap();
-
-        app.import_paths(std::slice::from_ref(&source));
-
-        assert!(source.exists(), "importing copies rather than moves");
-        let listed = crate::library::scan::scan(&root);
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].display_name(), "My cool design");
-        assert_ne!(
-            listed[0].meta.id.as_deref(),
-            Some(original_id.as_str()),
-            "an imported document is a new document"
-        );
-
-        app.import_paths(&[source]);
-        let listed = crate::library::scan::scan(&root);
-        assert_eq!(listed.len(), 2);
-        assert_ne!(listed[0].meta.id, listed[1].meta.id);
-
-        let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_dir_all(&outside);
-    }
-
-    /// A file already inside the library is skipped, since the dialog may open on the
-    /// base folder. flip: remove the `starts_with(&root)` guard → fails at the count
-    #[test]
-    fn importing_a_file_that_is_already_in_the_library_does_nothing() {
-        let ctx = egui::Context::default();
-        let root = temp_root("import-self");
-        let mut app = app_at(&ctx, root.clone());
-        let mut doc = ondin_core::Document::new(app.session.ids.mint());
-        let inside =
-            crate::library::store::file_document(&root, None, "Landing v4", &mut doc).unwrap();
-        app.library.refresh();
-        assert_eq!(app.library.entries.len(), 1);
-
-        app.import_paths(&[inside]);
-        assert_eq!(
-            crate::library::scan::scan(&root).len(),
-            1,
-            "the library must not have grown"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// A document with no metadata block takes its name from its filename, the same
-    /// guess the list makes.
-    #[test]
-    fn importing_an_unfiled_document_names_it_from_its_filename() {
-        let ctx = egui::Context::default();
-        let root = temp_root("import-bare");
-        let outside = temp_root("import-bare-src");
-        let mut app = app_at(&ctx, root.clone());
-
-        let doc = ondin_core::Document::new(app.session.ids.mint());
-        let source = outside.join("old-hero-sketch.ondin");
-        std::fs::write(&source, ondin_core::io::save(&doc).unwrap()).unwrap();
-
-        app.import_paths(&[source]);
-        let listed = crate::library::scan::scan(&root);
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].display_name(), "Old hero sketch");
-        assert_eq!(
-            listed[0].meta.name.as_deref(),
-            Some("Old hero sketch"),
-            "the guess is written down once, not re-derived forever"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_dir_all(&outside);
-    }
-
     /// A project with a folder and two files in it, plus a second empty project
     /// to transfer into.
     fn app_with_a_project(ctx: &egui::Context, root: PathBuf) -> OndinApp {
@@ -12478,7 +12395,7 @@ mod library_wiring_tests {
 
     /// An archived project is not a destination for a new document. Three doors
     /// must agree: `new_file_into` (the card), `nav_project` (where `Ctrl+N` files)
-    /// and `import_counting`. flip: `Projects::destination` reverted to plain `get`
+    /// and the *Import files* card. flip: `Projects::destination` reverted to plain `get`
     /// → fails at the card assertion; the import row is a separate call site
     #[test]
     fn an_archived_project_is_not_a_destination_for_a_new_document() {
@@ -12531,14 +12448,12 @@ mod library_wiring_tests {
         let source =
             crate::library::store::file_document(&outside, None, "Brought in", &mut incoming)
                 .unwrap();
-        let (ok, failed, already) = app.import_counting(&[source]);
+        let written = app.import_through_card(&ctx, vec![source]);
         assert_eq!(
-            (ok, failed, already),
-            (1, 0, 0),
+            written, 1,
             "the fixture's import has to succeed — and from outside the base folder, \
-             or the third count absorbs it silently (§15 D693)"
+             or the card refuses it as already in the library"
         );
-        app.library.refresh();
         let brought = app
             .library
             .entries

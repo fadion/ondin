@@ -357,6 +357,11 @@ pub(crate) struct DashboardState {
     pub(crate) new_project: Option<NewProject>,
     /// The Edit project modal's fields, while it is open.
     pub(crate) edit_project: Option<EditProject>,
+    /// The *Import files* card, while it is open.
+    pub(crate) import: Option<super::import_files::ImportCard>,
+    /// Copies whose card was cancelled or closed while they were being made; what
+    /// each wrote is taken back out when it answers (`OndinApp::poll_import`).
+    pub(crate) import_abandoned: Vec<crate::job::Job<super::import_files::Landed>>,
     /// Whether the sidebar's *Archived projects* group is showing its rows.
     /// Collapsed on every launch, deliberately not a preference.
     pub(crate) archived_open: bool,
@@ -571,12 +576,15 @@ impl OndinApp {
 
         // Taken here, not in the editor's `take_dropped_images`, which sits below the
         // `View::Dashboard` return. A modal backdrop does not stop a drop, so
-        // `library_keys_are_free` gates it, not the editor's `modal_is_up`.
-        if self.library_keys_are_free() {
+        // `library_keys_are_free` gates it, not the editor's `modal_is_up` — the
+        // *Import files* card excepted, since a drop on it refills its field.
+        if self.library_keys_are_free() || self.dash.import.is_some() {
             self.take_dropped_documents(ui.ctx());
-            if let Some(key) = crate::tabs::read_keys(ui.ctx()) {
-                self.tab_key(key);
-            }
+        }
+        if self.library_keys_are_free()
+            && let Some(key) = crate::tabs::read_keys(ui.ctx())
+        {
+            self.tab_key(key);
         }
         // The tab menu holds the keyboard (`library_keys_are_free`); `Escape` closes
         // only it, consumed so `dashboard_keys` does not also clear the cursor.
@@ -612,6 +620,7 @@ impl OndinApp {
         self.delete_modal(ui.ctx(), &mut act);
         self.stop_sharing_dialog(ui.ctx());
         self.library_settings_modal(ui.ctx());
+        self.import_modal(ui.ctx());
 
         if let Some(act) = act {
             self.dashboard_act(act);
@@ -1400,7 +1409,8 @@ impl OndinApp {
             Nav::Project(id) => self
                 .library
                 .projects
-                .get(id)
+                // `destination`, as the card files: an archived project files as none.
+                .destination(id)
                 .map(|p| format!("Drop to import into {}", p.name)),
             _ => None,
         };
@@ -2280,6 +2290,7 @@ impl OndinApp {
             && self.dash.deleting_project.is_none()
             && self.dash.new_project.is_none()
             && self.dash.edit_project.is_none()
+            && self.dash.import.is_none()
             && self.library_settings.is_none()
             && self.rename_entry.is_none()
             && self.unsharing_kit.is_none()
@@ -2905,7 +2916,7 @@ impl OndinApp {
                 }
             }
             Act::SetKit(path, sharing) => self.set_kit_at(&path, sharing),
-            Act::Import => self.import_documents(),
+            Act::Import => self.open_import_card(),
             Act::DeleteProject {
                 id,
                 transfer_to,
@@ -2980,28 +2991,9 @@ impl OndinApp {
         }
     }
 
-    /// Copy `.ondin` documents from outside the library into it, through an open
-    /// dialog. A copy, not a move: the originals are somebody else's files. It keeps
-    /// its name and creation date and gets a fresh id, as in `store::duplicate`.
-    fn import_documents(&mut self) {
-        // Before the dialog, so a picked answer is never thrown away.
-        if !self.library_writable() {
-            return;
-        }
-        let Some(files) = rfd::FileDialog::new()
-            .add_filter("Ondin document", &[crate::library::scan::DOCUMENT_EXT])
-            .set_title("Import into the library")
-            .pick_files()
-        else {
-            return;
-        };
-        self.import_paths(&files);
-    }
-
-    /// Documents dropped on the library window, filed exactly as *Import files*
-    /// files them. Only files with a `path` count: [`Self::import_paths`] takes paths
-    /// all the way down, so a bytes-only drop (from a browser) is "other". Everything
-    /// that is not a document is reported in one message.
+    /// Files dropped on the library window open the *Import files* card with them
+    /// in its field, or refill the open card. Only files with a `path` count: the
+    /// card reads from disk, so a bytes-only drop (from a browser) is refused.
     fn take_dropped_documents(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if dropped.is_empty() {
@@ -3011,85 +3003,13 @@ impl OndinApp {
         if !self.library_writable() {
             return;
         }
-        let mut docs: Vec<PathBuf> = Vec::new();
-        let mut others = 0usize;
-        for file in dropped {
-            match file.path {
-                Some(p)
-                    if p.extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|e| e.eq_ignore_ascii_case("ondin")) =>
-                {
-                    docs.push(p);
-                }
-                _ => others += 1,
-            }
-        }
-        // One message, composed here: the status is a single slot.
-        if docs.is_empty() {
+        let paths: Vec<PathBuf> = dropped.into_iter().filter_map(|f| f.path).collect();
+        if paths.is_empty() {
             self.session
-                .fail("The library takes .ondin documents — open one to place images in it");
+                .fail("Drop files from a folder to import them — these came without one");
             return;
         }
-        let (ok, failed, already) = self.import_counting(&docs);
-        self.session
-            .info(import_summary(ok, failed, others, already));
-    }
-
-    /// The half of [`Self::import_documents`] that is not the dialog, split out so
-    /// tests can drive it: [`Self::import_counting`] plus the announcement.
-    pub(crate) fn import_paths(&mut self, files: &[PathBuf]) {
-        let (ok, failed, already) = self.import_counting(files);
-        self.session.info(import_summary(ok, failed, 0, already));
-    }
-
-    /// [`Self::import_paths`] without the announcement, for the caller that adds its
-    /// own count to it (the status is a single slot; see [`import_summary`]).
-    pub(crate) fn import_counting(&mut self, files: &[PathBuf]) -> (usize, usize, usize) {
-        // Into the project being viewed. `destination`, not `get`: an archived project
-        // is selectable, and a refused destination files as unfiled.
-        let project = match &self.dash.nav {
-            Nav::Project(id) => self.library.projects.destination(id).cloned(),
-            _ => None,
-        };
-        let root = self.library.root.clone();
-        let (mut ok, mut failed, mut already) = (0usize, 0usize, 0usize);
-        for path in files {
-            // Files already in the library (the dialog may open on the base folder) are
-            // skipped and counted for [`import_summary`].
-            if path.starts_with(&root) {
-                already += 1;
-                continue;
-            }
-            let Ok(bytes) = std::fs::read(path) else {
-                failed += 1;
-                continue;
-            };
-            let Ok(mut doc) = ondin_core::io::load(&bytes) else {
-                failed += 1;
-                continue;
-            };
-            let name = doc
-                .meta()
-                .name
-                .clone()
-                .filter(|n| !n.trim().is_empty())
-                .unwrap_or_else(|| {
-                    // No name block: de-slug the filename as the list does.
-                    crate::library::scan::name_from_stem(
-                        path.file_stem().and_then(|s| s.to_str()).unwrap_or(""),
-                    )
-                });
-            let mut meta = doc.meta().clone();
-            meta.id = None;
-            doc.set_meta(meta);
-            match store::file_document(&root, project.as_ref(), &name, &mut doc) {
-                Ok(_) => ok += 1,
-                Err(_) => failed += 1,
-            }
-        }
-        self.library.refresh();
-        (ok, failed, already)
+        self.fill_import(ctx, paths);
     }
 
     /// Whether a document is starred here. Per-machine, in the cache: a star in the
@@ -3165,7 +3085,7 @@ impl OndinApp {
     /// *New file*, *New project* and an import ask, as each ends in a `create_dir_all`
     /// that would put an empty folder where the offline library belongs
     /// (`library::state::Library::may_write`). A message, not a disabled button.
-    fn library_writable(&mut self) -> bool {
+    pub(super) fn library_writable(&mut self) -> bool {
         if self.library.may_write() {
             return true;
         }
@@ -4314,7 +4234,7 @@ fn arrow_target(
 /// A caption over the field, unlike the nudge pair, whose two-character labels fit a
 /// [`ui::value_field`] prefix. Allocated at exactly the galley's height for
 /// `settings::section`'s reason: a `ui.horizontal` would add `interact_size.y` slack.
-fn field_label(ui: &mut egui::Ui, text: &str) {
+pub(super) fn field_label(ui: &mut egui::Ui, text: &str) {
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), FIELD_LABEL_H),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -4409,31 +4329,6 @@ fn warn_caption(ui: &mut egui::Ui, text: &str) {
             .size(settings::CAPTION_PT)
             .color(theme::color::WARN),
     );
-}
-
-/// What an import says when it is done: how many landed, how many could not be
-/// read, and how many were not documents at all.
-///
-/// One function because the status is a single slot, so the dialog's import and the
-/// drop's cannot each say half. `skipped` (non-documents, always 0 from the dialog)
-/// and `already` (files already in the library) are reported even when everything
-/// else went well, and the `(0, 0)` arm states only what it knows.
-fn import_summary(ok: usize, failed: usize, skipped: usize, already: usize) -> String {
-    let mut rest = String::new();
-    if already > 0 {
-        rest.push_str(&format!(" — {already} file(s) already in the library"));
-    }
-    if skipped > 0 {
-        rest.push_str(&format!(
-            " — {skipped} other file(s) were not Ondin documents"
-        ));
-    }
-    match (ok, failed) {
-        (0, 0) => format!("Nothing to import{rest}"),
-        (n, 0) => format!("Imported {n} file(s){rest}"),
-        (0, f) => format!("{f} file(s) could not be imported{rest}"),
-        (n, f) => format!("Imported {n} file(s); {f} could not be read{rest}"),
-    }
 }
 
 /// A section heading in the sidebar.
@@ -4832,7 +4727,7 @@ fn mark_chip_size(ui: &egui::Ui, mark: Mark) -> egui::Vec2 {
 ///
 /// The guard checks bytes are hex digits, not only length, so a non-ASCII value
 /// cannot reach the parse.
-fn swatch(hex: &str) -> egui::Color32 {
+pub(super) fn swatch(hex: &str) -> egui::Color32 {
     let h = hex.trim_start_matches('#');
     if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
         return color::ACCENT;
@@ -5683,9 +5578,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A dropped `.ondin` outside the library is imported; anything else is not, and
-    /// says so once. flip: remove `take_dropped_documents` from `dashboard_ui` →
-    /// fails at the first assertion.
+    /// A drop on the library opens *Import files* with the file in its field, and a
+    /// drop on the open card refills it. flip: remove `take_dropped_documents` from
+    /// `dashboard_ui` → fails at the first assertion.
     #[test]
     fn a_dropped_document_is_imported_and_a_dropped_image_is_not() {
         let ctx = egui::Context::default();
@@ -5716,30 +5611,26 @@ mod tests {
         };
 
         drop(&mut app, &source);
-        assert_eq!(
-            app.library.entries.len(),
-            1,
-            "a document dropped on the library is filed in it"
+        app.settle_import();
+        assert!(
+            app.dash.import.as_ref().is_some_and(|c| c.ready()),
+            "a document dropped on the library opens the card, ready to import it"
+        );
+        assert!(
+            app.library.entries.is_empty(),
+            "and nothing is filed until Import is pressed"
         );
 
         let png = outside.join("picture.png");
         std::fs::write(&png, [0u8; 8]).unwrap();
         drop(&mut app, &png);
-        assert_eq!(
-            app.library.entries.len(),
-            1,
-            "an image is not a document — the library takes .ondin files"
-        );
-        // The dot is the surface and the slot is the wording.
+        let card = app.dash.import.as_ref().expect("the card is still up");
         assert!(
-            status_dot_color(&mut app, &ctx).is_some(),
-            "the bar is marked"
+            matches!(&card.field, super::super::import_files::Field::Refused { why, .. }
+                if why.contains("Place image")),
+            "a picture dropped on the card is refused in its field, pointing at Place image"
         );
-        assert!(
-            app.session.status().text.contains(".ondin"),
-            "and it says what this screen takes: {}",
-            app.session.status().text
-        );
+        assert!(!card.ready(), "and Import stays off");
 
         let mut second = ondin_core::Document::new(app.session.ids.mint());
         let source2 = store::file_document(&outside, None, "Also dropped", &mut second).unwrap();
@@ -5758,108 +5649,15 @@ mod tests {
             ..Default::default()
         };
         let _ = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
-        assert_eq!(
-            app.library.entries.len(),
-            2,
-            "the document in the pile lands"
-        );
-        // Surface asserted apart from the field: no status call in the top bar fails the first.
+        app.settle_import();
+        let card = app.dash.import.as_ref().expect("the card is still up");
+        assert!(card.ready(), "the document in the pile is taken");
         assert!(
-            status_dot_color(&mut app, &ctx).is_some(),
-            "the bar is marked"
-        );
-        assert!(
-            app.session.status().text.contains("Imported 1")
-                && app.session.status().text.contains("1 other file(s)"),
-            "and the one it ignored is named in the same sentence: {}",
-            app.session.status().text
-        );
-
-        let _ = std::fs::remove_dir_all(&outside);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// The import summary's arms, one sentence each; the refusal clauses survive the
-    /// happy arms. flip: move
-    /// `rest` into the `(0, 0)` arm only → the second, fourth and sixth fail.
-    #[test]
-    fn an_import_says_what_it_took_and_what_it_left() {
-        assert_eq!(
-            import_summary(3, 0, 0, 0),
-            "Imported 3 file(s)",
-            "the ordinary case says nothing it does not have to"
-        );
-        assert_eq!(
-            import_summary(3, 0, 40, 0),
-            "Imported 3 file(s) — 40 other file(s) were not Ondin documents",
-            "a mixed drop names both halves"
-        );
-        assert_eq!(
-            import_summary(0, 0, 0, 3),
-            "Nothing to import — 3 file(s) already in the library"
-        );
-        assert_eq!(
-            import_summary(0, 2, 1, 0),
-            "2 file(s) could not be imported — 1 other file(s) were not Ondin documents"
-        );
-        assert_eq!(
-            import_summary(0, 0, 40, 0),
-            "Nothing to import — 40 other file(s) were not Ondin documents",
-            "forty pictures and no documents is not the library already holding them"
-        );
-        assert_eq!(
-            import_summary(1, 0, 2, 3),
-            "Imported 1 file(s) — 3 file(s) already in the library \
-             — 2 other file(s) were not Ondin documents",
-            "both clauses, in the order the two skips happen"
-        );
-        assert_eq!(
-            import_summary(1, 2, 0, 0),
-            "Imported 1 file(s); 2 could not be read"
-        );
-    }
-
-    /// A partial import, driven through `import_counting`, counts the files already
-    /// in the library rather than dropping them. flip: drop `already += 1` → fails
-    /// the second assertion with `(1, 0, 0)`.
-    #[test]
-    fn an_import_of_files_already_in_the_library_says_so() {
-        let ctx = egui::Context::default();
-        crate::theme::install(&ctx);
-        let (mut app, root) = app(&ctx, "already");
-        let outside = root
-            .parent()
-            .expect("temp dir")
-            .join(format!("ondin-already-source-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&outside);
-        std::fs::create_dir_all(&outside).unwrap();
-
-        let mut a = ondin_core::Document::new(app.session.ids.mint());
-        let inside_a = store::file_document(&root, None, "Already A", &mut a).unwrap();
-        let mut b = ondin_core::Document::new(app.session.ids.mint());
-        let inside_b = store::file_document(&root, None, "Already B", &mut b).unwrap();
-        let mut c = ondin_core::Document::new(app.session.ids.mint());
-        let source = store::file_document(&outside, None, "Brought in", &mut c).unwrap();
-        app.library.refresh();
-        assert!(
-            inside_a.starts_with(&root) && inside_b.starts_with(&root),
-            "the fixture must reach the state: two of the three really are under \
-             the base folder, or the skip arm is never taken"
-        );
-
-        let counts = app.import_counting(&[inside_a, inside_b, source]);
-        assert_eq!(
-            counts,
-            (1, 0, 2),
-            "one taken, none failed, and the two already here are counted rather \
-             than dropped"
-        );
-
-        let (ok, failed, already) = counts;
-        assert_eq!(
-            import_summary(ok, failed, 0, already),
-            "Imported 1 file(s) — 2 file(s) already in the library",
-            "the reported symptom was this sentence ending after `1 file(s)`"
+            card.note
+                .as_deref()
+                .is_some_and(|n| n.contains("1 other file")),
+            "and the one left out is named under the field: {:?}",
+            card.note
         );
 
         let _ = std::fs::remove_dir_all(&outside);

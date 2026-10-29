@@ -9,6 +9,7 @@ mod component;
 pub(crate) mod dashboard;
 mod export;
 pub(crate) mod history;
+pub(crate) mod import_files;
 mod inspector;
 pub(crate) mod layers;
 mod layout;

@@ -326,6 +326,9 @@ pub mod icon {
     pub const FLOPPY_DISK: &str = "\u{e248}"; // save
     pub const MAGNIFYING_GLASS_MINUS: &str = "\u{e30e}";
     pub const X: &str = "\u{e4f6}"; // close / remove a paint row
+    // The import card's: clearing its field, and the line under it.
+    pub const X_CIRCLE: &str = "\u{e4f8}";
+    pub const INFO: &str = "\u{e2ce}";
     /// Mirror in x (and a gradient's stops).
     ///
     /// Not a matched pair with [`FLIP_VERTICAL`]: the horizontal one is two
@@ -703,6 +706,8 @@ pub mod icon {
         ("floppy-disk", FLOPPY_DISK),
         ("magnifying-glass-minus", MAGNIFYING_GLASS_MINUS),
         ("x", X),
+        ("x-circle", X_CIRCLE),
+        ("info", INFO),
         ("flip-horizontal", FLIP_HORIZONTAL),
         ("flip-vertical", FLIP_VERTICAL),
         ("arrows-clockwise", ARROWS_CLOCKWISE),

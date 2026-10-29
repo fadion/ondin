@@ -60,7 +60,7 @@ Read the file for the exact wording before relying on one.
 | `inspector.md` | 9.4 | The inspector cards |
 | `type-panel.md` | 9.4 | The Type panel and typography popup |
 | `font-picker.md` | 9.4 | The font picker |
-| `library.md` | 9.5 | The library: dashboard, projects, versions, trash; document tabs (open, park, close, next launch) |
+| `library.md` | 9.5 | The library: dashboard, projects, versions, trash, *Import files*; document tabs (open, park, close, next launch) |
 
 Also in `docs/`: `shortcuts.md` (the keymap), `context-menus.md` (the menus), `vm.md` (the
 Command Mode language, unbuilt).

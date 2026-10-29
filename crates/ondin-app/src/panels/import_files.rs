@@ -30,6 +30,9 @@ const FIELD_H: f32 = 32.0;
 const TICK: f32 = 14.0;
 /// The tallest the page list grows before it scrolls.
 const PAGES_MAX_H: f32 = 150.0;
+/// The tallest the report's rows grow before they scroll, so a big document's
+/// summary keeps the card short.
+const REPORT_MAX_H: f32 = 240.0;
 /// Between two groups of options.
 const GROUP_GAP: f32 = 14.0;
 
@@ -1423,7 +1426,7 @@ fn form(
     foot: &str,
     act: &mut Option<CardAct>,
 ) {
-    super::dashboard::field_label(ui, "File or Figma link");
+    super::dashboard::field_label(ui, "Ondin, Sketch, Penpot file, or Figma link");
     file_field(ui, card, act);
     if let Some(note) = &card.note {
         message(ui, icon::INFO, note, theme::text::DIM);
@@ -2024,7 +2027,7 @@ fn check_row(
     let line = rect.top() + 11.0;
     // Centred on its line box a label sits low beside the tick; this lifts the ink
     // to the box's middle.
-    let text_line = line - 2.0;
+    let text_line = line - 1.0;
     let tick = egui::Rect::from_min_size(
         egui::pos2(rect.left(), line - TICK / 2.0),
         egui::vec2(TICK, TICK),
@@ -2202,46 +2205,55 @@ fn report(ui: &mut egui::Ui, rows: &[ReportRow]) {
                             .color(theme::text::MUTED),
                     );
                 });
-            for r in rows {
-                let (line, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 1.0),
-                    egui::Sense::empty(),
-                );
-                ui.painter().hline(
-                    line.x_range(),
-                    line.center().y,
-                    egui::Stroke::new(1.0, color::text_a(13)),
-                );
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin::symmetric(12, 8))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(&r.what)
-                                    .size(12.0)
-                                    .color(theme::text::STRONG),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(&r.count)
-                                            .size(11.0)
-                                            .color(theme::text::FAINT),
-                                    );
-                                },
-                            );
-                        });
-                        ui.add_space(2.0);
+            if rows.is_empty() {
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("import-report")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .max_height(REPORT_MAX_H)
+                .auto_shrink([false, true])
+                .show(ui, |ui| report_rows(ui, rows));
+        });
+}
+
+/// The report's rows, each under a hairline.
+fn report_rows(ui: &mut egui::Ui, rows: &[ReportRow]) {
+    ui.spacing_mut().item_spacing.y = 0.0;
+    for r in rows {
+        let (line, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::empty());
+        ui.painter().hline(
+            line.x_range(),
+            line.center().y,
+            egui::Stroke::new(1.0, color::text_a(13)),
+        );
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(&r.what)
+                            .size(12.0)
+                            .color(theme::text::STRONG),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new(&r.how)
+                            egui::RichText::new(&r.count)
                                 .size(11.0)
-                                .color(theme::text::DIM),
+                                .color(theme::text::FAINT),
                         );
                     });
-            }
-        });
+                });
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(&r.how)
+                        .size(11.0)
+                        .color(theme::text::DIM),
+                );
+            });
+    }
 }
 
 #[cfg(test)]
@@ -2673,7 +2685,7 @@ mod tests {
         check(
             &mut f,
             &[
-                "File or Figma link",
+                "Ondin, Sketch, Penpot file, or Figma link",
                 "Personal access token",
                 "Fetch",
                 "Remember the token on this computer",

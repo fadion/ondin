@@ -1,13 +1,14 @@
-//! Files imported by a drop or the *Place image* dialog, read off the frame. A
-//! worker reads the bytes, decodes pictures and builds SVG and PDF layers, minting
-//! ids from an actor of its own; the frame loop lands the result in the tab the
-//! files were given to, once that tab is in front and no drag or pen run is live.
-//! A tab closed first takes its imports with it, unsaid: a tab behind is never
-//! written to while it waits.
+//! Files imported by a drop, *Place image* or *Replace image*, and a pasted picture or
+//! SVG markup, read off the frame. A worker reads the bytes, decodes pictures and
+//! builds SVG and PDF layers, minting ids from an actor of its own; the frame loop
+//! lands the result in the tab it was given to, once that tab is in front and no
+//! drag or pen run is live. A tab closed first takes its imports with it, unsaid: a
+//! tab behind is never written to while it waits.
 
 use crate::app::{ImageRefusal, LoadedImage, OndinApp};
 use crate::canvas::{Decoded, PdfRead, SvgImport};
 use crate::job::Job;
+use crate::panels::PaintSlot;
 use crate::session::StatusKind;
 use crate::tabs::TabId;
 use ondin_core::kurbo::{Point, Vec2};
@@ -31,6 +32,14 @@ pub(crate) enum Door {
     /// Picked in *Place image*: pictures arm the Image tool, vector art lands where
     /// a paste would.
     Place,
+    /// Pasted, at *Paste here*'s point or, with `None`, aimed by the selection.
+    Paste { at: Option<Point> },
+    /// Picked in *Replace image*, for the picture in `slot` of `id`.
+    Replace {
+        id: NodeId,
+        slot: PaintSlot,
+        keep_framing: bool,
+    },
 }
 
 /// One import: the worker reading it, then what it read, waiting for its tab.
@@ -56,6 +65,8 @@ enum Read {
     },
     /// What to tell the user about a file that did not read.
     Refused(String),
+    /// Pasted markup that would not read as SVG, pasted as text instead.
+    Text(String),
 }
 
 /// What the status line says while files are read.
@@ -68,10 +79,10 @@ fn importing(files: &[Incoming]) -> String {
 
 /// Read every file, on the worker. Layers hang under `parent`, a stand-in id the
 /// landing replaces with the parent it picks.
-fn read_all(files: Vec<Incoming>, mut ids: IdSource, parent: NodeId) -> Vec<Read> {
+fn read_all(files: Vec<Incoming>, ids: &mut IdSource, parent: NodeId) -> Vec<Read> {
     files
         .into_iter()
-        .map(|file| read_one(file, &mut ids, parent))
+        .map(|file| read_one(file, ids, parent))
         .collect()
 }
 
@@ -139,10 +150,100 @@ impl OndinApp {
         if files.is_empty() {
             return;
         }
-        self.session.info(importing(&files));
+        let said = importing(&files);
+        self.start_reading(ctx, said, door, move |ids, parent| {
+            read_all(files, ids, parent)
+        });
+    }
+
+    /// Read a picture picked in *Replace image* on a worker, for the picture in
+    /// `slot` of `id`; anything but a picture is refused, as the dialog's filter asks.
+    pub(crate) fn start_replace_image(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        id: NodeId,
+        slot: PaintSlot,
+        keep_framing: bool,
+    ) {
+        let name = crate::app::image_name(&path);
+        let door = Door::Replace {
+            id,
+            slot,
+            keep_framing,
+        };
+        self.start_reading(ctx, format!("Importing {name}…"), door, move |_, _| {
+            // An unreadable file and a non-picture share one message.
+            let read = std::fs::read(&path)
+                .map_err(|_| ImageRefusal::NotAnImage)
+                .and_then(|bytes| {
+                    let ext = crate::app::file_extension(&path);
+                    crate::app::read_picture(bytes, ext, Some(name.clone()))
+                });
+            vec![match read {
+                Ok((image, pixels)) => Read::Picture(image, pixels),
+                Err(why) => Read::Refused(why.message(&name)),
+            }]
+        });
+    }
+
+    /// Encode and decode a clipboard picture (`rgba`, `size` pixels) on a worker,
+    /// pasted at `at` (`OndinApp::paste_image`).
+    pub(crate) fn start_paste_image(
+        &mut self,
+        ctx: &egui::Context,
+        rgba: Vec<u8>,
+        size: (u32, u32),
+        at: Option<Point>,
+    ) {
+        let said = "Pasting image…".to_string();
+        self.start_reading(ctx, said, Door::Paste { at }, move |_, _| {
+            let read = crate::app::rgba_to_png(&rgba, size)
+                .and_then(|png| crate::app::read_picture(png, None, None).ok());
+            vec![match read {
+                Some((image, pixels)) => Read::Picture(image, pixels),
+                // Our own fresh PNG refused is a bug, said plainly rather than in detail.
+                None => Read::Refused("The pasted picture could not be read".to_string()),
+            }]
+        });
+    }
+
+    /// Read pasted SVG markup on a worker, pasted at `at` (`OndinApp::paste_svg`):
+    /// markup that will not read lands as text, as the paste's last arm would have.
+    pub(crate) fn start_paste_svg(&mut self, ctx: &egui::Context, text: String, at: Option<Point>) {
+        let said = "Pasting SVG…".to_string();
+        self.start_reading(ctx, said, Door::Paste { at }, move |ids, parent| {
+            let mut images = Decoded::default();
+            vec![
+                match crate::canvas::read_svg(&text, ids, parent, None, &mut images) {
+                    Ok(out) => Read::Svg {
+                        name: String::new(),
+                        out,
+                        images,
+                    },
+                    Err(SvgImport::TooDeep) => Read::Refused(
+                        "That SVG is nested too deeply to read — nothing was pasted.".to_string(),
+                    ),
+                    Err(_) => Read::Text(text),
+                },
+            ]
+        });
+    }
+
+    /// Run `work` on a worker for the tab in front, the status saying `said`
+    /// meanwhile. Layers it builds hang under the stand-in parent it is given, minted
+    /// from its own `IdSource`; the landing replaces the parent.
+    fn start_reading(
+        &mut self,
+        ctx: &egui::Context,
+        said: String,
+        door: Door,
+        work: impl FnOnce(&mut IdSource, NodeId) -> Vec<Read> + Send + 'static,
+    ) {
+        self.session.info(said);
         let mut ids = IdSource::new(crate::session::random_actor());
         let parent = ids.mint();
-        let job = Job::spawn("ondin-import", ctx, move || read_all(files, ids, parent));
+        let job = Job::spawn("ondin-import", ctx, move || work(&mut ids, parent));
         self.imports.push(Import {
             tab: self.tabs.active,
             door,
@@ -221,6 +322,7 @@ impl OndinApp {
     /// own.
     fn land_import(&mut self, door: Door, reads: Vec<Read>) {
         let (mut pictures, mut vector, mut refused) = (Vec::new(), Vec::new(), Vec::new());
+        let mut text = None;
         for read in reads {
             match read {
                 Read::Picture(image, pixels) => {
@@ -236,20 +338,21 @@ impl OndinApp {
                     vector.push((name, Vector::Pdf(read)));
                 }
                 Read::Refused(why) => refused.push(why),
+                Read::Text(t) => text = Some(t),
             }
         }
         if !refused.is_empty() {
             self.session.fail(refused.join("; "));
         }
         let reported = !pictures.is_empty();
-        let mut selected = Vec::new();
-        let at = match door {
+        match door {
             Door::Drop { at, alone } => {
+                let mut selected = Vec::new();
                 if reported {
                     self.drop_images_at(pictures, at, alone);
                     selected.extend_from_slice(self.session.selection.ids());
                 }
-                at
+                self.place_vectors(vector, at, selected, reported);
             }
             Door::Place => {
                 let n = pictures.len();
@@ -261,10 +364,33 @@ impl OndinApp {
                         n => format!("Click to place {n} images"),
                     });
                 }
-                None
+                self.place_vectors(vector, None, Vec::new(), reported);
             }
-        };
-        self.place_vectors(vector, at, selected, reported);
+            Door::Paste { at } => {
+                for image in &pictures {
+                    self.land_pasted_image(image, at);
+                }
+                for (_, file) in vector {
+                    if let Vector::Svg(out) = file
+                        && let SvgImport::Placed(said) = self.place_svg(out, at)
+                    {
+                        self.session.info(format!("Pasted SVG — {said}"));
+                    }
+                }
+                if let Some(text) = text {
+                    self.paste_text(&text, at);
+                }
+            }
+            Door::Replace {
+                id,
+                slot,
+                keep_framing,
+            } => {
+                if let Some(image) = pictures.first() {
+                    self.replace_image_with(id, slot, keep_framing, image);
+                }
+            }
+        }
     }
 
     /// Place read SVG and PDF files as layers, cascaded from `at` as dropped
@@ -318,4 +444,159 @@ impl OndinApp {
 enum Vector {
     Svg(ondin_core::svg_in::Import),
     Pdf(PdfRead),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::{Brush, NodeKind};
+
+    /// The nodes on the document's first page.
+    fn page_nodes(app: &OndinApp) -> Vec<&ondin_core::Node> {
+        let doc = &app.session.doc;
+        ondin_core::subtree_nodes(doc, &[doc.first_page()])
+            .into_iter()
+            .filter_map(|id| doc.get(id))
+            .collect()
+    }
+
+    /// Pasted SVG markup is read off the frame and lands as layers; markup that
+    /// sniffs as SVG but will not read lands as the text layer the paste's last arm
+    /// would have made.
+    ///
+    /// flip: `start_paste_svg` refusing unreadable markup instead of `Read::Text` →
+    /// fails at "lands as text".
+    #[test]
+    fn pasted_svg_lands_as_layers_or_else_as_text() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>"#;
+        let before = app.session.revision();
+        app.start_paste_svg(&ctx, svg.to_string(), None);
+        assert_eq!(
+            (app.session.revision(), app.session.status().text.as_str()),
+            (before, "Pasting SVG…"),
+            "read off the frame"
+        );
+        app.settle_imports();
+        assert!(
+            app.session.status().text.starts_with("Pasted SVG — "),
+            "{}",
+            app.session.status().text
+        );
+        assert!(
+            page_nodes(&app)
+                .iter()
+                .any(|n| matches!(n.kind(), NodeKind::Rect { .. })),
+            "the rect came in"
+        );
+
+        let empty = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        app.start_paste_svg(&ctx, empty.to_string(), None);
+        app.settle_imports();
+        assert!(
+            page_nodes(&app)
+                .iter()
+                .any(|n| matches!(n.kind(), NodeKind::Text { content, .. } if content == empty)),
+            "lands as text"
+        );
+        assert!(app.imports.is_empty());
+    }
+
+    /// A clipboard picture is encoded and decoded off the frame, then lands as an
+    /// image layer whose pixels the decode cache holds.
+    ///
+    /// flip: `land_import` skipping `adopt` for a picture → fails at "decoded".
+    #[test]
+    fn a_pasted_picture_lands_as_a_layer_with_its_pixels() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let before = app.session.revision();
+        app.start_paste_image(&ctx, vec![255; 2 * 2 * 4], (2, 2), None);
+        assert_eq!(
+            (app.session.revision(), app.session.status().text.as_str()),
+            (before, "Pasting image…"),
+            "read off the frame"
+        );
+        app.settle_imports();
+        assert_eq!(app.session.status().text, "Pasted image");
+        let id = page_nodes(&app)
+            .iter()
+            .find_map(|n| match n.paint().fills.first()?.brush.literal() {
+                Some(Brush::Image(img)) => Some(img.image.id.clone()),
+                _ => None,
+            })
+            .expect("an image layer");
+        assert_eq!(
+            app.canvas.images().get(&id).map(|d| (d.width, d.height)),
+            Some((2, 2)),
+            "decoded"
+        );
+    }
+
+    /// *Replace image* reads its file off the frame and gives it to the slot; a file
+    /// that is not a picture is refused by name and leaves the fill alone.
+    ///
+    /// flip: `land_import`'s `Door::Replace` arm doing nothing → fails at "replaced".
+    #[test]
+    fn replace_image_reads_its_file_off_the_frame() {
+        use ondin_core::kurbo::{Affine, Size};
+        use ondin_core::peniko::Color;
+        use ondin_core::{Fill, Operation, Transaction, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let shape = app.session.ids.mint();
+        let page = app.session.doc.first_page();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: shape,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetFills {
+                id: shape,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ])));
+        let dir = std::env::temp_dir().join(format!("ondin-replace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (png, notes) = (dir.join("photo.png"), dir.join("notes.txt"));
+        std::fs::write(
+            &png,
+            crate::app::rgba_to_png(&[255, 0, 0, 255], (1, 1)).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(&notes, "not a picture").unwrap();
+        let is_image = |app: &OndinApp| {
+            matches!(
+                app.session.doc.get(shape).unwrap().paint().fills[0]
+                    .brush
+                    .literal(),
+                Some(Brush::Image(_))
+            )
+        };
+        let slot = PaintSlot::Fill(0);
+
+        app.start_replace_image(&ctx, notes, shape, slot, true);
+        app.settle_imports();
+        assert_eq!(app.session.status().text, "Could not read: notes.txt");
+        assert!(!is_image(&app), "the fill stands");
+
+        let before = app.session.revision();
+        app.start_replace_image(&ctx, png, shape, slot, true);
+        assert_eq!(app.session.revision(), before, "read off the frame");
+        app.settle_imports();
+        assert!(is_image(&app), "replaced");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

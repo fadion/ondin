@@ -5810,11 +5810,8 @@ impl OndinApp {
     }
 
     /// Pick one file and give it to the picture in `slot`; also the repair for a picture
-    /// that cannot be drawn (dangling id, undecodable bytes, moved link).
-    ///
-    /// `keep_framing: false` is *Replace and reset*: only the framing resets; the
-    /// adjustments and sampler survive, being another card's. The table entry goes in the
-    /// same transaction, so one undo restores both.
+    /// that cannot be drawn (dangling id, undecodable bytes, moved link). The file is
+    /// read and decoded off the frame (`crate::import`), then [`Self::replace_image_with`].
     pub(crate) fn replace_image_action(
         &mut self,
         id: NodeId,
@@ -5827,13 +5824,23 @@ impl OndinApp {
         else {
             return;
         };
-        let image = match self.load_image_file(&path) {
-            Ok(image) => image,
-            Err(why) => {
-                self.session.fail(why.message(&image_name(&path)));
-                return;
-            }
-        };
+        let ctx = self.egui_ctx.clone();
+        self.start_replace_image(&ctx, path, id, slot, keep_framing);
+    }
+
+    /// Give `image` to the picture in `slot` of `id`, as one undo step; nothing when
+    /// the layer or the slot has gone.
+    ///
+    /// `keep_framing: false` is *Replace and reset*: only the framing resets; the
+    /// adjustments and sampler survive, being another card's. The table entry goes in the
+    /// same transaction, so one undo restores both.
+    pub(crate) fn replace_image_with(
+        &mut self,
+        id: NodeId,
+        slot: crate::panels::PaintSlot,
+        keep_framing: bool,
+        image: &LoadedImage,
+    ) {
         let Some(brush) = self.slot_brush(id, slot) else {
             return;
         };
@@ -5902,28 +5909,6 @@ impl OndinApp {
     }
 
     // A picture is exported as a layer, through the Export panel.
-
-    /// Read, hash and decode one file, or say why not ([`ImageRefusal`]).
-    fn load_image_file(&mut self, path: &std::path::Path) -> Result<LoadedImage, ImageRefusal> {
-        // An unreadable file and a non-picture share one message.
-        let Ok(bytes) = std::fs::read(path) else {
-            return Err(ImageRefusal::NotAnImage);
-        };
-        self.load_image_bytes(bytes, file_extension(path), Some(image_name(path)))
-    }
-
-    /// [`read_picture`] on the frame, its pixels straight into the decode cache: the
-    /// paste's and *Replace image*'s path.
-    fn load_image_bytes(
-        &mut self,
-        bytes: Vec<u8>,
-        ext: Option<String>,
-        name: Option<String>,
-    ) -> Result<LoadedImage, ImageRefusal> {
-        let (image, pixels) = read_picture(bytes, ext, name)?;
-        self.canvas.images_mut().adopt(&image.id, pixels);
-        Ok(image)
-    }
 
     /// Take whatever was dropped on the window this frame and import it off the frame
     /// (`crate::import`). Each `DroppedFile` carries bytes (a browser drag) or a path
@@ -6058,9 +6043,10 @@ impl OndinApp {
     /// `at` is *Paste here*'s pointer: `None` (the chord) aims by the selection and lands
     /// mid-view; `Some(p)` aims like a drop ([`Self::image_drop_target`]).
     ///
-    /// Read through `arboard`, since `egui::Event::Paste` is text-only. The decoded RGBA
-    /// is re-encoded to lossless PNG, as a document stores encoded originals, so a pasted
-    /// image's id hashes our encoding.
+    /// Read through `arboard`, since `egui::Event::Paste` is text-only, on the frame;
+    /// the re-encode and decode run off it (`crate::import`). The RGBA is re-encoded to
+    /// lossless PNG, as a document stores encoded originals, so a pasted image's id
+    /// hashes our encoding.
     pub(crate) fn paste_image(&mut self, at: Option<Point>) -> bool {
         if !clipboard_is_reachable() {
             return false;
@@ -6072,34 +6058,23 @@ impl OndinApp {
         if w == 0 || h == 0 {
             return false;
         }
-        let mut png = Vec::new();
-        if image::write_buffer_with_format(
-            &mut std::io::Cursor::new(&mut png),
-            &img.bytes,
-            w,
-            h,
-            image::ExtendedColorType::Rgba8,
-            image::ImageFormat::Png,
-        )
-        .is_err()
-        {
-            return false;
-        }
-        // No message: a refusal of our own fresh PNG is a bug, not user news.
-        let Ok(image) = self.load_image_bytes(png, None, None) else {
-            return false;
-        };
+        let ctx = self.egui_ctx.clone();
+        self.start_paste_image(&ctx, img.bytes.into_owned(), (w, h), at);
+        true
+    }
+
+    /// Put a pasted picture where [`Self::paste_image`] aims: into the picture of the
+    /// shape `at` (or the selection) picks, else a new layer there or mid-view.
+    pub(crate) fn land_pasted_image(&mut self, image: &LoadedImage, at: Option<Point>) {
         if let Some(target) = self.image_drop_target(at)
-            && let Some(said) = self.replace_image_fill(target, &image)
+            && let Some(said) = self.replace_image_fill(target, image)
         {
             self.session.info(said);
-            return true;
+            return;
         }
-        let landed = self.create_image_at(&image, at.unwrap_or_else(|| self.viewport_centre()));
-        if landed {
+        if self.create_image_at(image, at.unwrap_or_else(|| self.viewport_centre())) {
             self.session.info("Pasted image");
         }
-        landed
     }
 
     /// Load every font family the document's text nodes reference, so an opened
@@ -6177,7 +6152,7 @@ pub(crate) fn file_extension(path: &std::path::Path) -> Option<String> {
 pub(crate) const DROP_CASCADE: f64 = 24.0;
 
 /// What a layer made from this file is called: its own name.
-fn image_name(path: &std::path::Path) -> String {
+pub(crate) fn image_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Image".to_string())
@@ -6424,6 +6399,21 @@ pub(crate) fn read_picture(
         name,
     };
     Ok((image, pixels))
+}
+
+/// The RGBA a clipboard holds as a lossless PNG, on any thread.
+pub(crate) fn rgba_to_png(rgba: &[u8], (w, h): (u32, u32)) -> Option<Vec<u8>> {
+    let mut png = Vec::new();
+    image::write_buffer_with_format(
+        &mut std::io::Cursor::new(&mut png),
+        rgba,
+        w,
+        h,
+        image::ExtendedColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .ok()?;
+    Some(png)
 }
 
 /// Which of the four formats a picked file is. The bytes decide, as the decoder
@@ -16165,7 +16155,7 @@ mod svg_sniff_tests {
     //! What a dropped or pasted byte run is, and what the app says when it is not
     //! a picture it can draw.
 
-    use super::{ImageRefusal, OndinApp, looks_like_svg};
+    use super::{ImageRefusal, looks_like_svg, read_picture};
 
     /// A picture Ondin will not draw is not reported as one it could not read; the
     /// negative assertion matters, since a message saying both would pass the others.
@@ -16173,10 +16163,6 @@ mod svg_sniff_tests {
     /// flip: `.ok().ok_or(ImageRefusal::NotAnImage)` back on `read_picture`'s `decode` → fails at the first assertion
     #[test]
     fn a_picture_too_big_to_draw_says_so_rather_than_could_not_read() {
-        let ctx = egui::Context::default();
-        crate::theme::install(&ctx);
-        let mut app = OndinApp::headless(&ctx);
-
         let (w, h) = (70_000_u32, 100_u32);
         let mut png = Vec::new();
         image::write_buffer_with_format(
@@ -16190,8 +16176,7 @@ mod svg_sniff_tests {
         .expect("a uniform grey PNG");
 
         // No `unwrap_err`: it needs `Debug` on `LoadedImage`, which holds the encoded bytes.
-        let Err(err) = app.load_image_bytes(png, Some("png".into()), Some("panorama.png".into()))
-        else {
+        let Err(err) = read_picture(png, Some("png".into()), Some("panorama.png".into())) else {
             panic!("70000 wide is past MAX_EDGE and was accepted")
         };
         assert!(
@@ -16212,7 +16197,7 @@ mod svg_sniff_tests {
             "the message has to say what to change and by how much: {said:?}"
         );
 
-        let Err(plain) = app.load_image_bytes(b"not a picture at all".to_vec(), None, None) else {
+        let Err(plain) = read_picture(b"not a picture at all".to_vec(), None, None) else {
             panic!("twenty bytes of prose became a picture")
         };
         assert_eq!(plain.message("notes.txt"), "Could not read: notes.txt");

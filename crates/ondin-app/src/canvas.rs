@@ -866,7 +866,8 @@ thread_local! {
     static GRIDS_LAID: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// What [`OndinApp::import_svg`] did with some markup.
+/// What reading ([`read_svg`], [`read_pdf`]) or placing ([`OndinApp::place_svg`],
+/// [`OndinApp::place_pdf`]) a vector file came to.
 pub(crate) enum SvgImport {
     /// Committed and selected; what was made, as `5 layers, skipped filter`.
     Placed(String),
@@ -5623,13 +5624,19 @@ impl OndinApp {
         let Some(text) = crate::app::system_clipboard_text() else {
             return false;
         };
+        self.paste_text(&text, at)
+    }
+
+    /// [`Self::paste_text_as_layer`] with the text in hand: also where pasted markup
+    /// that would not read as SVG lands (`crate::import`).
+    pub(crate) fn paste_text(&mut self, text: &str, at: Option<Point>) -> bool {
         let (centre, parent, parent_world) = self.paste_placement(at);
 
         // Through a `TextEdit`: `insert` normalizes `\r\n` (a bare `TextEdit::new`
         // would double-space every line).
         let mut parts = self.new_text_parts();
         let mut editor = TextEdit::new("", parts.clone());
-        editor.insert(&text);
+        editor.insert(text);
         let mut layout = editor.text_layout();
 
         // Wrapped to the frame's used width, or the view's.
@@ -5675,8 +5682,10 @@ impl OndinApp {
     }
 
     /// Paste SVG markup as layers, the arm between the app's clipboard and the text
-    /// fallback. Markup that will not parse falls through silently, except one nested
-    /// too deeply, refused out loud rather than pasted as a huge text layer.
+    /// fallback: taken once the markup sniffs as SVG, then read off the frame
+    /// (`crate::import`). Markup that will not parse lands as the text layer the
+    /// fallback would have made, except one nested too deeply, refused out loud
+    /// rather than pasted as a huge text layer.
     pub(crate) fn paste_svg(&mut self, at: Option<Point>) -> bool {
         let Some(text) = crate::app::system_clipboard_text() else {
             return false;
@@ -5684,38 +5693,9 @@ impl OndinApp {
         if !ondin_core::svg_in::looks_like_svg(&text) {
             return false;
         }
-        match self.import_svg(&text, at, None) {
-            SvgImport::Placed(said) => {
-                self.session.info(format!("Pasted SVG — {said}"));
-                true
-            }
-            SvgImport::TooDeep => {
-                self.session
-                    .fail("That SVG is nested too deeply to read — nothing was pasted.");
-                true
-            }
-            SvgImport::Locked | SvgImport::Unreadable => false,
-        }
-    }
-
-    /// Build SVG markup's layers (`ondin_core::svg_in`) on the frame, as
-    /// [`read_svg`] then [`Self::place_svg`]: the paste's door, whose markup is
-    /// already in hand.
-    pub(crate) fn import_svg(
-        &mut self,
-        text: &str,
-        at: Option<Point>,
-        name: Option<&str>,
-    ) -> SvgImport {
-        let parent = self.session.page;
-        let mut images = Decoded::default();
-        match read_svg(text, &mut self.session.ids, parent, name, &mut images) {
-            Ok(out) => {
-                self.adopt_decoded(images);
-                self.place_svg(out, at)
-            }
-            Err(why) => why,
-        }
+        let ctx = self.egui_ctx.clone();
+        self.start_paste_svg(&ctx, text, at);
+        true
     }
 
     /// Hand pictures an import decoded to the decode cache.

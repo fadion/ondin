@@ -213,7 +213,8 @@ impl std::fmt::Display for SvgError {
 /// `roxmltree` recurses and has no depth option, so deeply nested `<g>` overflowed
 /// the 1 MiB main-thread stack (an uncatchable abort); [`nests_deeper_than`] reads the
 /// depth off the text first. The parser survives ~170 levels in debug, so 96 leaves
-/// room for the egui frame, and a document 65–96 deep still imports.
+/// room for a caller's own frames on that stack, and a document 65–96 deep still
+/// imports.
 pub const MAX_XML_DEPTH: usize = 96;
 
 /// Whether `svg`'s elements nest deeper than `limit`, read from the text without
@@ -6035,7 +6036,7 @@ mod tests {
         s
     }
 
-    /// Runs `f` on a thread with the 1 MiB stack the shipped binary's main thread has, where `paste_svg` runs.
+    /// Runs `f` on a thread with the 1 MiB stack the shipped binary's main thread has, the smallest an import may run on.
     fn on_the_main_threads_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
         std::thread::Builder::new()
             .stack_size(1 << 20)

@@ -11,15 +11,9 @@ reads true.
 ## Now · Performance
 
 Each runs once per action on the frame and scales with a picture, a selection, the document or the
-library, so a large one freezes the window. File drops and *Place image* already read on a worker
-(`crate::import`), which the first three can share.
+library, so a large one freezes the window. Files, pictures and SVG markup already read on a worker
+(`crate::import`).
 
-- **Pasting a picture** (`OndinApp::paste_image`): the clipboard picture is re-encoded to PNG, then
-  hashed and decoded (`load_image_bytes`) on the frame.
-- **Replace image** (`OndinApp::replace_image_action`): the picked file is read and decoded on the
-  frame (`load_image_file`).
-- **Pasting SVG markup** (`canvas::import_svg`): `read_svg` parses on the frame; only `place_svg`
-  needs it.
 - **Placing a kit tile** (`kits::picker` `place_kit_at`): `kit::insert` and `centred`'s clone, apply
   and whole-document `Resolved::rebuild` run on the frame, which the dimmed tile (`ask_place`) only
   covers for. A worker must redo or refuse the placement when the document changed while it ran.

@@ -119,13 +119,17 @@ window onto its picture. There is no crop tool, rail button or `C` key.
 - `take_dropped_images` runs every frame from `update`, whatever the tool, **unless
   `OndinApp::modal_is_up`**, reading `raw.dropped_files` (browser drags as bytes, file-manager drops
   as paths). It and *Place image* (`place_image_action`) hand the files to `crate::import` as
-  `Incoming` (name, bytes or path); neither reads a file on the frame.
-- **An import is read off the frame** (`start_import`, a `crate::job::Job`), so a large PDF, SVG or
-  picture never freezes the window. The worker reads the bytes, decodes pictures
-  (`app::read_picture`) and builds SVG and PDF layers (`canvas::read_svg`, `canvas::read_pdf`) under
-  a stand-in parent the landing replaces, minting ids from an `IdSource` of its own
-  (`session::random_actor`); the session's `IdSource` stays the frame's. Meanwhile the status says
-  *Importing logo.svg…* or *Importing 3 files…*.
+  `Incoming` (name, bytes or path); neither reads a file on the frame. *Replace image*
+  (`replace_image_action`, `start_replace_image`), a clipboard picture (`paste_image`,
+  `start_paste_image`) and pasted SVG markup (`paste_svg`, `start_paste_svg`) go through the same
+  worker, each as its own `import::Door`: the frame only runs the dialog or reads the clipboard.
+- **An import is read off the frame** (`start_reading`, a `crate::job::Job`), so a large PDF, SVG
+  or picture never freezes the window. The worker reads the bytes, encodes a clipboard picture to PNG
+  (`app::rgba_to_png`), decodes pictures (`app::read_picture`) and builds SVG and PDF layers
+  (`canvas::read_svg`, `canvas::read_pdf`) under a stand-in parent the landing replaces, minting ids
+  from an `IdSource` of its own (`session::random_actor`); the session's `IdSource` stays the
+  frame's. Meanwhile the status says *Importing logo.svg…*, *Importing 3 files…*, *Pasting image…*
+  or *Pasting SVG…*.
 - **`poll_imports` lands it** (editor frame, beside `poll_simplify`), oldest first, held while a drag
   or a pen run is live, whose end would write back a document from before the import, and while a
   modal is up, which may be asking about the document as it stands. It lands only in the tab in
@@ -134,7 +138,10 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   started on the scratch session no tab shows, once a tab is active. `land_import` adopts the decoded pixels into the decode cache, then places as the door does,
   against the document at landing: a drop's pictures through `drop_images_at` at the drop's world
   point, *Place image*'s by arming the Image tool; SVG and PDF through `place_svg` / `place_pdf`
-  (`place_vectors`).
+  (`place_vectors`). A pasted picture lands through `land_pasted_image`, a pasted SVG through
+  `place_svg` (*Pasted SVG — 5 layers*), and markup that sniffed as SVG but will not read as a text
+  layer (`paste_text`), the paste's last arm; *Replace image* through `replace_image_with`, nothing
+  when its layer or slot has gone.
 - Lands at the pointer, cascaded 24 units per file; at the viewport centre with no pointer over the
   canvas. **One transaction per drop** — placements built via `canvas::image_tx` against a document
   advanced per picture (index, free name, embedded-blob check); every picture made is selected.
@@ -148,8 +155,7 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   or an inset canvas border), a pill naming the outcome, and the hover outline on a shape to be
   replaced.
 - SVG is never rasterized: a dropped or placed `.svg` (sniffed by its bytes, `app::looks_like_svg`)
-  is read by `svg_in::import` through `canvas::read_svg`, the reader a pasted SVG (`import_svg`,
-  on the frame) uses too: one
+  is read by `svg_in::import` through `canvas::read_svg`, the reader a pasted SVG uses too: one
   group named for the file's stem, centred on the drop point (cascaded `DROP_CASCADE` per file) or
   where a paste would land for the *Place image* dialog, which takes `.svg` and imports at once
   rather than loading the Image tool. Its report (*Imported logo.svg — 5 layers*) follows the

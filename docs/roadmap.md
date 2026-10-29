@@ -15,7 +15,6 @@ reads true.
   backdrop, so the SVG writer owes an answer (a reported approximation, at least).
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
-- **PDF import.**
 - **One import dialog for documents.** The library's *Import files* opens a modal, not the native
   dialog it opens now (`DashboardState::import_documents`): a file browser, then the options for the
   chosen file's type. An `.ondin` document gets what importing does today (`import_paths`: a copy with

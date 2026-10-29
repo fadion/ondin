@@ -5784,7 +5784,10 @@ impl OndinApp {
     /// armed if something loaded; a placement tool with nothing to place would look hung.
     pub(crate) fn place_image_action(&mut self) {
         let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif", "svg"])
+            .add_filter(
+                "Images",
+                &["png", "jpg", "jpeg", "webp", "gif", "svg", "pdf"],
+            )
             .pick_files()
         else {
             return;
@@ -5794,7 +5797,7 @@ impl OndinApp {
             // Vector art becomes layers now, where a paste would put them; only
             // pictures go on the Image tool's cursor.
             if let Ok(bytes) = std::fs::read(&path)
-                && looks_like_svg(&bytes)
+                && is_vector(&bytes)
             {
                 vector.push((image_name(&path), bytes));
                 continue;
@@ -5823,7 +5826,7 @@ impl OndinApp {
                 n => format!("Click to place {n} images"),
             });
         }
-        self.import_svg_files(vector, None, Vec::new(), n > 0);
+        self.import_vector_files(vector, None, Vec::new(), n > 0);
     }
 
     /// Pick one file and give it to the picture in `slot`; also the repair for a picture
@@ -5987,7 +5990,7 @@ impl OndinApp {
             let ext = file.path.as_deref().and_then(file_extension);
             match bytes {
                 // Vector art becomes layers, never a rasterized picture.
-                Some(b) if looks_like_svg(&b) => vector.push((name, b)),
+                Some(b) if is_vector(&b) => vector.push((name, b)),
                 Some(b) => match self.load_image_bytes(b, ext, Some(name.clone())) {
                     Ok(image) => loaded.push(image),
                     Err(why) => failed.push(why.message(&name)),
@@ -6004,14 +6007,14 @@ impl OndinApp {
             self.drop_images_at(loaded, at, alone);
             selected.extend_from_slice(self.session.selection.ids());
         }
-        self.import_svg_files(vector, at, selected, pictures);
+        self.import_vector_files(vector, at, selected, pictures);
     }
 
-    /// Import dropped or picked SVG files as layers, cascaded from `at` as dropped
-    /// pictures are, and select them beside `selected` (what the same gesture placed
-    /// already). Each file says what it made, after the gesture's own report when
-    /// `reported` says it wrote one; a file that will not read says why.
-    fn import_svg_files(
+    /// Import dropped or picked SVG and PDF files as layers, cascaded from `at` as
+    /// dropped pictures are, and select them beside `selected` (what the same gesture
+    /// placed already). Each file says what it made, after the gesture's own report
+    /// when `reported` says it wrote one; a file that will not read says why.
+    fn import_vector_files(
         &mut self,
         files: Vec<(String, Vec<u8>)>,
         at: Option<Point>,
@@ -6028,12 +6031,16 @@ impl OndinApp {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| name.clone());
-            let outcome = match String::from_utf8(bytes) {
-                Ok(text) => {
-                    self.import_svg(&text, at.map(|p| p + Vec2::new(step, step)), Some(&stem))
-                }
-                Err(_) => crate::canvas::SvgImport::Unreadable,
+            let at = at.map(|p| p + Vec2::new(step, step));
+            let pdf = ondin_export::pdf_in::looks_like_pdf(&bytes);
+            let outcome = match pdf {
+                true => self.import_pdf(bytes, at, &stem),
+                false => match String::from_utf8(bytes) {
+                    Ok(text) => self.import_svg(&text, at, Some(&stem)),
+                    Err(_) => crate::canvas::SvgImport::Unreadable,
+                },
             };
+            let kind = if pdf { "PDF" } else { "SVG" };
             match outcome {
                 crate::canvas::SvgImport::Placed(made) => {
                     said.push(format!("Imported {name} — {made}"));
@@ -6042,8 +6049,11 @@ impl OndinApp {
                 crate::canvas::SvgImport::TooDeep => {
                     failed.push(format!("{name} is nested too deeply to read"))
                 }
+                crate::canvas::SvgImport::Locked => {
+                    failed.push(format!("{name} is password-protected"))
+                }
                 crate::canvas::SvgImport::Unreadable => {
-                    failed.push(format!("{name} could not be read as SVG"))
+                    failed.push(format!("{name} could not be read as {kind}"))
                 }
             }
         }
@@ -6295,6 +6305,11 @@ fn image_name(path: &std::path::Path) -> String {
 fn looks_like_svg(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(512)];
     ondin_core::svg_in::looks_like_svg(&String::from_utf8_lossy(head))
+}
+
+/// Whether a byte run is vector art that becomes layers: SVG, or PDF by its header.
+fn is_vector(bytes: &[u8]) -> bool {
+    looks_like_svg(bytes) || ondin_export::pdf_in::looks_like_pdf(bytes)
 }
 
 /// Why a byte run did not become a placeable picture: not a picture at all, or one
@@ -13996,7 +14011,7 @@ mod library_wiring_tests {
     /// One drop of an SVG, a picture and a file that is neither: the SVG becomes layers
     /// in a group named for the file, the picture is placed, both end selected, and the
     /// status keeps the refusal ahead of both reports.
-    /// flip: `take_dropped_images` skipping `import_svg_files` → fails at the group.
+    /// flip: `take_dropped_images` skipping `import_vector_files` → fails at the group.
     #[test]
     fn a_dropped_svg_becomes_layers_beside_a_dropped_picture() {
         let ctx = egui::Context::default();
@@ -14060,6 +14075,166 @@ mod library_wiring_tests {
             "{}",
             status.text
         );
+        let _ = std::fs::remove_dir_all(&root_dir);
+    }
+
+    /// A PDF of `sizes.len()` pages, one filled rect per page, from the PDF export.
+    fn pdf_of_pages(sizes: &[(f64, f64)]) -> Vec<u8> {
+        use ondin_core::kurbo::Size;
+        use ondin_core::peniko::Color;
+        use ondin_core::{Fill, IdSource, NodeKind, Operation, Transaction, keyed_by_position};
+        let mut ids = IdSource::new(0x9DF);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let mut pages = Vec::new();
+        for (i, &(w, h)) in sizes.iter().enumerate() {
+            let (frame, rect) = (ids.mint(), ids.mint());
+            doc.apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: frame,
+                    parent: root,
+                    index: i,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(w, h),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: Some(ondin_core::kurbo::Affine::translate((
+                        1000.0 * i as f64,
+                        0.0,
+                    ))),
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id: rect,
+                    parent: frame,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(w / 2.0, h / 2.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetFills {
+                    id: rect,
+                    fills: keyed_by_position([Fill {
+                        brush: ondin_core::Brush::Solid(Color::from_rgba8(30, 90, 200, 255)).into(),
+                        visible: true,
+                    }]),
+                },
+            ]))
+            .unwrap();
+            pages.push((format!("p{i}"), vec![frame]));
+        }
+        let res = ondin_core::Resolved::rebuild(&doc);
+        ondin_export::pdf::pdf_pages(&doc, &res, &pages, Default::default())
+            .expect("a PDF")
+            .pdf
+    }
+
+    /// A dropped PDF of two pages becomes two frames of the pages' sizes, named for
+    /// the file and the page, side by side, selected, in one undo step; a PDF of
+    /// one page becomes a group named for the file, as an SVG does.
+    ///
+    /// flip: `import_vector_files` reading a PDF as SVG → fails at "two frames".
+    #[test]
+    fn a_dropped_pdf_becomes_a_frame_per_page() {
+        use ondin_core::{NodeId, NodeKind};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root_dir = temp_root("drop-pdf");
+        let mut app = app_at(&ctx, root_dir.clone());
+        let drop = |app: &mut OndinApp, name: &str, bytes: Vec<u8>| {
+            let input = egui::RawInput {
+                dropped_files: vec![egui::DroppedFile {
+                    name: name.to_string(),
+                    bytes: Some(bytes.into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                app.session.next_status_pass();
+                app.take_dropped_images(ui.ctx());
+            });
+        };
+        let before = app
+            .session
+            .doc
+            .get(app.session.page)
+            .unwrap()
+            .children()
+            .len();
+        drop(
+            &mut app,
+            "brochure.pdf",
+            pdf_of_pages(&[(200.0, 300.0), (400.0, 300.0)]),
+        );
+
+        let doc = &app.session.doc;
+        let frames: Vec<NodeId> = doc.get(app.session.page).unwrap().children()[before..].to_vec();
+        let named: Vec<&str> = frames.iter().map(|&f| doc.get(f).unwrap().name()).collect();
+        assert_eq!(
+            named,
+            ["brochure — page 1", "brochure — page 2"],
+            "two frames: {}",
+            app.session.status().text
+        );
+        let res = &app.session.resolved;
+        let boxes: Vec<_> = frames
+            .iter()
+            .map(|&f| res.world_bounds(f).unwrap())
+            .collect();
+        assert_eq!(
+            boxes
+                .iter()
+                .map(|b| (b.width().round(), b.height().round()))
+                .collect::<Vec<_>>(),
+            [(200.0, 300.0), (400.0, 300.0)],
+            "each the size of its page"
+        );
+        assert!(
+            (boxes[1].x0 - boxes[0].x1 - 40.0).abs() < 1e-6 && boxes[0].y0 == boxes[1].y0,
+            "side by side: {boxes:?}"
+        );
+        assert!(
+            frames
+                .iter()
+                .all(|&f| !doc.get(f).unwrap().children().is_empty()),
+            "each page drawn into its frame"
+        );
+        assert_eq!(app.session.selection.ids(), frames.as_slice());
+        assert!(
+            app.session
+                .status()
+                .text
+                .contains("Imported brochure.pdf — ")
+                && app.session.status().text.contains(" on 2 pages"),
+            "{}",
+            app.session.status().text
+        );
+        assert!(app.session.undo());
+        assert_eq!(
+            app.session
+                .doc
+                .get(app.session.page)
+                .unwrap()
+                .children()
+                .len(),
+            before,
+            "one undo takes both frames"
+        );
+
+        drop(&mut app, "logo.pdf", pdf_of_pages(&[(120.0, 80.0)]));
+        let doc = &app.session.doc;
+        let made = ondin_core::subtree_nodes(doc, &[doc.first_page()])
+            .into_iter()
+            .find(|&id| doc.get(id).unwrap().name() == "logo")
+            .expect("one page became a group named for its file");
+        assert!(matches!(doc.get(made).unwrap().kind(), NodeKind::Group));
+        assert_eq!(app.session.selection.ids(), [made]);
         let _ = std::fs::remove_dir_all(&root_dir);
     }
 

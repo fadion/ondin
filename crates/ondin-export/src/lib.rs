@@ -43,6 +43,7 @@ pub mod contrast;
 pub mod dtcg;
 pub mod jpeg;
 pub mod pdf;
+pub mod pdf_in;
 pub mod plan;
 pub mod png;
 pub mod snapshot;

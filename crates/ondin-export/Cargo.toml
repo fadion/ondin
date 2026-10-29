@@ -53,6 +53,10 @@ zip.workspace = true
 krilla.workspace = true
 krilla-svg.workspace = true
 usvg.workspace = true
+hayro-svg.workspace = true
+# Reads `hayro-svg`'s markup to merge glyphs into lines (`pdf_in`). The version
+# `ondin-core`'s `svg_in` reads with, so this declares an edge, not a tree.
+roxmltree = "0.20.0"
 
 [dev-dependencies]
 # Inflates a PDF's streams so `tests/pdf.rs` can read the text mapping krilla

@@ -872,9 +872,14 @@ pub(crate) enum SvgImport {
     Placed(String),
     /// Nested past what the reader will descend into.
     TooDeep,
+    /// A PDF the empty password does not open.
+    Locked,
     /// Not SVG, no shapes in it, or the build did not apply.
     Unreadable,
 }
+
+/// The space between the frames a many-page PDF is laid out as, in world units.
+const PDF_PAGE_GAP: f64 = 40.0;
 
 /// Where the pictures inside a pasted SVG go (`ondin_core::svg_in::ImageSink`).
 /// The same steps as `OndinApp::load_image_bytes`, which cannot be called
@@ -5565,7 +5570,7 @@ impl OndinApp {
                     .fail("That SVG is nested too deeply to read — nothing was pasted.");
                 true
             }
-            SvgImport::Unreadable => false,
+            SvgImport::Locked | SvgImport::Unreadable => false,
         }
     }
 
@@ -5645,6 +5650,102 @@ impl OndinApp {
         }
         if !out.approximated.is_empty() {
             msg.push_str(&format!(", approximated {}", out.approximated.join(", ")));
+        }
+        SvgImport::Placed(msg)
+    }
+
+    /// Import a PDF as `svg_in` reads SVG (`ondin_export::pdf_in`). One page lands
+    /// as [`Self::import_svg`] lands a file: a group named `name`, centred at `at`.
+    /// Several become one frame per page, its size, named "`name` — page N", in a
+    /// row on the page centred where a paste would land: one step, the frames
+    /// selected.
+    pub(crate) fn import_pdf(
+        &mut self,
+        bytes: Vec<u8>,
+        at: Option<Point>,
+        name: &str,
+    ) -> SvgImport {
+        use ondin_export::pdf_in::{PdfInError, import};
+        let pdf = match import(bytes) {
+            Ok(pdf) => pdf,
+            Err(PdfInError::Encrypted) => return SvgImport::Locked,
+            Err(PdfInError::Unreadable) => return SvgImport::Unreadable,
+        };
+        if !self.session.has_step_name() {
+            self.session.name_step("Import PDF", icon::SHARE_NETWORK);
+        }
+        let mut pages = pdf.pages;
+        if pages.len() == 1 {
+            let page = pages.remove(0);
+            return self.import_svg(&page.svg, at, Some(name));
+        }
+        let (centre, _, _) = self.paste_placement(at);
+        let width = pages
+            .iter()
+            .map(|p| p.size.width + PDF_PAGE_GAP)
+            .sum::<f64>()
+            - PDF_PAGE_GAP;
+        let height = pages.iter().map(|p| p.size.height).fold(0.0, f64::max);
+        let parent = self.session.page;
+        let first = self.child_count(parent);
+        let mut sink = SvgImages {
+            images: self.canvas.images_mut(),
+        };
+        let (mut ops, mut frames) = (Vec::new(), Vec::new());
+        let (mut shapes, mut skipped, mut approximated) = (0, Vec::new(), Vec::new());
+        let mut x = centre.x - width / 2.0;
+        for (i, page) in pages.iter().enumerate() {
+            let frame = self.session.ids.mint();
+            ops.push(Operation::CreateNode {
+                id: frame,
+                parent,
+                index: first + i,
+                kind: NodeKind::Artboard {
+                    size: page.size,
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((x, centre.y - height / 2.0))),
+                name: Some(format!("{name} — page {}", i + 1)),
+            });
+            x += page.size.width + PDF_PAGE_GAP;
+            frames.push(frame);
+            // A page that will not read stays an empty frame, so the numbering holds.
+            if let Ok(page) = ondin_core::svg_in::import(
+                &page.svg,
+                &mut self.session.ids,
+                frame,
+                0,
+                Some(&mut sink),
+            ) {
+                shapes += page.shapes;
+                ops.extend(page.tx.0);
+                skipped.extend(page.skipped);
+                approximated.extend(page.approximated);
+            }
+        }
+        if !self.session.commit(Transaction(ops)) {
+            return SvgImport::Unreadable;
+        }
+        self.session.selection.set(frames);
+        for list in [&mut skipped, &mut approximated] {
+            list.sort();
+            list.dedup();
+        }
+        let plural = if shapes == 1 { "layer" } else { "layers" };
+        let mut msg = format!("{shapes} {plural} on {} pages", pages.len());
+        if pdf.left_out > 0 {
+            msg.push_str(&format!(
+                ", the first {} of {}",
+                pages.len(),
+                pages.len() + pdf.left_out
+            ));
+        }
+        if !skipped.is_empty() {
+            msg.push_str(&format!(", skipped {}", skipped.join(", ")));
+        }
+        if !approximated.is_empty() {
+            msg.push_str(&format!(", approximated {}", approximated.join(", ")));
         }
         SvgImport::Placed(msg)
     }
@@ -8762,21 +8863,22 @@ impl OndinApp {
         /// The border drawn inside the canvas edge, when there is no frame to
         /// put one round instead.
         const BORDER: f32 = 2.0;
-        let (files, svgs) = ui.input(|i| {
+        let (files, svgs, pdfs) = ui.input(|i| {
             let hovered = &i.raw.hovered_files;
             (
                 hovered.len(),
                 hovered.iter().filter(|f| hovers_svg(f)).count(),
+                hovered.iter().filter(|f| hovers_pdf(f)).count(),
             )
         });
         if files == 0 {
             return;
         }
         // One gate for outline and words, `drop_images_at`'s own: a single picture on
-        // the shape. An SVG makes layers instead.
+        // the shape. An SVG or a PDF makes layers instead.
         let at = self.drop_point(ui.ctx());
         let replacing = at
-            .filter(|_| files == 1 && svgs == 0)
+            .filter(|_| files == 1 && svgs + pdfs == 0)
             .and_then(|p| self.image_drop_target(Some(p)));
         // The hover outline's weight and hue, so it does not read as selected.
         let anchor = match replacing {
@@ -8818,7 +8920,7 @@ impl OndinApp {
             painter,
             inner,
             self.to_screen(world, rect, ppp),
-            &drop_label(files, svgs, name.as_deref()),
+            &drop_label(files, svgs, pdfs, name.as_deref()),
         );
     }
 
@@ -9004,15 +9106,28 @@ fn os_cursor_screen_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
 /// What releasing the drag would do, as the future tense of `drop_images_at`'s
 /// messages. It names the shape in full, since the outline can be off screen and
 /// a destructive drop must not surprise.
-fn drop_label(files: usize, svgs: usize, replacing: Option<&str>) -> String {
+fn drop_label(files: usize, svgs: usize, pdfs: usize, replacing: Option<&str>) -> String {
     match (files, replacing) {
         (_, Some(name)) => format!("Replace image in {name}"),
         (1, None) if svgs == 1 => "Import SVG".to_string(),
+        (1, None) if pdfs == 1 => "Import PDF".to_string(),
         (n, None) if svgs == n => format!("Import {n} SVGs"),
-        (n, None) if svgs > 0 => format!("Place {n} files"),
+        (n, None) if pdfs == n => format!("Import {n} PDFs"),
+        (n, None) if svgs + pdfs == n => format!("Import {n} files"),
+        (n, None) if svgs + pdfs > 0 => format!("Place {n} files"),
         (1, None) => "Place image".to_string(),
         (n, None) => format!("Place {n} images"),
     }
+}
+
+/// Whether a file hovering over the window is PDF, by its name or MIME type.
+fn hovers_pdf(file: &egui::HoveredFile) -> bool {
+    file.mime == "application/pdf"
+        || file
+            .path
+            .as_deref()
+            .and_then(|p| p.extension())
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
 }
 
 /// Whether a file hovering over the window is SVG, by its name or its MIME type: the
@@ -11582,16 +11697,23 @@ mod image_name_tests {
 mod drop_label_tests {
     use super::*;
 
-    /// A hovering SVG is announced as an import and never as a picture replace; a mix
-    /// is counted as files.
+    /// A hovering SVG or PDF is announced as an import and never as a picture
+    /// replace; a mix is counted as files.
     #[test]
     fn a_hovering_svg_is_an_import() {
-        assert_eq!(drop_label(1, 1, None), "Import SVG");
-        assert_eq!(drop_label(2, 2, None), "Import 2 SVGs");
-        assert_eq!(drop_label(3, 1, None), "Place 3 files");
-        assert_eq!(drop_label(2, 0, None), "Place 2 images");
+        assert_eq!(drop_label(1, 1, 0, None), "Import SVG");
+        assert_eq!(drop_label(1, 0, 1, None), "Import PDF");
+        assert_eq!(drop_label(2, 2, 0, None), "Import 2 SVGs");
+        assert_eq!(drop_label(2, 0, 2, None), "Import 2 PDFs");
+        assert_eq!(drop_label(2, 1, 1, None), "Import 2 files");
+        assert_eq!(drop_label(3, 1, 0, None), "Place 3 files");
+        assert_eq!(drop_label(2, 0, 0, None), "Place 2 images");
         let svg = egui::HoveredFile {
             path: Some("C:/art/Logo.SVG".into()),
+            ..Default::default()
+        };
+        let pdf = egui::HoveredFile {
+            mime: "application/pdf".into(),
             ..Default::default()
         };
         let png = egui::HoveredFile {
@@ -11599,6 +11721,7 @@ mod drop_label_tests {
             ..Default::default()
         };
         assert!(hovers_svg(&svg) && !hovers_svg(&png));
+        assert!(hovers_pdf(&pdf) && !hovers_pdf(&svg) && !hovers_pdf(&png));
     }
 
     /// The pill `paint_drop_label` paints, as a screen rect.

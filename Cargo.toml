@@ -118,6 +118,9 @@ zip = { version = "8.6.0", default-features = false, features = [
 krilla = { version = "0.8.2", default-features = false }
 krilla-svg = "0.8.1"
 usvg = "0.47.0"
+# PDF import: each page drawn as SVG by `hayro-svg` (pure Rust, from krilla's
+# author), then read by `svg_in` like any pasted SVG. Its kurbo is ours.
+hayro-svg = "0.8.0"
 
 # --- ondin-app (UI chrome + windowing) — egui trio pinned exactly, moves together ---
 # eframe (default features) owns the window + wgpu device + event loop; it pulls

@@ -235,13 +235,36 @@ pub fn kernel(sigma: f32) -> Vec<f32> {
 /// outwards. The caller owes the surface padding for [`ondin_core::effect::reach`];
 /// without it the blur fades to nothing at the buffer's border.
 pub fn blur(s: &mut Surface<'_>, sigma_x: f32, sigma_y: f32) {
+    blur_channels(s, sigma_x, sigma_y, Channels::Rgba);
+}
+
+/// [`blur`] over `channels` alone.
+fn blur_channels(s: &mut Surface<'_>, sigma_x: f32, sigma_y: f32, channels: Channels) {
     if sigma_x > 0.0 {
         let k = kernel(sigma_x);
-        convolve(s, &k, true);
+        convolve(s, &k, true, channels);
     }
     if sigma_y > 0.0 {
         let k = kernel(sigma_y);
-        convolve(s, &k, false);
+        convolve(s, &k, false, channels);
+    }
+}
+
+/// Which channels a pass computes: all four, or alpha alone for a shadow's
+/// silhouette, whose colour is zero until the tint and is left as it is.
+#[derive(Clone, Copy)]
+enum Channels {
+    Rgba,
+    Alpha,
+}
+
+impl Channels {
+    /// The first channel computed; the rest run to the end of the pixel.
+    fn first(self) -> usize {
+        match self {
+            Self::Rgba => 0,
+            Self::Alpha => 3,
+        }
     }
 }
 
@@ -305,23 +328,29 @@ pub fn coarse_size(w: usize, h: usize, k: usize) -> (usize, usize) {
 /// `saturating_mul` because `k` is a parameter of a `pub fn`, not
 /// `shadow_downscale`'s capped output.
 pub fn coarsen(s: &Surface<'_>, k: usize) -> Vec<u8> {
+    coarsen_channels(s, k, Channels::Rgba)
+}
+
+/// [`coarsen`] over `channels` alone; the others come out zero.
+fn coarsen_channels(s: &Surface<'_>, k: usize, channels: Channels) -> Vec<u8> {
     let (cw, ch) = coarse_size(s.w, s.h, k);
     let mut out = vec![0u8; cw * ch * 4];
     let n = (k as f32) * (k as f32);
+    let first = channels.first();
     for cy in 0..ch {
         for cx in 0..cw {
             let mut acc = [0.0f32; 4];
             for y in cy * k..(cy + 1).saturating_mul(k).min(s.h) {
                 for x in cx * k..(cx + 1).saturating_mul(k).min(s.w) {
                     let p = (y * s.w + x) * 4;
-                    for (a, v) in acc.iter_mut().zip(&s.px[p..p + 4]) {
+                    for (a, v) in acc[first..].iter_mut().zip(&s.px[p + first..p + 4]) {
                         *a += f32::from(*v);
                     }
                 }
             }
             let p = (cy * cw + cx) * 4;
-            for (o, a) in out[p..p + 4].iter_mut().zip(acc) {
-                *o = (a / n + 0.5) as u8;
+            for c in first..4 {
+                out[p + c] = (acc[c] / n + 0.5) as u8;
             }
         }
     }
@@ -338,8 +367,14 @@ pub fn coarsen(s: &Surface<'_>, k: usize) -> Vec<u8> {
 /// blurred to nothing at its border, so clamping extends transparency (the
 /// opposite reason from [`convolve`]'s edge rule).
 pub fn upsample(s: &mut Surface<'_>, coarse: &[u8], k: usize) {
+    upsample_channels(s, coarse, k, Channels::Rgba);
+}
+
+/// [`upsample`] into `channels` alone; the others are left as they are.
+fn upsample_channels(s: &mut Surface<'_>, coarse: &[u8], k: usize, channels: Channels) {
     let (cw, ch) = coarse_size(s.w, s.h, k);
     let half = (k as f32 - 1.0) / 2.0;
+    let first = channels.first();
     for y in 0..s.h {
         let v = (y as f32 - half) / k as f32;
         let (y0, ty) = split(v, ch);
@@ -349,7 +384,7 @@ pub fn upsample(s: &mut Surface<'_>, coarse: &[u8], k: usize) {
             let (x0, tx) = split(u, cw);
             let x1 = (x0 + 1).min(cw - 1);
             let p = (y * s.w + x) * 4;
-            for c in 0..4 {
+            for c in first..4 {
                 let at = |cx: usize, cy: usize| coarse[(cy * cw + cx) * 4 + c] as f32;
                 let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
                 let bot = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
@@ -379,45 +414,117 @@ fn split(v: f32, n: usize) -> (usize, f32) {
 /// cost: the convolution runs over `w·h/k²` pixels with a kernel that no longer
 /// grows (§15 D403).
 pub fn blur_coarse(s: &mut Surface<'_>, sigma_x: f32, sigma_y: f32, k: usize) {
-    let (cw, ch) = coarse_size(s.w, s.h, k);
-    let mut coarse = coarsen(s, k);
-    blur(&mut Surface::new(&mut coarse, cw, ch), sigma_x, sigma_y);
-    upsample(s, &coarse, k);
+    blur_coarse_channels(s, sigma_x, sigma_y, k, Channels::Rgba);
 }
 
-fn convolve(s: &mut Surface<'_>, k: &[f32], horizontal: bool) {
+/// [`blur_coarse`] whose blur runs over `channels` alone.
+fn blur_coarse_channels(
+    s: &mut Surface<'_>,
+    sigma_x: f32,
+    sigma_y: f32,
+    k: usize,
+    channels: Channels,
+) {
+    let (cw, ch) = coarse_size(s.w, s.h, k);
+    let mut coarse = coarsen_channels(s, k, channels);
+    blur_channels(
+        &mut Surface::new(&mut coarse, cw, ch),
+        sigma_x,
+        sigma_y,
+        channels,
+    );
+    upsample_channels(s, &coarse, k, channels);
+}
+
+/// One separable pass of the kernel `k` along rows (`horizontal`) or columns.
+///
+/// **Each pixel sums its taps in kernel order, skipping those past the edge**, so
+/// the result is bit-identical however the work is split: the vertical pass
+/// accumulates whole rows for locality, and rows are shared across threads
+/// ([`for_row_bands`]). The GPU passes are checked against these numbers.
+fn convolve(s: &mut Surface<'_>, k: &[f32], horizontal: bool, channels: Channels) {
     let r = (k.len() - 1) / 2;
     let (w, h) = (s.w, s.h);
-    let mut out = vec![0u8; s.px.len()];
-    // The outer axis is the one the kernel does not run along.
-    let (outer, inner) = if horizontal { (h, w) } else { (w, h) };
-    for o in 0..outer {
-        for i in 0..inner {
-            let mut acc = [0.0f32; 4];
-            for (t, weight) in k.iter().enumerate() {
-                let d = i as isize + t as isize - r as isize;
-                if d < 0 || d >= inner as isize {
-                    continue;
+    let first = channels.first();
+    // Alpha alone leaves the colour as it was, so it starts as a copy.
+    let mut out = match channels {
+        Channels::Rgba => vec![0u8; s.px.len()],
+        Channels::Alpha => s.px.to_vec(),
+    };
+    let src: &[u8] = s.px;
+    let cost = w * h * k.len() * (4 - first);
+    for_row_bands(&mut out, w * 4, cost, |y0, band| {
+        let mut acc = vec![0.0f32; w * 4];
+        for (j, row) in band.chunks_exact_mut(w * 4).enumerate() {
+            let y = y0 + j;
+            acc.fill(0.0);
+            if horizontal {
+                let line = &src[y * w * 4..(y + 1) * w * 4];
+                for x in 0..w {
+                    // The taps that land inside the row, in kernel order.
+                    let (t0, t1) = (r.saturating_sub(x), (2 * r).min(w - 1 + r - x));
+                    for (t, weight) in k.iter().enumerate().take(t1 + 1).skip(t0) {
+                        let p = (x + t - r) * 4;
+                        for c in first..4 {
+                            acc[x * 4 + c] += f32::from(line[p + c]) * weight;
+                        }
+                    }
                 }
-                let (x, y) = if horizontal {
-                    (d as usize, o)
-                } else {
-                    (o, d as usize)
-                };
-                let p = (y * w + x) * 4;
-                for (a, v) in acc.iter_mut().zip(&s.px[p..p + 4]) {
-                    *a += *v as f32 * weight;
+            } else {
+                let (t0, t1) = (r.saturating_sub(y), (2 * r).min(h - 1 + r - y));
+                for (t, weight) in k.iter().enumerate().take(t1 + 1).skip(t0) {
+                    let d = y + t - r;
+                    let line = &src[d * w * 4..(d + 1) * w * 4];
+                    for x in 0..w {
+                        for c in first..4 {
+                            acc[x * 4 + c] += f32::from(line[x * 4 + c]) * weight;
+                        }
+                    }
                 }
             }
-            let (x, y) = if horizontal { (i, o) } else { (o, i) };
-            let p = (y * w + x) * 4;
-            for (o, a) in out[p..p + 4].iter_mut().zip(acc) {
-                *o = (a + 0.5).min(255.0) as u8;
+            for x in 0..w {
+                for c in first..4 {
+                    row[x * 4 + c] = (acc[x * 4 + c] + 0.5).min(255.0) as u8;
+                }
             }
         }
-    }
+    });
     s.px.copy_from_slice(&out);
 }
+
+/// Run `band(first_row, rows)` over `out`, rows of `row_bytes`, split into one
+/// band per thread when the pass costs `cost` multiply-adds or more than
+/// [`THREADED_COST`]; on the calling thread below it, where starting threads
+/// would cost more than they save.
+fn for_row_bands(
+    out: &mut [u8],
+    row_bytes: usize,
+    cost: usize,
+    band: impl Fn(usize, &mut [u8]) + Sync,
+) {
+    if out.is_empty() || row_bytes == 0 {
+        return;
+    }
+    let rows = out.len() / row_bytes;
+    let threads = match cost >= THREADED_COST {
+        true => std::thread::available_parallelism().map_or(1, |n| n.get().min(8)),
+        false => 1,
+    };
+    let per = rows.div_ceil(threads.min(rows).max(1));
+    if per >= rows {
+        band(0, out);
+        return;
+    }
+    std::thread::scope(|scope| {
+        for (i, rows) in out.chunks_mut(per * row_bytes).enumerate() {
+            let band = &band;
+            scope.spawn(move || band(i * per, rows));
+        }
+    });
+}
+
+/// The multiply-adds from which a pass is split across threads.
+const THREADED_COST: usize = 1 << 22;
 
 /// The device-space deviations a blur of `radius` document units needs, given the
 /// scale the surface was rasterized at.
@@ -547,9 +654,15 @@ fn shadow_layer(
         // (§15 D403): `shadow_downscale` is the only bound on a shadow's kernel.
         let k = ondin_core::effect::shadow_downscale(sx.max(sy) as f64) as usize;
         if k > 1 {
-            blur_coarse(&mut surface, sx / k as f32, sy / k as f32, k);
+            blur_coarse_channels(
+                &mut surface,
+                sx / k as f32,
+                sy / k as f32,
+                k,
+                Channels::Alpha,
+            );
         } else {
-            blur(&mut surface, sx, sy);
+            blur_channels(&mut surface, sx, sy, Channels::Alpha);
         }
     }
     // Tint: the shadow's colour at the silhouette's alpha, **complementing the
@@ -792,6 +905,94 @@ mod tests {
             drift * 1000 < before as i64,
             "alpha drifted {drift} out of {before}, i.e. more than 0.1%"
         );
+    }
+
+    /// The direct convolution, tap by tap in kernel order with the edge taps
+    /// skipped: what `convolve` must equal byte for byte.
+    fn convolve_reference(px: &[u8], w: usize, h: usize, k: &[f32], horizontal: bool) -> Vec<u8> {
+        let r = (k.len() - 1) / 2;
+        let mut out = vec![0u8; px.len()];
+        let (outer, inner) = if horizontal { (h, w) } else { (w, h) };
+        for o in 0..outer {
+            for i in 0..inner {
+                let mut acc = [0.0f32; 4];
+                for (t, weight) in k.iter().enumerate() {
+                    let d = i as isize + t as isize - r as isize;
+                    if d < 0 || d >= inner as isize {
+                        continue;
+                    }
+                    let (x, y) = if horizontal {
+                        (d as usize, o)
+                    } else {
+                        (o, d as usize)
+                    };
+                    let p = (y * w + x) * 4;
+                    for (a, v) in acc.iter_mut().zip(&px[p..p + 4]) {
+                        *a += *v as f32 * weight;
+                    }
+                }
+                let (x, y) = if horizontal { (i, o) } else { (o, i) };
+                let p = (y * w + x) * 4;
+                for (o, a) in out[p..p + 4].iter_mut().zip(acc) {
+                    *o = (a + 0.5).min(255.0) as u8;
+                }
+            }
+        }
+        out
+    }
+
+    /// The blur is byte-identical to the direct convolution, split across threads
+    /// (this surface is past `THREADED_COST`) or not, and the alpha-only pass a
+    /// shadow uses gives the same alpha and leaves the colour alone.
+    ///
+    /// flip: `for_row_bands` handing every band row 0 as its first → fails at "rgba".
+    #[test]
+    fn the_blur_is_the_direct_convolution_byte_for_byte() {
+        let (w, h) = (301, 203);
+        // Noise rather than a shape: every tap weight shows in the sum.
+        let mut seed = 0x2545_f491_u32;
+        let px: Vec<u8> = (0..w * h * 4)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            })
+            .collect();
+        let k = kernel(14.0);
+        assert!(
+            w * h * k.len() * 4 >= THREADED_COST,
+            "the fixture takes the threaded path"
+        );
+        for horizontal in [true, false] {
+            let want = convolve_reference(&px, w, h, &k, horizontal);
+            let mut got = px.clone();
+            convolve(
+                &mut Surface::new(&mut got, w, h),
+                &k,
+                horizontal,
+                Channels::Rgba,
+            );
+            assert!(got == want, "rgba, horizontal {horizontal}");
+
+            let mut alpha = px.clone();
+            convolve(
+                &mut Surface::new(&mut alpha, w, h),
+                &k,
+                horizontal,
+                Channels::Alpha,
+            );
+            let alphas = |v: &[u8]| v.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+            let colours = |v: &[u8]| v.chunks(4).map(|p| [p[0], p[1], p[2]]).collect::<Vec<_>>();
+            assert!(
+                alphas(&alpha) == alphas(&want),
+                "alpha, horizontal {horizontal}"
+            );
+            assert!(
+                colours(&alpha) == colours(&px),
+                "colour untouched, horizontal {horizontal}"
+            );
+        }
     }
 
     /// A zero blur leaves the buffer exactly untouched, not re-quantized.

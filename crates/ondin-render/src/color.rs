@@ -169,6 +169,9 @@ pub fn straight_rgba8_from_premul(premul: &[u8]) -> Vec<u8> {
         if a == 0 {
             // Fully transparent: leave color zeroed.
             dst[3] = 0;
+        } else if a == 255 {
+            // Opaque: the division below gives each channel back unchanged.
+            *dst = *px;
         } else {
             for i in 0..3 {
                 // Round-half-up division of (channel * 255) by alpha.

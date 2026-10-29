@@ -5654,11 +5654,10 @@ impl OndinApp {
         SvgImport::Placed(msg)
     }
 
-    /// Import a PDF as `svg_in` reads SVG (`ondin_export::pdf_in`). One page lands
-    /// as [`Self::import_svg`] lands a file: a group named `name`, centred at `at`.
-    /// Several become one frame per page, its size, named "`name` — page N", in a
-    /// row on the page centred where a paste would land: one step, the frames
-    /// selected.
+    /// Import a PDF as `svg_in` reads SVG (`ondin_export::pdf_in`): one white frame
+    /// per page, its size, named `name` or, of several, "`name` — page N", in a row
+    /// on the page centred where a paste would land: one step, the frames selected.
+    /// A frame, not a group, so the page keeps its paper and its edge.
     pub(crate) fn import_pdf(
         &mut self,
         bytes: Vec<u8>,
@@ -5674,11 +5673,7 @@ impl OndinApp {
         if !self.session.has_step_name() {
             self.session.name_step("Import PDF", icon::SHARE_NETWORK);
         }
-        let mut pages = pdf.pages;
-        if pages.len() == 1 {
-            let page = pages.remove(0);
-            return self.import_svg(&page.svg, at, Some(name));
-        }
+        let pages = pdf.pages;
         let (centre, _, _) = self.paste_placement(at);
         let width = pages
             .iter()
@@ -5706,7 +5701,17 @@ impl OndinApp {
                     corner_smoothing: 0.0,
                 },
                 transform: Some(Affine::translate((x, centre.y - height / 2.0))),
-                name: Some(format!("{name} — page {}", i + 1)),
+                name: Some(match pages.len() {
+                    1 => name.to_string(),
+                    _ => format!("{name} — page {}", i + 1),
+                }),
+            });
+            ops.push(Operation::SetFills {
+                id: frame,
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                    brush: ondin_core::Brush::Solid(Color::WHITE).into(),
+                    visible: true,
+                }]),
             });
             x += page.size.width + PDF_PAGE_GAP;
             frames.push(frame);
@@ -5733,7 +5738,10 @@ impl OndinApp {
             list.dedup();
         }
         let plural = if shapes == 1 { "layer" } else { "layers" };
-        let mut msg = format!("{shapes} {plural} on {} pages", pages.len());
+        let mut msg = match pages.len() {
+            1 => format!("{shapes} {plural}"),
+            n => format!("{shapes} {plural} on {n} pages"),
+        };
         if pdf.left_out > 0 {
             msg.push_str(&format!(
                 ", the first {} of {}",

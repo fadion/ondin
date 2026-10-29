@@ -138,10 +138,11 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   rather than loading the Image tool. Its report (*Imported logo.svg — 5 layers*) follows the
   pictures' in one status, and the drop selects both.
 - A PDF (its `%PDF-` header, `pdf_in::looks_like_pdf`) comes in by the same doors, the drop pill
-  saying *Import PDF* (`canvas::import_pdf`, through `import_vector_files`). One page lands as an
-  SVG file does. Several become one frame per page at the page's size, named *brochure — page 2*,
-  in a row `PDF_PAGE_GAP` apart on the page, centred where a paste would land: one step, the frames
-  selected, *Imported brochure.pdf — 340 layers on 12 pages*. Past `pdf_in::MAX_PAGES` the rest
+  saying *Import PDF* (`canvas::import_pdf`, through `import_vector_files`). Each page becomes a
+  white frame at the page's size — a frame even for one page, so the page keeps its paper and its
+  edge — named *brochure*, or *brochure — page 2* of several, in a row `PDF_PAGE_GAP` apart on the
+  page, centred where a paste would land: one step, the frames selected, *Imported brochure.pdf —
+  340 layers on 12 pages*. Past `pdf_in::MAX_PAGES` the rest
   are left out and the report says so; the import runs on the frame. A password-protected PDF is
   refused by name.
 - `Ctrl+V` over a picture-only clipboard produces no egui event, so `input::normal_mode` also reads the

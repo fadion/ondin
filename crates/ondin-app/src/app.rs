@@ -14136,7 +14136,7 @@ mod library_wiring_tests {
 
     /// A dropped PDF of two pages becomes two frames of the pages' sizes, named for
     /// the file and the page, side by side, selected, in one undo step; a PDF of
-    /// one page becomes a group named for the file, as an SVG does.
+    /// one page becomes one white frame named for the file.
     ///
     /// flip: `import_vector_files` reading a PDF as SVG → fails at "two frames".
     #[test]
@@ -14232,8 +14232,18 @@ mod library_wiring_tests {
         let made = ondin_core::subtree_nodes(doc, &[doc.first_page()])
             .into_iter()
             .find(|&id| doc.get(id).unwrap().name() == "logo")
-            .expect("one page became a group named for its file");
-        assert!(matches!(doc.get(made).unwrap().kind(), NodeKind::Group));
+            .expect("one page became a frame named for its file");
+        assert!(matches!(
+            doc.get(made).unwrap().kind(),
+            NodeKind::Artboard { size, .. } if (size.width, size.height) == (120.0, 80.0)
+        ));
+        assert!(
+            matches!(
+                doc.get(made).unwrap().paint().fills.first().and_then(|f| f.brush.literal()),
+                Some(ondin_core::Brush::Solid(c)) if *c == ondin_core::peniko::Color::WHITE
+            ),
+            "on white paper"
+        );
         assert_eq!(app.session.selection.ids(), [made]);
         let _ = std::fs::remove_dir_all(&root_dir);
     }

@@ -1,22 +1,11 @@
 # Ondin — Roadmap
 
-Open work only. **Now · Performance** is work on the frame thread that freezes the window and moves to
-a worker next. **Later · First** is the editor's remaining gaps, which land before MCP and Command
+Open work only. **Later · First** is the editor's remaining gaps, which land before MCP and Command
 Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it. The
 other **Later** sections are deferred with a stated reason or trigger. Decided non-goals are in
 `non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
 reads true.
-
-## Now · Performance
-
-Each runs once per action on the frame and scales with a picture, a selection, the document or the
-library, so a large one freezes the window. Files, pictures and SVG markup already read on a worker
-(`crate::import`).
-
-- **Library refresh** (`library::state` `refresh`): `scan::scan` opens every document and may load
-  one whole (`read_meta`), on the frame, from Duplicate, Move, the kit watch, `set_kit_at`, the kit
-  picker and a pinning save. Slow on a cloud-synced folder.
 
 ## Later · First
 

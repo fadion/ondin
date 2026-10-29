@@ -6,8 +6,9 @@
 //! the first time something other than this app changes the synced base folder.
 //!
 //! ⚠️ **A scan is a real cost and must not be per-frame.** [`Library::refresh`]
-//! opens every document's prefix. The dashboard calls it when entered and after a
-//! write, and on nothing else.
+//! lists every folder and opens the prefix of each document whose modification
+//! time or size moved since the last refresh (`scan::MetaCache`). The dashboard
+//! calls it when entered and after a write, and on nothing else.
 
 use super::cache::LocalIndex;
 use super::project::{Project, Projects, ProjectsRead};
@@ -86,6 +87,9 @@ pub struct Library {
     /// only way to move this is a refresh, which keeps the invalidation
     /// enumerable.
     trashed: Vec<Entry>,
+    /// What the last refresh read out of each document, so the next one opens
+    /// only those that changed ([`scan::scan_cached`]).
+    metas: scan::MetaCache,
     /// Per-machine facts — the *last opened* times behind the Recent list.
     pub local: LocalIndex,
     /// Set when `projects.json` exists but could not be read.
@@ -134,6 +138,7 @@ impl Library {
             entries: Vec::new(),
             // Both filled by the `refresh` below.
             trashed: Vec::new(),
+            metas: Default::default(),
             local,
             projects_unreadable,
             root_unavailable: false,
@@ -154,7 +159,7 @@ impl Library {
     /// since every other error that walk meets is right to drop.
     pub fn refresh(&mut self) {
         let readable = scan::readable(&self.root);
-        self.entries = scan::scan(&self.root);
+        self.entries = scan::scan_cached(&self.root, &mut self.metas);
         self.refresh_trash();
         self.root_unavailable = !readable && !self.local.is_empty();
         if !readable {
@@ -648,6 +653,7 @@ mod tests {
             projects: Default::default(),
             entries: Vec::new(),
             trashed: Vec::new(),
+            metas: Default::default(),
             local,
             projects_unreadable: false,
             root_unavailable: false,
@@ -683,6 +689,7 @@ mod tests {
             projects: Default::default(),
             entries: Vec::new(),
             trashed: Vec::new(),
+            metas: Default::default(),
             local: LocalIndex::default(),
             projects_unreadable: false,
             root_unavailable: false,

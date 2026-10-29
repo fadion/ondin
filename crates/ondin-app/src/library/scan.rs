@@ -16,6 +16,7 @@
 use super::project::PROJECTS_FILE;
 use ondin_core::io::probe::{self, MetaProbe, PREFIX_BYTES};
 use ondin_core::meta::DocumentMeta;
+use std::collections::HashMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -230,9 +231,67 @@ pub fn read_meta(path: &Path) -> Option<(DocumentMeta, bool)> {
 /// failure) are dropped: the dashboard shows what it can find, and a missing row
 /// beats a library that refuses to open.
 pub fn scan(root: &Path) -> Vec<Entry> {
+    scan_cached(root, &mut MetaCache::default())
+}
+
+/// [`scan`], opening only the documents whose modification time or size moved
+/// since `cache` saw them; `cache` ends holding what this scan found. The
+/// directory listing is still read in full, so a file added, removed or renamed
+/// outside the app is seen as before.
+pub fn scan_cached(root: &Path, cache: &mut MetaCache) -> Vec<Entry> {
+    let mut probe = Probe {
+        prev: std::mem::take(&mut cache.0),
+        next: HashMap::new(),
+    };
     let mut out = Vec::new();
-    collect(root, true, &mut out, &mut Vec::new());
+    collect(root, true, &mut out, &mut Vec::new(), &mut probe);
+    cache.0 = probe.next;
     out
+}
+
+/// What [`scan_cached`] read out of each document, by path, so the next scan can
+/// skip opening it. Keyed by the full-precision modification time and the size,
+/// which every write the app makes changes.
+#[derive(Default)]
+pub struct MetaCache(HashMap<PathBuf, Held>);
+
+/// One document's metadata as read, and the stamp it was read at.
+struct Held {
+    stamp: (std::time::SystemTime, u64),
+    meta: DocumentMeta,
+    unread: bool,
+}
+
+/// A scan's two caches: what the last scan held, and what this one keeps.
+#[derive(Default)]
+struct Probe {
+    prev: HashMap<PathBuf, Held>,
+    next: HashMap<PathBuf, Held>,
+}
+
+impl Probe {
+    /// `path`'s metadata: the held copy when `stamp` matches it, else
+    /// [`read_meta`]. A file without a stamp is read every time.
+    fn meta(
+        &mut self,
+        path: &Path,
+        stamp: Option<(std::time::SystemTime, u64)>,
+    ) -> Option<(DocumentMeta, bool)> {
+        let held = self.prev.remove(path).filter(|h| Some(h.stamp) == stamp);
+        let (meta, unread) = match held {
+            Some(h) => (h.meta, h.unread),
+            None => read_meta(path)?,
+        };
+        if let Some(stamp) = stamp {
+            let held = Held {
+                stamp,
+                meta: meta.clone(),
+                unread,
+            };
+            self.next.insert(path.to_path_buf(), held);
+        }
+        Some((meta, unread))
+    }
 }
 
 /// The `.ondin` files in the library whose **filename is not valid Unicode**, so
@@ -247,7 +306,13 @@ pub fn scan(root: &Path) -> Vec<Entry> {
 /// disagree about the two-level rule or the skipped dot-directories.
 pub fn unnameable(root: &Path) -> Vec<PathBuf> {
     let mut skipped = Vec::new();
-    collect(root, true, &mut Vec::new(), &mut skipped);
+    collect(
+        root,
+        true,
+        &mut Vec::new(),
+        &mut skipped,
+        &mut Probe::default(),
+    );
     skipped
 }
 
@@ -301,7 +366,7 @@ pub fn readable(root: &Path) -> bool {
 /// it because it skips dot-directories.
 pub fn scan_dir(dir: &Path) -> Vec<Entry> {
     let mut out = Vec::new();
-    collect(dir, false, &mut out, &mut Vec::new());
+    collect(dir, false, &mut out, &mut Vec::new(), &mut Probe::default());
     out
 }
 
@@ -310,8 +375,15 @@ pub fn scan_dir(dir: &Path) -> Vec<Entry> {
 ///
 /// `unnameable` collects the documents passed over because their filenames are
 /// not valid Unicode — see [`unnameable`]. A second output rather than a second
-/// walk, so both answer about the same directories.
-fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec<PathBuf>) {
+/// walk, so both answer about the same directories. `probe` reads each
+/// document's metadata ([`Probe::meta`]).
+fn collect(
+    dir: &Path,
+    descend: bool,
+    out: &mut Vec<Entry>,
+    unnameable: &mut Vec<PathBuf>,
+    probe: &mut Probe,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -328,7 +400,7 @@ fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec
                     .file_name()
                     .is_some_and(|n| n.to_string_lossy().starts_with('.'));
                 if descend && !hidden {
-                    collect(&path, false, out, unnameable);
+                    collect(&path, false, out, unnameable, probe);
                 }
                 continue;
             }
@@ -352,7 +424,7 @@ fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec
         };
         if file_type.is_dir() {
             if descend {
-                collect(&path, false, out, unnameable);
+                collect(&path, false, out, unnameable, probe);
             }
             continue;
         }
@@ -365,11 +437,15 @@ fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let Some((meta, unread)) = read_meta(&path) else {
+        let stat = entry.metadata().ok();
+        let stamp = stat
+            .as_ref()
+            .and_then(|m| Some((m.modified().ok()?, m.len())));
+        let Some((meta, unread)) = probe.meta(&path, stamp) else {
             continue;
         };
-        let (modified, size) = match entry.metadata() {
-            Ok(m) => (
+        let (modified, size) = match stat {
+            Some(m) => (
                 m.modified()
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -377,7 +453,7 @@ fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec
                     .unwrap_or(0),
                 m.len(),
             ),
-            Err(_) => (0, 0),
+            None => (0, 0),
         };
         out.push(Entry {
             stem: stem.to_string(),
@@ -421,6 +497,46 @@ mod tests {
             created: Some(1_774_483_200),
             kit: None,
         }
+    }
+
+    /// A cached scan opens a document again only when its modification time or
+    /// size moved: rewritten with its stamp put back, the held name stands, so the
+    /// file was not read; with the stamp moved, the new name shows.
+    ///
+    /// flip: `Probe::meta` ignoring its held copy → fails at "not reopened".
+    #[test]
+    fn a_cached_scan_reads_only_documents_whose_stamp_moved() {
+        let root = temp_root("cache");
+        let path = root.join("doc.ondin");
+        write_doc(&path, named("Alpha", None));
+        let stat = std::fs::metadata(&path).unwrap();
+        let (stamp, len) = (stat.modified().unwrap(), stat.len());
+        let mut cache = MetaCache::default();
+        let name = |cache: &mut MetaCache| scan_cached(&root, cache)[0].display_name();
+        assert_eq!(name(&mut cache), "Alpha");
+
+        write_doc(&path, named("Gamma", None));
+        let set_modified = |t: std::time::SystemTime| {
+            let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            f.set_times(std::fs::FileTimes::new().set_modified(t))
+                .unwrap();
+        };
+        set_modified(stamp);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            len,
+            "the fixture: one size"
+        );
+        assert_eq!(
+            scan(&root)[0].display_name(),
+            "Gamma",
+            "the fixture: rewritten"
+        );
+        assert_eq!(name(&mut cache), "Alpha", "not reopened");
+
+        set_modified(stamp + std::time::Duration::from_secs(1));
+        assert_eq!(name(&mut cache), "Gamma", "a moved stamp is read again");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

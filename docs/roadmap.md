@@ -14,13 +14,8 @@ Found testing Import files on real Sketch files.
 - **Sketch import, older text:** text in Sketch's older archived format (an NSKeyedArchiver binary
   plist in `archivedAttributedString`) comes in empty, reported "Texts in Sketch's older format".
   Decode it, so files such as a Sketch 47 one come in with their text.
-- **Sketch import, speed:** symbol-heavy kits are very slow — reading eight real files took about 27
-  minutes in a release build, the big ones holding thousands of resized instances and style
-  overrides or symbol swaps, each placed in its own transaction by `sketch_in::Builder::place_instances`.
-  Find and fix the superlinear step. One candidate in sight: each pass of that loop rebuilds the
-  waiting set over every pending instance and `Vec::remove`s the one it places. The worst offender
-  is `ag-grid-ui-kit-botmad` (in `~/Downloads/Sketch`); the other files there read in seconds.
-- **Penpot import, fills:** the same file's fills look wrong; compare against Penpot.
+- **Penpot import, fills:** `Dashboard UI Kit … (Community).penpot`'s fills look wrong; compare
+  against Penpot.
 - **Penpot 1 files:** four of the seven Penpot community templates tried are Penpot 1 files and are
   refused. Weigh reading them.
 

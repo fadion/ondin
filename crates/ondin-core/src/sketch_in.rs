@@ -1074,21 +1074,24 @@ impl Builder<'_> {
     /// Replace each placeholder with an instance of its master, a master holding
     /// no placeholder first, then write its overrides.
     fn place_instances(&mut self) -> Result<(), SketchError> {
+        // A round places every instance whose master holds no placeholder, in
+        // three transactions whatever their number: each commit costs in
+        // proportion to the whole document, so one per instance made a kit of
+        // thousands take minutes.
         loop {
             let waiting: rustc_hash::FxHashSet<String> = self
                 .pending
                 .iter()
                 .filter_map(|p| p.inside.clone())
                 .collect();
-            let Some(at) = self
-                .pending
-                .iter()
-                .position(|p| !waiting.contains(&p.symbol))
-            else {
+            let (ready, rest): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut self.pending)
+                .into_iter()
+                .partition(|p| !waiting.contains(&p.symbol));
+            self.pending = rest;
+            if ready.is_empty() {
                 break;
-            };
-            let p = self.pending.remove(at);
-            self.place(p)?;
+            }
+            self.place(ready)?;
         }
         let left = self.pending.len();
         if left > 0 {
@@ -1102,49 +1105,97 @@ impl Builder<'_> {
         Ok(())
     }
 
-    fn place(&mut self, p: Pending) -> Result<(), SketchError> {
+    /// Replace each of `ready`'s placeholders with a copy of its master, none of
+    /// which holds a placeholder: the copies in one transaction, their styles in
+    /// a second, their overrides in a third.
+    fn place(&mut self, ready: Vec<Pending>) -> Result<(), SketchError> {
+        let mut ops = Vec::new();
+        // Copies already inserted per holder, at their indices before any
+        // insert, so a later one in the same holder lands past them; the
+        // placeholders go only at the end, so those indices hold.
+        let mut added: FxHashMap<NodeId, Vec<usize>> = FxHashMap::default();
+        let mut placed = Vec::new();
+        for p in ready {
+            if let Some(root) = self.copy_of(&p, &mut added, &mut ops) {
+                placed.push((root, p));
+            }
+        }
+        ops.extend(
+            placed
+                .iter()
+                .map(|(_, p)| Operation::DeleteNode { id: p.placeholder }),
+        );
+        self.commit(ops)?;
+        for (root, p) in &placed {
+            let frame = Frame::of(&p.layer);
+            self.layers.insert(p.sketch_id.clone(), *root);
+            self.style(*root, &p.layer, frame.size(), false);
+            self.exports(*root, &p.layer);
+        }
+        let ops = std::mem::take(&mut self.ops);
+        self.commit(ops)?;
+        let mut ops = Vec::new();
+        for (root, p) in &placed {
+            self.overrides(*root, &p.layer, &mut ops);
+        }
+        self.commit(ops)?;
+        Ok(())
+    }
+
+    /// The operations copying `p`'s master into its placeholder's place, onto
+    /// `ops`, and the copy's root; `None`, counted, when it cannot be copied.
+    fn copy_of(
+        &mut self,
+        p: &Pending,
+        added: &mut FxHashMap<NodeId, Vec<usize>>,
+        ops: &mut Vec<Operation>,
+    ) -> Option<NodeId> {
         let Some(&main) = self.masters.get(&p.symbol) else {
             self.count("Missing symbols", 1, "instances", "Left as empty groups");
-            return Ok(());
+            return None;
         };
-        let (Some(holder), Some(template)) = (
-            self.doc.get(p.placeholder).and_then(|n| n.parent()),
-            self.doc.capture_subtree(main),
-        ) else {
-            self.count(
+        let unplaced = |b: &mut Self| {
+            b.count(
                 "Symbols that could not be placed",
                 1,
                 "instances",
                 "Left as empty groups",
             );
-            return Ok(());
         };
-        let index = self
+        let (Some(holder), Some(template)) = (
+            self.doc.get(p.placeholder).and_then(|n| n.parent()),
+            self.doc.capture_subtree(main),
+        ) else {
+            unplaced(self);
+            return None;
+        };
+        let Some(base) = self
             .doc
             .get(holder)
-            .and_then(|n| n.children().iter().position(|c| *c == p.placeholder));
+            .and_then(|n| n.children().iter().position(|c| *c == p.placeholder))
+        else {
+            unplaced(self);
+            return None;
+        };
+        let done = added.entry(holder).or_default();
+        let index = base + done.iter().filter(|i| **i <= base).count();
         let (tx, made) = crate::build::insert_subtrees(
             &self.doc,
             self.ids,
             &[crate::build::Placement {
                 nodes: template,
                 parent: holder,
-                index,
+                index: Some(index),
             }],
             Vec2::ZERO,
         );
         let Some(&root) = made.first() else {
-            self.count(
-                "Symbols that could not be placed",
-                1,
-                "instances",
-                "Left as empty groups",
-            );
-            return Ok(());
+            unplaced(self);
+            return None;
         };
+        added.entry(holder).or_default().push(base);
         let frame = Frame::of(&p.layer);
-        let mut ops = tx.0;
-        ops.push(Operation::DeleteNode { id: p.placeholder });
+        ops.extend(tx.0);
         ops.push(Operation::SetTransform {
             id: root,
             transform: frame.placement(),
@@ -1187,19 +1238,12 @@ impl Builder<'_> {
                 self.count("Masking symbols", 1, "instances", "Left unmasked");
             }
         }
-        self.commit(ops)?;
-        self.layers.insert(p.sketch_id, root);
-        self.style(root, &p.layer, frame.size(), false);
-        self.exports(root, &p.layer);
-        let ops = std::mem::take(&mut self.ops);
-        self.commit(ops)?;
-        self.overrides(root, &p.layer)?;
-        Ok(())
+        Some(root)
     }
 
-    /// An instance's overrides: text is written onto its copy; the rest is counted.
-    fn overrides(&mut self, root: NodeId, layer: &Value) -> Result<(), SketchError> {
-        let mut ops = Vec::new();
+    /// An instance's overrides onto `ops`: text is written onto its copy; the
+    /// rest is counted.
+    fn overrides(&mut self, root: NodeId, layer: &Value, ops: &mut Vec<Operation>) {
         for o in arr(layer, "overrideValues") {
             let name = str_of(o, "overrideName");
             let Some((path, property)) = name.rsplit_once('_') else {
@@ -1226,8 +1270,6 @@ impl Builder<'_> {
                 _ => self.count("Other overrides", 1, "", "Left out"),
             }
         }
-        self.commit(ops)?;
-        Ok(())
     }
 
     /// The node inside the instance at `root` that is the copy of the Sketch layer

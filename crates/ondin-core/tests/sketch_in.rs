@@ -359,6 +359,67 @@ fn a_nested_symbol_is_placed_before_the_symbol_holding_it() {
     assert!(r.report.is_empty(), "{:?}", r.report);
 }
 
+/// Several instances placed together in one parent, between other layers, keep
+/// the stacking their placeholders had, each with its own override.
+/// flip: index each copy at its placeholder's position without counting the
+/// copies inserted before it in `copy_of` → fails at the order.
+#[test]
+fn instances_sharing_a_parent_keep_their_places() {
+    let master = json!({
+        "_class": "symbolMaster", "do_objectID": "M", "name": "Chip", "symbolID": "S",
+        "frame": frame(0.0, 0.0, 40.0, 20.0),
+        "layers": [text("L", "Chip", json!([run(0, 4, "Inter-Regular", 12.0, color(0.0, 0.0, 0.0))]), 0)],
+    });
+    let layer = |id: &str, instance: bool| {
+        if instance {
+            json!({
+                "_class": "symbolInstance", "do_objectID": id, "name": id, "symbolID": "S",
+                "frame": frame(0.0, 0.0, 40.0, 20.0),
+                "overrideValues": [{ "overrideName": "L_stringValue", "value": format!("Label {id}") }],
+            })
+        } else {
+            let mut r = rectangle(id, 0.0, 0.0, json!({}));
+            r["name"] = json!(id);
+            r
+        }
+    };
+    let order = |instances: bool| {
+        let layers: Vec<Value> = ["A", "X", "Y", "B", "Z"]
+            .iter()
+            .map(|id| layer(id, instances && !matches!(*id, "A" | "B")))
+            .collect();
+        let group = json!({
+            "_class": "group", "do_objectID": "G", "name": "Row",
+            "frame": frame(500.0, 0.0, 200.0, 20.0), "layers": layers,
+        });
+        let r = import(sketch(
+            &[("P", "Page", json!([master.clone(), group]))],
+            json!({}),
+            &[],
+        ));
+        let row = one(&r.doc, "Row");
+        let names: Vec<String> = r
+            .doc
+            .get(row)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|&c| r.doc.get(c).unwrap().name().to_owned())
+            .collect();
+        (names, r)
+    };
+    let (plain, _) = order(false);
+    let (placed, r) = order(true);
+    assert_eq!(placed, plain);
+    for id in ["X", "Y", "Z"] {
+        let copy = r.doc.get(one(&r.doc, id)).unwrap().children()[0];
+        let NodeKind::Text { content, .. } = r.doc.get(copy).unwrap().kind() else {
+            panic!("the label's copy");
+        };
+        assert_eq!(*content, format!("Label {id}"));
+    }
+}
+
 /// A swatch is a colour variable a fill naming it is bound to; a shared style is
 /// an Ondin style its users are bound to while they match it.
 #[test]

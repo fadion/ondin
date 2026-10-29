@@ -89,6 +89,7 @@ mod import;
 mod input;
 mod instances;
 mod job;
+mod keychain;
 mod kits;
 mod lasso;
 mod loose_spacing;

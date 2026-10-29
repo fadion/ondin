@@ -15,12 +15,6 @@ reads true.
   backdrop, so the SVG writer owes an answer (a reported approximation, at least).
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
-- **Figma in *Import files*.** The card takes `.ondin`, `.sketch` and `.penpot` (`library.md`,
-  *Import files*); Figma joins `Kind` as they do, with its own words for the options. By link
-  only, through the REST API: the field becomes *File or Figma link*, a pasted `figma.com`
-  link brings up the personal access token and *Fetch*, the token is sent to Figma only and kept in
-  the system keychain only when asked; a `.fig` in the field gets a notice to paste its link instead
-  (`non-goals.md`). Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
 ## Later · Second

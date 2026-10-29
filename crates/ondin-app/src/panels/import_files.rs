@@ -40,6 +40,12 @@ pub(crate) enum Kind {
     Sketch,
     /// Penpot 2's export: read, never written back.
     Penpot,
+    /// A Figma file read through Figma's API from a pasted link, never a file
+    /// on disk.
+    Figma,
+    /// Figma's own `.fig` binary, which Ondin does not read: the field sends the
+    /// user to the file's link instead.
+    Fig,
     /// A PDF, an SVG or a picture: placed on a canvas, never imported.
     Placed,
     /// Anything else.
@@ -57,15 +63,21 @@ impl Kind {
             crate::library::scan::DOCUMENT_EXT => Self::Ondin,
             "sketch" => Self::Sketch,
             "penpot" => Self::Penpot,
+            "fig" => Self::Fig,
             "pdf" | "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff"
             | "avif" => Self::Placed,
             _ => Self::Other,
         }
     }
 
-    /// Whether the card imports this kind.
+    /// Whether the card imports this kind of file.
     pub(crate) fn imports(self) -> bool {
         matches!(self, Self::Ondin | Self::Sketch | Self::Penpot)
+    }
+
+    /// Whether this is a design tool's document, which a canvas refuses.
+    pub(crate) fn is_document(self) -> bool {
+        self.imports() || self == Self::Fig
     }
 
     /// What the message line calls a file of this kind.
@@ -74,6 +86,7 @@ impl Kind {
             Self::Ondin => "Ondin document",
             Self::Sketch => "Sketch document",
             Self::Penpot => "Penpot file",
+            Self::Figma | Self::Fig => "Figma file",
             Self::Placed | Self::Other => "File",
         }
     }
@@ -98,6 +111,14 @@ impl Kind {
                 variables: "Colours",
                 variables_off: "As colour variables. Off: each use keeps its colour.",
             },
+            Self::Figma => Words {
+                frames: ("frame", "frames"),
+                components: "Components and variants",
+                styles: "Styles",
+                styles_off: "Off: each use keeps the values it shows.",
+                variables: "Variables",
+                variables_off: "Figma's API gives them to Enterprise plans only; the values they show come in.",
+            },
             _ => Words {
                 frames: ("frame", "frames"),
                 components: "Components",
@@ -115,6 +136,8 @@ impl Kind {
             Self::Ondin => ("ONDIN".into(), egui::Color32::from_rgb(0x8b, 0xa5, 0xe0)),
             Self::Sketch => ("SKETCH".into(), egui::Color32::from_rgb(0xe6, 0xb8, 0x66)),
             Self::Penpot => ("PENPOT".into(), egui::Color32::from_rgb(0x8f, 0xd1, 0xa8)),
+            Self::Figma => ("LINK".into(), FIGMA),
+            Self::Fig => ("FIG".into(), FIGMA),
             Self::Placed | Self::Other => (
                 path.extension()
                     .and_then(|e| e.to_str())
@@ -125,6 +148,9 @@ impl Kind {
         }
     }
 }
+
+/// Figma's badge colour, on a link and on a `.fig`.
+const FIGMA: egui::Color32 = egui::Color32::from_rgb(0xc9, 0xa6, 0xe6);
 
 /// How a kind of file names what it holds.
 #[derive(Clone, Copy)]
@@ -175,6 +201,19 @@ pub(crate) enum Field {
         path: PathBuf,
         why: String,
     },
+    /// A `.fig`: the notice that sends the user to its link.
+    Fig(PathBuf),
+    /// A pasted Figma link, waiting for *Fetch*.
+    Link {
+        url: String,
+        key: String,
+    },
+    /// A Figma link being fetched and read.
+    Fetching {
+        url: String,
+        key: String,
+        job: Job<Result<Source, String>>,
+    },
 }
 
 /// The choices under the field. Per page, `pages` lines up with the source's
@@ -211,6 +250,18 @@ pub(crate) struct ImportCard {
     /// Said under the field about the drop or pick that filled it — the files a
     /// drop of several left out.
     pub(crate) note: Option<String>,
+    /// The Figma token, held for this card only unless `remember` is ticked.
+    pub(crate) token: String,
+    pub(crate) show_token: bool,
+    /// Keep the token in the system keychain once a fetch succeeds with it.
+    pub(crate) remember: bool,
+    /// The keychain's remembered token, being read when the card opened.
+    token_job: Option<Job<Option<String>>>,
+    /// Whether the token came from the keychain, so a paste fetches at once and
+    /// unticking *Remember* forgets it.
+    remembered: bool,
+    /// Why the last fetch failed, under the token row.
+    pub(crate) fetch_error: Option<String>,
 }
 
 /// What a worker filing copies hands back.
@@ -329,6 +380,22 @@ impl ImportCard {
             },
             step: Step::Form,
             note: None,
+            token: String::new(),
+            show_token: false,
+            remember: false,
+            token_job: None,
+            remembered: false,
+            fetch_error: None,
+        }
+    }
+
+    /// Whether the field holds a Figma link, fetched or not, and so the token
+    /// row shows.
+    fn has_link(&self) -> bool {
+        match &self.field {
+            Field::Link { .. } | Field::Fetching { .. } => true,
+            Field::One { source, .. } => source.kind == Kind::Figma,
+            _ => false,
         }
     }
 
@@ -355,7 +422,9 @@ fn foot_text(card: &ImportCard, projects: &project::Projects) -> String {
     match &card.field {
         Field::Empty => "Choose a file".into(),
         Field::Reading { .. } => "Reading the file…".into(),
-        Field::Refused { .. } => "Not a file Ondin imports".into(),
+        Field::Refused { .. } | Field::Fig(_) => "Not a file Ondin imports".into(),
+        Field::Link { .. } => "Fetch the file to choose what comes over".into(),
+        Field::Fetching { .. } => "Fetching from Figma…".into(),
         Field::One { .. } => match into {
             Some(p) => format!("Into {p} as a new document"),
             None => "Into the library as a new document".into(),
@@ -489,6 +558,176 @@ fn read_foreign(kind: Kind, bytes: &[u8]) -> Result<Read, String> {
         .collect();
     let name = name.filter(|n| !n.trim().is_empty());
     Ok((doc, report, families.into_iter().collect(), name))
+}
+
+/// A read that landed becomes the field's one document, its options set from it
+/// and the families it asks for that are not installed added to its report — on
+/// the frame, since the font list is the frame's.
+fn adopt(
+    fonts: &crate::fonts::FontService,
+    card: &mut ImportCard,
+    path: PathBuf,
+    mut source: Source,
+) {
+    for (family, runs) in std::mem::take(&mut source.families) {
+        if fonts.family_status(&family) == crate::fonts::FamilyStatus::Missing {
+            source.report.push((
+                Part::Layers,
+                ReportRow {
+                    what: family,
+                    count: counted(runs, "run", "runs"),
+                    how: "Not installed: drawn in Inter until it is".into(),
+                },
+            ));
+        }
+    }
+    let o = &mut card.options;
+    o.name.clone_from(&source.name);
+    o.pages = vec![true; source.census.pages.len()];
+    card.field = Field::One {
+        path,
+        source: Box::new(source),
+    };
+}
+
+/// Where Figma's REST API lives.
+const FIGMA_API: &str = "https://api.figma.com/v1";
+/// The most a fetched file and its pictures may weigh together.
+const FIGMA_LIMIT: u64 = 2 << 30;
+
+/// A fetched Figma file and its pictures, for `ondin_core::figma_in`.
+struct Fetched(std::collections::BTreeMap<String, Vec<u8>>);
+
+impl ondin_core::foreign::Archive for Fetched {
+    fn entry(&mut self, name: &str) -> Option<Vec<u8>> {
+        self.0.get(name).cloned()
+    }
+}
+
+/// Fetch the file at `key` with `token` and read it, on the worker: the file
+/// with its geometry, then the address of each picture it fills with, then the
+/// pictures. The token goes to Figma and nowhere else, and is kept in the
+/// keychain after a fetch it worked for only when `remember`; `forget` drops a
+/// remembered one that was unticked.
+fn fetch_figma(key: &str, token: &str, remember: bool, forget: bool) -> Result<Source, String> {
+    use std::time::Duration;
+    // No test reaches Figma: the read is tested through `read_figma`.
+    if cfg!(test) {
+        return Err("A test build does not reach Figma".into());
+    }
+    let agent: ureq::Agent = ureq::config::Config::builder()
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(120)))
+        .timeout_global(Some(Duration::from_secs(600)))
+        .build()
+        .new_agent();
+    let mut used = 0u64;
+    let mut get = |url: &str, with_token: bool| -> Result<Vec<u8>, String> {
+        let mut req = agent.get(url);
+        if with_token {
+            req = req.header("X-Figma-Token", token);
+        }
+        let mut resp = req.call().map_err(|e| match e {
+            ureq::Error::StatusCode(403) => {
+                "Figma refused the token: it needs read access to file content".to_owned()
+            }
+            ureq::Error::StatusCode(404) => {
+                "Figma has no file at that link that this token can open".to_owned()
+            }
+            ureq::Error::StatusCode(429) => {
+                "Figma asked to wait: try Fetch again in a minute".to_owned()
+            }
+            e => format!("Figma could not be reached: {e}"),
+        })?;
+        let bytes = resp
+            .body_mut()
+            .with_config()
+            .limit(FIGMA_LIMIT.saturating_sub(used))
+            .read_to_vec()
+            .map_err(|e| format!("Figma's answer did not arrive whole: {e}"))?;
+        used += bytes.len() as u64;
+        Ok(bytes)
+    };
+    let mut files = std::collections::BTreeMap::new();
+    files.insert(
+        "file.json".to_owned(),
+        get(&format!("{FIGMA_API}/files/{key}?geometry=paths"), true)?,
+    );
+    // Without the addresses the file still comes in, its pictures reported missing.
+    let addresses: serde_json::Value = get(&format!("{FIGMA_API}/files/{key}/images"), true)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    if let Some(images) = addresses
+        .get("meta")
+        .and_then(|m| m.get("images"))
+        .and_then(|i| i.as_object())
+    {
+        for (reference, url) in images {
+            // Pictures are served from storage that wants no token, and one that
+            // does not arrive is reported by the reader, not fatal here.
+            if let Some(url) = url.as_str()
+                && let Ok(bytes) = get(url, false)
+            {
+                files.insert(format!("images/{reference}"), bytes);
+            }
+        }
+    }
+    let mut source = read_figma(files, used)?;
+    if remember {
+        if let Err(why) = crate::keychain::store(token) {
+            source.report.push((
+                Part::Layers,
+                ReportRow {
+                    what: "The token".into(),
+                    count: String::new(),
+                    how: why,
+                },
+            ));
+        }
+    } else if forget {
+        crate::keychain::forget();
+    }
+    Ok(source)
+}
+
+/// A fetched file, `bytes` long with its pictures, read into a document.
+fn read_figma(
+    files: std::collections::BTreeMap<String, Vec<u8>>,
+    bytes: u64,
+) -> Result<Source, String> {
+    let actor = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_nanos() as u64 | 1);
+    let mut ids = ondin_core::IdSource::new(actor);
+    let read = ondin_core::figma_in::read(&mut Fetched(files), &mut ids, &mut Pictures)
+        .map_err(|e| format!("Could not be read: {e}"))?;
+    let report: Vec<(Part, ReportRow)> = read
+        .report
+        .into_iter()
+        .map(|u| {
+            let row = ReportRow {
+                what: u.what.to_owned(),
+                count: u.count,
+                how: u.how.to_owned(),
+            };
+            (u.part, row)
+        })
+        .collect();
+    let census = ondin_core::take::census(&read.doc);
+    Ok(Source {
+        name: if read.name.trim().is_empty() {
+            "Figma file".to_owned()
+        } else {
+            read.name
+        },
+        census,
+        kind: Kind::Figma,
+        bytes,
+        report,
+        families: read.families.into_iter().collect(),
+        doc: Arc::new(read.doc),
+    })
 }
 
 /// The name a document files under: its own, else its filename de-slugged as the
@@ -630,7 +869,55 @@ impl OndinApp {
         if !self.library_writable() {
             return;
         }
-        self.dash.import = Some(ImportCard::new(self.nav_project().map(|p| p.id)));
+        let mut card = ImportCard::new(self.nav_project().map(|p| p.id));
+        // The keychain can block (a locked macOS keychain asks), so off the frame.
+        card.token_job = Some(Job::spawn(
+            "figma-token",
+            &self.egui_ctx,
+            crate::keychain::read,
+        ));
+        self.dash.import = Some(card);
+    }
+
+    /// Put a pasted Figma link in the field, fetching at once when the token was
+    /// remembered.
+    fn fill_link(&mut self, ctx: &egui::Context, url: String, key: String) {
+        let Some(card) = self.dash.import.as_mut() else {
+            return;
+        };
+        card.typed.clear();
+        card.note = None;
+        card.fetch_error = None;
+        card.field = Field::Link { url, key };
+        if card.remembered && !card.token.trim().is_empty() {
+            self.start_fetch(ctx);
+        }
+    }
+
+    /// *Fetch*: read the linked file through Figma's API, on a worker.
+    fn start_fetch(&mut self, ctx: &egui::Context) {
+        let Some(card) = self.dash.import.as_mut() else {
+            return;
+        };
+        let token = card.token.trim().to_owned();
+        let Field::Link { url, key } = &card.field else {
+            return;
+        };
+        if token.is_empty() {
+            card.fetch_error = Some("Paste a personal access token first".into());
+            return;
+        }
+        let (url, key) = (url.clone(), key.clone());
+        let (remember, forget) = (card.remember, card.remembered && !card.remember);
+        let from = key.clone();
+        card.fetch_error = None;
+        card.field = Field::Fetching {
+            job: Job::spawn("figma-fetch", ctx, move || {
+                fetch_figma(&from, &token, remember, forget)
+            }),
+            url,
+            key,
+        };
     }
 
     /// Fill the card's field with `paths` — a pick, a drop or a pasted path —
@@ -676,6 +963,7 @@ impl OndinApp {
                 path: path.clone(),
                 why: in_library(&root, path).unwrap_or_default().into(),
             },
+            (0, None, Some(path), None) if Kind::of(path) == Kind::Fig => Field::Fig(path.clone()),
             (0, None, Some(path), None) => Field::Refused {
                 path: path.clone(),
                 why: refusal(Kind::of(path)).into(),
@@ -713,7 +1001,7 @@ impl OndinApp {
 
     /// Land the workers' answers: a file read for its options, a copy finished,
     /// and any copy whose card was cancelled or closed, which is taken back out.
-    pub(crate) fn poll_import(&mut self) {
+    pub(crate) fn poll_import(&mut self, ctx: &egui::Context) {
         self.dash.import_abandoned.retain(|job| match job.poll() {
             Ok(None) => true,
             Ok(Some(landed)) => {
@@ -728,30 +1016,29 @@ impl OndinApp {
         let Some(card) = self.dash.import.as_mut() else {
             return;
         };
+        let mut fetch_now = false;
+        if let Some(job) = &card.token_job {
+            // A worker that died answered no token.
+            let landed = match job.poll() {
+                Ok(answer) => answer,
+                Err(()) => Some(None),
+            };
+            if let Some(remembered) = landed {
+                card.token_job = None;
+                if let Some(token) = remembered.filter(|_| card.token.is_empty()) {
+                    card.token = token;
+                    card.remember = true;
+                    card.remembered = true;
+                    fetch_now = matches!(card.field, Field::Link { .. });
+                }
+            }
+        }
         if let Field::Reading { path, job } = &card.field {
             match job.poll() {
                 Ok(None) => {}
-                Ok(Some(Ok(mut source))) => {
-                    // Here, not on the worker: the font list is the frame's.
-                    for (family, runs) in std::mem::take(&mut source.families) {
-                        if fonts.family_status(&family) == crate::fonts::FamilyStatus::Missing {
-                            source.report.push((
-                                Part::Layers,
-                                ReportRow {
-                                    what: family,
-                                    count: counted(runs, "run", "runs"),
-                                    how: "Not installed: drawn in Inter until it is".into(),
-                                },
-                            ));
-                        }
-                    }
-                    let o = &mut card.options;
-                    o.name.clone_from(&source.name);
-                    o.pages = vec![true; source.census.pages.len()];
-                    card.field = Field::One {
-                        path: path.clone(),
-                        source: Box::new(source),
-                    };
+                Ok(Some(Ok(source))) => {
+                    let path = path.clone();
+                    adopt(fonts, card, path, source);
                 }
                 Ok(Some(Err(why))) => {
                     card.field = Field::Refused {
@@ -767,6 +1054,36 @@ impl OndinApp {
                 }
             }
         }
+        if let Field::Fetching { url, key, job } = &card.field {
+            let landed = match job.poll() {
+                Ok(None) => None,
+                Ok(Some(result)) => Some(result),
+                Err(()) => Some(Err("The fetch stopped before it finished".to_owned())),
+            };
+            match landed {
+                None => {}
+                Some(Ok(source)) => {
+                    card.fetch_error = None;
+                    // Remembered once it has worked; forgotten when unticked.
+                    card.remembered = card.remember;
+                    let path = PathBuf::from(url.clone());
+                    adopt(fonts, card, path, source);
+                }
+                Some(Err(why)) => {
+                    card.fetch_error = Some(why);
+                    card.field = Field::Link {
+                        url: url.clone(),
+                        key: key.clone(),
+                    };
+                }
+            }
+        }
+        if fetch_now {
+            self.start_fetch(ctx);
+        }
+        let Some(card) = self.dash.import.as_mut() else {
+            return;
+        };
         let Step::Loading { job, .. } = &card.step else {
             return;
         };
@@ -885,7 +1202,7 @@ impl OndinApp {
 
     /// Draw the card, if it is open.
     pub(crate) fn import_modal(&mut self, ctx: &egui::Context) {
-        self.poll_import();
+        self.poll_import(ctx);
         if self.dash.import.is_none() {
             return;
         }
@@ -927,9 +1244,10 @@ impl OndinApp {
             act = Some(CardAct::Close);
         }
         if act.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-            act = match self.dash.import.as_ref().map(|c| &c.step) {
-                Some(Step::Form) => Some(CardAct::Import),
-                Some(Step::Done(o)) if o.open.is_some() => Some(CardAct::Open),
+            act = match self.dash.import.as_ref().map(|c| (&c.step, &c.field)) {
+                Some((Step::Form, Field::Link { .. })) => Some(CardAct::Fetch),
+                Some((Step::Form, _)) => Some(CardAct::Import),
+                Some((Step::Done(o), _)) if o.open.is_some() => Some(CardAct::Open),
                 _ => None,
             };
         }
@@ -939,10 +1257,25 @@ impl OndinApp {
             Some(CardAct::Cancel) => self.cancel_import(),
             Some(CardAct::Browse) => self.browse_for_import(ctx),
             Some(CardAct::Fill(path)) => self.fill_import(ctx, vec![path]),
+            Some(CardAct::Link(url, key)) => self.fill_link(ctx, url, key),
+            Some(CardAct::Fetch) => self.start_fetch(ctx),
+            Some(CardAct::PasteLink) => {
+                let pasted = crate::app::system_clipboard_text().unwrap_or_default();
+                match ondin_core::figma_in::file_key(&pasted) {
+                    Some(key) => self.fill_link(ctx, pasted.trim().to_owned(), key),
+                    None => {
+                        if let Some(card) = self.dash.import.as_mut() {
+                            card.note =
+                                Some("The clipboard holds no Figma link. In Figma, use Share › Copy link.".into());
+                        }
+                    }
+                }
+            }
             Some(CardAct::Clear) => {
                 if let Some(card) = self.dash.import.as_mut() {
                     card.field = Field::Empty;
                     card.note = None;
+                    card.fetch_error = None;
                 }
             }
             Some(CardAct::Import) => self.start_copy(ctx),
@@ -971,6 +1304,11 @@ enum CardAct {
     Cancel,
     Browse,
     Fill(PathBuf),
+    /// A Figma link and its file key, typed or pasted.
+    Link(String, String),
+    Fetch,
+    /// *Paste link* on a `.fig`'s notice: the clipboard's link into the field.
+    PasteLink,
     Clear,
     Import,
     Copy,
@@ -983,8 +1321,8 @@ fn refusal(kind: Kind) -> &'static str {
         Kind::Placed => {
             "Ondin places a PDF, an SVG or a picture onto a canvas rather than importing it. Open a document and use Place image."
         }
-        Kind::Ondin | Kind::Sketch | Kind::Penpot | Kind::Other => {
-            "Ondin imports Ondin, Sketch and Penpot files, and cannot read this kind of file."
+        Kind::Ondin | Kind::Sketch | Kind::Penpot | Kind::Figma | Kind::Fig | Kind::Other => {
+            "Ondin imports Ondin, Sketch and Penpot files and Figma links, and cannot read this kind of file."
         }
     }
 }
@@ -1003,6 +1341,10 @@ fn overview(field: &Field, o: &Options, into: Option<String>, landed: Landed) ->
         (_, 0) => (
             "Nothing was imported".to_owned(),
             "The library is as it was".to_owned(),
+        ),
+        (Field::One { source, .. }, _) if source.kind == Kind::Figma => (
+            format!("{} is in {place}", o.name.trim()),
+            "Read from Figma, which is unchanged".to_owned(),
         ),
         (Field::One { source, path }, _) if source.kind != Kind::Ondin => (
             format!("{} is in {place}", o.name.trim()),
@@ -1045,7 +1387,7 @@ fn form(
     foot: &str,
     act: &mut Option<CardAct>,
 ) {
-    super::dashboard::field_label(ui, "File");
+    super::dashboard::field_label(ui, "File or Figma link");
     file_field(ui, card, act);
     if let Some(note) = &card.note {
         message(ui, icon::INFO, note, theme::text::DIM);
@@ -1116,14 +1458,21 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
         let w = ui.available_width() - browse_w - 8.0;
         let shown = match &card.field {
             Field::Empty => None,
-            Field::Reading { path, .. } | Field::One { path, .. } | Field::Refused { path, .. } => {
-                Some((
-                    Kind::of(path).badge(path),
-                    path.file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                ))
+            Field::One { source, path } if source.kind == Kind::Figma => {
+                Some((Kind::Figma.badge(path), path.to_string_lossy().into_owned()))
             }
+            Field::Link { url, .. } | Field::Fetching { url, .. } => {
+                Some((Kind::Figma.badge(Path::new(url)), url.clone()))
+            }
+            Field::Reading { path, .. }
+            | Field::One { path, .. }
+            | Field::Refused { path, .. }
+            | Field::Fig(path) => Some((
+                Kind::of(path).badge(path),
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            )),
             Field::Many(paths) => Some((
                 Kind::Ondin.badge(&paths[0]),
                 format!("{} documents", paths.len()),
@@ -1135,13 +1484,15 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                     ui,
                     egui::vec2(w, FIELD_H),
                     &mut card.typed,
-                    "Choose a file, or paste its path",
+                    "Choose a file, or paste a Figma link",
                     12.0,
                 );
-                if resp.changed()
-                    && let Some(path) = typed_path(&card.typed)
-                {
-                    *act = Some(CardAct::Fill(path));
+                if resp.changed() {
+                    if let Some(key) = ondin_core::figma_in::file_key(&card.typed) {
+                        *act = Some(CardAct::Link(card.typed.trim().to_owned(), key));
+                    } else if let Some(path) = typed_path(&card.typed) {
+                        *act = Some(CardAct::Fill(path));
+                    }
                 }
             }
             Some(((badge, tint), name)) => {
@@ -1181,6 +1532,23 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
     match &card.field {
         Field::Empty => {}
         Field::Reading { .. } => message(ui, icon::FILE, "Reading…", theme::text::FAINT),
+        Field::One { source, .. } if source.kind == Kind::Figma => message(
+            ui,
+            icon::CHECK_CIRCLE,
+            &format!(
+                "{} · {} · fetched just now",
+                source.name,
+                counted(source.census.pages.len(), "page", "pages")
+            ),
+            color::SAVED,
+        ),
+        Field::Link { .. } | Field::Fetching { .. } => message(
+            ui,
+            icon::LINK_SIMPLE,
+            "A Figma link, read through Figma's API with your token.",
+            theme::text::FAINT,
+        ),
+        Field::Fig(_) => fig_notice(ui, act),
         Field::One { path, source } => {
             let folder = path
                 .parent()
@@ -1206,6 +1574,113 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
             message(ui, icon::FILES, &names.join(", "), theme::text::FAINT);
         }
         Field::Refused { why, .. } => message(ui, icon::INFO, why, color::WARN),
+    }
+    if card.has_link() {
+        token_row(ui, card, act);
+    }
+}
+
+/// The notice a `.fig` gets: Ondin reads Figma by link, and *Paste link* puts the
+/// clipboard's link in the field.
+fn fig_notice(ui: &mut egui::Ui, act: &mut Option<CardAct>) {
+    ui.add_space(10.0);
+    egui::Frame::NONE
+        .fill(color::WARN.gamma_multiply(0.11))
+        .stroke(egui::Stroke::new(1.0, color::WARN.gamma_multiply(0.3)))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 9.0;
+                ui.label(theme::icon_text(icon::INFO, 15.0, color::WARN));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.label(
+                        egui::RichText::new("Figma files come in by link")
+                            .size(12.0)
+                            .color(theme::text::STRONG),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(
+                                "Ondin doesn't read .fig files. It reads the file through Figma's \
+                                 API instead. In Figma, use Share › Copy link and paste the link here.",
+                            )
+                            .size(settings::CAPTION_PT + 1.0)
+                            .color(theme::text::MUTED),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(6.0);
+                    if settings::text_button(ui, "Paste link", FieldButton::Off).clicked() {
+                        *act = Some(CardAct::PasteLink);
+                    }
+                });
+            });
+        });
+}
+
+/// The personal access token, *Fetch*, and whether to keep the token.
+fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>) {
+    let fetching = matches!(card.field, Field::Fetching { .. });
+    ui.add_space(GROUP_GAP);
+    super::dashboard::field_label(ui, "Personal access token");
+    let fetch_w = 84.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let w = ui.available_width() - fetch_w - 8.0;
+        ui::field_row_inset(ui, egui::vec2(w, FIELD_H), 8.0, 4.0, |ui| {
+            let eye_w = 26.0;
+            ui.add(
+                egui::TextEdit::singleline(&mut card.token)
+                    .password(!card.show_token)
+                    .frame(egui::Frame::NONE)
+                    .desired_width(ui.available_width() - eye_w)
+                    .font(egui::FontId::proportional(12.0))
+                    .hint_text(egui::RichText::new("figd_…").size(12.0)),
+            );
+            let glyph = if card.show_token {
+                icon::EYE_SLASH
+            } else {
+                icon::EYE
+            };
+            if ui::icon_button(ui, glyph, 22.0, 14.0, false, true)
+                .on_hover_text(if card.show_token {
+                    "Hide token"
+                } else {
+                    "Show token"
+                })
+                .clicked()
+            {
+                card.show_token = !card.show_token;
+            }
+        });
+        let state = FieldButton::enabled_if(!fetching && !card.token.trim().is_empty());
+        if ui::label_button(ui, "Fetch", egui::vec2(fetch_w, FIELD_H), state).clicked()
+            && state.is_enabled()
+        {
+            *act = Some(CardAct::Fetch);
+        }
+    });
+    settings::caption(
+        ui,
+        "Made in Figma's account settings, with read access to file content. Sent to Figma and nowhere else.",
+    );
+    ui.add_space(8.0);
+    if check_row(
+        ui,
+        "Remember the token on this computer",
+        "",
+        "In the system keychain, never in a document",
+        card.remember,
+    ) {
+        card.remember = !card.remember;
+    }
+    if fetching {
+        loading(ui, "Fetching from Figma…");
+    } else if let Some(why) = &card.fetch_error {
+        message(ui, icon::INFO, why, color::WARN);
     }
 }
 
@@ -1700,7 +2175,7 @@ impl OndinApp {
     /// frame would.
     pub(crate) fn settle_import(&mut self) {
         self.wait_import();
-        self.poll_import();
+        self.poll_import(&egui::Context::default());
     }
 
     /// Wait for every worker the card has running, landing nothing.
@@ -1716,8 +2191,16 @@ impl OndinApp {
                     job: Job::done(job.wait().unwrap_or_else(|| Err("no worker".into()))),
                     path,
                 },
+                Field::Fetching { url, key, job } => Field::Fetching {
+                    job: Job::done(job.wait().unwrap_or_else(|| Err("no worker".into()))),
+                    url,
+                    key,
+                },
                 other => other,
             };
+            if let Some(job) = card.token_job.take() {
+                card.token_job = Some(Job::done(job.wait().flatten()));
+            }
             card.step = match std::mem::replace(&mut card.step, Step::Form) {
                 Step::Loading { job, cancel, what } => match job.wait() {
                     Some(landed) => Step::Loading {
@@ -2075,8 +2558,28 @@ mod tests {
                 "Leave out its pictures",
             ],
         );
-        f.app.fill_import(&ctx, vec![two.clone(), two]);
+        f.app.fill_import(&ctx, vec![two.clone(), two.clone()]);
         check(&mut f, &["2 documents", "Leave out their pictures"]);
+        let fig = f.outside.join("Checkout.fig");
+        std::fs::write(&fig, b"fig").unwrap();
+        f.app.fill_import(&ctx, vec![fig]);
+        check(&mut f, &["Figma files come in by link", "Paste link"]);
+        f.app.fill_link(
+            &ctx,
+            "https://www.figma.com/design/AbC123/A-rather-long-file-name-for-a-link".into(),
+            "AbC123".into(),
+        );
+        check(
+            &mut f,
+            &[
+                "File or Figma link",
+                "Personal access token",
+                "Fetch",
+                "Remember the token on this computer",
+            ],
+        );
+        f.app.dash.import.as_mut().unwrap().field = Field::Empty;
+        f.app.fill_import(&ctx, vec![two.clone(), two.clone()]);
         // A copy that answers only when the test lets it, so the frames see it running.
         let (go, wait) = std::sync::mpsc::channel::<()>();
         f.app.dash.import.as_mut().unwrap().step = Step::Loading {
@@ -2320,6 +2823,128 @@ mod tests {
             matches!(&card.field, Field::Refused { why, .. } if why.contains("Penpot 2")),
             "{:?}",
             matches!(card.field, Field::Refused { .. })
+        );
+    }
+
+    /// A Figma file as Figma's API sends it: one page holding one frame.
+    fn a_fetched_figma_file() -> std::collections::BTreeMap<String, Vec<u8>> {
+        let file = serde_json::json!({
+            "name": "Checkout flow",
+            "document": { "id": "0:0", "type": "DOCUMENT", "children": [{
+                "id": "0:1", "name": "Flows", "type": "CANVAS", "children": [{
+                    "id": "1:2", "name": "Cart", "type": "FRAME",
+                    "relativeTransform": [[1, 0, 0], [0, 1, 0]], "size": { "x": 375, "y": 812 },
+                    "transitionNodeID": "1:9",
+                }],
+            }]},
+        });
+        [("file.json".to_owned(), file.to_string().into_bytes())].into()
+    }
+
+    /// A pasted Figma link waits for *Fetch*, with the token row under it and
+    /// *Import* off.
+    #[test]
+    fn a_pasted_figma_link_waits_for_fetch() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "figma-link");
+        f.app.open_import_card();
+        let link = "https://www.figma.com/design/AbC123/Checkout-flow?node-id=0-1".to_owned();
+        f.app.fill_link(&ctx, link, "AbC123".into());
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(matches!(&card.field, Field::Link { key, .. } if key == "AbC123"));
+        assert!(card.has_link(), "the token row shows");
+        assert!(!card.ready());
+        assert_eq!(
+            foot_text(card, &f.app.library.projects),
+            "Fetch the file to choose what comes over"
+        );
+        f.app.start_fetch(&ctx);
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(
+            matches!(card.field, Field::Link { .. }),
+            "no token, so no fetch"
+        );
+        assert!(
+            card.fetch_error
+                .as_deref()
+                .is_some_and(|e| e.contains("token"))
+        );
+    }
+
+    /// A fetched file lands as one document in Figma's words, named after the
+    /// file, and comes in through the card. flip: land a fetch through
+    /// `Field::Refused` in `poll_import` → fails at the kind.
+    #[test]
+    fn a_fetched_figma_file_comes_in_through_the_card() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "figma-fetched");
+        f.app.open_import_card();
+        let source = read_figma(a_fetched_figma_file(), 100).expect("the file reads");
+        let url = "https://www.figma.com/design/AbC123/Checkout-flow".to_owned();
+        f.app.dash.import.as_mut().unwrap().field = Field::Fetching {
+            url,
+            key: "AbC123".into(),
+            job: Job::done(Ok(source)),
+        };
+        f.app.settle_import();
+        let card = f.app.dash.import.as_ref().unwrap();
+        let Field::One { source, .. } = &card.field else {
+            panic!("the fetch landed");
+        };
+        assert_eq!(source.kind, Kind::Figma);
+        assert_eq!(card.options.name, "Checkout flow");
+        f.app.start_copy(&ctx);
+        f.app.settle_import();
+        let Some(Step::Done(o)) = f.app.dash.import.as_ref().map(|c| &c.step) else {
+            panic!("the card shows the overview");
+        };
+        assert_eq!(o.title, "Checkout flow is in the library");
+        assert_eq!(o.sub, "Read from Figma, which is unchanged");
+        assert!(o.report.iter().any(|r| r.what == "Prototype interactions"));
+        assert_eq!(listed(&f).len(), 1);
+    }
+
+    /// A `.fig` gets the notice that sends the user to its link, and *Import*
+    /// stays off.
+    #[test]
+    fn a_fig_file_is_sent_to_its_link() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "fig");
+        let fig = f.outside.join("Checkout flow.fig");
+        std::fs::write(&fig, b"fig-kiwi").unwrap();
+        f.app.fill_import(&ctx, vec![fig]);
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(matches!(card.field, Field::Fig(_)));
+        assert!(!card.ready());
+    }
+
+    /// A remembered token fetches as soon as a link is pasted.
+    #[test]
+    fn a_remembered_token_fetches_on_paste() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "figma-remembered");
+        f.app.open_import_card();
+        f.app.settle_import();
+        let card = f.app.dash.import.as_mut().unwrap();
+        assert!(card.token.is_empty(), "a test build remembers no token");
+        card.token = "figd_x".into();
+        card.remembered = true;
+        f.app.fill_link(
+            &ctx,
+            "https://www.figma.com/design/K1/F".into(),
+            "K1".into(),
+        );
+        assert!(matches!(
+            f.app.dash.import.as_ref().unwrap().field,
+            Field::Fetching { .. }
+        ));
+        // A test build's fetch fails at once, which puts the link back.
+        f.app.settle_import();
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(matches!(card.field, Field::Link { .. }));
+        assert_eq!(
+            card.fetch_error.as_deref(),
+            Some("A test build does not reach Figma")
         );
     }
 

@@ -90,7 +90,7 @@ fn read_all(files: Vec<Incoming>, ids: &mut IdSource, parent: NodeId) -> Vec<Rea
 fn read_one(file: Incoming, ids: &mut IdSource, parent: NodeId) -> Read {
     let name = file.name;
     // Another tool's document is a new library document, never layers in this one.
-    if crate::panels::import_files::Kind::of(std::path::Path::new(&name)).imports() {
+    if crate::panels::import_files::Kind::of(std::path::Path::new(&name)).is_document() {
         return Read::Refused(format!(
             "{name} is a document: bring it in with Import files in the library"
         ));
@@ -463,7 +463,12 @@ mod tests {
     fn a_document_dropped_on_a_canvas_points_to_the_library() {
         let mut ids = IdSource::new(1);
         let parent = ids.mint();
-        for name in ["Marketing.sketch", "Onboarding.ondin"] {
+        for name in [
+            "Marketing.sketch",
+            "Onboarding.ondin",
+            "Kit.penpot",
+            "Checkout.fig",
+        ] {
             let file = Incoming {
                 name: name.into(),
                 bytes: Some(Arc::from(&b"PK\x03\x04"[..])),

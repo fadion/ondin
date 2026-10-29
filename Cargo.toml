@@ -198,9 +198,13 @@ libc = "0.2"
 # **`Win32_System_Registry` and `Win32_UI_Shell` are the `.ondin` file type's**
 # (`file_type.rs`): the per-user registration Velopack's install hook writes, and
 # the shell notice that makes Explorer read it.
+#
+# **`Win32_Security_Credentials` is the Figma token's** (`keychain.rs`): the
+# Credential Manager entry *Import files* keeps it in when asked to remember it.
 windows-sys = { version = "0.52.0", features = [
   "Win32_Foundation",
   "Win32_Security",
+  "Win32_Security_Credentials",
   "Win32_System_JobObjects",
   "Win32_System_Registry",
   "Win32_System_Threading",

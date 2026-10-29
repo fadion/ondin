@@ -322,7 +322,8 @@ impl Builder<'_> {
             else {
                 continue;
             };
-            let ts = crate::style::type_part(&self.text_style(attrs));
+            let attrs = crate::keyed_archive::encoded_attributes(attrs);
+            let ts = crate::style::type_part(&self.text_style(&attrs));
             let id = self.ids.mint_style();
             self.add_style(
                 id,
@@ -947,18 +948,30 @@ impl Builder<'_> {
     /// A text layer: its runs as the node's default and spans, its box as Sketch
     /// sizes it, its paragraphs aligned.
     fn text(&mut self, id: NodeId, parent: NodeId, index: usize, layer: &Value, frame: &Frame) {
-        let attributed = layer.get("attributedString");
-        let content = attributed.map_or("", |a| str_of(a, "string")).to_owned();
-        if attributed.is_some_and(|a| a.get("archivedAttributedString").is_some()) {
-            self.count("Texts in Sketch's older format", 1, "", "Left empty");
+        // Sketch before 48 archived its text; read, it has the later shape.
+        let archived = layer
+            .get("attributedString")
+            .and_then(|a| a.get("archivedAttributedString"))
+            .map(|a| crate::keyed_archive::attributed_string(str_of(a, "_archive")));
+        if matches!(archived, Some(None)) {
+            self.count(
+                "Texts in Sketch's older format",
+                1,
+                "",
+                "Could not be read, left empty",
+            );
         }
+        let archived = archived.flatten();
+        let attributed = archived.as_ref().or(layer.get("attributedString"));
+        let content = attributed.map_or("", |a| str_of(a, "string")).to_owned();
         let runs = attributed.map(|a| arr(a, "attributes")).unwrap_or_default();
-        let fallback = str_in_value(layer, &["style", "textStyle", "encodedAttributes"]);
+        let fallback = str_in_value(layer, &["style", "textStyle", "encodedAttributes"])
+            .map(crate::keyed_archive::encoded_attributes);
         let first = runs
             .first()
             .and_then(|r| r.get("attributes"))
-            .or(fallback)
             .cloned()
+            .or(fallback)
             .unwrap_or(Value::Null);
         let default = self.text_style(&first);
         let ink = run_color(&first).unwrap_or(Color::BLACK);

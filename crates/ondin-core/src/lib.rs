@@ -39,6 +39,7 @@ pub mod id;
 pub mod image;
 pub mod io;
 pub mod item;
+mod keyed_archive;
 pub mod kit;
 pub mod layout;
 pub mod merge;

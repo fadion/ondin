@@ -11,9 +11,6 @@ reads true.
 
 Found testing Import files on real Sketch files.
 
-- **Sketch import, older text:** text in Sketch's older archived format (an NSKeyedArchiver binary
-  plist in `archivedAttributedString`) comes in empty, reported "Texts in Sketch's older format".
-  Decode it, so files such as a Sketch 47 one come in with their text.
 
 ## Later · First
 

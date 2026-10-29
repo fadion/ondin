@@ -713,6 +713,31 @@ fn an_older_files_shapes_and_text() {
     assert_eq!(rows, ["Texts in Sketch's older format"]);
 }
 
+/// "Play" in Avenir Black 14, blue, kerned 1.5, as Sketch before 48 archived it.
+const ARCHIVED_PLAY: &str = "YnBsaXN0MDBVJG51bGxcQXZlbmlyLUJsYWNrgAEjQCwAAAAAAACAAl8QE05TRm9udE5hbWVBdHRyaWJ1dGWAA18QE05TRm9udFNpemVBdHRyaWJ1dGWABFdOUy5rZXlzWk5TLm9iamVjdHOiBgiiAgTSCQoLDIAFXxAaTlNGb250RGVzY3JpcHRvckF0dHJpYnV0ZXPRDw6ABkcwIDAgMSAxgAdcTlNDb21wb25lbnRz0RQTgAgjP/gAAAAAAACACV8QH01TQXR0cmlidXRlZFN0cmluZ0ZvbnRBdHRyaWJ1dGWACldOU0NvbG9ygAtWTlNLZXJugAxXTlMua2V5c1pOUy5vYmplY3RzoxocHqMRFhjSHyAhIoANVFBsYXmADlhOU1N0cmluZ1xOU0F0dHJpYnV0ZXPSJygmJIAPrxAQAAEDBQcNEBIVFxkbHSMlKVgkb2JqZWN0c1QkdG9wVHJvb3TRLirSLC0rLwAIAA4AGwAdACYAKAA+AEAAVgBYAGAAawBuAHEAdgB4AJUAmACaAKIApACxALQAtgC/AMEA4wDlAO0A7wD2APgBAAELAQ8BEwEYARoBHwEhASoBNwE8AT4BUQFaAV8BZAFnAAAAAAAAAgEAAAAAAAAAMQAAAAAAAAAwAAAAAAAAAWw=";
+
+/// A text Sketch archived comes in with its words, font, size and colour, and
+/// nothing is reported. flip: skip the archive in `text` → fails at the content.
+#[test]
+fn an_archived_text_comes_in_with_its_words_and_style() {
+    let mut old = text("T", "", json!([]), 0);
+    old["attributedString"] = json!({ "archivedAttributedString": { "_archive": ARCHIVED_PLAY } });
+    let r = import(sketch(&[("P", "Page", json!([old]))], json!({}), &[]));
+    let id = one(&r.doc, "Label");
+    let NodeKind::Text { content, style, .. } = r.doc.get(id).unwrap().kind() else {
+        panic!("a text");
+    };
+    assert_eq!(content, "Play");
+    assert_eq!(style.font_family, "Avenir");
+    assert_eq!(style.font_size, 14.0);
+    assert_eq!(
+        style.letter_spacing,
+        ondin_core::typography::Length::Px(1.5)
+    );
+    assert_eq!(solid(&r.doc, id), Color::from_rgb8(0, 0, 255));
+    assert!(r.report.is_empty(), "{:?}", r.report);
+}
+
 /// A layer's export presets become its export settings: format, scale or
 /// size, and Sketch's name as a suffix or prefix, the bare `@2x` left to Ondin.
 #[test]

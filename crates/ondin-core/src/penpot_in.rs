@@ -563,9 +563,11 @@ impl Builder<'_> {
         if blend != BlendMode::Normal {
             self.push(Operation::SetBlend { id, blend });
         }
+        // Penpot lists paints topmost first; Ondin paints in list order.
         if kind != "text" && kind != "image" {
             let fills: Vec<Fill> = arr(shape, "fills")
                 .iter()
+                .rev()
                 .filter_map(|f| {
                     Some(Fill {
                         brush: self.brush(f, "fill", size)?,
@@ -582,12 +584,18 @@ impl Builder<'_> {
         }
         let strokes: Vec<Stroke> = arr(shape, "strokes")
             .iter()
+            .rev()
             .filter_map(|s| {
                 let brush = self.brush(s, "stroke", size)?;
                 let width = num_or(s, "strokeWidth", 1.0);
+                // Penpot's own pattern, which grows with the width.
                 let dashes = match str_of(s, "strokeStyle") {
-                    "dashed" => vec![width * 4.0, width * 4.0],
-                    "dotted" => vec![0.0, width * 2.0],
+                    "dashed" => vec![
+                        num_or(s, "strokeDash", width + 10.0),
+                        num_or(s, "strokeGap", width + 10.0),
+                    ],
+                    "dotted" => vec![0.0, width + 5.0],
+                    "mixed" => vec![width + 5.0, width + 5.0, width + 1.0, width + 5.0],
                     _ => Vec::new(),
                 };
                 if !matches!(str_of(s, "strokeCapStart"), "" | "round" | "square")

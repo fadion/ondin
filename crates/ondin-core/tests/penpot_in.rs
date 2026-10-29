@@ -324,6 +324,49 @@ fn a_left_out_layer_does_not_push_its_siblings_out_of_range() {
     assert_eq!(doc.get(page).unwrap().children(), [b, one(doc, "A")]);
 }
 
+/// Penpot lists fills and strokes topmost first, so they come in reversed, and
+/// a dashed or dotted stroke takes Penpot's pattern for its width.
+/// flip: drop the `.rev()` on the fills in `style` → fails at the fill order.
+#[test]
+fn paints_stack_as_penpot_draws_them() {
+    let mut rect = shape("R", "rect", ROOT, (0.0, 0.0, 10.0, 10.0));
+    rect["fills"] = json!([
+        { "fillColor": "#ff0000", "fillOpacity": 1 },
+        { "fillColor": "#0000ff", "fillOpacity": 1 },
+    ]);
+    rect["strokes"] = json!([
+        { "strokeColor": "#000000", "strokeWidth": 2, "strokeStyle": "dotted" },
+        { "strokeColor": "#ffffff", "strokeWidth": 2, "strokeStyle": "dashed" },
+    ]);
+    let r = import(export(&["R"], vec![rect], &[]));
+    let paint = r.doc.get(one(&r.doc, "R")).unwrap().paint();
+    let colour = |b: &BrushSource| match b {
+        BrushSource::Literal(peniko::Brush::Solid(c)) => {
+            let c = c.to_rgba8();
+            [c.r, c.g, c.b]
+        }
+        other => panic!("{other:?}"),
+    };
+    let fills: Vec<[u8; 3]> = paint.fills.iter().map(|f| colour(&f.brush)).collect();
+    assert_eq!(
+        fills,
+        [[0, 0, 255], [255, 0, 0]],
+        "the first listed is on top"
+    );
+    let strokes: Vec<([u8; 3], Vec<f64>)> = paint
+        .strokes
+        .iter()
+        .map(|s| (colour(&s.brush), s.dashes.clone()))
+        .collect();
+    assert_eq!(
+        strokes,
+        [
+            ([255, 255, 255], vec![12.0, 12.0]),
+            ([0, 0, 0], vec![0.0, 7.0])
+        ]
+    );
+}
+
 /// Penpot 1's binary export is told apart from a zip, and an archive with no
 /// manifest is refused.
 #[test]

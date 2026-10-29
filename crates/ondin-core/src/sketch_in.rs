@@ -19,7 +19,7 @@
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
 use crate::id::{IdSource, NodeId};
-use crate::image::{GradientBrush, ImageFit, ImageFormat, ImageId, image_brush};
+use crate::image::{GradientBrush, ImageFit, ImageId, image_brush};
 use crate::item::keyed_by_position;
 use crate::kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size, Vec2};
 use crate::node::{BlendMode, BoolOp, EllipseArc, Fill, FillRule, NodeKind, Stroke, StrokeAlign};
@@ -36,12 +36,8 @@ use rustc_hash::FxHashMap;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// Where the file's entries are read from: the zip, in the app.
-pub trait Archive {
-    /// The bytes of the entry at `name` (`document.json`, `pages/<id>.json`,
-    /// `images/<hash>.png`), or `None` when there is no such entry.
-    fn entry(&mut self, name: &str) -> Option<Vec<u8>>;
-}
+pub use crate::foreign::{Archive, Part, Unmapped};
+use crate::foreign::{Tally, arr, b_of, num, sniff, solid, str_of};
 
 /// A Sketch file read into a document.
 pub struct Read {
@@ -51,36 +47,6 @@ pub struct Read {
     /// Every font family the text asks for, with how many runs ask for it, so the
     /// caller can say which are not installed.
     pub families: BTreeMap<String, usize>,
-}
-
-/// One kind of thing that did not come in as it was.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Unmapped {
-    pub what: &'static str,
-    /// How many, with its noun where a bare number would not say of what.
-    pub count: String,
-    pub how: &'static str,
-    /// What the row is about, so an import that leaves that part out can drop it.
-    pub part: Part,
-}
-
-/// The part of a document a report row is about.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Part {
-    Layers,
-    Components,
-    Pictures,
-}
-
-impl Part {
-    /// The part each row is about, by its words.
-    fn of(what: &str) -> Self {
-        match what {
-            "Pictures" | "Picture overrides" => Self::Pictures,
-            w if w.contains("symbol") || w.contains("Symbol") => Self::Components,
-            _ => Self::Layers,
-        }
-    }
 }
 
 /// Why a file could not be read at all.
@@ -134,7 +100,7 @@ pub fn read(
         layer_styles: FxHashMap::default(),
         text_styles: FxHashMap::default(),
         pictures: FxHashMap::default(),
-        tally: BTreeMap::new(),
+        tally: Tally::default(),
         families: BTreeMap::new(),
     };
     if lost > 0 {
@@ -171,23 +137,9 @@ pub fn read(
         families,
         ..
     } = b;
-    let report = tally
-        .into_iter()
-        .map(|(what, (n, unit, how))| Unmapped {
-            what,
-            count: match (unit, n) {
-                ("", _) => n.to_string(),
-                // Every unit is a plural in `s`; one of it drops the `s`.
-                (unit, 1) => format!("1 {}", unit.strip_suffix('s').unwrap_or(unit)),
-                (unit, n) => format!("{n} {unit}"),
-            },
-            how,
-            part: Part::of(what),
-        })
-        .collect();
     Ok(Read {
         doc,
-        report,
+        report: tally.into_report(),
         families,
     })
 }
@@ -236,13 +188,13 @@ struct Builder<'a> {
     text_styles: FxHashMap<String, (StyleId, TextStyle)>,
     /// Picture reference → its id, `None` for one that would not read.
     pictures: FxHashMap<String, Option<ImageId>>,
-    tally: BTreeMap<&'static str, (usize, &'static str, &'static str)>,
+    tally: Tally,
     families: BTreeMap<String, usize>,
 }
 
 impl Builder<'_> {
     fn count(&mut self, what: &'static str, n: usize, unit: &'static str, how: &'static str) {
-        self.tally.entry(what).or_insert((0, unit, how)).0 += n;
+        self.tally.count(what, n, unit, how);
     }
 
     fn push(&mut self, op: Operation) {
@@ -1450,13 +1402,6 @@ fn gradient(g: &Value, size: Size, alpha: f32) -> crate::Brush {
     })
 }
 
-fn solid(c: Color) -> Fill {
-    Fill {
-        brush: peniko::Brush::Solid(c).into(),
-        visible: true,
-    }
-}
-
 fn color(c: &Value) -> Color {
     let ch = |k: &str| num(c, k).clamp(0.0, 1.0) as f32;
     Color::new([ch("red"), ch("green"), ch("blue"), ch("alpha")])
@@ -1484,21 +1429,6 @@ fn blend_mode(n: i64) -> BlendMode {
         14 => BlendMode::Color,
         15 => BlendMode::Luminosity,
         _ => BlendMode::Normal,
-    }
-}
-
-/// A picture's format by its first bytes.
-fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
-    if bytes.starts_with(b"\x89PNG") {
-        Some(ImageFormat::Png)
-    } else if bytes.starts_with(&[0xFF, 0xD8]) {
-        Some(ImageFormat::Jpeg)
-    } else if bytes.starts_with(b"GIF8") {
-        Some(ImageFormat::Gif)
-    } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        Some(ImageFormat::Webp)
-    } else {
-        None
     }
 }
 
@@ -1576,10 +1506,6 @@ fn pt(s: &str) -> Point {
     Point::new(it.next().unwrap_or(0.0), it.next().unwrap_or(0.0))
 }
 
-fn num(v: &Value, k: &str) -> f64 {
-    v.get(k).and_then(Value::as_f64).unwrap_or(0.0)
-}
-
 fn num_in(v: &Value, path: &[&str]) -> f64 {
     str_in_value(v, path).and_then(Value::as_f64).unwrap_or(0.0)
 }
@@ -1588,26 +1514,12 @@ fn b(v: &Value, k: &str) -> bool {
     b_of(v, k)
 }
 
-fn b_of(v: &Value, k: &str) -> bool {
-    v.get(k).and_then(Value::as_bool).unwrap_or(false)
-}
-
-fn str_of<'a>(v: &'a Value, k: &str) -> &'a str {
-    v.get(k).and_then(Value::as_str).unwrap_or("")
-}
-
 fn str_in<'a>(v: &'a Value, path: &[&str]) -> &'a str {
     str_in_value(v, path).and_then(Value::as_str).unwrap_or("")
 }
 
 fn str_in_value<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
     path.iter().try_fold(v, |v, k| v.get(k))
-}
-
-fn arr<'a>(v: &'a Value, k: &str) -> &'a [Value] {
-    v.get(k)
-        .and_then(Value::as_array)
-        .map_or(&[], Vec::as_slice)
 }
 
 fn arr_in<'a>(v: &'a Value, path: &[&str]) -> &'a [Value] {

@@ -14,7 +14,7 @@ use crate::settings;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
-use ondin_core::sketch_in::Part;
+use ondin_core::foreign::Part;
 use ondin_core::take::{Census, Keep};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +38,8 @@ pub(crate) enum Kind {
     Ondin,
     /// Sketch's own, which Lunacy saves too: read, never written back.
     Sketch,
+    /// Penpot 2's export: read, never written back.
+    Penpot,
     /// A PDF, an SVG or a picture: placed on a canvas, never imported.
     Placed,
     /// Anything else.
@@ -54,6 +56,7 @@ impl Kind {
         match ext.as_str() {
             crate::library::scan::DOCUMENT_EXT => Self::Ondin,
             "sketch" => Self::Sketch,
+            "penpot" => Self::Penpot,
             "pdf" | "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff"
             | "avif" => Self::Placed,
             _ => Self::Other,
@@ -62,7 +65,7 @@ impl Kind {
 
     /// Whether the card imports this kind.
     pub(crate) fn imports(self) -> bool {
-        matches!(self, Self::Ondin | Self::Sketch)
+        matches!(self, Self::Ondin | Self::Sketch | Self::Penpot)
     }
 
     /// What the message line calls a file of this kind.
@@ -70,6 +73,7 @@ impl Kind {
         match self {
             Self::Ondin => "Ondin document",
             Self::Sketch => "Sketch document",
+            Self::Penpot => "Penpot file",
             Self::Placed | Self::Other => "File",
         }
     }
@@ -81,13 +85,24 @@ impl Kind {
                 frames: ("artboard", "artboards"),
                 components: "Symbols as components",
                 styles: "Shared styles",
+                styles_off: "Off: each use keeps the values it shows.",
                 variables: "Colour variables",
                 variables_off: "Off: each use keeps its colour as a raw value.",
+            },
+            // Penpot's own names, with what each becomes.
+            Self::Penpot => Words {
+                frames: ("board", "boards"),
+                components: "Components",
+                styles: "Typographies",
+                styles_off: "As text styles. Off: each text keeps its own type.",
+                variables: "Colours",
+                variables_off: "As colour variables. Off: each use keeps its colour.",
             },
             _ => Words {
                 frames: ("frame", "frames"),
                 components: "Components",
                 styles: "Styles",
+                styles_off: "Off: each use keeps the values it shows.",
                 variables: "Variables",
                 variables_off: "Off: bound values become raw values in the current mode.",
             },
@@ -99,6 +114,7 @@ impl Kind {
         match self {
             Self::Ondin => ("ONDIN".into(), egui::Color32::from_rgb(0x8b, 0xa5, 0xe0)),
             Self::Sketch => ("SKETCH".into(), egui::Color32::from_rgb(0xe6, 0xb8, 0x66)),
+            Self::Penpot => ("PENPOT".into(), egui::Color32::from_rgb(0x8f, 0xd1, 0xa8)),
             Self::Placed | Self::Other => (
                 path.extension()
                     .and_then(|e| e.to_str())
@@ -116,6 +132,7 @@ struct Words {
     frames: (&'static str, &'static str),
     components: &'static str,
     styles: &'static str,
+    styles_off: &'static str,
     variables: &'static str,
     variables_off: &'static str,
 }
@@ -354,17 +371,18 @@ fn foot_text(card: &ImportCard, projects: &project::Projects) -> String {
 fn read_source(path: &Path) -> Result<Source, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Could not be read: {e}"))?;
     let kind = Kind::of(path);
-    let (doc, report, families) = match kind {
-        Kind::Sketch => read_sketch(&bytes)?,
+    let (doc, report, families, own_name) = match kind {
+        Kind::Sketch | Kind::Penpot => read_foreign(kind, &bytes)?,
         _ => (
             ondin_core::io::load(&bytes).map_err(|e| format!("Not a readable document: {e}"))?,
             Vec::new(),
             Vec::new(),
+            None,
         ),
     };
     let census = ondin_core::take::census(&doc);
     Ok(Source {
-        name: document_name(&doc, path),
+        name: own_name.unwrap_or_else(|| document_name(&doc, path)),
         census,
         kind,
         bytes: bytes.len() as u64,
@@ -374,18 +392,22 @@ fn read_source(path: &Path) -> Result<Source, String> {
     })
 }
 
-/// The most a `.sketch` zip may inflate to, all its entries together, so a
+/// The most another tool's zip may inflate to, all its entries together, so a
 /// crafted file cannot exhaust memory.
 const ZIP_LIMIT: u64 = 2 << 30;
 
-/// A `.sketch` zip's entries, for `ondin_core::sketch_in`, and how much of
-/// [`ZIP_LIMIT`] they have used.
-struct SketchZip<'a> {
+/// Another tool's zip, for `ondin_core::foreign::Archive`, and how much of
+/// [`ZIP_LIMIT`] its entries have used.
+struct Zip<'a> {
     zip: zip::ZipArchive<std::io::Cursor<&'a [u8]>>,
     read: u64,
 }
 
-impl ondin_core::sketch_in::Archive for SketchZip<'_> {
+impl ondin_core::foreign::Archive for Zip<'_> {
+    fn names(&mut self) -> Vec<String> {
+        self.zip.file_names().map(str::to_owned).collect()
+    }
+
     /// `None` for an entry that would pass the limit: whole or not at all, since a
     /// cut entry would read as a broken one.
     fn entry(&mut self, name: &str) -> Option<Vec<u8>> {
@@ -420,27 +442,41 @@ impl ondin_core::svg_in::ImageSink for Pictures {
     }
 }
 
-/// A `.sketch` file read into a document, with what did not map and the font
-/// families its text asks for.
+/// Another tool's file read into a document, with what did not map, the font
+/// families its text asks for, and the name the file gives itself.
 type Read = (
     ondin_core::Document,
     Vec<(Part, ReportRow)>,
     Vec<(String, usize)>,
+    Option<String>,
 );
 
-fn read_sketch(bytes: &[u8]) -> Result<Read, String> {
+fn read_foreign(kind: Kind, bytes: &[u8]) -> Result<Read, String> {
+    if kind == Kind::Penpot && ondin_core::penpot_in::is_old_format(bytes) {
+        return Err(ondin_core::penpot_in::PenpotError::OldFormat.to_string());
+    }
     let zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|_| "Not a Sketch file: it does not open as one".to_owned())?;
+        .map_err(|_| format!("Not a {}: it does not open as one", kind.noun()))?;
     // A fresh stream, as a new document's: nothing else holds ids under it.
     let actor = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(1, |d| d.as_nanos() as u64 | 1);
     let mut ids = ondin_core::IdSource::new(actor);
-    let mut archive = SketchZip { zip, read: 0 };
-    let read = ondin_core::sketch_in::read(&mut archive, &mut ids, &mut Pictures)
-        .map_err(|e| format!("Could not be read: {e}"))?;
-    let report = read
-        .report
+    let mut archive = Zip { zip, read: 0 };
+    let unreadable = |e: &dyn std::fmt::Display| format!("Could not be read: {e}");
+    let (doc, report, families, name) = match kind {
+        Kind::Penpot => {
+            let r = ondin_core::penpot_in::read(&mut archive, &mut ids, &mut Pictures)
+                .map_err(|e| unreadable(&e))?;
+            (r.doc, r.report, r.families, Some(r.name))
+        }
+        _ => {
+            let r = ondin_core::sketch_in::read(&mut archive, &mut ids, &mut Pictures)
+                .map_err(|e| unreadable(&e))?;
+            (r.doc, r.report, r.families, None)
+        }
+    };
+    let report = report
         .into_iter()
         .map(|u| {
             let row = ReportRow {
@@ -451,7 +487,8 @@ fn read_sketch(bytes: &[u8]) -> Result<Read, String> {
             (u.part, row)
         })
         .collect();
-    Ok((read.doc, report, read.families.into_iter().collect()))
+    let name = name.filter(|n| !n.trim().is_empty());
+    Ok((doc, report, families.into_iter().collect(), name))
 }
 
 /// The name a document files under: its own, else its filename de-slugged as the
@@ -662,8 +699,8 @@ impl OndinApp {
     fn browse_for_import(&mut self, ctx: &egui::Context) {
         let Some(files) = rfd::FileDialog::new()
             .add_filter(
-                "Ondin and Sketch documents",
-                &[crate::library::scan::DOCUMENT_EXT, "sketch"],
+                "Ondin, Sketch and Penpot files",
+                &[crate::library::scan::DOCUMENT_EXT, "sketch", "penpot"],
             )
             .add_filter("All files", &["*"])
             .set_title("Import into the library")
@@ -946,8 +983,8 @@ fn refusal(kind: Kind) -> &'static str {
         Kind::Placed => {
             "Ondin places a PDF, an SVG or a picture onto a canvas rather than importing it. Open a document and use Place image."
         }
-        Kind::Ondin | Kind::Sketch | Kind::Other => {
-            "Ondin imports Ondin and Sketch documents, and cannot read this kind of file."
+        Kind::Ondin | Kind::Sketch | Kind::Penpot | Kind::Other => {
+            "Ondin imports Ondin, Sketch and Penpot files, and cannot read this kind of file."
         }
     }
 }
@@ -1384,7 +1421,7 @@ fn bring_over(ui: &mut egui::Ui, census: &Census, words: Words, o: &mut Options)
         ui,
         words.styles,
         &census.styles.to_string(),
-        "Off: each use keeps the values it shows.",
+        words.styles_off,
         o.styles,
     ) {
         o.styles = !o.styles;
@@ -2213,6 +2250,79 @@ mod tests {
         assert!(report(&mut f, true).is_empty());
     }
 
+    /// A Penpot export is read in Penpot's words and filed under the name the
+    /// file gives itself.
+    #[test]
+    fn a_penpot_export_comes_in_through_the_card() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "penpot");
+        let root = "00000000-0000-0000-0000-000000000000";
+        let shape = |id: &str, kind: &str, x: f64, kids: &[&str]| {
+            serde_json::json!({ "id": id, "name": id, "type": kind, "x": x, "y": 0,
+                "width": 100, "height": 50, "shapes": kids,
+                "selrect": { "x": x, "y": 0, "width": 100, "height": 50 } })
+        };
+        let file = |v: serde_json::Value| v.to_string().into_bytes();
+        let zip = ondin_export::plan::zip(&[
+            (
+                "manifest.json".into(),
+                file(serde_json::json!({ "files": [{ "id": "F", "name": "Brand kit" }] })),
+            ),
+            (
+                "files/F.json".into(),
+                file(serde_json::json!({ "id": "F" })),
+            ),
+            (
+                "files/F/pages/P.json".into(),
+                file(serde_json::json!({ "id": "P", "name": "Main", "index": 0 })),
+            ),
+            (
+                format!("files/F/pages/P/{root}.json"),
+                file(shape(root, "frame", 0.0, &["B"])),
+            ),
+            (
+                "files/F/pages/P/B.json".into(),
+                file(shape("B", "frame", 10.0, &[])),
+            ),
+        ])
+        .unwrap();
+        let path = f.outside.join("export.penpot");
+        std::fs::write(&path, zip).unwrap();
+        f.app.fill_import(&ctx, vec![path]);
+        f.app.settle_import();
+        let card = f.app.dash.import.as_ref().unwrap();
+        let Field::One { source, .. } = &card.field else {
+            panic!("the export reads");
+        };
+        assert_eq!(source.kind, Kind::Penpot);
+        assert_eq!(card.options.name, "Brand kit", "the file's own name");
+        f.app.start_copy(&ctx);
+        f.app.settle_import();
+        let Some(Step::Done(o)) = f.app.dash.import.as_ref().map(|c| &c.step) else {
+            panic!("the card shows the overview");
+        };
+        assert_eq!(o.sub, "From export.penpot, which is unchanged");
+        assert!(o.text().contains("1 board"), "{}", o.text());
+        assert_eq!(listed(&f).len(), 1);
+    }
+
+    /// Penpot 1's binary export is refused with what to do about it.
+    #[test]
+    fn an_old_penpot_export_is_refused_with_a_way_forward() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "penpot-old");
+        let old = f.outside.join("Old.penpot");
+        std::fs::write(&old, [0x01, 0x0b, 0x32, 0x06, 0, 0]).unwrap();
+        f.app.fill_import(&ctx, vec![old]);
+        f.app.settle_import();
+        let card = f.app.dash.import.as_ref().unwrap();
+        assert!(
+            matches!(&card.field, Field::Refused { why, .. } if why.contains("Penpot 2")),
+            "{:?}",
+            matches!(card.field, Field::Refused { .. })
+        );
+    }
+
     /// A drop of several Sketch files takes the first, alone, and says so.
     #[test]
     fn another_tools_files_come_in_one_at_a_time() {
@@ -2250,6 +2360,7 @@ mod tests {
     fn a_file_is_known_by_its_extension() {
         assert_eq!(Kind::of(Path::new("a/B.ONDIN")), Kind::Ondin);
         assert_eq!(Kind::of(Path::new("Site.sketch")), Kind::Sketch);
+        assert_eq!(Kind::of(Path::new("Kit.penpot")), Kind::Penpot);
         assert_eq!(Kind::of(Path::new("poster.pdf")), Kind::Placed);
         assert_eq!(Kind::of(Path::new("logo.svg")), Kind::Placed);
         assert_eq!(Kind::of(Path::new("notes.txt")), Kind::Other);

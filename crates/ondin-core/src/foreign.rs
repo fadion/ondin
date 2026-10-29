@@ -93,6 +93,35 @@ impl Tally {
     }
 }
 
+/// The names given out so far, per kind of name. Other tools let two styles or
+/// two colours share a name, which a document refuses, so a repeat is numbered
+/// apart: the second "Shadow" becomes "Shadow 2".
+pub(crate) struct Names<K>(rustc_hash::FxHashSet<(K, String)>);
+
+impl<K> Default for Names<K> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<K: Copy + Eq + std::hash::Hash> Names<K> {
+    /// `name`, or the first free numbering of it, among `kind`'s; `blank` stands
+    /// in for an empty one. Counts each renaming on `tally`.
+    pub(crate) fn unique(&mut self, kind: K, name: &str, blank: &str, tally: &mut Tally) -> String {
+        let stem = if name.trim().is_empty() { blank } else { name };
+        let mut out = stem.to_owned();
+        let mut n = 1;
+        while !self.0.insert((kind, out.clone())) {
+            n += 1;
+            out = format!("{stem} {n}");
+        }
+        if n > 1 {
+            tally.count("Names used twice", 1, "", "Numbered apart");
+        }
+        out
+    }
+}
+
 /// A picture's format by its first bytes.
 pub(crate) fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
     if bytes.starts_with(b"\x89PNG") {

@@ -18,6 +18,7 @@
 
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
+use crate::export::{ExportFormat, ExportScale, ExportSpec};
 use crate::id::{IdSource, NodeId};
 use crate::image::{GradientBrush, ImageFit, ImageId, image_brush};
 use crate::item::keyed_by_position;
@@ -25,7 +26,7 @@ use crate::kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size, Vec2};
 use crate::node::{BlendMode, BoolOp, EllipseArc, Fill, FillRule, NodeKind, Stroke, StrokeAlign};
 use crate::op::{OpError, Operation, Transaction};
 use crate::peniko::{self, Color};
-use crate::style::{Style, StyleId, StyleValue};
+use crate::style::{Style, StyleId, StyleSlot, StyleValue};
 use crate::svg_in::ImageSink;
 use crate::typography::{
     CharAttr, CharSpans, Decoration, Length, ParaSpans, ParagraphStyle, TextAlign, TextStyle,
@@ -37,7 +38,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub use crate::foreign::{Archive, Part, Unmapped};
-use crate::foreign::{Tally, arr, b_of, num, sniff, solid, str_of, utf16_to_bytes};
+use crate::foreign::{Names, Tally, arr, b_of, num, sniff, solid, str_of, utf16_to_bytes};
 
 /// A Sketch file read into a document.
 pub struct Read {
@@ -101,6 +102,7 @@ pub fn read(
         text_styles: FxHashMap::default(),
         pictures: FxHashMap::default(),
         tally: Tally::default(),
+        names: Names::default(),
         families: BTreeMap::new(),
     };
     if lost > 0 {
@@ -189,6 +191,8 @@ struct Builder<'a> {
     /// Picture reference → its id, `None` for one that would not read.
     pictures: FxHashMap<String, Option<ImageId>>,
     tally: Tally,
+    /// Style names by slot; `None` holds the colour variables'.
+    names: Names<Option<StyleSlot>>,
     families: BTreeMap<String, usize>,
 }
 
@@ -236,10 +240,13 @@ impl Builder<'_> {
             let var = self.ids.mint_var();
             self.swatches
                 .insert(str_of(s, "do_objectID").to_owned(), var);
+            let name = self
+                .names
+                .unique(None, str_of(s, "name"), "Colour", &mut self.tally);
             self.push(Operation::AddVariable {
                 var: Variable {
                     id: var,
-                    name: str_of(s, "name").to_owned(),
+                    name,
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(color(value)))].into(),
                     origin: None,
@@ -328,10 +335,13 @@ impl Builder<'_> {
     }
 
     fn add_style(&mut self, id: StyleId, name: &str, value: StyleValue) {
+        let name = self
+            .names
+            .unique(Some(value.slot()), name, "Style", &mut self.tally);
         self.push(Operation::AddStyle {
             style: Style {
                 id,
-                name: name.to_owned(),
+                name,
                 value,
                 origin: None,
                 forked: None,
@@ -365,7 +375,9 @@ impl Builder<'_> {
         // Whether a mask below is clipping this run of siblings: Sketch sets the
         // chain break on layers no mask reaches, and only a reached one matters.
         let mut masking = false;
-        for (i, layer) in arr(parent_layer, "layers").iter().enumerate() {
+        // The next free index: a layer left out takes none.
+        let mut at = 0;
+        for layer in arr(parent_layer, "layers") {
             if masking && b(layer, "shouldBreakMaskChain") {
                 self.count(
                     "Mask chains broken early",
@@ -375,26 +387,26 @@ impl Builder<'_> {
                 );
             }
             masking |= b(layer, "hasClippingMask");
-            self.layer(layer, parent, i, master);
+            if self.layer(layer, parent, at, master) {
+                at += 1;
+            }
         }
     }
 
-    /// Count what a layer carries that has no counterpart: prototype links,
-    /// export settings, smart layout.
+    /// Count what a layer carries that has no counterpart: prototype links and
+    /// smart layout.
     fn notes(&mut self, layer: &Value) {
         if layer.get("flow").is_some() {
             self.count("Prototype links", 1, "", "Left out");
-        }
-        if !arr_in(layer, &["exportOptions", "exportFormats"]).is_empty() {
-            self.count("Export settings", 1, "layers", "Left out");
         }
         if str_in(layer, &["groupLayout", "_class"]) == "MSImmutableInferredGroupLayout" {
             self.count("Smart layout", 1, "groups", "Kept at their drawn positions");
         }
     }
 
-    /// One layer and what it holds, at `index` under `parent`.
-    fn layer(&mut self, layer: &Value, parent: NodeId, index: usize, master: Option<&str>) {
+    /// One layer and what it holds, at `index` under `parent`. Answers whether a
+    /// node was made.
+    fn layer(&mut self, layer: &Value, parent: NodeId, index: usize, master: Option<&str>) -> bool {
         let class = str_of(layer, "_class");
         let frame = Frame::of(layer);
         self.notes(layer);
@@ -501,6 +513,7 @@ impl Builder<'_> {
             self.layers
                 .insert(str_of(layer, "do_objectID").to_owned(), id);
         }
+        made
     }
 
     /// A shape group: its one shape carrying the group's style, or a boolean of
@@ -521,17 +534,19 @@ impl Builder<'_> {
             // place wearing the group's paints, the rest as themselves.
             self.create(id, parent, index, NodeKind::Group, frame.placement(), layer);
             self.style(id, layer, frame.size(), false);
-            for (i, s) in shapes.iter().enumerate() {
+            let mut at = 0;
+            for s in shapes {
                 if is_shape(s) {
                     let child = self.ids.mint();
                     let f = Frame::of(s);
                     self.notes(s);
                     let kind = shape_kind(str_of(s, "_class"), s, f.size());
-                    self.create(child, id, i, kind, f.placement(), s);
+                    self.create(child, id, at, kind, f.placement(), s);
                     self.paint(child, layer, f.size());
-                } else {
-                    self.layer(s, id, i, master);
+                } else if !self.layer(s, id, at, master) {
+                    continue;
                 }
+                at += 1;
             }
             self.count(
                 "Shape groups holding other layers",
@@ -630,6 +645,53 @@ impl Builder<'_> {
         }
         if b(layer, "hasClippingMask") {
             self.push(Operation::SetMask { id, mask: true });
+        }
+        self.exports(id, layer);
+    }
+
+    /// A layer's export presets as its export settings. Sketch's `name` is put
+    /// after the layer's name or, by its naming scheme, before it; the scale's
+    /// own marker (`@2x`) is left for Ondin to add. A format Ondin cannot write is
+    /// counted and left out.
+    fn exports(&mut self, id: NodeId, layer: &Value) {
+        let mut exports = Vec::new();
+        for f in arr_in(layer, &["exportOptions", "exportFormats"]) {
+            let format = match str_of(f, "fileFormat").to_ascii_lowercase().as_str() {
+                "png" => ExportFormat::Png,
+                "jpg" | "jpeg" => ExportFormat::Jpeg,
+                "webp" => ExportFormat::Webp,
+                "svg" => ExportFormat::Svg,
+                "pdf" => ExportFormat::Pdf,
+                _ => {
+                    self.count("Export formats Ondin lacks", 1, "", "Left out");
+                    continue;
+                }
+            };
+            let size = num(f, "absoluteSize").round();
+            let scale = match f.get("visibleScaleType").and_then(Value::as_i64) {
+                Some(1) if size >= 1.0 => ExportScale::Width(size as u32),
+                Some(2) if size >= 1.0 => ExportScale::Height(size as u32),
+                _ => match num(f, "scale") as f32 {
+                    s if s.is_finite() && s > 0.0 => ExportScale::Times(s),
+                    _ => ExportScale::Times(1.0),
+                },
+            };
+            let mut spec = ExportSpec::new(format, scale);
+            let name = str_of(f, "name");
+            if !name.is_empty() && name != scale.marker() {
+                if f.get("namingScheme").and_then(Value::as_i64) == Some(1) {
+                    spec.prefix = name.to_owned();
+                } else {
+                    spec.suffix = name.to_owned();
+                }
+            }
+            exports.push(spec);
+        }
+        if !exports.is_empty() {
+            self.push(Operation::SetExports {
+                id,
+                exports: keyed_by_position(exports),
+            });
         }
     }
 
@@ -887,6 +949,9 @@ impl Builder<'_> {
     fn text(&mut self, id: NodeId, parent: NodeId, index: usize, layer: &Value, frame: &Frame) {
         let attributed = layer.get("attributedString");
         let content = attributed.map_or("", |a| str_of(a, "string")).to_owned();
+        if attributed.is_some_and(|a| a.get("archivedAttributedString").is_some()) {
+            self.count("Texts in Sketch's older format", 1, "", "Left empty");
+        }
         let runs = attributed.map(|a| arr(a, "attributes")).unwrap_or_default();
         let fallback = str_in_value(layer, &["style", "textStyle", "encodedAttributes"]);
         let first = runs
@@ -1125,6 +1190,7 @@ impl Builder<'_> {
         self.commit(ops)?;
         self.layers.insert(p.sketch_id, root);
         self.style(root, &p.layer, frame.size(), false);
+        self.exports(root, &p.layer);
         let ops = std::mem::take(&mut self.ops);
         self.commit(ops)?;
         self.overrides(root, &p.layer)?;
@@ -1264,7 +1330,10 @@ fn is_shape(layer: &Value) -> bool {
 /// corners as a rect, an oval as an ellipse, anything else as the path its points
 /// draw.
 fn shape_kind(class: &str, layer: &Value, size: Size) -> NodeKind {
-    let points = arr(layer, "points");
+    // Older files (Sketch 47's, for one) keep the points in a nested `path`.
+    let outline = layer.get("path").filter(|_| layer.get("points").is_none());
+    let points = arr(outline.unwrap_or(layer), "points");
+    let closed = b(outline.unwrap_or(layer), "isClosed");
     match class {
         "oval" => NodeKind::Ellipse {
             size,
@@ -1290,7 +1359,7 @@ fn shape_kind(class: &str, layer: &Value, size: Size) -> NodeKind {
             }
         }
         _ => {
-            let path = path_of(points, b(layer, "isClosed"), size);
+            let path = path_of(points, closed, size);
             let corner_radii = points.iter().map(|p| num(p, "cornerRadius")).collect();
             NodeKind::Path {
                 path,

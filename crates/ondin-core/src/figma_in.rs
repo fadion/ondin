@@ -16,7 +16,9 @@
 
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
-use crate::foreign::{Archive, Tally, Unmapped, arr, b_of, num, sniff, str_of, utf16_to_bytes};
+use crate::foreign::{
+    Archive, Names, Tally, Unmapped, arr, b_of, num, sniff, str_of, utf16_to_bytes,
+};
 use crate::id::{IdSource, NodeId};
 use crate::image::{GradientBrush, ImageFit, ImageId, image_brush};
 use crate::item::keyed_by_position;
@@ -24,7 +26,7 @@ use crate::kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size, Vec2};
 use crate::node::{BlendMode, BoolOp, EllipseArc, Fill, FillRule, NodeKind, Stroke, StrokeAlign};
 use crate::op::{OpError, Operation, Transaction};
 use crate::peniko::{self, Color};
-use crate::style::{Style, StyleId, StyleValue};
+use crate::style::{Style, StyleId, StyleSlot, StyleValue};
 use crate::svg_in::ImageSink;
 use crate::typography::{
     CharAttr, CharSpans, Decoration, Length, ParaSpans, ParagraphStyle, TextAlign, TextCase,
@@ -123,6 +125,7 @@ pub fn read(
         styles: FxHashMap::default(),
         pictures: FxHashMap::default(),
         tally: Tally::default(),
+        taken: Names::default(),
         families: BTreeMap::new(),
         pending_type: None,
     };
@@ -202,6 +205,8 @@ struct Builder<'a> {
     styles: FxHashMap<String, Made>,
     pictures: FxHashMap<String, Option<ImageId>>,
     tally: Tally,
+    /// Style names given out, by slot.
+    taken: Names<StyleSlot>,
     families: BTreeMap<String, usize>,
     /// The text style the text node about to be made is bound to, found while
     /// its kind was read and written once the node exists.
@@ -551,14 +556,14 @@ impl Builder<'_> {
             StyleValue::Text(t) => Made::Text(id, t.clone()),
             StyleValue::Layout(_) => return None,
         };
+        let named = self.style_names.get(&sid).unwrap_or(&sid);
+        let name = self
+            .taken
+            .unique(value.slot(), named, "Style", &mut self.tally);
         self.push(Operation::AddStyle {
             style: Style {
                 id,
-                name: self
-                    .style_names
-                    .get(&sid)
-                    .cloned()
-                    .unwrap_or_else(|| sid.clone()),
+                name,
                 value,
                 origin: None,
                 forked: None,

@@ -21,7 +21,7 @@
 
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
-use crate::foreign::{Archive, Tally, Unmapped, arr, b_of, num, sniff, solid, str_of};
+use crate::foreign::{Archive, Names, Tally, Unmapped, arr, b_of, num, sniff, solid, str_of};
 use crate::id::{IdSource, NodeId};
 use crate::image::{GradientBrush, ImageFit, ImageId, image_brush};
 use crate::item::keyed_by_position;
@@ -29,7 +29,7 @@ use crate::kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size, Vec2};
 use crate::node::{BlendMode, BoolOp, EllipseArc, Fill, FillRule, NodeKind, Stroke, StrokeAlign};
 use crate::op::{OpError, Operation, Transaction};
 use crate::peniko::{self, Color};
-use crate::style::{Style, StyleId, StyleValue};
+use crate::style::{Style, StyleId, StyleSlot, StyleValue};
 use crate::svg_in::ImageSink;
 use crate::typography::{
     CharAttr, CharSpans, Decoration, Length, ParaSpans, ParagraphStyle, TextAlign, TextCase,
@@ -128,6 +128,7 @@ pub fn read(
         typographies: FxHashMap::default(),
         pictures: FxHashMap::default(),
         tally: Tally::default(),
+        taken: Names::default(),
         families: BTreeMap::new(),
         pages: 0,
         first,
@@ -195,6 +196,8 @@ struct Builder<'a> {
     typographies: FxHashMap<String, (StyleId, TextStyle)>,
     pictures: FxHashMap<String, Option<ImageId>>,
     tally: Tally,
+    /// Style names given out, by slot; `None` holds the colour variables'.
+    taken: Names<Option<StyleSlot>>,
     families: BTreeMap<String, usize>,
     /// How many pages have been written.
     pages: usize,
@@ -273,10 +276,13 @@ impl Builder<'_> {
                 let colour = hex(str_of(c, "color"), opacity(c, "opacity"));
                 self.colours
                     .insert(str_of(c, "id").to_owned(), (var, opacity(c, "opacity")));
+                let name = self
+                    .taken
+                    .unique(None, &asset_name(c), "Colour", &mut self.tally);
                 self.ops.push(Operation::AddVariable {
                     var: Variable {
                         id: var,
-                        name: asset_name(c),
+                        name,
                         kind: VarKind::Color,
                         cells: [(mode, Cell::Color(colour))].into(),
                         origin: None,
@@ -289,10 +295,16 @@ impl Builder<'_> {
         for t in &types {
             let ts = crate::style::type_part(&leaf_style(t));
             let id = self.ids.mint_style();
+            let name = self.taken.unique(
+                Some(StyleSlot::Text),
+                &asset_name(t),
+                "Style",
+                &mut self.tally,
+            );
             self.push(Operation::AddStyle {
                 style: Style {
                     id,
-                    name: asset_name(t),
+                    name,
                     value: StyleValue::Text(Box::new(ts.clone())),
                     origin: None,
                     forked: None,

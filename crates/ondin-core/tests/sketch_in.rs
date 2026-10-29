@@ -559,3 +559,133 @@ fn a_zip_that_is_not_a_sketch_file_is_refused() {
     let mut ids = IdSource::new(1);
     assert!(read(&mut Files::default(), &mut ids, &mut Pictures).is_err());
 }
+
+/// Two shared styles sharing a name, and two swatches, are numbered apart
+/// rather than failing the build, and the renaming is reported.
+/// flip: `Names::unique` answering the name as given → the read fails.
+#[test]
+fn a_name_used_twice_is_numbered_apart() {
+    let style = json!({ "fills": [fill(color(0.0, 1.0, 0.0))] });
+    let red = color(1.0, 0.0, 0.0);
+    let extra = json!({
+        "sharedSwatches": { "objects": [
+            { "do_objectID": "W1", "name": "Red", "value": red },
+            { "do_objectID": "W2", "name": "Red", "value": red },
+        ] },
+        "layerStyles": { "objects": [
+            { "do_objectID": "L1", "name": "Shadow/None", "value": style },
+            { "do_objectID": "L2", "name": "Shadow/None", "value": style },
+            { "do_objectID": "L3", "name": "", "value": style },
+        ] },
+    });
+    let r = import(sketch(&[("P", "Page", json!([]))], extra, &[]));
+    let mut styles: Vec<&str> = r.doc.styles().iter().map(|s| s.name.as_str()).collect();
+    styles.sort();
+    assert_eq!(styles, ["Shadow/None", "Shadow/None 2", "Style"]);
+    let mut vars: Vec<&str> = r.doc.variables().iter().map(|v| v.name.as_str()).collect();
+    vars.sort();
+    assert_eq!(vars, ["Red", "Red 2"]);
+    let rows: Vec<(&str, String)> = r.report.iter().map(|u| (u.what, u.count.clone())).collect();
+    assert_eq!(rows, [("Names used twice", "2".to_owned())]);
+}
+
+/// A layer left out (a hotspot) takes no index, so the siblings after it still
+/// land, in order.
+/// flip: `children` passing the layer's position in the file → the read fails.
+#[test]
+fn a_layer_left_out_leaves_no_gap() {
+    let hotspot = json!({
+        "_class": "MSImmutableHotspotLayer", "do_objectID": "H", "name": "Hot",
+        "frame": frame(0.0, 0.0, 10.0, 10.0),
+    });
+    let mut a = rectangle("A", 0.0, 0.0, json!({}));
+    a["name"] = json!("A");
+    let mut b = rectangle("B", 0.0, 0.0, json!({}));
+    b["name"] = json!("B");
+    let r = import(sketch(
+        &[("P", "Page", json!([hotspot, a, b]))],
+        json!({}),
+        &[],
+    ));
+    let page = r.doc.page_ids().next().unwrap();
+    let names: Vec<&str> = r
+        .doc
+        .get(page)
+        .unwrap()
+        .children()
+        .iter()
+        .map(|c| r.doc.get(*c).unwrap().name())
+        .collect();
+    assert_eq!(names, ["A", "B"]);
+}
+
+/// An older file's shape keeps its points in a nested `path`, and still draws
+/// its outline; its archived text is reported, left empty.
+/// flip: `shape_kind` reading only the layer's own `points` → fails at "the outline".
+#[test]
+fn an_older_files_shapes_and_text() {
+    let shape = json!({
+        "_class": "shapePath", "do_objectID": "S", "name": "Tri",
+        "frame": frame(0.0, 0.0, 10.0, 10.0),
+        "path": { "_class": "path", "isClosed": true,
+            "points": [corner(0.0, 0.0), corner(1.0, 0.0), corner(0.5, 1.0)] },
+    });
+    let mut old_text = text("T", "", json!([]), 0);
+    old_text["attributedString"] =
+        json!({ "archivedAttributedString": { "_archive": "YnBsaXN0" } });
+    let r = import(sketch(
+        &[("P", "Page", json!([shape, old_text]))],
+        json!({}),
+        &[],
+    ));
+    match r.doc.get(one(&r.doc, "Tri")).unwrap().kind() {
+        NodeKind::Path { path, .. } => {
+            assert_eq!(
+                path.elements().len(),
+                5,
+                "the outline: move, three sides, close"
+            )
+        }
+        other => panic!("not a path: {other:?}"),
+    }
+    let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+    assert_eq!(rows, ["Texts in Sketch's older format"]);
+}
+
+/// A layer's export presets become its export settings: format, scale or
+/// size, and Sketch's name as a suffix or prefix, the bare `@2x` left to Ondin.
+#[test]
+fn export_presets_become_export_settings() {
+    use ondin_core::export::{ExportFormat, ExportScale};
+    let mut r = rectangle("A", 0.0, 0.0, json!({}));
+    r["exportOptions"] = json!({ "exportFormats": [
+        { "fileFormat": "png", "scale": 2, "name": "@2x", "namingScheme": 0, "visibleScaleType": 0 },
+        { "fileFormat": "jpg", "scale": 1, "absoluteSize": 512, "name": "-big", "namingScheme": 0, "visibleScaleType": 1 },
+        { "fileFormat": "svg", "scale": 1, "name": "icons/", "namingScheme": 1, "visibleScaleType": 0 },
+        { "fileFormat": "tiff", "scale": 1, "name": "", "namingScheme": 0, "visibleScaleType": 0 },
+    ] });
+    let read = import(sketch(&[("P", "Page", json!([r]))], json!({}), &[]));
+    let node = read.doc.get(one(&read.doc, "Rect")).unwrap();
+    let got: Vec<_> = node
+        .exports()
+        .iter()
+        .map(|k| {
+            (
+                k.value.format,
+                k.value.scale,
+                k.value.prefix.as_str(),
+                k.value.suffix.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (ExportFormat::Png, ExportScale::Times(2.0), "", ""),
+            (ExportFormat::Jpeg, ExportScale::Width(512), "", "-big"),
+            (ExportFormat::Svg, ExportScale::Times(1.0), "icons/", ""),
+        ]
+    );
+    let rows: Vec<&str> = read.report.iter().map(|u| u.what).collect();
+    assert_eq!(rows, ["Export formats Ondin lacks"]);
+}

@@ -1,11 +1,35 @@
 # Ondin — Roadmap
 
-Open work only. **Later · First** is the editor's remaining gaps, which land before MCP and Command
+Open work only. **Now · Performance** is work on the frame thread that freezes the window and moves to
+a worker next. **Later · First** is the editor's remaining gaps, which land before MCP and Command
 Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it. The
 other **Later** sections are deferred with a stated reason or trigger. Decided non-goals are in
 `non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
 reads true.
+
+## Now · Performance
+
+Each runs once per action on the frame and scales with a picture, a selection, the document or the
+library, so a large one freezes the window. File drops and *Place image* already read on a worker
+(`crate::import`), which the first three can share.
+
+- **Pasting a picture** (`OndinApp::paste_image`): the clipboard picture is re-encoded to PNG, then
+  hashed and decoded (`load_image_bytes`) on the frame.
+- **Replace image** (`OndinApp::replace_image_action`): the picked file is read and decoded on the
+  frame (`load_image_file`).
+- **Pasting SVG markup** (`canvas::import_svg`): `read_svg` parses on the frame; only `place_svg`
+  needs it.
+- **Placing a kit tile** (`kits::picker` `place_kit_at`): `kit::insert` and `centred`'s clone, apply
+  and whole-document `Resolved::rebuild` run on the frame, which the dimmed tile (`ask_place`) only
+  covers for. A worker must redo or refuse the placement when the document changed while it ran.
+- **Copy as PNG** (`OndinApp::copy_as_png`): the selection is rendered on the CPU at the chosen scale
+  on the frame.
+- **Export code** (`panels::export` `export_code`): code generation, the zip and the write run on
+  the frame, unlike the other exports' `Job`.
+- **Library refresh** (`library::state` `refresh`): `scan::scan` opens every document and may load
+  one whole (`read_meta`), on the frame, from Duplicate, Move, the kit watch, `set_kit_at`, the kit
+  picker and a pinning save. Slow on a cloud-synced folder.
 
 ## Later · First
 
@@ -16,17 +40,24 @@ reads true.
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **One import dialog for documents.** The library's *Import files* opens a modal, not the native
-  dialog it opens now (`DashboardState::import_documents`): a file browser, then the options for the
-  chosen file's type. An `.ondin` document gets what importing does today (`import_paths`: a copy with
-  a new identity) plus the project to file it in and whether to drop its pictures. Other tools'
-  files come in through the same dialog only, each as a new library document that is never written
-  back; a canvas drop is not a door for them. Needs a design for the modal and each type's options.
-  The formats, in this order: **Sketch** (a published JSON spec; also covers Lunacy, which saves
-  `.sketch`; pages, artboards, symbols, shared styles and colour variables map to Ondin's own, the
-  rest reported as `svg_in` reports), **Figma** (`.fig` is reverse-engineered binary that breaks when
-  Figma changes it; the REST API is documented but needs a network and the user's token, which the
-  dialog would ask for), then **Penpot** (open source, so its format can be read from its code).
-  Pixso works with `.fig`; Affinity and Illustrator arrive through SVG and PDF.
+  dialog it opens now (`DashboardState::import_documents`), and a file dropped on the library window
+  opens it too, filled in. The modal is one field, *File or Figma link*, with *Browse…* (the native
+  dialog, filtered to the importable types); a pasted path or a file dropped on the modal fills it.
+  A chosen file shows its type's options under the field, the same set for every type: name, project
+  (the one being viewed, else unfiled, as `import_counting` files today), the pages to take, what to
+  bring over (components, styles, variables, each with what turning it off does) and whether to leave
+  the pictures out. An `.ondin` document is still a copy with a new identity; other tools' files are
+  each a new library document, only read, never written back. A PDF, SVG or picture is refused in the
+  field with a pointer to *Place image*; a canvas drop is not a door for other tools' files. *Import*
+  loads the file and turns the modal into an overview: counts of what came in, what did not map
+  (worded as `svg_in` reports), and *Open document*. Several dropped `.ondin` files share one
+  project and pictures choice; other formats come one at a time. The formats, in this order:
+  **Sketch** (a published JSON spec; also covers Lunacy, which saves `.sketch`; pages, artboards,
+  symbols, shared styles and colour variables map to Ondin's own), **Figma** by link only, through the
+  REST API: a pasted `figma.com` link brings up the personal access token and *Fetch*, the token is
+  sent to Figma only and kept in the system keychain only when asked; a `.fig` in the field gets a
+  notice to paste its link instead (`non-goals.md`), then **Penpot** (open source, so its format can
+  be read from its code). Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
 ## Later · Second

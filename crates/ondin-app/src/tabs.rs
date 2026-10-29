@@ -359,36 +359,30 @@ impl OndinApp {
             .collect()
     }
 
-    /// A library file has gone to the trash: an open document it backed keeps its
-    /// tab with nowhere to save to, and a tab that only named it closes.
+    /// A library file has gone to the trash: every tab of it closes, its unsaved
+    /// work dropped with it, and none is left for `Ctrl+Shift+T` to bring back.
     ///
-    /// The kept document gives up the file's id, so saving it files a new
-    /// document rather than a second one with the trashed file's id (its kept
-    /// history, crash snapshot and kit identity are keyed by it).
+    /// Each session is unfiled before its tab goes, so no save in flight or on the
+    /// way out writes the document back out of the trash.
     pub(crate) fn open_file_trashed(&mut self, path: &Path) {
-        let front = self.session.path.as_deref() == Some(path);
-        for s in self.open_sessions() {
-            if s.path.as_deref() == Some(path) {
-                s.path = None;
-                let mut meta = s.doc.meta().clone();
-                meta.id = None;
-                s.doc.set_meta(meta);
-            }
-        }
-        if front {
-            // The next tick snapshots under a key of its own.
-            self.drop_recovery();
-        }
         let gone: Vec<TabId> = self
             .tabs
             .list
             .iter()
-            .filter(|t| matches!(&t.body, Body::Unloaded { path: p, .. } if p == path))
+            .filter(|t| self.tab_path(t) == Some(path))
             .map(|t| t.id)
             .collect();
+        for s in self.open_sessions() {
+            if s.path.as_deref() == Some(path) {
+                s.path = None;
+                s.mark_clean();
+            }
+        }
         for id in gone {
+            self.forget_tab_work(id);
             self.discard_tab(id);
         }
+        self.tabs.closed.retain(|(p, _)| p != path);
     }
 
     // --- switching -----------------------------------------------------------
@@ -2271,47 +2265,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A library file trashed while open leaves its tab with nowhere to save to; a
-    /// tab that only named it closes.
-    /// flip: `open_file_trashed` skipping parked sessions → fails at "behind".
+    /// A library file trashed while open closes its tab, whether in front, parked
+    /// or not yet read, and leaves none for `Ctrl+Shift+T`; other tabs stay.
+    /// flip: `open_file_trashed` closing only unread tabs → fails at "b's tab stays".
     #[test]
-    fn a_trashed_file_unfiles_its_tab() {
+    fn a_trashed_file_closes_its_tabs() {
         let ctx = egui::Context::default();
         let root = temp_root("trashed");
         let mut app = app_at(&ctx, &root);
-        let (a, b, c) = (file(&root, "a"), file(&root, "b"), file(&root, "c"));
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(|n| file(&root, n));
+        let base = app.tabs.list.len();
         app.open_path(&a);
+        edit(&mut app);
         app.open_path(&b);
+        app.open_path(&d);
         let c_tab = app.tabs.add(Body::Unloaded {
             path: c.clone(),
             failed: None,
         });
+        assert_eq!(app.tabs.list.len(), base + 4, "fixture: four tabs");
+        assert_eq!(
+            app.session.path.as_deref(),
+            Some(d.as_path()),
+            "fixture: d in front"
+        );
         app.open_file_trashed(&a);
+        assert!(app.tab_of_path(&a).is_none(), "parked");
         app.open_file_trashed(&c);
-        assert!(app.tab_of_path(&a).is_none(), "behind");
-        assert!(app.tabs.get(c_tab).is_none(), "the unread one closes");
-        assert_eq!(app.tabs.list.len(), 3, "a's tab stays, unfiled");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// A trashed file's tab, saved again, files a document with an id of its own,
-    /// not a second one with the trashed file's.
-    /// flip: `open_file_trashed` keeping `meta.id` → fails at "an id of its own".
-    #[test]
-    fn a_trashed_files_tab_saves_under_a_new_id() {
-        let ctx = egui::Context::default();
-        let root = temp_root("trashed-id");
-        let mut app = app_at(&ctx, &root);
-        let mut doc = ondin_core::Document::new(ondin_core::IdSource::new(7).mint());
-        let a = crate::library::store::file_document(&root, None, "a", &mut doc).unwrap();
-        app.open_path(&a);
-        edit(&mut app);
-        let was = app.session.doc.meta().id.clone();
-        assert!(was.is_some(), "fixture: the file has an id");
-        app.open_file_trashed(&a);
-        assert!(app.save_file(false), "the tab files again");
-        let now = app.session.doc.meta().id.clone();
-        assert!(now.is_some() && now != was, "an id of its own");
+        assert!(app.tabs.get(c_tab).is_none(), "unread");
+        app.open_file_trashed(&d);
+        assert!(app.tab_of_path(&d).is_none(), "in front");
+        assert_eq!(app.tabs.list.len(), base + 1, "b's tab stays");
+        assert!(app.tab_of_path(&b).is_some(), "b's tab stays");
+        assert!(
+            app.tabs
+                .closed
+                .iter()
+                .all(|(p, _)| ![&a, &c, &d].contains(&p)),
+            "nothing trashed to reopen"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

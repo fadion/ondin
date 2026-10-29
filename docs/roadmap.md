@@ -21,8 +21,6 @@ Found testing Import files on real Sketch files.
   waiting set over every pending instance and `Vec::remove`s the one it places. The worst offender
   is `ag-grid-ui-kit-botmad` (in `~/Downloads/Sketch`); the other files there read in seconds.
 - **Penpot import, fills:** the same file's fills look wrong; compare against Penpot.
-- **Penpot import, failure:** `Labyrinth UI-FREE-v1.0.penpot` fails with "the document did not build:
-  index out of range".
 - **Penpot 1 files:** four of the seven Penpot community templates tried are Penpot 1 files and are
   refused. Weigh reading them.
 

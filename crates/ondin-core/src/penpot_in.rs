@@ -368,8 +368,9 @@ impl Builder<'_> {
             }
             self.pages += 1;
             if let Some(root) = root {
-                for (i, child) in child_ids(&root).iter().enumerate() {
-                    self.shape(child, id, i, Affine::IDENTITY);
+                let mut placed = 0;
+                for child in &child_ids(&root) {
+                    placed += usize::from(self.shape(child, id, placed, Affine::IDENTITY));
                 }
             }
         }
@@ -377,10 +378,11 @@ impl Builder<'_> {
     }
 
     /// One shape and what it holds, at `index` under `parent`, whose world
-    /// placement is `parent_world`.
-    fn shape(&mut self, sid: &str, parent: NodeId, index: usize, parent_world: Affine) {
+    /// placement is `parent_world`. False when it was left out, so the caller's
+    /// next sibling takes the same index.
+    fn shape(&mut self, sid: &str, parent: NodeId, index: usize, parent_world: Affine) -> bool {
         let Some(shape) = self.shapes.get(sid).cloned() else {
-            return;
+            return false;
         };
         let kind = str_of(&shape, "type");
         if !arr(&shape, "interactions").is_empty() {
@@ -453,7 +455,7 @@ impl Builder<'_> {
                 let world = corner_world(&shape);
                 let Some(path) = path_of(&shape, world) else {
                     self.count("Paths that could not be read", 1, "", "Left out");
-                    return;
+                    return false;
                 };
                 (
                     NodeKind::Path {
@@ -466,11 +468,11 @@ impl Builder<'_> {
             }
             "svg-raw" => {
                 self.count("SVG layers", 1, "", "Left out");
-                return;
+                return false;
             }
             _ => {
                 self.count("Layers of an unknown kind", 1, "", "Left out");
-                return;
+                return false;
             }
         };
         self.push(Operation::CreateNode {
@@ -530,8 +532,9 @@ impl Builder<'_> {
             }
         }
         let children = child_ids(&shape);
-        for (i, child) in children.iter().enumerate() {
-            self.shape(child, id, i, world);
+        let mut placed = 0;
+        for child in &children {
+            placed += usize::from(self.shape(child, id, placed, world));
         }
         // A masked group's first shape is its mask.
         if kind == "group"
@@ -543,6 +546,7 @@ impl Builder<'_> {
                 mask: true,
             });
         }
+        true
     }
 
     /// A shape's paints, effects, opacity and blend onto `id`. A text's colour

@@ -298,6 +298,32 @@ fn an_instance_of_a_missing_main_is_kept_plain() {
     ondin_core::io::load(&bytes).expect("the document loads");
 }
 
+/// A layer left out (an SVG layer, a shape missing from the export) does not
+/// leave a gap its later siblings are placed past, on the page or in a group.
+/// flip: place each child at its position in `shapes` → the read fails.
+#[test]
+fn a_left_out_layer_does_not_push_its_siblings_out_of_range() {
+    let mut board = shape("B", "frame", ROOT, (0.0, 0.0, 100.0, 100.0));
+    board["shapes"] = json!(["S", "gone", "R"]);
+    let svg = shape("S", "svg-raw", "B", (0.0, 0.0, 10.0, 10.0));
+    let rect = shape("R", "rect", "B", (0.0, 0.0, 10.0, 10.0));
+    let after = shape("A", "rect", ROOT, (0.0, 0.0, 10.0, 10.0));
+    let r = import(export(
+        &["S2", "B", "A"],
+        vec![board, svg.clone(), rect, after, {
+            let mut s = svg;
+            s["id"] = json!("S2");
+            s
+        }],
+        &[],
+    ));
+    let doc = &r.doc;
+    let b = one(doc, "B");
+    assert_eq!(doc.get(b).unwrap().children(), [one(doc, "R")]);
+    let page = doc.page_ids().next().unwrap();
+    assert_eq!(doc.get(page).unwrap().children(), [b, one(doc, "A")]);
+}
+
 /// Penpot 1's binary export is told apart from a zip, and an archive with no
 /// manifest is refused.
 #[test]

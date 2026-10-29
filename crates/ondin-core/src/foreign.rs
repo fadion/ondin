@@ -48,6 +48,7 @@ impl Part {
         } else if lower.contains("symbol")
             || lower.contains("component")
             || lower.contains("instance")
+            || lower.contains("variant")
         {
             Self::Components
         } else {
@@ -105,6 +106,19 @@ pub(crate) fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
     } else {
         None
     }
+}
+
+/// A map from a UTF-16 offset, which Sketch's runs and Figma's overrides count
+/// in, to a byte offset into `s`.
+pub(crate) fn utf16_to_bytes(s: &str) -> impl Fn(usize) -> usize + use<> {
+    let mut table = Vec::with_capacity(s.len() + 1);
+    for (byte, c) in s.char_indices() {
+        for _ in 0..c.len_utf16() {
+            table.push(byte);
+        }
+    }
+    table.push(s.len());
+    move |u| table.get(u).copied().unwrap_or(*table.last().unwrap_or(&0))
 }
 
 /// A visible fill of `c`.

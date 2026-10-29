@@ -37,7 +37,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub use crate::foreign::{Archive, Part, Unmapped};
-use crate::foreign::{Tally, arr, b_of, num, sniff, solid, str_of};
+use crate::foreign::{Tally, arr, b_of, num, sniff, solid, str_of, utf16_to_bytes};
 
 /// A Sketch file read into a document.
 pub struct Read {
@@ -1483,18 +1483,6 @@ fn spaced(name: &str) -> String {
         out.push(c);
     }
     out
-}
-
-/// A map from a UTF-16 offset, which Sketch's runs count in, to a byte offset.
-fn utf16_to_bytes(s: &str) -> impl Fn(usize) -> usize + use<> {
-    let mut table = Vec::with_capacity(s.len() + 1);
-    for (byte, c) in s.char_indices() {
-        for _ in 0..c.len_utf16() {
-            table.push(byte);
-        }
-    }
-    table.push(s.len());
-    move |u| table.get(u).copied().unwrap_or(*table.last().unwrap_or(&0))
 }
 
 /// `"{0.5, 1}"` as a point.

@@ -29,6 +29,7 @@ pub mod document;
 pub mod effect;
 pub mod export;
 pub mod families;
+pub mod figma_in;
 pub mod fit;
 pub mod foreign;
 pub mod geometry;

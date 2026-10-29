@@ -94,16 +94,18 @@ fn key_of(source: &Source) -> Key {
     }
 }
 
-/// A placement asked for and not yet run (§15 D1030) — held on the app, not on
-/// [`Picker`], so `Escape` closing the picker in the frames it waits does not
-/// lose a click already made.
+/// A placement being built on a worker, its tile dimmed meanwhile — held on the
+/// app, not on [`Picker`], so `Escape` closing the picker while it builds does
+/// not lose a click already made.
 pub(crate) struct Placing {
     key: Key,
     source: Source,
-    /// Where it lands: a drop's point, or `None` for the viewport's centre.
-    at: Option<egui::Pos2>,
-    /// Whether a frame has been drawn with the tile dimmed since it was asked.
-    painted: bool,
+    /// Where it lands, in world units, and whether a drag let it go there.
+    centre: ondin_core::kurbo::Point,
+    dropped: bool,
+    /// The revision the worker's copy of the document was taken at.
+    rev: u64,
+    job: crate::job::Job<Result<(Transaction, NodeId), String>>,
 }
 
 /// The dragged component rendered at the canvas's zoom, off the frame.
@@ -367,22 +369,10 @@ impl OndinApp {
     /// Draw the picker, when it is open, and place what it was asked to.
     pub(crate) fn kit_picker_ui(&mut self, ctx: &egui::Context) {
         self.kit_shelf.pass(ctx);
-        // A placement asked for on an earlier frame, once a frame has shown its
-        // tile dimmed (§15 D1030): the placement runs on this thread and the
-        // window does not repaint while it does, so the dim has to be on screen
-        // before the work starts or it is never seen. **Before the closed
-        // picker's return**: a picker closed in the wait has no tile to dim, and
-        // the click it took still places.
+        // **Before the closed picker's return**: a picker closed while the
+        // placement builds has no tile to dim, and the click it took still places.
+        self.poll_kit_place();
         let closed = self.kit_picker.is_none();
-        if self
-            .kit_placing
-            .as_ref()
-            .is_some_and(|pl| pl.painted || closed)
-            && let Some(pl) = self.kit_placing.take()
-        {
-            let at = pl.at.unwrap_or(self.canvas_rect.center());
-            self.place_kit_at(ctx, pl.source, at, pl.at.is_some());
-        }
         if closed {
             return;
         }
@@ -534,12 +524,6 @@ impl OndinApp {
 
         let ppp = ctx.pixels_per_point();
         let canvas = self.canvas_rect;
-        // The frame just drawn showed the waiting tile dimmed; the next one
-        // places it.
-        if let Some(pl) = self.kit_placing.as_mut() {
-            pl.painted = true;
-            ctx.request_repaint();
-        }
         if let Some(p) = self.kit_picker.as_mut() {
             p.panel = Some(panel);
             match &dragging {
@@ -784,14 +768,31 @@ impl OndinApp {
         out
     }
 
-    /// Place an instance of `source` at the viewport's centre — a tile's click.
-    ///
-    /// The tests' door: the picker's own clicks go through `Self::ask_place`,
-    /// which waits a frame for the dim (§15 D1030). Plain backticks: a
-    /// `cfg(test)` item's doc is one `cargo doc` never builds (§15 D319).
+    /// Place an instance of `source` at the viewport's centre — a tile's click —
+    /// and wait for it to land (tests only). Plain backticks: a `cfg(test)` item's
+    /// doc is one `cargo doc` never builds.
     #[cfg(test)]
     fn place_from_picker(&mut self, ctx: &egui::Context, source: Source) {
         self.place_kit_at(ctx, source, self.canvas_rect.center(), false);
+    }
+
+    /// Place an instance of `source` centred on the screen point `at`, inside the
+    /// container there when `dropped`, and wait for it to land (tests only).
+    #[cfg(test)]
+    fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2, dropped: bool) {
+        let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
+        self.start_kit_place(source, centre, dropped);
+        self.settle_kit_place();
+    }
+
+    /// Wait for the placement's worker, then land it as a frame would, again if
+    /// the document changed meanwhile (tests only).
+    #[cfg(test)]
+    pub(crate) fn settle_kit_place(&mut self) {
+        while let Some(pl) = self.kit_placing.take() {
+            let built = pl.job.wait().unwrap_or_else(|| Err(STOPPED.to_string()));
+            self.land_kit_place(pl.source, pl.centre, pl.dropped, pl.rev, built);
+        }
     }
 
     /// The container a tile let go at `world` lands in: the topmost unlocked frame
@@ -842,102 +843,84 @@ impl OndinApp {
         hit
     }
 
-    /// A click's, a drop's or `Enter`'s placement, run once a frame has shown
-    /// its tile dimmed (§15 D1030) — the "heard you" the dashboard's card pulse
-    /// is (§15 D1027), held at its low because the placement runs on this
-    /// thread and nothing repaints while it does. One at a time: a second ask
-    /// while one waits is dropped, as a second click on a busy button is.
+    /// A click's, a drop's or `Enter`'s placement, centred on the screen point
+    /// `at` (a drop's) or the viewport's centre, built off the frame
+    /// ([`Self::start_kit_place`]) while its tile shows dimmed. One at a time: a
+    /// second ask while one builds is dropped, as a second click on a busy button is.
     fn ask_place(&mut self, source: Source, at: Option<egui::Pos2>) {
         if self.kit_placing.is_none() {
-            self.kit_placing = Some(Placing {
-                key: key_of(&source),
-                source,
-                at,
-                painted: false,
-            });
+            let ppp = self.egui_ctx.pixels_per_point();
+            let point = at.unwrap_or(self.canvas_rect.center());
+            let centre = self.to_world(point, self.canvas_rect, ppp);
+            self.start_kit_place(source, centre, at.is_some());
         }
     }
 
-    /// Place an instance of `source` centred on the screen point `at`, as one
-    /// undoable step, and select it — a click's viewport centre at the document's top
-    /// level, or where a dragged tile was let go (`dropped`), inside the container
-    /// there ([`Self::drop_container_at`]).
-    fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2, dropped: bool) {
-        let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
+    /// Build an instance of `source` centred on `centre` on a worker, over a copy
+    /// of the document: at the document's top level, or for a drag let go there
+    /// (`dropped`), inside the container under it ([`Self::drop_container_at`]).
+    fn start_kit_place(&mut self, source: Source, centre: ondin_core::kurbo::Point, dropped: bool) {
         let parent = dropped
             .then(|| self.drop_container_at(centre))
             .flatten()
             .unwrap_or(self.session.page);
-        let built = match &source {
-            Source::Kit {
-                id,
-                version,
-                published,
-                top,
-            } => ondin_core::kit::insert(
-                &self.session.doc,
-                &mut self.session.ids,
-                id,
-                *version,
-                published,
-                *top,
-                parent,
-            )
-            .map_err(|e| match e {
-                // A main, or the kit's modes, held at an older version (§15
-                // D1064): either way an update is owed first. A kit held newer,
-                // covering the modes this kit read, is reused, not refused.
-                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_) => {
-                    "This kit has an update to accept before that component can be placed"
-                        .to_string()
-                }
-                // §15 D1036 (2): a kit built on this one.
-                ondin_core::kit::KitError::Circular(own) => {
-                    let src = published.document();
-                    format!(
-                        "{} in {} uses this kit's {}, so it cannot be placed here",
-                        src.get(*top).map_or("That component", |n| n.name()),
-                        published.name().unwrap_or("its kit"),
-                        self.session.doc.get(own).map_or("component", |n| n.name()),
-                    )
-                }
-                other => format!("That component could not be placed ({other:?})"),
-            }),
-            Source::Local(main) => {
-                let main = match self.session.doc.get(*main) {
-                    Some(n) if n.set().is_some() => {
-                        ondin_core::kit::default_variant(&self.session.doc, *main)
-                    }
-                    Some(_) => Some(*main),
-                    None => None,
-                };
-                main.and_then(|m| self.session.doc.capture_subtree(m))
-                    .map(|nodes| {
-                        let (tx, made) = ondin_core::build::insert_subtrees(
-                            &self.session.doc,
-                            &mut self.session.ids,
-                            &[ondin_core::build::Placement {
-                                nodes,
-                                parent,
-                                index: None,
-                            }],
-                            Vec2::ZERO,
-                        );
-                        (tx, made[0])
-                    })
-                    .ok_or_else(|| "That component is no longer here".to_string())
-            }
+        let doc = self.session.doc.clone();
+        let built = source.clone();
+        let job = crate::job::Job::spawn("ondin-kit-place", &self.egui_ctx, move || {
+            let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
+            build_placement(&doc, &mut ids, &built, parent, centre)
+        });
+        self.kit_placing = Some(Placing {
+            key: key_of(&source),
+            source,
+            centre,
+            dropped,
+            rev: self.session.revision(),
+            job,
+        });
+    }
+
+    /// Land the placement once its worker answers. Held while a canvas drag or a
+    /// pen run is live, whose end would write back a document from before it,
+    /// and while a modal is up.
+    fn poll_kit_place(&mut self) {
+        if !self.drag.is_none() || self.pen.is_some() || self.modal_is_up() {
+            return;
+        }
+        let Some(pl) = &self.kit_placing else { return };
+        let built = match pl.job.poll() {
+            Ok(None) => return,
+            Ok(Some(built)) => built,
+            Err(()) => Err(STOPPED.to_string()),
         };
-        let (mut tx, instance) = match built {
+        let Some(pl) = self.kit_placing.take() else {
+            return;
+        };
+        self.land_kit_place(pl.source, pl.centre, pl.dropped, pl.rev, built);
+    }
+
+    /// Commit a built placement as one undoable step and select it, or say why it
+    /// was not built. Built over a document that has changed since (`rev`), it is
+    /// built again, since its operations may no longer apply.
+    fn land_kit_place(
+        &mut self,
+        source: Source,
+        centre: ondin_core::kurbo::Point,
+        dropped: bool,
+        rev: u64,
+        built: Result<(Transaction, NodeId), String>,
+    ) {
+        if rev != self.session.revision() {
+            self.start_kit_place(source, centre, dropped);
+            return;
+        }
+        let (tx, instance) = match built {
             Ok(b) => b,
             Err(why) => {
                 self.session.fail(why);
                 return;
             }
         };
-        if let Some(op) = centred(&self.session.doc, &tx, instance, centre) {
-            tx.0.push(op);
-        }
         self.session.name_step("Insert component", icon::HEXAGON);
         if !self.session.commit(tx) {
             return;
@@ -952,6 +935,75 @@ impl OndinApp {
             self.library.local.save();
         }
     }
+}
+
+/// What a placement whose worker died says.
+const STOPPED: &str = "That component could not be placed: the worker stopped";
+
+/// An instance of `source` under `parent`, centred on `centre`, as a transaction
+/// over `doc` and the instance's id, or what to tell the user — on any thread.
+fn build_placement(
+    doc: &Document,
+    ids: &mut ondin_core::IdSource,
+    source: &Source,
+    parent: NodeId,
+    centre: ondin_core::kurbo::Point,
+) -> Result<(Transaction, NodeId), String> {
+    let (mut tx, instance) = match source {
+        Source::Kit {
+            id,
+            version,
+            published,
+            top,
+        } => ondin_core::kit::insert(doc, ids, id, *version, published, *top, parent).map_err(
+            |e| match e {
+                // A main, or the kit's modes, held at an older version (§15
+                // D1064): either way an update is owed first. A kit held newer,
+                // covering the modes this kit read, is reused, not refused.
+                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_) => {
+                    "This kit has an update to accept before that component can be placed"
+                        .to_string()
+                }
+                // §15 D1036 (2): a kit built on this one.
+                ondin_core::kit::KitError::Circular(own) => {
+                    let src = published.document();
+                    format!(
+                        "{} in {} uses this kit's {}, so it cannot be placed here",
+                        src.get(*top).map_or("That component", |n| n.name()),
+                        published.name().unwrap_or("its kit"),
+                        doc.get(own).map_or("component", |n| n.name()),
+                    )
+                }
+                other => format!("That component could not be placed ({other:?})"),
+            },
+        )?,
+        Source::Local(main) => {
+            let main = match doc.get(*main) {
+                Some(n) if n.set().is_some() => ondin_core::kit::default_variant(doc, *main),
+                Some(_) => Some(*main),
+                None => None,
+            };
+            main.and_then(|m| doc.capture_subtree(m))
+                .map(|nodes| {
+                    let (tx, made) = ondin_core::build::insert_subtrees(
+                        doc,
+                        ids,
+                        &[ondin_core::build::Placement {
+                            nodes,
+                            parent,
+                            index: None,
+                        }],
+                        Vec2::ZERO,
+                    );
+                    (tx, made[0])
+                })
+                .ok_or_else(|| "That component is no longer here".to_string())?
+        }
+    };
+    if let Some(op) = centred(doc, &tx, instance, centre) {
+        tx.0.push(op);
+    }
+    Ok((tx, instance))
 }
 
 /// The panel's whole height with its foot at `bottom`: [`H`], or less when the
@@ -1746,6 +1798,30 @@ pub(crate) mod tests {
     use ondin_core::{IdSource, NodeKind};
     use std::path::PathBuf;
 
+    /// Hold the placement being built until the returned sender is sent to, so a
+    /// test can draw frames while it builds however fast the worker is.
+    fn hold_placement(app: &mut OndinApp, ctx: &egui::Context) -> mpsc::Sender<()> {
+        let mut pl = app.kit_placing.take().expect("a placement building");
+        let (tx, rx) = mpsc::channel();
+        let real = pl.job;
+        pl.job = crate::job::Job::spawn("held", ctx, move || {
+            let _ = rx.recv();
+            real.wait().unwrap_or_else(|| Err(STOPPED.to_string()))
+        });
+        app.kit_placing = Some(pl);
+        tx
+    }
+
+    /// Wait for the placement's worker and leave its answer for the next frame
+    /// to land.
+    fn finish_building(app: &mut OndinApp) {
+        let pl = app.kit_placing.as_mut().expect("a placement building");
+        let built = std::mem::replace(&mut pl.job, crate::job::Job::done(Err(String::new())))
+            .wait()
+            .unwrap_or_else(|| Err(STOPPED.to_string()));
+        pl.job = crate::job::Job::done(built);
+    }
+
     pub(crate) fn temp_root(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ondin-kits-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2366,9 +2442,9 @@ pub(crate) mod tests {
         // The name sits under the tile's well; aim at the well.
         let tile = find(&text, "Button") - egui::vec2(0.0, 30.0);
 
-        // Back over the panel: a change of mind. The frames a placement waits
-        // (§15 D1030) pumped first, and nothing queued — checked on the release
-        // alone it could not tell "not asked" from "asked, not yet run".
+        // Back over the panel: a change of mind. Frames pumped after, and nothing
+        // building — checked on the release alone it could not tell "not asked"
+        // from "asked, not yet landed".
         drag(&mut app, tile, tile + egui::vec2(60.0, 0.0));
         frame_with(&mut app, vec![]);
         frame_with(&mut app, vec![]);
@@ -2379,13 +2455,11 @@ pub(crate) mod tests {
 
         let to = egui::pos2(600.0, 300.0);
         drag(&mut app, tile, to);
-        // A frame with the tile dimmed, then the placement (§15 D1030).
         assert!(
-            app.session.selection.single().is_none(),
-            "not on the release"
+            app.session.selection.single().is_none() && app.kit_placing.is_some(),
+            "built off the frame, not on the release"
         );
-        frame_with(&mut app, vec![]);
-        frame_with(&mut app, vec![]);
+        app.settle_kit_place();
         let inst = app
             .session
             .selection
@@ -2735,12 +2809,12 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A placement waiting its dimmed frame survives the picker closing**
-    /// (§15 D1030): `Escape` in the wait must not drop the click with the picker
-    /// that held it.
+    /// **A placement still building survives the picker closing**: `Escape`
+    /// meanwhile must not drop the click with the picker that held it, and the
+    /// frame lands it with the picker closed.
     ///
-    /// Flip, run: the due test without its `|| closed` fails *"the click
-    /// still places"*.
+    /// flip: `kit_picker_ui` polling the placement after its closed-picker return
+    /// → fails at "the click still places".
     #[test]
     fn a_placement_survives_the_picker_closing_in_its_wait() {
         let ctx = egui::Context::default();
@@ -2751,6 +2825,7 @@ pub(crate) mod tests {
         let source = kit_source(&mut app, &id, badge);
         app.ask_place(source, None);
         app.kit_picker = None;
+        finish_building(&mut app);
         let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
         let inst = app
             .session
@@ -2803,7 +2878,7 @@ pub(crate) mod tests {
     /// result drags onto the canvas at the component's own size** (§15 D1028,
     /// D1029, D1031). The drag's picture is the component's world size at the
     /// canvas's zoom — *Badge*, 24 × 30, at zoom 2 on a 1-point display, 48 × 60
-    /// — and let go over the canvas, it places after one dimmed frame (D1030).
+    /// — and let go over the canvas, it places, dimmed while it builds.
     ///
     /// Flip, run: `draw_ghost` drawing the tile's picture instead (its fallback
     /// arm) fails *"the ghost is the component at canvas size"*, a 42 × 52 tile
@@ -2964,10 +3039,11 @@ pub(crate) mod tests {
         };
         let resting = ink(&shapes).expect("the result's name");
         run(&mut app, vec![press(to, false)]);
+        let release = hold_placement(&mut app, &ctx);
         let waiting = run(&mut app, vec![]);
         assert!(
             app.session.selection.single().is_none(),
-            "the frame that shows the dim places nothing yet"
+            "a frame while it builds places nothing yet"
         );
         let dim = ink(&waiting).expect("the result's name");
         // Half, not a hover's few points: the flip (no dim) reads 255 here.
@@ -2975,7 +3051,8 @@ pub(crate) mod tests {
             (dim as f32) < resting as f32 * 0.6,
             "the waiting result dims: {dim} against {resting}"
         );
-        run(&mut app, vec![]);
+        release.send(()).unwrap();
+        app.settle_kit_place();
         let inst = app
             .session
             .selection
@@ -3089,9 +3166,8 @@ pub(crate) mod tests {
         ctx.memory_mut(|m| m.surrender_focus(field));
         let before = app.session.doc.clone();
         let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
-        // The frames a placement waits (§15 D1030), then nothing queued or
-        // placed: checked on the `Enter`'s own frame it passed whatever the
-        // guard did.
+        // Frames pumped, then nothing building or placed: checked on the
+        // `Enter`'s own frame it passed whatever the guard did.
         for _ in 0..2 {
             let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
         }
@@ -3103,10 +3179,7 @@ pub(crate) mod tests {
 
         ctx.memory_mut(|m| m.request_focus(field));
         let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
-        // A frame with the result dimmed, then the placement (§15 D1030).
-        for _ in 0..2 {
-            let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
-        }
+        app.settle_kit_place();
         let inst = app.session.selection.single().expect("Enter placed it");
         let main = app.session.doc.get(inst).unwrap().link().unwrap();
         assert_eq!(app.session.doc.get(main).unwrap().origin().unwrap().kit, id);
@@ -3529,9 +3602,7 @@ pub(crate) mod tests {
         let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
         let _ = ctx.run_ui(key(egui::Key::ArrowDown), |_| app.kit_picker_ui(&ctx));
         let _ = ctx.run_ui(key(egui::Key::Enter), |_| app.kit_picker_ui(&ctx));
-        for _ in 0..2 {
-            let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
-        }
+        app.settle_kit_place();
         let inst = app.session.selection.single().expect("Enter placed one");
         let doc = &app.session.doc;
         let main = doc.get(inst).unwrap().link().unwrap();
@@ -3543,9 +3614,45 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A placement built over a document that changed meanwhile is built again: an
+    /// undo that takes the vault's copy away while the second *Badge* builds still
+    /// ends with a *Badge* placed, linked to a main the document holds.
+    ///
+    /// flip: `land_kit_place` without its revision check → fails at "placed after the undo".
+    #[test]
+    fn a_placement_built_before_an_undo_is_built_again() {
+        let ctx = egui::Context::default();
+        let root = temp_root("rebuild");
+        let (id, _, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        app.toggle_kit_picker();
+        let source = kit_source(&mut app, &id, badge);
+        app.place_from_picker(&ctx, source.clone());
+        assert!(
+            app.session.doc.vault().is_some(),
+            "the fixture: the kit is vendored"
+        );
+
+        app.ask_place(source, None);
+        let release = hold_placement(&mut app, &ctx);
+        app.session.undo();
+        assert!(app.session.doc.vault().is_none(), "the undo took the vault");
+        release.send(()).unwrap();
+        app.settle_kit_place();
+        let inst = app
+            .session
+            .selection
+            .single()
+            .expect("placed after the undo");
+        let doc = &app.session.doc;
+        let main = doc.get(inst).unwrap().link().unwrap();
+        assert_eq!(doc.get(main).map(|n| n.name()), Some("Badge"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// **A second placement asked while one waits is dropped** (§15 D1030 — *"as
     /// a second click on a busy button is"*). *Badge* is asked, then the set,
-    /// before a frame; the frames that follow place *Badge* alone.
+    /// before a frame; *Badge* alone lands.
     ///
     /// Flip, run: `ask_place` replacing the waiting ask (its `is_none` guard
     /// dropped) fails *"the first ask places"* with *Small*.
@@ -3563,6 +3670,7 @@ pub(crate) mod tests {
         for _ in 0..3 {
             let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
         }
+        app.settle_kit_place();
         let doc = &app.session.doc;
         let page: Vec<NodeId> = doc.get(doc.first_page()).unwrap().children().to_vec();
         assert_eq!(page.len(), 1, "one placement: {page:?}");

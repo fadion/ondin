@@ -44,4 +44,13 @@ impl<T: Send + 'static> Job<T> {
     pub(crate) fn wait(self) -> Option<T> {
         self.rx.recv().ok()
     }
+
+    /// A job that has already answered `value` (tests only), for a test that
+    /// waits on the worker but leaves the landing to a frame.
+    #[cfg(test)]
+    pub(crate) fn done(value: T) -> Self {
+        let (tx, rx) = channel();
+        let _ = tx.send(value);
+        Self { rx }
+    }
 }

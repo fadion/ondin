@@ -14,9 +14,6 @@ Each runs once per action on the frame and scales with a picture, a selection, t
 library, so a large one freezes the window. Files, pictures and SVG markup already read on a worker
 (`crate::import`).
 
-- **Placing a kit tile** (`kits::picker` `place_kit_at`): `kit::insert` and `centred`'s clone, apply
-  and whole-document `Resolved::rebuild` run on the frame, which the dimmed tile (`ask_place`) only
-  covers for. A worker must redo or refuse the placement when the document changed while it ran.
 - **Copy as PNG** (`OndinApp::copy_as_png`): the selection is rendered on the CPU at the chosen scale
   on the frame.
 - **Export code** (`panels::export` `export_code`): code generation, the zip and the write run on

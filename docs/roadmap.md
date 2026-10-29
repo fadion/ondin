@@ -20,9 +20,6 @@ Found testing Import files on real Sketch files.
   Find and fix the superlinear step. One candidate in sight: each pass of that loop rebuilds the
   waiting set over every pending instance and `Vec::remove`s the one it places. The worst offender
   is `ag-grid-ui-kit-botmad` (in `~/Downloads/Sketch`); the other files there read in seconds.
-- **Penpot import, page names:** pages of `Dashboard UI Kit … (Community).penpot` (in
-  `~/Downloads/Penpot`) come in with stray glyphs and tofu in their names, in the import list and the
-  Pages panel.
 - **Penpot import, fills:** the same file's fills look wrong; compare against Penpot.
 - **Penpot import, failure:** `Labyrinth UI-FREE-v1.0.penpot` fails with "the document did not build:
   index out of range".

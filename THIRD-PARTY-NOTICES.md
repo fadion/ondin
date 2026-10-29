@@ -44,10 +44,21 @@ not apply here; but "Inter" is a trademark of rsms, per the font's own
 The font declares `LicenseDescription: MIT` in its own OpenType `name` table;
 that record and its `LicenseURL` are quoted at the head of the license file.
 
+### Noto Emoji
+
+`NotoEmoji.ttf` (the variable `NotoEmoji[wght].ttf` from `google/fonts`) is
+embedded via `include_bytes!` (`crates/ondin-app/assets/fonts/`) and draws
+monochrome emoji in the UI, ahead of egui's older copy below.
+
+- Copyright 2013 Google LLC.
+- Licensed under the SIL Open Font License, Version 1.1 (`OFL-1.1`), unmodified.
+- Full license text:
+  [`licenses/NotoEmoji-current-OFL-1.1.txt`](licenses/NotoEmoji-current-OFL-1.1.txt).
+
 ### egui's built-in fonts
 
 🚨 **These ship whether or not you expect them to.** `theme::install` starts from
-`egui::FontDefinitions::default()` and inserts Inter and Phosphor *in front of*
+`egui::FontDefinitions::default()` and inserts Inter, Noto Emoji and Phosphor *in front of*
 the built-ins rather than replacing them, so egui's fonts remain in the binary
 **and remain live as fallbacks** for any glyph Inter lacks. They arrive through
 `epaint_default_fonts`, whose crate license expression is

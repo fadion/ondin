@@ -869,6 +869,7 @@ fn install_fonts(ctx: &egui::Context) {
     // text, and Phosphor for icon glyphs.
     static INTER: &[u8] = include_bytes!("../../ondin-core/assets/fonts/Inter-Variable.ttf");
     static PHOSPHOR_TTF: &[u8] = include_bytes!("../assets/fonts/Phosphor.ttf");
+    static NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji.ttf");
 
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -880,12 +881,32 @@ fn install_fonts(ctx: &egui::Context) {
         Arc::new(egui::FontData::from_static(PHOSPHOR_TTF)),
     );
 
-    // Inter leads the proportional family (built-in fonts remain as fallbacks).
-    fonts
+    // A current Noto Emoji, monochrome, ahead of egui's own, which predates
+    // Unicode 12 and draws 🟪 or 🟡 in an imported page name as tofu. Scaled as
+    // egui scales its copy.
+    fonts.font_data.insert(
+        "noto-emoji".to_owned(),
+        Arc::new(
+            egui::FontData::from_static(NOTO_EMOJI).tweak(egui::FontTweak {
+                scale: 0.81,
+                ..Default::default()
+            }),
+        ),
+    );
+
+    // Inter leads both text families, the emoji next (built-in fonts remain as
+    // fallbacks).
+    let proportional = fonts
         .families
         .entry(egui::FontFamily::Proportional)
+        .or_default();
+    proportional.insert(0, "inter".to_owned());
+    proportional.insert(1, "noto-emoji".to_owned());
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
         .or_default()
-        .insert(0, "inter".to_owned());
+        .insert(1, "noto-emoji".to_owned());
 
     // A dedicated family for icon glyphs; falls back to Inter for any stray text.
     fonts.families.insert(
@@ -1012,6 +1033,33 @@ fn install_style_into(style: &mut egui::Style) {
 mod tests {
     use super::*;
     use eframe::egui;
+
+    /// Emoji a Penpot page name carries, Unicode 12's coloured squares and circles
+    /// among them, draw a glyph rather than the missing-glyph box, in both text
+    /// families. `Fonts::has_glyph` answers false for every emoji whatever the
+    /// fonts hold, so this compares atlas rects with an unassigned code point's.
+    /// flip: drop "noto-emoji" from the proportional family → fails on 🟪.
+    #[test]
+    fn emoji_in_a_name_draw_a_glyph_not_tofu() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        for font in [
+            egui::FontId::proportional(12.0),
+            egui::FontId::monospace(12.0),
+        ] {
+            let uv = |s: &str| {
+                let g = ctx.fonts_mut(|f| {
+                    f.layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::WHITE)
+                });
+                g.rows[0].glyphs[0].uv_rect
+            };
+            let tofu = uv("\u{10FFFD}");
+            for c in ["🟪", "🟡", "❄", "🔶", "😀", "🫠"] {
+                assert_ne!(uv(c), tofu, "{c} in {font:?}");
+            }
+        }
+    }
 
     /// Every glyph the app names is laid out, read back out of the font atlas, and
     /// has to have ink that differs from the missing-glyph box. A wrong Phosphor

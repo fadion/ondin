@@ -16,8 +16,6 @@ library, so a large one freezes the window. Files, pictures and SVG markup alrea
 
 - **Copy as PNG** (`OndinApp::copy_as_png`): the selection is rendered on the CPU at the chosen scale
   on the frame.
-- **Export code** (`panels::export` `export_code`): code generation, the zip and the write run on
-  the frame, unlike the other exports' `Job`.
 - **Library refresh** (`library::state` `refresh`): `scan::scan` opens every document and may load
   one whole (`read_meta`), on the frame, from Duplicate, Move, the kit watch, `set_kit_at`, the kit
   picker and a pinning save. Slow on a cloud-synced folder.

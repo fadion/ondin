@@ -2112,30 +2112,28 @@ impl OndinApp {
         format!("{stem}.zip")
     }
 
-    /// The selection written as `target`, or the sentence saying why there is
-    /// nothing to write. Reads the committed document, as every writer does.
-    pub(crate) fn code_export(
-        &self,
-        target: ondin_export::code::Target,
-    ) -> Result<ondin_export::code::CodeExport, &'static str> {
+    /// The layers a code export writes, or the sentence saying why there is
+    /// nothing to write.
+    pub(crate) fn code_subjects(&self) -> Result<Vec<NodeId>, &'static str> {
         let subjects = self.export_subjects();
         if subjects.is_empty() {
             return Err("Select the layers to export as code");
         }
-        Ok(target.export(&self.session.doc, &self.session.resolved, &subjects))
+        Ok(subjects)
     }
 
     /// Export the selection as `target` code into one zip the person names, and
-    /// say what the report holds.
+    /// say what the report holds. Generated, zipped and written on an export
+    /// worker ([`Self::spawn_export`]) from a copy of the committed document.
     pub(crate) fn export_code(&mut self, target: ondin_export::code::Target) {
-        let export = match self.code_export(target) {
-            Ok(e) => e,
+        let subjects = match self.code_subjects() {
+            Ok(s) => s,
             Err(why) => {
                 self.session.fail(why);
                 return;
             }
         };
-        let name = match self.export_subjects().as_slice() {
+        let name = match subjects.as_slice() {
             [one] => self
                 .session
                 .doc
@@ -2152,16 +2150,12 @@ impl OndinApp {
         else {
             return;
         };
-        let written = export.zip().and_then(|bytes| std::fs::write(&path, bytes));
-        if let Err(e) = written {
-            self.session.fail(format!("Could not write: {e}"));
-            return;
-        }
-        if let Some(dir) = path.parent() {
-            self.prefs.export_dir = Some(dir.into());
-            self.prefs.save();
-        }
-        self.session.info(code_export_summary(target, &export));
+        let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
+        let asker = self.session.path.clone();
+        self.spawn_export(move || Delivered {
+            asker,
+            ..write_code(&doc, &resolved, &subjects, target, &path)
+        });
     }
 }
 
@@ -2171,6 +2165,29 @@ impl OndinApp {
 fn code_archive_name(layer: &str) -> Option<String> {
     let name = ondin_export::plan::sanitize_segment(layer.trim());
     (!name.is_empty()).then(|| format!("{name}.zip"))
+}
+
+/// Write `subjects` as `target` code into the zip at `path`, off the UI thread,
+/// reported as an export is.
+fn write_code(
+    doc: &ondin_core::Document,
+    resolved: &ondin_core::Resolved,
+    subjects: &[NodeId],
+    target: ondin_export::code::Target,
+    path: &std::path::Path,
+) -> Delivered {
+    let export = target.export(doc, resolved, subjects);
+    let written = export.zip().and_then(|bytes| std::fs::write(path, bytes));
+    Delivered {
+        written: usize::from(written.is_ok()),
+        skipped: 0,
+        replaced: 0,
+        to_folder: false,
+        failed: written.err().map(|e| e.to_string()),
+        where_: path.parent().map(Into::into).unwrap_or_default(),
+        head: Some(code_export_summary(target, &export)),
+        asker: None,
+    }
 }
 
 /// The status line after a code export: what was written, then what the report
@@ -3809,7 +3826,9 @@ mod code_export_tests {
     use ondin_export::code::Target;
 
     /// The selection is what is written, and nothing selected is a sentence, not
-    /// an empty zip.
+    /// an empty zip; the worker's zip lands as the code export's own report.
+    ///
+    /// flip: `write_code` leaving `head` unset → fails at "Exported React code".
     #[test]
     fn code_export_writes_the_selection_and_refuses_none() {
         let ctx = egui::Context::default();
@@ -3832,11 +3851,12 @@ mod code_export_tests {
             }
         ])));
         app.session.selection.set(vec![]);
-        assert!(app.code_export(Target::React).is_err());
+        assert!(app.code_subjects().is_err());
 
         app.session.selection.set(vec![frame]);
+        let subjects = app.code_subjects().expect("a selection to write");
         for target in Target::ALL {
-            let out = app.code_export(target).expect("a selection to write");
+            let out = target.export(&app.session.doc, &app.session.resolved, &subjects);
             let page = match target {
                 Target::Html => "index.html",
                 Target::React => "App.tsx",
@@ -3845,6 +3865,27 @@ mod code_export_tests {
             let text = String::from_utf8(out.file(page).expect(page).to_vec()).unwrap();
             assert!(text.contains("hero"), "{target:?} writes the frame: {text}");
         }
+
+        // The worker's half: the zip on disk, landing as the export's report and
+        // the folder remembered.
+        let dir = std::env::temp_dir().join(format!("ondin-code-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("Hero.zip");
+        let d = write_code(
+            &app.session.doc,
+            &app.session.resolved,
+            &subjects,
+            Target::React,
+            &zip,
+        );
+        app.land_export(d);
+        assert!(
+            std::fs::metadata(&zip).is_ok_and(|m| m.len() > 0),
+            "the zip"
+        );
+        assert_eq!(app.session.status().text, "Exported React code");
+        assert_eq!(app.prefs.export_dir.as_deref(), Some(dir.as_path()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The status line names the target and counts each list the report holds.

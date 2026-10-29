@@ -113,6 +113,8 @@ fn fixture() -> F {
         },
         picture("hero", 10),
         picture("old", 20),
+        // Shown by nothing: never counted, and dropped by every trim.
+        picture("stray", 40),
         frame(m, flows, 0),
         rect(ma, m),
         Operation::SetComponent {
@@ -198,7 +200,8 @@ fn fill(doc: &Document, id: NodeId) -> BrushSource {
 }
 
 /// The census counts pages, the frames on each, mains, styles, variables, modes
-/// and pictures with their bytes.
+/// and the pictures something shows, with their bytes.
+/// flip: count every picture in the table → fails at the picture count.
 #[test]
 fn the_census_counts_what_the_import_offers() {
     let f = fixture();

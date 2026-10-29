@@ -59,6 +59,9 @@ pub fn census(doc: &Document) -> Census {
                 .count(),
         })
         .collect();
+    // A picture nothing shows is dropped by every copy, so it is not offered.
+    let shown = images_shown(doc);
+    let pictures: Vec<_> = doc.images().filter(|(id, _)| shown.contains(*id)).collect();
     Census {
         frames: pages.iter().map(|p| p.frames).sum(),
         pages,
@@ -69,14 +72,14 @@ pub fn census(doc: &Document) -> Census {
         styles: doc.styles().iter().count(),
         variables: doc.variables().iter().count(),
         modes: doc.variables().modes().len(),
-        pictures: doc.image_count(),
-        picture_bytes: doc
-            .images()
+        picture_bytes: pictures
+            .iter()
             .map(|(_, e)| match &e.source {
                 ImageSource::Embedded(bytes) => bytes.len() as u64,
                 ImageSource::Linked(_) => 0,
             })
             .sum(),
+        pictures: pictures.len(),
     }
 }
 

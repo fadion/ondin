@@ -16,11 +16,18 @@ reads true.
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **PDF import.**
-- **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
-  Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when
-  Figma changes it; the REST API is documented but needs a network and the user's token), then
-  **Penpot** (open source, so its format can be read from its code). Pixso works with `.fig`;
-  Affinity and Illustrator arrive through SVG and PDF.
+- **One import dialog for documents.** The library's *Import files* opens a modal, not the native
+  dialog it opens now (`DashboardState::import_documents`): a file browser, then the options for the
+  chosen file's type. An `.ondin` document gets what importing does today (`import_paths`: a copy with
+  a new identity) plus the project to file it in and whether to drop its pictures. Other tools'
+  files come in through the same dialog only, each as a new library document that is never written
+  back; a canvas drop is not a door for them. Needs a design for the modal and each type's options.
+  The formats, in this order: **Sketch** (a published JSON spec; also covers Lunacy, which saves
+  `.sketch`; pages, artboards, symbols, shared styles and colour variables map to Ondin's own, the
+  rest reported as `svg_in` reports), **Figma** (`.fig` is reverse-engineered binary that breaks when
+  Figma changes it; the REST API is documented but needs a network and the user's token, which the
+  dialog would ask for), then **Penpot** (open source, so its format can be read from its code).
+  Pixso works with `.fig`; Affinity and Illustrator arrive through SVG and PDF.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
 ## Later · Second

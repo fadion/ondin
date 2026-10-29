@@ -78,6 +78,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Detecting OneDrive's machine-name conflict copies** — indistinguishable from a typed name (§15 D375).
 - **Queueing `Ctrl+S` and document-leaving transitions on the writer thread** — they read the result on the next line (§15 D393).
 - **A "remember last page" dashboard option** — the default page is a Settings preference (§15 D749).
+- **Reading Figma's `.fig` binary** — the format is unpublished, reading it reverse-engineers another company's product, and it breaks when Figma changes it; Figma files come in by link through the documented REST API.
 
 ## Styles and variables
 

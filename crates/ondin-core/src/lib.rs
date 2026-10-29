@@ -54,6 +54,7 @@ pub mod resolve;
 pub mod style;
 pub mod svg_in;
 pub mod swap;
+pub mod take;
 pub mod text;
 pub mod tokens;
 pub mod typography;

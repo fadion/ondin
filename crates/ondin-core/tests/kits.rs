@@ -2663,3 +2663,22 @@ fn a_variants_own_visibility_binding_is_not_a_change() {
     let small = frozen.document().get(k.small).unwrap();
     assert_eq!((small.visible_var(), small.visible()), (None, false));
 }
+
+/// An import taken without components (`take::take`) cuts a kit instance loose
+/// and empties the vault, and the trimmed document still loads.
+#[test]
+fn an_import_without_components_closes_the_vault() {
+    let k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.set);
+    assert!(d.vault().is_some(), "control: the insert vendored the set");
+    let keep = ondin_core::take::Keep {
+        components: false,
+        ..ondin_core::take::Keep::all(&d)
+    };
+    ondin_core::take::take(&mut d, &keep).expect("the trim goes through");
+    assert_eq!(d.vault(), None);
+    assert_eq!(d.get(inst).unwrap().link(), None);
+    let bytes = ondin_core::io::save(&d).unwrap();
+    ondin_core::io::load(&bytes).expect("the trimmed document loads");
+}

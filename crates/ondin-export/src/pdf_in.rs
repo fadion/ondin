@@ -4,7 +4,8 @@
 //! tests. Text arrives as the glyphs' outlines: a PDF places glyphs, not
 //! paragraphs. `hayro-svg` draws each glyph as a `<use>` of its outline, which
 //! would be a layer per letter, so [`merged_glyphs`] joins each line's into one
-//! path first.
+//! path first. A shading arrives wrapped in a `<pattern>`, which [`unwrapped_shadings`]
+//! turns back into the gradient it holds.
 
 use ondin_core::kurbo::{Affine, BezPath, Size};
 use std::sync::Arc;
@@ -64,6 +65,7 @@ pub fn import(bytes: Vec<u8>) -> Result<PdfImport, PdfInError> {
         .map(|page| {
             let (w, h) = page.render_dimensions();
             let svg = hayro_svg::convert(page, &cache, &settings, &render);
+            let svg = unwrapped_shadings(&svg).unwrap_or(svg);
             PdfPage {
                 svg: merged_glyphs(&svg).unwrap_or(svg),
                 size: Size::new(f64::from(w), f64::from(h)),
@@ -141,16 +143,98 @@ pub fn merged_glyphs(svg: &str) -> Option<String> {
         }
         close(&mut run);
     }
-    runs.sort_by_key(|r| r.0.start);
+    Some(spliced(svg, runs))
+}
+
+/// `svg` with each `<pattern>` that holds only one shape painted by a gradient —
+/// how `hayro-svg` draws a PDF shading — replaced by that gradient under the
+/// pattern's id, the pattern's and the shape's transforms folded into its
+/// `gradientTransform`. `svg_in` reads gradients and not patterns. `None` when the
+/// markup does not parse.
+///
+/// The tile is dropped: `hayro-svg` sizes it to cover the shape it fills.
+pub fn unwrapped_shadings(svg: &str) -> Option<String> {
+    let doc = roxmltree::Document::parse(svg).ok()?;
+    let gradients: std::collections::HashMap<&str, roxmltree::Node<'_, '_>> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("linearGradient") || n.has_tag_name("radialGradient"))
+        .filter_map(|n| Some((n.attribute("id")?, n)))
+        .collect();
+    let swaps = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("pattern"))
+        .filter_map(|p| Some((p.range(), shading(svg, &gradients, p)?)))
+        .collect();
+    Some(spliced(svg, swaps))
+}
+
+/// The gradient `pattern` stands for, as markup under the pattern's id, when it is
+/// one shape filled by a user-space gradient in user-space units.
+fn shading(
+    svg: &str,
+    gradients: &std::collections::HashMap<&str, roxmltree::Node<'_, '_>>,
+    pattern: roxmltree::Node<'_, '_>,
+) -> Option<String> {
+    let user_space = |n: roxmltree::Node<'_, '_>, units| {
+        n.attribute(units).unwrap_or("objectBoundingBox") == "userSpaceOnUse"
+    };
+    if !user_space(pattern, "patternUnits")
+        || pattern
+            .attribute("patternContentUnits")
+            .is_some_and(|u| u != "userSpaceOnUse")
+        || pattern.has_attribute("viewBox")
+    {
+        return None;
+    }
+    let mut shapes = pattern.children().filter(|c| c.is_element());
+    let (Some(shape), None) = (shapes.next(), shapes.next()) else {
+        return None;
+    };
+    let target = shape
+        .attribute("fill")?
+        .trim()
+        .strip_prefix("url(#")?
+        .strip_suffix(')')?;
+    let gradient = *gradients.get(target)?;
+    if !user_space(gradient, "gradientUnits") || gradient.attributes().any(|a| a.name() == "href") {
+        return None;
+    }
+    let at = |n: roxmltree::Node<'_, '_>, name| {
+        n.attribute(name).map_or(Some(Affine::IDENTITY), transform)
+    };
+    let [a, b, c, d, e, f] = (at(pattern, "patternTransform")?
+        * at(shape, "transform")?
+        * at(gradient, "gradientTransform")?)
+    .as_coeffs();
+    let tag = gradient.tag_name().name();
+    let attrs: String = gradient
+        .attributes()
+        .filter(|a| a.name() != "id" && a.name() != "gradientTransform")
+        .map(|a| format!(r#" {}="{}""#, a.name(), escape_attr(a.value())))
+        .collect();
+    let stops = match (gradient.first_child(), gradient.last_child()) {
+        (Some(first), Some(last)) => &svg[first.range().start..last.range().end],
+        _ => "",
+    };
+    Some(format!(
+        r#"<{tag} id="{}" gradientTransform="matrix({a} {b} {c} {d} {e} {f})"{attrs}>{stops}</{tag}>"#,
+        escape_attr(pattern.attribute("id")?)
+    ))
+}
+
+/// `svg` with each range replaced by its markup, the rest kept byte for byte. The
+/// ranges do not overlap.
+fn spliced(svg: &str, mut swaps: Vec<(std::ops::Range<usize>, String)>) -> String {
+    swaps.sort_by_key(|r| r.0.start);
     let mut out = String::with_capacity(svg.len());
     let mut at = 0;
-    for (range, markup) in runs {
+    for (range, markup) in swaps {
         out.push_str(&svg[at..range.start]);
         out.push_str(&markup);
         at = range.end;
     }
     out.push_str(&svg[at..]);
-    Some(out)
+    out
 }
 
 /// A `<use>`'s attributes other than its reference and transform.

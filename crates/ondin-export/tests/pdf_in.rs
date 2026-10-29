@@ -55,6 +55,50 @@ fn glyphs_merge_into_one_path_per_line_and_paint() {
     assert!(!out.contains("#g0\""), "no glyph use is left: {out}");
 }
 
+/// A pattern holding one gradient-filled shape, as `hayro-svg` draws a shading,
+/// becomes that gradient under the pattern's id, the pattern's transform folded in;
+/// a pattern of tiles stays, for `svg_in` to report.
+///
+/// flip: `shading` leaving out `patternTransform` → fails at the matrix.
+#[test]
+fn a_shading_pattern_becomes_its_gradient() {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<rect width="10" height="10" fill="url(#v0)" transform="matrix(10 0 0 10 0 0)"/>
+<rect width="100" height="100" fill="url(#t0)"/>
+<defs>
+<pattern id="v0" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="matrix(0.5 0 0 0.5 0 0)"><rect width="20" height="20" fill="url(#n0)"/></pattern>
+<pattern id="t0" patternUnits="userSpaceOnUse" width="8" height="8"><rect width="4" height="4" fill="#000"/><rect x="4" y="4" width="4" height="4" fill="#000"/></pattern>
+<linearGradient id="n0" gradientUnits="userSpaceOnUse" gradientTransform="matrix(20 0 0 20 0 0)" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient>
+</defs>
+</svg>"##;
+    let out = ondin_export::pdf_in::unwrapped_shadings(svg).expect("parses");
+    assert!(
+        out.contains(r##"<linearGradient id="v0" gradientTransform="matrix(10 0 0 10 0 0)" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient>"##),
+        "{out}"
+    );
+    assert!(out.contains(r#"<pattern id="t0""#), "the tiles stay: {out}");
+
+    let mut ids = IdSource::new(0x9E);
+    let root = ids.mint();
+    let doc = ondin_core::Document::new(root);
+    let read = svg_in::import(&out, &mut ids, doc.first_page(), 0, None).expect("reads");
+    let gradients = read
+        .tx
+        .0
+        .iter()
+        .filter(|op| {
+            matches!(op, ondin_core::Operation::SetFills { fills, .. }
+                if fills.iter().any(|f| matches!(f.brush.literal(), Some(ondin_core::Brush::Gradient(_)))))
+        })
+        .count();
+    assert_eq!(gradients, 1, "the shading reads as a gradient fill");
+    assert_eq!(
+        read.skipped,
+        ["pattern (image fill)"],
+        "the tiles are reported"
+    );
+}
+
 /// A page Ondin exported reads back with its text as one layer per line, not a
 /// layer per glyph, and the rest of the page as layers.
 #[test]

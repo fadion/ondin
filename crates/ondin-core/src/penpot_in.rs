@@ -5,7 +5,8 @@
 //! `manifest.json` naming the files inside it, then per file `files/<file>.json`,
 //! `files/<file>/pages/<page>.json`, one `files/<file>/pages/<page>/<shape>.json`
 //! per shape, and `colors/`, `typographies/`, `components/` and `media/` beside
-//! them; pictures sit under `objects/`. The first format, a binary one, is refused.
+//! them; pictures sit under `objects/`. The older binary export is unpacked into
+//! those same entries first (`crate::penpot_v1`).
 //!
 //! Penpot places every shape in page space: a box (`x`, `y`, `width`, `height`)
 //! turned by `transform` about its centre, a path by its own absolute outline.
@@ -57,7 +58,9 @@ pub struct Read {
 pub enum PenpotError {
     #[error("not a Penpot export: it has no manifest.json")]
     NoManifest,
-    #[error("an export of Penpot 1; open it in Penpot 2 and export it again")]
+    #[error(
+        "a binary Penpot export of a version Ondin does not read; open it in Penpot and export it again"
+    )]
     OldFormat,
     #[error("not a Penpot export: {0}")]
     Json(String),
@@ -70,7 +73,8 @@ pub enum PenpotError {
 /// The id Penpot gives every page's root frame.
 const ROOT: &str = "00000000-0000-0000-0000-000000000000";
 
-/// Whether `bytes` are Penpot 1's binary export rather than a zip.
+/// Whether `bytes` are Penpot's older binary export rather than a zip; the
+/// version `crate::penpot_v1` reads is told apart by `penpot_v1::is_binfile`.
 pub fn is_old_format(bytes: &[u8]) -> bool {
     !bytes.starts_with(b"PK\x03\x04")
 }

@@ -49,6 +49,7 @@ pub mod op;
 pub mod page;
 pub mod paint_box;
 pub mod penpot_in;
+pub mod penpot_v1;
 pub mod propagate;
 pub mod query;
 pub mod rename;

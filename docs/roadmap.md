@@ -14,8 +14,6 @@ Found testing Import files on real Sketch files.
 - **Sketch import, older text:** text in Sketch's older archived format (an NSKeyedArchiver binary
   plist in `archivedAttributedString`) comes in empty, reported "Texts in Sketch's older format".
   Decode it, so files such as a Sketch 47 one come in with their text.
-- **Penpot 1 files:** four of the seven Penpot community templates tried are Penpot 1 files and are
-  refused. Weigh reading them.
 
 ## Later · First
 

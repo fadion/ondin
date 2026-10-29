@@ -525,27 +525,48 @@ type Read = (
     Option<String>,
 );
 
-fn read_foreign(kind: Kind, bytes: &[u8]) -> Result<Read, String> {
-    if kind == Kind::Penpot && ondin_core::penpot_in::is_old_format(bytes) {
+/// Penpot's older binary export inflated, within [`ZIP_LIMIT`], and unpacked
+/// into the entries its zip export would hold.
+fn penpot_one(bytes: &[u8]) -> Result<ondin_core::penpot_v1::Entries, String> {
+    use ondin_core::penpot_v1;
+    if !penpot_v1::is_binfile(bytes) {
         return Err(ondin_core::penpot_in::PenpotError::OldFormat.to_string());
     }
-    let zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|_| format!("Not a {}: it does not open as one", kind.noun()))?;
+    let unreadable = |e: &dyn std::fmt::Display| format!("Could not be read: {e}");
+    let stream = ruzstd::decoding::StreamingDecoder::new(&bytes[penpot_v1::HEADER..])
+        .map_err(|e| unreadable(&e))?;
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(stream, ZIP_LIMIT + 1), &mut body)
+        .map_err(|e| unreadable(&e))?;
+    if body.len() as u64 > ZIP_LIMIT {
+        return Err(unreadable(&"it unpacks to more than 2 GiB"));
+    }
+    penpot_v1::unpack(&body).map_err(|e| unreadable(&e))
+}
+
+fn read_foreign(kind: Kind, bytes: &[u8]) -> Result<Read, String> {
+    let mut archive: Box<dyn ondin_core::foreign::Archive> =
+        if kind == Kind::Penpot && ondin_core::penpot_in::is_old_format(bytes) {
+            Box::new(penpot_one(bytes)?)
+        } else {
+            let zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+                .map_err(|_| format!("Not a {}: it does not open as one", kind.noun()))?;
+            Box::new(Zip { zip, read: 0 })
+        };
     // A fresh stream, as a new document's: nothing else holds ids under it.
     let actor = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(1, |d| d.as_nanos() as u64 | 1);
     let mut ids = ondin_core::IdSource::new(actor);
-    let mut archive = Zip { zip, read: 0 };
     let unreadable = |e: &dyn std::fmt::Display| format!("Could not be read: {e}");
     let (doc, report, families, name) = match kind {
         Kind::Penpot => {
-            let r = ondin_core::penpot_in::read(&mut archive, &mut ids, &mut Pictures)
+            let r = ondin_core::penpot_in::read(&mut *archive, &mut ids, &mut Pictures)
                 .map_err(|e| unreadable(&e))?;
             (r.doc, r.report, r.families, Some(r.name))
         }
         _ => {
-            let r = ondin_core::sketch_in::read(&mut archive, &mut ids, &mut Pictures)
+            let r = ondin_core::sketch_in::read(&mut *archive, &mut ids, &mut Pictures)
                 .map_err(|e| unreadable(&e))?;
             (r.doc, r.report, r.families, None)
         }
@@ -2922,7 +2943,42 @@ mod tests {
         assert_eq!(listed(&f).len(), 1);
     }
 
-    /// Penpot 1's binary export is refused with what to do about it.
+    /// Penpot's binary export is inflated and unpacked before Penpot's reader
+    /// sees it: one whose stream holds no file reaches the reader and is
+    /// refused for having no pages, not for its format.
+    /// flip: inflate from the start of the file in `penpot_one` → fails at the
+    /// message.
+    #[test]
+    fn a_binary_penpot_export_is_inflated_for_the_reader() {
+        let label = [
+            &[0xef, 0xe3, 11][..],
+            b"clj/keyword",
+            &[2, 0xf7, 0xe3, 11],
+            b"v1/metadata",
+        ]
+        .concat();
+        let empty_map = [&[0xef, 0xe3, 7][..], b"clj/map", &[1, 0xe4]].concat();
+        let mut body = vec![4, 5];
+        body.extend((label.len() as u64).to_be_bytes());
+        body.extend(&label);
+        body.push(5);
+        body.extend((empty_map.len() as u64).to_be_bytes());
+        body.extend(&empty_map);
+        let mut file = vec![1];
+        file.extend(0x0B1A_8650_63A1_5FC5u64.to_be_bytes());
+        file.extend(1u64.to_be_bytes());
+        file.extend(ruzstd::encoding::compress_to_vec(
+            &body[..],
+            ruzstd::encoding::CompressionLevel::Fastest,
+        ));
+        let Err(why) = read_foreign(Kind::Penpot, &file) else {
+            panic!("a file of no pages reads");
+        };
+        assert_eq!(why, "Could not be read: the file has no pages");
+    }
+
+    /// A non-zip `.penpot` that is not the binary export Ondin reads either is
+    /// refused with what to do about it.
     #[test]
     fn an_old_penpot_export_is_refused_with_a_way_forward() {
         let ctx = egui::Context::default();
@@ -2933,7 +2989,7 @@ mod tests {
         f.app.settle_import();
         let card = f.app.dash.import.as_ref().unwrap();
         assert!(
-            matches!(&card.field, Field::Refused { why, .. } if why.contains("Penpot 2")),
+            matches!(&card.field, Field::Refused { why, .. } if why.contains("export it again")),
             "{:?}",
             matches!(card.field, Field::Refused { .. })
         );

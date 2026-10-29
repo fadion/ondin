@@ -110,6 +110,9 @@ png = "0.18.1"
 zip = { version = "8.6.0", default-features = false, features = [
   "deflate-flate2",
 ] }
+# Penpot 1's export is one zstd stream after a short header. A pure-Rust
+# decoder; `std` alone drops `hash`, which only verifies a frame's checksum.
+ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
 # PDF export: our SVG, parsed by `usvg` and drawn into a PDF by `krilla` through
 # `krilla-svg`. Not `svg2pdf`, whose `usvg` 0.45 ignores `font-variation-settings`
 # and so embeds a variable font (Inter, the default) at its default weight. These

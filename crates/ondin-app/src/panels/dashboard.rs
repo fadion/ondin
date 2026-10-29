@@ -353,6 +353,9 @@ pub(crate) struct DashboardState {
     pub(crate) moving: Option<PathBuf>,
     /// The document awaiting delete confirmation.
     pub(crate) deleting: Option<PathBuf>,
+    /// A document opened from the library whose file is gone from disk, while the
+    /// card saying so is up.
+    pub(crate) missing: Option<PathBuf>,
     /// The New project modal's fields, while it is open.
     pub(crate) new_project: Option<NewProject>,
     /// The Edit project modal's fields, while it is open.
@@ -618,6 +621,7 @@ impl OndinApp {
         self.delete_project_modal(ui.ctx(), &mut act);
         self.move_modal(ui.ctx(), &mut act);
         self.delete_modal(ui.ctx(), &mut act);
+        self.missing_modal(ui.ctx());
         self.stop_sharing_dialog(ui.ctx());
         self.library_settings_modal(ui.ctx());
         self.import_modal(ui.ctx());
@@ -2133,10 +2137,10 @@ impl OndinApp {
         if marks_kit(entry) {
             kit_chip(ui, corner);
         }
-        // A document already in a tab: a click brings that tab forward.
-        if self.tab_of_path(&entry.path).is_some() {
+        if let Some(chip) = self.state_chip(entry) {
             open_chip(
                 ui,
+                chip,
                 thumb.left_top() + egui::vec2(7.0, 7.0),
                 egui::Align2::LEFT_TOP,
             );
@@ -2287,6 +2291,7 @@ impl OndinApp {
             && self.closing_tabs.is_empty()
             && self.dash.moving.is_none()
             && self.dash.deleting.is_none()
+            && self.dash.missing.is_none()
             && self.dash.deleting_project.is_none()
             && self.dash.new_project.is_none()
             && self.dash.edit_project.is_none()
@@ -2557,13 +2562,9 @@ impl OndinApp {
         let renaming = self.rename_field(ui, entry, name_box, 12.0, act);
         // The chips take their width out of the *Name* column before the name is elided.
         let chip = self.mark_of(entry).filter(|_| !renaming);
-        let open = !renaming && self.tab_of_path(&entry.path).is_some();
+        let open = self.state_chip(entry).filter(|_| !renaming);
         let chip_room = chip.map_or(0.0, |m| mark_chip_size(ui, m).x + 8.0)
-            + if open {
-                open_chip_size(ui).x + 8.0
-            } else {
-                0.0
-            };
+            + open.map_or(0.0, |s| open_chip_size(ui, s).x + 8.0);
         let mut x = rect.left();
         for (i, (text, w)) in cells.iter().zip(cols).enumerate() {
             if i == 0 && renaming {
@@ -2583,7 +2584,7 @@ impl OndinApp {
                     theme::text::DIM
                 },
             );
-            if i == 0 && (chip.is_some() || open) {
+            if i == 0 && (chip.is_some() || open.is_some()) {
                 let name_w = ui
                     .ctx()
                     .fonts_mut(|f| {
@@ -2599,8 +2600,8 @@ impl OndinApp {
                 if let Some(mark) = chip {
                     at.x = mark_chip(ui, at, egui::Align2::LEFT_CENTER, mark).right() + 8.0;
                 }
-                if open {
-                    open_chip(ui, at, egui::Align2::LEFT_CENTER);
+                if let Some(s) = open {
+                    open_chip(ui, s, at, egui::Align2::LEFT_CENTER);
                 }
             }
             x += w;
@@ -2848,6 +2849,11 @@ impl OndinApp {
             self.opening = None;
         }
         match act {
+            // The card is kept from the last scan, which a file deleted outside
+            // Ondin since has not reached.
+            Act::Open(path) if !path.exists() && self.tab_of_path(&path).is_none() => {
+                self.dash.missing = Some(path)
+            }
             Act::Open(path) => self.begin_open(&path),
             Act::NewFile => {
                 let project = self.nav_project();
@@ -3021,6 +3027,23 @@ impl OndinApp {
             .id
             .as_deref()
             .is_some_and(|id| self.library.local.is_starred(id))
+    }
+
+    /// The state chip `entry` wears, if any: *Open* while a tab holds it, else
+    /// *New* while it was imported here and not opened since.
+    fn state_chip(&self, entry: &Entry) -> Option<StateChip> {
+        if self.tab_of_path(&entry.path).is_some() {
+            Some(StateChip::Open)
+        } else if entry
+            .meta
+            .id
+            .as_deref()
+            .is_some_and(|id| self.library.local.is_new(id))
+        {
+            Some(StateChip::New)
+        } else {
+            None
+        }
     }
 
     /// Trash a document, or delete it for good if it is already in the trash.
@@ -4193,6 +4216,43 @@ impl OndinApp {
             None => {}
         }
     }
+
+    /// The card for a document whose file is gone: it says so, and however it is
+    /// closed the library is read again, which drops the document's card.
+    fn missing_modal(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.dash.missing.as_ref() else {
+            return;
+        };
+        let name = self
+            .library
+            .entry_at(path)
+            .map(|e| e.display_name())
+            .unwrap_or_else(|| "This document".into());
+        let mut done = false;
+        let modal = settings::card("missing-file", ctx, |ui| {
+            ui.set_width(ui::menu_inner_w(settings::CARD_W, settings::PAD));
+            done |= settings::modal_title(ui, "File not found");
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "“{name}” is no longer on disk, so it is removed from the library."
+                    ))
+                    .size(12.0)
+                    .color(theme::text::MUTED),
+                )
+                .wrap(),
+            );
+            ui.add_space(settings::FOOTER_GAP);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                done |= settings::text_button(ui, "OK", FieldButton::On).clicked();
+            });
+        });
+        if done || modal.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            self.dash.missing = None;
+            self.library.refresh();
+        }
+    }
 }
 
 /// Where an arrow key moves the selection: the new index, or `None` for a key
@@ -4615,26 +4675,67 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
     rect
 }
 
-/// The *Open* chip, anchored at `at` by `align`, on a card or row whose document is
-/// open in a tab: an accent chip, since a click brings that tab forward rather than
-/// opening the document again.
-fn open_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2) -> egui::Rect {
-    let ink = color::ACCENT_100;
-    let word = open_word(ui);
-    let rect = align.anchor_size(at, open_chip_size(ui));
+/// The chip a card or row wears for its state in this window.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum StateChip {
+    /// Open in a tab, so a click brings that tab forward rather than opening the
+    /// document again. Accent.
+    Open,
+    /// Imported here and not opened since. Green.
+    New,
+}
+
+impl StateChip {
+    fn word(self) -> &'static str {
+        match self {
+            Self::Open => "Open",
+            Self::New => "New",
+        }
+    }
+
+    fn glyph(self) -> &'static str {
+        match self {
+            Self::Open => icon::BROWSERS,
+            Self::New => icon::SPARKLE,
+        }
+    }
+
+    /// Ink, ground and hairline.
+    fn colors(self) -> (egui::Color32, egui::Color32, egui::Color32) {
+        match self {
+            Self::Open => (
+                color::ACCENT_100,
+                color::ACCENT_900,
+                color::ACCENT.gamma_multiply(0.45),
+            ),
+            Self::New => (
+                egui::Color32::from_rgb(0xb4, 0xe8, 0xc8),
+                egui::Color32::from_rgb(0x12, 0x30, 0x20),
+                theme::color::SAVED.gamma_multiply(0.45),
+            ),
+        }
+    }
+}
+
+/// The chip `chip`, anchored at `at` by `align`. A document open in a tab wears
+/// *Open*, which outranks *New*.
+fn open_chip(ui: &egui::Ui, chip: StateChip, at: egui::Pos2, align: egui::Align2) -> egui::Rect {
+    let (ink, ground, line) = chip.colors();
+    let word = open_word(ui, chip);
+    let rect = align.anchor_size(at, open_chip_size(ui, chip));
     let p = ui.painter();
     let r = egui::CornerRadius::same(4);
-    p.rect_filled(rect, r, color::ACCENT_900);
+    p.rect_filled(rect, r, ground);
     p.rect_stroke(
         rect,
         r,
-        egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.45)),
+        egui::Stroke::new(1.0, line),
         egui::StrokeKind::Inside,
     );
     p.text(
         egui::pos2(rect.left() + OPEN_PAD + OPEN_GLYPH / 2.0, rect.center().y),
         egui::Align2::CENTER_CENTER,
-        icon::BROWSERS,
+        chip.glyph(),
         theme::icon_font(OPEN_GLYPH),
         ink,
     );
@@ -4653,22 +4754,22 @@ const OPEN_PAD: f32 = 7.0;
 const OPEN_GAP: f32 = 4.0;
 const OPEN_GLYPH: f32 = 11.0;
 
-/// The *Open* chip's word, laid out once for both its size and its drawing.
-fn open_word(ui: &egui::Ui) -> std::sync::Arc<egui::Galley> {
+/// A state chip's word, laid out once for both its size and its drawing.
+fn open_word(ui: &egui::Ui, chip: StateChip) -> std::sync::Arc<egui::Galley> {
     ui.ctx().fonts_mut(|f| {
         f.layout_no_wrap(
-            "Open".into(),
+            chip.word().into(),
             egui::FontId::proportional(10.5),
-            color::ACCENT_100,
+            chip.colors().0,
         )
     })
 }
 
 /// How much room [`open_chip`] needs; the list view takes it out of the *Name*
 /// column before eliding.
-fn open_chip_size(ui: &egui::Ui) -> egui::Vec2 {
+fn open_chip_size(ui: &egui::Ui, chip: StateChip) -> egui::Vec2 {
     egui::vec2(
-        OPEN_PAD + OPEN_GLYPH + OPEN_GAP + open_word(ui).size().x + OPEN_PAD,
+        OPEN_PAD + OPEN_GLYPH + OPEN_GAP + open_word(ui, chip).size().x + OPEN_PAD,
         18.0,
     )
 }
@@ -6071,6 +6172,34 @@ mod tests {
         };
         let _ = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
         app.settle_open();
+    }
+
+    /// Opening a document whose file was deleted outside Ondin raises the card
+    /// saying so instead of a tab, and closing it drops the document's card.
+    /// flip: `dashboard_act` opening without the existence check → fails at "the
+    /// card is up".
+    #[test]
+    fn a_document_gone_from_disk_is_reported_and_dropped() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "missing");
+        let mut doc = ondin_core::Document::new(ondin_core::IdSource::new(7).mint());
+        let path = store::file_document(&root, None, "Gone", &mut doc).unwrap();
+        app.library.refresh();
+        assert!(app.library.entry_at(&path).is_some(), "fixture: listed");
+        std::fs::remove_file(&path).unwrap();
+        let tabs = app.tabs.list.len();
+        app.dashboard_act(Act::Open(path.clone()));
+        app.settle_open();
+        assert_eq!(app.tabs.list.len(), tabs, "no tab");
+        assert_eq!(app.dash.missing.as_ref(), Some(&path), "the card is up");
+        press(&mut app, &ctx, egui::Key::Enter);
+        assert!(app.dash.missing.is_none(), "closed");
+        assert!(
+            app.library.entry_at(&path).is_none(),
+            "dropped from the library"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The ⋮ menu answers the keyboard: `↓` walks its rows from the first, `Enter`

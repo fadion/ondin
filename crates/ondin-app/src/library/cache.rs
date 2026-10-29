@@ -45,6 +45,9 @@ pub struct LocalIndex {
     /// id), so it reopens there (`crate::pages`). Local for `opened`'s reason:
     /// switching pages is a view change, never written into the file.
     pub last_page: HashMap<String, String>,
+    /// The documents imported here and not opened since, which wear the *New*
+    /// chip. Opening one takes it out.
+    pub imported: std::collections::HashSet<String>,
     /// Set when `library.json` exists but could not be read (§15 D418).
     ///
     /// A latch on writing, like [`super::state::Library::projects_unreadable`]:
@@ -142,6 +145,17 @@ impl LocalIndex {
     /// Record that a document was opened now.
     pub fn mark_opened(&mut self, id: &str) {
         self.opened.insert(id.to_string(), super::clock::now());
+        self.imported.remove(id);
+    }
+
+    /// Record that a document was imported here, so it reads as new until opened.
+    pub fn mark_imported(&mut self, id: &str) {
+        self.imported.insert(id.to_string());
+    }
+
+    /// Whether a document was imported here and not opened since.
+    pub fn is_new(&self, id: &str) -> bool {
+        self.imported.contains(id)
     }
 
     /// When a document was last opened here, if ever.
@@ -185,6 +199,7 @@ impl LocalIndex {
         self.kit_use.retain(|id, _| live.contains(id));
         self.kit_later.retain(|id, _| live.contains(id));
         self.last_page.retain(|id, _| live.contains(id));
+        self.imported.retain(|id| live.contains(id));
     }
 }
 

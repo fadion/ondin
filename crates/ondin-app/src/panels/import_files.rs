@@ -10,6 +10,7 @@
 use crate::app::OndinApp;
 use crate::job::Job;
 use crate::library::{project, store};
+use crate::panels::dashboard::Nav;
 use crate::settings;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
@@ -420,7 +421,8 @@ fn foot_text(card: &ImportCard, projects: &project::Projects) -> String {
         .and_then(|id| projects.get(id))
         .map(|p| p.name.clone());
     match &card.field {
-        Field::Empty => "Choose a file".into(),
+        // The field already asks for one.
+        Field::Empty => String::new(),
         Field::Reading { .. } => "Reading the file…".into(),
         Field::Refused { .. } | Field::Fig(_) => "Not a file Ondin imports".into(),
         Field::Link { .. } => "Fetch the file to choose what comes over".into(),
@@ -1106,8 +1108,39 @@ impl OndinApp {
             .as_deref()
             .and_then(|id| self.library.projects.get(id))
             .map(|p| p.name.clone());
+        let written = landed.written.clone();
         card.step = Step::Done(overview(&card.field, &card.options, into, landed));
         self.library.refresh();
+        for path in &written {
+            if let Some(id) = self.library.entry_at(path).and_then(|e| e.meta.id.clone()) {
+                self.library.local.mark_imported(&id);
+            }
+        }
+        self.library.local.save();
+    }
+
+    /// *Done* on the overview: the library shows where the copies went, the
+    /// project they were filed into or *All files*, with the one copy selected.
+    fn done_import(&mut self) {
+        let Some(card) = self.dash.import.take() else {
+            return;
+        };
+        let Step::Done(o) = &card.step else {
+            return;
+        };
+        if o.written == 0 {
+            return;
+        }
+        self.dash.nav = match card
+            .options
+            .project
+            .as_deref()
+            .and_then(|id| self.library.projects.destination(id))
+        {
+            Some(p) => Nav::Project(p.id.clone()),
+            None => Nav::All,
+        };
+        self.dash.selected = o.open.clone();
     }
 
     /// *Import*: start the copy on a worker.
@@ -1254,6 +1287,7 @@ impl OndinApp {
         match act {
             None => {}
             Some(CardAct::Close) => self.close_import(),
+            Some(CardAct::Done) => self.done_import(),
             Some(CardAct::Cancel) => self.cancel_import(),
             Some(CardAct::Browse) => self.browse_for_import(ctx),
             Some(CardAct::Fill(path)) => self.fill_import(ctx, vec![path]),
@@ -1313,6 +1347,8 @@ enum CardAct {
     Import,
     Copy,
     Open,
+    /// *Done* on the overview.
+    Done,
 }
 
 /// What the field says about a file it will not take.
@@ -1418,6 +1454,7 @@ fn form(
                 "",
                 "Image fills stay, drawn as missing until a picture is placed in them.",
                 card.options.leave_pictures,
+                true,
             ) {
                 card.options.leave_pictures = !card.options.leave_pictures;
             }
@@ -1674,6 +1711,7 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
         "",
         "In the system keychain, never in a document",
         card.remember,
+        true,
     ) {
         card.remember = !card.remember;
     }
@@ -1732,10 +1770,14 @@ fn badge_chip(ui: &mut egui::Ui, text: &str, tint: egui::Color32) {
 
 /// The line under the field: a glyph and a sentence, wrapped to the card.
 fn message(ui: &mut egui::Ui, glyph: &str, text: &str, col: egui::Color32) {
-    ui.add_space(6.0);
+    // The sentence rides 1 px above the glyph, which centres its ink on it.
+    ui.add_space(5.0);
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(theme::icon_text(glyph, 12.0, col));
+        ui.vertical(|ui| {
+            ui.add_space(1.0);
+            ui.label(theme::icon_text(glyph, 12.0, col));
+        });
         ui.add(
             egui::Label::new(
                 egui::RichText::new(text)
@@ -1872,14 +1914,15 @@ fn pages(ui: &mut egui::Ui, census: &Census, words: Words, keep: &mut [bool]) {
         .show(ui, |ui| {
             for (page, on) in census.pages.iter().zip(keep.iter_mut()) {
                 let meta = counted(page.frames, words.frames.0, words.frames.1);
-                if check_row(ui, &page.name, &meta, "", *on) {
+                if check_row(ui, &page.name, &meta, "", *on, true) {
                     *on = !*on;
                 }
             }
         });
 }
 
-/// What to bring over besides the layers, each saying what leaving it does.
+/// What to bring over besides the layers, each saying what leaving it does. A
+/// part the file has none of offers no choice.
 fn bring_over(ui: &mut egui::Ui, census: &Census, words: Words, o: &mut Options) {
     ui.add_space(GROUP_GAP);
     group_label(ui, "Bring over");
@@ -1889,6 +1932,7 @@ fn bring_over(ui: &mut egui::Ui, census: &Census, words: Words, o: &mut Options)
         &census.components.to_string(),
         "Off: instances become plain layers.",
         o.components,
+        census.components > 0,
     ) {
         o.components = !o.components;
     }
@@ -1898,6 +1942,7 @@ fn bring_over(ui: &mut egui::Ui, census: &Census, words: Words, o: &mut Options)
         &census.styles.to_string(),
         words.styles_off,
         o.styles,
+        census.styles > 0,
     ) {
         o.styles = !o.styles;
     }
@@ -1906,7 +1951,14 @@ fn bring_over(ui: &mut egui::Ui, census: &Census, words: Words, o: &mut Options)
     } else {
         census.variables.to_string()
     };
-    if check_row(ui, words.variables, &vars, words.variables_off, o.variables) {
+    if check_row(
+        ui,
+        words.variables,
+        &vars,
+        words.variables_off,
+        o.variables,
+        census.variables > 0,
+    ) {
         o.variables = !o.variables;
     }
 }
@@ -1926,6 +1978,7 @@ fn pictures(ui: &mut egui::Ui, count: usize, bytes: u64, o: &mut Options) {
         &meta,
         "Image fills stay, drawn as missing until a picture is placed in them.",
         o.leave_pictures,
+        count > 0,
     ) {
         o.leave_pictures = !o.leave_pictures;
     }
@@ -1937,39 +1990,56 @@ fn counted(n: usize, one: &str, many: &str) -> String {
 }
 
 /// A tick box, its label, a count against the right margin and, when given, a
-/// sentence under the label. Answers whether it was clicked.
-fn check_row(ui: &mut egui::Ui, label: &str, meta: &str, sub: &str, on: bool) -> bool {
+/// sentence under the label. Answers whether it was clicked; a row that is not
+/// `enabled` is dimmed and never is.
+fn check_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    meta: &str,
+    sub: &str,
+    on: bool,
+    enabled: bool,
+) -> bool {
     let w = ui.available_width();
     let text_x = TICK + 9.0;
+    let fade = if enabled { 1.0 } else { 0.4 };
     let sub_g = (!sub.is_empty()).then(|| {
         ui.fonts_mut(|f| {
             f.layout(
                 sub.to_owned(),
                 egui::FontId::proportional(settings::CAPTION_PT),
-                theme::text::FAINT,
+                theme::text::FAINT.gamma_multiply(fade),
                 w - text_x,
             )
         })
     });
     let h = 22.0 + sub_g.as_ref().map_or(0.0, |g| g.size().y + 1.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), sense);
     let p = ui.painter();
     let line = rect.top() + 11.0;
+    // Centred on its line box a label sits low beside the tick; this lifts the ink
+    // to the box's middle.
+    let text_line = line - 2.0;
     let tick = egui::Rect::from_min_size(
         egui::pos2(rect.left(), line - TICK / 2.0),
         egui::vec2(TICK, TICK),
     );
     if on {
-        p.rect_filled(tick, 3.0, color::ACCENT);
+        p.rect_filled(tick, 3.0, color::ACCENT.gamma_multiply(fade));
         p.text(
             tick.center(),
             egui::Align2::CENTER_CENTER,
             icon::CHECK,
             theme::icon_font(10.0),
-            egui::Color32::WHITE,
+            egui::Color32::WHITE.gamma_multiply(fade),
         );
     } else {
-        let ring = if resp.hovered() {
+        let ring = if enabled && resp.hovered() {
             color::text_a(140)
         } else {
             color::text_a(90)
@@ -1977,19 +2047,19 @@ fn check_row(ui: &mut egui::Ui, label: &str, meta: &str, sub: &str, on: bool) ->
         p.rect_stroke(
             tick,
             3.0,
-            egui::Stroke::new(1.0, ring),
+            egui::Stroke::new(1.0, ring.gamma_multiply(fade)),
             egui::StrokeKind::Inside,
         );
     }
     p.text(
-        egui::pos2(rect.left() + text_x, line),
+        egui::pos2(rect.left() + text_x, text_line),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(12.0),
-        theme::text::STRONG,
+        theme::text::STRONG.gamma_multiply(fade),
     );
     p.text(
-        egui::pos2(rect.right(), line),
+        egui::pos2(rect.right(), text_line),
         egui::Align2::RIGHT_CENTER,
         meta,
         egui::FontId::proportional(11.0),
@@ -1997,12 +2067,12 @@ fn check_row(ui: &mut egui::Ui, label: &str, meta: &str, sub: &str, on: bool) ->
     );
     if let Some(g) = sub_g {
         p.galley(
-            egui::pos2(rect.left() + text_x, line + 8.0),
+            egui::pos2(rect.left() + text_x, text_line + 8.0),
             g,
             theme::text::FAINT,
         );
     }
-    resp.clicked()
+    enabled && resp.clicked()
 }
 
 /// The copy in progress, in place of the options.
@@ -2088,11 +2158,7 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
     report(ui, &o.report);
     ui.add_space(settings::FOOTER_GAP - 6.0);
     ui.horizontal(|ui| {
-        if ui
-            .add(
-                egui::Button::new(theme::icon_text(icon::COPY, 13.0, theme::text::MUTED))
-                    .frame(false),
-            )
+        if ui::icon_button(ui, icon::COPY, 26.0, 13.0, false, true)
             .on_hover_text("Copy report")
             .clicked()
         {
@@ -2106,13 +2172,14 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
                 *act = Some(CardAct::Open);
             }
             if settings::text_button(ui, "Done", FieldButton::Off).clicked() {
-                *act = Some(CardAct::Close);
+                *act = Some(CardAct::Done);
             }
         });
     });
 }
 
-/// The boxed list of what did not come in as it was, under its count.
+/// The list of what did not come in as it was, under its count, on the count
+/// cards' ground.
 fn report(ui: &mut egui::Ui, rows: &[ReportRow]) {
     let head = if rows.is_empty() {
         "Nothing to report".to_owned()
@@ -2120,13 +2187,12 @@ fn report(ui: &mut egui::Ui, rows: &[ReportRow]) {
         format!("Not brought over as it was · {}", rows.len())
     };
     egui::Frame::NONE
-        .stroke(egui::Stroke::new(1.0, color::text_a(23)))
+        .fill(color::text_a(15))
         .corner_radius(8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
             egui::Frame::NONE
-                .fill(color::text_a(13))
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -2137,6 +2203,15 @@ fn report(ui: &mut egui::Ui, rows: &[ReportRow]) {
                     );
                 });
             for r in rows {
+                let (line, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 1.0),
+                    egui::Sense::empty(),
+                );
+                ui.painter().hline(
+                    line.x_range(),
+                    line.center().y,
+                    egui::Stroke::new(1.0, color::text_a(13)),
+                );
                 egui::Frame::NONE
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
@@ -2311,6 +2386,32 @@ mod tests {
                 .all(|e| e.meta.id.as_deref() != Some(original.as_str()))
         );
         assert_ne!(got[0].meta.id, got[1].meta.id);
+    }
+
+    /// *Done* shows where an unfiled copy went, *All files*, with the copy
+    /// selected and marked new until it is opened.
+    /// flip: `done_import` leaving `nav` alone → fails at "All files".
+    #[test]
+    fn done_shows_the_copy_marked_new_until_opened() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "done");
+        let source = two_pages(&mut f, "Fresh");
+        f.app.dash.nav = Nav::Recent;
+        assert_eq!(f.app.import_through_card(&ctx, vec![source]), 1);
+        f.app.done_import();
+        assert!(f.app.dash.import.is_none(), "the card closes");
+        assert_eq!(f.app.dash.nav, Nav::All, "All files");
+        let copy = f.app.dash.selected.clone().expect("the copy is selected");
+        let id = f
+            .app
+            .library
+            .entry_at(&copy)
+            .and_then(|e| e.meta.id.clone())
+            .expect("the copy is listed");
+        assert!(f.app.library.local.is_new(&id), "new");
+        f.app.begin_open(&copy);
+        f.app.settle_open();
+        assert!(!f.app.library.local.is_new(&id), "opened, no longer new");
     }
 
     /// Nothing is written before *Import*, and the overview names where the copy

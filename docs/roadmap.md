@@ -7,6 +7,19 @@ other **Later** sections are deferred with a stated reason or trigger. Decided n
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
 reads true.
 
+## Now · Polish
+
+Found testing Import files on real Sketch files.
+
+- **Sketch import, older text:** text in Sketch's older archived format (an NSKeyedArchiver binary
+  plist in `archivedAttributedString`) comes in empty, reported "Texts in Sketch's older format".
+  Decode it, so files such as a Sketch 47 one come in with their text.
+- **Sketch import, speed:** symbol-heavy kits are very slow — reading eight real files took about 27
+  minutes in a release build, the big ones holding thousands of resized instances and style
+  overrides or symbol swaps, each placed in its own transaction by `sketch_in::Builder::place_instances`.
+  Find and fix the superlinear step. One candidate in sight: each pass of that loop rebuilds the
+  waiting set over every pending instance and `Vec::remove`s the one it places.
+
 ## Later · First
 
 - **Background blur.** Not built: `EffectKind` has no such effect. Neither vello 0.9 nor vello_cpu 0.2

@@ -232,8 +232,16 @@ winresource = { version = "0.1.31", default-features = false }
 # files** — one set per build hash, never collected, ~300 MB for a single test
 # binary. Nearly all of it is symbols for code nobody here steps into; a
 # backtrace through wgpu is a wall of frames you read the top of.
+#
+# **And optimized**, since the dependencies are where an export spends its time:
+# `vello_cpu`'s raster, the PNG encoder, and `usvg`/`krilla` for a PDF. Unoptimized,
+# a 4x PNG of a 1440x4660 frame took about a minute and its PDF half of one,
+# against a second or two in release. Workspace members keep `opt-level = 0`, so
+# an edit rebuilds as fast as before; the cost is a slower first build of the
+# dependencies, paid once per lockfile change.
 [profile.dev.package."*"]
 debug = false
+opt-level = 3
 
 # `ondin-render` optimized even in a debug build.
 #

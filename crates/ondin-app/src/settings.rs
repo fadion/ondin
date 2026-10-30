@@ -196,23 +196,7 @@ impl OndinApp {
 
             // --- appearance --------------------------------------------
             ui.add_space(TITLE_GAP - SECTION_AIR);
-            section(ui, "Appearance");
-            const THEMES: [(ThemePref, &str); 3] = [
-                (ThemePref::System, "System"),
-                (ThemePref::Dark, "Dark"),
-                (ThemePref::Light, "Light"),
-            ];
-            let current = THEMES.iter().position(|(t, _)| *t == draft.theme);
-            if let Some(i) = ui::segmented(
-                ui,
-                ui.available_width(),
-                FIELD_H,
-                THEMES.len(),
-                current.unwrap_or(0),
-                |p, i, rect, on| ui::segment_label(p, rect, THEMES[i].1, on),
-            ) {
-                draft.theme = THEMES[i].0;
-            }
+            theme_section(ui, &mut draft.theme);
 
             // --- nudge -------------------------------------------------
             section(ui, "Nudge");
@@ -576,6 +560,28 @@ fn footer(ui: &mut egui::Ui, commit: Option<(&'static str, FieldButton)>) -> Opt
 pub(crate) enum Decision {
     Save,
     Cancel,
+}
+
+/// The *Appearance* section, first in both screens' Settings: a System / Dark /
+/// Light segmented control writing `theme` in the modal's draft.
+pub(crate) fn theme_section(ui: &mut egui::Ui, theme: &mut ThemePref) {
+    const THEMES: [(ThemePref, &str); 3] = [
+        (ThemePref::System, "System"),
+        (ThemePref::Dark, "Dark"),
+        (ThemePref::Light, "Light"),
+    ];
+    section(ui, "Appearance");
+    let current = THEMES.iter().position(|(t, _)| t == theme).unwrap_or(0);
+    if let Some(i) = ui::segmented(
+        ui,
+        ui.available_width(),
+        FIELD_H,
+        THEMES.len(),
+        current,
+        |p, i, rect, on| ui::segment_label(p, rect, THEMES[i].1, on),
+    ) {
+        *theme = THEMES[i].0;
+    }
 }
 
 /// A section eyebrow with a hairline running out to the card's edge.

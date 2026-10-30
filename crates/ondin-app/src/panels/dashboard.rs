@@ -403,6 +403,8 @@ pub(crate) struct Stranded {
 /// `dead_code`, so read the struct against the modal after removing a row.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct LibrarySettings {
+    /// The chrome's theme; the same preference the editor's Settings writes.
+    pub(crate) theme: crate::prefs::ThemePref,
     /// As typed. Empty means "the default", not "nothing".
     pub(crate) base_folder: String,
     /// Whether Save should move the existing library to the new folder. Defaults
@@ -423,6 +425,7 @@ impl LibrarySettings {
     /// root, not the raw preference, which is `None` until one is set.
     pub(crate) fn from_prefs(prefs: &crate::prefs::Prefs, root: &Path) -> Self {
         Self {
+            theme: prefs.theme,
             base_folder: root.display().to_string(),
             migrate: false,
             autosave_secs: prefs.autosave_secs,
@@ -3803,6 +3806,7 @@ impl OndinApp {
             }
 
             ui.add_space(settings::TITLE_GAP - settings::SECTION_AIR);
+            settings::theme_section(ui, &mut d.theme);
             settings::section(ui, "Storage");
             field_label(ui, "Base folder");
             // The button is allocated first, in a right-to-left row, so the field takes
@@ -4097,6 +4101,7 @@ impl OndinApp {
         let Some(d) = self.library_settings.take() else {
             return;
         };
+        self.prefs.theme = d.theme;
         self.prefs.autosave_secs = d.autosave_secs;
         self.prefs.trash_keep_days = d.trash_keep_days;
         self.prefs.version_history = d.version_history;
@@ -5770,6 +5775,37 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The library's Settings writes the same theme preference as the editor's,
+    /// and previews its pick while open.
+    /// flip: drop `self.prefs.theme = d.theme` from `apply_library_settings` →
+    /// fails at "Save writes it".
+    #[test]
+    fn the_library_settings_pick_the_theme_too() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "library-theme");
+        assert_eq!(app.prefs.theme, crate::prefs::ThemePref::Dark);
+
+        let mut d = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
+        d.theme = crate::prefs::ThemePref::Light;
+        app.library_settings = Some(d);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            eframe::App::ui(&mut app, ui, &mut eframe::Frame::_new_kittest())
+        });
+        assert_eq!(
+            crate::theme::color::theme(),
+            crate::theme::color::Theme::Light,
+            "the open modal previews its pick"
+        );
+        app.apply_library_settings();
+        assert_eq!(
+            app.prefs.theme,
+            crate::prefs::ThemePref::Light,
+            "Save writes it"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

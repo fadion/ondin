@@ -15,6 +15,7 @@
 
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
+use crate::export::{ExportFormat, ExportScale, ExportSpec};
 use crate::foreign::{
     Archive, Names, Tally, Unmapped, arr, b_of, num, sniff, str_of, utf16_to_bytes,
 };
@@ -271,14 +272,18 @@ impl Builder<'_> {
             "LINE" => NodeKind::Line {
                 end: Point::new(size.width, 0.0),
             },
-            "VECTOR" | "STAR" | "REGULAR_POLYGON" => match geometry(n, "fillGeometry") {
+            "VECTOR" | "STAR" | "REGULAR_POLYGON" => match geometry(n, "fillGeometry")
+                // Nothing to fill: an open path, or a closed one without fills,
+                // drawn from its network so its stroke stays a stroke.
+                .or_else(|| network(n))
+            {
                 Some(path) => NodeKind::Path {
                     path,
                     corner_radii: Vec::new(),
                     corner_smoothing: 0.0,
                 },
                 None => match geometry(n, "strokeGeometry") {
-                    // An open path: its stroke, outlined, drawn as a shape.
+                    // Without a network, its stroke outlined, drawn as a shape.
                     Some(path) => {
                         self.count("Open paths", 1, "", "Drawn as their outlined strokes");
                         return self.outlined(n, path, parent, index, world, parent_world);
@@ -399,9 +404,6 @@ impl Builder<'_> {
         {
             self.count("Prototype interactions", 1, "", "Left out");
         }
-        if !arr(n, "exportSettings").is_empty() {
-            self.count("Export settings", 1, "layers", "Left out");
-        }
         if matches!(str_of(n, "layoutMode"), "HORIZONTAL" | "VERTICAL" | "GRID") {
             self.count("Auto layout", 1, "frames", "Kept at their drawn positions");
         }
@@ -421,7 +423,7 @@ impl Builder<'_> {
         }
     }
 
-    /// Visibility, lock, mask, clipping, opacity and blend.
+    /// Visibility, lock, mask, clipping, opacity, blend and export settings.
     fn flags(&mut self, id: NodeId, n: &Value, kind: &str) {
         if n.get("visible").and_then(Value::as_bool) == Some(false) {
             self.push(Operation::SetVisible { id, visible: false });
@@ -456,12 +458,53 @@ impl Builder<'_> {
         if let Some(blend) = blend_mode(str_of(n, "blendMode")) {
             self.push(Operation::SetBlend { id, blend });
         }
+        self.exports(id, n);
+    }
+
+    /// A node's `exportSettings` as its export settings. A suffix that is only
+    /// the scale's own marker (`@2x`) is left for Ondin to add.
+    fn exports(&mut self, id: NodeId, n: &Value) {
+        let mut exports = Vec::new();
+        for e in arr(n, "exportSettings") {
+            let format = match str_of(e, "format") {
+                "PNG" => ExportFormat::Png,
+                "JPG" => ExportFormat::Jpeg,
+                "SVG" => ExportFormat::Svg,
+                "PDF" => ExportFormat::Pdf,
+                _ => {
+                    self.count("Export formats Ondin lacks", 1, "", "Left out");
+                    continue;
+                }
+            };
+            let c = e.get("constraint").unwrap_or(&Value::Null);
+            let value = num(c, "value");
+            let scale = match str_of(c, "type") {
+                "WIDTH" if value >= 1.0 => ExportScale::Width(value.round() as u32),
+                "HEIGHT" if value >= 1.0 => ExportScale::Height(value.round() as u32),
+                _ if value.is_finite() && value > 0.0 => ExportScale::Times(value as f32),
+                _ => ExportScale::Times(1.0),
+            };
+            let mut spec = ExportSpec::new(format, scale);
+            let suffix = str_of(e, "suffix");
+            if suffix != scale.marker() {
+                spec.suffix = suffix.to_owned();
+            }
+            exports.push(spec);
+        }
+        if !exports.is_empty() {
+            self.push(Operation::SetExports {
+                id,
+                exports: keyed_by_position(exports),
+            });
+        }
     }
 
     /// Fills, strokes and effects, bound to the node's styles where it still
     /// shows them.
     fn paint(&mut self, id: NodeId, n: &Value, kind: &str, size: Size) {
-        if kind != "LINE" {
+        // A path drawn from its network has no fill in Figma, whatever it lists.
+        let vector = matches!(kind, "VECTOR" | "STAR" | "REGULAR_POLYGON");
+        if kind != "LINE" && !(vector && arr(n, "fillGeometry").is_empty()) {
             let fills = self.paints(arr(n, "fills"), size);
             if !fills.is_empty() {
                 self.push(Operation::SetFills {
@@ -998,6 +1041,69 @@ fn geometry(n: &Value, key: &str) -> Option<BezPath> {
     for g in arr(n, key) {
         if let Ok(p) = BezPath::from_svg(str_of(g, "path")) {
             out.extend(p);
+        }
+    }
+    (!out.elements().is_empty()).then_some(out)
+}
+
+/// A node's centre line from its `vectorNetwork`, in the node's own space: each
+/// segment a cubic from its tangents (relative to its ends) or a line when both
+/// are zero, chained end to start, and a chain that comes back closed.
+fn network(n: &Value) -> Option<BezPath> {
+    let vn = n.get("vectorNetwork")?;
+    let at: Vec<Point> = arr(vn, "vertices")
+        .iter()
+        .map(|v| {
+            let p = v.get("position").unwrap_or(&Value::Null);
+            Point::new(num(p, "x"), num(p, "y"))
+        })
+        .collect();
+    let tangent = |s: &Value, key: &str| {
+        let t = s.get(key).unwrap_or(&Value::Null);
+        Vec2::new(num(t, "x"), num(t, "y"))
+    };
+    let segs: Vec<(usize, Vec2, Vec2, usize)> = arr(vn, "segments")
+        .iter()
+        .filter_map(|s| {
+            let end = |key| s.get(key).and_then(Value::as_u64).map(|i| i as usize);
+            let (a, b) = (end("start")?, end("end")?);
+            (a < at.len() && b < at.len())
+                .then(|| (a, tangent(s, "startTangent"), tangent(s, "endTangent"), b))
+        })
+        .collect();
+    let mut leaving: Vec<Vec<usize>> = vec![Vec::new(); at.len()];
+    let mut arriving = vec![0usize; at.len()];
+    for (i, s) in segs.iter().enumerate() {
+        leaving[s.0].push(i);
+        arriving[s.3] += 1;
+    }
+    let mut used = vec![false; segs.len()];
+    let mut out = BezPath::new();
+    // Chains start where nothing leads in first, so a run is not split; loops
+    // are what is left.
+    let order = (0..segs.len()).filter(|&i| arriving[segs[i].0] == 0);
+    let order: Vec<usize> = order.chain(0..segs.len()).collect();
+    for first in order {
+        if used[first] {
+            continue;
+        }
+        let origin = segs[first].0;
+        out.move_to(at[origin]);
+        let mut next = Some(first);
+        let mut end = origin;
+        while let Some(i) = next {
+            used[i] = true;
+            let (a, t0, t1, b) = segs[i];
+            if t0 == Vec2::ZERO && t1 == Vec2::ZERO {
+                out.line_to(at[b]);
+            } else {
+                out.curve_to(at[a] + t0, at[b] + t1, at[b]);
+            }
+            end = b;
+            next = leaving[b].iter().copied().find(|&j| !used[j]);
+        }
+        if end == origin {
+            out.close_path();
         }
     }
     (!out.elements().is_empty()).then_some(out)

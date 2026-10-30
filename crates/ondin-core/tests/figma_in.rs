@@ -1,7 +1,7 @@
 //! Figma import (`ondin_core::figma_in`): a link's file key, nodes placed in
-//! their containing frame, geometry, text overrides, components linked through
-//! instance ids with their overrides kept, styles, pictures, and a result the
-//! loader accepts.
+//! their parent, geometry, export settings, text overrides, components linked
+//! through instance ids with their overrides kept, styles, pictures, and a
+//! result the loader accepts.
 
 use ondin_core::figma_in::{Read, file_key, read};
 use ondin_core::foreign::Archive;
@@ -9,7 +9,10 @@ use ondin_core::image::{ImageEntry, ImageFormat, ImageId, ImageSource};
 use ondin_core::kurbo::{Affine, Point};
 use ondin_core::peniko::{self, Color};
 use ondin_core::svg_in::ImageSink;
-use ondin_core::{BrushSource, Document, IdSource, NodeId, NodeKind, TextSizing};
+use ondin_core::{
+    BrushSource, Document, ExportFormat, ExportScale, ExportSpec, IdSource, NodeId, NodeKind,
+    TextSizing,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -164,8 +167,9 @@ fn nodes_are_placed_in_their_parent() {
     assert_eq!(doc.get(page).unwrap().name(), "Flows");
 }
 
-/// A vector is its fill geometry; an open one with only stroke geometry is that
-/// outline filled with the stroke's paint.
+/// A vector is its fill geometry; an open one is its network's centre line,
+/// stroked and unfilled, its segments chained however Figma lists them; without
+/// a network, its stroke geometry filled with the stroke's paint.
 #[test]
 fn vectors_come_from_their_geometry() {
     let closed = node(
@@ -186,8 +190,36 @@ fn vectors_come_from_their_geometry() {
             "fillGeometry": [], "strokeGeometry": [{ "path": "M0 -1L10 -1L10 1L0 1Z" }],
         }),
     );
-    let r = import(fetched(vec![closed, open], json!({}), &[]));
+    let v = |x: f64, y: f64| json!({ "position": { "x": x, "y": y }, "meta": 0 });
+    let t = |x: f64, y: f64| json!({ "x": x, "y": y });
+    let seg = |a: usize, t0: Value, t1: Value, b: usize| json!({ "start": a, "startTangent": t0, "endTangent": t1, "end": b });
+    let networked = node(
+        "2:3",
+        "VECTOR",
+        (0.0, 0.0, 30.0, 10.0),
+        json!({
+            "fills": [solid(rgb(1.0, 0.0, 0.0))],
+            "strokes": [solid(rgb(0.0, 1.0, 0.0))], "strokeWeight": 2,
+            "fillGeometry": [], "strokeGeometry": [{ "path": "M0 -1L10 -1L10 1L0 1Z" }],
+            "vectorNetwork": {
+                "vertices": [v(0.0, 0.0), v(10.0, 0.0), v(30.0, 10.0), v(20.0, 0.0)],
+                "segments": [
+                    seg(1, t(0.0, 0.0), t(0.0, 0.0), 3),
+                    seg(3, t(5.0, 0.0), t(0.0, -5.0), 2),
+                    seg(0, t(0.0, 0.0), t(0.0, 0.0), 1),
+                ],
+            },
+        }),
+    );
+    let r = import(fetched(vec![closed, open, networked], json!({}), &[]));
     let doc = &r.doc;
+    let networked = doc.get(one(doc, "2:3")).unwrap();
+    let NodeKind::Path { path, .. } = networked.kind() else {
+        panic!("a path");
+    };
+    assert_eq!(path.to_svg(), "M0,0 L10,0 L20,0 C25,0 30,5 30,10");
+    assert!(networked.paint().fills.is_empty());
+    assert_eq!(networked.paint().strokes.len(), 1);
     let NodeKind::Path { path, .. } = doc.get(one(doc, "2:1")).unwrap().kind() else {
         panic!("a path");
     };
@@ -201,6 +233,41 @@ fn vectors_come_from_their_geometry() {
     );
     let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
     assert_eq!(rows, ["Open paths"]);
+}
+
+/// Export settings come over with their format, scale and suffix; a suffix that
+/// only repeats the scale's marker is left for Ondin to derive.
+#[test]
+fn export_settings_come_over() {
+    let setting = |format: &str, kind: &str, value: f64, suffix: &str| {
+        json!({ "format": format, "suffix": suffix,
+                "constraint": { "type": kind, "value": value } })
+    };
+    let rect = node(
+        "3:1",
+        "RECTANGLE",
+        (0.0, 0.0, 10.0, 10.0),
+        json!({ "exportSettings": [
+            setting("PNG", "SCALE", 2.0, "@2x"),
+            setting("JPG", "WIDTH", 512.0, "-wide"),
+            setting("SVG", "SCALE", 1.0, ""),
+        ]}),
+    );
+    let r = import(fetched(vec![rect], json!({}), &[]));
+    let doc = &r.doc;
+    let specs: Vec<_> = doc
+        .get(one(doc, "3:1"))
+        .unwrap()
+        .exports()
+        .iter()
+        .map(|k| &k.value)
+        .collect();
+    let png = ExportSpec::new(ExportFormat::Png, ExportScale::Times(2.0));
+    let mut jpg = ExportSpec::new(ExportFormat::Jpeg, ExportScale::Width(512));
+    jpg.suffix = "-wide".into();
+    let svg = ExportSpec::new(ExportFormat::Svg, ExportScale::Times(1.0));
+    assert_eq!(specs, [&png, &jpg, &svg]);
+    assert!(r.report.is_empty(), "{:?}", r.report);
 }
 
 /// A text's style is its default and each run of overrides a span, at bytes

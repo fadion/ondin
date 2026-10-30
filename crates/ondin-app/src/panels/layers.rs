@@ -636,6 +636,18 @@ fn caret_column(left: f32, depth: usize) -> f32 {
     left + indent_of(depth) + 5.0
 }
 
+/// Where a row's elbow stops: short of its leading glyph (caret, else kind icon).
+/// Two points off an 11pt caret box and four off a 15pt icon's (a Phosphor
+/// glyph's ink stops well inside its box).
+fn row_lead(left: f32, depth: usize, has_children: bool) -> f32 {
+    if has_children {
+        caret_column(left, depth) - 7.5
+    } else {
+        // A childless row reclaims the caret's room except at the top level.
+        left + icon_offset(depth, depth == 1) - 11.5
+    }
+}
+
 /// The depth the pointer is asking for, before the tree gets a say: one level per
 /// [`INDENT`] moved sideways from where the drag was picked up.
 ///
@@ -957,7 +969,13 @@ fn tree_guide_segments(rows: &[TreeRow], gap: f32) -> Vec<GuideSeg> {
 /// across two pixels); the elbow's own y is snapped in [`elbow_y`], so for a
 /// horizontal run this is idempotent.
 fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f32) {
+    // A dashed run is a shape per dash, so a run outside the clip is skipped here
+    // rather than left for the tessellator to cull.
+    let clip = painter.clip_rect().expand(1.0);
     for seg in tree_guide_segments(rows, gap) {
+        if !clip.intersects(egui::Rect::from_two_pos(seg.from, seg.to)) {
+            continue;
+        }
         let vertical = seg.from.x == seg.to.x;
         let across = if vertical { seg.from.x } else { seg.from.y };
         // 1pt wide.
@@ -1295,6 +1313,32 @@ impl OndinApp {
                 .collect(),
             None => node.children().to_vec(),
         };
+        // A boolean takes a drop like a group does: its children are its operands.
+        let is_container = matches!(
+            node.kind(),
+            NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
+        );
+        // Every row takes its slot and its id, so a drag that scrolls its row away
+        // keeps its widget; one outside the clip is walked but not painted. The row
+        // being renamed is always painted, or its field would lose focus unseen.
+        let slot = (depth > 0).then(|| {
+            ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), ROW_H),
+                egui::Sense::click_and_drag(),
+            )
+        });
+        if let Some((rect, _)) = slot
+            && !ui.is_rect_visible(rect)
+            && !matches!(&self.renaming_layer, Some((n, _)) if *n == id)
+        {
+            let has_children = !children.is_empty();
+            if self.off_view_row(ui, id, depth, rect, has_children, is_container, shown, rows) {
+                for child in children.into_iter().rev() {
+                    self.layers_row(ui, child, depth + 1, shown, rows);
+                }
+            }
+            return;
+        }
         // What the layer shows, a bound visibility resolved (§15 D1059); the eye's
         // click writes the opposite, which detaches the binding.
         let visible = self.session.doc.shown(id);
@@ -1327,11 +1371,6 @@ impl OndinApp {
         }
         // Cloned so the node's borrow ends before the painting below.
         let picture = picture_of(node).cloned();
-        // A boolean takes a drop like a group does: its children are its operands.
-        let is_container = matches!(
-            node.kind(),
-            NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
-        );
         let is_slice = matches!(node.kind(), NodeKind::Slice { .. });
         // The right-hand end of a resting row: one slot (the one the eye and lock
         // take over on hover) for several remarks, in priority order — mask (a mask
@@ -1409,10 +1448,7 @@ impl OndinApp {
                 (mark, child_drift_tip(children))
             };
 
-            let (rect, resp) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), ROW_H),
-                egui::Sense::click_and_drag(),
-            );
+            let (rect, resp) = slot.expect("every row below the root has a slot");
             // The dot's words, on the row it sits on (§15 D1003 (9)).
             let resp = match &children_tip {
                 Some(tip) => resp.on_hover_text(tip),
@@ -1491,19 +1527,11 @@ impl OndinApp {
             // it and look like its child: depth 1 always leaves the room.
             let caret_room = has_children || depth == 1;
             let icon_x = left + icon_offset(depth, caret_room);
-            // Where the elbow stops: short of the leading glyph (caret, else kind
-            // icon). Two points off an 11pt caret box and four off a 15pt icon's
-            // (a Phosphor glyph's ink stops well inside its box).
-            let lead = if has_children {
-                caret_x - 7.5
-            } else {
-                icon_x - 11.5
-            };
             rows.push(TreeRow {
                 id,
                 rect,
                 depth,
-                lead,
+                lead: row_lead(left, depth, has_children),
                 elbow: elbow_y(rect, ui.ctx().pixels_per_point()),
                 selected,
                 hovered,
@@ -1699,18 +1727,8 @@ impl OndinApp {
                 });
             }
 
-            // Scroll to the selection once, on the frame it changed; the topmost
-            // selected row wins.
-            if selected && self.scroll_layers_to_selection {
-                self.scroll_layers_to_selection = false;
-                // Only when off screen, and a jump, not a glide (§15 D1026).
-                if !ui.clip_rect().contains_rect(rect) {
-                    ui.scroll_to_rect_animation(
-                        rect,
-                        Some(egui::Align::Center),
-                        egui::style::ScrollAnimation::none(),
-                    );
-                }
+            if selected {
+                self.scroll_to_selected_row(ui, rect);
             }
 
             // Double-click renames in place. Counted by `ui::double_clicked`, so a
@@ -1797,6 +1815,57 @@ impl OndinApp {
         // walk is flipped, so the drop-target maths mirrors it.
         for child in children.into_iter().rev() {
             self.layers_row(ui, child, depth + 1, shown, rows);
+        }
+    }
+
+    /// A row outside the panel's clip: in `rows` for the guides and the drop hint,
+    /// and scrolled to when it holds the selection, but neither measured for its
+    /// marks nor painted. Returns whether its branch is open.
+    #[allow(clippy::too_many_arguments)]
+    fn off_view_row(
+        &mut self,
+        ui: &egui::Ui,
+        id: NodeId,
+        depth: usize,
+        rect: egui::Rect,
+        has_children: bool,
+        is_container: bool,
+        shown: Option<&HashSet<NodeId>>,
+        rows: &mut Vec<TreeRow>,
+    ) -> bool {
+        let selected = self.session.selection.contains(id);
+        let expanded = has_children && (shown.is_some() || !self.collapsed.contains(&id));
+        rows.push(TreeRow {
+            id,
+            rect,
+            depth,
+            lead: row_lead(rect.left(), depth, has_children),
+            elbow: elbow_y(rect, ui.ctx().pixels_per_point()),
+            selected,
+            hovered: false,
+            container: is_container,
+            closed: is_container && has_children && !expanded,
+        });
+        if selected {
+            self.scroll_to_selected_row(ui, rect);
+        }
+        expanded
+    }
+
+    /// Scroll to the selection once, on the frame it changed; the topmost selected
+    /// row wins. Only when the row is not wholly in view, and a jump, not a glide
+    /// (§15 D1026).
+    fn scroll_to_selected_row(&mut self, ui: &egui::Ui, rect: egui::Rect) {
+        if !self.scroll_layers_to_selection {
+            return;
+        }
+        self.scroll_layers_to_selection = false;
+        if !ui.clip_rect().contains_rect(rect) {
+            ui.scroll_to_rect_animation(
+                rect,
+                Some(egui::Align::Center),
+                egui::style::ScrollAnimation::none(),
+            );
         }
     }
 
@@ -4882,13 +4951,29 @@ mod drag_start_sync_tests {
 
     /// The row boxes of a fixture whose every row is selected, top to bottom
     /// (`row_rects`' technique); resets `layers_synced_selection` afterwards.
+    /// Measured through a viewport tall enough for every row, since a row out of
+    /// view paints no ground; the offset is 0 either way, so the boxes are `VIEW`'s.
     fn lit_rows(ctx: &egui::Context, app: &mut OndinApp, ids: &[NodeId]) -> Vec<egui::Rect> {
         app.session.selection.set(ids.to_vec());
         app.layers_synced_selection = ids.to_vec();
-        let (_, shapes) = frame(ctx, app, Vec::new());
+        let full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    VIEW.min,
+                    egui::vec2(VIEW.width(), 2000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("drag-sync-probe")
+                    .show(ui, |ui| app.layers_tree(ui));
+            },
+        );
         app.session.selection.clear();
         app.layers_synced_selection = Vec::new();
-        let mut rects: Vec<egui::Rect> = shapes
+        let mut rects: Vec<egui::Rect> = full
+            .shapes
             .iter()
             .filter_map(|cs| match &cs.shape {
                 egui::Shape::Rect(r) if r.fill == color::SELECT_ROW => Some(r.rect),
@@ -4906,6 +4991,57 @@ mod drag_start_sync_tests {
             .get(app.session.doc.first_page())
             .map(|n| n.children().to_vec())
             .unwrap_or_default()
+    }
+
+    /// Only the rows in view are painted, though every row keeps its place, and a
+    /// selection made out of view is still scrolled to.
+    /// flip: `layers_row` without its off-view return → fails at "painted out of view";
+    /// `off_view_row` without its scroll → fails at "scrolled to the last row".
+    #[test]
+    fn only_the_rows_in_view_are_painted() {
+        let ctx = egui::Context::default();
+        let (mut app, ids) = app_with_rows(&ctx, 40);
+        app.session.selection.set(ids.clone());
+        app.layers_synced_selection = ids.clone();
+        let (_, shapes) = frame(&ctx, &mut app, Vec::new());
+        let grounds: Vec<egui::Rect> = shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Rect(r) if r.fill == color::SELECT_ROW => Some(r.rect),
+                _ => None,
+            })
+            .collect();
+        assert!(!grounds.is_empty(), "the fixture: rows in view are lit");
+        assert!(
+            grounds.len() < 10 && grounds.iter().all(|r| r.intersects(VIEW)),
+            "painted out of view: {} grounds",
+            grounds.len()
+        );
+
+        // `ids[0]` is the bottom row, far below the viewport.
+        app.session.selection.set_one(ids[0]);
+        let mut offset = 0.0;
+        for _ in 0..3 {
+            (offset, _) = frame(&ctx, &mut app, Vec::new());
+        }
+        assert!(offset > VIEW.height(), "scrolled to the last row: {offset}");
+    }
+
+    /// A row being renamed keeps its field while it is out of view.
+    /// flip: `layers_row`'s off-view test without the `renaming_layer` exception →
+    /// fails at "the field is laid out".
+    #[test]
+    fn a_row_being_renamed_keeps_its_field_out_of_view() {
+        let ctx = egui::Context::default();
+        let (mut app, ids) = app_with_rows(&ctx, 40);
+        // `ids[0]` is the bottom row, far below the viewport.
+        app.renaming_layer = Some((ids[0], "Renamed".into()));
+        let (offset, _) = frame(&ctx, &mut app, Vec::new());
+        assert_eq!(offset, 0.0, "the fixture: the row stays out of view");
+        assert!(
+            crate::ui::widget_rect(&ctx, rename_field_id(ids[0])).is_some(),
+            "the field is laid out"
+        );
     }
 
     /// A point inside the visible half of the row straddling the viewport's bottom

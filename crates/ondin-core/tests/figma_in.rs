@@ -46,7 +46,7 @@ fn solid(c: Value) -> Value {
     json!({ "type": "SOLID", "color": c })
 }
 
-/// A node at `(x, y)` in its containing frame, `w` by `h`.
+/// A node at `(x, y)` in its parent, `w` by `h`.
 fn node(id: &str, kind: &str, (x, y, w, h): (f64, f64, f64, f64), extra: Value) -> Value {
     let mut n = json!({
         "id": id, "name": id, "type": kind,
@@ -119,10 +119,10 @@ fn a_links_file_key_is_found() {
     }
 }
 
-/// A frame holds a rect and a group; the group's child is placed by Figma in the
-/// frame, not the group, and lands where Figma draws it.
+/// A frame holds a rect and a group; the REST API places the group's child in
+/// the group, not in the frame as the Plugin API does.
 #[test]
-fn nodes_are_placed_in_their_containing_frame() {
+fn nodes_are_placed_in_their_parent() {
     let rect = node(
         "1:3",
         "RECTANGLE",
@@ -131,7 +131,7 @@ fn nodes_are_placed_in_their_containing_frame() {
             "fills": [solid(rgb(1.0, 0.0, 0.0))], "rectangleCornerRadii": [4, 4, 0, 0],
         }),
     );
-    let inner = node("1:5", "RECTANGLE", (60.0, 70.0, 10.0, 10.0), json!({}));
+    let inner = node("1:5", "RECTANGLE", (10.0, 10.0, 10.0, 10.0), json!({}));
     let group = node(
         "1:4",
         "GROUP",
@@ -156,7 +156,8 @@ fn nodes_are_placed_in_their_containing_frame() {
     assert!(
         matches!(rect.kind(), NodeKind::Rect { corner_radii, .. } if corner_radii.top_left == 4.0)
     );
-    // In the frame at (60, 70): the group sits at (50, 60), so (10, 10) in it.
+    let group = doc.get(one(doc, "1:4")).unwrap();
+    assert_eq!(group.transform(), Affine::translate((50.0, 60.0)));
     let inner = doc.get(one(doc, "1:5")).unwrap();
     assert_eq!(inner.transform(), Affine::translate((10.0, 10.0)));
     let page = doc.first_page();

@@ -5,10 +5,9 @@
 //! `file.json` is `GET /v1/files/:key?geometry=paths`, and `images/<ref>` each
 //! picture an image fill names. Ondin never reads Figma's `.fig` binary.
 //!
-//! A node's `relativeTransform` places it in its containing frame — a group's
-//! and a boolean's children are placed in the frame that holds the group, not in
-//! the group — so each node's place on the page is its container's times its
-//! own, and each Ondin node is placed in its parent's space by dividing that out.
+//! A node's `relativeTransform` places it in its parent — a group or a boolean
+//! included, unlike the Plugin API, which places their children in the frame
+//! holding them — so each node's place on the page is its parent's times its own.
 //!
 //! An instance's nodes carry ids `I<instance>;<source>`, the source being the
 //! node of the component it copies; that is Ondin's link. An instance whose every
@@ -151,7 +150,7 @@ pub fn read(
             });
         }
         for (j, child) in arr(page, "children").iter().enumerate() {
-            b.node(child, id, j, Affine::IDENTITY, Affine::IDENTITY, None);
+            b.node(child, id, j, Affine::IDENTITY, None);
         }
     }
     let ops = std::mem::take(&mut b.ops);
@@ -231,22 +230,20 @@ impl Builder<'_> {
         self.doc.apply(&tx).map(|_| ())
     }
 
-    /// One node and what it holds. `container` places it (its containing frame's
-    /// place on the page), `parent_world` is the place of the node it hangs under,
-    /// and `inst` the innermost instance it sits in, by index.
+    /// One node and what it holds. `parent_world` is the place on the page of the
+    /// node it hangs under, and `inst` the innermost instance it sits in, by index.
     fn node(
         &mut self,
         n: &Value,
         parent: NodeId,
         index: usize,
-        container: Affine,
         parent_world: Affine,
         inst: Option<usize>,
     ) {
         let kind = str_of(n, "type");
         self.notes(n);
         let size = size_of(n);
-        let world = container * relative(n);
+        let world = world_of(n, parent_world);
         let id = self.ids.mint();
         let made = match kind {
             "FRAME" | "COMPONENT" | "COMPONENT_SET" | "INSTANCE" | "SECTION" => {
@@ -335,12 +332,6 @@ impl Builder<'_> {
             }),
             _ => {}
         }
-        // Children of a group or a boolean are placed in the group's container.
-        let inner = if matches!(kind, "GROUP" | "BOOLEAN_OPERATION") {
-            container
-        } else {
-            world
-        };
         // A copy belongs to the innermost instance it sits in, which is this one
         // for its own children.
         let inst = if kind == "INSTANCE" {
@@ -349,7 +340,7 @@ impl Builder<'_> {
             inst
         };
         for (i, child) in arr(n, "children").iter().enumerate() {
-            self.node(child, id, i, inner, world, inst);
+            self.node(child, id, i, world, inst);
             let cid = str_of(child, "id");
             if let (Some(at), Some(&made), Some(source)) =
                 (inst, self.nodes.get(cid), source_of(cid))
@@ -960,13 +951,14 @@ fn size_of(n: &Value) -> Size {
     })
 }
 
-/// Where a node sits in its containing frame: `relativeTransform`, else its
-/// bounding box's corner.
-fn relative(n: &Value) -> Affine {
+/// Where a node sits on the page: its `relativeTransform` in `parent_world`,
+/// else its bounding box's corner, which is already on the page.
+fn world_of(n: &Value, parent_world: Affine) -> Affine {
     let rows = arr(n, "relativeTransform");
     if let [r0, r1] = rows {
         let r = |row: &Value, i: usize| row.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-        return Affine::new([r(r0, 0), r(r1, 0), r(r0, 1), r(r1, 1), r(r0, 2), r(r1, 2)]);
+        return parent_world
+            * Affine::new([r(r0, 0), r(r1, 0), r(r0, 1), r(r1, 1), r(r0, 2), r(r1, 2)]);
     }
     n.get("absoluteBoundingBox").map_or(Affine::IDENTITY, |b| {
         Affine::translate((num(b, "x"), num(b, "y")))

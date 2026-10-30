@@ -54,6 +54,17 @@ pub mod color {
     /// splits into two greys.
     pub const HOVER: Color32 = Color32::from_rgb(52, 52, 54);
 
+    /// A ground a step above [`CARD`] — the variables browser, which floats
+    /// over the inspector's cards.
+    pub const RAISED: Color32 = Color32::from_rgb(40, 40, 40);
+
+    /// The document tab strip's ground, a step below [`TOPBAR`]; a tab behind
+    /// keeps [`TAB_BEHIND`], a step above the strip, and hover lifts it to
+    /// [`TAB_LIFTED`]. The front tab takes [`TOPBAR`].
+    pub const TAB_STRIP: Color32 = Color32::from_rgb(14, 14, 15);
+    pub const TAB_BEHIND: Color32 = Color32::from_rgb(20, 20, 21);
+    pub const TAB_LIFTED: Color32 = Color32::from_rgb(25, 25, 26);
+
     // Accent ramp (Editor `:root` override — steel blue).
     pub const ACCENT: Color32 = Color32::from_rgb(109, 140, 217); // 500 / base
     pub const ACCENT_100: Color32 = Color32::from_rgb(226, 233, 248);
@@ -180,6 +191,14 @@ pub mod color {
     /// one green, computed to [`DANGER`]'s OKLCH lightness and chroma (0.68,
     /// 0.137) at a green hue (154°), so neither state is louder than the other.
     pub const SAVED: Color32 = Color32::from_rgb(0x45, 0xb0, 0x70);
+    /// Ink and ground of a green badge, [`SAVED`]'s twin of
+    /// [`ACCENT_100`]/[`ACCENT_900`] — the dashboard's *New* tag.
+    pub const SAVED_100: Color32 = Color32::from_rgb(0xb4, 0xe8, 0xc8);
+    pub const SAVED_900: Color32 = Color32::from_rgb(0x12, 0x30, 0x20);
+
+    /// A failed status message's ink: [`DANGER`] lifted toward the text, so a
+    /// line of small type stays readable.
+    pub const ERROR: Color32 = Color32::from_rgb(226, 138, 138);
 
     /// The three steps a *filled* destructive button needs, mirroring
     /// [`ACCENT_900`]/[`ACCENT_700`]/[`ACCENT_200`] — ground, border and ink for

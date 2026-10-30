@@ -8560,7 +8560,7 @@ impl OndinApp {
             for q in session.editor.selection_quads() {
                 painter.add(egui::Shape::convex_polygon(
                     self.poly(&q, world, rect, ppp),
-                    egui::Color32::from_rgba_unmultiplied(109, 140, 217, 70),
+                    color::ACCENT.gamma_multiply_u8(70),
                     egui::Stroke::NONE,
                 ));
             }

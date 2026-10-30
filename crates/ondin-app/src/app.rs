@@ -6611,7 +6611,7 @@ const STATUS_FADE: f32 = 0.3;
 /// [`OndinApp::status_bar`].
 fn status_color(status: &crate::session::Status) -> egui::Color32 {
     if status.kind == StatusKind::Error {
-        egui::Color32::from_rgb(226, 138, 138)
+        theme::color::ERROR
     } else {
         theme::text::FAINT
     }

@@ -4709,8 +4709,8 @@ impl StateChip {
                 color::ACCENT.gamma_multiply(0.45),
             ),
             Self::New => (
-                egui::Color32::from_rgb(0xb4, 0xe8, 0xc8),
-                egui::Color32::from_rgb(0x12, 0x30, 0x20),
+                theme::color::SAVED_100,
+                theme::color::SAVED_900,
                 theme::color::SAVED.gamma_multiply(0.45),
             ),
         }
@@ -6785,7 +6785,7 @@ mod tests {
         app.session.fail(fail_text);
         assert_eq!(
             status_dot_color(&mut app, &ctx),
-            Some(egui::Color32::from_rgb(226, 138, 138)),
+            Some(theme::color::ERROR),
             "a failure on this screen has to be visible on this screen, in the \
              colour a failure takes"
         );
@@ -6804,7 +6804,7 @@ mod tests {
         let lit = status_dot_color(&mut app, &ctx).expect("a report is marked too");
         assert_ne!(
             lit,
-            egui::Color32::from_rgb(226, 138, 138),
+            theme::color::ERROR,
             "and a report is not painted as a failure — on this screen the colour \
              is the only thing that separates them"
         );

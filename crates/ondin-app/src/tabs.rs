@@ -914,13 +914,6 @@ const DRAG_ROOM: f32 = 56.0;
 const END_BOX: f32 = 18.0;
 const OVERFLOW_W: f32 = 220.0;
 
-/// The strip's ground, a step below the top bar's; a tab behind keeps a ground of
-/// its own a step above the strip's, and hover lifts it one more. The front tab
-/// takes the top bar's, `color::TOPBAR`.
-const STRIP: egui::Color32 = egui::Color32::from_rgb(14, 14, 15);
-const BEHIND: egui::Color32 = egui::Color32::from_rgb(20, 20, 21);
-const LIFTED: egui::Color32 = egui::Color32::from_rgb(25, 25, 26);
-
 /// What a key on either screen asks of the tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabKey {
@@ -1039,7 +1032,7 @@ impl OndinApp {
             .exact_size(STRIP_H)
             .resizable(false)
             .show_separator_line(false)
-            .frame(egui::Frame::NONE.fill(STRIP))
+            .frame(egui::Frame::NONE.fill(crate::theme::color::TAB_STRIP))
             .show(ui, |ui| self.strip_body(ui, act, spent));
     }
 
@@ -1265,9 +1258,9 @@ impl OndinApp {
         let ground = if self.view == View::Dashboard {
             crate::theme::color::TOPBAR
         } else if resp.hovered() {
-            LIFTED
+            crate::theme::color::TAB_LIFTED
         } else {
-            BEHIND
+            crate::theme::color::TAB_BEHIND
         };
         ui.painter().rect_filled(rect, tab_corners(), ground);
         let mark = egui::Rect::from_center_size(rect.center(), egui::vec2(18.0, 18.0));
@@ -1308,9 +1301,9 @@ impl OndinApp {
         let ground = if front {
             color::TOPBAR
         } else if hovered {
-            LIFTED
+            color::TAB_LIFTED
         } else {
-            BEHIND
+            color::TAB_BEHIND
         };
         let p = ui.painter().clone();
         p.rect_filled(rect, tab_corners(), ground);
@@ -1716,8 +1709,15 @@ fn strip_button(
     use crate::theme::color;
     let resp = ui.interact(rect, egui::Id::new(id), egui::Sense::CLICK);
     let lit = open || resp.hovered();
-    ui.painter()
-        .rect_filled(rect, tab_corners(), if lit { LIFTED } else { BEHIND });
+    ui.painter().rect_filled(
+        rect,
+        tab_corners(),
+        if lit {
+            color::TAB_LIFTED
+        } else {
+            color::TAB_BEHIND
+        },
+    );
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,

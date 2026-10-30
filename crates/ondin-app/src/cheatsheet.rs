@@ -639,10 +639,7 @@ fn row_ui(
                 .iter()
                 .any(|q| key.to_lowercase().starts_with(q.as_str()));
             let (fg, bg) = match () {
-                _ if lit_held => (
-                    color::ACCENT_100,
-                    egui::Color32::from_rgba_unmultiplied(109, 140, 217, 77),
-                ),
+                _ if lit_held => (color::ACCENT_100, color::ACCENT.gamma_multiply_u8(77)),
                 _ if lit_query => (color::ACCENT_300, theme::color::text_a(20)),
                 _ => (theme::color::text_a(184), theme::color::text_a(20)),
             };

@@ -46,9 +46,6 @@ const INDENT: f32 = 23.0;
 /// opened over a label puts the text where the label was.
 const EDIT_PAD_X: f32 = 6.0;
 const MENU_ROW_H: f32 = 26.0;
-/// The browser's ground — the text at 17% over black, `#282828`, a step
-/// above the inspector's card.
-const SURFACE: egui::Color32 = egui::Color32::from_rgb(40, 40, 40);
 const SEARCH_ID: &str = "var-browser-search";
 
 /// The panel's width for `modes` modes.
@@ -417,7 +414,7 @@ impl OndinApp {
             .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
                 egui::Frame::NONE
-                    .fill(SURFACE)
+                    .fill(color::RAISED)
                     .corner_radius(8)
                     .stroke(egui::Stroke::new(1.0, color::text_a(20)))
                     .inner_margin(PAD)

@@ -1486,7 +1486,12 @@ fn form(
         _ => {}
     }
     ui.add_space(settings::FOOTER_GAP - 6.0);
+    let busy = matches!(card.field, Field::Reading { .. } | Field::Fetching { .. });
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if busy {
+            ui.add(egui::Spinner::new().size(11.0).color(theme::text::FAINT));
+        }
         ui.label(
             egui::RichText::new(foot)
                 .size(settings::CAPTION_PT)
@@ -1739,9 +1744,7 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
     ) {
         card.remember = !card.remember;
     }
-    if fetching {
-        loading(ui, "Fetching from Figma…");
-    } else if let Some(why) = &card.fetch_error {
+    if let Some(why) = &card.fetch_error {
         message(ui, icon::INFO, why, color::WARN);
     }
 }

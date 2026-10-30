@@ -386,6 +386,88 @@ fn a_frame_is_the_union_of_its_members_and_moves_none_of_them() {
     );
 }
 
+/// A group becomes a frame of its children's union and back, in its own slot:
+/// the children keep their ids and where they are drawn, the container its name,
+/// and a frame's own fill comes back on a rectangle under the children.
+/// flip: `convert_container` without the `shift` on each child → fails at "a
+/// stayed put" on the way to a frame.
+#[test]
+fn a_group_and_a_frame_convert_into_each_other_in_place() {
+    let mut f = Fixture::new();
+    let below = f.add(f.artboard, rect(5.0, 5.0), (0.0, 0.0));
+    let a = f.add(f.artboard, rect(10.0, 20.0), (100.0, 100.0));
+    let b = f.add(f.artboard, rect(30.0, 10.0), (200.0, 150.0));
+    let above = f.add(f.artboard, rect(5.0, 5.0), (0.0, 0.0));
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
+    f.commit(tx);
+    f.commit(Transaction(vec![Operation::SetName {
+        id: g,
+        name: "Card".into(),
+    }]));
+    let before = [f.world_origin(a), f.world_origin(b)];
+
+    let (tx, fr) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, g).unwrap();
+    f.commit(tx);
+    assert!(f.doc.get(g).is_none(), "the group is gone");
+    assert_eq!(
+        f.children_of(f.artboard),
+        vec![below, fr, above],
+        "in its slot"
+    );
+    let frame = f.doc.get(fr).unwrap();
+    assert_eq!(frame.name(), "Card");
+    assert!(
+        matches!(frame.kind(), NodeKind::Artboard { size, .. } if *size == Size::new(130.0, 60.0))
+    );
+    assert!(
+        frame.paint().fills.is_empty() && !frame.clip(),
+        "nothing visible changes"
+    );
+    assert_eq!(f.children_of(fr), vec![a, b]);
+    approx(f.world_origin(a), before[0], "a stayed put");
+    approx(f.world_origin(b), before[1], "b stayed put");
+
+    let red = ondin_core::Fill {
+        brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgb8(255, 0, 0))
+            .into(),
+        visible: true,
+    };
+    f.commit(Transaction(vec![Operation::SetFills {
+        id: fr,
+        fills: ondin_core::item::keyed_by_position([red]),
+    }]));
+    let (tx, back) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, fr).unwrap();
+    f.commit(tx);
+    let group = f.doc.get(back).unwrap();
+    assert!(matches!(group.kind(), NodeKind::Group));
+    let kids = f.children_of(back);
+    assert_eq!(kids[1..], [a, b], "the children above the backing");
+    assert_eq!(
+        f.doc.get(kids[0]).unwrap().paint().fills.len(),
+        1,
+        "the frame's fill"
+    );
+    approx(f.world_origin(a), before[0], "a stayed put again");
+}
+
+/// A main, a layer inside a main and an instance are refused, their links being
+/// to the node a conversion would replace.
+#[test]
+fn a_component_is_not_converted() {
+    let mut f = Fixture::new();
+    let inner = f.add(f.artboard, artboard(), (0.0, 0.0));
+    assert!(build::can_convert_container(&f.doc, inner), "the control");
+    f.commit(Transaction(vec![Operation::SetComponent {
+        id: f.artboard,
+        component: true,
+    }]));
+    assert!(!build::can_convert_container(&f.doc, f.artboard), "a main");
+    assert!(
+        !build::can_convert_container(&f.doc, inner),
+        "inside a main"
+    );
+}
+
 /// §5.3: an `Artboard` hangs off the root, another `Artboard` or a group, and never
 /// sits under a boolean or a mask (§15 D870, D876). So a selection **inside a
 /// group** frames where it stands, and one **inside a mask** cannot — the refusal

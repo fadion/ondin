@@ -698,6 +698,201 @@ pub fn frame(
     Ok((Transaction(ops), frame_id))
 }
 
+/// Turn the `Group` or frame `id` into the other, in its place: a new container
+/// of the other kind takes its slot, name and layer settings, its children move
+/// in keeping their ids and where they are drawn, and the emptied original goes.
+/// Returns the transaction and the new container's id.
+///
+/// A group becomes a frame sized to its children's union, with no background and
+/// no clip, as [`frame`] makes one, so nothing visible changes. A frame becomes a
+/// group with its own fills and strokes moved onto a rectangle under its children,
+/// so its look survives; its clip and layout go, the children kept where they were
+/// laid. A main, an instance and a component set are refused: their links are to
+/// this node.
+pub fn convert_container(
+    doc: &Document,
+    res: &Resolved,
+    ids: &mut IdSource,
+    id: NodeId,
+) -> Result<(Transaction, NodeId), OpError> {
+    let node = doc.get(id).ok_or(OpError::NoSuchNode(id))?;
+    let to_frame = match node.kind() {
+        NodeKind::Group => true,
+        NodeKind::Artboard { .. } => false,
+        _ => return Err(OpError::WrongKindForOp),
+    };
+    if !can_convert_container(doc, id) {
+        return Err(OpError::WrongKindForOp);
+    }
+    let parent = node.parent().ok_or(OpError::CannotModifyRoot)?;
+    let at = doc
+        .get(parent)
+        .ok_or(OpError::NoSuchNode(parent))?
+        .children()
+        .iter()
+        .position(|c| *c == id)
+        .ok_or(OpError::MalformedSubtree)?;
+    let local = res.used_local(doc, id).unwrap_or(node.transform());
+    let children = node.children().to_vec();
+    let new = ids.mint();
+    let mut ops = Vec::with_capacity(children.len() * 3 + 12);
+
+    // Where the new container sits in its parent, and what moves each child from
+    // the old one's space into it.
+    let (kind, transform, shift) = if to_frame {
+        if !doc.frame_may_sit_under(parent) {
+            return Err(OpError::ArtboardPlacement);
+        }
+        let union = children
+            .iter()
+            .filter_map(|c| {
+                let b = crate::local_box(doc, res, *c)?;
+                Some(crate::geometry::transform_rect(res.used_local(doc, *c)?, b))
+            })
+            .reduce(|a, b| a.union(b))
+            .ok_or(OpError::EmptyGeometry)?;
+        let origin = union.origin().to_vec2();
+        let kind = NodeKind::Artboard {
+            size: kurbo::Size::new(union.width().max(1.0), union.height().max(1.0)),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        };
+        (
+            kind,
+            local * Affine::translate(origin),
+            Affine::translate(-origin),
+        )
+    } else {
+        (NodeKind::Group, local, Affine::IDENTITY)
+    };
+    ops.push(Operation::CreateNode {
+        id: new,
+        parent,
+        index: at,
+        kind,
+        transform: Some(transform),
+        name: Some(node.name().to_owned()),
+    });
+    // A new frame clips; a group never did, and an effect past the union would be cut.
+    if to_frame {
+        ops.push(Operation::SetClip {
+            id: new,
+            clip: false,
+        });
+    }
+    // The frame's own paint, on a rectangle under the children.
+    let backing = (!to_frame
+        && (!node.paint().fills.is_empty() || !node.paint().strokes.is_empty()))
+    .then(|| ids.mint());
+    if let (
+        Some(rect),
+        NodeKind::Artboard {
+            size,
+            corner_radii,
+            corner_smoothing,
+        },
+    ) = (backing, res.used_kind(doc, id).unwrap_or(node.kind()))
+    {
+        ops.push(Operation::CreateNode {
+            id: rect,
+            parent: new,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: *size,
+                corner_radii: *corner_radii,
+                corner_smoothing: *corner_smoothing,
+            },
+            transform: None,
+            name: Some("Background".to_owned()),
+        });
+        ops.extend(carried_paint(node, rect));
+    }
+    let base = usize::from(backing.is_some());
+    for (i, child) in children.iter().enumerate() {
+        let child_local = res
+            .used_local(doc, *child)
+            .ok_or(OpError::NoSuchNode(*child))?;
+        ops.push(Operation::Reparent {
+            id: *child,
+            new_parent: new,
+            index: base + i,
+        });
+        ops.push(Operation::SetTransform {
+            id: *child,
+            transform: shift * child_local,
+        });
+        ops.extend(baked_size(doc, res, *child));
+    }
+    if !node.visible() {
+        ops.push(Operation::SetVisible {
+            id: new,
+            visible: false,
+        });
+    }
+    if node.locked() {
+        ops.push(Operation::SetLocked {
+            id: new,
+            locked: true,
+        });
+    }
+    if node.opacity() != 1.0 {
+        ops.push(Operation::SetOpacity {
+            id: new,
+            opacity: node.opacity(),
+        });
+    }
+    if !matches!(
+        node.blend(),
+        crate::BlendMode::Normal | crate::BlendMode::PassThrough
+    ) {
+        ops.push(Operation::SetBlend {
+            id: new,
+            blend: node.blend(),
+        });
+    }
+    if !node.effects().is_empty() {
+        ops.push(Operation::SetEffects {
+            id: new,
+            effects: node.effects().to_vec(),
+        });
+    }
+    if !node.exports().is_empty() {
+        ops.push(Operation::SetExports {
+            id: new,
+            exports: node.exports().to_vec(),
+        });
+    }
+    if node.mask() {
+        ops.push(Operation::SetMask {
+            id: new,
+            mask: true,
+        });
+    }
+    ops.push(Operation::DeleteNode { id });
+    Ok((Transaction(ops), new))
+}
+
+/// Whether [`convert_container`] would take `id`: a group with layers in it or a
+/// frame, neither a component set nor a main, in a main or in an instance, whose
+/// copies would lose the node they link to.
+pub fn can_convert_container(doc: &Document, id: NodeId) -> bool {
+    let Some(n) = doc.get(id) else {
+        return false;
+    };
+    let kind_ok = match n.kind() {
+        NodeKind::Group => !n.children().is_empty(),
+        NodeKind::Artboard { .. } => true,
+        _ => false,
+    };
+    let mut in_main = false;
+    let mut at = Some(id);
+    while let Some(a) = at.and_then(|a| doc.get(a)) {
+        in_main |= a.component();
+        at = a.parent();
+    }
+    kind_ok && !in_main && n.set().is_none() && crate::component::instance_root(doc, id).is_none()
+}
+
 /// Whether [`frame`] would accept `members`, so a menu row cannot offer what the
 /// verb would refuse. It does not ask whether the members' boxes resolve (that
 /// needs a [`Resolved`]); [`frame`] reports that.

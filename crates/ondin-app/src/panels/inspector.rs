@@ -1685,7 +1685,7 @@ impl OndinApp {
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                identity_glyph(ui, glyph, color::ACCENT_300);
+                self.identity_kind(ui, id, glyph);
                 // Name — buffered, committed once on defocus.
                 let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
                 let mut name = match &self.name_edit {
@@ -1792,6 +1792,94 @@ impl OndinApp {
             self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
     }
+    /// A layer's kind glyph on its identity card. A group's or a frame's is a
+    /// dropdown turning one into the other (`build::convert_container`), dimmed
+    /// where a component's links forbid it; any other layer's is a picture.
+    fn identity_kind(&mut self, ui: &mut egui::Ui, id: NodeId, glyph: &'static str) {
+        let doc = &self.session.doc;
+        let Some(is_frame) = doc.get(id).and_then(|n| match n.kind() {
+            NodeKind::Group => Some(false),
+            NodeKind::Artboard { .. } => Some(true),
+            _ => None,
+        }) else {
+            identity_glyph(ui, glyph, color::ACCENT_300);
+            return;
+        };
+        let enabled = ondin_core::build::can_convert_container(doc, id);
+        let sense = if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        };
+        let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(IDENTITY_ICON), sense);
+        let ink = if enabled && resp.hovered() {
+            color::TEXT
+        } else {
+            color::ACCENT_300
+        };
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            theme::icon_font(IDENTITY_ICON),
+            ink,
+        );
+        let resp = if enabled {
+            resp.on_hover_text("Turn into a frame or a group")
+        } else {
+            resp.on_hover_text("A component keeps its kind: its copies link to it")
+        };
+        let mut pick = None;
+        egui::Popup::menu(&resp).gap(ui::MENU_GAP).show(|ui| {
+            ui::menu_rows(ui);
+            for (frame, label) in [(true, "Frame"), (false, "Group")] {
+                let kind = if frame {
+                    NodeKind::Artboard {
+                        size: Default::default(),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    }
+                } else {
+                    NodeKind::Group
+                };
+                let row = ui::glyph_and_text(super::layers_icon(&kind).0, label);
+                if ui.selectable_label(frame == is_frame, row).clicked() && frame != is_frame {
+                    pick = Some(frame);
+                }
+            }
+        });
+        if pick.is_some() {
+            self.convert_container(id);
+        }
+    }
+
+    /// Turn the group or frame `id` into the other, selecting what it became.
+    pub(crate) fn convert_container(&mut self, id: NodeId) {
+        let to_frame = matches!(
+            self.session.doc.get(id).map(|n| n.kind()),
+            Some(NodeKind::Group)
+        );
+        match ondin_core::build::convert_container(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            id,
+        ) {
+            Ok((tx, new)) => {
+                let (verb, glyph) = if to_frame {
+                    ("Turn into frame", icon::BOUNDING_BOX)
+                } else {
+                    ("Turn into group", icon::SELECTION)
+                };
+                self.session.name_step(verb, glyph);
+                if self.commit_edit(tx) {
+                    self.session.selection.set_one(new);
+                }
+            }
+            Err(e) => self.session.fail(format!("Cannot convert: {e}")),
+        }
+    }
+
     /// The identity card's second row: the boolean
     /// operations dropdown, then Mask, Group and Ungroup as 28×28 actions.
     ///
@@ -12822,6 +12910,41 @@ mod mask_card_tests {
             2,
             "and one undo brings both back"
         );
+    }
+
+    /// Turning a group into a frame and back keeps the layers, selects what it
+    /// became, and undoes in one step each.
+    /// flip: `convert_container` not selecting `new` → fails at "the frame is selected".
+    #[test]
+    fn a_group_turns_into_a_frame_and_back() {
+        let ctx = egui::Context::default();
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let group = t.add(root, NodeKind::Group);
+        let a = t.shape(group);
+        let b = t.shape(group);
+        let doc = t.doc.clone();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![group]);
+
+        app.convert_container(group);
+        let frame = app.session.selection.ids().first().copied();
+        let frame = frame
+            .filter(|f| *f != group)
+            .expect("the frame is selected");
+        let node = app.session.doc.get(frame).expect("the frame");
+        assert!(matches!(node.kind(), NodeKind::Artboard { .. }));
+        assert_eq!(node.children(), [a, b]);
+
+        app.convert_container(frame);
+        let back = app.session.selection.ids()[0];
+        assert!(matches!(
+            app.session.doc.get(back).map(|n| n.kind()),
+            Some(NodeKind::Group)
+        ));
+        app.session.undo();
+        app.session.undo();
+        assert!(app.session.doc.get(group).is_some(), "two undos, two steps");
     }
 
     /// Each `mask_action` refusal gives its own sentence (not just `is_err()`), and the

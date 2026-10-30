@@ -9,13 +9,10 @@ reads true.
 
 ## Now · Polish
 
-Found testing Import files on real Sketch files.
-
+Nothing open.
 
 ## Later · First
 
-- **Convert a group to a frame and back.** No command does it; a dropdown in the identity card of a
-  group or frame would.
 - **Background blur.** Not built: `EffectKind` has no such effect. Neither vello 0.9 nor vello_cpu 0.2
   has a backdrop filter, so both backends need a pass that renders what lies behind the layer, blurs
   it and clips it to the shape. The code export would write `backdrop-filter`; SVG cannot express a

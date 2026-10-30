@@ -724,7 +724,11 @@ impl OndinApp {
                     ui.set_height(BAR_H - 2.0);
                     ui.horizontal_centered(|ui| {
                         ui.spacing_mut().item_spacing.x = 10.0;
-                        ui.label(theme::icon_text(icon::CIRCLE_HALF, 15.0, color::ACCENT_300));
+                        ui.label(theme::icon_text(
+                            icon::CIRCLE_HALF,
+                            15.0,
+                            color::accent_300(),
+                        ));
                         match &scope_name {
                             Some(name) => {
                                 if scope_chip(ui, name, selected) {
@@ -735,7 +739,7 @@ impl OndinApp {
                                 ui.label(
                                     egui::RichText::new("Contrast")
                                         .size(12.0)
-                                        .color(color::TEXT),
+                                        .color(color::text()),
                                 );
                             }
                         }
@@ -749,7 +753,7 @@ impl OndinApp {
                             ui,
                             egui::RichText::new(level.label())
                                 .size(12.0)
-                                .color(theme::text::MUTED),
+                                .color(theme::text::muted()),
                             4.0,
                             level_open,
                         );
@@ -759,9 +763,9 @@ impl OndinApp {
                         ui.spacing_mut().item_spacing.x = 10.0;
                         separator(ui);
                         let ink = if waiting {
-                            theme::text::DIM
+                            theme::text::dim()
                         } else {
-                            color::TEXT
+                            color::text()
                         };
                         // A count's glyph sits 5 from its words.
                         let glyph = |ui: &mut egui::Ui, text: egui::RichText| {
@@ -773,7 +777,7 @@ impl OndinApp {
                             ui.label(
                                 egui::RichText::new("Measuring…")
                                     .size(12.0)
-                                    .color(theme::text::MUTED.gamma_multiply(alpha)),
+                                    .color(theme::text::muted().gamma_multiply(alpha)),
                             );
                         } else if fails.is_empty() {
                             glyph(ui, theme::icon_text(icon::CHECK_CIRCLE, 13.0, PASS));
@@ -799,7 +803,7 @@ impl OndinApp {
                                 .layout_no_wrap(
                                     format!("{n} / {n}"),
                                     egui::FontId::proportional(12.0),
-                                    theme::text::DIM,
+                                    theme::text::dim(),
                                 )
                                 .size()
                                 .x;
@@ -808,7 +812,7 @@ impl OndinApp {
                                     ui.label(
                                         egui::RichText::new(format!("{at} / {}", fails.len()))
                                             .size(12.0)
-                                            .color(theme::text::DIM),
+                                            .color(theme::text::dim()),
                                     );
                                 }
                             });
@@ -1564,7 +1568,7 @@ fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
     let font = egui::FontId::proportional(12.0);
     let galley = ui
         .painter()
-        .layout_no_wrap(name.to_string(), font, color::TEXT);
+        .layout_no_wrap(name.to_string(), font, color::text());
     let w = PAD + 12.0 + GAP + galley.size().x + PAD + 2.0;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, H), egui::Sense::click());
     let p = ui.painter();
@@ -1579,7 +1583,7 @@ fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
         egui::Align2::CENTER_CENTER,
         icon::FRAME_CORNERS,
         theme::icon_font(12.0),
-        color::ACCENT_400,
+        color::accent_400(),
     );
     p.galley(
         egui::pos2(
@@ -1587,7 +1591,7 @@ fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
-        color::TEXT,
+        color::text(),
     );
     resp.on_hover_text(if selected {
         "Retry on the selection"
@@ -1643,8 +1647,8 @@ fn card_head(ui: &mut egui::Ui, name: &str, f: &Finding, level: Level) {
                 } else {
                     icon::TEXT_T
                 };
-                ui.label(theme::icon_text(glyph, 15.0, color::ACCENT_300));
-                ui.label(egui::RichText::new(name).size(12.5).color(color::TEXT));
+                ui.label(theme::icon_text(glyph, 15.0, color::accent_300()));
+                ui.label(egui::RichText::new(name).size(12.5).color(color::text()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let what = match () {
                         _ if f.non_text => "non-text",
@@ -1654,7 +1658,7 @@ fn card_head(ui: &mut egui::Ui, name: &str, f: &Finding, level: Level) {
                     ui.label(
                         egui::RichText::new(format!("{what} · {}", level.label()))
                             .size(10.5)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                     );
                 });
             });
@@ -1675,7 +1679,7 @@ fn card_colours(ui: &mut egui::Ui, f: &Finding, level: Level) {
                     ui.label(
                         egui::RichText::new(format!("{} on {}", hex(w.ink), hex(w.backdrop)))
                             .size(10.5)
-                            .color(color::TEXT),
+                            .color(color::text()),
                     );
                     ui.label(
                         egui::RichText::new(if f.non_text {
@@ -1684,7 +1688,7 @@ fn card_colours(ui: &mut egui::Ui, f: &Finding, level: Level) {
                             "text on backdrop"
                         })
                         .size(10.5)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1719,10 +1723,14 @@ fn card_modes(ui: &mut egui::Ui, f: &Finding, level: Level) {
                     ui.label(
                         egui::RichText::new(s.name.as_deref().unwrap_or("Default"))
                             .size(11.5)
-                            .color(color::TEXT),
+                            .color(color::text()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let ink = if pass { theme::text::MUTED } else { FAIL_LINE };
+                        let ink = if pass {
+                            theme::text::muted()
+                        } else {
+                            FAIL_LINE
+                        };
                         ui.label(
                             egui::RichText::new(level.format(s.score))
                                 .size(11.5)
@@ -1793,14 +1801,14 @@ fn fix_row(ui: &mut egui::Ui, swatch: Color, name: &str, score: &str) -> egui::R
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(11.5),
-        color::TEXT,
+        color::text(),
     );
     p.text(
         egui::pos2(rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         score,
         egui::FontId::proportional(11.5),
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     resp
 }
@@ -1817,7 +1825,11 @@ fn eyebrow(ui: &mut egui::Ui, label: &str) {
 fn note(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        ui.label(egui::RichText::new(text).size(11.0).color(theme::text::DIM));
+        ui.label(
+            egui::RichText::new(text)
+                .size(11.0)
+                .color(theme::text::dim()),
+        );
     });
     ui.add_space(4.0);
 }
@@ -1825,7 +1837,7 @@ fn note(ui: &mut egui::Ui, text: &str) {
 fn rule(ui: &mut egui::Ui) {
     let (r, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(r, 0.0, color::DIVIDER);
+    ui.painter().rect_filled(r, 0.0, color::divider());
 }
 
 fn color32(c: Color) -> egui::Color32 {

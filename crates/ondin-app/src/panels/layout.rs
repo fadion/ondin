@@ -822,9 +822,9 @@ fn glyph_combo<T: Copy + PartialEq>(
         ui.spacing_mut().button_padding.y = 0.0;
         let pad = ui.spacing().button_padding.x;
         let ink = if enabled {
-            color::TEXT
+            color::text()
         } else {
-            theme::text::DISABLED
+            theme::text::disabled()
         };
         let label_font = egui::FontId::proportional(10.5);
         let value_font = egui::FontId::proportional(12.0);
@@ -853,8 +853,8 @@ fn glyph_combo<T: Copy + PartialEq>(
             egui::TextFormat::simple(
                 label_font,
                 match mark {
-                    Some(_) => theme::text::STRONG,
-                    None => theme::text::FAINT,
+                    Some(_) => theme::text::strong(),
+                    None => theme::text::faint(),
                 },
             ),
         );
@@ -890,7 +890,7 @@ fn glyph_combo<T: Copy + PartialEq>(
                         text.append(
                             row.map_or("Auto", name),
                             GLYPH_PT + GLYPH_GAP,
-                            egui::TextFormat::simple(value_font.clone(), color::TEXT),
+                            egui::TextFormat::simple(value_font.clone(), color::text()),
                         );
                         let lit = shown == Some(row);
                         let r = ui.selectable_label(lit, text);
@@ -905,7 +905,7 @@ fn glyph_combo<T: Copy + PartialEq>(
                                 GLYPH_PT,
                                 g,
                                 orient(g),
-                                theme::text::DIM,
+                                theme::text::dim(),
                             );
                         }
                         if r.clicked() {
@@ -942,7 +942,7 @@ fn glyph_combo<T: Copy + PartialEq>(
                 egui::Align2::RIGHT_CENTER,
                 hint,
                 egui::FontId::proportional(10.5),
-                theme::text::DISABLED,
+                theme::text::disabled(),
             );
         }
     });
@@ -956,7 +956,11 @@ fn display_cell(p: &egui::Painter, i: usize, rect: egui::Rect, on: bool) {
         (Glyph::DisplayFlex, "Flex"),
         (Glyph::DisplayGrid, "Grid"),
     ][i];
-    let ink = if on { color::TEXT } else { theme::text::DIM };
+    let ink = if on {
+        color::text()
+    } else {
+        theme::text::dim()
+    };
     let galley = p.layout_no_wrap(
         word.to_owned(),
         egui::FontId::proportional(ui::SEGMENT_LABEL_PT + 1.0),
@@ -1758,7 +1762,7 @@ impl OndinApp {
                         subjects.len() - flowing.len()
                     ))
                     .size(11.0)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
                 );
             }
             app.item_rows(ui, &flowing);
@@ -1811,17 +1815,21 @@ impl OndinApp {
         };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 9.0;
-            ui.label(theme::icon_text(glyph, 15.0, theme::text::DIM));
+            ui.label(theme::icon_text(glyph, 15.0, theme::text::dim()));
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 3.0;
                 ui.label(
                     egui::RichText::new(title)
                         .size(12.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 );
                 ui.add(
-                    egui::Label::new(egui::RichText::new(body).size(11.0).color(theme::text::DIM))
-                        .wrap(),
+                    egui::Label::new(
+                        egui::RichText::new(body)
+                            .size(11.0)
+                            .color(theme::text::dim()),
+                    )
+                    .wrap(),
                 );
             });
         });
@@ -2187,7 +2195,7 @@ impl OndinApp {
             };
             let mut undo = false;
             egui::Frame::new()
-                .fill(color::ACCENT.gamma_multiply(0.14))
+                .fill(color::accent().gamma_multiply(0.14))
                 .corner_radius(egui::CornerRadius::same(ui::BUTTON_R))
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
@@ -2197,7 +2205,7 @@ impl OndinApp {
                             egui::Label::new(
                                 egui::RichText::new(format!("Resizing set {list}."))
                                     .size(11.0)
-                                    .color(theme::text::STRONG),
+                                    .color(theme::text::strong()),
                             )
                             .wrap(),
                         );
@@ -2207,7 +2215,7 @@ impl OndinApp {
                                     egui::Label::new(
                                         egui::RichText::new("Undo")
                                             .size(11.0)
-                                            .color(color::ACCENT_300),
+                                            .color(color::accent_300()),
                                     )
                                     .sense(egui::Sense::click()),
                                 )
@@ -2245,7 +2253,7 @@ impl OndinApp {
                 ui.painter().rect_stroke(
                     rect,
                     egui::CornerRadius::same(ui::BUTTON_R),
-                    egui::Stroke::new(1.0, color::ACCENT),
+                    egui::Stroke::new(1.0, color::accent()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -2380,12 +2388,12 @@ impl OndinApp {
                     icon::CARET_RIGHT
                 },
                 12.0,
-                theme::text::DIM,
+                theme::text::dim(),
             ));
             ui.label(
                 egui::RichText::new("Min / max")
                     .size(11.0)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
@@ -2395,7 +2403,7 @@ impl OndinApp {
                         Some(n) => format!("{n} set"),
                     })
                     .size(10.5)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
                 );
             });
         });
@@ -5037,13 +5045,13 @@ mod tests {
     }
 
     /// Whether `shapes` hold the grip reorder's insertion line — the one
-    /// horizontal `ACCENT` stroke 1.5 wide the track list draws.
+    /// horizontal `accent()` stroke 1.5 wide the track list draws.
     fn reorder_line(shapes: &[egui::epaint::ClippedShape]) -> bool {
         shapes.iter().any(|cs| {
             matches!(
                 &cs.shape,
                 egui::epaint::Shape::LineSegment { points: [a, b], stroke }
-                    if a.y == b.y && stroke.color == color::ACCENT && stroke.width == 1.5
+                    if a.y == b.y && stroke.color == color::accent() && stroke.width == 1.5
             )
         })
     }
@@ -5417,7 +5425,7 @@ mod tests {
                 matches!(
                     &cs.shape,
                     egui::epaint::Shape::Rect(r)
-                        if r.stroke.color == color::ACCENT && r.rect.contains(at)
+                        if r.stroke.color == color::accent() && r.rect.contains(at)
                 )
             })
         };

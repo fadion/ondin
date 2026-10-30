@@ -128,15 +128,15 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("This document uses no kit.")
                         .size(12.0)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             }
             for u in &used {
                 ui.horizontal(|ui| {
-                    ui.label(theme::icon_text(icon::PACKAGE, 14.0, theme::text::MUTED));
+                    ui.label(theme::icon_text(icon::PACKAGE, 14.0, theme::text::muted()));
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 1.0;
-                        ui.label(egui::RichText::new(&u.name).size(12.5).color(color::TEXT));
+                        ui.label(egui::RichText::new(&u.name).size(12.5).color(color::text()));
                         ui.label(
                             egui::RichText::new(format!(
                                 "{} · {} instance{}",
@@ -145,7 +145,7 @@ impl OndinApp {
                                 if u.instances == 1 { "" } else { "s" }
                             ))
                             .size(11.0)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -196,9 +196,9 @@ impl OndinApp {
                             egui::RichText::new(u.status())
                                 .size(11.0)
                                 .color(if waiting {
-                                    color::TEXT
+                                    color::text()
                                 } else {
-                                    theme::text::FAINT
+                                    theme::text::faint()
                                 }),
                         );
                     });
@@ -265,7 +265,7 @@ impl OndinApp {
                     u.name
                 ))
                 .size(12.0)
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
             );
             ui.add_space(6.0);
             ui.label(
@@ -275,7 +275,7 @@ impl OndinApp {
                     if u.instances == 1 { "" } else { "s" }
                 ))
                 .size(12.0)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
             );
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

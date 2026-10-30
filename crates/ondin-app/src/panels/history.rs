@@ -124,7 +124,7 @@ impl OndinApp {
     fn history_divider(&mut self, ui: &mut egui::Ui, folded: bool, max: f32) {
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, color::DIVIDER);
+        ui.painter().rect_filled(rect, 0.0, color::divider());
         if folded {
             return;
         }
@@ -171,7 +171,7 @@ impl OndinApp {
                         ui.painter().layout_no_wrap(
                             t,
                             egui::FontId::proportional(10.5),
-                            theme::text::DIM,
+                            theme::text::dim(),
                         )
                     });
                     ui.add_space(4.0);
@@ -180,7 +180,7 @@ impl OndinApp {
                     let mut job = egui::text::LayoutJob::simple_singleline(
                         self.current_step_text(),
                         egui::FontId::proportional(12.0),
-                        theme::text::MUTED,
+                        theme::text::muted(),
                     );
                     job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
                     let name = ui.painter().layout_job(job);
@@ -190,14 +190,14 @@ impl OndinApp {
                     );
                     let top = baseline - baseline_in(&name);
                     ui.painter()
-                        .galley(egui::pos2(rect.left(), top), name, theme::text::MUTED);
+                        .galley(egui::pos2(rect.left(), top), name, theme::text::muted());
                     if let Some(tail) = tail {
                         let right = ui.max_rect().right();
                         let top = baseline - baseline_in(&tail);
                         ui.painter().galley(
                             egui::pos2(right - tail.size().x, top),
                             tail,
-                            theme::text::DIM,
+                            theme::text::dim(),
                         );
                     }
                     head.rect
@@ -324,7 +324,7 @@ impl OndinApp {
                     ui.scroll_to_rect(row_rect(i), None);
                 }
             });
-        crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::PANEL);
+        crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::panel());
     }
 
     /// One row; answers its rect.
@@ -338,7 +338,7 @@ impl OndinApp {
                 ui.label(format!("Made over MCP by {client}"));
                 ui.label(
                     egui::RichText::new(mcp_detail(tool, row.subjects.len(), row.page.as_deref()))
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             }),
             None => resp,
@@ -361,7 +361,7 @@ impl OndinApp {
         let p = ui.painter();
         let r5 = egui::CornerRadius::same(5);
         if current {
-            p.rect_filled(rect, r5, color::ACCENT.gamma_multiply(0.22));
+            p.rect_filled(rect, r5, color::accent().gamma_multiply(0.22));
         } else if hovered {
             p.rect_filled(rect, r5, theme::color::text_a(12));
         }
@@ -374,9 +374,9 @@ impl OndinApp {
             &row.glyph,
             theme::icon_font(14.0),
             dim(if current {
-                color::ACCENT
+                color::accent()
             } else {
-                theme::text::DIM
+                theme::text::dim()
             }),
         );
         x += 14.0 + 7.0;
@@ -387,17 +387,17 @@ impl OndinApp {
             let g = p.layout_no_wrap(
                 icon::SPARKLE.into(),
                 theme::icon_font(12.0),
-                dim(color::ACCENT),
+                dim(color::accent()),
             );
             right -= g.size().x;
-            p.galley(egui::pos2(right, cy - g.size().y / 2.0), g, color::ACCENT);
+            p.galley(egui::pos2(right, cy - g.size().y / 2.0), g, color::accent());
             right -= 6.0;
         }
         if row.saved {
             let tag = p.layout_no_wrap(
                 "Saved".to_string(),
                 egui::FontId::proportional(10.0),
-                dim(theme::text::MUTED),
+                dim(theme::text::muted()),
             );
             let size = tag.size() + egui::vec2(10.0, 3.0);
             let at = egui::Rect::from_min_size(egui::pos2(right - size.x, cy - size.y / 2.0), size);
@@ -407,17 +407,21 @@ impl OndinApp {
                 egui::Stroke::new(1.0, dim(theme::color::text_a(40))),
                 egui::StrokeKind::Inside,
             );
-            p.galley(at.min + egui::vec2(5.0, 1.5), tag, theme::text::MUTED);
+            p.galley(at.min + egui::vec2(5.0, 1.5), tag, theme::text::muted());
             right = at.left() - 6.0;
         }
 
         // `Label · Subject · Page`: the subject gives way first, then the page.
         let font = egui::FontId::proportional(12.5);
-        let ink = dim(if lit { color::TEXT } else { theme::text::MUTED });
-        let sub = dim(if lit {
-            theme::text::MUTED
+        let ink = dim(if lit {
+            color::text()
         } else {
-            theme::text::DIM
+            theme::text::muted()
+        });
+        let sub = dim(if lit {
+            theme::text::muted()
+        } else {
+            theme::text::dim()
         });
         let cut = |text: String, ink: egui::Color32, width: f32| {
             let mut job = egui::text::LayoutJob::simple_singleline(text, font.clone(), ink);

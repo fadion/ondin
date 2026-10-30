@@ -322,7 +322,7 @@ impl OndinApp {
                     ui.label(
                         egui::RichText::new(text)
                             .size(LABEL_PT)
-                            .color(theme::text::MUTED),
+                            .color(theme::text::muted()),
                     );
                 });
             });
@@ -331,12 +331,12 @@ impl OndinApp {
 
     /// *Default font* and the family dropdown, the typography panel's list in it.
     /// Returns the family picked, for the draft. A family that can never be had
-    /// wears its glyph in `WARN`, as in the panel.
+    /// wears its glyph in `warn()`, as in the panel.
     fn default_font_row(&mut self, ui: &mut egui::Ui, current: &str) -> Option<String> {
         let mut chosen = None;
         let missing = self.fonts.family_status(current) == crate::fonts::FamilyStatus::Missing;
         let head = if missing {
-            ui::glyph_and_text_tinted(icon::TEXT_AA, current, color::WARN)
+            ui::glyph_and_text_tinted(icon::TEXT_AA, current, color::warn())
         } else {
             ui::glyph_and_text(icon::TEXT_AA, current)
         };
@@ -439,10 +439,10 @@ pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
         .backdrop_color(egui::Color32::from_black_alpha(128))
         .frame(
             egui::Frame::NONE
-                .fill(color::CARD)
-                // The token, not its value, so retuning `color::DIVIDER` moves the
+                .fill(color::card())
+                // The token, not its value, so retuning `color::divider()` moves the
                 // modal hairline too; no gate could catch a respelled copy.
-                .stroke(egui::Stroke::new(1.0, theme::color::DIVIDER))
+                .stroke(egui::Stroke::new(1.0, theme::color::divider()))
                 .corner_radius(egui::CornerRadius::same(10))
                 // Deeper than a dropdown's: this floats over everything.
                 .shadow(egui::epaint::Shadow {
@@ -482,7 +482,7 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
         ui.label(
             egui::RichText::new(title)
                 .size(14.0)
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui::icon_button(ui, icon::X, 18.0, 14.0, false, true).clicked()
@@ -571,7 +571,7 @@ pub(crate) fn section(ui: &mut egui::Ui, label: &str) {
             let y = ui::hairline_in_column(rect.center().y, ppp, 1.0);
             ui.painter().line_segment(
                 [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                egui::Stroke::new(1.0, theme::color::DIVIDER),
+                egui::Stroke::new(1.0, theme::color::divider()),
             );
         },
     );
@@ -586,7 +586,7 @@ pub(crate) fn caption(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .size(CAPTION_PT)
-            .color(theme::text::FAINT),
+            .color(theme::text::faint()),
     );
 }
 
@@ -637,7 +637,7 @@ pub(crate) fn text_button(ui: &mut egui::Ui, label: &str, state: FieldButton) ->
             f.layout_no_wrap(
                 label.to_owned(),
                 egui::FontId::proportional(BUTTON_PT),
-                theme::text::MUTED,
+                theme::text::muted(),
             )
         })
         .size()

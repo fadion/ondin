@@ -1032,7 +1032,7 @@ impl OndinApp {
             .exact_size(STRIP_H)
             .resizable(false)
             .show_separator_line(false)
-            .frame(egui::Frame::NONE.fill(crate::theme::color::TAB_STRIP))
+            .frame(egui::Frame::NONE.fill(crate::theme::color::tab_strip()))
             .show(ui, |ui| self.strip_body(ui, act, spent));
     }
 
@@ -1256,11 +1256,11 @@ impl OndinApp {
     fn home_tab(&mut self, ui: &mut egui::Ui, rect: egui::Rect, act: bool) {
         let resp = ui.interact(rect, egui::Id::new("tab-library"), egui::Sense::CLICK);
         let ground = if self.view == View::Dashboard {
-            crate::theme::color::TOPBAR
+            crate::theme::color::topbar()
         } else if resp.hovered() {
-            crate::theme::color::TAB_LIFTED
+            crate::theme::color::tab_lifted()
         } else {
-            crate::theme::color::TAB_BEHIND
+            crate::theme::color::tab_behind()
         };
         ui.painter().rect_filled(rect, tab_corners(), ground);
         let mark = egui::Rect::from_center_size(rect.center(), egui::vec2(18.0, 18.0));
@@ -1299,11 +1299,11 @@ impl OndinApp {
         let close_resp = ui.interact(close, id.with("close"), sense);
         let hovered = resp.hovered() || close_resp.hovered();
         let ground = if front {
-            color::TOPBAR
+            color::topbar()
         } else if hovered {
-            color::TAB_LIFTED
+            color::tab_lifted()
         } else {
-            color::TAB_BEHIND
+            color::tab_behind()
         };
         let p = ui.painter().clone();
         p.rect_filled(rect, tab_corners(), ground);
@@ -1311,23 +1311,23 @@ impl OndinApp {
             p.rect_stroke(
                 rect,
                 tab_corners(),
-                egui::Stroke::new(1.0, color::DANGER.gamma_multiply(0.35)),
+                egui::Stroke::new(1.0, color::danger().gamma_multiply(0.35)),
                 egui::StrokeKind::Inside,
             );
         }
         let ink = if info.failed.is_some() {
-            color::DANGER_200
+            color::danger_200()
         } else if front || hovered {
-            color::TEXT
+            color::text()
         } else {
-            crate::theme::text::MUTED
+            crate::theme::text::muted()
         };
 
         let mut left = rect.left() + 10.0;
         let glyph = if info.failed.is_some() {
-            Some((icon::WARNING, color::DANGER))
+            Some((icon::WARNING, color::danger()))
         } else if info.kit {
-            Some((icon::PACKAGE, color::ACCENT_300))
+            Some((icon::PACKAGE, color::accent_300()))
         } else {
             None
         };
@@ -1370,7 +1370,7 @@ impl OndinApp {
                 egui::Align2::CENTER_CENTER,
                 icon::PUSH_PIN,
                 crate::theme::icon_font(12.0),
-                crate::theme::text::MUTED,
+                crate::theme::text::muted(),
             );
         } else if show_x {
             if close_resp.hovered() {
@@ -1381,10 +1381,10 @@ impl OndinApp {
                 egui::Align2::CENTER_CENTER,
                 icon::X,
                 crate::theme::icon_font(12.0),
-                crate::theme::text::MUTED,
+                crate::theme::text::muted(),
             );
         } else if info.dirty {
-            p.circle_filled(close.center(), 3.5, color::TEXT);
+            p.circle_filled(close.center(), 3.5, color::text());
         }
 
         if !act {
@@ -1478,9 +1478,9 @@ impl OndinApp {
                         );
                         let on = front == Some(info.id);
                         let ink = if on || resp.hovered() {
-                            color::TEXT
+                            color::text()
                         } else {
-                            crate::theme::text::MUTED
+                            crate::theme::text::muted()
                         };
                         let galley = ui.ctx().fonts_mut(|f| {
                             let mut job = egui::text::LayoutJob::simple_singleline(
@@ -1502,7 +1502,7 @@ impl OndinApp {
                                 egui::Align2::CENTER_CENTER,
                                 icon::CHECK,
                                 crate::theme::icon_font(13.0),
-                                color::ACCENT,
+                                color::accent(),
                             );
                         }
                         p.galley(
@@ -1514,7 +1514,7 @@ impl OndinApp {
                             p.circle_filled(
                                 egui::pos2(rect.right() - 11.0, rect.center().y),
                                 3.0,
-                                color::TEXT,
+                                color::text(),
                             );
                         }
                         if resp.clicked() {
@@ -1599,26 +1599,26 @@ impl OndinApp {
             .resizable(false)
             .frame(
                 egui::Frame::NONE
-                    .fill(color::TOPBAR)
+                    .fill(color::topbar())
                     .inner_margin(egui::Margin::symmetric(14, 0)),
             )
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     if let Some(project) = &info.project {
-                        ui.label(egui::RichText::new(project).size(13.0).color(text::MUTED));
-                        ui.label(egui::RichText::new("/").size(13.0).color(text::FAINT));
+                        ui.label(egui::RichText::new(project).size(13.0).color(text::muted()));
+                        ui.label(egui::RichText::new("/").size(13.0).color(text::faint()));
                     }
                     ui.label(
                         egui::RichText::new(&info.name)
                             .size(13.0)
-                            .color(color::TEXT),
+                            .color(color::text()),
                     );
                 });
             });
         let mut retry = false;
         let mut close = false;
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(color::BG))
+            .frame(egui::Frame::NONE.fill(color::bg()))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space((ui.available_height() / 2.0 - 40.0).max(0.0));
@@ -1626,17 +1626,17 @@ impl OndinApp {
                         ui.label(
                             egui::RichText::new(format!("Loading {}…", info.name))
                                 .size(11.5)
-                                .color(text::DIM),
+                                .color(text::dim()),
                         );
                         return;
                     };
                     ui.label(
                         egui::RichText::new(format!("“{}” could not be read", info.name))
                             .size(13.0)
-                            .color(color::TEXT),
+                            .color(color::text()),
                     );
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(why).size(11.5).color(text::DIM));
+                    ui.label(egui::RichText::new(why).size(11.5).color(text::dim()));
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
                         let w = 2.0 * 96.0 + 8.0;
@@ -1713,9 +1713,9 @@ fn strip_button(
         rect,
         tab_corners(),
         if lit {
-            color::TAB_LIFTED
+            color::tab_lifted()
         } else {
-            color::TAB_BEHIND
+            color::tab_behind()
         },
     );
     ui.painter().text(
@@ -1724,9 +1724,9 @@ fn strip_button(
         glyph,
         crate::theme::icon_font(14.0),
         if lit {
-            color::TEXT
+            color::text()
         } else {
-            crate::theme::text::DIM
+            crate::theme::text::dim()
         },
     );
     resp

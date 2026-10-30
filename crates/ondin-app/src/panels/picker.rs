@@ -339,7 +339,7 @@ fn picker_window() -> egui::Window<'static> {
         .order(egui::Order::Foreground)
         .frame(
             egui::Frame::NONE
-                .fill(color::CARD)
+                .fill(color::card())
                 .stroke(egui::Stroke::new(1.0, theme::color::text_a(15)))
                 .shadow(egui::epaint::Shadow {
                     offset: [0, 10],
@@ -813,7 +813,7 @@ impl OndinApp {
         let p = ui.painter();
         ui::paint_checkerboard(p, rect, 5.0);
         ui::paint_ramp(p, rect, &ramp(brush));
-        mask_corners(p, rect, 5.0, color::CARD);
+        mask_corners(p, rect, 5.0, color::card());
         let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
         let rim = match (open, resp.hovered()) {
             (true, _) => egui::Stroke::new(1.5, theme::color::text_a(200)),
@@ -828,14 +828,14 @@ impl OndinApp {
         );
         // The badge hangs off the corner, ringed in the card's colour.
         let badge = egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0);
-        p.circle_filled(badge, 7.0, color::CARD);
+        p.circle_filled(badge, 7.0, color::card());
         p.circle_filled(badge, 5.5, theme::color::text_a(60));
         p.text(
             badge,
             egui::Align2::CENTER_CENTER,
             icon::CARET_DOWN,
             theme::icon_font(8.0),
-            theme::text::STRONG,
+            theme::text::strong(),
         );
         let kind = paint::kind_of(brush);
         let resp = resp.on_hover_text("Gradient kind");
@@ -883,7 +883,7 @@ impl OndinApp {
         ui::paint_checkerboard(p, bar, 5.0);
         // **`stop_colours`, not `ramp`** — see that function.
         ui::paint_ramp(p, bar, &stop_colours(brush));
-        mask_corners(p, bar, 5.0, color::CARD);
+        mask_corners(p, bar, 5.0, color::card());
         // The bar is registered *before* the handles on it: egui gives an
         // overlapping click to the widget registered last, so grabbing a handle
         // grabs the handle rather than dropping a new stop underneath it.
@@ -986,7 +986,7 @@ impl OndinApp {
             ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click_and_drag());
         let p = ui.painter();
         ui::paint_sv_plane(p, rect, hsv.h);
-        mask_corners(p, rect, 5.0, color::CARD);
+        mask_corners(p, rect, 5.0, color::card());
         let handle = egui::pos2(
             rect.min.x + rect.width() * hsv.s,
             rect.min.y + rect.height() * (1.0 - hsv.v),
@@ -1026,7 +1026,7 @@ impl OndinApp {
             })
             .collect();
         ui::paint_ramp(p, rect, &ramp);
-        mask_corners(p, rect, TRACK_H * 0.5, color::CARD);
+        mask_corners(p, rect, TRACK_H * 0.5, color::card());
         slider_knob(p, rect, hsv.h, Hsv::new(hsv.h, 1.0, 1.0, 1.0).to_egui());
         if let Some(pos) = resp.interact_pointer_pos() {
             let h = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
@@ -1053,7 +1053,7 @@ impl OndinApp {
         let [r, g, b, _] = opaque.to_srgba_unmultiplied();
         let clear = egui::Color32::from_rgba_unmultiplied(r, g, b, 0);
         ui::paint_ramp(p, rect, &[(0.0, clear), (1.0, opaque)]);
-        mask_corners(p, rect, TRACK_H * 0.5, color::CARD);
+        mask_corners(p, rect, TRACK_H * 0.5, color::card());
         slider_knob(p, rect, hsv.a, opaque);
         if let Some(pos) = resp.interact_pointer_pos() {
             let a = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
@@ -1311,7 +1311,7 @@ impl OndinApp {
                     ui.spacing_mut().interact_size.x = w;
                     ui.spacing_mut().button_padding.x = 0.0;
                     if previewing {
-                        ui.visuals_mut().override_text_color = Some(color::ACCENT_200);
+                        ui.visuals_mut().override_text_color = Some(color::accent_200());
                     }
                     // Read only when the edit ends, so a number half-typed is never
                     // mistaken for a colour on the way.
@@ -1437,14 +1437,14 @@ impl OndinApp {
             egui::Align2::LEFT_CENTER,
             format.label(),
             egui::FontId::proportional(10.5),
-            theme::text::MUTED,
+            theme::text::muted(),
         );
         p.text(
             egui::pos2(rect.right() - 5.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             icon::CARET_DOWN,
             theme::icon_font(9.0),
-            theme::text::MUTED,
+            theme::text::muted(),
         );
         let resp = resp.on_hover_text("Colour format");
         let hsv = self.hsv_of(current);
@@ -1557,7 +1557,7 @@ impl OndinApp {
                 egui::Align2::CENTER_CENTER,
                 glyph,
                 theme::icon_font(12.0),
-                theme::text::DIM,
+                theme::text::dim(),
             );
             ui.interact(
                 glyph_rect,
@@ -1601,7 +1601,7 @@ impl OndinApp {
                 if col.components[3] < 1.0 {
                     let inset = 1.0 / ui.pixels_per_point();
                     ui::paint_checkerboard(p, rect.shrink(inset), 4.0);
-                    mask_corners(p, rect.shrink(inset), SWATCH_RADIUS - inset, color::CARD);
+                    mask_corners(p, rect.shrink(inset), SWATCH_RADIUS - inset, color::card());
                 }
                 p.rect_filled(rect, radius, color_to_egui(*col));
                 // The inspector chips' hairline: a dark drawing would otherwise fill
@@ -1619,7 +1619,7 @@ impl OndinApp {
                     p.rect_stroke(
                         rect,
                         radius,
-                        egui::Stroke::new(1.5, color::ACCENT_200),
+                        egui::Stroke::new(1.5, color::accent_200()),
                         egui::StrokeKind::Outside,
                     );
                 }

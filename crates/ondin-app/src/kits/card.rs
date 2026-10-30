@@ -104,13 +104,13 @@ impl OndinApp {
         let galley = ui.painter().layout_no_wrap(
             format!("← {name}"),
             egui::FontId::proportional(11.5),
-            theme::text::MUTED,
+            theme::text::muted(),
         );
         let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
         let ink = if resp.hovered() {
-            theme::color::TEXT
+            theme::color::text()
         } else {
-            theme::text::MUTED
+            theme::text::muted()
         };
         ui.painter()
             .galley_with_override_text_color(rect.min, galley, ink);
@@ -198,7 +198,7 @@ impl OndinApp {
                      receiving updates from {kit}."
                 ))
                 .size(12.0)
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
             );
             ui.add_space(6.0);
             ui.label(
@@ -212,7 +212,7 @@ impl OndinApp {
                     if instances == 1 { "" } else { "s" }
                 ))
                 .size(12.0)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
             );
             if nested_in_kit > 0 {
                 ui.add_space(6.0);
@@ -221,7 +221,7 @@ impl OndinApp {
                         "{kit}'s own components that use {name} keep {kit}'s {name}."
                     ))
                     .size(12.0)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
                 );
             }
             ui.add_space(crate::settings::FOOTER_GAP);
@@ -324,7 +324,7 @@ pub(crate) fn forked_note((vars, styles): (usize, usize), kit_frames: usize) -> 
 pub(crate) fn source_line(ui: &mut egui::Ui, k: &KitLine) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.0;
-        ui.label(theme::icon_text(icon::PACKAGE, 11.0, theme::text::DIM));
+        ui.label(theme::icon_text(icon::PACKAGE, 11.0, theme::text::dim()));
         let mut text = format!("{} kit · v{}", k.kit_name, k.version);
         if let Some(v) = k.waiting {
             text.push_str(&format!(" · v{v} waiting"));

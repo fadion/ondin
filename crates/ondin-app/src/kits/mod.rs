@@ -73,7 +73,7 @@ impl OndinApp {
             ui,
             egui::RichText::new(title)
                 .size(13.0)
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
             TOP_GAP,
             open,
         )
@@ -376,7 +376,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(line)
                         .size(12.0)
-                        .color(theme::text::MUTED),
+                        .color(theme::text::muted()),
                 );
                 ui.add_space(4.0);
             }

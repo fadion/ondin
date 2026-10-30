@@ -444,7 +444,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("Keyboard shortcuts")
                         .size(14.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if crate::ui::icon_button(ui, icon::X, 18.0, 14.0, false, true).clicked() {
@@ -483,7 +483,7 @@ impl OndinApp {
                                 sheet.filter.trim()
                             ))
                             .size(12.0)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                         );
                         return;
                     }
@@ -559,13 +559,13 @@ fn in_a_file(ui: &mut egui::Ui) {
     let g = p.layout_no_wrap(
         "In a file".into(),
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let w = g.size().x;
     p.galley(
         egui::pos2(rect.left(), rect.center().y - g.size().y / 2.0),
         g,
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     p.hline(
         (rect.left() + w + 10.0)..=rect.right(),
@@ -594,7 +594,7 @@ fn section_ui(ui: &mut egui::Ui, s: &Section, query: &[String], held: [bool; 3],
     let g = p.layout_job(job);
     let w = g.size().x;
     let y = rect.top() + 4.0;
-    p.galley(egui::pos2(rect.left(), y), g, theme::text::FAINT);
+    p.galley(egui::pos2(rect.left(), y), g, theme::text::faint());
     p.hline(
         (rect.left() + w + 10.0)..=rect.right(),
         y + 7.0,
@@ -639,8 +639,8 @@ fn row_ui(
                 .iter()
                 .any(|q| key.to_lowercase().starts_with(q.as_str()));
             let (fg, bg) = match () {
-                _ if lit_held => (color::ACCENT_100, color::ACCENT.gamma_multiply_u8(77)),
-                _ if lit_query => (color::ACCENT_300, theme::color::text_a(20)),
+                _ if lit_held => (color::accent_100(), color::accent().gamma_multiply_u8(77)),
+                _ if lit_query => (color::accent_300(), theme::color::text_a(20)),
                 _ => (theme::color::text_a(184), theme::color::text_a(20)),
             };
             let word = key == "drag";
@@ -650,7 +650,7 @@ fn row_ui(
                 p.galley(
                     egui::pos2(x, rect.center().y - g.size().y / 2.0),
                     g,
-                    fade(theme::text::FAINT),
+                    fade(theme::text::faint()),
                 );
                 right = x - 3.0;
                 continue;
@@ -678,12 +678,12 @@ fn row_ui(
             right = cap.left() - 3.0;
         }
         if n > 0 {
-            let g = p.layout_no_wrap("or".into(), font.clone(), fade(theme::text::FAINT));
+            let g = p.layout_no_wrap("or".into(), font.clone(), fade(theme::text::faint()));
             let x = right - g.size().x - 2.0;
             p.galley(
                 egui::pos2(x, rect.center().y - g.size().y / 2.0),
                 g,
-                fade(theme::text::FAINT),
+                fade(theme::text::faint()),
             );
             right = x - 5.0;
         }
@@ -691,7 +691,7 @@ fn row_ui(
     let base = fade(theme::color::text_a(204));
     let mut job = egui::text::LayoutJob::default();
     let plain = egui::TextFormat::simple(egui::FontId::proportional(11.5), base);
-    let lit = egui::TextFormat::simple(egui::FontId::proportional(11.5), fade(color::ACCENT_300));
+    let lit = egui::TextFormat::simple(egui::FontId::proportional(11.5), fade(color::accent_300()));
     // Light each label word a query word starts.
     let mut at = 0;
     let label = &row.label;
@@ -750,8 +750,8 @@ fn footer(ui: &mut egui::Ui) {
     let font = egui::FontId::proportional(10.5);
     let y = rect.center().y;
     let mut job = egui::text::LayoutJob::default();
-    let dim = egui::TextFormat::simple(font.clone(), theme::text::DIM);
-    let strong = egui::TextFormat::simple(font.clone(), theme::text::MUTED);
+    let dim = egui::TextFormat::simple(font.clone(), theme::text::dim());
+    let strong = egui::TextFormat::simple(font.clone(), theme::text::muted());
     for (text, fmt) in [
         ("Run any command by name with ", &dim),
         ("Ctrl + K", &strong),
@@ -765,7 +765,7 @@ fn footer(ui: &mut egui::Ui) {
     ] {
         job.append(text, 0.0, fmt.clone());
     }
-    let esc = p.layout_no_wrap("Esc close".into(), font, theme::text::DIM);
+    let esc = p.layout_no_wrap("Esc close".into(), font, theme::text::dim());
     // On a narrow card the hints give way to "Esc close", never run under it.
     job.wrap = egui::text::TextWrapping {
         max_width: (rect.width() - esc.size().x - 16.0).max(0.0),
@@ -777,12 +777,12 @@ fn footer(ui: &mut egui::Ui) {
     p.galley(
         egui::pos2(rect.left(), y - g.size().y / 2.0),
         g,
-        theme::text::DIM,
+        theme::text::dim(),
     );
     p.galley(
         egui::pos2(rect.right() - esc.size().x, y - esc.size().y / 2.0),
         esc,
-        theme::text::DIM,
+        theme::text::dim(),
     );
 }
 

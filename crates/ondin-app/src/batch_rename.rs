@@ -826,7 +826,7 @@ fn pill_fill() -> egui::Color32 {
 /// text's size: a smaller font sits on the line's baseline, low against its words.
 fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
     let font = egui::FontId::proportional(12.0);
-    let plain = egui::TextFormat::simple(font.clone(), color::TEXT);
+    let plain = egui::TextFormat::simple(font.clone(), color::text());
     let mut job = egui::text::LayoutJob::default();
     let mut at = 0;
     let mut last_end = None;
@@ -855,7 +855,11 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
         // between the wrong ones: the word is the text's own, the brackets hidden.
         let bracket = pill(egui::Color32::TRANSPARENT);
         job.append("[", gap, bracket.clone());
-        job.append(&text[r.start + 1..r.end - 1], 0.0, pill(color::ACCENT_200));
+        job.append(
+            &text[r.start + 1..r.end - 1],
+            0.0,
+            pill(color::accent_200()),
+        );
         job.append("]", 0.0, bracket);
         at = r.end;
     }
@@ -1010,8 +1014,8 @@ impl OndinApp {
             .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(
                 egui::Frame::NONE
-                    .fill(color::CARD)
-                    .stroke(egui::Stroke::new(1.0, color::DIVIDER))
+                    .fill(color::card())
+                    .stroke(egui::Stroke::new(1.0, color::divider()))
                     .corner_radius(egui::CornerRadius::same(8))
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 14],
@@ -1084,7 +1088,7 @@ enum Act {
 
 fn divider(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, color::DIVIDER);
+    ui.painter().rect_filled(rect, 0.0, color::divider());
 }
 
 /// The title row; true when its close button is clicked.
@@ -1097,14 +1101,14 @@ fn head(ui: &mut egui::Ui) -> bool {
         egui::Align2::LEFT_CENTER,
         icon::TEXT_AA,
         theme::icon_font(15.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     p.text(
         egui::pos2(rect.left() + PAD + 23.0, y),
         egui::Align2::LEFT_CENTER,
         "Batch rename",
         egui::FontId::proportional(13.0),
-        color::TEXT,
+        color::text(),
     );
     let close = egui::Rect::from_center_size(
         egui::pos2(rect.right() - 8.0 - 13.0, y),
@@ -1126,7 +1130,7 @@ fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(12.0),
-            theme::text::MUTED,
+            theme::text::muted(),
         );
         ui.add_space(GAP);
         add(ui)
@@ -1138,9 +1142,9 @@ fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui
 /// its word.
 fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::Response {
     let font = egui::FontId::proportional(11.5);
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color::TEXT));
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color::text()));
     let sub_g = (!sub.is_empty()).then(|| {
-        ui.fonts_mut(|f| f.layout_no_wrap(sub.to_string(), font.clone(), theme::text::DIM))
+        ui.fonts_mut(|f| f.layout_no_wrap(sub.to_string(), font.clone(), theme::text::dim()))
     });
     let w = galley.size().x + sub_g.as_ref().map_or(0.0, |g| g.size().x + 5.0) + 18.0;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
@@ -1150,7 +1154,11 @@ fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::
     } else if resp.hovered() {
         p.rect_filled(rect, 4.0, color::text_a(15));
     }
-    let ink = if on { color::TEXT } else { theme::text::MUTED };
+    let ink = if on {
+        color::text()
+    } else {
+        theme::text::muted()
+    };
     let x = rect.left() + 9.0;
     p.text(
         egui::pos2(x, rect.center().y),
@@ -1166,7 +1174,7 @@ fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::
                 rect.center().y - g.size().y / 2.0,
             ),
             g,
-            theme::text::DIM,
+            theme::text::dim(),
         );
     }
     resp
@@ -1175,7 +1183,7 @@ fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::
 /// A rounded well holding segments `h` tall.
 fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::NONE
-        .fill(color::FIELD)
+        .fill(color::field())
         .corner_radius(5)
         .inner_margin(2)
         .show(ui, |ui| {
@@ -1230,9 +1238,9 @@ fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: b
         p.rect_filled(rect, 4.0, color::text_a(15));
     }
     let ink = if *on {
-        color::ACCENT_200
+        color::accent_200()
     } else {
-        theme::text::DIM
+        theme::text::dim()
     };
     p.text(rect.center(), egui::Align2::CENTER_CENTER, text, font, ink);
     if resp.on_hover_text(tip).clicked() {
@@ -1243,9 +1251,9 @@ fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: b
 /// A field's well and ring, lit while `focused`.
 fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
     let p = ui.painter();
-    p.rect_filled(rect, 5.0, color::FIELD);
+    p.rect_filled(rect, 5.0, color::field());
     let ring = if focused {
-        egui::Stroke::new(1.0, color::ACCENT_400)
+        egui::Stroke::new(1.0, color::accent_400())
     } else {
         egui::Stroke::new(1.0, color::text_a(18))
     };
@@ -1296,18 +1304,18 @@ fn find_row(ui: &mut egui::Ui, s: &mut Settings, error: Option<&str>) {
                     .vertical_align(egui::Align::Center)
                     .desired_width(text.width())
                     .font(egui::FontId::proportional(12.0))
-                    .text_color(color::TEXT)
+                    .text_color(color::text())
                     .hint_text(
                         egui::RichText::new("Whole name")
                             .size(12.0)
-                            .color(theme::text::FAINT),
+                            .color(theme::text::faint()),
                     ),
             );
             let mut child = toggles(ui, rect, 52.0);
             field_toggle(&mut child, "Aa", "Match case", &mut s.match_case, false);
             field_toggle(&mut child, ".*", "Find as a pattern", &mut s.pattern, true);
             if let Some(e) = error {
-                ui.label(egui::RichText::new(e).size(10.5).color(color::WARN));
+                ui.label(egui::RichText::new(e).size(10.5).color(color::warn()));
             }
         });
     });
@@ -1417,7 +1425,7 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
                         ui.label(
                             egui::RichText::new("Empty: removes the match")
                                 .size(10.5)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                         );
                     });
                 }
@@ -1467,7 +1475,7 @@ fn take_pill(ui: &egui::Ui, id: egui::Id, text: &mut String) {
 
 fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let font = egui::FontId::proportional(11.0);
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font, theme::text::MUTED));
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font, theme::text::muted()));
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(galley.size().x + 7.0 * 2.0 + 14.0, 22.0),
         egui::Sense::click(),
@@ -1483,7 +1491,7 @@ fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
         egui::Align2::CENTER_CENTER,
         icon::PLUS,
         theme::icon_font(10.0),
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     p.galley(
         egui::pos2(
@@ -1491,7 +1499,7 @@ fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     resp.on_hover_text(format!("Insert {label} at the caret"))
 }
@@ -1565,9 +1573,11 @@ fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
     ui.horizontal(|ui| {
         ui.add_space(LABEL_W + GAP);
         let font = egui::FontId::proportional(12.0);
-        let galley = ui
-            .fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), theme::text::STRONG));
-        let note_g = ui.fonts_mut(|f| f.layout_no_wrap(note.to_string(), font, theme::text::FAINT));
+        let galley = ui.fonts_mut(|f| {
+            f.layout_no_wrap(label.to_string(), font.clone(), theme::text::strong())
+        });
+        let note_g =
+            ui.fonts_mut(|f| f.layout_no_wrap(note.to_string(), font, theme::text::faint()));
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(14.0 + 7.0 + galley.size().x + 5.0 + note_g.size().x, 24.0),
             egui::Sense::click(),
@@ -1578,7 +1588,7 @@ fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
             egui::vec2(14.0, 14.0),
         );
         if *on {
-            p.rect_filled(tick, 3.0, color::ACCENT);
+            p.rect_filled(tick, 3.0, color::accent());
             p.text(
                 tick.center(),
                 egui::Align2::CENTER_CENTER,
@@ -1604,12 +1614,12 @@ fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
         p.galley(
             egui::pos2(x, rect.center().y - galley.size().y / 2.0),
             galley,
-            theme::text::STRONG,
+            theme::text::strong(),
         );
         p.galley(
             egui::pos2(x + w + 5.0, rect.center().y - note_g.size().y / 2.0),
             note_g,
-            theme::text::FAINT,
+            theme::text::faint(),
         );
         if resp.clicked() {
             *on = !*on;
@@ -1646,14 +1656,14 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
         egui::Align2::LEFT_CENTER,
         "PREVIEW",
         egui::FontId::proportional(9.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     p.text(
         egui::pos2(rect.right() - PAD, y),
         egui::Align2::RIGHT_CENTER,
         count_label(scope, plan),
         egui::FontId::proportional(10.5),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     egui::Frame::NONE
         .inner_margin(egui::Margin {
@@ -1675,7 +1685,7 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
                         "Matching…"
                     },
                     egui::FontId::proportional(12.0),
-                    theme::text::DIM,
+                    theme::text::dim(),
                 );
                 return;
             }
@@ -1704,21 +1714,21 @@ fn page_head(ui: &mut egui::Ui, name: &str, n: usize) {
         egui::Align2::LEFT_CENTER,
         icon::FILE,
         theme::icon_font(11.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     p.text(
         egui::pos2(rect.left() + 8.0 + 17.0, y),
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(10.5),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     p.text(
         egui::pos2(rect.right() - 8.0, y),
         egui::Align2::RIGHT_CENTER,
         n.to_string(),
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
 }
 
@@ -1747,7 +1757,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
     let font = egui::FontId::proportional(12.0);
     let mut old = egui::text::LayoutJob::default();
     let mut at = 0;
-    let plain = egui::TextFormat::simple(font.clone(), fade(theme::text::MUTED));
+    let plain = egui::TextFormat::simple(font.clone(), fade(theme::text::muted()));
     for m in &l.matched {
         if m.start < at || m.end > l.old.len() {
             continue;
@@ -1757,9 +1767,9 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
             &l.old[m.clone()],
             0.0,
             egui::TextFormat {
-                color: fade(theme::text::STRONG),
-                underline: egui::Stroke::new(1.0, fade(theme::text::MUTED)),
-                ..egui::TextFormat::simple(font.clone(), color::TEXT)
+                color: fade(theme::text::strong()),
+                underline: egui::Stroke::new(1.0, fade(theme::text::muted())),
+                ..egui::TextFormat::simple(font.clone(), color::text())
             },
         );
         at = m.end;
@@ -1767,14 +1777,18 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
     old.append(&l.old[at..], 0.0, plain);
     old.wrap = egui::text::TextWrapping::truncate_at_width(old_w);
     let old = ui.fonts_mut(|f| f.layout_job(old));
-    p.galley(egui::pos2(x_old, y - old.size().y / 2.0), old, color::TEXT);
+    p.galley(
+        egui::pos2(x_old, y - old.size().y / 2.0),
+        old,
+        color::text(),
+    );
 
     p.text(
         egui::pos2(x_arrow + 7.0, y),
         egui::Align2::CENTER_CENTER,
         icon::ARROW_RIGHT,
         theme::icon_font(11.0),
-        fade(theme::text::FAINT),
+        fade(theme::text::faint()),
     );
 
     let mut new = egui::text::LayoutJob::default();
@@ -1783,20 +1797,24 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
         New::Name(spans) => {
             for s in spans {
                 let c = if s.changed {
-                    color::ACCENT_300
+                    color::accent_300()
                 } else {
-                    color::TEXT
+                    color::text()
                 };
                 new.append(&s.text, 0.0, fmt(c));
             }
         }
-        New::Unchanged => new.append(&l.old, 0.0, fmt(fade(theme::text::DIM))),
-        New::Empty => new.append("Would be empty · kept", 0.0, fmt(color::WARN)),
-        New::Variant => new.append("Named by its properties", 0.0, fmt(color::WARN)),
+        New::Unchanged => new.append(&l.old, 0.0, fmt(fade(theme::text::dim()))),
+        New::Empty => new.append("Would be empty · kept", 0.0, fmt(color::warn())),
+        New::Variant => new.append("Named by its properties", 0.0, fmt(color::warn())),
     }
     new.wrap = egui::text::TextWrapping::truncate_at_width(new_w);
     let new = ui.fonts_mut(|f| f.layout_job(new));
-    p.galley(egui::pos2(x_new, y - new.size().y / 2.0), new, color::TEXT);
+    p.galley(
+        egui::pos2(x_new, y - new.size().y / 2.0),
+        new,
+        color::text(),
+    );
 }
 
 /// The footer: the hint, then *Cancel* and *Rename* as the Settings modal's
@@ -1808,7 +1826,7 @@ fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act>
         egui::Align2::LEFT_CENTER,
         "Enter renames · Esc cancels",
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let go = match changes {
         0 => "Rename".to_string(),

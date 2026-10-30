@@ -445,7 +445,7 @@ fn counter(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32) 
     let galley = painter.layout_no_wrap(
         text.to_string(),
         egui::FontId::proportional(12.0),
-        crate::theme::text::STRONG.gamma_multiply(alpha),
+        crate::theme::text::strong().gamma_multiply(alpha),
     );
     let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);
     let pill = egui::Rect::from_center_size(
@@ -479,7 +479,7 @@ fn page_chip(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32
     let galley = painter.layout_no_wrap(
         text.to_string(),
         egui::FontId::proportional(12.0),
-        crate::theme::text::STRONG.gamma_multiply(alpha),
+        crate::theme::text::strong().gamma_multiply(alpha),
     );
     let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);
     let chip = egui::Rect::from_min_size(

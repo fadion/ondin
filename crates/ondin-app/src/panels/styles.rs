@@ -336,7 +336,7 @@ fn capsule(
         p.rect_stroke(
             rect,
             CAPSULE_H / 2.0,
-            egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.65)),
+            egui::Stroke::new(1.0, color::accent().gamma_multiply(0.65)),
             egui::StrokeKind::Inside,
         );
     }
@@ -367,7 +367,7 @@ fn capsule(
     };
     let font = egui::FontId::proportional(10.5);
     let chip_w = p
-        .layout_no_wrap(chip_label.into(), font.clone(), theme::text::STRONG)
+        .layout_no_wrap(chip_label.into(), font.clone(), theme::text::strong())
         .size()
         .x
         + 11.0
@@ -395,7 +395,7 @@ fn capsule(
     p.galley(
         egui::pos2(x, mid - name.size().y / 2.0),
         name,
-        theme::text::STRONG,
+        theme::text::strong(),
     );
     if hovered {
         let target = ui.interact(
@@ -421,7 +421,7 @@ fn capsule(
             egui::Align2::LEFT_CENTER,
             chip_label,
             font,
-            theme::text::STRONG,
+            theme::text::strong(),
         );
         if target.clicked() {
             out.detach = true;
@@ -649,7 +649,7 @@ impl OndinApp {
         p.rect_stroke(
             rect,
             CAPSULE_H / 2.0,
-            egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.65)),
+            egui::Stroke::new(1.0, color::accent().gamma_multiply(0.65)),
             egui::StrokeKind::Inside,
         );
         let mid = rect.center().y;
@@ -673,7 +673,7 @@ impl OndinApp {
                 .id(id)
                 .frame(egui::Frame::NONE)
                 .font(egui::FontId::proportional(12.0))
-                .text_color(theme::text::STRONG),
+                .text_color(theme::text::strong()),
         );
         if n.focus {
             edit.request_focus();
@@ -694,7 +694,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(why)
                     .size(10.5)
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
             );
         } else {
             ui.label(
@@ -1030,7 +1030,7 @@ impl OndinApp {
                         ui.label(
                             egui::RichText::new(text)
                                 .size(11.0)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                         );
                         return;
                     }
@@ -1066,7 +1066,7 @@ impl OndinApp {
                                             egui::Align2::LEFT_CENTER,
                                             g.to_uppercase(),
                                             egui::FontId::proportional(9.5),
-                                            theme::text::FAINT,
+                                            theme::text::faint(),
                                         );
                                     }
                                 }
@@ -1093,7 +1093,7 @@ impl OndinApp {
                                     egui::Align2::LEFT_CENTER,
                                     leaf,
                                     egui::FontId::proportional(11.5),
-                                    theme::text::STRONG,
+                                    theme::text::strong(),
                                 );
                                 p.text(
                                     egui::pos2(r.right() - 8.0, r.center().y),
@@ -1214,7 +1214,7 @@ fn number(x: f64) -> String {
 fn elided(p: &egui::Painter, text: &str, size: f32, width: f32) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::single_section(
         text.to_owned(),
-        egui::TextFormat::simple(egui::FontId::proportional(size), theme::text::STRONG),
+        egui::TextFormat::simple(egui::FontId::proportional(size), theme::text::strong()),
     );
     job.wrap = egui::text::TextWrapping {
         max_width: width.max(0.0),

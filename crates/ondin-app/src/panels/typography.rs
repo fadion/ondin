@@ -1066,7 +1066,7 @@ impl OndinApp {
             let over = ui.rect_contains_pointer(ui.max_rect());
             match mark {
                 None => {
-                    ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
+                    ui.label(theme::icon_text(key.badge(), 14.0, theme::text::faint()));
                 }
                 Some(m) => {
                     let glyph = if over {
@@ -1075,7 +1075,7 @@ impl OndinApp {
                         key.badge()
                     };
                     let badge = ui.add(
-                        egui::Label::new(theme::icon_text(glyph, 14.0, theme::text::STRONG))
+                        egui::Label::new(theme::icon_text(glyph, 14.0, theme::text::strong()))
                             .sense(egui::Sense::click()),
                     );
                     if !over {
@@ -1200,7 +1200,7 @@ impl OndinApp {
         let mixed = subject.mixed(CharAttrKind::Family);
         let current = shown.clone();
         // A family still downloading gets an ellipsis; one that can never be had
-        // wears its glyph in `WARN`.
+        // wears its glyph in `warn()`.
         let status = (!mixed).then(|| self.fonts.family_status(&shown));
         let label = if mixed {
             "Mixed".to_string()
@@ -1212,7 +1212,7 @@ impl OndinApp {
         // Only the glyph is tinted: a dim name would read as the pick not taking.
         let head = match status {
             Some(crate::fonts::FamilyStatus::Missing) => {
-                ui::glyph_and_text_tinted(icon::TEXT_AA, &label, theme::color::WARN)
+                ui::glyph_and_text_tinted(icon::TEXT_AA, &label, theme::color::warn())
             }
             _ => ui::glyph_and_text(icon::TEXT_AA, &label),
         };
@@ -1339,9 +1339,9 @@ impl OndinApp {
         }
 
         let ink = if selected {
-            theme::color::TEXT
+            theme::color::text()
         } else {
-            theme::text::STRONG
+            theme::text::strong()
         };
         let text = rect
             .shrink2(egui::vec2(7.0, 0.0))
@@ -1355,7 +1355,7 @@ impl OndinApp {
                 egui::Align2::LEFT_CENTER,
                 family,
                 egui::FontId::proportional(12.0),
-                theme::text::MUTED,
+                theme::text::muted(),
             );
         }
         // Asked after `ensure_preview`, which is what puts the face in flight.
@@ -2092,7 +2092,7 @@ impl OndinApp {
                                                     "The text style holds the greyed rows. Detach to edit",
                                                 )
                                                 .size(10.0)
-                                                .color(theme::text::MUTED),
+                                                .color(theme::text::muted()),
                                             );
                                         }
                                         self.type_character_tab(ui, subject, char_locked);
@@ -2410,7 +2410,7 @@ impl OndinApp {
                     if ui::swatch(
                         ui,
                         14.0,
-                        theme::color::FIELD,
+                        theme::color::field(),
                         match &ramp {
                             Some(stops) => ui::Swatch::Ramp(stops),
                             None => ui::Swatch::Solid(ui::color_to_egui(shown)),
@@ -2855,7 +2855,7 @@ impl OndinApp {
                 ui.label(theme::icon_text(
                     icon::MAGNIFYING_GLASS,
                     SEARCH_ICON_PT,
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 ));
                 // A `TextEdit` asking for more than its row grows the row, pinning the card's width.
                 ui.add(
@@ -2929,7 +2929,7 @@ impl OndinApp {
                         egui::Label::new(
                             egui::RichText::new(text)
                                 .size(ui::SEGMENT_LABEL_PT)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                         )
                         .sense(egui::Sense::click())
                         // A selectable `Label` reports the I-beam cursor.
@@ -3006,7 +3006,7 @@ impl OndinApp {
                             egui::Label::new(
                                 egui::RichText::new(axis.name.as_str())
                                     .size(11.5)
-                                    .color(theme::text::MUTED),
+                                    .color(theme::text::muted()),
                             )
                             .truncate(),
                         )
@@ -3552,7 +3552,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("An ellipsis needs a line limit or a fixed height.")
                         .size(10.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
             }
         });
@@ -4297,7 +4297,7 @@ fn section_marked<R>(
                 None,
                 &label.to_uppercase(),
                 ui::EYEBROW_PT,
-                theme::text::FAINT,
+                theme::text::faint(),
                 mark,
             );
             ui.add_space(ui::SECTION_LABEL_GAP);
@@ -5507,7 +5507,7 @@ fn paint_loading_dot(ui: &egui::Ui, centre: egui::Pos2) {
     ui.painter().circle_filled(
         centre,
         LOADING_DOT_R,
-        theme::color::ACCENT.gamma_multiply(alpha as f32 / 255.0),
+        theme::color::accent().gamma_multiply(alpha as f32 / 255.0),
     );
     // The app repaints reactively; without this the dot freezes at its last phase.
     ui.ctx().request_repaint();
@@ -6898,7 +6898,7 @@ mod tests {
             rest_fallback, hot_fallback,
             "hovering the unit has to change the colour it is painted in"
         );
-        assert_eq!(rest_fallback, theme::text::FAINT, "at rest");
+        assert_eq!(rest_fallback, theme::text::faint(), "at rest");
     }
 
     /// The hand-painted slider reaches both ends of its range despite the knob inset, and the middle.
@@ -7217,7 +7217,7 @@ mod tests {
                 ui.label(theme::icon_text(
                     icon::MAGNIFYING_GLASS,
                     SEARCH_ICON_PT,
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 ));
                 ui.add(
                     egui::TextEdit::singleline(&mut needle)
@@ -7237,7 +7237,7 @@ mod tests {
                     ui::swatch(
                         ui,
                         14.0,
-                        theme::color::FIELD,
+                        theme::color::field(),
                         ui::Swatch::Solid(egui::Color32::RED),
                     );
                     ui.add(
@@ -7272,7 +7272,7 @@ mod tests {
                             egui::Label::new(
                                 egui::RichText::new("Optical size")
                                     .size(11.5)
-                                    .color(theme::text::MUTED),
+                                    .color(theme::text::muted()),
                             )
                             .truncate(),
                         );
@@ -7735,7 +7735,7 @@ mod tests {
         let font = egui::FontId::proportional(ui::SEGMENT_LABEL_PT);
         for tab in TypeTab::ALL {
             let w = ctx.fonts_mut(|f| {
-                f.layout_no_wrap(tab.label().to_string(), font.clone(), theme::color::TEXT)
+                f.layout_no_wrap(tab.label().to_string(), font.clone(), theme::color::text())
                     .size()
                     .x
             });
@@ -7759,7 +7759,7 @@ mod tests {
                 .iter()
                 .map(|s| {
                     ctx.fonts_mut(|f| {
-                        f.layout_no_wrap((*s).to_string(), font.clone(), theme::color::TEXT)
+                        f.layout_no_wrap((*s).to_string(), font.clone(), theme::color::text())
                             .size()
                             .x
                     })
@@ -11241,7 +11241,7 @@ mod instance_mark_tests {
         };
         assert_eq!(dots.len(), 1, "one dot: {dots:?}");
         let (case_at, case_ink) = ink("CASE");
-        assert_eq!(case_ink, theme::text::STRONG, "Case is overridden");
+        assert_eq!(case_ink, theme::text::strong(), "Case is overridden");
         // Language's ink is in the galley, not `fallback_color`.
         assert!(
             (dots[0].y - case_at.center().y).abs() < 8.0 && ink("LANGUAGE").0.top() > dots[0].y,

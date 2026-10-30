@@ -9,86 +9,200 @@
 use eframe::egui;
 use std::sync::Arc;
 
-/// Palette. Grounds are `color-mix(in srgb, var(--color-text) N%, #000)` with
-/// text = `#e9e9ed` (233, 233, 237); the accent ramp is a steel blue.
+/// Palette. The chrome's colours change with the theme, so each is read through
+/// a function of its own name ([`color::bg`], [`text::dim`]). The canvas marks —
+/// selection, key, component, measure, point — are drawn over artwork rather
+/// than over the chrome, and stay constants.
 ///
 /// No `#[allow(dead_code)]` here: `dead_code` reports a colour that loses its
 /// last caller.
 pub mod color {
     use eframe::egui::Color32;
 
-    /// `--color-text` — the one near-neutral foreground everything derives from.
-    pub const TEXT: Color32 = Color32::from_rgb(233, 233, 237);
+    /// Declares [`Palette`]: one field per chrome colour, and a function of the
+    /// same name returning the current theme's value.
+    macro_rules! palette {
+        ($($(#[$doc:meta])* $name:ident,)*) => {
+            /// One theme's chrome colours.
+            struct Palette {
+                $($name: Color32,)*
+            }
+            $(
+                $(#[$doc])*
+                pub fn $name() -> Color32 {
+                    palette().$name
+                }
+            )*
+        };
+    }
 
-    // Grounds (text mixed toward pure black).
-    /// 10% — main container, canvas, inspector pane.
-    pub const BG: Color32 = Color32::from_rgb(23, 23, 24);
-    /// 13% — top bar.
-    pub const TOPBAR: Color32 = Color32::from_rgb(30, 30, 31);
-    /// 14% — layers pane.
-    pub const PANEL: Color32 = Color32::from_rgb(33, 33, 33);
-    /// 16% — tool rail and inspector cards.
-    pub const CARD: Color32 = Color32::from_rgb(37, 37, 38);
-    /// Field/input ground inside a card (text 5% over the card).
-    pub const FIELD: Color32 = Color32::from_rgb(47, 47, 48);
-    /// Hairline field border — text 8% over **[`FIELD`], not over [`CARD`]**.
-    ///
-    /// A translucent CSS border composites over the element's own background
-    /// (`background-clip: border-box`), so the 8% resolves against the field's 47,
-    /// not the card's 37; resolved over the card it is 53, which is too dim to
-    /// register. [`CARD_BORDER`] is the same 8% over the card, for boxes filled
-    /// with [`CARD`].
-    pub const FIELD_BORDER: Color32 = Color32::from_rgb(62, 62, 63);
+    palette! {
+        /// `--color-text` — the one near-neutral foreground everything derives from.
+        text,
 
-    /// Hairline round a box filled with [`CARD`] — the dashboard's project and
-    /// file cards, and the *New file* slot's dashed outline.
-    ///
-    /// Text 8% over [`CARD`]. Kept apart from [`FIELD_BORDER`]: against a 37 ground
-    /// 62 would read as a lit edge, which is what a *hovered* card already means
-    /// (`ACCENT_700`).
-    pub const CARD_BORDER: Color32 = Color32::from_rgb(53, 53, 54);
+        // Grounds (text mixed toward the far end).
+        /// Main container, canvas, inspector pane.
+        bg,
+        /// Top bar.
+        topbar,
+        /// Layers pane.
+        panel,
+        /// Tool rail and inspector cards.
+        card,
+        /// Field/input ground inside a card (text 5% over the card).
+        field,
+        /// Hairline field border — text 8% over **[`field`], not over [`card`]**.
+        ///
+        /// A translucent CSS border composites over the element's own background
+        /// (`background-clip: border-box`), so the 8% resolves against the field,
+        /// not the card; resolved over the card it is too dim to register.
+        /// [`card_border`] is the same 8% over the card, for boxes filled with
+        /// [`card`].
+        field_border,
+        /// Hairline round a box filled with [`card`] — the dashboard's project and
+        /// file cards, and the *New file* slot's dashed outline.
+        ///
+        /// Text 8% over [`card`]. Kept apart from [`field_border`]: against the
+        /// card that would read as a lit edge, which is what a *hovered* card
+        /// already means ([`accent_700`]).
+        card_border,
+        /// The ground every hovered control paints (§15 D484): egui's stock widgets
+        /// (`install_style_into`), `ui::icon_button_padded`, `ui::button_face` and
+        /// `inspector::template_cell` all use it, and they must agree or the hover
+        /// splits into two greys.
+        hover,
+        /// A ground a step above [`card`] — the variables browser, which floats
+        /// over the inspector's cards.
+        raised,
+        /// The document tab strip's ground, a step below [`topbar`]; a tab behind
+        /// keeps [`tab_behind`], a step above the strip, and hover lifts it to
+        /// [`tab_lifted`]. The front tab takes [`topbar`].
+        tab_strip,
+        /// A tab behind the front one.
+        tab_behind,
+        /// A tab behind the front one, under the pointer.
+        tab_lifted,
 
-    /// The ground every hovered control paints (§15 D484): egui's stock widgets
-    /// (`install_style_into`), `ui::icon_button_padded`, `ui::button_face` and
-    /// `inspector::template_cell` all use it, and they must agree or the hover
-    /// splits into two greys.
-    pub const HOVER: Color32 = Color32::from_rgb(52, 52, 54);
+        /// The accent (the ramp's 500). The ramp's steps count away from the
+        /// ground: 900 is the subtle accent ground, 100 the ink on it.
+        accent,
+        accent_100,
+        accent_200,
+        accent_300,
+        accent_400,
+        accent_600,
+        accent_700,
+        accent_800,
+        accent_900,
 
-    /// A ground a step above [`CARD`] — the variables browser, which floats
-    /// over the inspector's cards.
-    pub const RAISED: Color32 = Color32::from_rgb(40, 40, 40);
+        /// A layer the app cannot draw as the document describes it — today, one
+        /// whose picture is missing (§15 D179).
+        ///
+        /// Amber rather than red: the usual cause is a moved file, a thing to fix
+        /// rather than a mistake. It tints the row's existing kind glyph, which costs
+        /// no width.
+        warn,
+        /// The star on a starred document's card.
+        ///
+        /// Its own colour rather than [`warn`], though near-identical: the two mean
+        /// opposite things (*you marked this* / *this cannot be drawn*) and must be
+        /// free to be re-tuned apart.
+        star,
+        /// A row that destroys something — today, *Delete* in a context menu.
+        ///
+        /// The app's one red, so the eye lands on the row work can be lost with.
+        /// Distinct from [`warn`]: amber grades toward "cannot be drawn", red means
+        /// "this click removes it".
+        danger,
+        /// The save dot once the file matches the document (§15 D962) — the app's
+        /// one green, at [`danger`]'s OKLCH lightness and chroma, so neither state
+        /// is louder than the other.
+        saved,
+        /// Ink of a green badge, [`saved`]'s twin of [`accent_100`] — the
+        /// dashboard's *New* tag.
+        saved_100,
+        /// Ground of a green badge, [`saved`]'s twin of [`accent_900`].
+        saved_900,
+        /// A failed status message's ink: [`danger`] moved toward the text, so a
+        /// line of small type stays readable.
+        error,
+        /// The steps a *filled* destructive button needs, mirroring
+        /// [`accent_900`]/[`accent_700`]/[`accent_200`] — ground, border and ink for
+        /// [`super::super::ui::FieldButton::Danger`] — and [`accent_800`] for its
+        /// hovered ground. Derived from [`danger`] by the accent ramp's ratios, so
+        /// the red button is the blue one's twin in weight.
+        danger_900,
+        /// [`danger_900`]'s hovered ground.
+        danger_800,
+        /// [`danger_900`]'s border.
+        danger_700,
+        /// [`danger_900`]'s ink.
+        danger_200,
+    }
 
-    /// The document tab strip's ground, a step below [`TOPBAR`]; a tab behind
-    /// keeps [`TAB_BEHIND`], a step above the strip, and hover lifts it to
-    /// [`TAB_LIFTED`]. The front tab takes [`TOPBAR`].
-    pub const TAB_STRIP: Color32 = Color32::from_rgb(14, 14, 15);
-    pub const TAB_BEHIND: Color32 = Color32::from_rgb(20, 20, 21);
-    pub const TAB_LIFTED: Color32 = Color32::from_rgb(25, 25, 26);
+    /// The dark palette. Grounds are `color-mix(in srgb, var(--color-text) N%,
+    /// #000)` with text `#e9e9ed`: 10% the main ground, 13% the top bar, 14% the
+    /// layers pane, 16% the cards, 17% the raised ground.
+    const DARK: Palette = Palette {
+        text: Color32::from_rgb(233, 233, 237),
+        bg: Color32::from_rgb(23, 23, 24),
+        topbar: Color32::from_rgb(30, 30, 31),
+        panel: Color32::from_rgb(33, 33, 33),
+        card: Color32::from_rgb(37, 37, 38),
+        field: Color32::from_rgb(47, 47, 48),
+        field_border: Color32::from_rgb(62, 62, 63),
+        card_border: Color32::from_rgb(53, 53, 54),
+        hover: Color32::from_rgb(52, 52, 54),
+        raised: Color32::from_rgb(40, 40, 40),
+        tab_strip: Color32::from_rgb(14, 14, 15),
+        tab_behind: Color32::from_rgb(20, 20, 21),
+        tab_lifted: Color32::from_rgb(25, 25, 26),
+        accent: Color32::from_rgb(109, 140, 217),
+        accent_100: Color32::from_rgb(226, 233, 248),
+        accent_200: Color32::from_rgb(196, 211, 241),
+        accent_300: Color32::from_rgb(166, 189, 234),
+        accent_400: Color32::from_rgb(139, 165, 224),
+        accent_600: Color32::from_rgb(87, 115, 189),
+        accent_700: Color32::from_rgb(68, 92, 154),
+        accent_800: Color32::from_rgb(47, 63, 102),
+        accent_900: Color32::from_rgb(33, 44, 70),
+        warn: Color32::from_rgb(0xe0, 0xa0, 0x4a),
+        star: Color32::from_rgb(0xe0, 0xa9, 0x3c),
+        danger: Color32::from_rgb(0xe0, 0x73, 0x6b),
+        saved: Color32::from_rgb(0x45, 0xb0, 0x70),
+        saved_100: Color32::from_rgb(0xb4, 0xe8, 0xc8),
+        saved_900: Color32::from_rgb(0x12, 0x30, 0x20),
+        error: Color32::from_rgb(226, 138, 138),
+        danger_900: Color32::from_rgb(69, 36, 33),
+        danger_800: Color32::from_rgb(101, 52, 48),
+        danger_700: Color32::from_rgb(148, 76, 71),
+        danger_200: Color32::from_rgb(243, 201, 198),
+    };
 
-    // Accent ramp (Editor `:root` override — steel blue).
-    pub const ACCENT: Color32 = Color32::from_rgb(109, 140, 217); // 500 / base
-    pub const ACCENT_100: Color32 = Color32::from_rgb(226, 233, 248);
-    pub const ACCENT_200: Color32 = Color32::from_rgb(196, 211, 241);
-    pub const ACCENT_300: Color32 = Color32::from_rgb(166, 189, 234);
-    pub const ACCENT_400: Color32 = Color32::from_rgb(139, 165, 224);
-    pub const ACCENT_600: Color32 = Color32::from_rgb(87, 115, 189);
-    pub const ACCENT_700: Color32 = Color32::from_rgb(68, 92, 154);
-    pub const ACCENT_800: Color32 = Color32::from_rgb(47, 63, 102);
-    pub const ACCENT_900: Color32 = Color32::from_rgb(33, 44, 70);
+    /// The current theme's palette.
+    fn palette() -> &'static Palette {
+        &DARK
+    }
 
-    /// Text at a given opacity over the dark ground. Used for the muted label
-    /// tiers (38% / 45% / 62% / 88%).
-    pub const fn text_a(alpha: u8) -> Color32 {
-        Color32::from_rgba_premultiplied(
-            (233 * alpha as u32 / 255) as u8,
-            (233 * alpha as u32 / 255) as u8,
-            (237 * alpha as u32 / 255) as u8,
-            alpha,
-        )
+    /// Text at a given opacity over the ground. Used for the muted label tiers
+    /// (38% / 45% / 62% / 88%).
+    pub fn text_a(alpha: u8) -> Color32 {
+        let [r, g, b, _] = text().to_array();
+        let at = |c: u8| (c as u32 * alpha as u32 / 255) as u8;
+        Color32::from_rgba_premultiplied(at(r), at(g), at(b), alpha)
     }
 
     /// Hairline divider / faint border (text at ~9%).
-    pub const DIVIDER: Color32 = text_a(23);
+    pub fn divider() -> Color32 {
+        text_a(23)
+    }
+
+    /// The editor's save dot, red while the document differs from its file
+    /// (§15 D962). [`danger`]'s value under its own name: a dirty document is
+    /// not a click that destroys something, and the two must be free to part.
+    pub fn unsaved() -> Color32 {
+        danger()
+    }
 
     /// The selection colour on the canvas — a light sky blue, deliberately
     /// *not* the chrome accent: the panels and much artwork are blue, and an
@@ -143,8 +257,8 @@ pub mod color {
     /// The ground of the dimension badge under a selection: the selection
     /// colour itself, so the box and the number it quotes are one object.
     pub const BADGE: Color32 = SELECT;
-    /// Ink on [`BADGE`]. The badge ground is light, so the near-white text tier
-    /// the rest of the chrome uses would be unreadable on it.
+    /// Ink on [`BADGE`]. The badge ground is light, so the dark theme's near-white
+    /// text tier would be unreadable on it; it stays the same in either theme.
     pub const BADGE_INK: Color32 = Color32::from_rgb(0x0c, 0x25, 0x30);
 
     /// **A labelled distance on the canvas** — the lines and pills of the Alt-hover
@@ -160,59 +274,6 @@ pub mod color {
     /// Ink on [`MEASURE`], for [`BADGE_INK`]'s reason: the pill's ground is light.
     pub const MEASURE_INK: Color32 = Color32::from_rgb(0x2b, 0x0c, 0x0c);
 
-    /// A layer the app cannot draw as the document describes it — today, one
-    /// whose picture is missing (§15 D179).
-    ///
-    /// Amber rather than red: the usual cause is a moved file, a thing to fix
-    /// rather than a mistake. It tints the row's existing kind glyph, which costs
-    /// no width.
-    pub const WARN: Color32 = Color32::from_rgb(0xe0, 0xa0, 0x4a);
-
-    /// The star on a starred document's card.
-    ///
-    /// Its own constant rather than [`WARN`], though near-identical: the two mean
-    /// opposite things (*you marked this* / *this cannot be drawn*) and must be
-    /// free to be re-tuned apart.
-    pub const STAR: Color32 = Color32::from_rgb(0xe0, 0xa9, 0x3c);
-
-    /// A row that destroys something — today, *Delete* in a context menu.
-    ///
-    /// The app's one red, so the eye lands on the row work can be lost with. Distinct
-    /// from [`WARN`]: amber grades toward "cannot be drawn", red means "this click
-    /// removes it".
-    pub const DANGER: Color32 = Color32::from_rgb(0xe0, 0x73, 0x6b);
-
-    /// The editor's save dot, red while the document differs from its file
-    /// (§15 D962). [`DANGER`]'s value under its own name: a dirty document is
-    /// not a click that destroys something, and the two must be free to part.
-    pub const UNSAVED: Color32 = DANGER;
-
-    /// The save dot once the file matches the document (§15 D962) — the app's
-    /// one green, computed to [`DANGER`]'s OKLCH lightness and chroma (0.68,
-    /// 0.137) at a green hue (154°), so neither state is louder than the other.
-    pub const SAVED: Color32 = Color32::from_rgb(0x45, 0xb0, 0x70);
-    /// Ink and ground of a green badge, [`SAVED`]'s twin of
-    /// [`ACCENT_100`]/[`ACCENT_900`] — the dashboard's *New* tag.
-    pub const SAVED_100: Color32 = Color32::from_rgb(0xb4, 0xe8, 0xc8);
-    pub const SAVED_900: Color32 = Color32::from_rgb(0x12, 0x30, 0x20);
-
-    /// A failed status message's ink: [`DANGER`] lifted toward the text, so a
-    /// line of small type stays readable.
-    pub const ERROR: Color32 = Color32::from_rgb(226, 138, 138);
-
-    /// The three steps a *filled* destructive button needs, mirroring
-    /// [`ACCENT_900`]/[`ACCENT_700`]/[`ACCENT_200`] — ground, border and ink for
-    /// [`super::super::ui::FieldButton::Danger`].
-    ///
-    /// Computed from [`DANGER`] by the accent ramp's ratios (×0.31 ground, ×0.66
-    /// border, 61.5% of the way to white for the ink), so the red button is the
-    /// blue one's twin in weight. A fourth step is the hovered ground, mirroring
-    /// [`ACCENT_800`].
-    pub const DANGER_900: Color32 = Color32::from_rgb(69, 36, 33);
-    pub const DANGER_800: Color32 = Color32::from_rgb(101, 52, 48);
-    pub const DANGER_700: Color32 = Color32::from_rgb(148, 76, 71);
-    pub const DANGER_200: Color32 = Color32::from_rgb(243, 201, 198);
-
     /// The ground of an *unselected* point marker in the node tool.
     ///
     /// Opaque rather than hollow like a resize handle (§15 D14): the anchor *is*
@@ -225,21 +286,35 @@ pub mod color {
 pub mod text {
     use super::color::text_a;
     use eframe::egui::Color32;
-    pub const STRONG: Color32 = text_a(224); // ~88%
-    pub const MUTED: Color32 = text_a(158); // ~62%
-    pub const DIM: Color32 = text_a(115); // ~45%
-    pub const FAINT: Color32 = text_a(97); // ~38%
+    /// ~88%.
+    pub fn strong() -> Color32 {
+        text_a(224)
+    }
+    /// ~62%.
+    pub fn muted() -> Color32 {
+        text_a(158)
+    }
+    /// ~45%.
+    pub fn dim() -> Color32 {
+        text_a(115)
+    }
+    /// ~38%.
+    pub fn faint() -> Color32 {
+        text_a(97)
+    }
     /// **A control that cannot be used**, as distinct from one that is merely
-    /// quiet. Below [`FAINT`], which stays the tier for placeholders, hints and
-    /// secondary labels.
+    /// quiet: ~31%, below [`faint`], which stays the tier for placeholders, hints
+    /// and secondary labels.
     ///
     /// 79 is matched, not chosen: `Ui::disable` fades by `Visuals::disabled_alpha`
-    /// (0.5), so a [`MUTED`] glyph disabled that way paints at 79, and colour-based
+    /// (0.5), so a [`muted`] glyph disabled that way paints at 79, and colour-based
     /// disabling (`icon_button`'s `enabled: false`, `FieldButton::Disabled`) must
     /// land on the same ink. It also stays well apart from the "off" tiers
-    /// (`HIDDEN_OPACITY` over MUTED is 95, a hidden or locked layer row is
+    /// (`HIDDEN_OPACITY` over muted is 95, a hidden or locked layer row is
     /// `text_a(102)`), so dimmed-because-off and dimmed-because-unavailable differ.
-    pub const DISABLED: Color32 = text_a(79); // ~31%
+    pub fn disabled() -> Color32 {
+        text_a(79)
+    }
 }
 
 /// Phosphor icon glyphs (Regular weight), by name. Codepoints extracted from
@@ -597,7 +672,7 @@ pub mod icon {
     pub const STACK: &str = "\u{e466}";
     /// *Flatten* — the same stack pressed into one sheet.
     pub const STACK_SIMPLE: &str = "\u{e468}";
-    /// *Delete*, in [`super::color::DANGER`]. The lidded bin rather than
+    /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
     /// *Show grid* — the one View switch with no glyph of its own until a menu
@@ -970,18 +1045,18 @@ fn install_style_into(style: &mut egui::Style) {
 
     let v = &mut style.visuals;
     v.dark_mode = true;
-    v.override_text_color = Some(color::TEXT);
-    v.panel_fill = color::BG;
-    v.window_fill = color::CARD;
-    v.extreme_bg_color = color::FIELD; // text-edit / input backgrounds
-    v.faint_bg_color = color::CARD;
-    v.hyperlink_color = color::ACCENT;
-    v.window_stroke = Stroke::new(1.0, color::DIVIDER);
+    v.override_text_color = Some(color::text());
+    v.panel_fill = color::bg();
+    v.window_fill = color::card();
+    v.extreme_bg_color = color::field(); // text-edit / input backgrounds
+    v.faint_bg_color = color::card();
+    v.hyperlink_color = color::accent();
+    v.window_stroke = Stroke::new(1.0, color::divider());
     v.window_corner_radius = CornerRadius::same(6);
 
     // Selection (used by text fields, selectable_label highlight, etc.).
-    v.selection.bg_fill = color::ACCENT_800;
-    v.selection.stroke = Stroke::new(1.0, color::ACCENT_300);
+    v.selection.bg_fill = color::accent_800();
+    v.selection.stroke = Stroke::new(1.0, color::accent_300());
 
     let r5 = CornerRadius::same(5);
     let w = &mut v.widgets;
@@ -989,32 +1064,32 @@ fn install_style_into(style: &mut egui::Style) {
     // Non-interactive (labels, separators): no fill, faint divider strokes.
     w.noninteractive.bg_fill = Color32::TRANSPARENT;
     w.noninteractive.weak_bg_fill = Color32::TRANSPARENT;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, color::DIVIDER);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, text::MUTED);
+    w.noninteractive.bg_stroke = Stroke::new(1.0, color::divider());
+    w.noninteractive.fg_stroke = Stroke::new(1.0, text::muted());
     w.noninteractive.corner_radius = r5;
 
     // Inactive (resting buttons / controls): field ground, hairline border.
-    w.inactive.bg_fill = color::FIELD;
-    w.inactive.weak_bg_fill = color::FIELD;
-    w.inactive.bg_stroke = Stroke::new(1.0, color::FIELD_BORDER);
-    w.inactive.fg_stroke = Stroke::new(1.0, text::STRONG);
+    w.inactive.bg_fill = color::field();
+    w.inactive.weak_bg_fill = color::field();
+    w.inactive.bg_stroke = Stroke::new(1.0, color::field_border());
+    w.inactive.fg_stroke = Stroke::new(1.0, text::strong());
     w.inactive.corner_radius = r5;
     w.inactive.expansion = 0.0;
 
     // Hovered: a touch lighter, accent-tinted border.
-    w.hovered.bg_fill = color::HOVER;
-    w.hovered.weak_bg_fill = color::HOVER;
-    w.hovered.bg_stroke = Stroke::new(1.0, color::ACCENT_700);
-    w.hovered.fg_stroke = Stroke::new(1.0, color::TEXT);
+    w.hovered.bg_fill = color::hover();
+    w.hovered.weak_bg_fill = color::hover();
+    w.hovered.bg_stroke = Stroke::new(1.0, color::accent_700());
+    w.hovered.fg_stroke = Stroke::new(1.0, color::text());
     w.hovered.corner_radius = r5;
     w.hovered.expansion = 0.0;
 
     // Active/pressed and open: accent-tinted ground.
     for ws in [&mut w.active, &mut w.open] {
-        ws.bg_fill = color::ACCENT_800;
-        ws.weak_bg_fill = color::ACCENT_800;
-        ws.bg_stroke = Stroke::new(1.0, color::ACCENT);
-        ws.fg_stroke = Stroke::new(1.0, color::ACCENT_100);
+        ws.bg_fill = color::accent_800();
+        ws.weak_bg_fill = color::accent_800();
+        ws.bg_stroke = Stroke::new(1.0, color::accent());
+        ws.fg_stroke = Stroke::new(1.0, color::accent_100());
         ws.corner_radius = r5;
         ws.expansion = 0.0;
     }

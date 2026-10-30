@@ -310,8 +310,8 @@ fn three_buttons(ui: &mut egui::Ui, act: bool) {
     let glyph = |ui: &egui::Ui, rect: Rect, hovered: bool, close: bool| {
         let fg = match (hovered, close) {
             (true, true) => Color32::WHITE,
-            (true, false) => color::TEXT,
-            (false, _) => crate::theme::text::MUTED,
+            (true, false) => color::text(),
+            (false, _) => crate::theme::text::muted(),
         };
         (
             ui.painter().clone(),
@@ -322,7 +322,7 @@ fn three_buttons(ui: &mut egui::Ui, act: bool) {
     let button = |ui: &mut egui::Ui, close: bool| {
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(CONTROL_W, height), Sense::CLICK);
         if resp.hovered() {
-            let fill = if close { CLOSE_HOVER } else { color::HOVER };
+            let fill = if close { CLOSE_HOVER } else { color::hover() };
             ui.painter().rect_filled(rect, 0.0, fill);
         }
         (rect, resp)
@@ -414,11 +414,11 @@ pub(crate) fn focus_strip(ctx: &egui::Context, chrome: Chrome) {
         .show(ctx, |ui| {
             // The whole strip is the area's, so the canvas never sees the pointer.
             ui.set_min_size(strip.size());
-            ui.painter().rect_filled(strip, 0.0, color::TOPBAR);
+            ui.painter().rect_filled(strip, 0.0, color::topbar());
             ui.painter().hline(
                 strip.x_range(),
                 strip.max.y - 0.5,
-                Stroke::new(1.0, color::DIVIDER),
+                Stroke::new(1.0, color::divider()),
             );
             ui.scope_builder(
                 egui::UiBuilder::new()

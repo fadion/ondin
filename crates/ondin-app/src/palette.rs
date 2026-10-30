@@ -968,8 +968,8 @@ impl OndinApp {
             .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(
                 egui::Frame::NONE
-                    .fill(color::CARD)
-                    .stroke(egui::Stroke::new(1.0, theme::color::DIVIDER))
+                    .fill(color::card())
+                    .stroke(egui::Stroke::new(1.0, theme::color::divider()))
                     .corner_radius(egui::CornerRadius::same(8))
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 14],
@@ -1076,7 +1076,7 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
             ui.label(
                 egui::RichText::new(icon::MAGNIFYING_GLASS)
                     .font(theme::icon_font(16.0))
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
             );
             if pal.layers_only {
                 layers_chip(ui);
@@ -1087,7 +1087,7 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY)
                     .font(egui::FontId::proportional(13.0))
-                    .text_color(color::TEXT)
+                    .text_color(color::text())
                     .hint_text(
                         egui::RichText::new(if pal.layers_only {
                             "Search layers"
@@ -1095,7 +1095,7 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
                             "Search commands and layers"
                         })
                         .size(13.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                     ),
             );
             // Every frame: the palette owns the keyboard while it is open.
@@ -1123,7 +1123,7 @@ fn section_label(ui: &mut egui::Ui, title: &str) {
         title.to_uppercase(),
         egui::TextFormat {
             font_id: egui::FontId::proportional(9.0),
-            color: theme::text::FAINT,
+            color: theme::text::faint(),
             extra_letter_spacing: 0.9,
             ..Default::default()
         },
@@ -1133,7 +1133,7 @@ fn section_label(ui: &mut egui::Ui, title: &str) {
     ui.painter().galley(
         egui::pos2(rect.left() + 8.0, rect.bottom() - 5.0 - galley.size().y),
         galley,
-        theme::text::FAINT,
+        theme::text::faint(),
     );
 }
 
@@ -1183,7 +1183,11 @@ fn chip(ui: &egui::Ui, right: f32, y: f32, accel: &str, live: bool) -> f32 {
         egui::CornerRadius::same(4),
         theme::color::text_a(if live { 18 } else { 10 }),
     );
-    p.galley(rect.min + egui::vec2(5.0, 2.0), galley, theme::text::FAINT);
+    p.galley(
+        rect.min + egui::vec2(5.0, 2.0),
+        galley,
+        theme::text::faint(),
+    );
     size.x
 }
 
@@ -1205,9 +1209,9 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
     }
     let live = c.enabled;
     let glyph_col = match () {
-        _ if !live => theme::text::DISABLED,
-        _ if lit => color::ACCENT_200,
-        _ => theme::text::DIM,
+        _ if !live => theme::text::disabled(),
+        _ if lit => color::accent_200(),
+        _ => theme::text::dim(),
     };
     let glyph_at = egui::pos2(rect.left() + 8.0 + 8.0, rect.center().y);
     match c.checked {
@@ -1218,9 +1222,9 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
                 icon::CHECK,
                 theme::icon_font(14.0),
                 if live {
-                    color::ACCENT_300
+                    color::accent_300()
                 } else {
-                    theme::text::DISABLED
+                    theme::text::disabled()
                 },
             );
         }
@@ -1256,7 +1260,7 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
     p.galley(
         egui::pos2(right - side_w, rect.center().y - side_g.size().y / 2.0),
         side_g,
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     right -= side_w + 10.0;
 
@@ -1264,16 +1268,16 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
     let (base, hit) = if live {
         (
             if lit {
-                color::TEXT
+                color::text()
             } else {
-                theme::text::STRONG
+                theme::text::strong()
             },
-            color::ACCENT_300,
+            color::accent_300(),
         )
     } else {
         (
             theme::color::text_a(97),
-            color::ACCENT_300.gamma_multiply(0.6),
+            color::accent_300().gamma_multiply(0.6),
         )
     };
     let mut job = lit_label(&c.label, &c.hits, 12.0, base, hit);
@@ -1319,7 +1323,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
             egui::Align2::RIGHT_CENTER,
             mark,
             theme::icon_font(13.0),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
         right -= 13.0 + 8.0;
     }
@@ -1329,11 +1333,11 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
         &l.hits,
         12.0,
         if lit {
-            color::TEXT
+            color::text()
         } else {
-            theme::text::STRONG
+            theme::text::strong()
         },
-        color::ACCENT_300,
+        color::accent_300(),
     );
     // The name keeps at least half the row; the path takes what is left.
     job.wrap.max_width = ((right - label_x) * 0.6).max(0.0);
@@ -1342,7 +1346,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
     p.galley(
         egui::pos2(label_x, rect.center().y - name.size().y / 2.0),
         name,
-        color::TEXT,
+        color::text(),
     );
     let room = right - (label_x + name_w + 12.0);
     if room > 20.0 && !l.path.is_empty() {
@@ -1351,11 +1355,11 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
         // one that tells two same-named layers apart.
         let mut parts: Vec<&str> = l.path.split(" / ").collect();
         let mut text = l.path.clone();
-        let mut galley = p.layout_no_wrap(text.clone(), font.clone(), theme::text::FAINT);
+        let mut galley = p.layout_no_wrap(text.clone(), font.clone(), theme::text::faint());
         while galley.size().x > room && parts.len() > 1 {
             parts.remove(0);
             text = format!("… / {}", parts.join(" / "));
-            galley = p.layout_no_wrap(text.clone(), font.clone(), theme::text::FAINT);
+            galley = p.layout_no_wrap(text.clone(), font.clone(), theme::text::faint());
         }
         if galley.size().x <= room {
             p.galley(
@@ -1364,7 +1368,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
                     rect.center().y - galley.size().y / 2.0,
                 ),
                 galley,
-                theme::text::FAINT,
+                theme::text::faint(),
             );
         }
     }
@@ -1390,7 +1394,7 @@ fn more_row(ui: &mut egui::Ui, n: usize, lit: bool) -> egui::Response {
             format!("{n} more layers")
         },
         egui::FontId::proportional(11.0),
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     chip(ui, rect.right() - 8.0, rect.center().y, "Tab", true);
     resp
@@ -1411,7 +1415,7 @@ fn no_match(ui: &mut egui::Ui, pal: &Palette) {
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(12.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
 }
 
@@ -1420,7 +1424,7 @@ fn layers_chip(ui: &mut egui::Ui) {
     let font = egui::FontId::proportional(11.0);
     let galley = ui
         .painter()
-        .layout_no_wrap("Layers".into(), font, color::ACCENT_100);
+        .layout_no_wrap("Layers".into(), font, color::accent_100());
     let size = egui::vec2(galley.size().x + 7.0 + 12.0 + 5.0 + 7.0, 20.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::empty());
     let p = ui.painter();
@@ -1439,7 +1443,7 @@ fn layers_chip(ui: &mut egui::Ui) {
         egui::Align2::CENTER_CENTER,
         icon::STACK,
         theme::icon_font(12.0),
-        color::ACCENT_100,
+        color::accent_100(),
     );
     p.galley(
         egui::pos2(
@@ -1447,7 +1451,7 @@ fn layers_chip(ui: &mut egui::Ui) {
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
-        color::ACCENT_100,
+        color::accent_100(),
     );
 }
 
@@ -1463,16 +1467,16 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     } else {
         "↑↓ move    Enter run    Tab layers    Esc close"
     };
-    let keys_g = p.layout_no_wrap(keys.into(), font.clone(), theme::text::DIM);
+    let keys_g = p.layout_no_wrap(keys.into(), font.clone(), theme::text::dim());
     let keys_w = keys_g.size().x;
     p.galley(
         egui::pos2(rect.right() - 14.0 - keys_w, y - keys_g.size().y / 2.0),
         keys_g,
-        theme::text::DIM,
+        theme::text::dim(),
     );
     let (text, col) = match why {
-        Some(why) => (why, theme::text::MUTED),
-        None => (note, theme::text::MUTED),
+        Some(why) => (why, theme::text::muted()),
+        None => (note, theme::text::muted()),
     };
     let mut job = egui::text::LayoutJob::single_section(
         text.to_string(),

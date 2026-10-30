@@ -258,7 +258,7 @@ impl OndinApp {
         };
         let galley = ui
             .ctx()
-            .fonts_mut(|f| f.layout_no_wrap(text, egui::FontId::proportional(11.5), color::TEXT));
+            .fonts_mut(|f| f.layout_no_wrap(text, egui::FontId::proportional(11.5), color::text()));
         let w = 9.0 + 13.0 + 6.0 + galley.size().x + 9.0;
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::click());
         let p = ui.painter();
@@ -281,7 +281,7 @@ impl OndinApp {
         p.galley(
             egui::pos2(rect.left() + 28.0, y - galley.size().y / 2.0),
             galley,
-            color::TEXT,
+            color::text(),
         );
         let resp = resp.on_hover_text(if quiet {
             format!(
@@ -325,7 +325,7 @@ impl OndinApp {
                     if n == 1 { "has" } else { "have" }
                 ))
                 .size(12.0)
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
             );
             ui.add_space(4.0);
             for w in &waiting {
@@ -347,7 +347,7 @@ impl OndinApp {
                         None => format!("{layers} using what the kits removed keep their values."),
                     })
                     .size(11.0)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
                 );
             }
             ui.label(
@@ -356,7 +356,7 @@ impl OndinApp {
                     if instances == 1 { "" } else { "s" }
                 ))
                 .size(11.0)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
             );
             ui.add_space(6.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -688,17 +688,17 @@ pub(crate) fn stack_local(
 /// *Removed* rows (`kits::summary`).
 fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::KitSummary>) {
     ui.horizontal(|ui| {
-        ui.label(theme::icon_text(icon::PACKAGE, 12.0, theme::text::MUTED));
+        ui.label(theme::icon_text(icon::PACKAGE, 12.0, theme::text::muted()));
         ui.label(
             egui::RichText::new(&w.kit.name)
                 .size(12.0)
-                .color(color::TEXT),
+                .color(color::text()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(format!("v{} → v{}", w.held, w.kit.version))
                     .size(10.5)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
             );
         });
     });
@@ -712,13 +712,17 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::Kit
             if w.mains == 1 { "" } else { "s" }
         ),
     };
-    ui.label(egui::RichText::new(line).size(11.0).color(theme::text::DIM));
+    ui.label(
+        egui::RichText::new(line)
+            .size(11.0)
+            .color(theme::text::dim()),
+    );
     if let Some(note) = &w.kit.note {
         ui.label(
             egui::RichText::new(format!("“{note}”"))
                 .size(11.0)
                 .italics()
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
         );
     }
     if let Some(k) = part {

@@ -791,7 +791,7 @@ impl OndinApp {
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                identity_glyph(ui, icon::FILE, color::ACCENT_300);
+                identity_glyph(ui, icon::FILE, color::accent_300());
                 // Buffered, committed once on defocus, as a layer's name is.
                 let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
                 let mut name = match &self.name_edit {
@@ -823,7 +823,7 @@ impl OndinApp {
                     ui.label(
                         egui::RichText::new(place)
                             .size(10.5)
-                            .color(theme::text::FAINT),
+                            .color(theme::text::faint()),
                     );
                 });
             });
@@ -976,11 +976,11 @@ impl OndinApp {
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                identity_glyph(ui, icon::RULER, color::ACCENT_300);
+                identity_glyph(ui, icon::RULER, color::accent_300());
                 ui.label(
                     egui::RichText::new(title)
                         .size(13.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 );
             });
             self.guide_actions(ui, guides);
@@ -1045,7 +1045,7 @@ impl OndinApp {
                 true => Swatch::Mixed,
                 false => Swatch::Solid(ui::color_to_egui(base)),
             };
-            if swatch(ui, 16.0, color::FIELD, chip)
+            if swatch(ui, 16.0, color::field(), chip)
                 .on_hover_text(hover)
                 .clicked()
             {
@@ -1159,13 +1159,16 @@ impl OndinApp {
                                     n => format!("{n} layers"),
                                 })
                                 .size(11.0)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                             );
                             ui.with_layout(
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    let label =
-                                        ui::glyph_and_text_tinted(icon::TEXT_AA, name, color::WARN);
+                                    let label = ui::glyph_and_text_tinted(
+                                        icon::TEXT_AA,
+                                        name,
+                                        color::warn(),
+                                    );
                                     let resp = ui
                                         .add(
                                             egui::Label::new(label)
@@ -1188,7 +1191,7 @@ impl OndinApp {
                             .width(ui.available_width())
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .selected_text(
-                                egui::RichText::new("Replace with…").color(theme::text::FAINT),
+                                egui::RichText::new("Replace with…").color(theme::text::faint()),
                             )
                             .show_ui(ui, |ui| {
                                 ui::menu_rows(ui);
@@ -1278,11 +1281,11 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
                 // Not `SELECTION`, which the layers tree spends on a `Group`.
-                identity_glyph(ui, icon::BOUNDING_BOX, color::ACCENT_300);
+                identity_glyph(ui, icon::BOUNDING_BOX, color::accent_300());
                 ui.label(
                     egui::RichText::new(format!("{n} layers"))
                         .size(13.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 );
             });
             self.identity_boolean_row(ui);
@@ -1469,11 +1472,11 @@ impl OndinApp {
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                identity_glyph(ui, icon::BEZIER_CURVE, color::ACCENT_300);
+                identity_glyph(ui, icon::BEZIER_CURVE, color::accent_300());
                 ui.label(
                     egui::RichText::new("Edit Path")
                         .size(13.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let _ = icon_button(ui, icon::LOCK_SIMPLE_OPEN, 22.0, 16.0, false, false);
@@ -1685,7 +1688,7 @@ impl OndinApp {
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                identity_glyph(ui, glyph, color::ACCENT_300);
+                identity_glyph(ui, glyph, color::accent_300());
                 // Name — buffered, committed once on defocus.
                 let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
                 let mut name = match &self.name_edit {
@@ -1751,7 +1754,7 @@ impl OndinApp {
                                 egui::Align2::CENTER_CENTER,
                                 eye,
                                 theme::icon_font(14.0),
-                                color::TEXT,
+                                color::text(),
                             );
                             let doc = &self.session.doc;
                             let table = doc.variables();
@@ -5243,7 +5246,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("No fill")
                         .size(11.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
                 return;
             }
@@ -5387,7 +5390,7 @@ impl OndinApp {
                     ui.label(
                         egui::RichText::new("No stroke")
                             .size(11.0)
-                            .color(theme::text::FAINT),
+                            .color(theme::text::faint()),
                     );
                     return;
                 }
@@ -5606,7 +5609,7 @@ impl OndinApp {
                         ui.label(
                             egui::RichText::new("Open shapes stroke centred")
                                 .size(11.0)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                         );
                     })
                     .response
@@ -6349,7 +6352,7 @@ impl OndinApp {
             ui.label(theme::icon_text(
                 icon::LIST_DASHES,
                 14.0,
-                theme::text::FAINT,
+                theme::text::faint(),
             ));
             ui.add(
                 egui::TextEdit::singleline(&mut text)
@@ -6666,7 +6669,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("Mixed layout grids. Add to override.")
                         .size(11.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
                 return;
             };
@@ -6678,7 +6681,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("No layout grid")
                         .size(11.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
                 return;
             }
@@ -6795,7 +6798,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("Pinned differently. A pin applies to every layer.")
                         .size(11.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
             }
             let full = ui.available_width();
@@ -7216,11 +7219,11 @@ impl OndinApp {
         } else {
             // The pinned accent, painted after because the field's ground is opaque.
             ui.painter()
-                .rect_filled(at, 5.0, color::ACCENT.gamma_multiply(0.09));
+                .rect_filled(at, 5.0, color::accent().gamma_multiply(0.09));
             ui.painter().rect_stroke(
                 at,
                 5.0,
-                egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.55)),
+                egui::Stroke::new(1.0, color::accent().gamma_multiply(0.55)),
                 egui::StrokeKind::Inside,
             );
             resp
@@ -7842,7 +7845,7 @@ impl OndinApp {
                     let chip = ui
                         .scope(|ui| {
                             ui.set_opacity(1.0);
-                            swatch(ui, CHIP, color::FIELD, paint)
+                            swatch(ui, CHIP, color::field(), paint)
                         })
                         .inner;
                     // An image's chip opens image editing, not the picker. Only the
@@ -7909,7 +7912,7 @@ impl OndinApp {
                                     egui::Label::new(
                                         egui::RichText::new(paint::label_of(brush))
                                             .size(12.0)
-                                            .color(theme::text::STRONG),
+                                            .color(theme::text::strong()),
                                     )
                                     .sense(egui::Sense::click()),
                                 )
@@ -7930,7 +7933,7 @@ impl OndinApp {
                                     egui::Label::new(
                                         egui::RichText::new(paint::label_of(brush))
                                             .size(12.0)
-                                            .color(theme::text::STRONG),
+                                            .color(theme::text::strong()),
                                     )
                                     .sense(egui::Sense::click()),
                                 )
@@ -7949,7 +7952,7 @@ impl OndinApp {
                                     n => format!("{n} matches"),
                                 })
                                 .size(11.0)
-                                .color(theme::text::DIM),
+                                .color(theme::text::dim()),
                             );
                             return;
                         }
@@ -8726,7 +8729,7 @@ impl OndinApp {
                     ui.label(
                         egui::RichText::new("These layers have different effects")
                             .size(11.0)
-                            .color(theme::text::FAINT),
+                            .color(theme::text::faint()),
                     );
                     return;
                 }
@@ -8735,7 +8738,7 @@ impl OndinApp {
                     ui.label(
                         egui::RichText::new("No effects")
                             .size(11.0)
-                            .color(theme::text::FAINT),
+                            .color(theme::text::faint()),
                     );
                     return;
                 }
@@ -9162,12 +9165,12 @@ impl OndinApp {
                             ui.label(theme::icon_text(
                                 effect_glyph(&effect.kind),
                                 15.0,
-                                theme::text::MUTED,
+                                theme::text::muted(),
                             ));
                             ui.label(
                                 egui::RichText::new(effect.kind.label())
                                     .size(12.0)
-                                    .color(theme::text::STRONG),
+                                    .color(theme::text::strong()),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -9184,7 +9187,7 @@ impl OndinApp {
                                     ui.label(
                                         egui::RichText::new(effect_summary(&effect.kind))
                                             .size(11.0)
-                                            .color(theme::text::DIM),
+                                            .color(theme::text::dim()),
                                     );
                                 },
                             );
@@ -9597,7 +9600,7 @@ impl OndinApp {
                     swatch(
                         ui,
                         14.0,
-                        color::FIELD,
+                        color::field(),
                         Swatch::Solid(ui::color_to_egui(color)),
                     )
                 })
@@ -10780,9 +10783,9 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
     let hovered = resp.hovered();
     let r5 = egui::CornerRadius::same(ui::BUTTON_R);
     let ground = match (on, hovered) {
-        (true, false) => Some(color::ACCENT_900),
-        (true, true) => Some(color::ACCENT_800),
-        (false, true) => Some(theme::color::HOVER),
+        (true, false) => Some(color::accent_900()),
+        (true, true) => Some(color::accent_800()),
+        (false, true) => Some(theme::color::hover()),
         (false, false) => None,
     };
     if let Some(bg) = ground {
@@ -10792,7 +10795,7 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
         ui.painter().rect_stroke(
             rect,
             r5,
-            egui::Stroke::new(1.0, color::ACCENT_700),
+            egui::Stroke::new(1.0, color::accent_700()),
             egui::StrokeKind::Inside,
         );
     }
@@ -10813,13 +10816,13 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
         egui::Rect::from_center_size(slot.center(), picture),
         egui::CornerRadius::same(1),
         match on {
-            true => color::ACCENT_300,
-            false => theme::text::DIM,
+            true => color::accent_300(),
+            false => theme::text::dim(),
         },
     );
     let ink = match on {
-        true => color::ACCENT_200,
-        false => theme::text::MUTED,
+        true => color::accent_200(),
+        false => theme::text::muted(),
     };
     let left = slot.right() + ui::CARD_COL_GAP;
     let galley = ui.ctx().fonts_mut(|f| {
@@ -10848,7 +10851,7 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
         egui::Align2::LEFT_TOP,
         format!("{w} × {h}"),
         egui::FontId::proportional(TEMPLATE_DIMS_PT),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     // The name repeats in the tooltip because the longest entry is elided on the cell.
     resp.on_hover_text(format!("{name} — resize this frame to {w} × {h}"))
@@ -11028,18 +11031,18 @@ fn inset_diagram(
     const CLEAR: f32 = 3.0;
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 5.0, color::FIELD);
+    painter.rect_filled(rect, 5.0, color::field());
     painter.rect_stroke(
         rect,
         5.0,
-        egui::Stroke::new(1.0, color::FIELD_BORDER),
+        egui::Stroke::new(1.0, color::field_border()),
         egui::StrokeKind::Inside,
     );
     let layer = egui::Rect::from_center_size(rect.center(), egui::vec2(28.0, 20.0));
     let (fill, edge_colour) = if insets.is_authored() || held.0 || held.1 {
         (
-            color::ACCENT.gamma_multiply(0.14),
-            color::ACCENT.gamma_multiply(0.7),
+            color::accent().gamma_multiply(0.14),
+            color::accent().gamma_multiply(0.7),
         )
     } else {
         (theme::color::text_a(13), theme::color::text_a(64))
@@ -11114,7 +11117,7 @@ fn inset_diagram(
         let colour = if pinned && centred {
             color::MEASURE
         } else if pinned || by_default {
-            color::ACCENT_300
+            color::accent_300()
         } else if resp.hovered() {
             theme::color::text_a(140)
         } else {
@@ -11277,7 +11280,11 @@ fn grid_glyph(painter: &egui::Painter, rect: egui::Rect, glyph: &'static str, on
         egui::Align2::CENTER_CENTER,
         glyph,
         theme::icon_font(13.0),
-        if on { color::TEXT } else { theme::text::DIM },
+        if on {
+            color::text()
+        } else {
+            theme::text::dim()
+        },
     );
 }
 
@@ -11667,7 +11674,7 @@ mod carry_tests {
             .shapes
             .iter()
             .filter_map(|c| match &c.shape {
-                egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                egui::Shape::Rect(r) if r.fill == color::field() => Some(r.rect),
                 _ => None,
             })
             .collect()
@@ -13414,7 +13421,7 @@ mod identity_row_tests {
     #[test]
     fn the_two_identity_rows_are_the_same_height() {
         let single = row_height(|ui| {
-            identity_glyph(ui, icon::SQUARE, color::ACCENT_300);
+            identity_glyph(ui, icon::SQUARE, color::accent_300());
             let mut name = "Rectangle".to_string();
             ui.add(
                 egui::TextEdit::singleline(&mut name)
@@ -13428,11 +13435,11 @@ mod identity_row_tests {
             });
         });
         let multi = row_height(|ui| {
-            identity_glyph(ui, icon::BOUNDING_BOX, color::ACCENT_300);
+            identity_glyph(ui, icon::BOUNDING_BOX, color::accent_300());
             ui.label(
                 egui::RichText::new("3 layers")
                     .size(13.0)
-                    .color(theme::text::STRONG),
+                    .color(theme::text::strong()),
             );
         });
         assert_eq!(
@@ -18568,7 +18575,7 @@ mod rhythm_tests {
                 .iter()
                 .filter(|cs| match &cs.shape {
                     egui::Shape::Rect(r) => {
-                        r.fill == color::ACCENT_900
+                        r.fill == color::accent_900()
                             && (r.rect.height() - TEMPLATE_CELL_H).abs() < 0.5
                     }
                     _ => false,
@@ -21991,7 +21998,7 @@ mod quarters_row_tests {
             .shapes
             .iter()
             .filter_map(|c| match &c.shape {
-                egui::Shape::Rect(r) if r.fill == crate::theme::color::FIELD => Some(r.rect),
+                egui::Shape::Rect(r) if r.fill == crate::theme::color::field() => Some(r.rect),
                 _ => None,
             })
             .collect();
@@ -22828,7 +22835,7 @@ mod inset_card_tests {
             .shapes
             .iter()
             .filter_map(|cs| match &cs.shape {
-                egui::epaint::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                egui::epaint::Shape::Rect(r) if r.fill == color::field() => Some(r.rect),
                 _ => None,
             })
             .collect();

@@ -353,7 +353,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
         ui.label(
             egui::RichText::new(title)
                 .size(10.5)
-                .color(theme::text::FAINT),
+                .color(theme::text::faint()),
         );
         let more = rows.len().saturating_sub(MAX_ROWS);
         for r in rows.into_iter().take(MAX_ROWS) {
@@ -363,7 +363,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
             ui.label(
                 egui::RichText::new(format!("and {more} more"))
                     .size(11.0)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
             );
         }
     };
@@ -455,7 +455,7 @@ fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
                 egui::Align2::LEFT_CENTER,
                 g,
                 theme::icon_font(11.0),
-                theme::text::DIM,
+                theme::text::dim(),
             );
         }
     }
@@ -469,7 +469,7 @@ fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
                 egui::Align2::RIGHT_CENTER,
                 t,
                 egui::FontId::proportional(10.5),
-                theme::text::FAINT,
+                theme::text::faint(),
             )
             .left(),
         Tail::Chips(a, b) => {
@@ -479,7 +479,7 @@ fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
                 egui::Align2::RIGHT_CENTER,
                 icon::ARROW_RIGHT,
                 theme::icon_font(10.0),
-                theme::text::FAINT,
+                theme::text::faint(),
             );
             chip(arrow.left() - 14.0, a);
             arrow.left() - 14.0
@@ -492,7 +492,7 @@ fn row(ui: &mut egui::Ui, w: f32, r: Row<'_>) {
         egui::Align2::LEFT_CENTER,
         r.name,
         egui::FontId::proportional(11.5),
-        color::TEXT,
+        color::text(),
     );
 }
 

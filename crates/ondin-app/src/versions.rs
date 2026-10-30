@@ -98,7 +98,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(words)
                         .size(12.0)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             }
             egui::ScrollArea::vertical()
@@ -110,7 +110,7 @@ impl OndinApp {
                             ui.label(theme::icon_text(
                                 icon::CLOCK_COUNTER_CLOCKWISE,
                                 14.0,
-                                theme::text::MUTED,
+                                theme::text::muted(),
                             ));
                             ui.vertical(|ui| {
                                 ui.spacing_mut().item_spacing.y = 1.0;
@@ -120,9 +120,11 @@ impl OndinApp {
                                     }
                                     None => ("Unknown time".into(), String::new()),
                                 };
-                                ui.label(egui::RichText::new(when).size(12.5).color(color::TEXT));
+                                ui.label(egui::RichText::new(when).size(12.5).color(color::text()));
                                 ui.label(
-                                    egui::RichText::new(ago).size(11.0).color(theme::text::DIM),
+                                    egui::RichText::new(ago)
+                                        .size(11.0)
+                                        .color(theme::text::dim()),
                                 );
                             });
                             ui.with_layout(

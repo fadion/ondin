@@ -437,7 +437,7 @@ pub(crate) fn chip(ui: &mut egui::Ui, state: &UpdateState) -> bool {
         );
         ui.fonts_mut(|f| f.layout_job(job))
     };
-    let size = galley(ui, color::TEXT).size() + egui::vec2(18.0, 6.0);
+    let size = galley(ui, color::text()).size() + egui::vec2(18.0, 6.0);
     let sense = if actionable {
         egui::Sense::click()
     } else {
@@ -445,7 +445,11 @@ pub(crate) fn chip(ui: &mut egui::Ui, state: &UpdateState) -> bool {
     };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
     let lit = actionable && resp.hovered();
-    let fg = if lit { color::TEXT } else { theme::text::MUTED };
+    let fg = if lit {
+        color::text()
+    } else {
+        theme::text::muted()
+    };
     let p = ui.painter();
     p.rect_stroke(
         rect,

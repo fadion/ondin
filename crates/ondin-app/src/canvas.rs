@@ -7190,21 +7190,21 @@ impl OndinApp {
         if is_set {
             glyph(&mut job, icon::SQUARES_FOUR, egui::Color32::PLACEHOLDER);
             words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
-            mode_word(&mut job, theme::text::DIM);
+            mode_word(&mut job, theme::text::dim());
             if let Some(clash) = crate::panels::clash_text(doc, id) {
                 job.append(
                     icon::WARNING,
                     8.0,
-                    egui::TextFormat::simple(theme::icon_font(PT), theme::text::STRONG),
+                    egui::TextFormat::simple(theme::icon_font(PT), theme::text::strong()),
                 );
-                words(&mut job, &clash, 3.0, theme::text::STRONG);
+                words(&mut job, &clash, 3.0, theme::text::strong());
             } else if self.session.selection.contains(id) {
                 let n = ondin_core::variant::variants(doc, id).len();
                 let count = match n {
                     1 => "1 variant".to_string(),
                     n => format!("{n} variants"),
                 };
-                words(&mut job, &count, 8.0, theme::text::DIM);
+                words(&mut job, &count, 8.0, theme::text::dim());
             }
         } else if is_main {
             // A filled hexagon on a violet chip: the outline glyph holds the cell
@@ -7340,10 +7340,10 @@ impl OndinApp {
         painter.circle(
             at,
             SET_PLUS_R,
-            theme::color::CARD,
-            egui::Stroke::new(1.0, theme::color::CARD_BORDER),
+            theme::color::card(),
+            egui::Stroke::new(1.0, theme::color::card_border()),
         );
-        let s = egui::Stroke::new(1.5, theme::text::STRONG);
+        let s = egui::Stroke::new(1.5, theme::text::strong());
         let arm = SET_PLUS_R * 0.5;
         painter.line_segment([at - egui::vec2(arm, 0.0), at + egui::vec2(arm, 0.0)], s);
         painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
@@ -7433,7 +7433,7 @@ impl OndinApp {
             if is_set {
                 // A set's tab and resting hairline, neutral selected or not.
                 if let Some(q) = self.selection_quad(id, rect, ppp) {
-                    let stroke = egui::Stroke::new(1.0, theme::color::CARD_BORDER);
+                    let stroke = egui::Stroke::new(1.0, theme::color::card_border());
                     for i in 0..4 {
                         painter.line_segment([q[i], q[(i + 1) % 4]], stroke);
                     }
@@ -7446,17 +7446,17 @@ impl OndinApp {
                         sw: 0,
                         se: 0,
                     },
-                    theme::color::CARD,
-                    egui::Stroke::new(1.0, theme::color::CARD_BORDER),
+                    theme::color::card(),
+                    egui::Stroke::new(1.0, theme::color::card_border()),
                     egui::StrokeKind::Inside,
                 );
-                painter.galley(label.min + SET_TAB_PAD, galley, theme::text::STRONG);
+                painter.galley(label.min + SET_TAB_PAD, galley, theme::text::strong());
                 continue;
             }
             let ink = if self.session.selection.contains(id) {
                 color::SELECT
             } else {
-                ground_text(self.session.preview_ground(), theme::text::MUTED.a())
+                ground_text(self.session.preview_ground(), theme::text::muted().a())
             };
             painter.galley(label.min, galley, ink);
         }
@@ -8560,7 +8560,7 @@ impl OndinApp {
             for q in session.editor.selection_quads() {
                 painter.add(egui::Shape::convex_polygon(
                     self.poly(&q, world, rect, ppp),
-                    color::ACCENT.gamma_multiply_u8(70),
+                    color::accent().gamma_multiply_u8(70),
                     egui::Stroke::NONE,
                 ));
             }
@@ -8570,7 +8570,7 @@ impl OndinApp {
                 for q in session.editor.caret_quads(caret_width) {
                     painter.add(egui::Shape::convex_polygon(
                         self.poly(&q, world, rect, ppp),
-                        color::ACCENT,
+                        color::accent(),
                         egui::Stroke::NONE,
                     ));
                 }
@@ -15958,11 +15958,11 @@ mod frame_menu_door_tests {
         let chrome = shapes(&app, false);
         assert!(
             chrome.iter().any(|s| matches!(s, egui::Shape::Circle(c)
-                if c.fill == theme::color::CARD && c.center == at && c.radius == SET_PLUS_R)),
+                if c.fill == theme::color::card() && c.center == at && c.radius == SET_PLUS_R)),
             "the disc on the set's bottom edge"
         );
         assert_eq!(
-            segments(&chrome, theme::text::STRONG),
+            segments(&chrome, theme::text::strong()),
             2,
             "and its two arms"
         );
@@ -16132,7 +16132,7 @@ mod frame_menu_door_tests {
     }
 
     /// A frame's name is light on a dark page and dark on a light one.
-    /// flip: `draw_frame_labels` back on `theme::text::MUTED` → fails at "dark on light grey".
+    /// flip: `draw_frame_labels` back on `theme::text::muted()` → fails at "dark on light grey".
     #[test]
     fn a_frames_name_takes_ink_against_the_page_ground() {
         let ctx = egui::Context::default();

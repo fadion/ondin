@@ -467,7 +467,7 @@ impl OndinApp {
             .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
                 egui::Frame::NONE
-                    .fill(color::CARD)
+                    .fill(color::card())
                     .corner_radius(RADIUS)
                     .stroke(egui::Stroke::new(1.0, color::text_a(20)))
                     .inner_margin(PAD)
@@ -1381,7 +1381,7 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
         egui::Align2::LEFT_CENTER,
         icon::MAGNIFYING_GLASS,
         theme::icon_font(14.0),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let field = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 30.0, rect.top()),
@@ -1427,9 +1427,9 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
             icon::X,
             theme::icon_font(12.0),
             if resp.hovered() {
-                color::TEXT
+                color::text()
             } else {
-                theme::text::DIM
+                theme::text::dim()
             },
         );
         if resp.on_hover_text("Clear").clicked() {
@@ -1480,13 +1480,17 @@ fn browse(
             continue;
         }
         if let Some(note) = &s.note {
-            ui.label(egui::RichText::new(note).size(11.0).color(theme::text::DIM));
+            ui.label(
+                egui::RichText::new(note)
+                    .size(11.0)
+                    .color(theme::text::dim()),
+            );
         }
         if s.groups.is_empty() && s.note.is_none() {
             ui.label(
                 egui::RichText::new("Loading…")
                     .size(11.0)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
             );
         }
         for (group, items) in &s.groups {
@@ -1516,7 +1520,7 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
     }
     let y = rect.center().y;
     let ink = if s.used {
-        color::TEXT
+        color::text()
     } else {
         color::text_a(191)
     };
@@ -1529,14 +1533,14 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
             icon::CARET_RIGHT
         },
         theme::icon_font(11.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     p.text(
         egui::pos2(rect.left() + 20.0, y),
         egui::Align2::LEFT_CENTER,
         icon::PACKAGE,
         theme::icon_font(13.0),
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     p.text(
         egui::pos2(rect.left() + 38.0, y),
@@ -1693,7 +1697,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
             egui::Align2::LEFT_CENTER,
             &item.name,
             egui::FontId::proportional(12.0),
-            color::TEXT,
+            color::text(),
         );
         if let Some((kit, used)) = &item.kit {
             let right = if *used {
@@ -1714,7 +1718,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
         ui.label(
             egui::RichText::new("No components match")
                 .size(11.0)
-                .color(theme::text::FAINT),
+                .color(theme::text::faint()),
         );
     }
 }
@@ -1731,14 +1735,14 @@ fn section_row(ui: &mut egui::Ui, label: &str, count: &str) {
         p,
         egui::pos2(rect.left() + 8.0, y),
         11.0,
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     p.text(
         egui::pos2(rect.left() + 20.0, y),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(12.0),
-        color::TEXT,
+        color::text(),
     );
     p.text(
         egui::pos2(rect.right() - 4.0, y),
@@ -1766,11 +1770,11 @@ fn empty_note(ui: &mut egui::Ui) -> bool {
     let mut open = false;
     ui.vertical_centered(|ui| {
         ui.add_space(10.0);
-        ui.label(theme::icon_text(icon::PACKAGE, 18.0, theme::text::DIM));
+        ui.label(theme::icon_text(icon::PACKAGE, 18.0, theme::text::dim()));
         ui.label(
             egui::RichText::new("No kits in your library")
                 .size(12.0)
-                .color(color::TEXT),
+                .color(color::text()),
         );
         ui.label(
             egui::RichText::new(
@@ -1778,7 +1782,7 @@ fn empty_note(ui: &mut egui::Ui) -> bool {
                  from the document menu.",
             )
             .size(11.0)
-            .color(theme::text::DIM),
+            .color(theme::text::dim()),
         );
         ui.add_space(8.0);
         open =

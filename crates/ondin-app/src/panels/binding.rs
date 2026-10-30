@@ -334,11 +334,11 @@ pub(crate) fn chip(
     let hovered = resp.hovered();
     let p = ui.painter();
     let (fill, ink) = if focused {
-        (color::ACCENT.gamma_multiply(0.28), color::ACCENT_100)
+        (color::accent().gamma_multiply(0.28), color::accent_100())
     } else if hovered {
-        (color::text_a(43), color::TEXT)
+        (color::text_a(43), color::text())
     } else {
-        (color::text_a(28), color::TEXT)
+        (color::text_a(28), color::text())
     };
     p.rect_filled(cap, CHIP_H / 2.0, fill);
     // The hover ×, in the chip's last 14 points.
@@ -383,7 +383,7 @@ pub(crate) fn chip(
             egui::Align2::CENTER_CENTER,
             icon::X,
             egui::FontId::new(9.0, egui::FontFamily::Name("phosphor".into())),
-            color::TEXT,
+            color::text(),
         );
         if xresp.on_hover_text("Detach variable").clicked() {
             out.detach = true;
@@ -439,7 +439,7 @@ pub(crate) fn chip_slot(ui: &mut egui::Ui) -> egui::Rect {
 pub(crate) fn elide_groups(ui: &egui::Ui, name: &str, font: &egui::FontId, width: f32) -> String {
     let fits = |s: &str| {
         ui.fonts_mut(|f| {
-            f.layout_no_wrap(s.to_string(), font.clone(), color::TEXT)
+            f.layout_no_wrap(s.to_string(), font.clone(), color::text())
                 .size()
                 .x
         }) <= width
@@ -1143,7 +1143,7 @@ impl OndinApp {
                         .and_then(|t| refused(table, c.key.kind(), &t).map(|(v, at)| (v, t, at)));
                     if let Some((v, t, at)) = &refusal {
                         let font = egui::FontId::proportional(11.5);
-                        let plain = egui::TextFormat::simple(font.clone(), theme::text::DIM);
+                        let plain = egui::TextFormat::simple(font.clone(), theme::text::dim());
                         let mut job = egui::text::LayoutJob::default();
                         job.append(
                             "A variable fills the whole field. Remove ",
@@ -1153,7 +1153,7 @@ impl OndinApp {
                         job.append(
                             t[*at..].trim(),
                             0.0,
-                            egui::TextFormat::simple(egui::FontId::monospace(11.0), color::TEXT),
+                            egui::TextFormat::simple(egui::FontId::monospace(11.0), color::text()),
                         );
                         job.append(&format!(" to bind {}.", v.name), 0.0, plain);
                         job.wrap.max_width = LIST_W - 8.0 - 16.0;
@@ -1184,7 +1184,7 @@ impl OndinApp {
                                 }
                             })
                             .size(11.5)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                         );
                     }
                     egui::ScrollArea::vertical()
@@ -1215,7 +1215,7 @@ impl OndinApp {
                         ui.label(
                             egui::RichText::new(format!("{} · ↑↓ preview · ↵ bind", m.name))
                                 .size(10.0)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                         );
                     }
                 });
@@ -1450,11 +1450,11 @@ impl OndinApp {
                             egui::Align2::CENTER_CENTER,
                             icon::ARROW_COUNTER_CLOCKWISE,
                             theme::icon_font(12.0),
-                            theme::text::STRONG,
+                            theme::text::strong(),
                         );
                     } else {
                         let lead_w = lead.size().x;
-                        let at = ui::paint_prefix(&p, strip, lead, theme::text::STRONG);
+                        let at = ui::paint_prefix(&p, strip, lead, theme::text::strong());
                         ui::override_dot(&p, at + egui::vec2(lead_w + 1.5, 3.0));
                     }
                     reset = resp.on_hover_text(&m.tip).clicked();
@@ -1466,7 +1466,7 @@ impl OndinApp {
                 // affordance, and a refusal reads as an error over a field that
                 // is working as meant.
                 None => {
-                    ui::paint_prefix(&p, strip, lead, theme::text::FAINT);
+                    ui::paint_prefix(&p, strip, lead, theme::text::faint());
                 }
             }
             chip_rect = chip_slot(ui);
@@ -1502,7 +1502,7 @@ impl OndinApp {
             ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
                 // The unbound field's own prefix (§15 D1092).
                 let (strip, lead) = ui::prefix_strip(ui, key.prefix());
-                ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
+                ui::paint_prefix(ui.painter(), strip, lead, theme::text::faint());
                 rect = chip_slot(ui);
             });
             self.mixed_chip(ui, key, &vars, rect);
@@ -1555,7 +1555,7 @@ impl OndinApp {
         let font = egui::FontId::proportional(12.0);
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
             let (strip, lead) = ui::prefix_strip(ui, key.prefix());
-            ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
+            ui::paint_prefix(ui.painter(), strip, lead, theme::text::faint());
             // The refused tail dims as it is typed (§15 D1044).
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 let at = refused(table, key.kind(), buf.as_str()).map(|r| r.1);
@@ -1973,7 +1973,7 @@ impl OndinApp {
             ui.label(theme::icon_text(
                 icon::MAGNIFYING_GLASS,
                 13.0,
-                theme::text::DIM,
+                theme::text::dim(),
             ));
             ui.add(
                 egui::TextEdit::singleline(&mut search)
@@ -2001,7 +2001,11 @@ impl OndinApp {
                         true => "No variable matches",
                         false => "No colour variables yet — Shift+S to add one",
                     };
-                    ui.label(egui::RichText::new(none).size(11.5).color(theme::text::DIM));
+                    ui.label(
+                        egui::RichText::new(none)
+                            .size(11.5)
+                            .color(theme::text::dim()),
+                    );
                 }
                 // The document's own first, then each kit's under its name and
                 // the kit mark, its rows dimmed (§15 D1065).
@@ -2105,14 +2109,14 @@ pub(crate) fn kit_header(ui: &mut egui::Ui, name: &str, w: f32) {
         egui::Align2::LEFT_CENTER,
         icon::PACKAGE,
         theme::icon_font(11.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     p.text(
         egui::pos2(g.right() + 5.0, y),
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(10.5),
-        theme::text::DIM,
+        theme::text::dim(),
     );
 }
 
@@ -2172,7 +2176,7 @@ fn face_row(
         match (refusal, v.origin.is_some()) {
             (Some(_), _) => color::text_a(102),
             (None, true) => color::text_a(170),
-            (None, false) => color::TEXT,
+            (None, false) => color::text(),
         },
     );
     p.galley(
@@ -2181,7 +2185,7 @@ fn face_row(
             y - hex_galley.size().y / 2.0 + 1.0,
         ),
         hex_galley,
-        color::TEXT,
+        color::text(),
     );
     if on {
         p.text(
@@ -2234,7 +2238,7 @@ fn list_row(
             egui::Align2::LEFT_CENTER,
             icon::PACKAGE,
             theme::icon_font(10.5),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
         x = g.right() + 5.0;
     }
@@ -2243,7 +2247,7 @@ fn list_row(
     let q = query.trim().to_lowercase();
     let hit = (!q.is_empty()).then(|| folded_find(&v.name, &q)).flatten();
     let dim = egui::TextFormat::simple(font.clone(), color::text_a(153));
-    let bright = egui::TextFormat::simple(font.clone(), color::TEXT);
+    let bright = egui::TextFormat::simple(font.clone(), color::text());
     match hit {
         Some(r) => {
             job.append(&v.name[..r.start], 0.0, dim.clone());
@@ -2256,7 +2260,7 @@ fn list_row(
     p.galley(
         egui::pos2(x, y - galley.size().y / 2.0),
         galley,
-        color::TEXT,
+        color::text(),
     );
     let value = match value {
         Some(Value::Color(c)) => ui::hex_of(c),
@@ -2270,7 +2274,7 @@ fn list_row(
         egui::Align2::RIGHT_CENTER,
         value,
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     if v.description.is_empty() {
         resp
@@ -3285,7 +3289,7 @@ mod tests {
             out.shapes
                 .iter()
                 .find_map(|c| match &c.shape {
-                    egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                    egui::Shape::Rect(r) if r.fill == color::field() => Some(r.rect),
                     _ => None,
                 })
                 .expect("a field ground")
@@ -3359,7 +3363,7 @@ mod tests {
                 .shapes
                 .iter()
                 .filter_map(|c| match &c.shape {
-                    egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                    egui::Shape::Rect(r) if r.fill == color::field() => Some(r.rect),
                     _ => None,
                 })
                 .map(|r| [r.min.x, r.min.y, r.max.x, r.max.y].map(|f| (f * 2.0).round() as i32))
@@ -3692,7 +3696,7 @@ mod tests {
             let full = "layout/sidebar/width-collapsed";
             assert_eq!(elide_groups(ui, full, &font, 1000.0), full);
             let w = ui.fonts_mut(|f| {
-                f.layout_no_wrap("…/width-collapsed".into(), font.clone(), color::TEXT)
+                f.layout_no_wrap("…/width-collapsed".into(), font.clone(), color::text())
                     .size()
                     .x
             });

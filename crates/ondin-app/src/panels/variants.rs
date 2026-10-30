@@ -411,7 +411,7 @@ fn swap_picker(
                     ui.label(
                         egui::RichText::new("No main matches")
                             .size(12.0)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                     );
                 }
                 egui::ScrollArea::vertical()
@@ -649,7 +649,7 @@ fn swap_heading(ui: &mut egui::Ui, glyph: Option<&str>, name: &str, status: &str
             egui::Align2::LEFT_CENTER,
             g,
             theme::icon_font(12.0),
-            theme::text::DIM,
+            theme::text::dim(),
         );
         x += 16.0;
     }
@@ -658,14 +658,14 @@ fn swap_heading(ui: &mut egui::Ui, glyph: Option<&str>, name: &str, status: &str
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(11.0),
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     p.text(
         egui::pos2(rect.right() - 4.0, y),
         egui::Align2::RIGHT_CENTER,
         status,
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
 }
 
@@ -679,7 +679,7 @@ fn row_label(ui: &mut egui::Ui, text: &str, mark: Option<&super::component::Over
         egui::Align::Max,
         text,
         12.0,
-        theme::text::MUTED,
+        theme::text::muted(),
         mark,
     )
 }
@@ -748,7 +748,7 @@ fn toggle_row(
                     egui::Align2::LEFT_CENTER,
                     ui::MIXED_WORD,
                     egui::FontId::proportional(12.0),
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 );
             }
         }
@@ -764,12 +764,12 @@ fn note(ui: &mut egui::Ui, glyph: &str, text: &str) -> egui::Response {
         ui.label(
             egui::RichText::new(glyph)
                 .font(theme::icon_font(13.0))
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
         );
         ui.label(
             egui::RichText::new(text)
                 .size(12.0)
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
         );
     })
     .response
@@ -1025,7 +1025,7 @@ impl OndinApp {
                     egui::Button::new(
                         egui::RichText::new(icon::PLUS)
                             .font(theme::icon_font(12.0))
-                            .color(theme::text::MUTED),
+                            .color(theme::text::muted()),
                     )
                     .min_size(egui::vec2(CHIP_H, CHIP_H)),
                 );
@@ -1150,7 +1150,7 @@ impl OndinApp {
                 egui::Label::new(
                     egui::RichText::new(body)
                         .size(12.0)
-                        .color(theme::text::MUTED),
+                        .color(theme::text::muted()),
                 )
                 .wrap(),
             );
@@ -1356,23 +1356,27 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(icon::HEXAGON)
                         .font(theme::icon_font(14.0))
-                        .color(theme::text::MUTED),
+                        .color(theme::text::muted()),
                 );
                 for (i, name) in g.path.iter().enumerate() {
                     if i > 0 {
-                        ui.label(egui::RichText::new("›").size(12.0).color(theme::text::DIM));
+                        ui.label(
+                            egui::RichText::new("›")
+                                .size(12.0)
+                                .color(theme::text::dim()),
+                        );
                     }
                     ui.label(
                         egui::RichText::new(name)
                             .size(12.0)
-                            .color(theme::text::MUTED),
+                            .color(theme::text::muted()),
                     );
                 }
                 if let Some(main) = &g.main {
                     ui.label(
                         egui::RichText::new(format!("· {main}"))
                             .size(12.0)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                     );
                 }
             });
@@ -1381,7 +1385,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("Select one to edit its properties")
                         .size(11.5)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
                 continue;
             }
@@ -1432,11 +1436,11 @@ impl OndinApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for (text, ink) in [
-                ("Chosen by".to_string(), theme::text::DIM),
-                (prop, theme::text::STRONG),
+                ("Chosen by".to_string(), theme::text::dim()),
+                (prop, theme::text::strong()),
             ]
             .into_iter()
-            .chain(on.map(|o| (format!("on {o}"), theme::text::DIM)))
+            .chain(on.map(|o| (format!("on {o}"), theme::text::dim())))
             {
                 ui.label(egui::RichText::new(text).size(11.5).color(ink));
             }
@@ -1478,7 +1482,7 @@ impl OndinApp {
         ui.label(
             egui::RichText::new(caption)
                 .size(11.0)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
         );
         if resp.clicked()
             && let Some(tx) = variant::set_shown(doc, &mut self.session.ids, root, !on)
@@ -2206,7 +2210,7 @@ impl OndinApp {
                         "Bind layers from their Component line",
                     )
                     .size(11.5)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
                 );
             }
             // **Three groups with a rule between each** (§15 D1000, the
@@ -2242,7 +2246,7 @@ impl OndinApp {
                         ui.label(
                             egui::RichText::new(icon::HEXAGON)
                                 .font(theme::icon_font(14.0))
-                                .color(theme::text::MUTED),
+                                .color(theme::text::muted()),
                         );
                         let name = doc
                             .get(*slot)
@@ -2253,7 +2257,7 @@ impl OndinApp {
                                 egui::Label::new(
                                     egui::RichText::new(&name)
                                         .size(12.0)
-                                        .color(theme::text::STRONG),
+                                        .color(theme::text::strong()),
                                 )
                                 .sense(egui::Sense::click()),
                             )
@@ -2267,7 +2271,7 @@ impl OndinApp {
                                 shown_names(doc, *slot).join(", ")
                             ))
                             .size(12.0)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui::field_button(
@@ -2469,7 +2473,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new("Bind to a component property")
                     .size(12.0)
-                    .color(theme::text::STRONG),
+                    .color(theme::text::strong()),
             );
             for (kind, label) in kinds {
                 let of_kind: Vec<&Keyed<Property>> =
@@ -2634,7 +2638,7 @@ fn property_row(
         ui.label(
             egui::RichText::new(glyph)
                 .font(theme::icon_font(14.0))
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
         );
         let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
         let id = ui.id().with(("prop-name", owner, p.id));
@@ -2694,7 +2698,11 @@ fn property_row(
         [one] => format!("{default} · {one}"),
         [one, rest @ ..] => format!("{default} · {one} and {} more", rest.len()),
     };
-    ui.label(egui::RichText::new(line).size(11.0).color(theme::text::DIM));
+    ui.label(
+        egui::RichText::new(line)
+            .size(11.0)
+            .color(theme::text::dim()),
+    );
     // A swap property's filter (§15 D983 (5)): the prefix of a main's name the
     // picker offers, every main when empty. Edited here, on the main — **as a row
     // of its own like the name's** (§15 D1000, the maintainer's look): the funnel
@@ -2707,7 +2715,7 @@ fn property_row(
             ui.label(
                 egui::RichText::new(icon::FUNNEL)
                     .font(theme::icon_font(14.0))
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
             );
             let w = ui.available_width();
             let id = ui.id().with(("prop-filter", owner, p.id));
@@ -2725,7 +2733,7 @@ fn property_row(
         ui.label(
             egui::RichText::new("Filter displayed list by name")
                 .size(11.0)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
         );
         preferred_rows(ui, doc, owner, p, edits);
     }
@@ -2758,12 +2766,12 @@ fn preferred_rows(
             ui.label(
                 egui::RichText::new(icon::STAR)
                     .font(theme::icon_font(14.0))
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
             );
             // A main since deleted keeps its place, named as gone.
             let (name, ink) = match doc.get(*m).filter(|n| n.component()) {
-                Some(n) => (n.name().to_string(), theme::text::STRONG),
-                None => ("Deleted main".to_string(), theme::text::DIM),
+                Some(n) => (n.name().to_string(), theme::text::strong()),
+                None => ("Deleted main".to_string(), theme::text::dim()),
             };
             let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
             ui.add_sized(

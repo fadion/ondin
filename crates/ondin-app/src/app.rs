@@ -1798,7 +1798,7 @@ impl eframe::App for OndinApp {
 
         // The canvas takes the remaining area; the inspector and picker float over it.
         let canvas = egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(color::BG))
+            .frame(egui::Frame::NONE.fill(color::bg()))
             .show(ui, |ui| {
                 self.canvas_ui(ui);
                 // After the canvas's own widget, so a badge wins the pointer over it.
@@ -5307,7 +5307,7 @@ impl OndinApp {
                     ),
                 })
                 .size(12.0)
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
             );
             if pending.target.is_none() {
                 ui.add_space(6.0);
@@ -5316,7 +5316,7 @@ impl OndinApp {
                         "This document was never saved, so it comes back untitled.",
                     )
                     .size(12.0)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
                 );
             }
             if waiting > 1 {
@@ -5324,7 +5324,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(format!("{} more after this one.", waiting - 1))
                         .size(12.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
             }
             ui.add_space(crate::settings::FOOTER_GAP);
@@ -5743,7 +5743,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(sentence)
                     .size(12.0)
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
             );
             if count > 1 {
                 ui.add_space(8.0);
@@ -6509,8 +6509,12 @@ fn unsaved_list(ui: &mut egui::Ui, tabs: &[crate::tabs::TabInfo]) {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     let (dot, _) =
                         ui.allocate_exact_size(egui::vec2(6.0, 14.0), egui::Sense::hover());
-                    ui.painter().circle_filled(dot.center(), 3.0, color::TEXT);
-                    ui.label(egui::RichText::new(&tab.name).size(12.0).color(color::TEXT));
+                    ui.painter().circle_filled(dot.center(), 3.0, color::text());
+                    ui.label(
+                        egui::RichText::new(&tab.name)
+                            .size(12.0)
+                            .color(color::text()),
+                    );
                     let place = match (&tab.project, &tab.path) {
                         (Some(project), _) => project.clone(),
                         (None, Some(_)) => "Unfiled".to_string(),
@@ -6520,7 +6524,7 @@ fn unsaved_list(ui: &mut egui::Ui, tabs: &[crate::tabs::TabInfo]) {
                         ui.label(
                             egui::RichText::new(place)
                                 .size(11.0)
-                                .color(theme::text::DIM),
+                                .color(theme::text::dim()),
                         );
                     });
                 });
@@ -6568,7 +6572,7 @@ pub(crate) const TOP_BAR_H: f32 = 46.0;
 /// the title bar, so it keeps clear of nothing the system draws.
 pub(crate) fn top_bar_frame() -> egui::Frame {
     egui::Frame::NONE
-        .fill(color::TOPBAR)
+        .fill(color::topbar())
         .inner_margin(egui::Margin::symmetric(14, 0))
 }
 
@@ -6611,9 +6615,9 @@ const STATUS_FADE: f32 = 0.3;
 /// [`OndinApp::status_bar`].
 fn status_color(status: &crate::session::Status) -> egui::Color32 {
     if status.kind == StatusKind::Error {
-        theme::color::ERROR
+        theme::color::error()
     } else {
-        theme::text::FAINT
+        theme::text::faint()
     }
 }
 
@@ -6776,7 +6780,7 @@ impl OndinApp {
             ui,
             egui::RichText::new(format!("{zoom}%"))
                 .size(11.5)
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
             TOP_GAP,
             self.open_menu == TopMenu::Zoom,
         )
@@ -6929,7 +6933,7 @@ impl OndinApp {
             // `TOP_GAP` before the caret, matching the zoom readout's.
             let head = crate::ui::menu_head(
                 ui,
-                theme::icon_text(glyph, 16.0, theme::text::MUTED),
+                theme::icon_text(glyph, 16.0, theme::text::muted()),
                 TOP_GAP,
                 self.open_menu == which,
             )
@@ -7173,7 +7177,7 @@ impl OndinApp {
             let width = ui
                 .ctx()
                 .fonts_mut(|f| {
-                    f.layout_no_wrap(project.name.clone(), font.clone(), theme::text::MUTED)
+                    f.layout_no_wrap(project.name.clone(), font.clone(), theme::text::muted())
                 })
                 .size()
                 .x;
@@ -7188,7 +7192,11 @@ impl OndinApp {
                 egui::Align2::LEFT_CENTER,
                 &project.name,
                 font,
-                if lit { color::TEXT } else { theme::text::MUTED },
+                if lit {
+                    color::text()
+                } else {
+                    theme::text::muted()
+                },
             );
             if resp
                 .on_hover_text(format!("Open “{}” in the library", project.name))
@@ -7200,7 +7208,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new("/")
                     .size(13.0)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
             );
         }
 
@@ -7221,8 +7229,8 @@ impl OndinApp {
             egui::pos2(rect.left() + DOT * 0.5, rect.center().y),
             DOT * 0.5,
             match ago {
-                None => color::UNSAVED,
-                Some(_) => color::SAVED,
+                None => color::unsaved(),
+                Some(_) => color::saved(),
             },
         );
         // Formatted only while hovered.
@@ -7294,7 +7302,7 @@ impl OndinApp {
                                 ui.label(
                                     egui::RichText::new(self.mode.label())
                                         .size(9.5)
-                                        .color(color::ACCENT_300),
+                                        .color(color::accent_300()),
                                 );
                             }
                             if message {
@@ -7311,12 +7319,12 @@ impl OndinApp {
                                 ui.label(
                                     egui::RichText::new(exporting)
                                         .size(11.5)
-                                        .color(theme::text::MUTED),
+                                        .color(theme::text::muted()),
                                 );
                                 let button = egui::Button::new(
                                     egui::RichText::new("Cancel")
                                         .size(11.5)
-                                        .color(color::ACCENT_300),
+                                        .color(color::accent_300()),
                                 )
                                 .frame(false);
                                 cancel = ui.add(button).clicked();
@@ -7392,7 +7400,7 @@ impl OndinApp {
         egui::Panel::left("rail")
             .exact_size(46.0)
             .resizable(false)
-            .frame(panel_frame(color::CARD, 0, 9))
+            .frame(panel_frame(color::card(), 0, 9))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
@@ -7461,18 +7469,18 @@ impl OndinApp {
         {
             let w = &mut ui.style_mut().visuals.widgets;
             let hover = match self.layers_edge.lit() {
-                true => color::ACCENT_700,
-                false => color::DIVIDER,
+                true => color::accent_700(),
+                false => color::divider(),
             };
             w.hovered.fg_stroke = egui::Stroke::new(1.0, hover);
-            w.active.fg_stroke = egui::Stroke::new(1.0, color::ACCENT);
+            w.active.fg_stroke = egui::Stroke::new(1.0, color::accent());
         }
         let shown = egui::Panel::left("layers")
             // `default_size` before `size_range`, which then clamps a hand-edited value.
             .default_size(self.prefs.layers_width)
             .size_range(crate::panels::layers::MIN_W..=crate::panels::layers::MAX_W)
             .resizable(true)
-            .frame(panel_frame(color::PANEL, 0, 0))
+            .frame(panel_frame(color::panel(), 0, 0))
             .show(ui, |ui| {
                 // The retune is for the edge only, or the content's text would go accent-blue.
                 ui.set_style(inner_style);
@@ -7660,7 +7668,7 @@ impl OndinApp {
                         ui,
                         tree.inner_rect,
                         tree.state.offset.y,
-                        color::PANEL,
+                        color::panel(),
                     );
                     #[cfg(test)]
                     {
@@ -13149,7 +13157,7 @@ mod library_wiring_tests {
             .filter_map(|s| match &s.shape {
                 egui::Shape::Rect(r)
                     if r.fill == crate::theme::color::text_a(20)
-                        || r.fill == crate::theme::color::ACCENT_800 =>
+                        || r.fill == crate::theme::color::accent_800() =>
                 {
                     Some(r.rect)
                 }
@@ -15943,7 +15951,7 @@ mod close_confirmation_tests {
     fn accent_rings(app: &mut OndinApp, ctx: &egui::Context, events: Vec<egui::Event>) -> usize {
         rects(app, ctx, events)
             .iter()
-            .filter(|r| r.stroke.color == color::ACCENT && r.stroke.width > 0.0)
+            .filter(|r| r.stroke.color == color::accent() && r.stroke.width > 0.0)
             .count()
     }
 
@@ -15980,7 +15988,7 @@ mod close_confirmation_tests {
     }
 
     /// The card is on the app's card, not egui's: asserts the backdrop weight and the
-    /// hairline, since `color::CARD` is also egui's window fill and discriminates nothing.
+    /// hairline, since `color::card()` is also egui's window fill and discriminates nothing.
     ///
     /// flip: routing back through `egui::Modal::new` → fails at the backdrop with alpha 100
     #[test]
@@ -15997,7 +16005,7 @@ mod close_confirmation_tests {
             "the backdrop is not the app's weight: {fills:?}"
         );
         assert!(
-            painted.iter().any(|r| r.fill == color::CARD
+            painted.iter().any(|r| r.fill == color::card()
                 && r.stroke.color == crate::theme::color::text_a(23)
                 && r.corner_radius == egui::CornerRadius::same(10)),
             "the card's own frame is missing — ground, hairline and corner: {:?}",

@@ -147,7 +147,7 @@ impl Kind {
                     .and_then(|e| e.to_str())
                     .map(str::to_ascii_uppercase)
                     .unwrap_or_else(|| "FILE".into()),
-                theme::text::DIM,
+                theme::text::dim(),
             ),
         }
     }
@@ -1450,7 +1450,7 @@ fn form(
     super::dashboard::field_label(ui, "Ondin, Sketch, Penpot file, or Figma link");
     file_field(ui, card, act);
     if let Some(note) = &card.note {
-        message(ui, icon::INFO, note, theme::text::DIM);
+        message(ui, icon::INFO, note, theme::text::dim());
     }
     let ready = card.ready();
     match &card.field {
@@ -1490,12 +1490,12 @@ fn form(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         if busy {
-            ui.add(egui::Spinner::new().size(11.0).color(theme::text::FAINT));
+            ui.add(egui::Spinner::new().size(11.0).color(theme::text::faint()));
         }
         ui.label(
             egui::RichText::new(foot)
                 .size(settings::CAPTION_PT)
-                .color(theme::text::FAINT),
+                .color(theme::text::faint()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
@@ -1569,7 +1569,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                         egui::Label::new(
                             egui::RichText::new(name)
                                 .size(12.0)
-                                .color(theme::text::STRONG),
+                                .color(theme::text::strong()),
                         )
                         .truncate(),
                     );
@@ -1597,7 +1597,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
     });
     match &card.field {
         Field::Empty => {}
-        Field::Reading { .. } => message(ui, icon::FILE, "Reading…", theme::text::FAINT),
+        Field::Reading { .. } => message(ui, icon::FILE, "Reading…", theme::text::faint()),
         Field::One { source, .. } if source.kind == Kind::Figma => message(
             ui,
             icon::CHECK_CIRCLE,
@@ -1606,13 +1606,13 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                 source.name,
                 counted(source.census.pages.len(), "page", "pages")
             ),
-            color::SAVED,
+            color::saved(),
         ),
         Field::Link { .. } | Field::Fetching { .. } => message(
             ui,
             icon::LINK_SIMPLE,
             "A Figma link, read through Figma's API with your token.",
-            theme::text::FAINT,
+            theme::text::faint(),
         ),
         Field::Fig(_) => fig_notice(ui, act),
         Field::One { path, source } => {
@@ -1629,7 +1629,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                     source.kind.noun(),
                     settings::human_bytes(source.bytes)
                 ),
-                theme::text::FAINT,
+                theme::text::faint(),
             );
         }
         Field::Many(paths) => {
@@ -1637,9 +1637,9 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                 .iter()
                 .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
                 .collect();
-            message(ui, icon::FILES, &names.join(", "), theme::text::FAINT);
+            message(ui, icon::FILES, &names.join(", "), theme::text::faint());
         }
-        Field::Refused { why, .. } => message(ui, icon::INFO, why, color::WARN),
+        Field::Refused { why, .. } => message(ui, icon::INFO, why, color::warn()),
     }
     if card.has_link() {
         token_row(ui, card, act);
@@ -1651,21 +1651,21 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
 fn fig_notice(ui: &mut egui::Ui, act: &mut Option<CardAct>) {
     ui.add_space(10.0);
     egui::Frame::NONE
-        .fill(color::WARN.gamma_multiply(0.11))
-        .stroke(egui::Stroke::new(1.0, color::WARN.gamma_multiply(0.3)))
+        .fill(color::warn().gamma_multiply(0.11))
+        .stroke(egui::Stroke::new(1.0, color::warn().gamma_multiply(0.3)))
         .corner_radius(8)
         .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                ui.label(theme::icon_text(icon::INFO, 15.0, color::WARN));
+                ui.label(theme::icon_text(icon::INFO, 15.0, color::warn()));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     ui.label(
                         egui::RichText::new("Figma files come in by link")
                             .size(12.0)
-                            .color(theme::text::STRONG),
+                            .color(theme::text::strong()),
                     );
                     ui.add(
                         egui::Label::new(
@@ -1674,7 +1674,7 @@ fn fig_notice(ui: &mut egui::Ui, act: &mut Option<CardAct>) {
                                  API instead. In Figma, use Share › Copy link and paste the link here.",
                             )
                             .size(settings::CAPTION_PT + 1.0)
-                            .color(theme::text::MUTED),
+                            .color(theme::text::muted()),
                         )
                         .wrap(),
                     );
@@ -1745,7 +1745,7 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
         card.remember = !card.remember;
     }
     if let Some(why) = &card.fetch_error {
-        message(ui, icon::INFO, why, color::WARN);
+        message(ui, icon::INFO, why, color::warn());
     }
 }
 
@@ -1824,7 +1824,7 @@ fn divider(ui: &mut egui::Ui) {
     ui.painter().hline(
         rect.x_range(),
         rect.center().y,
-        egui::Stroke::new(1.0, theme::color::DIVIDER),
+        egui::Stroke::new(1.0, theme::color::divider()),
     );
     ui.add_space(GROUP_GAP + 2.0);
 }
@@ -1906,7 +1906,7 @@ fn dotted(name: &str, hex: Option<&str>) -> egui::WidgetText {
     let mut job = egui::text::LayoutJob::default();
     let (glyph, col) = match hex {
         Some(hex) => ("●", super::dashboard::swatch(hex)),
-        None => ("○", theme::text::FAINT),
+        None => ("○", theme::text::faint()),
     };
     job.append(
         glyph,
@@ -1923,7 +1923,7 @@ fn dotted(name: &str, hex: Option<&str>) -> egui::WidgetText {
         7.0,
         egui::TextFormat {
             font_id: egui::FontId::proportional(12.0),
-            color: color::TEXT,
+            color: color::text(),
             valign: egui::Align::Center,
             ..Default::default()
         },
@@ -2035,7 +2035,7 @@ fn check_row(
             f.layout(
                 sub.to_owned(),
                 egui::FontId::proportional(settings::CAPTION_PT),
-                theme::text::FAINT.gamma_multiply(fade),
+                theme::text::faint().gamma_multiply(fade),
                 w - text_x,
             )
         })
@@ -2057,7 +2057,7 @@ fn check_row(
         egui::vec2(TICK, TICK),
     );
     if on {
-        p.rect_filled(tick, 3.0, color::ACCENT.gamma_multiply(fade));
+        p.rect_filled(tick, 3.0, color::accent().gamma_multiply(fade));
         p.text(
             tick.center(),
             egui::Align2::CENTER_CENTER,
@@ -2083,20 +2083,20 @@ fn check_row(
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(12.0),
-        theme::text::STRONG.gamma_multiply(fade),
+        theme::text::strong().gamma_multiply(fade),
     );
     p.text(
         egui::pos2(rect.right(), text_line),
         egui::Align2::RIGHT_CENTER,
         meta,
         egui::FontId::proportional(11.0),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     if let Some(g) = sub_g {
         p.galley(
             egui::pos2(rect.left() + text_x, text_line + 8.0),
             g,
-            theme::text::FAINT,
+            theme::text::faint(),
         );
     }
     enabled && resp.clicked()
@@ -2107,11 +2107,11 @@ fn loading(ui: &mut egui::Ui, what: &str) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        ui.add(egui::Spinner::new().size(14.0).color(theme::text::DIM));
+        ui.add(egui::Spinner::new().size(14.0).color(theme::text::dim()));
         ui.label(
             egui::RichText::new(what)
                 .size(12.0)
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
         );
     });
 }
@@ -2122,7 +2122,7 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
-        let tint = if ok { color::SAVED } else { color::WARN };
+        let tint = if ok { color::saved() } else { color::warn() };
         ui.painter().rect(
             rect,
             9.0,
@@ -2143,12 +2143,12 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
             ui.label(
                 egui::RichText::new(&o.title)
                     .size(14.0)
-                    .color(theme::text::STRONG),
+                    .color(theme::text::strong()),
             );
             ui.label(
                 egui::RichText::new(&o.sub)
                     .size(settings::CAPTION_PT + 0.5)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
             );
         });
     });
@@ -2168,14 +2168,14 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
                     egui::Align2::LEFT_TOP,
                     n.to_string(),
                     egui::FontId::proportional(16.0),
-                    theme::text::STRONG,
+                    theme::text::strong(),
                 );
                 p.text(
                     rect.left_bottom() + egui::vec2(11.0, -9.0),
                     egui::Align2::LEFT_BOTTOM,
                     if n == 1 { one } else { many },
                     egui::FontId::proportional(11.0),
-                    theme::text::DIM,
+                    theme::text::dim(),
                 );
             }
         });
@@ -2226,7 +2226,7 @@ fn report(ui: &mut egui::Ui, rows: &[ReportRow]) {
                     ui.label(
                         egui::RichText::new(head)
                             .size(11.0)
-                            .color(theme::text::MUTED),
+                            .color(theme::text::muted()),
                     );
                 });
             if rows.is_empty() {
@@ -2260,13 +2260,13 @@ fn report_rows(ui: &mut egui::Ui, rows: &[ReportRow]) {
                     ui.label(
                         egui::RichText::new(&r.what)
                             .size(12.0)
-                            .color(theme::text::STRONG),
+                            .color(theme::text::strong()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new(&r.count)
                                 .size(11.0)
-                                .color(theme::text::FAINT),
+                                .color(theme::text::faint()),
                         );
                     });
                 });
@@ -2274,7 +2274,7 @@ fn report_rows(ui: &mut egui::Ui, rows: &[ReportRow]) {
                 ui.label(
                     egui::RichText::new(&r.how)
                         .size(11.0)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             });
     }

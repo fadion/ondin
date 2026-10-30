@@ -414,7 +414,7 @@ impl OndinApp {
             .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
                 egui::Frame::NONE
-                    .fill(color::RAISED)
+                    .fill(color::raised())
                     .corner_radius(8)
                     .stroke(egui::Stroke::new(1.0, color::text_a(20)))
                     .inner_margin(PAD)
@@ -437,12 +437,12 @@ impl OndinApp {
                             ui.label(
                                 egui::RichText::new(line)
                                     .size(10.5)
-                                    .color(theme::text::DIM),
+                                    .color(theme::text::dim()),
                             );
                         }
                         if let Some(why) = &b.refusal {
                             ui.add_space(-6.0);
-                            ui.label(egui::RichText::new(why).size(11.0).color(theme::text::MUTED));
+                            ui.label(egui::RichText::new(why).size(11.0).color(theme::text::muted()));
                         }
                         match b.tab {
                             Tab::Styles if doc.styles().is_empty() => empty(
@@ -958,7 +958,7 @@ impl OndinApp {
                                 egui::Label::new(
                                     egui::RichText::new(what)
                                         .size(11.5)
-                                        .color(theme::text::MUTED),
+                                        .color(theme::text::muted()),
                                 )
                                 .wrap(),
                             );
@@ -1736,7 +1736,11 @@ fn tabs(ui: &mut egui::Ui, tab: &mut Tab) {
             egui::Align2::CENTER_CENTER,
             label,
             egui::FontId::proportional(11.0),
-            if on { color::TEXT } else { theme::text::MUTED },
+            if on {
+                color::text()
+            } else {
+                theme::text::muted()
+            },
         );
         if resp.clicked() {
             *tab = t;
@@ -1757,7 +1761,7 @@ fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
             ui.label(theme::icon_text(
                 icon::MAGNIFYING_GLASS,
                 13.0,
-                theme::text::DIM,
+                theme::text::dim(),
             ));
             ui.add(
                 egui::TextEdit::singleline(&mut b.query)
@@ -1803,11 +1807,11 @@ fn square_button(ui: &mut egui::Ui, glyph: &str, on: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(SEARCH_H, SEARCH_H), egui::Sense::click());
     let p = ui.painter();
     let (fill, border, ink) = if on {
-        (color::text_a(36), color::text_a(46), color::TEXT)
+        (color::text_a(36), color::text_a(46), color::text())
     } else if resp.hovered() {
-        (color::text_a(23), color::text_a(38), theme::text::STRONG)
+        (color::text_a(23), color::text_a(38), theme::text::strong())
     } else {
-        (color::text_a(13), color::text_a(20), theme::text::MUTED)
+        (color::text_a(13), color::text_a(20), theme::text::muted())
     };
     p.rect(
         rect,
@@ -1919,18 +1923,18 @@ fn styles_tab(
                         icon::CARET_RIGHT
                     },
                     egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 );
                 let name = p.layout_no_wrap(
                     slot.title().to_string(),
                     egui::FontId::proportional(11.5),
-                    color::TEXT,
+                    color::text(),
                 );
                 let name_w = name.size().x;
                 p.galley(
                     egui::pos2(rect.left() + 23.0, rect.center().y - name.size().y / 2.0),
                     name,
-                    color::TEXT,
+                    color::text(),
                 );
                 let count = if picked.is_some() {
                     format!("{} of {total}", shown.len())
@@ -1942,7 +1946,7 @@ fn styles_tab(
                     egui::Align2::LEFT_CENTER,
                     count,
                     egui::FontId::proportional(10.5),
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 );
                 if resp.clicked() {
                     acts.push(Act::Toggle(key));
@@ -2034,7 +2038,7 @@ fn style_group_row(
         ui.painter().rect_stroke(
             r,
             4,
-            egui::Stroke::new(1.0, color::ACCENT),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Outside,
         );
         if b.edit_focus {
@@ -2068,18 +2072,18 @@ fn style_group_row(
             icon::CARET_RIGHT
         },
         egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let name = p.layout_no_wrap(
         g.path.to_string(),
         egui::FontId::proportional(11.5),
-        color::TEXT,
+        color::text(),
     );
     let name_w = name.size().x;
     p.galley(
         egui::pos2(left + 23.0, rect.center().y - name.size().y / 2.0),
         name,
-        color::TEXT,
+        color::text(),
     );
     let count = if g.filtered {
         format!("{} of {}", g.shown, g.total)
@@ -2091,7 +2095,7 @@ fn style_group_row(
         egui::Align2::LEFT_CENTER,
         count,
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     if g.kit.is_none() && ui::double_clicked(ui, &resp) {
         acts.push(Act::StartEdit(Edit::StyleGroup {
@@ -2136,7 +2140,7 @@ fn describe_row(
     ui.painter().rect_stroke(
         r,
         4,
-        egui::Stroke::new(1.0, color::ACCENT),
+        egui::Stroke::new(1.0, color::accent()),
         egui::StrokeKind::Outside,
     );
     if b.edit_focus {
@@ -2193,7 +2197,7 @@ fn style_row(
         ui.painter().rect_stroke(
             r,
             4,
-            egui::Stroke::new(1.0, color::ACCENT),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Outside,
         );
         if b.edit_focus {
@@ -2212,14 +2216,14 @@ fn style_row(
         egui::Align2::LEFT_CENTER,
         var::split_name(&s.name).1,
         egui::FontId::proportional(11.5),
-        theme::text::STRONG,
+        theme::text::strong(),
     );
     p.text(
         egui::pos2(rect.right() - 6.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let menu_at = |r: &egui::Response| {
         r.interact_pointer_pos().unwrap_or(rect.left_bottom()) + egui::vec2(6.0, 8.0)
@@ -2235,11 +2239,16 @@ fn empty(ui: &mut egui::Ui, head: &str, sub: &str) {
         ui.label(
             egui::RichText::new(head)
                 .size(12.0)
-                .color(theme::text::STRONG),
+                .color(theme::text::strong()),
         );
         ui.add_space(-4.0);
         ui.add(
-            egui::Label::new(egui::RichText::new(sub).size(11.0).color(theme::text::DIM)).wrap(),
+            egui::Label::new(
+                egui::RichText::new(sub)
+                    .size(11.0)
+                    .color(theme::text::dim()),
+            )
+            .wrap(),
         );
     });
 }
@@ -2264,7 +2273,7 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
         egui::Align2::LEFT_CENTER,
         "NAME",
         egui::FontId::proportional(9.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let clip = egui::Rect::from_x_y_ranges(rect.left() + NAME_W..=rect.right(), rect.y_range());
     for (i, m) in modes.iter().enumerate() {
@@ -2283,7 +2292,7 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
             ui.painter().rect_stroke(
                 r,
                 4,
-                egui::Stroke::new(1.0, color::ACCENT),
+                egui::Stroke::new(1.0, color::accent()),
                 egui::StrokeKind::Outside,
             );
             if b.edit_focus {
@@ -2308,9 +2317,9 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
             label,
             egui::FontId::proportional(11.0),
             if resp.hovered() {
-                theme::text::STRONG
+                theme::text::strong()
             } else {
-                theme::text::MUTED
+                theme::text::muted()
             },
         );
         if ui::double_clicked(ui, &resp) {
@@ -2357,7 +2366,7 @@ fn group_row(
         ui.painter().rect_stroke(
             r,
             4,
-            egui::Stroke::new(1.0, color::ACCENT),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Outside,
         );
         if b.edit_focus {
@@ -2384,18 +2393,18 @@ fn group_row(
             icon::CARET_RIGHT
         },
         egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let name = p.layout_no_wrap(
         path.to_string(),
         egui::FontId::proportional(11.5),
-        color::TEXT,
+        color::text(),
     );
     let name_w = name.size().x;
     p.galley(
         egui::pos2(rect.left() + 23.0, rect.center().y - name.size().y / 2.0),
         name,
-        color::TEXT,
+        color::text(),
     );
     let count = if filtered {
         format!("{shown} of {total}")
@@ -2407,7 +2416,7 @@ fn group_row(
         egui::Align2::LEFT_CENTER,
         count,
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     if kit.is_none() && ui::double_clicked(ui, &resp) {
         acts.push(Act::StartEdit(Edit::Group {
@@ -2484,7 +2493,7 @@ fn var_row(
         ui.painter().rect_stroke(
             r,
             4,
-            egui::Stroke::new(1.0, color::ACCENT),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Outside,
         );
         if b.edit_focus {
@@ -2503,7 +2512,7 @@ fn var_row(
         let count_galley = p.layout_no_wrap(
             count_text,
             egui::FontId::proportional(10.5),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
         let count_rect = egui::Rect::from_min_size(
             egui::pos2(
@@ -2516,7 +2525,7 @@ fn var_row(
         let galley = p.layout(
             leaf.to_string(),
             egui::FontId::proportional(11.5),
-            color::TEXT,
+            color::text(),
             f32::INFINITY,
         );
         let clip = egui::Rect::from_min_size(
@@ -2529,7 +2538,7 @@ fn var_row(
                 rect.center().y - galley.size().y / 2.0,
             ),
             galley,
-            color::TEXT,
+            color::text(),
         );
         let count_resp = ui.interact(
             count_rect.expand(3.0),
@@ -2537,9 +2546,9 @@ fn var_row(
             egui::Sense::click(),
         );
         let count_col = if count_resp.hovered() && count > 0 {
-            color::TEXT
+            color::text()
         } else {
-            theme::text::FAINT
+            theme::text::faint()
         };
         ui.painter().text(
             count_rect.left_center(),
@@ -2601,7 +2610,7 @@ fn var_row(
             ui.painter().rect_stroke(
                 r,
                 4,
-                egui::Stroke::new(1.0, color::ACCENT),
+                egui::Stroke::new(1.0, color::accent()),
                 egui::StrokeKind::Outside,
             );
             if b.edit_focus {
@@ -2741,14 +2750,14 @@ fn kit_row(
         egui::Align2::LEFT_CENTER,
         icon::PACKAGE,
         theme::icon_font(12.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
     let named = p.text(
         egui::pos2(g.right() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         super::binding::kit_name(doc, kit),
         egui::FontId::proportional(11.5),
-        theme::text::STRONG,
+        theme::text::strong(),
     );
     if let Some((held, next)) = waiting {
         let at = egui::pos2(named.right() + 5.0, rect.center().y);
@@ -2756,7 +2765,7 @@ fn kit_row(
             f.layout_no_wrap(
                 format!("· v{held} → v{next}"),
                 egui::FontId::proportional(10.5),
-                theme::text::DIM,
+                theme::text::dim(),
             )
         });
         let hit = egui::Rect::from_min_size(
@@ -2775,9 +2784,9 @@ fn kit_row(
             egui::pos2(at.x, at.y - galley.size().y / 2.0),
             galley,
             if resp.hovered() {
-                theme::text::STRONG
+                theme::text::strong()
             } else {
-                theme::text::DIM
+                theme::text::dim()
             },
         );
         if resp.clicked() {
@@ -2812,9 +2821,9 @@ fn kit_row(
             name,
             egui::FontId::proportional(11.0),
             if hand {
-                theme::text::STRONG
+                theme::text::strong()
             } else {
-                theme::text::DIM
+                theme::text::dim()
             },
         );
         if let Some(c) = col {
@@ -2860,7 +2869,7 @@ fn kit_var_row(
     let count_galley = p.layout_no_wrap(
         count.to_string(),
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     let count_rect = egui::Rect::from_min_size(
         egui::pos2(
@@ -2878,7 +2887,7 @@ fn kit_var_row(
         egui::Align2::LEFT_CENTER,
         leaf,
         egui::FontId::proportional(11.5),
-        theme::text::MUTED,
+        theme::text::muted(),
     );
     let count_resp = ui.interact(
         count_rect.expand(3.0),
@@ -2891,9 +2900,9 @@ fn kit_var_row(
         count.to_string(),
         egui::FontId::proportional(10.5),
         if count_resp.hovered() && count > 0 {
-            color::TEXT
+            color::text()
         } else {
-            theme::text::FAINT
+            theme::text::faint()
         },
     );
     if count > 0 && count_resp.on_hover_text(layers_label(count)).clicked() {
@@ -2939,7 +2948,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 egui::Align2::LEFT_CENTER,
                 cell_text(table, c),
                 font,
-                theme::text::STRONG,
+                theme::text::strong(),
             );
         }
         Cell::Number(x) => {
@@ -2948,7 +2957,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 egui::Align2::LEFT_CENTER,
                 number_text(*x),
                 font,
-                theme::text::STRONG,
+                theme::text::strong(),
             );
         }
         // A string (§15 D1069): quoted, cut at the cell's edge by the painter's
@@ -2959,7 +2968,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 egui::Align2::LEFT_CENTER,
                 string_text(s),
                 font,
-                theme::text::STRONG,
+                theme::text::strong(),
             );
         }
         // A boolean (§15 D1059): a 12-point box where the colour cell has its
@@ -2976,7 +2985,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                     egui::Align2::CENTER_CENTER,
                     icon::CHECK,
                     theme::icon_font(10.0),
-                    color::CARD,
+                    color::card(),
                 );
             } else {
                 p.rect_stroke(
@@ -2991,12 +3000,12 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 egui::Align2::LEFT_CENTER,
                 super::binding::bool_word(*b),
                 font,
-                theme::text::STRONG,
+                theme::text::strong(),
             );
         }
         Cell::Alias(t) => {
             let name = table.get(*t).map(|t| t.name.clone()).unwrap_or_default();
-            let galley = p.layout(name, font, color::TEXT, MODE_W - 12.0 - 14.0);
+            let galley = p.layout(name, font, color::text(), MODE_W - 12.0 - 14.0);
             let w = (galley.size().x + 14.0).min(MODE_W - 12.0);
             let cap = egui::Rect::from_min_size(
                 egui::pos2(cell.left() + 6.0, y - 9.0),
@@ -3006,7 +3015,7 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
             p.with_clip_rect(cap.shrink2(egui::vec2(7.0, 0.0))).galley(
                 egui::pos2(cap.left() + 7.0, y - galley.size().y / 2.0 + 0.5),
                 galley,
-                color::TEXT,
+                color::text(),
             );
         }
     }
@@ -3211,7 +3220,7 @@ impl OndinApp {
                         egui::Align2::CENTER_CENTER,
                         icon::ARROW_COUNTER_CLOCKWISE,
                         theme::icon_font(13.0),
-                        color::TEXT,
+                        color::text(),
                     );
                 }
                 Some(_) => {
@@ -3220,7 +3229,7 @@ impl OndinApp {
                         egui::Align2::LEFT_CENTER,
                         "Mode",
                         egui::FontId::proportional(10.5),
-                        theme::text::STRONG,
+                        theme::text::strong(),
                     );
                     ui::override_dot(ui.painter(), egui::pos2(g.right() + 5.0, g.center().y));
                 }
@@ -3230,7 +3239,7 @@ impl OndinApp {
                         egui::Align2::LEFT_CENTER,
                         "Mode",
                         egui::FontId::proportional(10.5),
-                        theme::text::DIM,
+                        theme::text::dim(),
                     );
                 }
             }
@@ -3241,7 +3250,7 @@ impl OndinApp {
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
             let p = ui.painter();
             let border = if open {
-                color::ACCENT.gamma_multiply(0.65)
+                color::accent().gamma_multiply(0.65)
             } else if resp.hovered() {
                 color::text_a(38)
             } else {
@@ -3254,7 +3263,11 @@ impl OndinApp {
                 egui::Stroke::new(1.0, border),
                 egui::StrokeKind::Inside,
             );
-            let ink = if set { color::TEXT } else { color::text_a(128) };
+            let ink = if set {
+                color::text()
+            } else {
+                color::text_a(128)
+            };
             let galley = p.layout_no_wrap(value, egui::FontId::proportional(12.0), ink);
             let x = rect.left() + 9.0;
             let gw = galley.size().x;
@@ -3277,7 +3290,7 @@ impl OndinApp {
                 egui::Align2::RIGHT_CENTER,
                 icon::CARET_DOWN,
                 egui::FontId::new(12.0, egui::FontFamily::Name("phosphor".into())),
-                theme::text::DIM,
+                theme::text::dim(),
             );
             let resp = resp.on_hover_text(match (page, set) {
                 (false, true) => "The mode this frame sets for itself and everything in it",

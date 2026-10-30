@@ -317,7 +317,7 @@ pub enum FamilyStatus {
     /// the family has not landed, or nothing has asked for it.
     Pending,
     /// Not drawable **ever**: every source has landed and none lists this family,
-    /// or every face tried came back unusable. Earns `theme::color::WARN`.
+    /// or every face tried came back unusable. Earns `theme::color::warn()`.
     Missing,
 }
 

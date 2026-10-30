@@ -929,7 +929,7 @@ pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, 
                 egui::Align2::CENTER_CENTER,
                 icon::PLUS,
                 theme::icon_font(11.0),
-                theme::text::MUTED,
+                theme::text::muted(),
             );
             resp.on_hover_text("This instance's own — not in the main");
             false
@@ -940,7 +940,7 @@ pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, 
                 egui::Align2::CENTER_CENTER,
                 icon::ARROW_COUNTER_CLOCKWISE,
                 theme::icon_font(12.0),
-                theme::text::STRONG,
+                theme::text::strong(),
             );
             resp.on_hover_text("Reset to main").clicked()
         }
@@ -978,7 +978,7 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
         ui.spacing_mut().item_spacing.x = gap;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::hover());
         let p = ui.painter();
-        let dash = egui::Stroke::new(1.0, theme::text::FAINT);
+        let dash = egui::Stroke::new(1.0, theme::text::faint());
         p.extend(egui::Shape::dashed_line(
             &rounded_outline(rect.shrink(0.5), 3.0),
             dash,
@@ -995,7 +995,7 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
                     egui::pos2(x0 + 11.0 + 9.0, y - 8.0),
                     egui::vec2(16.0, 16.0),
                 );
-                p.rect_filled(chip, 4.0, theme::text::FAINT.gamma_multiply(0.5));
+                p.rect_filled(chip, 4.0, theme::text::faint().gamma_multiply(0.5));
                 chip.right() + 9.0
             }
             GhostLead::Glyph(g) => {
@@ -1004,7 +1004,7 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
                     egui::Align2::LEFT_CENTER,
                     g,
                     theme::icon_font(15.0),
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 );
                 r.right() + 9.0
             }
@@ -1015,7 +1015,7 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(12.0),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
         ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, 14.0, FieldButton::Off)
             .on_hover_text("Restore — put the main's item back")
@@ -1246,7 +1246,7 @@ pub(super) fn label_mark_in(
     mark: Option<&OverrideMark>,
 ) -> bool {
     let color = match mark {
-        Some(_) => theme::text::STRONG,
+        Some(_) => theme::text::strong(),
         None => ink,
     };
     let right = align == egui::Align::Max && size.is_some();
@@ -1286,7 +1286,7 @@ pub(super) fn label_mark_in(
             egui::Align2::CENTER_CENTER,
             icon::ARROW_COUNTER_CLOCKWISE,
             theme::icon_font(11.0),
-            theme::text::STRONG,
+            theme::text::strong(),
         );
     } else {
         ui::override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
@@ -1404,7 +1404,7 @@ fn heading(
         } else {
             let font = egui::FontId::proportional(11.0);
             ui.painter()
-                .layout_no_wrap(summary.to_owned(), font, theme::text::DIM)
+                .layout_no_wrap(summary.to_owned(), font, theme::text::dim())
                 .size()
                 .x
                 + 9.0
@@ -1414,7 +1414,7 @@ fn heading(
             .layout_no_wrap(
                 icon::ARROW_UP_RIGHT.to_owned(),
                 theme::icon_font(12.0),
-                theme::text::DIM,
+                theme::text::dim(),
             )
             .size()
             .x
@@ -1426,7 +1426,7 @@ fn heading(
                 ui.label(
                     egui::RichText::new(caption)
                         .size(11.0)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             }
             if let Some((main, name)) = link {
@@ -1440,7 +1440,7 @@ fn heading(
                     .layout_no_wrap(
                         name.to_owned(),
                         egui::FontId::proportional(13.0),
-                        theme::text::STRONG,
+                        theme::text::strong(),
                     )
                     .size()
                     .x
@@ -1456,7 +1456,7 @@ fn heading(
                                         egui::RichText::new(name)
                                             .size(13.0)
                                             .underline()
-                                            .color(theme::text::STRONG),
+                                            .color(theme::text::strong()),
                                     )
                                     .truncate()
                                     // Named in the row's own tooltip below, one
@@ -1470,7 +1470,7 @@ fn heading(
                             egui::Label::new(
                                 egui::RichText::new(icon::ARROW_UP_RIGHT)
                                     .font(theme::icon_font(12.0))
-                                    .color(theme::text::DIM),
+                                    .color(theme::text::dim()),
                             )
                             .sense(egui::Sense::click()),
                         );
@@ -1492,7 +1492,7 @@ fn heading(
                         egui::Label::new(
                             egui::RichText::new(title)
                                 .size(13.0)
-                                .color(theme::text::STRONG),
+                                .color(theme::text::strong()),
                         )
                         .truncate(),
                     );
@@ -1505,7 +1505,7 @@ fn heading(
                 ui.label(
                     egui::RichText::new(summary)
                         .size(11.0)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             });
         }
@@ -1734,7 +1734,7 @@ fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> Na
                         egui::Label::new(
                             egui::RichText::new(name)
                                 .size(NAME_PT)
-                                .color(theme::text::STRONG),
+                                .color(theme::text::strong()),
                         )
                         .truncate(),
                     )
@@ -1775,7 +1775,7 @@ fn description_note(doc: &ondin_core::Document, main: NodeId, ui: &mut egui::Ui)
         egui::Label::new(
             egui::RichText::new(text)
                 .size(DESC_PT)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
         )
         .wrap(),
     );
@@ -1793,7 +1793,7 @@ fn count_link(ui: &mut egui::Ui, instances: usize) -> bool {
         ui.label(
             egui::RichText::new(text)
                 .size(NAME_PT)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
         );
         return false;
     }
@@ -1804,9 +1804,9 @@ fn count_link(ui: &mut egui::Ui, instances: usize) -> bool {
         .size();
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let color = if resp.hovered() {
-        theme::text::STRONG
+        theme::text::strong()
     } else {
-        theme::text::MUTED
+        theme::text::muted()
     };
     let job = egui::text::LayoutJob::single_section(
         text,
@@ -1869,7 +1869,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
                 egui::Label::new(
                     egui::RichText::new(text)
                         .size(12.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 )
                 .truncate(),
             );
@@ -1894,7 +1894,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
                 ui.label(
                     egui::RichText::new("no counterpart")
                         .size(11.0)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             }
         });
@@ -1922,7 +1922,7 @@ fn mixed_line(ui: &mut egui::Ui, roots: &[NodeId], others: usize, act: &mut Opti
                 plural(others, "other layer")
             ))
             .size(12.0)
-            .color(theme::text::STRONG),
+            .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let label = "Select instances";
@@ -1959,7 +1959,7 @@ fn paint_glyph(ui: &egui::Ui, glyph: &str, slot: egui::Rect, beside: egui::Rect)
         egui::Align2::CENTER_CENTER,
         glyph,
         theme::icon_font(16.0),
-        theme::text::STRONG,
+        theme::text::strong(),
     );
 }
 
@@ -1971,7 +1971,7 @@ fn paint_hexagon(ui: &egui::Ui, filled: bool, slot: egui::Rect, beside: egui::Re
             ui.painter(),
             egui::pos2(slot.center().x, beside.center().y),
             16.0,
-            theme::text::STRONG,
+            theme::text::strong(),
         );
     } else {
         paint_glyph(ui, icon::HEXAGON, slot, beside);
@@ -2309,8 +2309,8 @@ mod tests {
         };
         let (x_at, x_ink) = ink_of("X");
         let (_, y_ink) = ink_of("Y");
-        assert_eq!(x_ink, theme::text::STRONG, "X is overridden");
-        assert_eq!(y_ink, theme::text::FAINT, "Y follows");
+        assert_eq!(x_ink, theme::text::strong(), "X is overridden");
+        assert_eq!(y_ink, theme::text::faint(), "Y follows");
         click(&mut f.app, &ctx, x_at.center());
         let doc = &f.app.session.doc;
         assert_eq!(
@@ -2424,7 +2424,7 @@ mod tests {
             .find(|(t, ..)| t == icon::DROP_HALF)
             .map(|(_, r, c)| (*r, *c))
             .expect("the opacity field");
-        assert_eq!(drop_ink, theme::text::STRONG, "opacity is overridden");
+        assert_eq!(drop_ink, theme::text::strong(), "opacity is overridden");
         click(&mut f.app, &ctx, drop_at.center());
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
     }
@@ -2605,7 +2605,7 @@ mod tests {
         let out = settled(&mut f.app, &ctx, f.ir);
         let at = inks(&out)
             .into_iter()
-            .find(|(t, _, c)| t == "W" && *c == theme::text::STRONG)
+            .find(|(t, _, c)| t == "W" && *c == theme::text::strong())
             .map(|(_, r, _)| r.center())
             .expect("a marked W");
         click(&mut f.app, &ctx, at);
@@ -2650,7 +2650,7 @@ mod tests {
             .find(|(t, ..)| t == "Mode")
             .map(|(_, r, c)| (r, c))
             .expect("the Mode row is drawn");
-        assert_eq!(ink, theme::text::STRONG, "the label is bright");
+        assert_eq!(ink, theme::text::strong(), "the label is bright");
         assert!(
             dots(&out)
                 .iter()
@@ -2797,7 +2797,7 @@ mod tests {
             .find(|(t, ..)| t == icon::CORNERS_OUT)
             .map(|(_, r, c)| (r, c))
             .expect("the multi-selection radius field");
-        assert_eq!(ink, theme::text::STRONG, "the radius is overridden");
+        assert_eq!(ink, theme::text::strong(), "the radius is overridden");
         click(&mut f.app, &ctx, at.center());
         let radii = |id| match f.app.session.doc.get(id).unwrap().kind() {
             NodeKind::Rect { corner_radii, .. } => *corner_radii,
@@ -3307,7 +3307,7 @@ mod tests {
         let out = settle(&mut f.app, &ctx);
         let at = inks(&out)
             .into_iter()
-            .find(|(t, _, c)| t == "X" && *c == theme::text::STRONG)
+            .find(|(t, _, c)| t == "X" && *c == theme::text::strong())
             .map(|(_, r, _)| r.center())
             .expect("a marked X");
         click(&mut f.app, &ctx, at);
@@ -3341,7 +3341,7 @@ mod tests {
         let out = settle(&mut f.app, &ctx);
         let at = inks(&out)
             .into_iter()
-            .find(|(t, _, c)| t == "X" && *c == theme::text::STRONG)
+            .find(|(t, _, c)| t == "X" && *c == theme::text::strong())
             .map(|(_, r, _)| r.center())
             .expect("a marked X");
         click(&mut f.app, &ctx, at);
@@ -3479,7 +3479,7 @@ mod tests {
         let out = settle(&mut f.app, &ctx);
         let w = inks(&out)
             .into_iter()
-            .find(|(t, _, c)| t == "W" && *c == theme::text::STRONG)
+            .find(|(t, _, c)| t == "W" && *c == theme::text::strong())
             .map(|(_, r, _)| r.center())
             .expect("a marked W");
         click(&mut f.app, &ctx, w);
@@ -3728,7 +3728,7 @@ mod tests {
                 .find(|(t, ..)| t == label)
                 .map(|(.., c)| *c)
                 .unwrap_or_else(|| panic!("no {label} in {painted:?}"));
-            assert_eq!(ink, theme::text::FAINT, "{says}");
+            assert_eq!(ink, theme::text::faint(), "{says}");
         }
         let pin = ondin_core::Insets {
             right: Some(ondin_core::LengthPct::Px(8.0)),
@@ -3832,8 +3832,8 @@ mod tests {
         f.app.session.selection.set_one(copy);
         let out = settle(&mut f.app, &ctx);
         let (w, w_ink) = ink_of(&out, "W");
-        assert_eq!(w_ink, theme::text::STRONG, "W is overridden");
-        assert_eq!(ink_of(&out, "H").1, theme::text::FAINT, "H follows");
+        assert_eq!(w_ink, theme::text::strong(), "W is overridden");
+        assert_eq!(ink_of(&out, "H").1, theme::text::faint(), "H follows");
         click(&mut f.app, &ctx, w);
         assert!(
             matches!(
@@ -3889,15 +3889,15 @@ mod tests {
         f.app.session.selection.set_one(copy);
         let out = settle(&mut f.app, &ctx);
         let (l, l_ink) = ink_of(&out, "L");
-        assert_eq!(l_ink, theme::text::STRONG, "L is overridden");
-        assert_eq!(rotation(&out).1, theme::text::FAINT, "R follows");
+        assert_eq!(l_ink, theme::text::strong(), "L is overridden");
+        assert_eq!(rotation(&out).1, theme::text::faint(), "R follows");
         click(&mut f.app, &ctx, l);
         assert_eq!(end_of(&f), ondin_core::kurbo::Point::new(50.0, 0.0));
         end_at(&mut f, 0.0, 50.0);
         let out = settle(&mut f.app, &ctx);
-        assert_eq!(ink_of(&out, "L").1, theme::text::FAINT, "L follows");
+        assert_eq!(ink_of(&out, "L").1, theme::text::faint(), "L follows");
         let (r, r_ink) = rotation(&out);
-        assert_eq!(r_ink, theme::text::STRONG, "R is overridden");
+        assert_eq!(r_ink, theme::text::strong(), "R is overridden");
         click(&mut f.app, &ctx, r);
         let end = end_of(&f);
         assert!(
@@ -3936,7 +3936,7 @@ mod tests {
             .find(|(t, rr, _)| t == icon::ARROW_CLOCKWISE && (rr.center().x - x.x).abs() < 8.0)
             .map(|(_, rr, c)| (rr.center(), c))
             .expect("the rotation field's glyph");
-        assert_eq!(r_ink, theme::text::STRONG, "R is overridden");
+        assert_eq!(r_ink, theme::text::strong(), "R is overridden");
         click(&mut f.app, &ctx, r);
         let doc = &f.app.session.doc;
         let got = doc.get(f.ir).unwrap().transform().as_coeffs();

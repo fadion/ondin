@@ -451,7 +451,7 @@ impl OndinApp {
                 egui::Label::new(
                     egui::RichText::new(body)
                         .size(12.0)
-                        .color(theme::text::MUTED),
+                        .color(theme::text::muted()),
                 )
                 .wrap(),
             );
@@ -624,7 +624,7 @@ impl OndinApp {
                         let mut job = egui::text::LayoutJob::simple_singleline(
                             self.page_name(self.session.page),
                             egui::FontId::proportional(12.0),
-                            theme::text::MUTED,
+                            theme::text::muted(),
                         );
                         job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
                         let name = ui.painter().layout_job(job);
@@ -633,8 +633,11 @@ impl OndinApp {
                             egui::Sense::hover(),
                         );
                         let top = baseline - baseline_in(&name);
-                        ui.painter()
-                            .galley(egui::pos2(rect.left(), top), name, theme::text::MUTED);
+                        ui.painter().galley(
+                            egui::pos2(rect.left(), top),
+                            name,
+                            theme::text::muted(),
+                        );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let plus = icon_button(ui, icon::PLUS, 20.0, 15.0, false, true);
@@ -669,7 +672,7 @@ impl OndinApp {
                         })
                         .show(ui, |ui| self.page_rows(ui));
                 });
-            crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::PANEL);
+            crate::ui::scroll_fade_top(ui, list.inner_rect, list.state.offset.y, color::panel());
             // The divider sits on the list's edge: item spacing there would be a band
             // the rows stop short of.
             ui.add_space(-ui.spacing().item_spacing.y);
@@ -682,7 +685,7 @@ impl OndinApp {
     fn pages_divider(&mut self, ui: &mut egui::Ui, folded: bool) {
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, color::DIVIDER);
+        ui.painter().rect_filled(rect, 0.0, color::divider());
         if folded {
             return;
         }
@@ -744,7 +747,7 @@ impl OndinApp {
                 p.rect_stroke(
                     rect.shrink(0.75),
                     r5,
-                    egui::Stroke::new(1.5, color::ACCENT),
+                    egui::Stroke::new(1.5, color::accent()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -755,14 +758,14 @@ impl OndinApp {
                     egui::Align2::CENTER_CENTER,
                     icon::CHECK,
                     theme::icon_font(13.0),
-                    color::ACCENT,
+                    color::accent(),
                 );
             }
             let ink = match (dragged, *draft, current) {
-                (true, ..) => theme::text::FAINT,
-                (_, true, _) => theme::text::DIM,
-                (_, _, true) => color::TEXT,
-                _ => theme::text::MUTED,
+                (true, ..) => theme::text::faint(),
+                (_, true, _) => theme::text::dim(),
+                (_, _, true) => color::text(),
+                _ => theme::text::muted(),
             };
             if !renaming {
                 let name = self.page_name(*page);
@@ -778,7 +781,7 @@ impl OndinApp {
                 let tag = p.layout_no_wrap(
                     "Draft".to_string(),
                     egui::FontId::proportional(10.0),
-                    theme::text::DIM,
+                    theme::text::dim(),
                 );
                 let size = tag.size() + egui::vec2(10.0, 3.0);
                 let at = egui::Rect::from_min_size(
@@ -791,7 +794,7 @@ impl OndinApp {
                     egui::Stroke::new(1.0, theme::color::text_a(40)),
                     egui::StrokeKind::Inside,
                 );
-                p.galley(at.min + egui::vec2(5.0, 1.5), tag, theme::text::DIM);
+                p.galley(at.min + egui::vec2(5.0, 1.5), tag, theme::text::dim());
             }
             if renaming {
                 self.page_rename_field(ui, *page, rect);
@@ -835,7 +838,7 @@ impl OndinApp {
             let line_y = rects.get(slot).map_or(last.bottom(), |r| r.top());
             let x = first.left() + 4.0..=first.right() - 4.0;
             ui.painter()
-                .hline(x, line_y, egui::Stroke::new(2.0, color::ACCENT));
+                .hline(x, line_y, egui::Stroke::new(2.0, color::accent()));
         }
         if ui.input(|i| i.pointer.any_released()) {
             self.pages.drag = None;
@@ -869,8 +872,8 @@ impl OndinApp {
         ui.painter().rect(
             field,
             egui::CornerRadius::same(4),
-            color::FIELD,
-            egui::Stroke::new(1.0, color::ACCENT),
+            color::field(),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Inside,
         );
         // `place`, not `put`: the field is shorter than its row, and `put` would
@@ -884,7 +887,7 @@ impl OndinApp {
                 .vertical_align(egui::Align::Center)
                 .desired_width(field.width() - 8.0)
                 .font(egui::FontId::proportional(12.5))
-                .text_color(color::TEXT),
+                .text_color(color::text()),
         );
         // Focus once, on the field's first frame (the layer rename's rule), and
         // bring the row into a list scrolled or dragged short.

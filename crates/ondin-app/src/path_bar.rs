@@ -541,7 +541,7 @@ impl OndinApp {
                             ui.label(
                                 egui::RichText::new("Nothing left at this distance")
                                     .size(11.0)
-                                    .color(theme::text::MUTED),
+                                    .color(theme::text::muted()),
                             );
                         }
                     });
@@ -579,7 +579,7 @@ impl OndinApp {
 /// The bar's ground: the rail's fill, as a floating card draws it.
 fn bar_frame() -> egui::Frame {
     egui::Frame::NONE
-        .fill(color::CARD)
+        .fill(color::card())
         .stroke(egui::Stroke::new(1.0, theme::color::text_a(15)))
         .shadow(egui::epaint::Shadow {
             offset: [0, 6],

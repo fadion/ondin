@@ -33,7 +33,9 @@ const FIRST_MAP_H: f32 = 132.0;
 const IMAGE_GREY: egui::Color32 = egui::Color32::from_rgb(0x8d, 0x8f, 0x96);
 /// A layer that paints nothing of its own and is drawn anyway: an unfilled frame, a
 /// container too small to open, or a gradient with no stops.
-const UNFILLED: egui::Color32 = crate::theme::color::text_a(28);
+fn unfilled() -> egui::Color32 {
+    crate::theme::color::text_a(28)
+}
 /// The smallest a container's shorter side may be on the map, in points, for the
 /// walk to open it and draw its contents instead.
 const DESCEND: f64 = 6.0;
@@ -267,7 +269,7 @@ impl OndinApp {
 
         let view = self.session.camera.viewport(self.canvas_px).view;
         let painter = ui.painter_at(map);
-        painter.rect_filled(map, 4.0, color::BG);
+        painter.rect_filled(map, 4.0, color::bg());
         let boxes = self.minimap_boxes(fit.scale);
         for b in &boxes {
             let r = fit.rect(b.bounds);
@@ -291,7 +293,7 @@ impl OndinApp {
         let held = self.minimap.drag.is_some();
         if let Some(drag) = self.minimap.drag {
             let g = fit.rect(drag.ghost);
-            let stroke = egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.55));
+            let stroke = egui::Stroke::new(1.0, color::accent().gamma_multiply(0.55));
             let corners = [
                 g.left_top(),
                 g.right_top(),
@@ -312,22 +314,22 @@ impl OndinApp {
             painter.rect_stroke(
                 vp,
                 2.0,
-                egui::Stroke::new(3.0, color::ACCENT.gamma_multiply(0.25)),
+                egui::Stroke::new(3.0, color::accent().gamma_multiply(0.25)),
                 egui::StrokeKind::Outside,
             );
         }
         painter.rect_filled(
             vp,
             2.0,
-            color::ACCENT.gamma_multiply(if held { 0.2 } else { 0.12 }),
+            color::accent().gamma_multiply(if held { 0.2 } else { 0.12 }),
         );
         painter.rect_stroke(
             vp,
             2.0,
             if held {
-                egui::Stroke::new(2.0, color::ACCENT_300)
+                egui::Stroke::new(2.0, color::accent_300())
             } else {
-                egui::Stroke::new(1.5, color::ACCENT)
+                egui::Stroke::new(1.5, color::accent())
             },
             egui::StrokeKind::Inside,
         );
@@ -407,7 +409,7 @@ impl OndinApp {
             // where its contents are.
             None if frame || !descend => out.push(MapBox {
                 bounds,
-                fill: UNFILLED,
+                fill: unfilled(),
                 text,
             }),
             None => {}
@@ -459,7 +461,7 @@ impl OndinApp {
             })?;
         Some(match brush {
             ondin_core::Brush::Solid(c) => crate::ui::color_to_egui(*c),
-            ondin_core::Brush::Gradient(g) => g.gradient.stops.first().map_or(UNFILLED, |s| {
+            ondin_core::Brush::Gradient(g) => g.gradient.stops.first().map_or(unfilled(), |s| {
                 crate::ui::color_to_egui(s.color.to_alpha_color())
             }),
             ondin_core::Brush::Image(_) => IMAGE_GREY,
@@ -795,7 +797,7 @@ mod tests {
         assert!(
             !boxes
                 .iter()
-                .any(|b| b.bounds == group && b.fill == UNFILLED),
+                .any(|b| b.bounds == group && b.fill == unfilled()),
             "the opened group draws nothing of its own"
         );
         let past = |boxes: &[MapBox]| boxes.iter().any(|b| b.bounds.max_x() > own.max_x());

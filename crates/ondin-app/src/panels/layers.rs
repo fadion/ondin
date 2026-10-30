@@ -183,10 +183,14 @@ const GUIDE_GAP: f32 = 2.5;
 const ELBOW_CLEAR: f32 = 0.5 + GUIDE_GAP;
 /// A tree guide at rest — 8.5% of the text colour. Below
 /// [`theme::text`]'s dimmest tier (38%) so the gutter does not compete with names.
-const GUIDE_REST: egui::Color32 = theme::color::text_a(22);
-/// [`GUIDE_REST`] lit: the trunk from the hovered row's parent down to its elbow,
+fn guide_rest() -> egui::Color32 {
+    theme::color::text_a(22)
+}
+/// [`guide_rest`] lit: the trunk from the hovered row's parent down to its elbow,
 /// at 34%.
-const GUIDE_HOVER: egui::Color32 = theme::color::text_a(87);
+fn guide_hover() -> egui::Color32 {
+    theme::color::text_a(87)
+}
 /// How close to a row's edge counts as "drop between" rather than "drop into".
 const EDGE_FRACTION: f32 = 0.3;
 /// How far, in indents, the pointer has to leave the level the drag is holding
@@ -419,7 +423,7 @@ fn row_tint(dragged: bool, selected: bool, hovered: bool) -> Option<egui::Color3
 
 /// What a row looks like under its tint, opaque, for covering a name with.
 fn row_ground(dragged: bool, selected: bool, hovered: bool) -> egui::Color32 {
-    let panel = color::PANEL;
+    let panel = color::panel();
     row_tint(dragged, selected, hovered).map_or(panel, |t| panel.blend(t))
 }
 
@@ -490,20 +494,20 @@ fn subtract_base(doc: &ondin_core::Document, node: &ondin_core::Node) -> bool {
 /// The layers-tree icon (glyph + resting colour) for a node kind.
 pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
     match kind {
-        NodeKind::Root => (icon::SELECTION, theme::text::MUTED),
-        NodeKind::Artboard { .. } => (icon::FRAME_CORNERS, color::ACCENT_400),
-        NodeKind::Group => (icon::SELECTION, theme::text::MUTED),
-        NodeKind::Rect { .. } => (icon::SQUARE, theme::text::MUTED),
-        NodeKind::Ellipse { .. } => (icon::CIRCLE, theme::text::MUTED),
-        NodeKind::Polygon { .. } => (icon::TRIANGLE, theme::text::MUTED),
-        NodeKind::Star { .. } => (icon::STAR, theme::text::MUTED),
-        NodeKind::Line { .. } => (icon::LINE_SEGMENT, theme::text::MUTED),
-        NodeKind::Path { .. } => (icon::POLYGON, color::ACCENT_400),
-        NodeKind::Text { .. } => (icon::TEXT_T, theme::text::MUTED),
-        NodeKind::Slice { .. } => (icon::KNIFE, theme::text::MUTED),
+        NodeKind::Root => (icon::SELECTION, theme::text::muted()),
+        NodeKind::Artboard { .. } => (icon::FRAME_CORNERS, color::accent_400()),
+        NodeKind::Group => (icon::SELECTION, theme::text::muted()),
+        NodeKind::Rect { .. } => (icon::SQUARE, theme::text::muted()),
+        NodeKind::Ellipse { .. } => (icon::CIRCLE, theme::text::muted()),
+        NodeKind::Polygon { .. } => (icon::TRIANGLE, theme::text::muted()),
+        NodeKind::Star { .. } => (icon::STAR, theme::text::muted()),
+        NodeKind::Line { .. } => (icon::LINE_SEGMENT, theme::text::muted()),
+        NodeKind::Path { .. } => (icon::POLYGON, color::accent_400()),
+        NodeKind::Text { .. } => (icon::TEXT_T, theme::text::muted()),
+        NodeKind::Slice { .. } => (icon::KNIFE, theme::text::muted()),
         // Accent, like `Path`, with the operation's own glyph: the name can be
         // renamed away, the icon cannot.
-        NodeKind::Boolean { op } => (op_glyph(*op), color::ACCENT_400),
+        NodeKind::Boolean { op } => (op_glyph(*op), color::accent_400()),
     }
 }
 
@@ -893,8 +897,8 @@ enum GuideInk {
 impl GuideInk {
     fn colour(self) -> egui::Color32 {
         match self {
-            Self::Rest => GUIDE_REST,
-            Self::Hovered => GUIDE_HOVER,
+            Self::Rest => guide_rest(),
+            Self::Hovered => guide_hover(),
             Self::Selected => color::SELECT,
         }
     }
@@ -1088,7 +1092,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("No layers match")
                         .size(11.5)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
             }
             // Collected whether or not the guides are on: cheaper than a second
@@ -1227,7 +1231,7 @@ impl OndinApp {
                 .vertical_align(egui::Align::Center)
                 .desired_width(field.width())
                 .font(egui::FontId::proportional(12.5))
-                .text_color(color::TEXT),
+                .text_color(color::text()),
         );
         if let Some((_, stored)) = &mut self.renaming_layer {
             *stored = buf.clone();
@@ -1435,7 +1439,7 @@ impl OndinApp {
         // `boolean_failed`, never "the outline is missing": an empty intersection is
         // on purpose.
         if picture_missing(self.canvas.images(), node) || self.session.resolved.boolean_failed(id) {
-            glyph_col = theme::color::WARN;
+            glyph_col = theme::color::warn();
         }
         // Cloned so the node's borrow ends before the painting below.
         let picture = picture_of(node).cloned();
@@ -1579,10 +1583,10 @@ impl OndinApp {
             };
             // The control the pointer is on, as opposed to the row (§15 D246).
             let under = resp.hover_pos().and_then(|q| targets.at(q.x));
-            // A hovered control lights to `STRONG` from every resting colour, with
+            // A hovered control lights to `strong()` from every resting colour, with
             // no ground behind it (the row has its own hover ground).
             let lit = |on: bool, resting: egui::Color32| {
-                if on { theme::text::STRONG } else { resting }
+                if on { theme::text::strong() } else { resting }
             };
             if has_children {
                 p.text(
@@ -1594,7 +1598,7 @@ impl OndinApp {
                         icon::CARET_RIGHT
                     },
                     theme::icon_font(11.0),
-                    lit(under == Some(RowHit::Caret), theme::text::DIM),
+                    lit(under == Some(RowHit::Caret), theme::text::dim()),
                 );
             }
             // A childless row reclaims the caret's 16px, except at the top level,
@@ -1626,14 +1630,14 @@ impl OndinApp {
             // its glyph's ink: blue, or white beside a component's hexagon.
             let name_col = match (drop_host, selected, dimmed) {
                 (true, ..) => color::SELECT,
-                (_, true, _) if hexagon.is_some() => color::TEXT,
+                (_, true, _) if hexagon.is_some() => color::text(),
                 (_, true, _) => color::SELECT,
                 (_, false, true) => theme::color::text_a(102),
-                (_, false, false) => theme::text::MUTED,
+                (_, false, false) => theme::text::muted(),
             };
             let glyph_col = match (drop_host, selected, dimmed) {
                 (true, ..) => color::SELECT,
-                (_, true, _) if hexagon.is_some() => theme::text::STRONG,
+                (_, true, _) if hexagon.is_some() => theme::text::strong(),
                 (_, true, _) => color::SELECT,
                 (_, false, true) => dim_to(glyph_col, 102),
                 (_, false, false) => glyph_col,
@@ -1684,7 +1688,7 @@ impl OndinApp {
                     true => eye_x - BOUND_EYE.x / 2.0 - 4.0,
                     false => right - edge,
                 };
-                (p.layout_no_wrap(s, font, theme::text::FAINT), right)
+                (p.layout_no_wrap(s, font, theme::text::faint()), right)
             });
             let name_right = name_limit(NameLimit {
                 row_right: right,
@@ -1738,7 +1742,7 @@ impl OndinApp {
                     lit(
                         under == Some(RowHit::Eye),
                         if visible {
-                            theme::text::DIM
+                            theme::text::dim()
                         } else {
                             theme::color::text_a(102)
                         },
@@ -1752,7 +1756,7 @@ impl OndinApp {
                     p,
                     egui::pos2(lock_x, cy),
                     ICON_PT,
-                    lit(under == Some(RowHit::Lock), theme::text::MUTED),
+                    lit(under == Some(RowHit::Lock), theme::text::muted()),
                     0.0,
                 );
             } else if show_lock {
@@ -1761,13 +1765,13 @@ impl OndinApp {
                     egui::Align2::CENTER_CENTER,
                     icon::LOCK_SIMPLE_OPEN,
                     theme::icon_font(ICON_PT),
-                    lit(under == Some(RowHit::Lock), theme::text::DIM),
+                    lit(under == Some(RowHit::Lock), theme::text::dim()),
                 );
             } else if let Some((galley, right)) = badge {
                 let at = egui::Align2::RIGHT_CENTER
                     .anchor_size(egui::pos2(right, cy), galley.size())
                     .min;
-                p.galley(at, galley, theme::text::FAINT);
+                p.galley(at, galley, theme::text::faint());
             }
             // The mark sits after the lock and eye at the row's very edge, in every
             // row state (§15 D981).
@@ -1775,10 +1779,10 @@ impl OndinApp {
                 let at = egui::pos2(right - MARK_SLOT / 2.0 + 1.0, cy);
                 match m {
                     RowMark::Override => {
-                        p.circle_filled(at, 2.0, theme::text::MUTED);
+                        p.circle_filled(at, 2.0, theme::text::muted());
                     }
                     RowMark::Local => {
-                        let s = egui::Stroke::new(1.2, theme::text::MUTED);
+                        let s = egui::Stroke::new(1.2, theme::text::muted());
                         p.line_segment([at - egui::vec2(2.5, 0.0), at + egui::vec2(2.5, 0.0)], s);
                         p.line_segment([at - egui::vec2(0.0, 2.5), at + egui::vec2(0.0, 2.5)], s);
                     }
@@ -3171,7 +3175,7 @@ mod name_limit_tests {
             shapes[n..s]
                 .iter()
                 .any(|sh| matches!(sh, egui::Shape::Rect(r)
-                if r.fill == color::PANEL
+                if r.fill == color::panel()
                     && r.rect.left() <= size.left() - NAME_CLEAR
                     && r.rect.right() >= size.right())),
             "covered: the row's ground lies between the name and its size"
@@ -3809,7 +3813,7 @@ mod tree_guide_tests {
         let ctx = egui::Context::default();
         let mut app = app_with_a_nested_tree(&ctx);
         let lit = |v: &[(egui::Pos2, egui::Pos2, egui::Color32)]| {
-            v.iter().filter(|(.., c)| *c == GUIDE_HOVER).count()
+            v.iter().filter(|(.., c)| *c == guide_hover()).count()
         };
 
         let away = dashes(&mut app, &ctx, Some(egui::pos2(250.0, 500.0)));
@@ -3823,7 +3827,7 @@ mod tree_guide_tests {
         // Four rows on a 27pt pitch: y 100 is the last of them.
         let on_row = dashes(&mut app, &ctx, Some(egui::pos2(120.0, 100.0)));
         assert!(lit(&on_row) > 0, "the pointer on a row lights its path");
-        for (a, b, _) in on_row.iter().filter(|(.., c)| *c == GUIDE_HOVER) {
+        for (a, b, _) in on_row.iter().filter(|(.., c)| *c == guide_hover()) {
             if a.x == b.x {
                 assert_eq!(
                     a.x, 42.5,

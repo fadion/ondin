@@ -51,9 +51,11 @@ const ROW_UNIT_GAP: f32 = 6.0;
 /// An export's two halves sit closer than one export sits to the next, or the size
 /// line reads as belonging to the row below it.
 const _: () = assert!(ROW_LINE_GAP < ROW_UNIT_GAP);
-/// The size line's ink — 34%, quieter than `text::FAINT` (38%),
+/// The size line's ink — 34%, quieter than `text::faint()` (38%),
 /// because it annotates a control rather than labelling one.
-const SIZE_INK: egui::Color32 = theme::color::text_a(87);
+fn size_ink() -> egui::Color32 {
+    theme::color::text_a(87)
+}
 /// The collapse key the Preview section shares with the panel list.
 ///
 /// `collapsed_panels` is keyed by title, but the section now lives inside the Export
@@ -380,7 +382,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("No exports")
                         .size(11.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
                 return;
             }
@@ -533,7 +535,7 @@ impl OndinApp {
                 p.rect_stroke(
                     ground,
                     egui::CornerRadius::same(5),
-                    egui::Stroke::new(1.0, theme::color::FIELD_BORDER),
+                    egui::Stroke::new(1.0, theme::color::field_border()),
                     egui::StrokeKind::Inside,
                 );
                 let at = egui::Rect::from_center_size(ground.center(), shown);
@@ -542,7 +544,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(&preview.summary)
                     .size(10.5)
-                    .color(SIZE_INK),
+                    .color(size_ink()),
             );
         });
     }
@@ -679,7 +681,7 @@ impl OndinApp {
         ui.label(
             egui::RichText::new("Mixed exports. Add to override.")
                 .size(11.0)
-                .color(theme::text::FAINT),
+                .color(theme::text::faint()),
         );
     }
 
@@ -758,7 +760,7 @@ impl OndinApp {
                                         spec.format.label()
                                     ))
                                     .size(11.0)
-                                    .color(theme::text::FAINT),
+                                    .color(theme::text::faint()),
                                 );
                             })
                             .response
@@ -840,8 +842,8 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.add_space(2.0);
-                        ui.label(theme::icon_text(icon::FRAME_CORNERS, 12.0, SIZE_INK));
-                        ui.label(egui::RichText::new(size).size(10.5).color(SIZE_INK));
+                        ui.label(theme::icon_text(icon::FRAME_CORNERS, 12.0, size_ink()));
+                        ui.label(egui::RichText::new(size).size(10.5).color(size_ink()));
                     });
                 });
             }
@@ -1230,7 +1232,7 @@ impl OndinApp {
         section(ui, part.label(), |ui| {
             let resp = ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
-                ui.label(theme::icon_text(icon::TEXT_T, 13.0, theme::text::FAINT));
+                ui.label(theme::icon_text(icon::TEXT_T, 13.0, theme::text::faint()));
                 ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .id(egui::Id::new((part.id_salt(), index)))
@@ -1297,7 +1299,7 @@ impl OndinApp {
                 let [r, g, b, a] = c.to_rgba8().to_u8_array();
                 egui::Color32::from_rgba_unmultiplied(r, g, b, a)
             }
-            None => theme::text::DIM,
+            None => theme::text::dim(),
         }
     }
 
@@ -2957,7 +2959,7 @@ mod tests {
 
         assert_eq!(
             app.background_swatch(&framed, None),
-            theme::text::DIM,
+            theme::text::dim(),
             "and over both of them the chip says nothing rather than picking one"
         );
 
@@ -3072,8 +3074,10 @@ mod tests {
                             ui.spacing_mut().interact_size.y = 0.0;
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 6.0;
-                                ui.label(theme::icon_text(icon::FRAME_CORNERS, 12.0, SIZE_INK));
-                                ui.label(egui::RichText::new("100×60").size(10.5).color(SIZE_INK));
+                                ui.label(theme::icon_text(icon::FRAME_CORNERS, 12.0, size_ink()));
+                                ui.label(
+                                    egui::RichText::new("100×60").size(10.5).color(size_ink()),
+                                );
                             })
                             .response
                             .rect

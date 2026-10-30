@@ -70,9 +70,9 @@ impl OndinApp {
         };
         let enabled = c.any();
         let ink = if enabled {
-            color::ACCENT_100
+            color::accent_100()
         } else {
-            theme::text::DISABLED
+            theme::text::disabled()
         };
         let label = ui.ctx().fonts_mut(|f| {
             f.layout_no_wrap("Publish".into(), egui::FontId::proportional(11.5), ink)
@@ -102,8 +102,8 @@ impl OndinApp {
         );
         let p = ui.painter();
         let ground = match (enabled, resp.hovered()) {
-            (true, true) => color::ACCENT_700,
-            (true, false) => color::ACCENT_800,
+            (true, true) => color::accent_700(),
+            (true, false) => color::accent_800(),
             (false, _) => color::text_a(18),
         };
         p.rect_filled(rect, egui::CornerRadius::same(6), ground);
@@ -111,7 +111,7 @@ impl OndinApp {
             p.rect_stroke(
                 rect,
                 egui::CornerRadius::same(6),
-                egui::Stroke::new(1.0, color::ACCENT),
+                egui::Stroke::new(1.0, color::accent()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -123,9 +123,9 @@ impl OndinApp {
             icon::UPLOAD_SIMPLE,
             theme::icon_font(13.0),
             if enabled {
-                color::ACCENT_200
+                color::accent_200()
             } else {
-                theme::text::DISABLED
+                theme::text::disabled()
             },
         );
         x += 13.0 + 7.0;
@@ -133,8 +133,12 @@ impl OndinApp {
         x += label.size().x + 7.0;
         if chip {
             let chip = egui::Rect::from_min_size(egui::pos2(x, y - 9.0), egui::vec2(chip_w, 18.0));
-            p.rect_filled(chip, egui::CornerRadius::same(4), color::ACCENT_600);
-            p.galley(chip.center() - count.size() / 2.0, count, color::ACCENT_100);
+            p.rect_filled(chip, egui::CornerRadius::same(4), color::accent_600());
+            p.galley(
+                chip.center() - count.size() / 2.0,
+                count,
+                color::accent_100(),
+            );
         }
         let resp = resp.on_hover_text(tip);
         if resp.clicked() {
@@ -228,7 +232,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(sub)
                     .size(12.0)
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
             );
             ui.add_space(10.0);
             if first {
@@ -239,7 +243,7 @@ impl OndinApp {
                     ui.label(
                         egui::RichText::new(format!("+ {} more", c.added.len() - FIRST_LISTED))
                             .size(11.5)
-                            .color(theme::text::DIM),
+                            .color(theme::text::dim()),
                     );
                 }
             } else {
@@ -259,7 +263,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new("Note · optional")
                     .size(11.0)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
             );
             ui.add_space(4.0);
             // The app's text field, not a bare `TextEdit`: egui's own frame has
@@ -410,12 +414,12 @@ fn section(ui: &mut egui::Ui, title: &str, ids: &[NodeId], doc: &Document, aside
         ui.label(
             egui::RichText::new(title)
                 .size(11.0)
-                .color(theme::text::DIM),
+                .color(theme::text::dim()),
         );
         ui.label(
             egui::RichText::new(ids.len().to_string())
                 .size(11.0)
-                .color(theme::text::FAINT),
+                .color(theme::text::faint()),
         );
     });
     for id in ids {
@@ -438,14 +442,14 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
             egui::Align2::CENTER_CENTER,
             icon::SQUARES_FOUR,
             theme::icon_font(12.0),
-            theme::text::MUTED,
+            theme::text::muted(),
         );
     } else {
         crate::ui::paint_hexagon_filled(
             p,
             egui::pos2(rect.left() + 8.0, y),
             11.0,
-            theme::text::MUTED,
+            theme::text::muted(),
         );
     }
     p.text(
@@ -453,7 +457,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
         egui::Align2::LEFT_CENTER,
         n.name(),
         egui::FontId::proportional(12.0),
-        color::TEXT,
+        color::text(),
     );
     let right = match (aside, n.set().is_some()) {
         (Some(a), _) => Some(a.to_string()),
@@ -470,7 +474,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
             egui::Align2::RIGHT_CENTER,
             r,
             egui::FontId::proportional(10.5),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
     }
 }

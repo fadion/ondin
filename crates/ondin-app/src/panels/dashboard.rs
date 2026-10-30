@@ -174,11 +174,11 @@ fn anchored_menu(
     let inner = area.show(ui.ctx(), |ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::empty());
         let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(8), color::FIELD);
+        p.rect_filled(rect, egui::CornerRadius::same(8), color::field());
         p.rect_stroke(
             rect,
             egui::CornerRadius::same(8),
-            egui::Stroke::new(1.0, color::FIELD_BORDER),
+            egui::Stroke::new(1.0, color::field_border()),
             egui::StrokeKind::Inside,
         );
         let mut clicked = None;
@@ -608,11 +608,11 @@ impl OndinApp {
         egui::Panel::left("library-sidebar")
             .exact_size(SIDEBAR_W)
             .resizable(false)
-            .frame(ui::panel_frame(color::PANEL, 10, 14))
+            .frame(ui::panel_frame(color::panel(), 10, 14))
             .show(ui, |ui| self.dashboard_sidebar(ui, &mut act));
         // The drop hint uses the panel's own rect; `dashboard_body`'s is less its 20pt margin.
         let body = egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(color::BG).inner_margin(20))
+            .frame(egui::Frame::NONE.fill(color::bg()).inner_margin(20))
             .show(ui, |ui| self.dashboard_body(ui, &mut act));
         self.library_drop_hint(ui, body.response.rect);
 
@@ -649,7 +649,7 @@ impl OndinApp {
                         .label(
                             egui::RichText::new("Ondin")
                                 .size(13.0)
-                                .color(theme::text::STRONG),
+                                .color(theme::text::strong()),
                         )
                         .rect;
 
@@ -728,7 +728,7 @@ impl OndinApp {
             egui::Stroke::new(
                 1.0,
                 if open {
-                    color::ACCENT
+                    color::accent()
                 } else {
                     theme::color::text_a(20)
                 },
@@ -740,7 +740,7 @@ impl OndinApp {
             egui::Align2::LEFT_CENTER,
             icon::MAGNIFYING_GLASS,
             theme::icon_font(14.0),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
 
         if !open {
@@ -749,14 +749,14 @@ impl OndinApp {
                 egui::Align2::LEFT_CENTER,
                 "Search files and projects",
                 egui::FontId::proportional(SEARCH_PT),
-                theme::text::FAINT,
+                theme::text::faint(),
             );
             p.text(
                 egui::pos2(rect.right() - 10.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 "Ctrl + K",
                 egui::FontId::proportional(10.0),
-                theme::text::FAINT,
+                theme::text::faint(),
             );
             if resp.clicked() && !self.dash.menu_was_up {
                 self.dash.search = Some(String::new());
@@ -803,7 +803,7 @@ impl OndinApp {
                 .hint_text(
                     egui::RichText::new("Search files and projects")
                         .size(SEARCH_PT)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 ),
         );
         // Requested every frame, for `rename_field`'s reason; the dismissal below makes that safe.
@@ -879,7 +879,7 @@ impl OndinApp {
                     egui::Align2::CENTER_CENTER,
                     "No matches",
                     egui::FontId::proportional(11.5),
-                    theme::text::DIM,
+                    theme::text::dim(),
                 );
             }));
         }
@@ -943,7 +943,7 @@ impl OndinApp {
                     egui::Align2::LEFT_CENTER,
                     label,
                     egui::FontId::proportional(12.0),
-                    theme::text::STRONG,
+                    theme::text::strong(),
                 );
                 if !meta.is_empty() {
                     p.text(
@@ -951,7 +951,7 @@ impl OndinApp {
                         egui::Align2::RIGHT_CENTER,
                         meta,
                         egui::FontId::proportional(10.5),
-                        theme::text::FAINT,
+                        theme::text::faint(),
                     );
                 }
                 resp.clicked() || (enter && i == sel)
@@ -962,7 +962,7 @@ impl OndinApp {
                     ui,
                     i,
                     icon::CLOCK_COUNTER_CLOCKWISE,
-                    theme::text::FAINT,
+                    theme::text::faint(),
                     q,
                     "",
                 ) {
@@ -981,7 +981,7 @@ impl OndinApp {
                     ui,
                     i,
                     icon::FILES,
-                    theme::text::DIM,
+                    theme::text::dim(),
                     &e.display_name(),
                     "File",
                 ) {
@@ -1026,11 +1026,11 @@ impl OndinApp {
                 let (rect, _) = ui
                     .allocate_exact_size(egui::vec2(anchor.width(), height), egui::Sense::empty());
                 let p = ui.painter();
-                p.rect_filled(rect, egui::CornerRadius::same(9), color::FIELD);
+                p.rect_filled(rect, egui::CornerRadius::same(9), color::field());
                 p.rect_stroke(
                     rect,
                     egui::CornerRadius::same(9),
-                    egui::Stroke::new(1.0, color::FIELD_BORDER),
+                    egui::Stroke::new(1.0, color::field_border()),
                     egui::StrokeKind::Inside,
                 );
                 body(ui, rect);
@@ -1065,15 +1065,15 @@ impl OndinApp {
             rect,
             egui::CornerRadius::same(7),
             if lit {
-                color::ACCENT_700
+                color::accent_700()
             } else {
-                color::ACCENT_800
+                color::accent_800()
             },
         );
         p.rect_stroke(
             rect,
             egui::CornerRadius::same(7),
-            egui::Stroke::new(1.0, color::ACCENT),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Inside,
         );
         // The glyph is a separate icon-font `p.text`, as the bundled Inter has no
@@ -1082,7 +1082,7 @@ impl OndinApp {
         const GAP: f32 = 7.0;
         let font = egui::FontId::proportional(12.5);
         let word = ui.ctx().fonts_mut(|f| {
-            f.layout_no_wrap("New file".to_owned(), font.clone(), color::ACCENT_100)
+            f.layout_no_wrap("New file".to_owned(), font.clone(), color::accent_100())
         });
         let total = GLYPH_PT + GAP + word.size().x;
         let left = rect.center().x - total / 2.0;
@@ -1092,12 +1092,12 @@ impl OndinApp {
             egui::Align2::CENTER_CENTER,
             icon::PLUS,
             theme::icon_font(GLYPH_PT),
-            color::ACCENT_100,
+            color::accent_100(),
         );
         p.galley(
             egui::pos2(left + GLYPH_PT + GAP, rect.center().y - word.size().y / 2.0),
             word,
-            color::ACCENT_100,
+            color::accent_100(),
         );
         // Hand-rolled, so `nav_row`'s menu gate does not reach it.
         if resp.clicked() && !self.dash.menu_was_up {
@@ -1201,11 +1201,11 @@ impl OndinApp {
         );
         let lit = resp.hovered();
         let fg = if selected {
-            color::TEXT
+            color::text()
         } else if lit {
-            theme::text::STRONG
+            theme::text::strong()
         } else {
-            theme::text::MUTED
+            theme::text::muted()
         };
         let p = ui.painter();
         if selected || lit {
@@ -1235,7 +1235,7 @@ impl OndinApp {
                 egui::Align2::RIGHT_CENTER,
                 n.to_string(),
                 egui::FontId::proportional(11.0),
-                theme::text::FAINT,
+                theme::text::faint(),
             );
         }
         resp.clicked() && !self.dash.menu_was_up
@@ -1268,13 +1268,13 @@ impl OndinApp {
         });
         let lit = resp.hovered();
         let fg = if selected {
-            color::TEXT
+            color::text()
         } else if lit {
-            theme::text::STRONG
+            theme::text::strong()
         } else if archived {
-            theme::text::DIM
+            theme::text::dim()
         } else {
-            theme::text::MUTED
+            theme::text::muted()
         };
         let painter = ui.painter();
         if selected || lit {
@@ -1307,7 +1307,7 @@ impl OndinApp {
                 egui::Align2::RIGHT_CENTER,
                 n.to_string(),
                 egui::FontId::proportional(11.0),
-                theme::text::FAINT,
+                theme::text::faint(),
             ),
             ProjectRowKind::Archived => painter.text(
                 egui::pos2(rect.right() - UNARCHIVE_X, rect.center().y),
@@ -1315,9 +1315,9 @@ impl OndinApp {
                 icon::ARROW_COUNTER_CLOCKWISE,
                 theme::icon_font(13.0),
                 if undo.as_ref().is_some_and(egui::Response::hovered) {
-                    color::TEXT
+                    color::text()
                 } else {
-                    theme::text::FAINT
+                    theme::text::faint()
                 },
             ),
         };
@@ -1500,12 +1500,12 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new(&heading)
                         .size(17.0)
-                        .color(theme::text::STRONG),
+                        .color(theme::text::strong()),
                 );
                 ui.label(
                     egui::RichText::new(subheading.replace("{n}", &count.to_string()))
                         .size(11.5)
-                        .color(theme::text::DIM),
+                        .color(theme::text::dim()),
                 );
             });
 
@@ -1612,7 +1612,7 @@ impl OndinApp {
             self.dash.filter_open = false;
             return;
         }
-        let (label, dot) = current.unwrap_or_else(|| (ALL_PROJECTS.to_owned(), theme::text::DIM));
+        let (label, dot) = current.unwrap_or_else(|| (ALL_PROJECTS.to_owned(), theme::text::dim()));
 
         let w = FILTER_W;
         let (rect, resp, fg) = ui::button_face(
@@ -1650,7 +1650,7 @@ impl OndinApp {
             egui::Align2::RIGHT_CENTER,
             icon::CARET_DOWN,
             theme::icon_font(12.0),
-            theme::text::DIM,
+            theme::text::dim(),
         );
         if resp.clicked() {
             self.dash.filter_open = !self.dash.filter_open;
@@ -1665,7 +1665,7 @@ impl OndinApp {
     /// swatch and a tick on the one in force.
     fn project_filter_menu(&mut self, ui: &mut egui::Ui, anchor: egui::Rect) {
         let mut rows: Vec<(Option<String>, String, egui::Color32)> =
-            vec![(None, ALL_PROJECTS.to_owned(), theme::text::DIM)];
+            vec![(None, ALL_PROJECTS.to_owned(), theme::text::dim())];
         rows.extend(
             self.library
                 .projects
@@ -1698,7 +1698,11 @@ impl OndinApp {
                     egui::Align2::LEFT_CENTER,
                     elide(p.ctx(), name, 11.5, w - 60.0),
                     egui::FontId::proportional(11.5),
-                    if on { color::TEXT } else { theme::text::MUTED },
+                    if on {
+                        color::text()
+                    } else {
+                        theme::text::muted()
+                    },
                 );
                 // The tick's column is reserved either way, so rows do not shift.
                 if on {
@@ -1707,7 +1711,7 @@ impl OndinApp {
                         egui::Align2::RIGHT_CENTER,
                         icon::CHECK,
                         theme::icon_font(13.0),
-                        color::ACCENT,
+                        color::accent(),
                     );
                 }
             },
@@ -1778,13 +1782,17 @@ impl OndinApp {
                 egui::RichText::new(glyph)
                     .font(theme::icon_font(28.0))
                     .color(if unavailable {
-                        color::WARN
+                        color::warn()
                     } else {
-                        theme::text::FAINT
+                        theme::text::faint()
                     }),
             );
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(line).size(12.5).color(theme::text::DIM));
+            ui.label(
+                egui::RichText::new(line)
+                    .size(12.5)
+                    .color(theme::text::dim()),
+            );
             // No path under the sentence: the base folder lives in Settings.
         });
     }
@@ -1835,16 +1843,16 @@ impl OndinApp {
         let lit = resp.hovered();
         let dot = swatch(&p.color);
         let painter = ui.painter();
-        painter.rect_filled(rect, egui::CornerRadius::same(9), color::CARD);
+        painter.rect_filled(rect, egui::CornerRadius::same(9), color::card());
         painter.rect_stroke(
             rect,
             egui::CornerRadius::same(9),
             egui::Stroke::new(
                 1.0,
                 if lit {
-                    color::ACCENT_700
+                    color::accent_700()
                 } else {
-                    color::CARD_BORDER
+                    color::card_border()
                 },
             ),
             egui::StrokeKind::Inside,
@@ -1870,14 +1878,14 @@ impl OndinApp {
             egui::Align2::LEFT_CENTER,
             elide(ui, &p.name, 12.5, w - PROJECT_PAD * 2.0 - DOT - 7.0),
             egui::FontId::proportional(12.5),
-            theme::text::STRONG,
+            theme::text::strong(),
         );
         ui.painter().text(
             egui::pos2(rect.left() + PROJECT_PAD, rect.bottom() - PROJECT_PAD - 6.0),
             egui::Align2::LEFT_CENTER,
             format!("{count} file(s) · {touched}"),
             egui::FontId::proportional(11.0),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
         resp.clicked()
     }
@@ -1996,12 +2004,12 @@ impl OndinApp {
         );
         let lit = resp.hovered();
         let ink = if lit {
-            color::ACCENT_200
+            color::accent_200()
         } else {
-            theme::text::FAINT
+            theme::text::faint()
         };
         let p = ui.painter();
-        // A shade under [`color::CARD`] (`text 12%` against `15%`): reads as an empty slot.
+        // A shade under [`color::card()`] (`text 12%` against `15%`): reads as an empty slot.
         p.rect_filled(
             rect,
             egui::CornerRadius::same(GHOST_R as u8),
@@ -2013,9 +2021,9 @@ impl OndinApp {
         let stroke = egui::Stroke::new(
             1.0,
             if lit {
-                color::ACCENT_700
+                color::accent_700()
             } else {
-                color::CARD_BORDER
+                color::card_border()
             },
         );
         for shape in egui::Shape::dashed_line(&closed, stroke, 5.0, 4.0) {
@@ -2067,21 +2075,21 @@ impl OndinApp {
             .library
             .project_of(entry)
             .map(|p| swatch(&p.color))
-            .unwrap_or(theme::text::FAINT);
+            .unwrap_or(theme::text::faint());
         let thumb = egui::Rect::from_min_size(rect.min, egui::vec2(w, CARD_THUMB_H));
         let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(9), color::CARD);
+        p.rect_filled(rect, egui::CornerRadius::same(9), color::card());
         // Three tiers: the top is the keyboard's cursor, a full accent border against
-        // hover's muted `ACCENT_700`, since the two can coexist.
+        // hover's muted `accent_700()`, since the two can coexist.
         p.rect_stroke(
             rect,
             egui::CornerRadius::same(9),
             egui::Stroke::new(
                 1.0,
                 match (picked, lit) {
-                    (true, _) => color::ACCENT,
-                    (false, true) => color::ACCENT_700,
-                    (false, false) => color::CARD_BORDER,
+                    (true, _) => color::accent(),
+                    (false, true) => color::accent_700(),
+                    (false, false) => color::card_border(),
                 },
             ),
             egui::StrokeKind::Inside,
@@ -2156,7 +2164,7 @@ impl OndinApp {
                 STAR_R,
                 egui::Color32::from_black_alpha(110),
             ));
-            p.add(star_shape(at, STAR_R, theme::color::STAR));
+            p.add(star_shape(at, STAR_R, theme::color::star()));
         }
         let name_box = egui::Rect::from_min_size(
             egui::pos2(rect.left() + 8.0, thumb.bottom() + 5.0),
@@ -2168,7 +2176,7 @@ impl OndinApp {
                 egui::Align2::LEFT_CENTER,
                 elide(ui, &entry.display_name(), 12.5, w - 46.0),
                 egui::FontId::proportional(12.5),
-                theme::text::STRONG,
+                theme::text::strong(),
             );
         }
         let p = ui.painter();
@@ -2177,7 +2185,7 @@ impl OndinApp {
             egui::Align2::LEFT_CENTER,
             clock::relative_label(clock::since(entry.modified)),
             egui::FontId::proportional(11.0),
-            theme::text::FAINT,
+            theme::text::faint(),
         );
 
         self.pick_or_open(&resp, entry, act);
@@ -2457,7 +2465,7 @@ impl OndinApp {
                     egui::Align2::LEFT_CENTER,
                     *label,
                     egui::FontId::proportional(11.0),
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 );
                 x += w;
             }
@@ -2480,9 +2488,9 @@ impl OndinApp {
         );
         let lit = resp.hovered();
         let ink = if lit {
-            color::ACCENT_200
+            color::accent_200()
         } else {
-            theme::text::FAINT
+            theme::text::faint()
         };
         let p = ui.painter();
         if lit {
@@ -2533,7 +2541,7 @@ impl OndinApp {
                 rect,
                 egui::CornerRadius::same(6),
                 if picked {
-                    color::ACCENT_900
+                    color::accent_900()
                 } else {
                     theme::color::text_a(10)
                 },
@@ -2579,9 +2587,9 @@ impl OndinApp {
                 &shown,
                 egui::FontId::proportional(12.0),
                 if i == 0 {
-                    theme::text::STRONG
+                    theme::text::strong()
                 } else {
-                    theme::text::DIM
+                    theme::text::dim()
                 },
             );
             if i == 0 && (chip.is_some() || open.is_some()) {
@@ -2591,7 +2599,7 @@ impl OndinApp {
                         f.layout_no_wrap(
                             shown.clone(),
                             egui::FontId::proportional(12.0),
-                            theme::text::STRONG,
+                            theme::text::strong(),
                         )
                     })
                     .size()
@@ -2642,14 +2650,14 @@ impl OndinApp {
         }
         let id = egui::Id::new(("rename", &entry.path));
         // The app's field ground, painted here rather than left to egui's focus ring
-        // (`ui::text_field` does not fit a reserved rect). `color::FIELD_BORDER`, not
+        // (`ui::text_field` does not fit a reserved rect). `color::field_border()`, not
         // the accent: the field is only on screen while focused.
         let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(ui::BUTTON_R), color::FIELD);
+        p.rect_filled(rect, egui::CornerRadius::same(ui::BUTTON_R), color::field());
         p.rect_stroke(
             rect,
             egui::CornerRadius::same(ui::BUTTON_R),
-            egui::Stroke::new(1.0, color::FIELD_BORDER),
+            egui::Stroke::new(1.0, color::field_border()),
             egui::StrokeKind::Inside,
         );
         // The inset is 4 on the frame, where the painted name sits 4pt right of the box
@@ -2706,9 +2714,9 @@ impl OndinApp {
             icon::DOTS_THREE_VERTICAL,
             theme::icon_font(15.0),
             if open || resp.hovered() {
-                color::TEXT
+                color::text()
             } else {
-                theme::text::DIM
+                theme::text::dim()
             },
         );
         if resp.clicked() {
@@ -2800,9 +2808,9 @@ impl OndinApp {
                     label,
                     egui::FontId::proportional(12.0),
                     if danger {
-                        theme::color::DANGER
+                        theme::color::danger()
                     } else {
-                        theme::text::STRONG
+                        theme::text::strong()
                     },
                 );
             },
@@ -3584,7 +3592,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(format!("“{}” can't be brought back.", project.name))
                     .size(12.0)
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
             );
             let Some(dp) = self.dash.deleting_project.as_mut() else {
                 return;
@@ -3628,7 +3636,7 @@ impl OndinApp {
                 ui.label(
                     egui::RichText::new("It has no files in it.")
                         .size(11.0)
-                        .color(theme::text::FAINT),
+                        .color(theme::text::faint()),
                 );
             }
 
@@ -3696,7 +3704,7 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(format!("“{name}”"))
                     .size(11.0)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
             );
             ui.add_space(10.0);
             egui::ScrollArea::vertical()
@@ -3728,7 +3736,7 @@ impl OndinApp {
                                 egui::Align2::LEFT_CENTER,
                                 label,
                                 egui::FontId::proportional(12.0),
-                                theme::text::STRONG,
+                                theme::text::strong(),
                             );
                             if selected {
                                 ui.painter().text(
@@ -3736,7 +3744,7 @@ impl OndinApp {
                                     egui::Align2::RIGHT_CENTER,
                                     icon::CHECK,
                                     theme::icon_font(12.0),
-                                    color::ACCENT,
+                                    color::accent(),
                                 );
                             }
                             resp.clicked()
@@ -4198,7 +4206,7 @@ impl OndinApp {
                     format!("“{name}” moves to Trash.")
                 })
                 .size(12.0)
-                .color(theme::text::MUTED),
+                .color(theme::text::muted()),
             );
             match settings::danger_footer(ui, "Delete") {
                 Some(settings::Decision::Save) => decision = Some(true),
@@ -4239,7 +4247,7 @@ impl OndinApp {
                         "“{name}” is no longer on disk, so it is removed from the library."
                     ))
                     .size(12.0)
-                    .color(theme::text::MUTED),
+                    .color(theme::text::muted()),
                 )
                 .wrap(),
             );
@@ -4302,7 +4310,7 @@ pub(super) fn field_label(ui: &mut egui::Ui, text: &str) {
             ui.label(
                 egui::RichText::new(text)
                     .size(settings::CAPTION_PT)
-                    .color(theme::text::DIM),
+                    .color(theme::text::dim()),
             );
         },
     );
@@ -4343,7 +4351,7 @@ fn picker_row(
                 ui.label(
                     egui::RichText::new(label)
                         .size(settings::LABEL_PT)
-                        .color(theme::text::MUTED),
+                        .color(theme::text::muted()),
                 );
             });
         });
@@ -4380,14 +4388,14 @@ fn whole_field(
     *value = v.round().clamp(0.0, max as f64) as u64;
 }
 
-/// A [`settings::caption`] in the warning amber ([`theme::color::WARN`]) — for a
+/// A [`settings::caption`] in the warning amber ([`theme::color::warn()`]) — for a
 /// setting that is valid and has a consequence worth naming.
 fn warn_caption(ui: &mut egui::Ui, text: &str) {
     ui.add_space(3.0);
     ui.label(
         egui::RichText::new(text)
             .size(settings::CAPTION_PT)
-            .color(theme::color::WARN),
+            .color(theme::color::warn()),
     );
 }
 
@@ -4400,7 +4408,7 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
 }
 
@@ -4413,9 +4421,9 @@ fn archived_header(ui: &mut egui::Ui, open: bool, count: usize) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::click());
     let fg = if resp.hovered() {
-        theme::text::MUTED
+        theme::text::muted()
     } else {
-        theme::text::FAINT
+        theme::text::faint()
     };
     let p = ui.painter();
     p.text(
@@ -4441,7 +4449,7 @@ fn archived_header(ui: &mut egui::Ui, open: bool, count: usize) -> bool {
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
         egui::FontId::proportional(10.5),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
     resp.clicked()
 }
@@ -4559,7 +4567,7 @@ fn star_shape(centre: egui::Pos2, r: f32, fill: egui::Color32) -> egui::Shape {
 ///
 /// The tooltip is attached here so a caller cannot drop it: it is the only thing
 /// saying *project* rather than *file*. The face is [`ui::button_face`]'s, with a
-/// [`color::DANGER`] hover wash between face and glyph, rounded to [`ui::BUTTON_R`].
+/// [`color::danger()`] hover wash between face and glyph, rounded to [`ui::BUTTON_R`].
 fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
     let (rect, resp, fg) =
         ui::button_face(ui, egui::vec2(DELETE_W, HEADER_CONTROL_H), FieldButton::Off);
@@ -4567,11 +4575,11 @@ fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
     if lit {
         let r = egui::CornerRadius::same(ui::BUTTON_R);
         let p = ui.painter();
-        p.rect_filled(rect, r, color::DANGER.gamma_multiply(0.14));
+        p.rect_filled(rect, r, color::danger().gamma_multiply(0.14));
         p.rect_stroke(
             rect,
             r,
-            egui::Stroke::new(1.0, color::DANGER.gamma_multiply(0.4)),
+            egui::Stroke::new(1.0, color::danger().gamma_multiply(0.4)),
             egui::StrokeKind::Inside,
         );
     }
@@ -4580,7 +4588,7 @@ fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
         egui::Align2::CENTER_CENTER,
         icon::TRASH,
         theme::icon_font(14.0),
-        if lit { color::DANGER } else { fg },
+        if lit { color::danger() } else { fg },
     );
     resp.on_hover_text("Delete project")
 }
@@ -4704,14 +4712,14 @@ impl StateChip {
     fn colors(self) -> (egui::Color32, egui::Color32, egui::Color32) {
         match self {
             Self::Open => (
-                color::ACCENT_100,
-                color::ACCENT_900,
-                color::ACCENT.gamma_multiply(0.45),
+                color::accent_100(),
+                color::accent_900(),
+                color::accent().gamma_multiply(0.45),
             ),
             Self::New => (
-                theme::color::SAVED_100,
-                theme::color::SAVED_900,
-                theme::color::SAVED.gamma_multiply(0.45),
+                theme::color::saved_100(),
+                theme::color::saved_900(),
+                theme::color::saved().gamma_multiply(0.45),
             ),
         }
     }
@@ -4799,8 +4807,8 @@ impl Mark {
     /// for a file this build cannot open.
     fn color(self) -> egui::Color32 {
         match self {
-            Self::Unreadable => theme::color::DANGER,
-            Self::Conflict => theme::color::WARN,
+            Self::Unreadable => theme::color::danger(),
+            Self::Conflict => theme::color::warn(),
         }
     }
 }
@@ -4831,11 +4839,11 @@ fn mark_chip_size(ui: &egui::Ui, mark: Mark) -> egui::Vec2 {
 pub(super) fn swatch(hex: &str) -> egui::Color32 {
     let h = hex.trim_start_matches('#');
     if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return color::ACCENT;
+        return color::accent();
     }
     match u32::from_str_radix(h, 16) {
         Ok(v) => egui::Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8),
-        Err(_) => color::ACCENT,
+        Err(_) => color::accent(),
     }
 }
 
@@ -4847,7 +4855,7 @@ fn elide(ctx: &egui::Context, text: &str, size: f32, max_w: f32) -> String {
             f.layout_no_wrap(
                 s.to_owned(),
                 egui::FontId::proportional(size),
-                theme::text::STRONG,
+                theme::text::strong(),
             )
         })
         .size()
@@ -4900,7 +4908,7 @@ mod tests {
             // Six bytes, five characters.
             "#éa0b1",
         ] {
-            assert_eq!(swatch(bad), color::ACCENT, "{bad}");
+            assert_eq!(swatch(bad), color::accent(), "{bad}");
         }
     }
 
@@ -5140,7 +5148,7 @@ mod tests {
                     if let egui::Shape::Path(path) = &cs.shape
                         && path.points.len() == 30
                     {
-                        if path.fill == theme::color::STAR {
+                        if path.fill == theme::color::star() {
                             out.0 += 1;
                         } else if path.fill.a() > 0 {
                             out.1 += 1;
@@ -5571,12 +5579,12 @@ mod tests {
                 .shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
-                    // Premultiplied: the card's red is `CARD`'s scaled by its alpha.
+                    // Premultiplied: the card's red is `card()`'s scaled by its alpha.
                     egui::Shape::Rect(r)
                         if r.corner_radius == egui::CornerRadius::same(9)
                             && r.fill.a() > 0
                             && (r.fill.r() as i32
-                                - (color::CARD.r() as i32 * r.fill.a() as i32 / 255))
+                                - (color::card().r() as i32 * r.fill.a() as i32 / 255))
                                 .abs()
                                 <= 1 =>
                     {
@@ -6785,7 +6793,7 @@ mod tests {
         app.session.fail(fail_text);
         assert_eq!(
             status_dot_color(&mut app, &ctx),
-            Some(theme::color::ERROR),
+            Some(theme::color::error()),
             "a failure on this screen has to be visible on this screen, in the \
              colour a failure takes"
         );
@@ -6804,7 +6812,7 @@ mod tests {
         let lit = status_dot_color(&mut app, &ctx).expect("a report is marked too");
         assert_ne!(
             lit,
-            theme::color::ERROR,
+            theme::color::error(),
             "and a report is not painted as a failure — on this screen the colour \
              is the only thing that separates them"
         );
@@ -7870,7 +7878,7 @@ mod tests {
                     .iter()
                     .filter(|cs| match &cs.shape {
                         egui::Shape::Rect(r) => {
-                            r.stroke.color == color::ACCENT
+                            r.stroke.color == color::accent()
                                 && r.stroke_kind == egui::StrokeKind::Outside
                         }
                         _ => false,

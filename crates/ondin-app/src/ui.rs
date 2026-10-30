@@ -91,7 +91,7 @@ pub fn panel_frame(fill: egui::Color32, mx: i8, my: i8) -> egui::Frame {
 /// with a deeper shadow. `pad` is its inner margin.
 pub fn menu_frame(pad: f32) -> egui::Frame {
     egui::Frame::NONE
-        .fill(color::CARD)
+        .fill(color::card())
         .stroke(egui::Stroke::new(MENU_BORDER, theme::color::text_a(15)))
         .shadow(egui::epaint::Shadow {
             offset: [0, 10],
@@ -142,12 +142,12 @@ pub fn menu_item(ui: &mut egui::Ui, glyph: &str, text: &str, height: f32) -> egu
 pub struct MenuRow<'a> {
     pub glyph: &'a str,
     pub label: &'a str,
-    /// The chord this row answers to, right-aligned in [`theme::text::FAINT`].
+    /// The chord this row answers to, right-aligned in [`theme::text::faint()`].
     pub accel: Option<&'a str>,
     /// `Some` makes this a checkable row. The glyph column carries the state (the
-    /// glyph turns [`color::ACCENT`], the label full strength); no tick column.
+    /// glyph turns [`color::accent()`], the label full strength); no tick column.
     pub checked: Option<bool>,
-    /// A row that destroys something: [`theme::color::DANGER`] on glyph and label
+    /// A row that destroys something: [`theme::color::danger()`] on glyph and label
     /// over the ordinary neutral hover ground.
     pub danger: bool,
     /// A row that cannot run now: dimmed, no hover ground, not clickable. The
@@ -226,18 +226,22 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     // Three tiers: disabled, resting, on or hovered.
     let (glyph_col, label_col, accel_col) = match () {
         _ if !row.enabled => (
-            theme::text::DISABLED,
+            theme::text::disabled(),
             theme::color::text_a(65),
             theme::color::text_a(49),
         ),
         _ if row.danger => (
-            color::DANGER,
-            color::DANGER,
-            color::DANGER.gamma_multiply(0.55),
+            color::danger(),
+            color::danger(),
+            color::danger().gamma_multiply(0.55),
         ),
-        _ if on => (color::ACCENT, color::TEXT, theme::text::FAINT),
-        _ if hovered => (color::TEXT, color::TEXT, theme::text::FAINT),
-        _ => (theme::text::DIM, theme::text::MUTED, theme::text::FAINT),
+        _ if on => (color::accent(), color::text(), theme::text::faint()),
+        _ if hovered => (color::text(), color::text(), theme::text::faint()),
+        _ => (
+            theme::text::dim(),
+            theme::text::muted(),
+            theme::text::faint(),
+        ),
     };
     // A row handed `""` sets its label at the row's own inset; no menu mixes the two.
     let bare = row.glyph.is_empty() && !row.filled_hexagon;
@@ -418,7 +422,7 @@ pub fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
         egui::Align2::CENTER_CENTER,
         icon::CARET_RIGHT,
         theme::icon_font(11.0),
-        theme::text::DIM,
+        theme::text::dim(),
     );
 }
 
@@ -448,7 +452,7 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
     let lead = lay(ui, lead);
     let caret = lay(
         ui,
-        theme::icon_text(icon::CARET_DOWN, 12.0, theme::text::DIM),
+        theme::icon_text(icon::CARET_DOWN, 12.0, theme::text::dim()),
     );
 
     let (rect, resp) = ui.allocate_exact_size(
@@ -465,11 +469,11 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
     };
     let lit = open || resp.hovered();
     if lit {
-        p.rect_filled(rect, egui::CornerRadius::same(5), theme::color::HOVER);
+        p.rect_filled(rect, egui::CornerRadius::same(5), theme::color::hover());
     }
     let ink_of = |g: &std::sync::Arc<egui::Galley>, pos: egui::Pos2| {
         if lit {
-            p.galley_with_override_text_color(pos, g.clone(), color::TEXT);
+            p.galley_with_override_text_color(pos, g.clone(), color::text());
         } else {
             p.galley(pos, g.clone(), egui::Color32::PLACEHOLDER);
         }
@@ -502,7 +506,7 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
             egui::Align2::CENTER_CENTER,
             icon::CHECK,
             theme::icon_font(13.0),
-            color::ACCENT,
+            color::accent(),
         );
     }
     p.text(
@@ -511,9 +515,9 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
         label,
         egui::FontId::proportional(11.5),
         if on || hovered {
-            color::TEXT
+            color::text()
         } else {
-            theme::text::MUTED
+            theme::text::muted()
         },
     );
     resp.clicked()
@@ -553,7 +557,7 @@ pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f
 pub fn eyebrow(label: &str) -> egui::RichText {
     egui::RichText::new(label.to_uppercase())
         .size(EYEBROW_PT)
-        .color(theme::text::FAINT)
+        .color(theme::text::faint())
 }
 
 /// An [`eyebrow`]'s size, named for the popover sections that draw a marked one
@@ -591,9 +595,9 @@ pub fn fold_head(ui: &mut egui::Ui, label: &str, open: bool) -> (egui::Response,
     let size = egui::vec2(word_x + word.size().x, FOLD_HEAD_H);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let ink = if resp.hovered() {
-        theme::text::MUTED
+        theme::text::muted()
     } else {
-        theme::text::FAINT
+        theme::text::faint()
     };
     let ppp = ui.ctx().pixels_per_point();
     // The galley's top that puts its ink's centre on the row's, on a pixel.
@@ -675,7 +679,7 @@ pub const CARD_COL_GAP: f32 = 7.0;
 /// card interactive (see [`crate::app::OndinApp::panel`]).
 pub fn card_at<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> (R, egui::Rect) {
     let out = egui::Frame::NONE
-        .fill(color::CARD)
+        .fill(color::card())
         .stroke(egui::Stroke::new(1.0, theme::color::text_a(15)))
         .shadow(egui::epaint::Shadow {
             offset: [0, 6],
@@ -855,7 +859,7 @@ pub fn section_head_full(
                         icon::CARET_RIGHT
                     },
                     12.0,
-                    theme::text::FAINT,
+                    theme::text::faint(),
                 ));
                 ui.label(eyebrow(label));
                 if let Some(o) = overrides {
@@ -864,7 +868,7 @@ pub fn section_head_full(
                         .layout_no_wrap(
                             o.reset.to_owned(),
                             egui::FontId::proportional(11.0),
-                            theme::text::MUTED,
+                            theme::text::muted(),
                         )
                         .size()
                         .x
@@ -982,9 +986,9 @@ pub fn section_head_full(
                 egui::Sense::click(),
             );
             let ground = if target.hovered() {
-                color::HOVER
+                color::hover()
             } else {
-                color::FIELD
+                color::field()
             };
             p.rect_filled(slot, 4.0, ground);
             let mid = slot.center().y;
@@ -993,14 +997,14 @@ pub fn section_head_full(
                 egui::Align2::CENTER_CENTER,
                 icon::ARROW_COUNTER_CLOCKWISE,
                 theme::icon_font(12.0),
-                theme::text::MUTED,
+                theme::text::muted(),
             );
             p.text(
                 egui::pos2(slot.left() + HEAD_RESET_PAD + 16.0, mid),
                 egui::Align2::LEFT_CENTER,
                 o.reset,
                 egui::FontId::proportional(11.0),
-                theme::text::STRONG,
+                theme::text::strong(),
             );
             if target.clicked() {
                 clicks.reset = true;
@@ -1014,7 +1018,7 @@ pub fn section_head_full(
                 egui::Align2::LEFT_CENTER,
                 o.count.to_string(),
                 egui::FontId::proportional(10.0),
-                theme::text::MUTED,
+                theme::text::muted(),
             );
         }
     }
@@ -1025,7 +1029,7 @@ pub fn section_head_full(
 /// an overridden field's label, and in a list item's trailing slot. Neutral
 /// because the accent means selected.
 pub fn override_dot(p: &egui::Painter, at: egui::Pos2) {
-    p.circle_filled(at, 2.0, theme::text::MUTED);
+    p.circle_filled(at, 2.0, theme::text::muted());
 }
 
 /// The centre of every override dot a frame painted (2-pt muted circle, also the
@@ -1034,7 +1038,7 @@ pub fn override_dot(p: &egui::Painter, at: egui::Pos2) {
 pub(crate) fn painted_override_dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
     fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>) {
         match shape {
-            egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::MUTED => {
+            egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::muted() => {
                 out.push(c.center);
             }
             egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
@@ -1054,18 +1058,18 @@ fn head_badge(ui: &mut egui::Ui, word: &str) {
     let galley = ui.painter().layout_no_wrap(
         word.to_owned(),
         egui::FontId::proportional(10.0),
-        color::ACCENT_100,
+        color::accent_100(),
     );
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(galley.size().x + 12.0, 18.0),
         egui::Sense::hover(),
     );
     ui.painter()
-        .rect_filled(rect, 4.0, color::ACCENT.gamma_multiply(0.18));
+        .rect_filled(rect, 4.0, color::accent().gamma_multiply(0.18));
     ui.painter().galley(
         rect.center() - galley.size() / 2.0,
         galley,
-        color::ACCENT_100,
+        color::accent_100(),
     );
 }
 
@@ -1075,15 +1079,15 @@ fn head_drop(ui: &mut egui::Ui, d: HeadDrop<'_>) -> egui::Response {
     let font = egui::FontId::proportional(11.0);
     let text_w = ui
         .painter()
-        .layout_no_wrap(d.text.to_owned(), font.clone(), theme::text::STRONG)
+        .layout_no_wrap(d.text.to_owned(), font.clone(), theme::text::strong())
         .size()
         .x;
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(text_w + 14.0, 18.0), egui::Sense::click());
     let ink = if d.strong || resp.hovered() {
-        theme::text::STRONG
+        theme::text::strong()
     } else {
-        theme::text::MUTED
+        theme::text::muted()
     };
     let p = ui.painter();
     let mid = rect.center().y;
@@ -1118,8 +1122,8 @@ pub const MAX_STROKE_WIDTH: f64 = 10_000.0;
 /// The recessed ground a value field or list row sits on.
 pub fn field_frame() -> egui::Frame {
     egui::Frame::NONE
-        .fill(color::FIELD)
-        .stroke(egui::Stroke::new(1.0, color::FIELD_BORDER))
+        .fill(color::field())
+        .stroke(egui::Stroke::new(1.0, color::field_border()))
         .corner_radius(egui::CornerRadius::same(5))
         .inner_margin(egui::Margin::symmetric(FIELD_PAD_X as i8, 0))
 }
@@ -1194,7 +1198,7 @@ pub fn field_row_active<R>(
     if !active {
         return field_row(ui, size, add);
     }
-    let frame = field_frame().stroke(egui::Stroke::new(1.0, color::ACCENT_700));
+    let frame = field_frame().stroke(egui::Stroke::new(1.0, color::accent_700()));
     framed_row(ui, size, frame, add)
 }
 
@@ -1552,11 +1556,11 @@ impl Prefix {
         match self {
             Prefix::Text(t) => egui::RichText::new(t)
                 .size(PREFIX_PT)
-                .color(theme::text::FAINT),
-            Prefix::Icon(g) => theme::icon_text(g, PREFIX_ICON_PT, theme::text::FAINT),
+                .color(theme::text::faint()),
+            Prefix::Icon(g) => theme::icon_text(g, PREFIX_ICON_PT, theme::text::faint()),
             Prefix::Label(t) => egui::RichText::new(t)
                 .size(SUFFIX_PT)
-                .color(theme::text::FAINT),
+                .color(theme::text::faint()),
         }
     }
 
@@ -1623,8 +1627,10 @@ pub fn edge_scroll_speed(p: f32, min: f32, max: f32, band: f32, top: f32) -> f32
 
 /// Size of the chevron every dropdown closes with.
 pub const COMBO_CHEVRON_PT: f32 = 13.0;
-/// Its ink: `text::DIM`, the same as the menu heads' caret.
-pub const COMBO_CHEVRON: egui::Color32 = theme::text::DIM;
+/// Its ink: `text::dim()`, the same as the menu heads' caret.
+pub fn combo_chevron_ink() -> egui::Color32 {
+    theme::text::dim()
+}
 
 /// Set up a dropdown's menu rows, inside a `ComboBox::show_ui` closure.
 ///
@@ -1686,7 +1692,7 @@ pub fn combo_chevron(
         egui::Align2::CENTER_CENTER,
         icon::CARET_DOWN,
         theme::icon_font(COMBO_CHEVRON_PT),
-        COMBO_CHEVRON,
+        combo_chevron_ink(),
     );
 }
 
@@ -1699,7 +1705,7 @@ pub fn glyph_only(glyph: &'static str) -> egui::WidgetText {
         0.0,
         egui::TextFormat {
             font_id: theme::icon_font(16.0),
-            color: theme::text::STRONG,
+            color: theme::text::strong(),
             valign: egui::Align::Center,
             ..Default::default()
         },
@@ -1712,12 +1718,12 @@ pub fn glyph_only(glyph: &'static str) -> egui::WidgetText {
 /// For where a [`Prefix`] cannot reach: a `ComboBox`'s `selected_text` is a single
 /// `WidgetText`.
 pub fn glyph_and_text(glyph: &str, text: &str) -> egui::WidgetText {
-    glyph_and_text_tinted(glyph, text, theme::text::FAINT)
+    glyph_and_text_tinted(glyph, text, theme::text::faint())
 }
 
 /// [`glyph_and_text`] with the glyph in a colour of the caller's choosing.
 ///
-/// The type family row wears `TEXT_AA` in [`theme::color::WARN`] when the family
+/// The type family row wears `TEXT_AA` in [`theme::color::warn()`] when the family
 /// cannot be had.
 pub fn glyph_and_text_tinted(
     glyph: &str,
@@ -1740,7 +1746,7 @@ pub fn glyph_and_text_tinted(
         7.0,
         egui::TextFormat {
             font_id: egui::FontId::proportional(12.0),
-            color: color::TEXT,
+            color: color::text(),
             valign: egui::Align::Center,
             ..Default::default()
         },
@@ -1850,9 +1856,9 @@ const METER_TICK_W: f32 = 1.0;
 /// The accent wash a metered field's bar and its zero tick share.
 fn meter_wash() -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(
-        color::ACCENT_400.r(),
-        color::ACCENT_400.g(),
-        color::ACCENT_400.b(),
+        color::accent_400().r(),
+        color::accent_400().g(),
+        color::accent_400().b(),
         METER_ALPHA,
     )
 }
@@ -2247,7 +2253,7 @@ fn value_field_f64_marked(
             let at = egui::pos2(strip.left(), prefix_top(&lead, resp.rect.center().y));
             match mark {
                 None => {
-                    ui.painter().galley(at, lead, theme::text::FAINT);
+                    ui.painter().galley(at, lead, theme::text::faint());
                 }
                 Some(_) if ui.rect_contains_pointer(strip.union(resp.rect)) => {
                     ui.painter().text(
@@ -2255,12 +2261,12 @@ fn value_field_f64_marked(
                         egui::Align2::CENTER_CENTER,
                         icon::ARROW_COUNTER_CLOCKWISE,
                         theme::icon_font(12.0),
-                        theme::text::STRONG,
+                        theme::text::strong(),
                     );
                 }
                 Some(_) => {
                     let w = lead.size().x;
-                    ui.painter().galley(at, lead, theme::text::STRONG);
+                    ui.painter().galley(at, lead, theme::text::strong());
                     override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
                 }
             }
@@ -2280,7 +2286,7 @@ fn value_field_f64_marked(
                     egui::pos2(text_right - galley.size().x - SUFFIX_HIT_PAD, band.top()),
                     egui::pos2(text_right + SUFFIX_HIT_PAD, band.bottom()),
                 );
-                let mut ink = theme::text::FAINT;
+                let mut ink = theme::text::faint();
                 if s.clickable {
                     // Sensed before it is painted, so the ink is this frame's answer;
                     // wide, since two characters are small to aim at. No `FOCUSABLE`
@@ -2293,9 +2299,9 @@ fn value_field_f64_marked(
                         hit.on_hover_text(s.tooltip)
                     };
                     if hit.is_pointer_button_down_on() {
-                        ink = color::TEXT;
+                        ink = color::text();
                     } else if hit.hovered() {
-                        ink = theme::text::STRONG;
+                        ink = theme::text::strong();
                     }
                     unit = Some(hit);
                 }
@@ -2314,7 +2320,7 @@ fn value_field_f64_marked(
         ui.painter().rect_stroke(
             scope.response.rect,
             egui::CornerRadius::same(5),
-            egui::Stroke::new(1.0, color::ACCENT_700),
+            egui::Stroke::new(1.0, color::accent_700()),
             egui::StrokeKind::Inside,
         );
     }
@@ -2397,22 +2403,22 @@ pub fn icon_button_padded(
     let r5 = egui::CornerRadius::same(5);
     let p = ui.painter();
     let fg = if active {
-        color::ACCENT_100
+        color::accent_100()
     } else if hovered {
-        color::TEXT
+        color::text()
     } else {
         resting
     };
     if active {
-        p.rect_filled(rect, r5, color::ACCENT_800);
+        p.rect_filled(rect, r5, color::accent_800());
         p.rect_stroke(
             rect,
             r5,
-            egui::Stroke::new(1.0, color::ACCENT),
+            egui::Stroke::new(1.0, color::accent()),
             egui::StrokeKind::Inside,
         );
     } else if hovered {
-        p.rect_filled(rect, r5, theme::color::HOVER);
+        p.rect_filled(rect, r5, theme::color::hover());
     }
     p.text(
         rect.center(),
@@ -2517,7 +2523,7 @@ pub fn focus_ring(ui: &egui::Ui) {
     ui.painter().rect_stroke(
         rect.expand(FOCUS_GAP),
         egui::CornerRadius::same(BUTTON_R + FOCUS_GAP as u8),
-        egui::Stroke::new(1.0, color::ACCENT),
+        egui::Stroke::new(1.0, color::accent()),
         egui::StrokeKind::Outside,
     );
 }
@@ -2635,13 +2641,13 @@ pub fn label_button(
     resp
 }
 
-/// The ink a resting control's content takes: [`theme::text::MUTED`] while it can
-/// be used, [`theme::text::DISABLED`] when it cannot. `enabled` is ignored under an
-/// already-disabled `Ui` ([`disable_unless`]): faded `MUTED` is `text::DISABLED`.
+/// The ink a resting control's content takes: [`theme::text::muted()`] while it can
+/// be used, [`theme::text::disabled()`] when it cannot. `enabled` is ignored under an
+/// already-disabled `Ui` ([`disable_unless`]): faded `muted()` is `text::disabled()`.
 fn resting_ink(ui: &egui::Ui, enabled: bool) -> egui::Color32 {
     match enabled || !ui.is_enabled() {
-        true => theme::text::MUTED,
-        false => theme::text::DISABLED,
+        true => theme::text::muted(),
+        false => theme::text::disabled(),
     }
 }
 
@@ -2660,15 +2666,15 @@ pub fn button_face(
     let r5 = egui::CornerRadius::same(BUTTON_R);
     let p = ui.painter();
     // `Set` takes an ordinary button's hover; the filled states lighten one ramp
-    // step, ink fixed (the danger ramp has no twin of `ACCENT_100`).
+    // step, ink fixed (the danger ramp has no twin of `accent_100()`).
     let (bg, fg) = match (state, hovered) {
-        (FieldButton::On, false) => (color::ACCENT_900, color::ACCENT_200),
-        (FieldButton::On, true) => (color::ACCENT_800, color::ACCENT_200),
-        (FieldButton::Danger, false) => (color::DANGER_900, color::DANGER_200),
-        (FieldButton::Danger, true) => (color::DANGER_800, color::DANGER_200),
-        (_, true) => (color::HOVER, color::TEXT),
-        (FieldButton::Disabled, false) => (color::FIELD, dead),
-        (_, false) => (color::FIELD, theme::text::MUTED),
+        (FieldButton::On, false) => (color::accent_900(), color::accent_200()),
+        (FieldButton::On, true) => (color::accent_800(), color::accent_200()),
+        (FieldButton::Danger, false) => (color::danger_900(), color::danger_200()),
+        (FieldButton::Danger, true) => (color::danger_800(), color::danger_200()),
+        (_, true) => (color::hover(), color::text()),
+        (FieldButton::Disabled, false) => (color::field(), dead),
+        (_, false) => (color::field(), theme::text::muted()),
     };
     p.rect_filled(rect, r5, bg);
     p.rect_stroke(
@@ -2677,9 +2683,9 @@ pub fn button_face(
         egui::Stroke::new(
             1.0,
             match state {
-                FieldButton::On | FieldButton::Set => color::ACCENT_700,
-                FieldButton::Danger => color::DANGER_700,
-                FieldButton::Off | FieldButton::Disabled => color::FIELD_BORDER,
+                FieldButton::On | FieldButton::Set => color::accent_700(),
+                FieldButton::Danger => color::danger_700(),
+                FieldButton::Off | FieldButton::Disabled => color::field_border(),
             },
         ),
         egui::StrokeKind::Inside,
@@ -2735,7 +2741,7 @@ pub fn action_button_w(ctx: &egui::Context, label: &str) -> f32 {
             f.layout_no_wrap(
                 label.to_owned(),
                 egui::FontId::proportional(ACTION_LABEL_PT),
-                theme::text::MUTED,
+                theme::text::muted(),
             )
         })
         .size()
@@ -2853,7 +2859,7 @@ pub fn grip(ui: &mut egui::Ui, enabled: bool, row_h: f32) -> egui::Response {
     };
     let live = enabled && (resp.hovered() || resp.dragged());
     let fg = if live {
-        theme::text::MUTED
+        theme::text::muted()
     } else {
         theme::color::text_a(77)
     };
@@ -3148,7 +3154,7 @@ pub fn segmented_marked(
     let r5 = egui::CornerRadius::same(5);
     let p = ui.painter();
     p.rect_filled(track, r5, theme::color::text_a(13));
-    // Translucent rather than the solid `FIELD_BORDER`: the track sits on several grounds.
+    // Translucent rather than the solid `field_border()`: the track sits on several grounds.
     p.rect_stroke(
         track,
         r5,
@@ -3225,7 +3231,11 @@ pub fn segment_glyph(painter: &egui::Painter, rect: egui::Rect, glyph: &str, on:
         egui::Align2::CENTER_CENTER,
         glyph,
         theme::icon_font(15.0),
-        if on { color::TEXT } else { theme::text::DIM },
+        if on {
+            color::text()
+        } else {
+            theme::text::dim()
+        },
     );
 }
 
@@ -3237,7 +3247,7 @@ pub fn segment_mixed(painter: &egui::Painter, rect: egui::Rect) {
         egui::Align2::CENTER_CENTER,
         "–",
         egui::FontId::proportional(11.0),
-        theme::text::FAINT,
+        theme::text::faint(),
     );
 }
 
@@ -3298,7 +3308,7 @@ pub fn slider(
         p.rect_filled(
             egui::Rect::from_min_max(rail.min, egui::pos2(knob_x, rail.max.y)),
             r,
-            color::ACCENT_600,
+            color::accent_600(),
         );
     }
     // One soft disc under the knob, as `box-shadow: 0 1px 3px rgba(0,0,0,.4)`.
@@ -3311,9 +3321,9 @@ pub fn slider(
         egui::pos2(knob_x, rect.center().y),
         half,
         if resp.is_pointer_button_down_on() || resp.hovered() {
-            color::TEXT
+            color::text()
         } else {
-            color::ACCENT_100
+            color::accent_100()
         },
     );
     resp
@@ -3336,10 +3346,10 @@ const SWITCH_ROW_BLEED: f32 = 4.0;
 /// [`icon_button_padded`]).
 pub fn paint_switch(painter: &egui::Painter, rect: egui::Rect, on: bool, hot: bool) {
     let (track, knob) = match (on, hot) {
-        (true, false) => (color::ACCENT_600, color::ACCENT_100),
-        (true, true) => (color::ACCENT, color::ACCENT_100),
-        (false, false) => (theme::color::text_a(33), theme::text::DIM),
-        (false, true) => (theme::color::text_a(46), theme::text::MUTED),
+        (true, false) => (color::accent_600(), color::accent_100()),
+        (true, true) => (color::accent(), color::accent_100()),
+        (false, false) => (theme::color::text_a(33), theme::text::dim()),
+        (false, true) => (theme::color::text_a(46), theme::text::muted()),
     };
     painter.rect_filled(rect, egui::CornerRadius::same(5), track);
     let d = rect.height() - SWITCH_PAD * 2.0;
@@ -3359,14 +3369,14 @@ pub fn paint_switch(painter: &egui::Painter, rect: egui::Rect, on: bool, hot: bo
 /// n-way `cvXX` row, which sits in the same column.
 pub const SWITCH_ROW_LABEL_PT: f32 = 11.5;
 
-/// The ink of a toggle-list row's label: [`theme::text::STRONG`] when the row is
-/// on, [`theme::text::MUTED`] when it is off. A row that is not a switch still
+/// The ink of a toggle-list row's label: [`theme::text::strong()`] when the row is
+/// on, [`theme::text::muted()`] when it is off. A row that is not a switch still
 /// owes the two tiers (see [`switch_row`]).
 pub fn switch_row_ink(on: bool) -> egui::Color32 {
     if on {
-        theme::text::STRONG
+        theme::text::strong()
     } else {
-        theme::text::MUTED
+        theme::text::muted()
     }
 }
 
@@ -3457,7 +3467,7 @@ fn switch_row_inner(
                 egui::Align2::RIGHT_CENTER,
                 MIXED_WORD,
                 egui::FontId::proportional(SEGMENT_LABEL_PT),
-                theme::text::FAINT,
+                theme::text::faint(),
             );
         }
     }
@@ -3479,12 +3489,16 @@ pub fn segment_label(painter: &egui::Painter, rect: egui::Rect, text: &str, on: 
         egui::Align2::CENTER_CENTER,
         text,
         egui::FontId::proportional(SEGMENT_LABEL_PT),
-        if on { color::TEXT } else { theme::text::DIM },
+        if on {
+            color::text()
+        } else {
+            theme::text::dim()
+        },
     );
 }
 
 /// A [`segment_label`] for a cell that is present but unavailable — see
-/// [`segmented_enabled`]. [`theme::text::DISABLED`], not the resting tier, or the
+/// [`segmented_enabled`]. [`theme::text::disabled()`], not the resting tier, or the
 /// cell would look merely unselected.
 pub fn segment_label_disabled(painter: &egui::Painter, rect: egui::Rect, text: &str) {
     painter.text(
@@ -3492,7 +3506,7 @@ pub fn segment_label_disabled(painter: &egui::Painter, rect: egui::Rect, text: &
         egui::Align2::CENTER_CENTER,
         text,
         egui::FontId::proportional(SEGMENT_LABEL_PT),
-        theme::text::DISABLED,
+        theme::text::disabled(),
     );
 }
 
@@ -3693,9 +3707,9 @@ pub enum Swatch<'a> {
 /// otherwise invisible and a threshold would pop as a colour is scrubbed.
 /// White, not the picker's black, which is invisible on a dark chip.
 ///
-/// 76/255 is set by the black chip: grey 76 against `color::FIELD`'s 47. The
+/// 76/255 is set by the black chip: grey 76 against `color::field()`'s 47. The
 /// picker's `stop_bar`, `sv_plane`, `hue_slider` and `alpha_slider` mask without
-/// it; their ground is `color::CARD` under a bright ramp, which wants translucent
+/// it; their ground is `color::card()` under a bright ramp, which wants translucent
 /// black. Premultiplied for `const`; equals `Color32::from_white_alpha(76)`.
 pub const SWATCH_HAIRLINE: egui::Color32 = egui::Color32::from_rgba_premultiplied(76, 76, 76, 76);
 
@@ -3953,8 +3967,11 @@ pub(crate) fn logo(ui: &egui::Ui, rect: egui::Rect, lit: bool) {
         handle
     });
     if lit {
-        ui.painter()
-            .rect_filled(rect.expand(3.0), egui::CornerRadius::same(7), color::HOVER);
+        ui.painter().rect_filled(
+            rect.expand(3.0),
+            egui::CornerRadius::same(7),
+            color::hover(),
+        );
     }
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     ui.painter()
@@ -5037,7 +5054,7 @@ mod head_tests {
         let _ = ctx.run_ui(Default::default(), |ui| {
             rect = menu_head(
                 ui,
-                crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
+                crate::theme::icon_text(icon::EYE, 16.0, theme::text::muted()),
                 1.0,
                 false,
             )
@@ -5061,7 +5078,7 @@ mod head_tests {
         let _ = ctx.run_ui(raw, |ui| {
             clicked = menu_head(
                 ui,
-                crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
+                crate::theme::icon_text(icon::EYE, 16.0, theme::text::muted()),
                 1.0,
                 false,
             )
@@ -5070,7 +5087,7 @@ mod head_tests {
         assert!(clicked, "a press on the glyph did not reach the head");
     }
 
-    /// A menu head hovered or `open` paints the `HOVER` ground and mark and caret in `TEXT`; at rest it paints neither.
+    /// A menu head hovered or `open` paints the `hover()` ground and mark and caret in `text()`; at rest it paints neither.
     ///
     /// flip: ignoring `open` → fails "an open head stays lit with the pointer away".
     #[test]
@@ -5080,22 +5097,22 @@ mod head_tests {
         let head = |ui: &mut egui::Ui, open: bool| {
             menu_head(
                 ui,
-                crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
+                crate::theme::icon_text(icon::EYE, 16.0, theme::text::muted()),
                 5.0,
                 open,
             )
         };
-        // Answers (rect, ground fills, text runs in TEXT, text runs) for one frame.
+        // Answers (rect, ground fills, text runs in `text()`, text runs) for one frame.
         let frame = |ctx: &egui::Context, raw: egui::RawInput, open: bool| {
             let mut rect = egui::Rect::NOTHING;
             let out = ctx.run_ui(raw, |ui| rect = head(ui, open).rect);
             let (mut grounds, mut lit, mut texts) = (0, 0, 0);
             for cs in &out.shapes {
                 match &cs.shape {
-                    egui::Shape::Rect(r) if r.fill == theme::color::HOVER => grounds += 1,
+                    egui::Shape::Rect(r) if r.fill == theme::color::hover() => grounds += 1,
                     egui::Shape::Text(t) => {
                         texts += 1;
-                        if t.override_text_color == Some(color::TEXT) {
+                        if t.override_text_color == Some(color::text()) {
                             lit += 1;
                         }
                     }
@@ -5194,7 +5211,7 @@ mod head_tests {
             let _ = ctx.run_ui(Default::default(), |ui| {
                 w = menu_head(
                     ui,
-                    crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
+                    crate::theme::icon_text(icon::EYE, 16.0, theme::text::muted()),
                     gap,
                     false,
                 )
@@ -5220,7 +5237,7 @@ mod head_tests {
                 icon_button(ui, icon::ARROW_U_UP_LEFT, HEAD_H, GLYPH, false, true);
                 menu_head(
                     ui,
-                    crate::theme::icon_text(icon::EYE, GLYPH, theme::text::MUTED),
+                    crate::theme::icon_text(icon::EYE, GLYPH, theme::text::muted()),
                     5.0,
                     false,
                 );
@@ -5335,7 +5352,7 @@ mod head_tests {
             .shapes
             .iter()
             .filter_map(|c| match &c.shape {
-                egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                egui::Shape::Rect(r) if r.fill == color::field() => Some(r.rect),
                 _ => None,
             })
             .collect();
@@ -5369,7 +5386,7 @@ mod dim_tests {
                     if off {
                         ui.disable();
                     }
-                    ui.label(egui::RichText::new("A").color(theme::text::MUTED));
+                    ui.label(egui::RichText::new("A").color(theme::text::muted()));
                     ui.label("B");
                     let p = ui.painter();
                     p.text(
@@ -5377,12 +5394,12 @@ mod dim_tests {
                         egui::Align2::LEFT_TOP,
                         "C",
                         egui::FontId::proportional(12.0),
-                        theme::text::MUTED,
+                        theme::text::muted(),
                     );
                     p.rect_filled(
                         egui::Rect::from_min_size(egui::pos2(0.0, 80.0), egui::vec2(9.0, 9.0)),
                         egui::CornerRadius::ZERO,
-                        color::ACCENT,
+                        color::accent(),
                     );
                 });
             })
@@ -5442,7 +5459,7 @@ mod dim_tests {
                     ui.painter().rect_filled(
                         egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(8.0, 8.0)),
                         egui::CornerRadius::ZERO,
-                        color::ACCENT,
+                        color::accent(),
                     );
                 };
                 match (nest, guarded) {
@@ -5486,7 +5503,7 @@ mod dim_tests {
     /// Disabled is one ink however reached, and it clears both "switched off" tiers by `MARGIN` levels.
     #[test]
     fn unavailable_and_switched_off_are_different_greys() {
-        const OFF_HIDDEN_ROW: u8 = 95; // HIDDEN_OPACITY (0.6) over MUTED
+        const OFF_HIDDEN_ROW: u8 = 95; // HIDDEN_OPACITY (0.6) over muted()
         const OFF_LAYER_ROW: u8 = 102; // layers.rs, absolute
         const MARGIN: i32 = 15;
 
@@ -5513,21 +5530,21 @@ mod dim_tests {
 
         assert_eq!(
             scoped,
-            theme::text::DISABLED.a(),
+            theme::text::disabled().a(),
             "the two routes to `disabled` paint different inks: a faded scope gives \
              {scoped}, the constant {}",
-            theme::text::DISABLED.a()
+            theme::text::disabled().a()
         );
         for (what, off) in [
             ("a hidden row", OFF_HIDDEN_ROW),
             ("a layer row", OFF_LAYER_ROW),
         ] {
-            let gap = i32::from(off) - i32::from(theme::text::DISABLED.a());
+            let gap = i32::from(off) - i32::from(theme::text::disabled().a());
             assert!(
                 gap >= MARGIN,
                 "{what} is off at {off} and a disabled control is at {}, only {gap} \
                  levels apart — dim alone cannot say which",
-                theme::text::DISABLED.a()
+                theme::text::disabled().a()
             );
         }
     }
@@ -5608,14 +5625,14 @@ mod dim_tests {
                         if escape {
                             ui.set_opacity(1.0);
                         }
-                        swatch(ui, 16.0, color::FIELD, Swatch::Solid(chip));
+                        swatch(ui, 16.0, color::field(), Swatch::Solid(chip));
                     });
                 });
             })
         };
 
-        let faded = mask_alpha(&draw(false), color::FIELD).expect("a corner mask, faded");
-        let kept = mask_alpha(&draw(true), color::FIELD).expect("a corner mask, escaped");
+        let faded = mask_alpha(&draw(false), color::field()).expect("a corner mask, faded");
+        let kept = mask_alpha(&draw(true), color::field()).expect("a corner mask, escaped");
         assert!(
             faded < 255,
             "the dim did nothing, so this test proves nothing: mask alpha {faded}"
@@ -5638,7 +5655,7 @@ mod swatch_hairline_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut rect = egui::Rect::NOTHING;
         let out = ctx.run_ui(Default::default(), |ui| {
-            rect = swatch(ui, 16.0, color::FIELD, Swatch::Solid(chip)).rect;
+            rect = swatch(ui, 16.0, color::field(), Swatch::Solid(chip)).rect;
         });
         (out, rect)
     }
@@ -5676,7 +5693,7 @@ mod swatch_hairline_tests {
             .unwrap()
     }
 
-    /// A chip the colour of its row (`2F2F2F` on `FIELD`, and black, which sets `MARGIN`) stays visible.
+    /// A chip the colour of its row (`2F2F2F` on `field()`, and black, which sets `MARGIN`) stays visible.
     ///
     /// flip: `from_black_alpha(76)` for the hairline → fails the margin on the `2F2F2F` chip.
     #[test]
@@ -5693,11 +5710,11 @@ mod swatch_hairline_tests {
             let (_, line) = hairline(&out);
             let edge = over(line.stroke.color, chip);
             assert!(
-                apart(edge, color::FIELD) >= MARGIN,
+                apart(edge, color::field()) >= MARGIN,
                 "{name}: the chip's edge composites to {edge:?}, only {} levels from the \
                  row's own {:?} — the chip reads as a hole in the row",
-                apart(edge, color::FIELD),
-                color::FIELD,
+                apart(edge, color::field()),
+                color::field(),
             );
         }
     }
@@ -5817,7 +5834,7 @@ mod transform_row_tests {
             .shapes
             .iter()
             .filter_map(|c| match &c.shape {
-                egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                egui::Shape::Rect(r) if r.fill == color::field() => Some(r.rect),
                 _ => None,
             })
             .collect();
@@ -6565,7 +6582,7 @@ mod combo_chevron_tests {
         out.shapes.into_iter().map(|c| c.shape).collect()
     }
 
-    /// A closed dropdown paints one chevron glyph at `COMBO_CHEVRON_PT` in `COMBO_CHEVRON`, and not egui's filled triangle.
+    /// A closed dropdown paints one chevron glyph at `COMBO_CHEVRON_PT` in `combo_chevron_ink()`, and not egui's filled triangle.
     #[test]
     fn a_dropdown_closes_with_a_chevron_and_not_egui_s_triangle() {
         let painted = shapes(true);
@@ -6580,7 +6597,7 @@ mod combo_chevron_tests {
         assert_eq!(caret.len(), 1, "exactly one chevron on a closed dropdown");
         let format = &caret[0].galley.job.sections[0].format;
         assert_eq!(format.font_id.size, COMBO_CHEVRON_PT);
-        assert_eq!(format.color, COMBO_CHEVRON);
+        assert_eq!(format.color, combo_chevron_ink());
 
         assert!(
             !painted.iter().any(is_triangle),
@@ -6682,7 +6699,7 @@ mod meter_tests {
             "a metered field paints a tick and a bar, in that order"
         );
         (
-            rects(color::FIELD)
+            rects(color::field())
                 .first()
                 .copied()
                 .expect("the field paints a ground"),
@@ -7338,7 +7355,7 @@ mod context_menu_chrome_tests {
 mod family_row_chrome_tests {
     use super::*;
 
-    /// A `WARN`-tinted glyph survives into the galley a `ComboBox` paints, while the label stays full-strength `TEXT`.
+    /// A `warn()`-tinted glyph survives into the galley a `ComboBox` paints, while the label stays full-strength `text()`.
     #[test]
     fn a_warn_tinted_combo_glyph_reaches_the_painted_galley() {
         let ctx = egui::Context::default();
@@ -7356,7 +7373,7 @@ mod family_row_chrome_tests {
                     .selected_text(glyph_and_text_tinted(
                         icon::TEXT_AA,
                         "Nonesuch",
-                        theme::color::WARN,
+                        theme::color::warn(),
                     ))
                     .show_ui(ui, |_| {});
             },
@@ -7373,11 +7390,11 @@ mod family_row_chrome_tests {
         colours.sort_by_key(|c| c.to_array());
         colours.dedup();
         assert!(
-            colours.contains(&theme::color::WARN),
+            colours.contains(&theme::color::warn()),
             "the warning colour never reached the galley: {colours:?}"
         );
         assert!(
-            colours.contains(&color::TEXT),
+            colours.contains(&color::text()),
             "and the label must stay full strength beside it: {colours:?}"
         );
     }

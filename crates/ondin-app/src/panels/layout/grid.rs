@@ -713,7 +713,7 @@ impl OndinApp {
                     "Grid template columns"
                 },
                 11.0,
-                theme::text::DIM,
+                theme::text::dim(),
                 mark.as_ref(),
             );
             self.reset_marked(hit, &mark);
@@ -751,7 +751,7 @@ impl OndinApp {
                         (true, n) => format!("{n} tracks"),
                     })
                     .size(10.5)
-                    .color(theme::text::FAINT),
+                    .color(theme::text::faint()),
                 );
             });
         });
@@ -801,7 +801,7 @@ impl OndinApp {
                     ui.painter().hline(
                         first.x_range(),
                         line_y,
-                        egui::Stroke::new(1.5, color::ACCENT),
+                        egui::Stroke::new(1.5, color::accent()),
                     );
                 }
                 if released {
@@ -847,7 +847,7 @@ impl OndinApp {
             }
         }
         if let Some(why) = refusal(ui, key, shown.as_deref()) {
-            ui.label(egui::RichText::new(why).size(10.5).color(color::DANGER));
+            ui.label(egui::RichText::new(why).size(10.5).color(color::danger()));
         }
     }
 
@@ -1073,7 +1073,9 @@ impl OndinApp {
                         ui.add_sized(
                             rest,
                             egui::Label::new(
-                                egui::RichText::new(text).size(11.0).color(theme::text::DIM),
+                                egui::RichText::new(text)
+                                    .size(11.0)
+                                    .color(theme::text::dim()),
                             )
                             .truncate(),
                         )
@@ -1128,7 +1130,7 @@ impl OndinApp {
                     Some(egui::vec2(LABEL_W, side)),
                     label,
                     10.5,
-                    theme::text::FAINT,
+                    theme::text::faint(),
                     mark.as_ref(),
                 );
                 self.reset_marked(hit, &mark);
@@ -1184,7 +1186,7 @@ impl OndinApp {
                 }
             });
             if let Some(why) = refused {
-                ui.label(egui::RichText::new(why).size(10.5).color(color::DANGER));
+                ui.label(egui::RichText::new(why).size(10.5).color(color::danger()));
             }
         }
 
@@ -1264,7 +1266,7 @@ impl OndinApp {
                 ui.painter().rect_stroke(
                     at,
                     egui::CornerRadius::same(ui::BUTTON_R),
-                    egui::Stroke::new(1.0, color::ACCENT),
+                    egui::Stroke::new(1.0, color::accent()),
                     egui::StrokeKind::Inside,
                 );
             }

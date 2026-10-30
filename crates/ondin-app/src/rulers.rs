@@ -751,7 +751,7 @@ impl OndinApp {
         // Opaque, in the chrome's ground: the near-white ticks and type would be
         // unreadable over a light canvas or artwork.
         for bar in [top, left] {
-            painter.rect_filled(bar, egui::CornerRadius::ZERO, color::BG);
+            painter.rect_filled(bar, egui::CornerRadius::ZERO, color::bg());
         }
         let hairline = egui::Stroke::new(1.0, theme::color::text_a(18));
         painter.line_segment(
@@ -812,7 +812,7 @@ impl OndinApp {
             if let Some((lo, hi)) = ends
                 && let Some(band) = extent_band(axis, bar, on_screen(lo), on_screen(hi))
             {
-                painter.rect_filled(band, egui::CornerRadius::ZERO, color::ACCENT_900);
+                painter.rect_filled(band, egui::CornerRadius::ZERO, color::accent_900());
             }
 
             let first = (from / step).floor() as i64;
@@ -889,7 +889,7 @@ impl OndinApp {
                         egui::vec2(THICKNESS, TICK_W),
                     ),
                 };
-                painter.rect_filled(mark, egui::CornerRadius::ZERO, POINTER_MARK);
+                painter.rect_filled(mark, egui::CornerRadius::ZERO, pointer_mark());
             }
         }
     }
@@ -919,7 +919,7 @@ impl OndinApp {
         value: f64,
     ) {
         let font = egui::FontId::proportional(LABEL_SIZE);
-        let lay = |text: String| painter.layout_no_wrap(text, font.clone(), color::ACCENT_200);
+        let lay = |text: String| painter.layout_no_wrap(text, font.clone(), color::accent_200());
         let pos = match axis {
             GuideAxis::Vertical => egui::pos2(at + LABEL_GAP, bar.top() + LABEL_INSET),
             GuideAxis::Horizontal => egui::pos2(bar.left() + LABEL_INSET, at + LABEL_GAP),
@@ -1049,7 +1049,9 @@ const CHIP_INK: egui::Color32 = egui::Color32::from_rgb(0x0d, 0x1c, 0x26);
 ///
 /// A full-height line rather than a longer tick, so the eye can follow it among
 /// the ticks. It carries no number, which would compete with the guide chip.
-const POINTER_MARK: egui::Color32 = theme::color::text_a(120);
+fn pointer_mark() -> egui::Color32 {
+    theme::color::text_a(120)
+}
 
 // --- interaction ------------------------------------------------------------
 

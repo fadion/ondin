@@ -20,6 +20,9 @@ Nothing open.
 - **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
+- **The layers panel paints only the rows in view.** `layers_tree` paints every row and
+  `paint_tree_guides` dashes every guide each frame, scrolled out or not: a file of a few thousand
+  layers is tens of thousands of shapes a frame, egui's largest allocation and the panel's cost.
 
 ## Later · Second
 

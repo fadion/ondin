@@ -412,6 +412,11 @@ pub struct EditorSession {
     /// page's contents ([`Self::take_first_visit`]): only the app knows the
     /// canvas's size.
     first_visit: bool,
+    /// Set when a document opens with no view recorded for it here, until the
+    /// canvas puts its first frame in view (`OndinApp::home_camera`). Kept with the
+    /// document rather than the app, so a tab parked before its first frame still
+    /// gets it.
+    pub home_pending: bool,
     /// The file backing this document, if it has been saved or opened.
     pub path: Option<PathBuf>,
 
@@ -555,6 +560,7 @@ impl EditorSession {
             page,
             parked: Default::default(),
             first_visit: false,
+            home_pending: false,
             path,
             overrides: RenderOverrides::default(),
             session_preview: None,
@@ -1608,6 +1614,7 @@ impl EditorSession {
         self.page = doc.first_page();
         self.parked.clear();
         self.first_visit = false;
+        self.home_pending = false;
         self.doc = doc;
         self.ids = IdSource::new(random_actor());
         ondin_core::reserve_existing_ids(&self.doc, &mut self.ids);

@@ -45,6 +45,9 @@ pub struct LocalIndex {
     /// id), so it reopens there (`crate::pages`). Local for `opened`'s reason:
     /// switching pages is a view change, never written into the file.
     pub last_page: HashMap<String, String>,
+    /// For each document, where the camera was when it was last left here, so it
+    /// reopens on the same spot (`crate::pages`). Local for `last_page`'s reason.
+    pub last_view: HashMap<String, LastView>,
     /// The documents imported here and not opened since, which wear the *New*
     /// chip. Opening one takes it out.
     pub imported: std::collections::HashSet<String>,
@@ -199,8 +202,19 @@ impl LocalIndex {
         self.kit_use.retain(|id, _| live.contains(id));
         self.kit_later.retain(|id, _| live.contains(id));
         self.last_page.retain(|id, _| live.contains(id));
+        self.last_view.retain(|id, _| live.contains(id));
         self.imported.retain(|id| live.contains(id));
     }
+}
+
+/// A camera as a document was left: the page it was on (a page root's wire id),
+/// the world point at the canvas's centre, and the zoom.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LastView {
+    pub page: String,
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
 }
 
 /// Whether this process may resolve [`path`] at all: `false` under `cfg(test)`,

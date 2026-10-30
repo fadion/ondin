@@ -29,6 +29,10 @@ const CHECK_X: f32 = 14.0;
 /// Where a row's name starts, from the row's left.
 const NAME_X: f32 = 28.0;
 
+/// How far below the canvas's top edge a just-opened document's first frame
+/// starts, in points.
+const HOME_MARGIN: f32 = 100.0;
+
 /// The Pages section's own state.
 #[derive(Default)]
 pub(crate) struct PagesState {
@@ -125,6 +129,81 @@ impl OndinApp {
         if let Some(page) = page {
             self.session.open_on_page(page);
         }
+    }
+
+    /// Put a just-opened document's camera back where it was last left here, on
+    /// the page [`Self::reopen_last_page`] landed on; with nothing recorded for
+    /// that page, ask for [`Self::home_camera`].
+    pub(crate) fn reopen_last_view(&mut self) {
+        let page = self.session.page.to_wire();
+        let view = self
+            .session
+            .doc
+            .meta()
+            .id
+            .as_ref()
+            .and_then(|id| self.library.local.last_view.get(id))
+            .filter(|v| v.page == page)
+            .cloned();
+        match view {
+            Some(v) => {
+                self.session.camera.center = ondin_core::kurbo::Point::new(v.x, v.y);
+                self.session.camera.set_zoom(v.zoom);
+            }
+            None => self.session.home_pending = true,
+        }
+    }
+
+    /// Record where the camera is, and on which page, for [`Self::reopen_last_view`]:
+    /// called as a document leaves the front — parked, closed, or the app quitting.
+    /// Not for one never shown, whose camera is not one the user saw.
+    pub(crate) fn remember_view(&mut self) {
+        if self.session.home_pending {
+            return;
+        }
+        let Some(id) = self.session.doc.meta().id.clone() else {
+            return;
+        };
+        let page = self.session.page.to_wire();
+        let camera = self.session.camera;
+        let local = &mut self.library.local;
+        local.last_page.insert(id.clone(), page.clone());
+        local.last_view.insert(
+            id,
+            crate::library::cache::LastView {
+                page,
+                x: camera.center.x,
+                y: camera.center.y,
+                zoom: camera.zoom,
+            },
+        );
+        local.save();
+    }
+
+    /// The camera a document opens on when none was recorded: 100%, its first
+    /// frame — the top one, the leftmost of a row — centred across the canvas
+    /// with its top [`HOME_MARGIN`] points below the canvas's. A page without a
+    /// frame is fitted whole; an empty one gets the default camera.
+    pub(crate) fn home_camera(&mut self) {
+        let first = self
+            .root_artboards()
+            .into_iter()
+            .filter_map(|id| self.session.preview_world_bounds(id))
+            .min_by(|a, b| a.y0.total_cmp(&b.y0).then(a.x0.total_cmp(&b.x0)));
+        let Some(frame) = first else {
+            match self.document_bounds() {
+                Some(b) => self.zoom_to(Some(b)),
+                None => self.session.camera = crate::view::Camera::default(),
+            }
+            return;
+        };
+        let (_, ph) = self.canvas_px;
+        let margin = f64::from(HOME_MARGIN * self.canvas_ppp);
+        self.session.camera.zoom = 1.0;
+        self.session.camera.center = ondin_core::kurbo::Point::new(
+            frame.center().x,
+            frame.y0 - margin + f64::from(ph) / 2.0,
+        );
     }
 
     /// The current page just changed: drop the gesture and panel state naming
@@ -1460,5 +1539,76 @@ mod tests {
         confirm_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
         assert!(app.session.doc.is_page(second), "Escape keeps the page");
         assert!(app.pages.deleting.is_none(), "and closes the card");
+    }
+
+    /// A document opened with nothing recorded comes up at 100%, its top frame —
+    /// the leftmost of the top row — centred across the canvas and `HOME_MARGIN`
+    /// below its top; left somewhere, it reopens there; and a camera never shown
+    /// is not recorded.
+    /// flip: `adopt_opened` without `reopen_last_view` → fails at "homed on open";
+    /// `remember_view` without its `home_pending` return → fails at "nothing recorded".
+    #[test]
+    fn a_document_opens_on_its_first_frame_then_where_it_was_left() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xCA3E);
+        let page = ids.mint();
+        let mut doc = Document::new(page);
+        let frame = |id, x: f64, y: f64, w: f64| Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(w, 300.0),
+                corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((x, y))),
+            name: None,
+        };
+        let (right, home, lower) = (ids.mint(), ids.mint(), ids.mint());
+        doc.apply(&Transaction(vec![
+            frame(right, 900.0, 40.0, 400.0),
+            frame(home, -200.0, 40.0, 600.0),
+            frame(lower, -900.0, 800.0, 400.0),
+        ]))
+        .unwrap();
+        doc.set_meta(ondin_core::DocumentMeta {
+            id: Some("camera-doc".into()),
+            ..Default::default()
+        });
+        let path = std::env::temp_dir().join("ondin-camera-doc.ondin");
+        app.canvas_px = (800, 600);
+        app.canvas_ppp = 1.0;
+        // A camera from whatever was open before.
+        app.session.camera.center = Point::new(-5000.0, 5000.0);
+        app.session.camera.zoom = 0.3;
+
+        app.adopt_opened(&path, doc.clone());
+        assert!(app.session.home_pending, "homed on open");
+        app.remember_view();
+        assert!(
+            app.library.local.last_view.is_empty(),
+            "nothing recorded before the canvas showed it"
+        );
+        // What the canvas does on its first frame.
+        app.session.home_pending = false;
+        app.home_camera();
+        let cam = app.session.camera;
+        assert_eq!(cam.zoom, 1.0, "at 100%");
+        let top = cam.world_to_screen(Point::new(100.0, 40.0), app.canvas_px);
+        assert!(
+            (top.x - 400.0).abs() < 1e-6 && (top.y - f64::from(HOME_MARGIN)).abs() < 1e-6,
+            "the top-left frame's top middle at the canvas's middle, {HOME_MARGIN} down: {top:?}"
+        );
+
+        app.session.camera.center = Point::new(1234.0, -56.0);
+        app.session.camera.zoom = 2.5;
+        app.remember_view();
+        app.session.camera = crate::view::Camera::default();
+        app.adopt_opened(&path, doc);
+        assert!(!app.session.home_pending, "a recorded view is not homed");
+        assert_eq!(app.session.camera.center, Point::new(1234.0, -56.0));
+        assert_eq!(app.session.camera.zoom, 2.5, "where it was left");
     }
 }

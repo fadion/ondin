@@ -412,6 +412,7 @@ impl OndinApp {
         }
         // Every result lands while the fields are still the ones it is about.
         self.disk_settle();
+        self.remember_view();
         let parked = Parked {
             session: std::mem::take(&mut self.session),
             recovery_key: self.recovery.key.take(),
@@ -732,6 +733,7 @@ impl OndinApp {
             self.cancel_gesture(&ctx);
             self.drop_recovery();
             self.disk_settle();
+            self.remember_view();
             self.session = EditorSession::new();
             self.tabs.active = None;
             self.leave_document();

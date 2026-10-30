@@ -1062,6 +1062,11 @@ impl OndinApp {
         self.canvas_ppp = ppp;
         // `fold_chrome_hold` runs before this and reads the previous frame's.
         self.canvas_rect = rect;
+        // Needs the size just measured, which a document opened before its first
+        // frame never had.
+        if std::mem::take(&mut self.session.home_pending) {
+            self.home_camera();
+        }
 
         self.wheel_input(ui, &resp, rect, ppp);
 

@@ -1510,6 +1510,10 @@ impl eframe::App for OndinApp {
     ///
     /// [`Self::handle_close_request`]: OndinApp::handle_close_request
     fn on_exit(&mut self) {
+        // The tab in front; a parked one recorded its view as it was parked.
+        if self.tabs.active.is_some() {
+            self.remember_view();
+        }
         self.disk_settle();
         self.drain_exports();
         // After the settle: Velopack's updater stops this process regardless.
@@ -5605,6 +5609,7 @@ impl OndinApp {
         self.session.adopt_document(doc, Some(path.to_path_buf()));
         self.reset_transient_state();
         self.reopen_last_page();
+        self.reopen_last_view();
         // After the reset, which empties `collapsed`.
         if self.prefs.collapse_groups_on_open {
             self.collapse_all();

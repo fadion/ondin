@@ -614,12 +614,27 @@ fn default_shape_fill() -> Color {
 /// Outline mode's ink on a page of `ground`: near-black on a light page,
 /// near-white on a dark one, by the ground's luminance.
 fn outline_ink(ground: Color) -> Color {
-    let [r, g, b, _] = ground.components;
-    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    if luma > 0.5 {
+    if is_light_ground(ground) {
         Color::from_rgba8(24, 24, 24, 255)
     } else {
         Color::from_rgba8(232, 232, 232, 255)
+    }
+}
+
+/// Whether a page of `ground` is light enough that chrome drawn straight on it
+/// needs dark ink. A saturated mid ground (red, yellow) falls either side.
+fn is_light_ground(ground: Color) -> bool {
+    let [r, g, b, _] = ground.components;
+    0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5
+}
+
+/// Text drawn straight on the canvas, at `alpha`: the theme's light text on a
+/// dark page, near-black on a light one, so a frame's name survives either.
+fn ground_text(ground: Color, alpha: u8) -> egui::Color32 {
+    if is_light_ground(ground) {
+        egui::Color32::from_rgba_unmultiplied(24, 24, 24, alpha)
+    } else {
+        color::text_a(alpha)
     }
 }
 
@@ -7226,7 +7241,7 @@ impl OndinApp {
                 if clashing { 4.0 } else { 0.0 },
                 egui::Color32::PLACEHOLDER,
             );
-            mode_word(&mut job, color::text_a(179));
+            mode_word(&mut job, ground_text(self.session.preview_ground(), 179));
         }
         let galley = ui.painter().layout_job(job);
         let size = galley.size();
@@ -7359,7 +7374,7 @@ impl OndinApp {
             egui::Align2::LEFT_TOP,
             "Editing inside instance · Esc to exit",
             egui::FontId::proportional(LABEL_PT),
-            theme::text::DIM,
+            ground_text(self.session.preview_ground(), theme::text::DIM.a()),
         );
     }
 
@@ -7428,7 +7443,7 @@ impl OndinApp {
             let ink = if self.session.selection.contains(id) {
                 color::SELECT
             } else {
-                theme::text::MUTED
+                ground_text(self.session.preview_ground(), theme::text::MUTED.a())
             };
             painter.galley(label.min, galley, ink);
         }
@@ -16103,6 +16118,60 @@ mod frame_menu_door_tests {
         assert!(
             !inks.contains(&color::SELECT),
             "a component's tag never takes the accent: {inks:?}"
+        );
+    }
+
+    /// A frame's name is light on a dark page and dark on a light one.
+    /// flip: `draw_frame_labels` back on `theme::text::MUTED` → fails at "dark on light grey".
+    #[test]
+    fn a_frames_name_takes_ink_against_the_page_ground() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, _) = app_with_an_occupied_frame(&ctx);
+        app.session.selection.clear();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut ink_on = |ground: Color| {
+            let page = app.session.page;
+            assert!(
+                app.session
+                    .commit(Transaction(vec![Operation::SetPageGround {
+                        id: page,
+                        ground,
+                    }]))
+            );
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| app.draw_frame_labels(ui, ui.painter(), rect, 1.0),
+            );
+            let inks: Vec<_> = out
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) => Some(t.fallback_color),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(inks.len(), 1, "the frame's one tag: {inks:?}");
+            inks[0]
+        };
+        let lightness = |c: egui::Color32| {
+            let [r, g, b, a] = c.to_srgba_unmultiplied();
+            assert!(a > 0, "the tag is inked");
+            (u32::from(r) + u32::from(g) + u32::from(b)) / 3
+        };
+        let on_dark = ink_on(Color::from_rgba8(30, 30, 30, 255));
+        assert!(
+            lightness(on_dark) > 128,
+            "light on a dark page: {on_dark:?}"
+        );
+        let on_light = ink_on(Color::from_rgba8(229, 229, 229, 255));
+        assert!(
+            lightness(on_light) < 128,
+            "dark on light grey: {on_light:?}"
         );
     }
 

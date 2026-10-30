@@ -893,6 +893,64 @@ pub fn can_convert_container(doc: &Document, id: NodeId) -> bool {
     kind_ok && !in_main && n.set().is_none() && crate::component::instance_root(doc, id).is_none()
 }
 
+/// Resize the frame `id` to its children's union, keeping each child where it is
+/// drawn: the frame moves to the union's corner and takes its size, and every
+/// child moves back by that corner, as [`frame`] places a new one. A pinned child's
+/// insets follow at commit (`keep_insets`). A slice lends no bounds.
+///
+/// `None` for anything but a frame without a layout (one with a layout sizes
+/// itself, through `fit-content`), a frame with nothing to measure, and a frame
+/// that already fits.
+pub fn fit_frame(doc: &Document, res: &Resolved, id: NodeId) -> Option<Transaction> {
+    let node = doc.get(id)?;
+    if !matches!(node.kind(), NodeKind::Artboard { .. })
+        || node.display().is_some()
+        || doc.is_page(id)
+    {
+        return None;
+    }
+    let union = node
+        .children()
+        .iter()
+        .filter(|c| crate::resolve::lends_bounds(doc, **c))
+        .filter_map(|c| {
+            let b = crate::local_box(doc, res, *c)?;
+            Some(crate::geometry::transform_rect(res.used_local(doc, *c)?, b))
+        })
+        .reduce(|a, b| a.union(b))?;
+    let size = kurbo::Size::new(union.width().max(1.0), union.height().max(1.0));
+    let NodeKind::Artboard { size: now, .. } = res.used_kind(doc, id).unwrap_or(node.kind()) else {
+        return None;
+    };
+    const EPS: f64 = 1e-6;
+    if union.origin().to_vec2().hypot() < EPS
+        && (size.width - now.width).abs() < EPS
+        && (size.height - now.height).abs() < EPS
+    {
+        return None;
+    }
+    let origin = union.origin().to_vec2();
+    let local = res.used_local(doc, id).unwrap_or(node.transform());
+    let mut ops = vec![
+        Operation::SetTransform {
+            id,
+            transform: local * Affine::translate(origin),
+        },
+        Operation::SetGeometry {
+            id,
+            geometry: crate::GeometryPatch::Size(size),
+        },
+    ];
+    for child in node.children() {
+        let child_local = res.used_local(doc, *child)?;
+        ops.push(Operation::SetTransform {
+            id: *child,
+            transform: Affine::translate(-origin) * child_local,
+        });
+    }
+    Some(Transaction(ops))
+}
+
 /// Whether [`frame`] would accept `members`, so a menu row cannot offer what the
 /// verb would refuse. It does not ask whether the members' boxes resolve (that
 /// needs a [`Resolved`]); [`frame`] reports that.

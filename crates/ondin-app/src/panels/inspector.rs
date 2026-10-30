@@ -1794,19 +1794,29 @@ impl OndinApp {
         });
     }
     /// A group's or a frame's kind row on its identity card, under the boolean row:
-    /// a full-width dropdown, *Frame* / *Group*, turning one into the other
-    /// (`build::convert_container`), disabled where a component's links forbid it.
-    /// Nothing for any other layer.
+    /// a dropdown, *Frame* / *Group*, turning one into the other
+    /// (`build::convert_container`), disabled where a component's links forbid it;
+    /// then *Resize to fit content* (`build::fit_frame`), live only on a frame
+    /// without a layout that does not fit already. Nothing for any other layer.
     fn identity_kind_row(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let doc = &self.session.doc;
-        let Some(is_frame) = doc.get(id).and_then(|n| match n.kind() {
-            NodeKind::Group => Some(false),
-            NodeKind::Artboard { .. } => Some(true),
-            _ => None,
-        }) else {
-            return;
+        let Some(node) = doc.get(id) else { return };
+        let is_frame = match node.kind() {
+            NodeKind::Group => false,
+            NodeKind::Artboard { .. } => true,
+            _ => return,
         };
         let enabled = ondin_core::build::can_convert_container(doc, id);
+        let fit = ondin_core::build::fit_frame(doc, &self.session.resolved, id);
+        let unfit = match fit {
+            Some(_) => "",
+            None if !is_frame => "A group always fits its content",
+            None if node.display().is_some() => {
+                "A frame with a layout sizes itself: set W and H to fit-content"
+            }
+            None if node.children().is_empty() => "Nothing inside to fit to",
+            None => "Already fits its content",
+        };
         let kinds = [
             (
                 true,
@@ -1820,14 +1830,16 @@ impl OndinApp {
             (false, NodeKind::Group, "Group"),
         ];
         let mut pick = None;
-        ui.scope(|ui| {
+        let mut fitted = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = BOOL_ROW_GAP;
             ui.spacing_mut().interact_size.y = BOOL_ROW_H;
             ui.spacing_mut().button_padding.y = 0.0;
             ui::disable_unless(ui, enabled, |ui| {
                 let shown = &kinds[usize::from(!is_frame)];
                 egui::ComboBox::from_id_salt("container-kind")
                     .icon(ui::combo_chevron)
-                    .width(ui.available_width())
+                    .width(ui.available_width() - BOOL_ROW_H - BOOL_ROW_GAP)
                     .selected_text(ui::glyph_and_text(super::layers_icon(&shown.1).0, shown.2))
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);
@@ -1843,9 +1855,25 @@ impl OndinApp {
                     .response
                     .on_disabled_hover_text("A component keeps its kind: its copies link to it");
             });
+            // The Appearance card's square, a field's ground; `Disabled` only draws,
+            // so the click is ignored here.
+            let state = match fit {
+                Some(_) => ui::FieldButton::Off,
+                None => ui::FieldButton::Disabled,
+            };
+            let resp = ui::field_button(ui, icon::CORNERS_IN, BOOL_ROW_H, 15.0, state);
+            let tip = if fit.is_some() {
+                "Resize to fit content"
+            } else {
+                unfit
+            };
+            fitted = resp.on_hover_text(tip).clicked() && fit.is_some();
         });
         if pick.is_some() {
             self.convert_container(id);
+        } else if fitted && let Some(tx) = fit {
+            self.session.name_step("Resize to fit", icon::CORNERS_IN);
+            self.commit_edit(tx);
         }
     }
 
@@ -13039,6 +13067,106 @@ mod mask_card_tests {
                     Some(NodeKind::Artboard { .. })
                 )),
             "picking Frame turned the group into a frame and selected it"
+        );
+    }
+
+    /// The fit button beside a frame's kind dropdown resizes the frame to its
+    /// children, a child pinned to the far edge staying put (the commit's
+    /// `keep_insets`), and a fitted frame has nothing left to fit.
+    /// flip: `identity_kind_row` committing nothing on the click → fails at "the
+    /// frame fits its content".
+    #[test]
+    fn the_fit_button_resizes_a_frame_to_its_content() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let frame = t.add(
+            root,
+            NodeKind::Artboard {
+                size: Size::new(800.0, 600.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+        );
+        t.shape(frame);
+        // Pinned to the right edge, 790 in: drawn at the left like the others.
+        let pinned = t.shape(frame);
+        t.doc
+            .apply(&Transaction(vec![Operation::SetInsets {
+                id: pinned,
+                insets: ondin_core::container::Insets {
+                    top: Some(ondin_core::container::LengthPct::Px(0.0)),
+                    right: Some(ondin_core::container::LengthPct::Px(790.0)),
+                    ..Default::default()
+                },
+            }]))
+            .unwrap();
+        app.session.adopt_document(t.doc.clone(), None);
+        app.session.selection.set(vec![frame]);
+        let drawn = |app: &crate::app::OndinApp| app.session.resolved.world_bounds(pinned);
+        let before = drawn(&app);
+        assert!(
+            before.is_some_and(|b| b.x0.abs() < 1e-9 && b.width() == 10.0),
+            "the fixture: the pinned child is drawn at the frame's left, {before:?}"
+        );
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut pass = |app: &mut crate::app::OndinApp, events: Vec<egui::Event>| {
+            let time = ctx.input(|i| i.time) + 0.1;
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1320.0, 820.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut kitten),
+            )
+            .shapes
+        };
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let at = shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t)
+                    if t.galley.text() == crate::theme::icon::CORNERS_IN && t.pos.x > 900.0 =>
+                {
+                    Some(t.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .expect("the fit button is drawn");
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for _ in 0..2 {
+            pass(&mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        pass(&mut app, vec![press(true)]);
+        pass(&mut app, vec![press(false)]);
+        pass(&mut app, vec![]);
+        assert!(
+            matches!(app.session.doc.get(frame).map(|n| n.kind()),
+                Some(NodeKind::Artboard { size, .. }) if *size == Size::new(10.0, 10.0)),
+            "the frame fits its content"
+        );
+        assert_eq!(
+            drawn(&app),
+            before,
+            "a child pinned to the right edge stays where it is drawn"
+        );
+        assert!(
+            ondin_core::build::fit_frame(&app.session.doc, &app.session.resolved, frame).is_none(),
+            "fitted, the button has nothing left to do"
         );
     }
 

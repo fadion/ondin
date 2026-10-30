@@ -468,6 +468,52 @@ fn a_component_is_not_converted() {
     );
 }
 
+/// A frame fits to its children's union with every child left where it is drawn;
+/// a fitted frame, a frame with a layout and a group are not fitted.
+/// flip: `fit_frame` without the shift on each child → fails at "a stayed put".
+#[test]
+fn a_frame_fits_its_content_and_its_children_stay_put() {
+    let mut f = Fixture::new();
+    let inner = f.add(f.artboard, artboard(), (50.0, 40.0));
+    let a = f.add(inner, rect(30.0, 30.0), (10.0, 20.0));
+    let b = f.add(inner, rect(20.0, 10.0), (100.0, 60.0));
+    let before = [f.world_origin(a), f.world_origin(b)];
+
+    let tx = build::fit_frame(&f.doc, &f.resolved(), inner).expect("an 800×600 frame fits");
+    f.commit(tx);
+    assert!(
+        matches!(f.doc.get(inner).unwrap().kind(),
+            NodeKind::Artboard { size, .. } if *size == Size::new(110.0, 50.0)),
+        "the union's size"
+    );
+    approx(
+        f.world_origin(inner),
+        before[0],
+        "at the union's corner, which is a's",
+    );
+    approx(f.world_origin(a), before[0], "a stayed put");
+    approx(f.world_origin(b), before[1], "b stayed put");
+    assert!(
+        build::fit_frame(&f.doc, &f.resolved(), inner).is_none(),
+        "a fitted frame does not fit again"
+    );
+
+    f.commit(Transaction(vec![Operation::SetDisplay {
+        id: inner,
+        display: Some(ondin_core::container::Display::Flex(Default::default())),
+    }]));
+    assert!(
+        build::fit_frame(&f.doc, &f.resolved(), inner).is_none(),
+        "a frame with a layout sizes itself"
+    );
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
+    f.commit(tx);
+    assert!(
+        build::fit_frame(&f.doc, &f.resolved(), g).is_none(),
+        "a group"
+    );
+}
+
 /// §5.3: an `Artboard` hangs off the root, another `Artboard` or a group, and never
 /// sits under a boolean or a mask (§15 D870, D876). So a selection **inside a
 /// group** frames where it stands, and one **inside a mask** cannot — the refusal

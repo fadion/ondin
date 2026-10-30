@@ -297,6 +297,7 @@ pub mod icon {
     /// An ellipse's Ratio, the hole.
     pub const CIRCLE_DASHED: &str = "\u{e602}";
     pub const CORNERS_OUT: &str = "\u{e1d0}"; // zoom to fit
+    pub const CORNERS_IN: &str = "\u{e1ce}"; // fit a frame to its content
     pub const NUMBER_SQUARE_ONE: &str = "\u{e36c}"; // actual size (1:1 / 100%)
     pub const PLUS: &str = "\u{e3d4}";
     pub const DOTS_THREE: &str = "\u{e1fe}";
@@ -697,6 +698,7 @@ pub mod icon {
         ("chart-pie-slice", CHART_PIE_SLICE),
         ("circle-dashed", CIRCLE_DASHED),
         ("corners-out", CORNERS_OUT),
+        ("corners-in", CORNERS_IN),
         ("number-square-one", NUMBER_SQUARE_ONE),
         ("plus", PLUS),
         ("dots-three", DOTS_THREE),

@@ -14,11 +14,8 @@
 //! saved — never filed, or its save failed — and nothing is written behind the
 //! user's back while it waits.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-
-use ondin_core::NodeId;
 
 use crate::app::{OndinApp, View};
 use crate::session::EditorSession;
@@ -96,7 +93,7 @@ pub(crate) struct Parked {
     recovery_at: Option<u64>,
     recovery_last: Option<Instant>,
     last_autosave: Instant,
-    collapsed: HashSet<NodeId>,
+    collapsed: crate::panels::layers::Folds,
     kit_return: Option<(PathBuf, String)>,
 }
 

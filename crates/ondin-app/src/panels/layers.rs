@@ -542,6 +542,12 @@ pub(crate) fn rename_field_id(id: NodeId) -> egui::Id {
     egui::Id::new(("layer-rename", id))
 }
 
+/// The egui id of a row's widget: its layer's, so it holds still however the tree
+/// scrolls ([`OndinApp::tree_rows`]).
+fn row_id(id: NodeId) -> egui::Id {
+    egui::Id::new(("layer-row", id))
+}
+
 /// Where the rename field goes on a row whose name is painted from `left`: the
 /// full row height, starting at the name's own left edge, so the text does not
 /// shift when the rename opens. The field's `margin` must be zero and its
@@ -869,6 +875,92 @@ struct TreeRow {
     closed: bool,
 }
 
+static NEXT_FOLD_STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The layer-tree rows the user has folded, stamped afresh on every change so
+/// [`FlatTree`] can tell when to rebuild. The stamps are drawn from one counter, so
+/// a set swapped in from a parked tab never repeats one the cache holds.
+#[derive(Clone, Debug)]
+pub(crate) struct Folds {
+    set: HashSet<NodeId>,
+    stamp: u64,
+}
+
+impl Default for Folds {
+    fn default() -> Self {
+        Self {
+            set: HashSet::new(),
+            stamp: NEXT_FOLD_STAMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+}
+
+impl Folds {
+    fn touch(&mut self) {
+        self.stamp = NEXT_FOLD_STAMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn contains(&self, id: &NodeId) -> bool {
+        self.set.contains(id)
+    }
+
+    pub(crate) fn insert(&mut self, id: NodeId) -> bool {
+        self.touch();
+        self.set.insert(id)
+    }
+
+    pub(crate) fn remove(&mut self, id: &NodeId) -> bool {
+        self.touch();
+        self.set.remove(id)
+    }
+
+    pub(crate) fn extend(&mut self, ids: impl IntoIterator<Item = NodeId>) {
+        self.touch();
+        self.set.extend(ids);
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.touch();
+        self.set.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &NodeId> {
+        self.set.iter()
+    }
+}
+
+/// One row of the flattened tree: what the drawing needs of it before any widget
+/// exists.
+#[derive(Clone, Copy, Debug)]
+struct FlatRow {
+    id: NodeId,
+    /// 1 for a top-level row; the page is not a row.
+    depth: usize,
+    has_children: bool,
+    /// A `Group`, `Artboard` or `Boolean` (see [`TreeRow::container`]).
+    container: bool,
+    expanded: bool,
+}
+
+/// What the cached rows were flattened from: the document revision (unique across
+/// sessions), the page, the folds' stamp and the search.
+type FlatKey = (u64, NodeId, u64, Option<String>);
+
+/// The layers tree flattened into rows, top to bottom, rebuilt only when its key
+/// changes: the walk is linear in the document, and a frame draws only the rows in
+/// view.
+#[derive(Default)]
+pub(crate) struct FlatTree {
+    key: Option<FlatKey>,
+    rows: std::rc::Rc<[FlatRow]>,
+    /// Each row's index in `rows`.
+    index: HashMap<NodeId, usize>,
+    /// Whether every container is folded, keyed without the search, which does
+    /// not change the answer.
+    all_folded: Option<((u64, NodeId, u64), bool)>,
+}
+
 /// A dashed run of tree guide, and what it is saying.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct GuideSeg {
@@ -907,16 +999,38 @@ impl GuideInk {
 /// What one row's guides run over: the level its parent's trunk is on, and the
 /// half-open range of rows above it that trunk crosses. The range stops before the
 /// row itself (the trunk below its elbow belongs to later siblings). `None` for a
-/// top-level row.
-fn guide_path(rows: &[TreeRow], row: usize) -> Option<(usize, std::ops::Range<usize>)> {
+/// top-level row. `parents` is [`guide_parents`] of the same rows.
+fn guide_path(
+    rows: &[TreeRow],
+    parents: &[Option<usize>],
+    row: usize,
+) -> Option<(usize, std::ops::Range<usize>)> {
     let level = rows[row].depth.checked_sub(1).filter(|l| *l >= 1)?;
     // The parent's own row — or, in a filtered tree whose parent is absent, the row
     // itself, which then claims nothing above it.
-    let start = rows[..row]
-        .iter()
-        .rposition(|r| r.depth == level)
-        .map_or(row, |p| p + 1);
+    let start = parents[row].map_or(row, |p| p + 1);
     Some((level, start..row))
+}
+
+/// For each row, the nearest row above it one level up — its parent's row — in
+/// one pass: a row at that depth further up would be the parent's sibling, which
+/// comes after the parent's whole branch.
+fn guide_parents(rows: &[TreeRow]) -> Vec<Option<usize>> {
+    let mut last: Vec<Option<usize>> = Vec::new();
+    rows.iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let parent = r
+                .depth
+                .checked_sub(1)
+                .and_then(|l| last.get(l).copied().flatten());
+            if last.len() <= r.depth {
+                last.resize(r.depth + 1, None);
+            }
+            last[r.depth] = Some(i);
+            parent
+        })
+        .collect()
 }
 
 /// For each row, the levels whose trunk carries on *below* it — bit `n - 1` for
@@ -954,19 +1068,25 @@ fn trunks_below(rows: &[TreeRow]) -> Vec<u64> {
 /// Hovering lights only the path from the parent to the row's elbow, not the whole
 /// ancestry, and a selection lights the same path in `color::SELECT`. Where the two
 /// overlap hover wins, one run at a time (see [`GuideInk`]).
-fn tree_guide_segments(rows: &[TreeRow], gap: f32) -> Vec<GuideSeg> {
+///
+/// Only the rows in `emit` get runs — the ones in view; the rest of `rows` is read
+/// for the trunks and paths that cross them.
+fn tree_guide_segments(rows: &[TreeRow], gap: f32, emit: std::ops::Range<usize>) -> Vec<GuideSeg> {
     let below = trunks_below(rows);
+    let parents = guide_parents(rows);
     // A hovered row that is itself selected has no hover path.
     let hovered = rows
         .iter()
         .position(|r| r.hovered && !r.selected)
-        .and_then(|h| guide_path(rows, h).map(|(l, over)| (h, l, over)));
-    // Every selected row: two selected siblings light two legs off one trunk.
+        .and_then(|h| guide_path(rows, &parents, h).map(|(l, over)| (h, l, over)));
+    // Every selected row whose path reaches `emit`: two selected siblings light two
+    // legs off one trunk.
     let selected: Vec<(usize, usize, std::ops::Range<usize>)> = rows
         .iter()
         .enumerate()
         .filter(|(_, r)| r.selected)
-        .filter_map(|(i, _)| guide_path(rows, i).map(|(l, over)| (i, l, over)))
+        .filter_map(|(i, _)| guide_path(rows, &parents, i).map(|(l, over)| (i, l, over)))
+        .filter(|(i, _, over)| emit.contains(i) || (over.start < emit.end && emit.start < over.end))
         .collect();
     // Is this run on that path? The whole trunk for a row the path merely crosses,
     // and only the connector for the row it ends at.
@@ -977,7 +1097,7 @@ fn tree_guide_segments(rows: &[TreeRow], gap: f32) -> Vec<GuideSeg> {
         *plevel == level && (over.contains(&i) || (connector && i == *owner))
     };
     let mut out = Vec::new();
-    for (i, row) in rows.iter().enumerate() {
+    for (i, row) in rows.iter().enumerate().take(emit.end).skip(emit.start) {
         let (top, elbow) = (row.rect.top(), row.elbow);
         let trunk_ink = |level: usize, connector: bool| {
             if hovered.as_ref().is_some_and(|p| on(p, i, level, connector)) {
@@ -1039,7 +1159,11 @@ fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f
     // A dashed run is a shape per dash, so a run outside the clip is skipped here
     // rather than left for the tessellator to cull.
     let clip = painter.clip_rect().expand(1.0);
-    for seg in tree_guide_segments(rows, gap) {
+    // A row's runs stay within its own pitch, so only the rows crossing the clip
+    // can have one in it.
+    let first = rows.partition_point(|r| r.rect.bottom() + gap < clip.top());
+    let end = rows.partition_point(|r| r.rect.top() <= clip.bottom());
+    for seg in tree_guide_segments(rows, gap, first..end.max(first)) {
         if !clip.intersects(egui::Rect::from_two_pos(seg.from, seg.to)) {
             continue;
         }
@@ -1063,7 +1187,6 @@ fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f
 
 impl OndinApp {
     pub(crate) fn layers_tree(&mut self, ui: &mut egui::Ui) {
-        let root = self.session.page;
         // Re-derive the drop target each frame so releasing off the tree drops
         // nothing. The container it named is kept one frame in `lit` for the walk's
         // ink (see [`LayerDrag::lit`]).
@@ -1080,25 +1203,23 @@ impl OndinApp {
             .as_ref()
             .map(|f| f.trim().to_lowercase())
             .filter(|f| !f.is_empty());
-        let shown = needle.as_deref().map(|n| self.matching_rows(n));
+        let searching = needle.is_some();
+        let flat = self.flat_rows(needle);
 
-        // Every row the walk draws, for the guides and the drop hint ([`TreeRow`]).
-        let mut drawn = Vec::new();
         // Measured afresh by the rows in view; the scroll area lays out next frame's.
         let was_w = std::mem::take(&mut self.layers_tree_w);
-        match &shown {
-            Some(rows) if rows.is_empty() => {
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new("No layers match")
-                        .size(11.5)
-                        .color(theme::text::faint()),
-                );
-            }
-            // Collected whether or not the guides are on: cheaper than a second
-            // preference read per row.
-            _ => self.layers_row(ui, root, 0, shown.as_ref(), &mut drawn),
-        }
+        // Every row, for the guides and the drop hint ([`TreeRow`]).
+        let drawn = if searching && flat.is_empty() {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new("No layers match")
+                    .size(11.5)
+                    .color(theme::text::faint()),
+            );
+            Vec::new()
+        } else {
+            self.tree_rows(ui, &flat)
+        };
         if self.layers_tree_w != was_w {
             ui.ctx().request_repaint();
         }
@@ -1125,7 +1246,7 @@ impl OndinApp {
     /// Ctrl/Cmd toggles one row. The canvas's Shift adds and removes instead, as
     /// there is no order to take a range along. The range runs along the rows as
     /// displayed: collapsed and filtered-out rows are not in it.
-    fn select_from_row(&mut self, id: NodeId, shown: Option<&HashSet<NodeId>>, ui: &egui::Ui) {
+    fn select_from_row(&mut self, id: NodeId, ui: &egui::Ui) {
         let (shift, ctrl) =
             ui.input(|i| (i.modifiers.shift, i.modifiers.ctrl || i.modifiers.command));
         if ctrl && !shift {
@@ -1134,14 +1255,15 @@ impl OndinApp {
             return;
         }
         if shift {
-            let rows = self.visible_rows(shown);
+            let flat = &self.layers_flat;
             let anchor = self
                 .layers_range_anchor
-                .and_then(|a| rows.iter().position(|r| *r == a));
-            let here = rows.iter().position(|r| *r == id);
+                .and_then(|a| flat.index.get(&a).copied());
+            let here = flat.index.get(&id).copied();
             if let (Some(a), Some(b)) = (anchor, here) {
                 let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-                self.session.selection.set(rows[lo..=hi].to_vec());
+                let range = flat.rows[lo..=hi].iter().map(|r| r.id).collect();
+                self.session.selection.set(range);
                 // The anchor stays put so the range can be stretched either way.
                 return;
             }
@@ -1154,21 +1276,33 @@ impl OndinApp {
         self.layers_range_anchor = Some(id);
     }
 
-    /// The rows the tree is currently showing, top to bottom. Must walk exactly as
-    /// [`Self::layers_row`] draws (same filter, collapse check, reversed children),
-    /// or a range would select rows the user cannot see.
-    fn visible_rows(&self, shown: Option<&HashSet<NodeId>>) -> Vec<NodeId> {
-        let mut out = Vec::new();
-        self.collect_visible_rows(self.session.page, 0, shown, &mut out);
-        out
+    /// The rows the tree is showing, top to bottom, flattened once per change of
+    /// [`FlatKey`] and shared by the drawing and a Shift-click's range, so a range
+    /// cannot take a row the user cannot see.
+    fn flat_rows(&mut self, needle: Option<String>) -> std::rc::Rc<[FlatRow]> {
+        let key = (
+            self.session.revision(),
+            self.session.page,
+            self.collapsed.stamp,
+            needle,
+        );
+        if self.layers_flat.key.as_ref() != Some(&key) {
+            let shown = key.3.as_deref().map(|n| self.matching_rows(n));
+            let mut rows = Vec::new();
+            self.flatten(self.session.page, 0, shown.as_ref(), &mut rows);
+            self.layers_flat.index = rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
+            self.layers_flat.rows = rows.into();
+            self.layers_flat.key = Some(key);
+        }
+        self.layers_flat.rows.clone()
     }
 
-    fn collect_visible_rows(
+    fn flatten(
         &self,
         id: NodeId,
         depth: usize,
         shown: Option<&HashSet<NodeId>>,
-        out: &mut Vec<NodeId>,
+        out: &mut Vec<FlatRow>,
     ) {
         if let Some(rows) = shown
             && !rows.contains(&id)
@@ -1188,17 +1322,113 @@ impl OndinApp {
             None => node.children().to_vec(),
         };
         if depth > 0 {
-            out.push(id);
-            // A filter forces every branch open, exactly as the drawing walk does.
-            let expanded =
-                !children.is_empty() && (shown.is_some() || !self.collapsed.contains(&id));
+            let has_children = !children.is_empty();
+            // A filter forces every branch open.
+            let expanded = has_children && (shown.is_some() || !self.collapsed.contains(&id));
+            out.push(FlatRow {
+                id,
+                depth,
+                has_children,
+                // A boolean takes a drop like a group does: its children are its
+                // operands.
+                container: matches!(
+                    node.kind(),
+                    NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
+                ),
+                expanded,
+            });
             if !expanded {
                 return;
             }
         }
+        // Reversed: `children` is z-order with the last entry nearest the viewer
+        // (§5.3). Every index this file computes stays a model index; only the
+        // walk is flipped, so the drop-target maths mirrors it.
         for child in children.into_iter().rev() {
-            self.collect_visible_rows(child, depth + 1, shown, out);
+            self.flatten(child, depth + 1, shown, out);
         }
+    }
+
+    /// Lay the tree out: one allocation for the whole column, a [`TreeRow`] for
+    /// every row by arithmetic, and widgets and ink only for the rows in view.
+    ///
+    /// Each row's widget id is its layer's ([`row_id`]), not the layout's next auto
+    /// id, which would shift with the first row in view and so drop a held drag.
+    /// Two kinds of row outside the view still take theirs: the one being renamed,
+    /// painted so its field keeps focus, and a dragged one, so the drag survives
+    /// scrolling it away.
+    fn tree_rows(&mut self, ui: &mut egui::Ui, flat: &[FlatRow]) -> Vec<TreeRow> {
+        if flat.is_empty() {
+            return Vec::new();
+        }
+        let gap = ui.spacing().item_spacing.y;
+        let pitch = ROW_H + gap;
+        let ppp = ui.ctx().pixels_per_point();
+        let width = ui.available_width();
+        let (_, column) = ui.allocate_space(egui::vec2(width, flat.len() as f32 * pitch - gap));
+        let mut rows: Vec<TreeRow> = flat
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(column.left(), column.top() + i as f32 * pitch),
+                    egui::vec2(width, ROW_H),
+                );
+                TreeRow {
+                    id: f.id,
+                    rect,
+                    depth: f.depth,
+                    lead: row_lead(rect.left(), f.depth, f.has_children),
+                    elbow: elbow_y(rect, ppp),
+                    selected: false,
+                    hovered: false,
+                    container: f.container,
+                    closed: f.container && f.has_children && !f.expanded,
+                }
+            })
+            .collect();
+        let mut topmost = None::<usize>;
+        for id in self.session.selection.ids() {
+            if let Some(&i) = self.layers_flat.index.get(id) {
+                rows[i].selected = true;
+                topmost = Some(topmost.map_or(i, |t| t.min(i)));
+            }
+        }
+        if let Some(i) = topmost {
+            self.scroll_to_selected_row(ui, rows[i].rect);
+        }
+
+        let index = &self.layers_flat.index;
+        let clip = ui.clip_rect();
+        let first = rows.partition_point(|r| r.rect.bottom() < clip.top());
+        let end = rows
+            .partition_point(|r| r.rect.top() <= clip.bottom())
+            .max(first);
+        let mut paint: Vec<usize> = (first..end).collect();
+        if let Some((n, _)) = &self.renaming_layer
+            && let Some(&i) = index.get(n)
+            && !paint.contains(&i)
+        {
+            paint.push(i);
+        }
+        if let Some(drag) = &self.layer_drag {
+            for id in &drag.ids {
+                if let Some(&i) = index.get(id)
+                    && !paint.contains(&i)
+                {
+                    ui.interact(rows[i].rect, row_id(*id), egui::Sense::click_and_drag());
+                }
+            }
+        }
+        let stamp = self.collapsed.stamp;
+        for i in paint {
+            self.layers_row(ui, flat[i], &mut rows[i]);
+        }
+        // A caret clicked this frame folds rows the walk has already placed.
+        if self.collapsed.stamp != stamp {
+            ui.ctx().request_repaint();
+        }
+        rows
     }
 
     /// The in-place rename field, laid over the row where its name was.
@@ -1334,10 +1564,26 @@ impl OndinApp {
     /// [`Self::tree_containers`] so the glyph and [`Self::toggle_collapse_all`]'s
     /// action cannot disagree about what counts as a container (§15 D674); it is the
     /// exact negation of `anything_open`.
-    pub(crate) fn tree_is_all_collapsed(&self) -> bool {
-        self.tree_containers()
+    ///
+    /// Asked every frame by the header, so the answer is kept until the document,
+    /// the page or the folds change.
+    pub(crate) fn tree_is_all_collapsed(&mut self) -> bool {
+        let key = (
+            self.session.revision(),
+            self.session.page,
+            self.collapsed.stamp,
+        );
+        if let Some((k, folded)) = self.layers_flat.all_folded
+            && k == key
+        {
+            return folded;
+        }
+        let folded = self
+            .tree_containers()
             .iter()
-            .all(|id| self.collapsed.contains(id))
+            .all(|id| self.collapsed.contains(id));
+        self.layers_flat.all_folded = Some((key, folded));
+        folded
     }
 
     /// Rows to show for a name filter: every node whose name matches, plus the
@@ -1360,57 +1606,20 @@ impl OndinApp {
         keep
     }
 
-    fn layers_row(
-        &mut self,
-        ui: &mut egui::Ui,
-        id: NodeId,
-        depth: usize,
-        shown: Option<&HashSet<NodeId>>,
-        rows: &mut Vec<TreeRow>,
-    ) {
-        if let Some(rows) = shown
-            && !rows.contains(&id)
-        {
-            return;
-        }
+    /// One row in view: its widget, its ink and what a press on it does. `row` is
+    /// its [`TreeRow`], placed by [`Self::tree_rows`]; the row records whether it is
+    /// selected and hovered for the guides.
+    fn layers_row(&mut self, ui: &mut egui::Ui, f: FlatRow, row: &mut TreeRow) {
+        let FlatRow {
+            id,
+            depth,
+            has_children,
+            expanded,
+            ..
+        } = f;
         let Some(node) = self.session.doc.get(id) else {
             return;
         };
-        let children: Vec<NodeId> = match shown {
-            Some(rows) => node
-                .children()
-                .iter()
-                .copied()
-                .filter(|c| rows.contains(c))
-                .collect(),
-            None => node.children().to_vec(),
-        };
-        // A boolean takes a drop like a group does: its children are its operands.
-        let is_container = matches!(
-            node.kind(),
-            NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
-        );
-        // Every row takes its slot and its id, so a drag that scrolls its row away
-        // keeps its widget; one outside the clip is walked but not painted. The row
-        // being renamed is always painted, or its field would lose focus unseen.
-        let slot = (depth > 0).then(|| {
-            ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), ROW_H),
-                egui::Sense::click_and_drag(),
-            )
-        });
-        if let Some((rect, _)) = slot
-            && !ui.is_rect_visible(rect)
-            && !matches!(&self.renaming_layer, Some((n, _)) if *n == id)
-        {
-            let has_children = !children.is_empty();
-            if self.off_view_row(ui, id, depth, rect, has_children, is_container, shown, rows) {
-                for child in children.into_iter().rev() {
-                    self.layers_row(ui, child, depth + 1, shown, rows);
-                }
-            }
-            return;
-        }
         // What the layer shows, a bound visibility resolved (§15 D1059); the eye's
         // click writes the opposite, which detaches the binding.
         let visible = self.session.doc.shown(id);
@@ -1477,471 +1686,410 @@ impl OndinApp {
         };
         // (node borrow ends here — safe to mutate self below)
 
-        // Root is implicit; the tree starts at its children.
-        if depth > 0 {
-            let selected = self.session.selection.contains(id);
-            let has_children = !children.is_empty();
-            // While filtering, every branch is open.
-            let expanded = has_children && (shown.is_some() || !self.collapsed.contains(&id));
-            // The row's component mark (§15 D981): `+` for a layer of an instance's
-            // own, a dot for an override — on the holding row while expanded, on a
-            // collapsed row for anything inside differing from its main. A parent
-            // whose children differ (removed or reordered) carries the dot too, with
-            // a tooltip naming what; collapsed, it counts the whole subtree (§15
-            // D1003 (9), D1004 (2), `child_drift_of`).
-            let (mark, children_tip) = {
-                let doc = &self.session.doc;
-                let in_instance = doc
-                    .get(id)
-                    .and_then(|n| n.parent())
-                    .and_then(|p| ondin_core::component::instance_root(doc, p))
-                    .is_some();
-                let local = in_instance
-                    && doc.get(id).is_some_and(|n| {
-                        n.link()
-                            .is_none_or(|l| doc.get(l).is_some_and(|l| l.component()))
-                    });
-                let copy = in_instance || hexagon == Some(false);
-                let children = if copy && !local {
-                    self.child_drift_of(id)
-                } else {
-                    Default::default()
-                };
-                let mark = if local {
-                    Some(RowMark::Local)
-                } else if has_children && !expanded && copy {
-                    let d = self.drift_of(id);
-                    (d.any() || d.local > 0).then_some(RowMark::Override)
-                } else {
-                    (children.any()
-                        || !ondin_core::reset::overrides(&self.session.doc, id).is_empty())
-                    .then_some(RowMark::Override)
-                };
-                (mark, child_drift_tip(children))
-            };
-
-            let (rect, resp) = slot.expect("every row below the root has a slot");
-            // The dot's words, on the row it sits on (§15 D1003 (9)).
-            let resp = match &children_tip {
-                Some(tip) => resp.on_hover_text(tip),
-                None => resp,
-            };
-            let hovered = resp.hovered();
-            let being_dragged = self
-                .layer_drag
-                .as_ref()
-                .is_some_and(|d| d.ids.contains(&id));
-
-            // The drop target is read in [`OndinApp::drop_hint`] from the rects this
-            // walk collects, against `pointer_interact_pos`, never `resp.hovered()`:
-            // during a drag egui reports only the dragged widget as hovered (§15 D19).
-
-            // Asked before the painter is taken, for the borrows. `None` for no
-            // picture, one the store cannot draw, or one the pass's budget deferred
-            // (all fall back to the glyph), and never for a main or an instance,
-            // whose hexagon is the row's component mark (§15 D981).
-            let thumb = picture
-                .as_ref()
-                .filter(|_| wears_thumbnail(hexagon))
-                .and_then(|b| {
-                    self.thumbs
-                        .texture(ui.ctx(), self.canvas.images(), &b.image, THUMB)
-                });
-            // The part of the row in view, inset by the tree's padding: the row is as
-            // wide as the widest name in view and scrolls sideways under it, while
-            // the tint, the controls, the badge and the mark stay pinned to it.
-            let pad = f32::from(TREE_PAD_X);
-            let view = self.layers_view_x.map_or(rect.x_range(), |v| {
-                egui::Rangef::new(v.min + pad, v.max - pad)
-            });
-            // The view itself, not its overlap with the row: scrolled to the end, the
-            // row can stop a few points short of the view, and the controls with it.
-            let band = egui::Rect::from_x_y_ranges(view, rect.y_range());
-            let p = ui.painter();
-            let r5 = egui::CornerRadius::same(5);
-            if let Some(tint) = row_tint(being_dragged, selected, hovered) {
-                p.rect_filled(band, r5, tint);
-            }
-            let cy = rect.center().y;
-            let left = rect.left();
-            let caret_x = caret_column(left, depth);
-            // Right-side controls: eye / lock (on hover, or when toggled off),
-            // [`EYE_PITCH`] apart. Their x's are worked out before the caret is
-            // painted because all three go into one [`RowTargets`].
-            let right = band.right();
-            let lock_x = right - LOCK_INSET;
-            let eye_x = lock_x - EYE_PITCH;
-            // Also while bound (§15 D1060), as a hidden layer's eye is.
-            let show_eye = hovered || !visible || bound_eye;
-            let show_lock = hovered || locked;
-            let targets = RowTargets {
-                caret: has_children.then_some(caret_x),
-                eye: show_eye.then_some(eye_x),
-                // Not gated on `show_lock`: a press only arrives with the pointer on
-                // the row, which is what `show_lock` already means.
-                lock: Some(lock_x),
-            };
-            // The control the pointer is on, as opposed to the row (§15 D246).
-            let under = resp.hover_pos().and_then(|q| targets.at(q.x));
-            // A hovered control lights to `strong()` from every resting colour, with
-            // no ground behind it (the row has its own hover ground).
-            let lit = |on: bool, resting: egui::Color32| {
-                if on { theme::text::strong() } else { resting }
-            };
-            if has_children {
-                p.text(
-                    egui::pos2(caret_x, cy),
-                    egui::Align2::CENTER_CENTER,
-                    if expanded {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_RIGHT
-                    },
-                    theme::icon_font(11.0),
-                    lit(under == Some(RowHit::Caret), theme::text::dim()),
-                );
-            }
-            // A childless row reclaims the caret's 16px, except at the top level,
-            // where a frame with a caret would sit right of the loose shape above
-            // it and look like its child: depth 1 always leaves the room.
-            let caret_room = has_children || depth == 1;
-            let icon_x = left + icon_offset(depth, caret_room);
-            rows.push(TreeRow {
-                id,
-                rect,
-                depth,
-                lead: row_lead(left, depth, has_children),
-                elbow: elbow_y(rect, ui.ctx().pixels_per_point()),
-                selected,
-                hovered,
-                container: is_container,
-                closed: is_container && has_children && !expanded,
-            });
-            // A locked or hidden layer is drawn at 40% throughout, glyph and name,
-            // and so is a slice, which never shows.
-            let dimmed = locked || !visible || is_slice;
-            // The container an in-flight drop would land in: the line says where
-            // but not which group, so its text and icon go blue. A frame behind the
-            // line ([`LayerDrag::lit`]).
-            let drop_host = self.layer_drag.as_ref().is_some_and(|d| d.lit == Some(id));
-            // A selected row wears the selection hue, not the chrome accent. The
-            // drop host outranks selection and dimming (a drag is a question asked
-            // now, §15 D331; a hidden group still takes children). The name takes
-            // its glyph's ink: blue, or white beside a component's hexagon.
-            let name_col = match (drop_host, selected, dimmed) {
-                (true, ..) => color::SELECT,
-                (_, true, _) if hexagon.is_some() => color::text(),
-                (_, true, _) => color::SELECT,
-                (_, false, true) => theme::color::text_a(102),
-                (_, false, false) => theme::text::muted(),
-            };
-            let glyph_col = match (drop_host, selected, dimmed) {
-                (true, ..) => color::SELECT,
-                (_, true, _) if hexagon.is_some() => theme::text::strong(),
-                (_, true, _) => color::SELECT,
-                (_, false, true) => dim_to(glyph_col, 102),
-                (_, false, false) => glyph_col,
-            };
-            match thumb {
-                // Centred where the glyph would be, as it replaces it. Rounded by
-                // the tessellator, not `ui::mask_corners`, which paints corners in
-                // the ground colour and a row has three grounds.
-                Some(id) => {
-                    p.add(egui::Shape::Rect(
-                        egui::epaint::RectShape::filled(
-                            egui::Rect::from_center_size(
-                                egui::pos2(icon_x, cy),
-                                egui::vec2(THUMB, THUMB),
-                            ),
-                            egui::CornerRadius::same(THUMB_RADIUS),
-                            thumb_tint(dimmed, picture.as_ref()),
-                        )
-                        .with_texture(id, crate::thumbs::FULL_UV),
-                    ));
-                }
-                None if hexagon == Some(true) => {
-                    crate::ui::paint_hexagon_filled(p, egui::pos2(icon_x, cy), ICON_PT, glyph_col);
-                }
-                None => {
-                    p.text(
-                        egui::pos2(icon_x, cy),
-                        egui::Align2::CENTER_CENTER,
-                        glyph,
-                        theme::icon_font(ICON_PT),
-                        glyph_col,
-                    );
-                }
-            }
-            // The badge is laid out before the name, which is covered short of it. Drawn
-            // only while neither lock is: they share the row's end.
-            let badge = badge.filter(|_| !locked && !show_lock).map(|b| {
-                // One layout for both, differing only in the font.
-                let (s, font, worded) = match b {
-                    RowBadge::Text(s) => (s, egui::FontId::proportional(10.5), true),
-                    RowBadge::Icon(g, size) => (g.to_string(), theme::icon_font(size), false),
-                };
-                // Clear of a component mark, which holds the very edge.
-                let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
-                // A worded badge ends before a resting eye (§15 D1060; see
-                // `bound_eye_tests`); a glyph badge clears it where it is.
-                let right = match worded && show_eye {
-                    true => eye_x - BOUND_EYE.x / 2.0 - 4.0,
-                    false => right - edge,
-                };
-                (p.layout_no_wrap(s, font, theme::text::faint()), right)
-            });
-            let name_right = name_limit(NameLimit {
-                row_right: right,
-                mark: mark.is_some(),
-                lock: (show_lock || locked).then_some(lock_x),
-                eye: show_eye.then_some((eye_x, bound_eye)),
-                badge_left: badge.as_ref().map(|(g, right)| right - g.size().x),
-            });
-            let renaming = matches!(&self.renaming_layer, Some((n, _)) if *n == id);
-            if !renaming {
-                // Whole, never cut: the tree scrolls sideways to the rest.
-                let x = icon_x + NAME_GAP;
-                let galley =
-                    p.layout_no_wrap(name.to_string(), egui::FontId::proportional(12.5), name_col);
-                let name_end = x + galley.size().x;
-                p.galley(egui::pos2(x, cy - galley.size().y / 2.0), galley, name_col);
-                // Room for the whole name and, scrolled to its end, a hovered row's
-                // eye and lock after it. Hovered whatever the row is now, so a
-                // hover does not change the width.
-                let controls = right
-                    - name_limit(NameLimit {
-                        row_right: right,
-                        mark: mark.is_some(),
-                        lock: Some(lock_x),
-                        eye: Some((eye_x, bound_eye)),
-                        badge_left: None,
-                    });
-                self.layers_tree_w = self.layers_tree_w.max(name_end - rect.left() + controls);
-                if name_end > name_right {
-                    let ground = row_ground(being_dragged, selected, hovered);
-                    cover_row_end(p, band, name_right, ground);
-                }
-            }
-
-            if show_eye {
-                // Bound, in the capsule (§15 D1060): `text_a(28)`, 44 under the
-                // pointer. The click still writes the other value, which detaches.
-                if bound_eye {
-                    let fill = if under == Some(RowHit::Eye) { 44 } else { 28 };
-                    p.rect_filled(
-                        egui::Rect::from_center_size(egui::pos2(eye_x, cy), BOUND_EYE),
-                        BOUND_EYE.y / 2.0,
-                        theme::color::text_a(fill),
-                    );
-                }
-                p.text(
-                    egui::pos2(eye_x, cy),
-                    egui::Align2::CENTER_CENTER,
-                    if visible { icon::EYE } else { icon::EYE_SLASH },
-                    theme::icon_font(ICON_PT),
-                    lit(
-                        under == Some(RowHit::Eye),
-                        if visible {
-                            theme::text::dim()
-                        } else {
-                            theme::color::text_a(102)
-                        },
-                    ),
-                );
-            }
-            if locked {
-                // A locked layer wears a filled lock permanently, legible while
-                // scanning rather than only on hover.
-                crate::ui::paint_lock_filled(
-                    p,
-                    egui::pos2(lock_x, cy),
-                    ICON_PT,
-                    lit(under == Some(RowHit::Lock), theme::text::muted()),
-                    0.0,
-                );
-            } else if show_lock {
-                p.text(
-                    egui::pos2(lock_x, cy),
-                    egui::Align2::CENTER_CENTER,
-                    icon::LOCK_SIMPLE_OPEN,
-                    theme::icon_font(ICON_PT),
-                    lit(under == Some(RowHit::Lock), theme::text::dim()),
-                );
-            } else if let Some((galley, right)) = badge {
-                let at = egui::Align2::RIGHT_CENTER
-                    .anchor_size(egui::pos2(right, cy), galley.size())
-                    .min;
-                p.galley(at, galley, theme::text::faint());
-            }
-            // The mark sits after the lock and eye at the row's very edge, in every
-            // row state (§15 D981).
-            if let Some(m) = mark {
-                let at = egui::pos2(right - MARK_SLOT / 2.0 + 1.0, cy);
-                match m {
-                    RowMark::Override => {
-                        p.circle_filled(at, 2.0, theme::text::muted());
-                    }
-                    RowMark::Local => {
-                        let s = egui::Stroke::new(1.2, theme::text::muted());
-                        p.line_segment([at - egui::vec2(2.5, 0.0), at + egui::vec2(2.5, 0.0)], s);
-                        p.line_segment([at - egui::vec2(0.0, 2.5), at + egui::vec2(0.0, 2.5)], s);
-                    }
-                }
-            }
-
-            // Not while renaming: the text field owns the pointer then.
-            if resp.drag_started() && !renaming {
-                // Dragging something selected carries the set; anything else is
-                // selected first, as the canvas does (`begin_select_drag`).
-                let ids = if self.session.selection.contains(id) {
-                    build::outermost(&self.session.doc, self.session.selection.ids())
-                } else {
-                    self.session.selection.set_one(id);
-                    // Tell the panel (§15 D581), or `sync_tree_to_selection` reads
-                    // this as news and recentres a partly visible row, scrolling the
-                    // tree out from under a held pointer.
-                    self.layers_synced_selection = self.session.selection.ids().to_vec();
-                    vec![id]
-                };
-                // The press origin, not the pointer now: egui reports a drag only
-                // past its threshold, which would bake that slop into the indent.
-                let grab_x = ui
-                    .input(|i| i.pointer.press_origin())
-                    .map_or(rect.left(), |p| p.x);
-                self.layer_drag = Some(LayerDrag {
-                    ids,
-                    target: None,
-                    grab: (grab_x, depth),
-                    level: depth,
-                    lit: None,
-                    spring: None,
-                    refused: None,
-                });
-            }
-
-            if selected {
-                self.scroll_to_selected_row(ui, rect);
-            }
-
-            // Double-click renames in place. Counted by `ui::double_clicked`, so a
-            // click on one row and a fast double-click on the next still renames
-            // it (§15 D986).
-            if crate::ui::double_clicked(ui, &resp) {
-                self.renaming_layer = Some((id, name.clone()));
-                // Focus is the field's business: see `layer_rename_field`.
-            }
-            if renaming {
-                self.layer_rename_field(ui, id, rect, icon_x + NAME_GAP);
-            }
-
-            // The click that dismisses an open menu is spent dismissing it (R4), the
-            // tab menu's included.
-            if resp.clicked() && !renaming && self.context_menu.is_none() && !self.tabs.menu_was_up
-            {
-                // `interact_pointer_pos`, not the hover-based `under`: they can
-                // differ on a touch or click-through frame.
-                match resp.interact_pointer_pos().and_then(|q| targets.at(q.x)) {
-                    Some(RowHit::Caret) => {
-                        if expanded {
-                            self.collapsed.insert(id);
-                        } else {
-                            self.collapsed.remove(&id);
-                        }
-                    }
-                    Some(RowHit::Eye) => {
-                        match visible {
-                            true => self.session.name_step("Hide", icon::EYE_SLASH),
-                            false => self.session.name_step("Show", icon::EYE),
-                        }
-                        self.session.commit(Transaction(vec![Operation::SetVisible {
-                            id,
-                            visible: !visible,
-                        }]));
-                    }
-                    Some(RowHit::Lock) => {
-                        match locked {
-                            true => self.session.name_step("Unlock", icon::LOCK_SIMPLE_OPEN),
-                            false => self.session.name_step("Lock", icon::LOCK_SIMPLE),
-                        }
-                        self.session.commit(Transaction(vec![Operation::SetLocked {
-                            id,
-                            locked: !locked,
-                        }]));
-                    }
-                    None => self.select_from_row(id, shown, ui),
-                }
-                // The panel made this selection itself, so it must not read as news
-                // and scroll the row away.
-                self.layers_synced_selection = self.session.selection.ids().to_vec();
-            }
-
-            // The panel's door (`docs/context-menus.md` §1): the only one that
-            // reaches a locked or hidden layer, so its menu carries the full set,
-            // including *Unlock* (§5.9, C4). C6 needs no code: the press already
-            // committed any live rename (`layer_rename_field`).
-            // Not after a cancelling right-click, which would reselect with no menu.
-            if resp.secondary_clicked() && !self.gesture_cancelled {
-                // C2, in the panel: a right-click on a row that is already part of
-                // the selection acts on all of it.
-                if !self.session.selection.contains(id) {
-                    self.session.selection.set_one(id);
-                    self.layers_synced_selection = self.session.selection.ids().to_vec();
-                }
-                self.open_context_menu(
-                    ui.ctx(),
-                    crate::menu::Target::Layer {
-                        id,
-                        door: crate::menu::Door::Panel,
-                    },
-                    None,
-                );
-            }
-
-            if !expanded {
-                return; // collapsed: skip children
-            }
-        }
-
-        // Reversed: `children` is z-order with the last entry nearest the viewer
-        // (§5.3). Every index this file computes stays a model index; only the
-        // walk is flipped, so the drop-target maths mirrors it.
-        for child in children.into_iter().rev() {
-            self.layers_row(ui, child, depth + 1, shown, rows);
-        }
-    }
-
-    /// A row outside the panel's clip: in `rows` for the guides and the drop hint,
-    /// and scrolled to when it holds the selection, but neither measured for its
-    /// marks nor painted. Returns whether its branch is open.
-    #[allow(clippy::too_many_arguments)]
-    fn off_view_row(
-        &mut self,
-        ui: &egui::Ui,
-        id: NodeId,
-        depth: usize,
-        rect: egui::Rect,
-        has_children: bool,
-        is_container: bool,
-        shown: Option<&HashSet<NodeId>>,
-        rows: &mut Vec<TreeRow>,
-    ) -> bool {
         let selected = self.session.selection.contains(id);
-        let expanded = has_children && (shown.is_some() || !self.collapsed.contains(&id));
-        rows.push(TreeRow {
-            id,
-            rect,
-            depth,
-            lead: row_lead(rect.left(), depth, has_children),
-            elbow: elbow_y(rect, ui.ctx().pixels_per_point()),
-            selected,
-            hovered: false,
-            container: is_container,
-            closed: is_container && has_children && !expanded,
+        // The row's component mark (§15 D981): `+` for a layer of an instance's
+        // own, a dot for an override — on the holding row while expanded, on a
+        // collapsed row for anything inside differing from its main. A parent
+        // whose children differ (removed or reordered) carries the dot too, with
+        // a tooltip naming what; collapsed, it counts the whole subtree (§15
+        // D1003 (9), D1004 (2), `child_drift_of`).
+        let (mark, children_tip) = {
+            let doc = &self.session.doc;
+            let in_instance = doc
+                .get(id)
+                .and_then(|n| n.parent())
+                .and_then(|p| ondin_core::component::instance_root(doc, p))
+                .is_some();
+            let local = in_instance
+                && doc.get(id).is_some_and(|n| {
+                    n.link()
+                        .is_none_or(|l| doc.get(l).is_some_and(|l| l.component()))
+                });
+            let copy = in_instance || hexagon == Some(false);
+            let children = if copy && !local {
+                self.child_drift_of(id)
+            } else {
+                Default::default()
+            };
+            let mark = if local {
+                Some(RowMark::Local)
+            } else if has_children && !expanded && copy {
+                let d = self.drift_of(id);
+                (d.any() || d.local > 0).then_some(RowMark::Override)
+            } else {
+                (children.any() || !ondin_core::reset::overrides(&self.session.doc, id).is_empty())
+                    .then_some(RowMark::Override)
+            };
+            (mark, child_drift_tip(children))
+        };
+
+        let rect = row.rect;
+        let resp = ui.interact(rect, row_id(id), egui::Sense::click_and_drag());
+        // The dot's words, on the row it sits on (§15 D1003 (9)).
+        let resp = match &children_tip {
+            Some(tip) => resp.on_hover_text(tip),
+            None => resp,
+        };
+        let hovered = resp.hovered();
+        let being_dragged = self
+            .layer_drag
+            .as_ref()
+            .is_some_and(|d| d.ids.contains(&id));
+
+        // The drop target is read in [`OndinApp::drop_hint`] from the rects this
+        // walk collects, against `pointer_interact_pos`, never `resp.hovered()`:
+        // during a drag egui reports only the dragged widget as hovered (§15 D19).
+
+        // Asked before the painter is taken, for the borrows. `None` for no
+        // picture, one the store cannot draw, or one the pass's budget deferred
+        // (all fall back to the glyph), and never for a main or an instance,
+        // whose hexagon is the row's component mark (§15 D981).
+        let thumb = picture
+            .as_ref()
+            .filter(|_| wears_thumbnail(hexagon))
+            .and_then(|b| {
+                self.thumbs
+                    .texture(ui.ctx(), self.canvas.images(), &b.image, THUMB)
+            });
+        // The part of the row in view, inset by the tree's padding: the row is as
+        // wide as the widest name in view and scrolls sideways under it, while
+        // the tint, the controls, the badge and the mark stay pinned to it.
+        let pad = f32::from(TREE_PAD_X);
+        let view = self.layers_view_x.map_or(rect.x_range(), |v| {
+            egui::Rangef::new(v.min + pad, v.max - pad)
         });
+        // The view itself, not its overlap with the row: scrolled to the end, the
+        // row can stop a few points short of the view, and the controls with it.
+        let band = egui::Rect::from_x_y_ranges(view, rect.y_range());
+        let p = ui.painter();
+        let r5 = egui::CornerRadius::same(5);
+        if let Some(tint) = row_tint(being_dragged, selected, hovered) {
+            p.rect_filled(band, r5, tint);
+        }
+        let cy = rect.center().y;
+        let left = rect.left();
+        let caret_x = caret_column(left, depth);
+        // Right-side controls: eye / lock (on hover, or when toggled off),
+        // [`EYE_PITCH`] apart. Their x's are worked out before the caret is
+        // painted because all three go into one [`RowTargets`].
+        let right = band.right();
+        let lock_x = right - LOCK_INSET;
+        let eye_x = lock_x - EYE_PITCH;
+        // Also while bound (§15 D1060), as a hidden layer's eye is.
+        let show_eye = hovered || !visible || bound_eye;
+        let show_lock = hovered || locked;
+        let targets = RowTargets {
+            caret: has_children.then_some(caret_x),
+            eye: show_eye.then_some(eye_x),
+            // Not gated on `show_lock`: a press only arrives with the pointer on
+            // the row, which is what `show_lock` already means.
+            lock: Some(lock_x),
+        };
+        // The control the pointer is on, as opposed to the row (§15 D246).
+        let under = resp.hover_pos().and_then(|q| targets.at(q.x));
+        // A hovered control lights to `strong()` from every resting colour, with
+        // no ground behind it (the row has its own hover ground).
+        let lit = |on: bool, resting: egui::Color32| {
+            if on { theme::text::strong() } else { resting }
+        };
+        if has_children {
+            p.text(
+                egui::pos2(caret_x, cy),
+                egui::Align2::CENTER_CENTER,
+                if expanded {
+                    icon::CARET_DOWN
+                } else {
+                    icon::CARET_RIGHT
+                },
+                theme::icon_font(11.0),
+                lit(under == Some(RowHit::Caret), theme::text::dim()),
+            );
+        }
+        // A childless row reclaims the caret's 16px, except at the top level,
+        // where a frame with a caret would sit right of the loose shape above
+        // it and look like its child: depth 1 always leaves the room.
+        let caret_room = has_children || depth == 1;
+        let icon_x = left + icon_offset(depth, caret_room);
+        row.selected = selected;
+        row.hovered = hovered;
+        // A locked or hidden layer is drawn at 40% throughout, glyph and name,
+        // and so is a slice, which never shows.
+        let dimmed = locked || !visible || is_slice;
+        // The container an in-flight drop would land in: the line says where
+        // but not which group, so its text and icon go blue. A frame behind the
+        // line ([`LayerDrag::lit`]).
+        let drop_host = self.layer_drag.as_ref().is_some_and(|d| d.lit == Some(id));
+        // A selected row wears the selection hue, not the chrome accent. The
+        // drop host outranks selection and dimming (a drag is a question asked
+        // now, §15 D331; a hidden group still takes children). The name takes
+        // its glyph's ink: blue, or white beside a component's hexagon.
+        let name_col = match (drop_host, selected, dimmed) {
+            (true, ..) => color::SELECT,
+            (_, true, _) if hexagon.is_some() => color::text(),
+            (_, true, _) => color::SELECT,
+            (_, false, true) => theme::color::text_a(102),
+            (_, false, false) => theme::text::muted(),
+        };
+        let glyph_col = match (drop_host, selected, dimmed) {
+            (true, ..) => color::SELECT,
+            (_, true, _) if hexagon.is_some() => theme::text::strong(),
+            (_, true, _) => color::SELECT,
+            (_, false, true) => dim_to(glyph_col, 102),
+            (_, false, false) => glyph_col,
+        };
+        match thumb {
+            // Centred where the glyph would be, as it replaces it. Rounded by
+            // the tessellator, not `ui::mask_corners`, which paints corners in
+            // the ground colour and a row has three grounds.
+            Some(id) => {
+                p.add(egui::Shape::Rect(
+                    egui::epaint::RectShape::filled(
+                        egui::Rect::from_center_size(
+                            egui::pos2(icon_x, cy),
+                            egui::vec2(THUMB, THUMB),
+                        ),
+                        egui::CornerRadius::same(THUMB_RADIUS),
+                        thumb_tint(dimmed, picture.as_ref()),
+                    )
+                    .with_texture(id, crate::thumbs::FULL_UV),
+                ));
+            }
+            None if hexagon == Some(true) => {
+                crate::ui::paint_hexagon_filled(p, egui::pos2(icon_x, cy), ICON_PT, glyph_col);
+            }
+            None => {
+                p.text(
+                    egui::pos2(icon_x, cy),
+                    egui::Align2::CENTER_CENTER,
+                    glyph,
+                    theme::icon_font(ICON_PT),
+                    glyph_col,
+                );
+            }
+        }
+        // The badge is laid out before the name, which is covered short of it. Drawn
+        // only while neither lock is: they share the row's end.
+        let badge = badge.filter(|_| !locked && !show_lock).map(|b| {
+            // One layout for both, differing only in the font.
+            let (s, font, worded) = match b {
+                RowBadge::Text(s) => (s, egui::FontId::proportional(10.5), true),
+                RowBadge::Icon(g, size) => (g.to_string(), theme::icon_font(size), false),
+            };
+            // Clear of a component mark, which holds the very edge.
+            let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
+            // A worded badge ends before a resting eye (§15 D1060; see
+            // `bound_eye_tests`); a glyph badge clears it where it is.
+            let right = match worded && show_eye {
+                true => eye_x - BOUND_EYE.x / 2.0 - 4.0,
+                false => right - edge,
+            };
+            (p.layout_no_wrap(s, font, theme::text::faint()), right)
+        });
+        let name_right = name_limit(NameLimit {
+            row_right: right,
+            mark: mark.is_some(),
+            lock: (show_lock || locked).then_some(lock_x),
+            eye: show_eye.then_some((eye_x, bound_eye)),
+            badge_left: badge.as_ref().map(|(g, right)| right - g.size().x),
+        });
+        let renaming = matches!(&self.renaming_layer, Some((n, _)) if *n == id);
+        if !renaming {
+            // Whole, never cut: the tree scrolls sideways to the rest.
+            let x = icon_x + NAME_GAP;
+            let galley =
+                p.layout_no_wrap(name.to_string(), egui::FontId::proportional(12.5), name_col);
+            let name_end = x + galley.size().x;
+            p.galley(egui::pos2(x, cy - galley.size().y / 2.0), galley, name_col);
+            // Room for the whole name and, scrolled to its end, a hovered row's
+            // eye and lock after it. Hovered whatever the row is now, so a
+            // hover does not change the width.
+            let controls = right
+                - name_limit(NameLimit {
+                    row_right: right,
+                    mark: mark.is_some(),
+                    lock: Some(lock_x),
+                    eye: Some((eye_x, bound_eye)),
+                    badge_left: None,
+                });
+            self.layers_tree_w = self.layers_tree_w.max(name_end - rect.left() + controls);
+            if name_end > name_right {
+                let ground = row_ground(being_dragged, selected, hovered);
+                cover_row_end(p, band, name_right, ground);
+            }
+        }
+
+        if show_eye {
+            // Bound, in the capsule (§15 D1060): `text_a(28)`, 44 under the
+            // pointer. The click still writes the other value, which detaches.
+            if bound_eye {
+                let fill = if under == Some(RowHit::Eye) { 44 } else { 28 };
+                p.rect_filled(
+                    egui::Rect::from_center_size(egui::pos2(eye_x, cy), BOUND_EYE),
+                    BOUND_EYE.y / 2.0,
+                    theme::color::text_a(fill),
+                );
+            }
+            p.text(
+                egui::pos2(eye_x, cy),
+                egui::Align2::CENTER_CENTER,
+                if visible { icon::EYE } else { icon::EYE_SLASH },
+                theme::icon_font(ICON_PT),
+                lit(
+                    under == Some(RowHit::Eye),
+                    if visible {
+                        theme::text::dim()
+                    } else {
+                        theme::color::text_a(102)
+                    },
+                ),
+            );
+        }
+        if locked {
+            // A locked layer wears a filled lock permanently, legible while
+            // scanning rather than only on hover.
+            crate::ui::paint_lock_filled(
+                p,
+                egui::pos2(lock_x, cy),
+                ICON_PT,
+                lit(under == Some(RowHit::Lock), theme::text::muted()),
+                0.0,
+            );
+        } else if show_lock {
+            p.text(
+                egui::pos2(lock_x, cy),
+                egui::Align2::CENTER_CENTER,
+                icon::LOCK_SIMPLE_OPEN,
+                theme::icon_font(ICON_PT),
+                lit(under == Some(RowHit::Lock), theme::text::dim()),
+            );
+        } else if let Some((galley, right)) = badge {
+            let at = egui::Align2::RIGHT_CENTER
+                .anchor_size(egui::pos2(right, cy), galley.size())
+                .min;
+            p.galley(at, galley, theme::text::faint());
+        }
+        // The mark sits after the lock and eye at the row's very edge, in every
+        // row state (§15 D981).
+        if let Some(m) = mark {
+            let at = egui::pos2(right - MARK_SLOT / 2.0 + 1.0, cy);
+            match m {
+                RowMark::Override => {
+                    p.circle_filled(at, 2.0, theme::text::muted());
+                }
+                RowMark::Local => {
+                    let s = egui::Stroke::new(1.2, theme::text::muted());
+                    p.line_segment([at - egui::vec2(2.5, 0.0), at + egui::vec2(2.5, 0.0)], s);
+                    p.line_segment([at - egui::vec2(0.0, 2.5), at + egui::vec2(0.0, 2.5)], s);
+                }
+            }
+        }
+
+        // Not while renaming: the text field owns the pointer then.
+        if resp.drag_started() && !renaming {
+            // Dragging something selected carries the set; anything else is
+            // selected first, as the canvas does (`begin_select_drag`).
+            let ids = if self.session.selection.contains(id) {
+                build::outermost(&self.session.doc, self.session.selection.ids())
+            } else {
+                self.session.selection.set_one(id);
+                // Tell the panel (§15 D581), or `sync_tree_to_selection` reads
+                // this as news and recentres a partly visible row, scrolling the
+                // tree out from under a held pointer.
+                self.layers_synced_selection = self.session.selection.ids().to_vec();
+                vec![id]
+            };
+            // The press origin, not the pointer now: egui reports a drag only
+            // past its threshold, which would bake that slop into the indent.
+            let grab_x = ui
+                .input(|i| i.pointer.press_origin())
+                .map_or(rect.left(), |p| p.x);
+            self.layer_drag = Some(LayerDrag {
+                ids,
+                target: None,
+                grab: (grab_x, depth),
+                level: depth,
+                lit: None,
+                spring: None,
+                refused: None,
+            });
+        }
+
         if selected {
             self.scroll_to_selected_row(ui, rect);
         }
-        expanded
+
+        // Double-click renames in place. Counted by `ui::double_clicked`, so a
+        // click on one row and a fast double-click on the next still renames
+        // it (§15 D986).
+        if crate::ui::double_clicked(ui, &resp) {
+            self.renaming_layer = Some((id, name.clone()));
+            // Focus is the field's business: see `layer_rename_field`.
+        }
+        if renaming {
+            self.layer_rename_field(ui, id, rect, icon_x + NAME_GAP);
+        }
+
+        // The click that dismisses an open menu is spent dismissing it (R4), the
+        // tab menu's included.
+        if resp.clicked() && !renaming && self.context_menu.is_none() && !self.tabs.menu_was_up {
+            // `interact_pointer_pos`, not the hover-based `under`: they can
+            // differ on a touch or click-through frame.
+            match resp.interact_pointer_pos().and_then(|q| targets.at(q.x)) {
+                Some(RowHit::Caret) => {
+                    if expanded {
+                        self.collapsed.insert(id);
+                    } else {
+                        self.collapsed.remove(&id);
+                    }
+                }
+                Some(RowHit::Eye) => {
+                    match visible {
+                        true => self.session.name_step("Hide", icon::EYE_SLASH),
+                        false => self.session.name_step("Show", icon::EYE),
+                    }
+                    self.session.commit(Transaction(vec![Operation::SetVisible {
+                        id,
+                        visible: !visible,
+                    }]));
+                }
+                Some(RowHit::Lock) => {
+                    match locked {
+                        true => self.session.name_step("Unlock", icon::LOCK_SIMPLE_OPEN),
+                        false => self.session.name_step("Lock", icon::LOCK_SIMPLE),
+                    }
+                    self.session.commit(Transaction(vec![Operation::SetLocked {
+                        id,
+                        locked: !locked,
+                    }]));
+                }
+                None => self.select_from_row(id, ui),
+            }
+            // The panel made this selection itself, so it must not read as news
+            // and scroll the row away.
+            self.layers_synced_selection = self.session.selection.ids().to_vec();
+        }
+
+        // The panel's door (`docs/context-menus.md` §1): the only one that
+        // reaches a locked or hidden layer, so its menu carries the full set,
+        // including *Unlock* (§5.9, C4). C6 needs no code: the press already
+        // committed any live rename (`layer_rename_field`).
+        // Not after a cancelling right-click, which would reselect with no menu.
+        if resp.secondary_clicked() && !self.gesture_cancelled {
+            // C2, in the panel: a right-click on a row that is already part of
+            // the selection acts on all of it.
+            if !self.session.selection.contains(id) {
+                self.session.selection.set_one(id);
+                self.layers_synced_selection = self.session.selection.ids().to_vec();
+            }
+            self.open_context_menu(
+                ui.ctx(),
+                crate::menu::Target::Layer {
+                    id,
+                    door: crate::menu::Door::Panel,
+                },
+                None,
+            );
+        }
     }
 
     /// Scroll to the selection once, on the frame it changed; the topmost selected
@@ -3413,7 +3561,7 @@ mod tree_guide_tests {
     #[test]
     fn a_row_hangs_off_the_column_its_parents_caret_is_on() {
         let r = rows(&[1, 2], None);
-        let segs = tree_guide_segments(&r, GAP);
+        let segs = tree_guide_segments(&r, GAP, 0..r.len());
         assert!(
             verticals(&segs, &r[0]).is_empty()
                 && !segs.iter().any(|s| (s.from.y - r[0].elbow).abs() < 0.01),
@@ -3449,7 +3597,7 @@ mod tree_guide_tests {
     #[test]
     fn a_trunk_runs_to_the_last_child_and_stops_at_its_elbow() {
         let r = rows(&[1, 2, 2, 2], None);
-        let segs = tree_guide_segments(&r, GAP);
+        let segs = tree_guide_segments(&r, GAP, 0..r.len());
         for (i, carries_on) in [(1, true), (2, true), (3, false)] {
             let v = verticals(&segs, &r[i]);
             assert_eq!(
@@ -3476,7 +3624,7 @@ mod tree_guide_tests {
     #[test]
     fn a_trunk_that_already_ended_leaves_no_fragment_in_a_deeper_row() {
         let r = rows(&[1, 2, 3], None);
-        let segs = tree_guide_segments(&r, GAP);
+        let segs = tree_guide_segments(&r, GAP, 0..r.len());
         let v = verticals(&segs, &r[2]);
         assert_eq!(v.len(), 1, "C hangs off B and off nothing else: {v:#?}");
         assert_eq!(
@@ -3497,7 +3645,7 @@ mod tree_guide_tests {
         // hovered row needs a sibling after it (a trunk below its elbow), and the
         // frame's second child puts a level-1 trunk through the deep rows.
         let r = rows(&[1, 2, 3, 3, 3, 2], Some(3));
-        let segs = tree_guide_segments(&r, GAP);
+        let segs = tree_guide_segments(&r, GAP, 0..r.len());
         let level2 = caret_column(0.0, 2);
         let level1 = caret_column(0.0, 1);
 
@@ -3593,7 +3741,7 @@ mod tree_guide_tests {
         };
 
         let r = marked(&depths, None, &[3]);
-        let segs = tree_guide_segments(&r, GAP);
+        let segs = tree_guide_segments(&r, GAP, 0..r.len());
         for i in [2, 3] {
             for s in leg(&segs, &r[i]) {
                 let below_the_elbow = s.from.y > r[i].rect.top();
@@ -3625,7 +3773,7 @@ mod tree_guide_tests {
         );
 
         // The row between the selection and its parent, hovered.
-        let crossed = tree_guide_segments(&marked(&depths, Some(2), &[3]), GAP);
+        let crossed = tree_guide_segments(&marked(&depths, Some(2), &[3]), GAP, 0..depths.len());
         assert_eq!(
             leg(&crossed, &r[2])
                 .iter()
@@ -3642,7 +3790,7 @@ mod tree_guide_tests {
         );
 
         // The selected row itself, hovered.
-        let same = tree_guide_segments(&marked(&depths, Some(3), &[3]), GAP);
+        let same = tree_guide_segments(&marked(&depths, Some(3), &[3]), GAP, 0..depths.len());
         assert_eq!(
             leg(&same, &r[2]).iter().map(|s| s.ink).collect::<Vec<_>>(),
             vec![GuideInk::Selected, GuideInk::Selected],
@@ -4939,14 +5087,14 @@ mod autoscroll_ownership_tests {
     use crate::app::OndinApp;
     use ondin_core::kurbo::Size;
 
-    const VIEW: egui::Rect = egui::Rect {
+    pub(super) const VIEW: egui::Rect = egui::Rect {
         min: egui::Pos2::ZERO,
         max: egui::Pos2::new(300.0, 120.0),
     };
 
     /// A headless app holding `n` rects at the root, enough to overflow the 120pt
     /// viewport.
-    fn app_with_rows(ctx: &egui::Context, n: usize) -> OndinApp {
+    pub(super) fn app_with_rows(ctx: &egui::Context, n: usize) -> OndinApp {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(31);
@@ -5043,6 +5191,51 @@ mod autoscroll_ownership_tests {
                 "the tree scrolls itself on pass {pass}: offset {offset}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod virtual_tree_tests {
+    //! The tree lays out only the rows in view (`OndinApp::tree_rows`).
+
+    use super::autoscroll_ownership_tests::{VIEW, app_with_rows};
+    use super::*;
+
+    /// Only the rows in view take a widget, while the column still spans every row
+    /// and a dragged row scrolled out of view keeps its own.
+    /// flip: register a widget for every row in `tree_rows` → fails at "a row far
+    /// below the view".
+    #[test]
+    fn only_the_rows_in_view_take_a_widget() {
+        let ctx = egui::Context::default();
+        let n = 400;
+        let mut app = app_with_rows(&ctx, n);
+        // Read first: with no button held, the frame ends the drag (`drop_hint`).
+        let dragged = app.layer_drag.as_ref().expect("the fixture's drag").ids[0];
+        let mut content = 0.0;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(VIEW),
+                ..Default::default()
+            },
+            |ui| {
+                let out = egui::ScrollArea::vertical()
+                    .id_salt("virtual-probe")
+                    .show(ui, |ui| app.layers_tree(ui));
+                content = out.content_size.y;
+            },
+        );
+        let rows = app.layers_flat.rows.clone();
+        assert_eq!(rows.len(), n, "the fixture: every layer is a row");
+        assert!(
+            content >= n as f32 * ROW_H,
+            "the column spans every row: {content}"
+        );
+        let has_widget = |id: NodeId| crate::ui::widget_rect(&ctx, row_id(id)).is_some();
+        assert!(has_widget(rows[0].id), "the top row, in view");
+        assert!(!has_widget(rows[n / 2].id), "a row far below the view");
+        assert_eq!(rows[n - 1].id, dragged, "the fixture drags the bottom row");
+        assert!(has_widget(dragged), "the dragged row, out of view");
     }
 }
 
@@ -5174,8 +5367,8 @@ mod drag_start_sync_tests {
 
     /// Only the rows in view are painted, though every row keeps its place, and a
     /// selection made out of view is still scrolled to.
-    /// flip: `layers_row` without its off-view return → fails at "painted out of view";
-    /// `off_view_row` without its scroll → fails at "scrolled to the last row".
+    /// flip: `tree_rows` painting every row → fails at "painted out of view";
+    /// `tree_rows` without its scroll → fails at "scrolled to the last row".
     #[test]
     fn only_the_rows_in_view_are_painted() {
         let ctx = egui::Context::default();

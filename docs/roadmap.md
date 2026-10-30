@@ -16,11 +16,8 @@ Nothing open.
 
 Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, paths, booleans and
 1,090 effect layers), 2560×1440 on an RTX 4070 Ti: smooth at 80% zoom and above, dropping frames
-below it, and ~13 fps with the whole grid in view; the layers list scrolls unevenly.
+below it, and ~13 fps with the whole grid in view.
 
-- **Virtualise the layers tree.** `layers_row` walks every expanded row each frame and allocates a
-  widget for each, painted or not; `tree_guide_segments` builds every row's guides before culling.
-  Cache the flattened rows (per revision and expansion) and lay out only those in view.
 - **Per-frame walks of the whole document in the chrome.** `page_slices` (every frame, with no
   slices), `tree_is_all_collapsed` (the layers header's icon), `draw_frame_labels` (every label,
   on screen or not), `frame_label_at` (every label rebuilt per hover pick, up to three picks a

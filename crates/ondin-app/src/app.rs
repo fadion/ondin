@@ -533,7 +533,9 @@ pub struct OndinApp {
     /// beside the layer selection and the guide selection.
     pub(crate) points: PointSet,
     /// Layer-tree rows the user has collapsed (default: everything expanded).
-    pub(crate) collapsed: HashSet<NodeId>,
+    pub(crate) collapsed: crate::panels::layers::Folds,
+    /// The layer tree flattened into rows, cached between frames.
+    pub(crate) layers_flat: crate::panels::layers::FlatTree,
     /// The first of a possible two opacity digits, and when it was typed; `None`
     /// outside the 600 ms window ([`OndinApp::opacity_digit`]).
     pub(crate) opacity_entry: Option<OpacityEntry>,
@@ -1340,7 +1342,8 @@ impl OndinApp {
             dropper_press: None,
             text: None,
             points: PointSet::default(),
-            collapsed: HashSet::new(),
+            collapsed: Default::default(),
+            layers_flat: Default::default(),
             opacity_entry: None,
             renaming_layer: None,
             pages: Default::default(),

@@ -13,6 +13,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **A comment tool.**
 - **A unit system** — a screen tool's units are all px at 1x; density belongs to export (§15 D358).
 - **Custom key bindings** — the keymap is fixed (`shortcuts.md`).
+- **A UI scale setting.**
 
 ## Canvas and interaction
 

@@ -450,14 +450,14 @@ project dropdown, and the caret's list.
 
 | | Value |
 |---|---|
-| Card | `ui::menu_frame`: `color::CARD`, 1pt `text_a(15)` hairline, shadow `[0,10]` blur 24 α 82, corner 5, padding 5 |
+| Card | `ui::menu_frame`: `color::card()`, 1pt `text_a(15)` hairline, shadow `[0,10]` blur 24 α 82, corner 5, padding 5 |
 | Width | 210pt painted, border included (`MENU_W`) |
-| Row | `ui::MENU_ITEM_H` 24pt, 1pt gap; 11.5pt label; hover ground `text_a(20)`; glyph `text::DIM` |
-| Accelerator | right-aligned, 10.5pt, `text::FAINT`; label cut with `…` at `MENU_ACCEL_GAP` (2pt) from it, the full label in the tooltip |
+| Row | `ui::MENU_ITEM_H` 24pt, 1pt gap; 11.5pt label; hover ground `text_a(20)`; glyph `text::dim()` |
+| Accelerator | right-aligned, 10.5pt, `text::faint()`; label cut with `…` at `MENU_ACCEL_GAP` (2pt) from it, the full label in the tooltip |
 | Separator | 1pt `text_a(20)`, 3pt air either side |
-| Checkable row | no tick column; the glyph goes `ACCENT` when on, the label full strength on and muted off |
+| Checkable row | no tick column; the glyph goes `accent()` when on, the label full strength on and muted off |
 | Disabled row | glyph / label / accelerator inks 79 / 65 / 49; the reason in the row's tooltip |
-| Destructive row | `color::DANGER` `#e0736b` on glyph and label, accelerator at 55%; neutral hover |
+| Destructive row | `color::danger()` (`#e0736b` dark, `#c83c34` light) on glyph and label, accelerator at 55%; neutral hover |
 | Order glyphs | arrow-line-up / arrow-up / arrow-down / arrow-line-down (a deliberate departure from the export's stack glyphs) |
 | Placement | `ui::menu_place`: flips up/left near an edge, clamps last; height computed, not measured |
 | Keyboard | `↑`/`↓` move, `Home`/`End` jump, `Enter` runs, `Escape` closes; only enabled rows are reachable; keyboard and pointer share one highlight |

@@ -1,10 +1,12 @@
-//! Visual theme for the app chrome: the "Nocturne" dark design realized in egui.
+//! Visual theme for the app chrome: the "Nocturne" design realized in egui, in a
+//! dark and a light palette.
 //!
-//! Every panel ground is the near-neutral text colour mixed toward black, with a
-//! single steel-blue accent. The mixed values are frozen here as `Color32`
-//! constants, since egui has no `color-mix`.
+//! Every panel ground is the near-neutral text colour mixed toward black (dark)
+//! or white (light), with a single steel-blue accent. The mixed values are frozen
+//! here as `Color32` values, since egui has no `color-mix`.
 //!
-//! This module is where the design tokens become egui `Style`/`Visuals`/fonts.
+//! This module is where the design tokens become egui `Style`/`Visuals`/fonts;
+//! [`apply`] switches the palette and restyles egui together.
 
 use eframe::egui;
 use std::sync::Arc;
@@ -94,6 +96,10 @@ pub mod color {
         accent_700,
         accent_800,
         accent_900,
+        /// A mark on a *solid* accent fill — a switch's knob, a slider's — which
+        /// stays near-white in either theme, where [`accent_100`] (the ink on a
+        /// pale accent tint) turns dark in the light one.
+        on_accent,
 
         /// A layer the app cannot draw as the document describes it — today, one
         /// whose picture is missing (§15 D179).
@@ -166,6 +172,7 @@ pub mod color {
         accent_700: Color32::from_rgb(68, 92, 154),
         accent_800: Color32::from_rgb(47, 63, 102),
         accent_900: Color32::from_rgb(33, 44, 70),
+        on_accent: Color32::from_rgb(226, 233, 248),
         warn: Color32::from_rgb(0xe0, 0xa0, 0x4a),
         star: Color32::from_rgb(0xe0, 0xa9, 0x3c),
         danger: Color32::from_rgb(0xe0, 0x73, 0x6b),
@@ -179,17 +186,112 @@ pub mod color {
         danger_200: Color32::from_rgb(243, 201, 198),
     };
 
-    /// The current theme's palette.
-    fn palette() -> &'static Palette {
-        &DARK
+    /// The light palette, the dark one's mirror: grounds are the text mixed
+    /// toward white, lighter as they rise (the main ground lowest, a card
+    /// near-white), and a field, a hover or a recessed tab sits *below* its
+    /// ground rather than above. The accent and danger ramps keep their roles —
+    /// 900 the pale ground, 100 the dark ink on it — and the hues are deepened
+    /// to hold contrast on white.
+    const LIGHT: Palette = Palette {
+        text: Color32::from_rgb(30, 30, 33),
+        bg: Color32::from_rgb(236, 236, 238),
+        topbar: Color32::from_rgb(245, 245, 246),
+        panel: Color32::from_rgb(247, 247, 248),
+        card: Color32::from_rgb(252, 252, 252),
+        field: Color32::from_rgb(241, 241, 242),
+        field_border: Color32::from_rgb(224, 224, 225),
+        card_border: Color32::from_rgb(234, 234, 235),
+        hover: Color32::from_rgb(232, 232, 234),
+        raised: Color32::from_rgb(255, 255, 255),
+        tab_strip: Color32::from_rgb(226, 226, 228),
+        tab_behind: Color32::from_rgb(232, 232, 234),
+        tab_lifted: Color32::from_rgb(238, 238, 240),
+        accent: Color32::from_rgb(74, 108, 196),
+        accent_100: Color32::from_rgb(30, 48, 100),
+        accent_200: Color32::from_rgb(44, 68, 138),
+        accent_300: Color32::from_rgb(58, 88, 172),
+        accent_400: Color32::from_rgb(66, 98, 186),
+        accent_600: Color32::from_rgb(112, 140, 214),
+        accent_700: Color32::from_rgb(160, 182, 234),
+        accent_800: Color32::from_rgb(205, 217, 245),
+        accent_900: Color32::from_rgb(228, 235, 251),
+        on_accent: Color32::from_rgb(255, 255, 255),
+        warn: Color32::from_rgb(0x96, 0x5f, 0x0a),
+        star: Color32::from_rgb(0xaa, 0x73, 0x00),
+        danger: Color32::from_rgb(0xc8, 0x3c, 0x34),
+        saved: Color32::from_rgb(0x19, 0x7d, 0x46),
+        saved_100: Color32::from_rgb(0x14, 0x5a, 0x32),
+        saved_900: Color32::from_rgb(0xde, 0xf5, 0xe7),
+        error: Color32::from_rgb(190, 50, 50),
+        danger_900: Color32::from_rgb(251, 231, 229),
+        danger_800: Color32::from_rgb(246, 214, 211),
+        danger_700: Color32::from_rgb(226, 150, 144),
+        danger_200: Color32::from_rgb(130, 35, 30),
+    };
+
+    /// The chrome's two palettes.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum Theme {
+        #[default]
+        Dark,
+        Light,
     }
 
+    thread_local! {
+        /// Per thread: the UI paints on one, and a test that switches theme
+        /// cannot reach a test running beside it.
+        static THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Dark) };
+    }
+
+    /// The theme the chrome is painting in.
+    pub fn theme() -> Theme {
+        THEME.get()
+    }
+
+    /// Switch the palette alone; [`super::apply`] also restyles egui.
+    pub(super) fn set_theme(theme: Theme) {
+        THEME.set(theme);
+    }
+
+    /// The current theme's palette.
+    fn palette() -> &'static Palette {
+        match theme() {
+            Theme::Dark => &DARK,
+            Theme::Light => &LIGHT,
+        }
+    }
+
+    /// How much stronger the light theme draws a translucent text ink: dark ink
+    /// over a light ground reads fainter than light ink over a dark one at the
+    /// same alpha. Linear, so a tier halved by `Ui::disable` still lands on
+    /// [`super::text::disabled`].
+    const LIGHT_INK_GAIN: f32 = 1.2;
+
     /// Text at a given opacity over the ground. Used for the muted label tiers
-    /// (38% / 45% / 62% / 88%).
+    /// (38% / 45% / 62% / 88% in the dark theme).
     pub fn text_a(alpha: u8) -> Color32 {
+        let alpha = match theme() {
+            Theme::Dark => alpha,
+            Theme::Light => (alpha as f32 * LIGHT_INK_GAIN).round().min(255.0) as u8,
+        };
         let [r, g, b, _] = text().to_array();
         let at = |c: u8| (c as u32 * alpha as u32 / 255) as u8;
         Color32::from_rgba_premultiplied(at(r), at(g), at(b), alpha)
+    }
+
+    /// The accent at an alpha, for a wash over the chrome.
+    pub fn accent_a(alpha: u8) -> Color32 {
+        let [r, g, b, _] = accent().to_array();
+        Color32::from_rgba_unmultiplied(r, g, b, alpha)
+    }
+
+    /// `dark` or `light` by the current theme, for a colour too local to earn
+    /// a palette entry.
+    pub fn by_theme(dark: Color32, light: Color32) -> Color32 {
+        match theme() {
+            Theme::Dark => dark,
+            Theme::Light => light,
+        }
     }
 
     /// Hairline divider / faint border (text at ~9%).
@@ -1014,8 +1116,38 @@ fn install_fonts(ctx: &egui::Context) {
 }
 
 fn install_style(ctx: &egui::Context) {
-    ctx.set_theme(egui::ThemePreference::Dark);
+    let preference = match color::theme() {
+        color::Theme::Dark => egui::ThemePreference::Dark,
+        color::Theme::Light => egui::ThemePreference::Light,
+    };
+    ctx.set_theme(preference);
     ctx.all_styles_mut(install_style_into);
+}
+
+/// Paint the chrome in `theme` from the next frame: the palette, and egui's own
+/// style, whose widget colours are copied out of the palette when installed.
+pub fn apply(ctx: &egui::Context, theme: color::Theme) {
+    color::set_theme(theme);
+    install_style(ctx);
+    ctx.request_repaint();
+}
+
+/// Bring the chrome in line with `pref`, resolving *System* against the OS (dark
+/// when it does not say). Cheap when nothing changed, so it runs every frame —
+/// which is also how an OS switch under *System* is followed.
+pub fn follow(ctx: &egui::Context, pref: crate::prefs::ThemePref) {
+    use crate::prefs::ThemePref;
+    let want = match pref {
+        ThemePref::Dark => color::Theme::Dark,
+        ThemePref::Light => color::Theme::Light,
+        ThemePref::System => match ctx.system_theme() {
+            Some(egui::Theme::Light) => color::Theme::Light,
+            _ => color::Theme::Dark,
+        },
+    };
+    if want != color::theme() {
+        apply(ctx, want);
+    }
 }
 
 fn install_style_into(style: &mut egui::Style) {
@@ -1044,7 +1176,7 @@ fn install_style_into(style: &mut egui::Style) {
     .into();
 
     let v = &mut style.visuals;
-    v.dark_mode = true;
+    v.dark_mode = color::theme() == color::Theme::Dark;
     v.override_text_color = Some(color::text());
     v.panel_fill = color::bg();
     v.window_fill = color::card();
@@ -1424,4 +1556,117 @@ mod tests {
             }
         }
     }
+
+    /// WCAG contrast of `ink` composited over the opaque `ground`.
+    fn contrast(ink: egui::Color32, ground: egui::Color32) -> f32 {
+        let lum = |c: [f32; 3]| {
+            let lin = |v: f32| {
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+        };
+        let a = ink.a() as f32 / 255.0;
+        let over = |i: usize| (ink[i] as f32 + ground[i] as f32 * (1.0 - a)) / 255.0;
+        let (x, y) = (lum([over(0), over(1), over(2)]), {
+            let g = |i: usize| ground[i] as f32 / 255.0;
+            lum([g(0), g(1), g(2)])
+        });
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// Every chrome ink stays legible on every chrome ground in both palettes:
+    /// each tier keeps a floor the dark theme was tuned to, and the light
+    /// palette has to meet the same floors.
+    /// flip: `text_a` without `LIGHT_INK_GAIN` → fails at `muted` over `bg`, Light.
+    #[test]
+    fn every_ink_reads_on_every_ground_in_both_themes() {
+        let grounds = [
+            ("bg", color::bg as fn() -> egui::Color32),
+            ("topbar", color::topbar),
+            ("panel", color::panel),
+            ("card", color::card),
+            ("field", color::field),
+            ("hover", color::hover),
+            ("raised", color::raised),
+        ];
+        // Text on a ground at 4.5:1 and up; a glyph or a hint at 3:1; the two
+        // quiet tiers below that by design.
+        let inks = [
+            ("text", color::text as fn() -> egui::Color32, 10.0),
+            ("strong", text::strong, 8.0),
+            ("muted", text::muted, 4.5),
+            ("dim", text::dim, 3.0),
+            ("faint", text::faint, 2.5),
+            ("disabled", text::disabled, 2.0),
+            ("accent", color::accent, 3.5),
+            ("accent_300", color::accent_300, 4.5),
+            ("warn", color::warn, 3.0),
+            ("star", color::star, 3.0),
+            ("danger", color::danger, 3.0),
+            ("saved", color::saved, 3.0),
+            ("error", color::error, 4.5),
+        ];
+        for theme in [color::Theme::Dark, color::Theme::Light] {
+            color::set_theme(theme);
+            for (i, ink, floor) in &inks {
+                for (g, ground) in &grounds {
+                    let c = contrast(ink(), ground());
+                    assert!(
+                        c >= *floor,
+                        "{theme:?}: {i} over {g} is {c:.2}, under {floor}"
+                    );
+                }
+            }
+            // A ramp's ink on its own grounds, and white type on a filled accent.
+            for (name, ink, ground) in [
+                ("accent_100/900", color::accent_100(), color::accent_900()),
+                ("accent_100/800", color::accent_100(), color::accent_800()),
+                ("accent_300/800", color::accent_300(), color::accent_800()),
+                ("danger_200/900", color::danger_200(), color::danger_900()),
+                ("saved_100/900", color::saved_100(), color::saved_900()),
+                ("on_accent/accent", color::on_accent(), color::accent()),
+                (
+                    "on_accent/accent_600",
+                    color::on_accent(),
+                    color::accent_600(),
+                ),
+            ] {
+                let c = contrast(ink, ground);
+                let floor = if name.starts_with("on_accent") {
+                    2.5
+                } else {
+                    4.5
+                };
+                assert!(c >= floor, "{theme:?}: {name} is {c:.2}, under {floor}");
+            }
+        }
+    }
+
+    /// Applying a theme swaps the palette and egui's own style together, so a
+    /// stock widget and a hand-painted one agree.
+    /// flip: `install_style_into` writing `dark_mode = true` → fails at `dark_mode`.
+    #[test]
+    fn applying_a_theme_restyles_egui_with_it() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        apply(&ctx, color::Theme::Light);
+        assert_eq!(color::theme(), color::Theme::Light);
+        let v = ctx.global_style().visuals.clone();
+        assert!(!v.dark_mode, "egui is told the theme is light");
+        assert_eq!(v.panel_fill, color::bg());
+        assert_eq!(
+            v.panel_fill, LIGHT_BG,
+            "the fixture reached the light palette"
+        );
+        follow(&ctx, crate::prefs::ThemePref::Dark);
+        assert_eq!(ctx.global_style().visuals.panel_fill, color::bg());
+        assert!(ctx.global_style().visuals.dark_mode, "and back");
+    }
+
+    /// The light palette's main ground, to check a fixture reached it.
+    const LIGHT_BG: egui::Color32 = egui::Color32::from_rgb(236, 236, 238);
 }

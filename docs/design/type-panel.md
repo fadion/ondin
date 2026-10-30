@@ -206,7 +206,7 @@ menu's three checkable rows (`context-menus.md` §5.6).
 
 **`ui::slider`** is hand-painted, like `segmented` and `switch`.
 
-- **Look.** A 3pt rail (`SLIDER_RAIL_H`), an 11pt knob (`SLIDER_H`), the filled half in `ACCENT_600` and the knob in `ACCENT_100` with a shadow.
+- **Look.** A 3pt rail (`SLIDER_RAIL_H`), an 11pt knob (`SLIDER_H`), the filled half in `accent_600()` and the knob in `on_accent()` with a shadow.
 - **Behaviour.** No text box. Knob travel is clamped to `half..width − half`, with the rail drawn full width. It is absolute: it jumps to the press.
 - **Overflow.** The shadow paints one point below `SLIDER_H`, into the caller's row gap. The other three sides are tight.
 - **`SLIDER_H` is not read outside `ui.rs`.** Do not treat it as what every caller reserves.

@@ -26,7 +26,7 @@
 
 use crate::app::OndinApp;
 use crate::input::NudgeStep;
-use crate::prefs::Prefs;
+use crate::prefs::{Prefs, ThemePref};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton, Prefix, Scrub, Suffix};
 
@@ -80,6 +80,7 @@ const BUTTON_PT: f32 = 11.5;
 /// and mirroring `Prefs` field for field makes the dirty test one `!=`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Settings {
+    theme: ThemePref,
     nudge: NudgeStep,
     tree_guides: bool,
     collapse_groups_on_open: bool,
@@ -91,6 +92,7 @@ impl Settings {
     /// The form as the saved preferences have it — what opening the modal shows.
     fn from_prefs(prefs: &Prefs) -> Self {
         Self {
+            theme: prefs.theme,
             nudge: prefs.nudge,
             tree_guides: prefs.tree_guides,
             collapse_groups_on_open: prefs.collapse_groups_on_open,
@@ -105,11 +107,18 @@ impl Settings {
         self.nudge = nudge;
     }
 
+    /// The theme picked in the form, which the chrome previews while the modal
+    /// is open (`theme::follow` in `<OndinApp as eframe::App>::ui`).
+    pub(crate) fn theme(&self) -> ThemePref {
+        self.theme
+    }
+
     /// Write the form back. Returns whether the web-fonts switch moved, because
     /// that is the one row with a consequence beyond the file — see
     /// [`crate::fonts::FontService::set_web_fonts`].
     fn apply(&self, prefs: &mut Prefs) -> bool {
         let web_fonts_changed = prefs.web_fonts != self.web_fonts;
+        prefs.theme = self.theme;
         prefs.nudge = self.nudge;
         prefs.tree_guides = self.tree_guides;
         prefs.collapse_groups_on_open = self.collapse_groups_on_open;
@@ -185,8 +194,27 @@ impl OndinApp {
                 decision = Some(Decision::Cancel);
             }
 
-            // --- nudge -------------------------------------------------
+            // --- appearance --------------------------------------------
             ui.add_space(TITLE_GAP - SECTION_AIR);
+            section(ui, "Appearance");
+            const THEMES: [(ThemePref, &str); 3] = [
+                (ThemePref::System, "System"),
+                (ThemePref::Dark, "Dark"),
+                (ThemePref::Light, "Light"),
+            ];
+            let current = THEMES.iter().position(|(t, _)| *t == draft.theme);
+            if let Some(i) = ui::segmented(
+                ui,
+                ui.available_width(),
+                FIELD_H,
+                THEMES.len(),
+                current.unwrap_or(0),
+                |p, i, rect, on| ui::segment_label(p, rect, THEMES[i].1, on),
+            ) {
+                draft.theme = THEMES[i].0;
+            }
+
+            // --- nudge -------------------------------------------------
             section(ui, "Nudge");
             // Before the fields: `value_field` applies this frame's drag delta inside
             // the call that reports `drag_started()`.
@@ -916,9 +944,9 @@ mod tests {
     /// stands off by `TITLE_GAP` on purpose, and gets its own assertion.
     ///
     /// flip: a 15pt `add_space` over an 11pt `item_spacing`, with the eyebrow row
-    /// left to take `interact_size.y` → both headers fail (*Layers* 32 above
+    /// left to take `interact_size.y` → the headers fail (*Layers* 32 above
     /// against 20 below). Dropping the `TITLE_GAP - SECTION_AIR` line fails the
-    /// title assertion at 21.5 against 18.
+    /// title assertion.
     #[test]
     fn a_section_header_has_equal_air_above_and_below_it() {
         let ctx = egui::Context::default();
@@ -948,7 +976,7 @@ mod tests {
             )
         };
 
-        for header in ["LAYERS", "WEB FONTS"] {
+        for header in ["NUDGE", "LAYERS", "WEB FONTS"] {
             let (above, below) = air(header);
             assert!(
                 (above - below).abs() <= 4.0,
@@ -957,7 +985,7 @@ mod tests {
         }
 
         // The title's standoff is the larger one.
-        let (title_gap, first_row) = air("NUDGE");
+        let (title_gap, first_row) = air("APPEARANCE");
         assert!(
             title_gap > first_row + 6.0,
             "the title stands off by {title_gap:.1}pt against the header's own \
@@ -1094,6 +1122,7 @@ mod tests {
         assert_eq!(
             opened,
             Settings {
+                theme: ThemePref::Dark,
                 nudge: NudgeStep::default(),
                 tree_guides: true,
                 collapse_groups_on_open: false,
@@ -1104,6 +1133,7 @@ mod tests {
         );
 
         let edited = Settings {
+            theme: ThemePref::Light,
             nudge: NudgeStep {
                 small: 0.5,
                 large: 25.0,

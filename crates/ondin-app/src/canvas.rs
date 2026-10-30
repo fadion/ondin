@@ -628,13 +628,22 @@ fn is_light_ground(ground: Color) -> bool {
     0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5
 }
 
-/// Text drawn straight on the canvas, at `alpha`: the theme's light text on a
-/// dark page, near-black on a light one, so a frame's name survives either.
+/// A frame name's alpha on the page: `text::muted()`'s in the dark theme, kept
+/// whatever the chrome's theme since the page decides the ink.
+const MUTED_ON_PAGE: u8 = 158;
+
+/// Text drawn straight on the canvas, at `alpha`: light text on a dark page,
+/// near-black on a light one, so a frame's name survives either. The page is the
+/// document's, not the chrome's, so the light theme still writes light ink on a
+/// dark page.
 fn ground_text(ground: Color, alpha: u8) -> egui::Color32 {
     if is_light_ground(ground) {
         egui::Color32::from_rgba_unmultiplied(24, 24, 24, alpha)
     } else {
-        color::text_a(alpha)
+        color::by_theme(
+            color::text_a(alpha),
+            egui::Color32::from_rgba_unmultiplied(233, 233, 237, alpha),
+        )
     }
 }
 
@@ -7456,7 +7465,9 @@ impl OndinApp {
             let ink = if self.session.selection.contains(id) {
                 color::SELECT
             } else {
-                ground_text(self.session.preview_ground(), theme::text::muted().a())
+                // The dark theme's muted alpha in either theme: the page, not the
+                // chrome, sets this ink.
+                ground_text(self.session.preview_ground(), MUTED_ON_PAGE)
             };
             painter.galley(label.min, galley, ink);
         }

@@ -818,7 +818,7 @@ fn canonical(text: &str, caret: usize) -> (String, usize) {
 
 /// A pill's ground behind a token.
 fn pill_fill() -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(109, 140, 217, 66)
+    color::accent_a(66)
 }
 
 /// The template field's text: each token a pill, its brackets drawn as the pill's
@@ -844,7 +844,7 @@ fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
         // which no eye sees and which ends the rectangle at each pill.
         let ground = match i % 2 {
             0 => pill_fill(),
-            _ => egui::Color32::from_rgba_unmultiplied(109, 140, 217, 65),
+            _ => color::accent_a(65),
         };
         let pill = |ink| egui::TextFormat {
             color: ink,

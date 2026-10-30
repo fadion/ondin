@@ -494,7 +494,7 @@ Inspector:
   main's name — the variant's own, else its set's (`component::description_note`); it is never an
   override. A row of the swap picker hovers its main's description (`SwapTarget::description`).
 - A face's instance count is on its name's line and is the *Select all*
-  (`component::name_line(ui, glyph, name, instances)`; at zero plain `text::DIM` and dead).
+  (`component::name_line(ui, glyph, name, instances)`; at zero plain `text::dim()` and dead).
 - Resets: *Reset all*, and a ⋯ overflow with *Reset fields N*, *Restore removed children N*, *Reset
   order*, *Reset properties* — **disabled, not hidden** at zero; counts shown only above zero. No reset
   deletes a local *layer*; list resets do remove the instance's own items.

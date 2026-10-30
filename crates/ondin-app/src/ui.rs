@@ -3320,10 +3320,12 @@ pub fn slider(
     p.circle_filled(
         egui::pos2(knob_x, rect.center().y),
         half,
+        // Brighter under the pointer in the dark theme; the light one's knob is
+        // already white, so it tints instead.
         if resp.is_pointer_button_down_on() || resp.hovered() {
-            color::text()
+            color::by_theme(color::text(), color::accent_800())
         } else {
-            color::accent_100()
+            color::on_accent()
         },
     );
     resp
@@ -3346,8 +3348,8 @@ const SWITCH_ROW_BLEED: f32 = 4.0;
 /// [`icon_button_padded`]).
 pub fn paint_switch(painter: &egui::Painter, rect: egui::Rect, on: bool, hot: bool) {
     let (track, knob) = match (on, hot) {
-        (true, false) => (color::accent_600(), color::accent_100()),
-        (true, true) => (color::accent(), color::accent_100()),
+        (true, false) => (color::accent_600(), color::on_accent()),
+        (true, true) => (color::accent(), color::on_accent()),
         (false, false) => (theme::color::text_a(33), theme::text::dim()),
         (false, true) => (theme::color::text_a(46), theme::text::muted()),
     };

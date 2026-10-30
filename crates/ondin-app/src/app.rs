@@ -1546,6 +1546,12 @@ impl eframe::App for OndinApp {
     /// The frame body: everything the app draws and decides, once per pass.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Before anything paints: an open Settings modal previews its own pick.
+        let pref = self
+            .settings
+            .as_ref()
+            .map_or(self.prefs.theme, |s| s.theme());
+        theme::follow(&ctx, pref);
         // First: this frame's status writes join one another, not the last frame's.
         self.session.next_status_pass();
         self.session.forget_step_name();

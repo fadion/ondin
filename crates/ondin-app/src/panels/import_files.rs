@@ -137,11 +137,11 @@ impl Kind {
     /// The badge at the head of the filled field.
     fn badge(self, path: &Path) -> (String, egui::Color32) {
         match self {
-            Self::Ondin => ("ONDIN".into(), egui::Color32::from_rgb(0x8b, 0xa5, 0xe0)),
-            Self::Sketch => ("SKETCH".into(), egui::Color32::from_rgb(0xe6, 0xb8, 0x66)),
-            Self::Penpot => ("PENPOT".into(), egui::Color32::from_rgb(0x8f, 0xd1, 0xa8)),
-            Self::Figma => ("LINK".into(), FIGMA),
-            Self::Fig => ("FIG".into(), FIGMA),
+            Self::Ondin => ("ONDIN".into(), color::accent_400()),
+            Self::Sketch => ("SKETCH".into(), color::by_theme(SKETCH, SKETCH_LIGHT)),
+            Self::Penpot => ("PENPOT".into(), color::by_theme(PENPOT, PENPOT_LIGHT)),
+            Self::Figma => ("LINK".into(), color::by_theme(FIGMA, FIGMA_LIGHT)),
+            Self::Fig => ("FIG".into(), color::by_theme(FIGMA, FIGMA_LIGHT)),
             Self::Placed | Self::Other => (
                 path.extension()
                     .and_then(|e| e.to_str())
@@ -153,8 +153,14 @@ impl Kind {
     }
 }
 
-/// Figma's badge colour, on a link and on a `.fig`.
+/// Figma's badge colour, on a link and on a `.fig`; each badge ink has a deeper
+/// twin that holds its contrast on the light theme's grounds.
 const FIGMA: egui::Color32 = egui::Color32::from_rgb(0xc9, 0xa6, 0xe6);
+const FIGMA_LIGHT: egui::Color32 = egui::Color32::from_rgb(0x78, 0x46, 0xaa);
+const SKETCH: egui::Color32 = egui::Color32::from_rgb(0xe6, 0xb8, 0x66);
+const SKETCH_LIGHT: egui::Color32 = egui::Color32::from_rgb(0x96, 0x64, 0x0a);
+const PENPOT: egui::Color32 = egui::Color32::from_rgb(0x8f, 0xd1, 0xa8);
+const PENPOT_LIGHT: egui::Color32 = egui::Color32::from_rgb(0x1e, 0x7d, 0x4b);
 
 /// How a kind of file names what it holds.
 #[derive(Clone, Copy)]

@@ -366,7 +366,7 @@ const SWITCHES: [ViewSwitch; 17] = [
 
 /// The highlighted row's ground: the accent at 18%.
 fn highlight_fill() -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(109, 140, 217, 46)
+    color::accent_a(46)
 }
 
 impl OndinApp {
@@ -1431,11 +1431,8 @@ fn layers_chip(ui: &mut egui::Ui) {
     p.rect(
         rect,
         egui::CornerRadius::same(5),
-        egui::Color32::from_rgba_unmultiplied(109, 140, 217, 56),
-        egui::Stroke::new(
-            1.0,
-            egui::Color32::from_rgba_unmultiplied(109, 140, 217, 128),
-        ),
+        color::accent_a(56),
+        egui::Stroke::new(1.0, color::accent_a(128)),
         egui::StrokeKind::Inside,
     );
     p.text(

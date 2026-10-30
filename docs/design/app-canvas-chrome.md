@@ -173,7 +173,7 @@ document opens, it is never saved or exported, and present mode's own branch nev
 
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
 
-- Each head (zoom readout's too) is `ui::menu_head`: `HOVER` ground on its 26pt rect, radius 5, held
+- Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held
   while its own menu is open.
 - Rows are `ui::menu_check`, `ui::MENU_ITEM_H` (24) tall, in `ui::menu_frame`; width 160pt or the
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
@@ -218,7 +218,7 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   sits between it and that gap. The window's caption buttons are in the tab strip above.
 - Opens `settings.rs`'s modal: nudge step, *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
-  its glyph `WARN` with a tooltip when the family is `Missing`, §5.4a), the web-font switch and
+  its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a), the web-font switch and
   cache row. `Ctrl+,` opens it (and only opens:
   `input::resolve` is not called while a modal is up). Staged; writes on *Save changes*.
 - Not a `TopMenu` value. Panel-owned preferences stay on their panel (export habits in the export
@@ -401,7 +401,7 @@ worded for the scope that plan was made for (`Plan::scope`).
   skipped one leaves no gap; a matched layer whose name already is its result keeps that number, so
   no two layers are given the same one.
 - **Preview**, in run order: glyph, old name with its matches underlined, arrow, new name with its
-  new runs in `ACCENT_300`; it scrolls past eight rows, and only the rows in view are laid out
+  new runs in `accent_300()`; it scrolls past eight rows, and only the rows in view are laid out
   (`ScrollArea::show_rows`), page headings at a row's height. At *Selection* every layer is listed and the
   unchanged ones dim; elsewhere only matches, and *All pages* heads each page's rows with its name
   and count. The count reads *N of M change* at *Selection*, *N of M match* on a page, plus *· K

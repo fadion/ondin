@@ -19,6 +19,18 @@ use ondin_core::ExportSpec;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Which palette the chrome paints in (`crate::theme::follow`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePref {
+    /// Whatever the OS is set to, followed while the app runs.
+    System,
+    /// The default, so an install that predates the light theme keeps its look.
+    #[default]
+    Dark,
+    Light,
+}
+
 /// A named set of export specs, applied to a layer in one click. Copy-pasting
 /// settings between layers stops being enough once the same set is needed in a
 /// different file.
@@ -152,6 +164,8 @@ impl Default for BatchRenamePrefs {
 #[serde(default)]
 pub struct Prefs {
     pub export_presets: Vec<ExportPreset>,
+    /// The chrome's palette.
+    pub theme: ThemePref,
     /// Where the last export went, so *Export all* can repeat with no dialog.
     ///
     /// One folder, not a map per document path, which grows without bound and
@@ -345,6 +359,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             export_presets: Vec::new(),
+            theme: ThemePref::Dark,
             export_dir: None,
             export_folders_from_names: false,
             export_on_save: false,
@@ -495,6 +510,18 @@ mod tests {
         let one: Prefs = serde_json::from_str(r#"{"view":{"snap_grid":false}}"#).unwrap();
         assert!(!one.view.snap_grid);
         assert!(one.view.rulers && one.view.snap_shapes && !one.view.lock_guides);
+    }
+
+    /// A file from before the light theme opens dark, and the theme is stored as
+    /// a lowercase word.
+    #[test]
+    fn a_missing_theme_reads_as_dark() {
+        let old: Prefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.theme, ThemePref::Dark);
+        let light: Prefs = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
+        assert_eq!(light.theme, ThemePref::Light);
+        let json = serde_json::to_string(&Prefs::default()).unwrap();
+        assert!(json.contains(r#""theme":"dark""#), "{json}");
     }
 
     /// The `ephemeral` flag defaults off and never survives serialization. It

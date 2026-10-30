@@ -18,7 +18,6 @@ Nothing open.
   has a backdrop filter, so both backends need a pass that renders what lies behind the layer, blurs
   it and clips it to the shape. The code export would write `backdrop-filter`; SVG cannot express a
   backdrop, so the SVG writer owes an answer (a reported approximation, at least).
-- **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
@@ -243,6 +242,8 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **Is a 38-row context menu past the ceiling?** (`context-menus.md` *Open*, §15 D981, D1003 (9)).
 - **`Ctrl+Alt` is `AltGr`** on many European layouts (`shortcuts.md` §12, §15 D987).
 - **Is the chrome meant to be keyboard-traversable?** (§15 D747) — deferred by the maintainer.
+- **Should the page ground follow the light theme?** A page's ground is the document's
+  (`ondin_core::DEFAULT_CANVAS_BACKGROUND`, near-black) and stays dark under the light chrome.
 - **One font-availability question for panel and snapshot** — only worth it if the snapshot ever
   reads a live `FontService`.
 

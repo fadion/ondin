@@ -7110,10 +7110,22 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) -> Option<NodeId> {
-        self.tagged().into_iter().rev().find(|id| {
+        self.canvas_tags().into_iter().rev().find(|id| {
             self.frame_label(ui, *id, rect, ppp)
                 .is_some_and(|(r, _)| r.contains(screen))
         })
+    }
+
+    /// Every layer whose tag the canvas shows, in paint order: those that wear one
+    /// ([`OndinApp::tagged`]), then the entered instance, which takes one wherever
+    /// it sits and paints last.
+    fn canvas_tags(&self) -> Vec<NodeId> {
+        let mut ids = self.tagged();
+        if let Some(entered) = self.entered_instance() {
+            ids.retain(|id| *id != entered);
+            ids.push(entered);
+        }
+        ids
     }
 
     /// Where a frame's name tag sits, and its text: above the top-left corner and
@@ -7131,7 +7143,9 @@ impl OndinApp {
 
         let node = self.session.doc.get(id)?;
         let is_main = node.component();
-        if !crate::app::wears_tag(&self.session.doc, id) {
+        let entered = self.entered_instance() == Some(id);
+        // An entered instance is tagged wherever it sits: the tag says how to leave.
+        if !crate::app::wears_tag(&self.session.doc, id) && !entered {
             return None;
         }
         if !self.shown_visible(id) {
@@ -7202,33 +7216,29 @@ impl OndinApp {
             }
         } else if ondin_core::component::instance_root(doc, id) == Some(id) {
             // An instance: outline hexagon and a violet label, trailing its main's
-            // name when renamed, a path when entered. Only while selected or
-            // entered, since it picks like a group and the tag is no handle.
-            if !self.session.selection.contains(id) && self.entered_instance() != Some(id) {
+            // name when renamed, or saying how to leave when entered. Only while
+            // selected or entered, since it picks like a group and the tag is no handle.
+            if !self.session.selection.contains(id) && !entered {
                 return None;
             }
             glyph(&mut job, icon::HEXAGON, egui::Color32::PLACEHOLDER);
-            let main_name = ondin_core::component::main_of(doc, id)
-                .and_then(|m| doc.get(m))
-                .map(|m| m.name().to_string())
-                .unwrap_or_default();
-            let inside = (self.entered_instance() == Some(id))
-                .then(|| self.session.selection.single())
-                .flatten()
-                .filter(|s| *s != id && ondin_core::is_within(doc, *s, id))
-                .and_then(|s| doc.get(s));
-            match inside {
-                Some(child) => {
-                    words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
-                    words(&mut job, "›", 5.0, color::COMPONENT_DIM);
-                    words(&mut job, child.name(), 5.0, egui::Color32::PLACEHOLDER);
-                }
-                None => {
-                    words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
-                    mode_word(&mut job, color::COMPONENT_DIM);
-                    if !main_name.is_empty() && main_name != node.name() {
-                        words(&mut job, &main_name, 6.0, color::COMPONENT_DIM);
-                    }
+            if entered {
+                words(
+                    &mut job,
+                    &format!("Editing {}", node.name()),
+                    4.0,
+                    egui::Color32::PLACEHOLDER,
+                );
+                words(&mut job, "· Esc to exit", 4.0, color::COMPONENT_DIM);
+            } else {
+                words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+                mode_word(&mut job, color::COMPONENT_DIM);
+                let main_name = ondin_core::component::main_of(doc, id)
+                    .and_then(|m| doc.get(m))
+                    .map(|m| m.name().to_string())
+                    .unwrap_or_default();
+                if !main_name.is_empty() && main_name != node.name() {
+                    words(&mut job, &main_name, 6.0, color::COMPONENT_DIM);
                 }
             }
         } else {
@@ -7330,13 +7340,14 @@ impl OndinApp {
         painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
     }
 
-    /// The neutral components chrome over the artwork:
+    /// The components chrome over the artwork, violet so that it reads over any
+    /// fill and stroke beneath:
     /// - **a selected main's instances** each get a hairline round their box;
-    /// - **an entered instance** keeps a dashed boundary and a quiet tag saying
-    ///   how to leave.
+    /// - **an entered instance** keeps a dashed boundary; its tag
+    ///   ([`Self::frame_label`]) says how to leave.
     fn draw_component_chrome(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         let doc = &self.session.doc;
-        let hair = egui::Stroke::new(1.0, theme::text::FAINT);
+        let hair = egui::Stroke::new(1.0, color::COMPONENT);
         let outline = |q: [egui::Pos2; 4]| {
             for i in 0..4 {
                 painter.line_segment([q[i], q[(i + 1) % 4]], hair);
@@ -7362,20 +7373,13 @@ impl OndinApp {
         let Some(q) = self.selection_quad(entered, rect, ppp) else {
             return;
         };
-        let edge = egui::Stroke::new(1.0, theme::text::DIM);
+        let edge = egui::Stroke::new(1.0, color::COMPONENT);
         painter.extend(egui::Shape::dashed_line(
             &[q[0], q[1], q[2], q[3], q[0]],
             edge,
             4.0,
             3.0,
         ));
-        painter.text(
-            q[3] + egui::vec2(5.0, 5.0),
-            egui::Align2::LEFT_TOP,
-            "Editing inside instance · Esc to exit",
-            egui::FontId::proportional(LABEL_PT),
-            ground_text(self.session.preview_ground(), theme::text::DIM.a()),
-        );
     }
 
     /// Every frame's name, drawn under the selection chrome.
@@ -7386,7 +7390,7 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) {
-        for id in self.tagged() {
+        for id in self.canvas_tags() {
             let Some((label, galley)) = self.frame_label(ui, id, rect, ppp) else {
                 continue;
             };
@@ -15851,10 +15855,11 @@ mod frame_menu_door_tests {
     }
 
     /// The components chrome, read off the frame's shapes: a main's hexagon chip, an
-    /// instance's hairlines when its main is selected, an entered instance's dashed edge
-    /// and *Esc to exit* tag, a selected set's `+` disc.
+    /// instance's violet hairlines when its main is selected, an entered instance's
+    /// violet dashed edge, a selected set's `+` disc.
     /// flip: drop `paint_hexagon_filled` → fails at "one filled hexagon"; draw the entered
-    /// edge as four solid segments → fails at "dashed" (run alone, since the first flip hides it).
+    /// edge as four solid segments → fails at "dashed" (run alone, since the first flip
+    /// hides it).
     #[test]
     fn the_components_chrome_paints_its_chip_hexagon_hairlines_dashes_and_disc() {
         let ctx = egui::Context::default();
@@ -15923,23 +15928,18 @@ mod frame_menu_door_tests {
         app.session.selection.set_one(main);
         let chrome = shapes(&app, false);
         assert_eq!(
-            segments(&chrome, theme::text::FAINT),
+            segments(&chrome, color::COMPONENT),
             4,
-            "four hairlines round the one instance"
+            "four violet hairlines round the one instance"
         );
 
         app.session.selection.clear();
         app.entered_group = Some(inst);
         let chrome = shapes(&app, false);
         assert!(
-            segments(&chrome, theme::text::DIM) > 8,
+            segments(&chrome, color::COMPONENT) > 8,
             "dashed: many short segments, not four sides — {}",
-            segments(&chrome, theme::text::DIM)
-        );
-        assert!(
-            chrome.iter().any(|s| matches!(s, egui::Shape::Text(t)
-                if t.galley.text().contains("Esc to exit"))),
-            "and the tag under it"
+            segments(&chrome, color::COMPONENT)
         );
         app.entered_group = None;
 
@@ -16047,7 +16047,7 @@ mod frame_menu_door_tests {
     }
 
     /// A main's tag is a hexagon chip counting its instances while selected; an instance's
-    /// trails its main's name, or is a path when entered; neither turns `color::SELECT`.
+    /// trails its main's name, or says how to leave when entered; neither turns `color::SELECT`.
     /// flip: `draw_frame_labels` without the two component arms → fails at the hue assertion.
     #[test]
     fn a_mains_tag_is_a_chip_and_an_instances_tag_names_its_main() {
@@ -16090,13 +16090,14 @@ mod frame_menu_door_tests {
             "renamed, it trails its main's name: {text:?}"
         );
         let child = app.session.doc.get(inst).unwrap().children()[0];
-        let child_name = app.session.doc.get(child).unwrap().name().to_string();
         app.entered_group = Some(inst);
         app.session.selection.set_one(child);
         let text = tag(&app, inst);
         assert!(
-            text.contains('›') && text.ends_with(&child_name),
-            "entered, a path: {text:?}"
+            text.contains("Editing Mine")
+                && text.ends_with("Esc to exit")
+                && !text.contains("Board"),
+            "entered, how to leave: {text:?}"
         );
         app.entered_group = None;
 
@@ -16177,8 +16178,9 @@ mod frame_menu_door_tests {
 
     /// Only page frames and mains wear tags: a frame or an instance inside another
     /// frame, a main or an instance has none, while the mains and the instance on
-    /// the page keep theirs.
-    /// flip: tag every frame in `wears_tag` → fails at "an instance inside a frame".
+    /// the page keep theirs; an entered instance is tagged wherever it sits.
+    /// flip: tag every frame in `wears_tag` → fails at "an instance inside a frame";
+    /// `canvas_tags` without the entered instance → fails at "its tag is on the canvas".
     #[test]
     fn nested_frames_and_instances_wear_no_tag() {
         let ctx = egui::Context::default();
@@ -16255,6 +16257,27 @@ mod frame_menu_door_tests {
             !tagged(&mut app, icon_copy),
             "an instance inside the instance"
         );
+
+        // Entered, a nested instance takes a tag, and paints it and answers a click
+        // as any other tag does.
+        app.entered_group = Some(nested);
+        assert!(
+            tagged(&mut app, nested),
+            "an entered instance inside a frame"
+        );
+        let mut picked = None;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| {
+                let (r, g) = app.frame_label(ui, nested, rect, 1.0).expect("the tag");
+                assert!(g.text().contains("Editing Icon"), "{:?}", g.text());
+                picked = app.frame_label_at(ui, r.center(), rect, 1.0);
+            },
+        );
+        assert_eq!(picked, Some(nested), "its tag is on the canvas");
     }
 
     /// An instance's tag shows only while selected or entered (a frame's name and a

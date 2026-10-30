@@ -451,23 +451,26 @@ Canvas:
   `COMPONENT_INK`, *N instances* in `COMPONENT_INK_DIM` while selected. Always shown. A group that is a
   main gets a canvas label as a page frame does (`OndinApp::tagged`, walked by `canvas::draw_frame_labels`).
 - A frame instance on its page wears a tag: outline hexagon and name in `COMPONENT`, its main's name trailing in
-  `COMPONENT_DIM` when they differ, *Name › Child* while entered with a layer inside selected — drawn
-  **only while the instance is selected or entered**.
+  `COMPONENT_DIM` when they differ — drawn **only while the instance is selected or entered**. The
+  entered instance (`canvas::entered_instance`) is tagged wherever it sits, nested included
+  (`canvas::canvas_tags`), and reads *Editing Name* with *· Esc to exit* in `COMPONENT_DIM`: the
+  top-left tag is the one place no other chrome, the size badge included, competes for.
 - Neither label ever takes `color::SELECT`; nor does a set's tab. A main's or instance root's
   selection/hover outlines are `COMPONENT` (`canvas::chrome_hue`), and so are handles and the size
   badge when every selected layer is one (`selection_hue`); a set and layers inside a component keep
   `SELECT`. Nothing off the canvas takes the hue.
 - A main keeps its chip and a set its tab wherever they sit (`app::wears_tag`); nothing else inside a main or an
-  instance wears a tag, since a frame inside another frame or a group picks as a group does
+  instance wears a tag but the entered instance, since a frame inside another frame or a group picks as a group does
   (`app-frames-and-copies.md` §9.4).
 - **An instance picks like a group**, whatever its kind: `query::group_chain` keeps an instance root
   as a rung even when it is a page frame, and `canvas::pick_leaf` does not skip an occupied page frame
   that is an instance — for a frame instance an exception to D22. `Enter` enters it ahead of its text/picture/path arms
   (`enter_action`), and so does a double-click on its own background (`double_click_pick`).
-- `canvas::draw_component_chrome`: a `FAINT` hairline round each instance of a selected main; round the
-  entered instance (`canvas::entered_instance`, nearest instance root at/above `entered_group`) a
-  dashed `DIM` boundary and *Editing inside instance · Esc to exit*, cleared once the selection leaves
-  by any door (`OndinApp::leave_a_scope_the_selection_left`).
+- `canvas::draw_component_chrome`: a `COMPONENT` hairline round each instance of a selected main; round
+  the entered instance (`canvas::entered_instance`, nearest instance root at/above `entered_group`) a
+  dashed `COMPONENT` boundary, cleared once the selection leaves by any door
+  (`OndinApp::leave_a_scope_the_selection_left`). This chrome lies over the artwork, not the canvas
+  ground, so it takes the violet: a neutral grey vanished on a light frame.
 
 Layers panel: neutral icons wearing the hexagon. Trailing mark: **+** for a local layer (unlinked
 inside an instance, or a local instance); a **dot** for an override on the row; on a collapsed row

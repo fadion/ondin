@@ -1685,7 +1685,7 @@ impl OndinApp {
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
-                self.identity_kind(ui, id, glyph);
+                identity_glyph(ui, glyph, color::ACCENT_300);
                 // Name — buffered, committed once on defocus.
                 let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
                 let mut name = match &self.name_edit {
@@ -1788,65 +1788,61 @@ impl OndinApp {
             // A frame's *Mode*, under its name.
             self.frame_mode_row(ui, id);
             self.identity_boolean_row(ui);
+            self.identity_kind_row(ui, id);
             // What the layer is inside a component, in the same card.
             self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
     }
-    /// A layer's kind glyph on its identity card. A group's or a frame's is a
-    /// dropdown turning one into the other (`build::convert_container`), dimmed
-    /// where a component's links forbid it; any other layer's is a picture.
-    fn identity_kind(&mut self, ui: &mut egui::Ui, id: NodeId, glyph: &'static str) {
+    /// A group's or a frame's kind row on its identity card, under the boolean row:
+    /// a full-width dropdown, *Frame* / *Group*, turning one into the other
+    /// (`build::convert_container`), disabled where a component's links forbid it.
+    /// Nothing for any other layer.
+    fn identity_kind_row(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let doc = &self.session.doc;
         let Some(is_frame) = doc.get(id).and_then(|n| match n.kind() {
             NodeKind::Group => Some(false),
             NodeKind::Artboard { .. } => Some(true),
             _ => None,
         }) else {
-            identity_glyph(ui, glyph, color::ACCENT_300);
             return;
         };
         let enabled = ondin_core::build::can_convert_container(doc, id);
-        let sense = if enabled {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        };
-        let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(IDENTITY_ICON), sense);
-        let ink = if enabled && resp.hovered() {
-            color::TEXT
-        } else {
-            color::ACCENT_300
-        };
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            glyph,
-            theme::icon_font(IDENTITY_ICON),
-            ink,
-        );
-        let resp = if enabled {
-            resp.on_hover_text("Turn into a frame or a group")
-        } else {
-            resp.on_hover_text("A component keeps its kind: its copies link to it")
-        };
+        let kinds = [
+            (
+                true,
+                NodeKind::Artboard {
+                    size: Default::default(),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                "Frame",
+            ),
+            (false, NodeKind::Group, "Group"),
+        ];
         let mut pick = None;
-        egui::Popup::menu(&resp).gap(ui::MENU_GAP).show(|ui| {
-            ui::menu_rows(ui);
-            for (frame, label) in [(true, "Frame"), (false, "Group")] {
-                let kind = if frame {
-                    NodeKind::Artboard {
-                        size: Default::default(),
-                        corner_radii: Default::default(),
-                        corner_smoothing: 0.0,
-                    }
-                } else {
-                    NodeKind::Group
-                };
-                let row = ui::glyph_and_text(super::layers_icon(&kind).0, label);
-                if ui.selectable_label(frame == is_frame, row).clicked() && frame != is_frame {
-                    pick = Some(frame);
-                }
-            }
+        ui.scope(|ui| {
+            ui.spacing_mut().interact_size.y = BOOL_ROW_H;
+            ui.spacing_mut().button_padding.y = 0.0;
+            ui::disable_unless(ui, enabled, |ui| {
+                let shown = &kinds[usize::from(!is_frame)];
+                egui::ComboBox::from_id_salt("container-kind")
+                    .icon(ui::combo_chevron)
+                    .width(ui.available_width())
+                    .selected_text(ui::glyph_and_text(super::layers_icon(&shown.1).0, shown.2))
+                    .show_ui(ui, |ui| {
+                        ui::menu_rows(ui);
+                        for (frame, kind, label) in &kinds {
+                            let row = ui::glyph_and_text(super::layers_icon(kind).0, label);
+                            if ui.selectable_label(*frame == is_frame, row).clicked()
+                                && *frame != is_frame
+                            {
+                                pick = Some(*frame);
+                            }
+                        }
+                    })
+                    .response
+                    .on_disabled_hover_text("A component keeps its kind: its copies link to it");
+            });
         });
         if pick.is_some() {
             self.convert_container(id);
@@ -12945,6 +12941,101 @@ mod mask_card_tests {
         app.session.undo();
         app.session.undo();
         assert!(app.session.doc.get(group).is_some(), "two undos, two steps");
+    }
+
+    /// A group's identity card shows its kind in a full-width dropdown under the
+    /// boolean row, and picking *Frame* there turns it into a frame.
+    /// flip: `inspector_header` without its `identity_kind_row` → fails at "the
+    /// dropdown is drawn".
+    #[test]
+    fn a_groups_kind_dropdown_sits_under_the_boolean_row_and_converts_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let (mut t, root) = Tree::new();
+        let group = t.add(root, NodeKind::Group);
+        t.shape(group);
+        t.shape(group);
+        app.session.adopt_document(t.doc.clone(), None);
+        app.session.selection.set(vec![group]);
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut pass = |app: &mut crate::app::OndinApp, events: Vec<egui::Event>| {
+            let time = ctx.input(|i| i.time) + 0.1;
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1320.0, 820.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut kitten),
+            )
+            .shapes
+        };
+        let text = |shapes: &[egui::epaint::ClippedShape], s: &str| {
+            shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text().ends_with(s) && t.pos.x > 900.0 => {
+                    Some(t.visual_bounding_rect())
+                }
+                _ => None,
+            })
+        };
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let face = text(&shapes, "Group").expect("the dropdown is drawn");
+        let union = text(
+            &shapes,
+            crate::panels::layers::op_glyph(ondin_core::BoolOp::Union),
+        )
+        .expect("the boolean row is drawn");
+        assert!(
+            face.top() > union.bottom(),
+            "under the boolean row: the face at {face:?}, the row's glyph at {union:?}"
+        );
+
+        let at = face.center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for _ in 0..2 {
+            pass(&mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        pass(&mut app, vec![press(true)]);
+        pass(&mut app, vec![press(false)]);
+        for _ in 0..2 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let row = text(&shapes, "Frame").expect("open, the menu offers Frame");
+        let at = row.center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for _ in 0..2 {
+            pass(&mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        pass(&mut app, vec![press(true)]);
+        pass(&mut app, vec![press(false)]);
+        pass(&mut app, vec![]);
+        let picked = app.session.selection.ids().first().copied();
+        assert!(
+            picked.is_some_and(|f| f != group
+                && matches!(
+                    app.session.doc.get(f).map(|n| n.kind()),
+                    Some(NodeKind::Artboard { .. })
+                )),
+            "picking Frame turned the group into a frame and selected it"
+        );
     }
 
     /// Each `mask_action` refusal gives its own sentence (not just `is_err()`), and the

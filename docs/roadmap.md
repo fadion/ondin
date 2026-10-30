@@ -1,8 +1,9 @@
 # Ondin — Roadmap
 
 Open work only. **Later · First** is the editor's remaining gaps, which land before MCP and Command
-Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it. The
-other **Later** sections are deferred with a stated reason or trigger. Decided non-goals are in
+Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it.
+**Gaps** is what other design tools have and Ondin lacks; **Illustrations** is vector editing for
+icons, logos and simple illustrations. The other **Later** sections are deferred with a stated reason or trigger. Decided non-goals are in
 `non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
 reads true.
@@ -69,6 +70,89 @@ Nothing open.
   surface open (inspector, palette, menus, popovers, library), failing on any drawn text holding it.
   First the chrome, canvas labels, inspector, toasts and palette with that test; then the popovers,
   kits and library.
+
+## Gaps
+
+What Figma, Sketch and Penpot have that Ondin lacks, beyond prototyping, animation and AI. Gaps
+already listed elsewhere in this file are not repeated.
+
+### Big
+
+- **Pattern fills.** A layer or component tiled as a fill, with spacing, scale and offset. Today only
+  an image fill tiles (`app-image-editing.md`, framing modes).
+- **An editable way out.** Sketch, Penpot and Figma files come in (`library.md`, *Import files*);
+  nothing editable goes back, only SVG and PDF. A `.penpot` export is the candidate: an open format,
+  and `penpot_in` already maps it, so the writer is the reader's mapping in reverse.
+
+### Medium
+
+- **Find and replace** in text across the page or the document. The layers search matches names only.
+- **Component documentation.** A description and a link on a main, shown in the insert picker; and
+  preferred values on a swap property, offered first in its picker.
+- **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
+  together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
+
+### Small
+
+- **Pixel preview.** The canvas rasterized at 1x and enlarged with hard pixel edges, so the
+  anti-aliasing a viewer gets is visible. The pixel grid (`grid.rs`) shows where pixels fall over
+  artwork drawn at device resolution, so a half-pixel edge looks sharp; the preview shows it blur.
+- **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
+  the dictionary, untagged text falls back to the system's input languages. The OS checker
+  (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.
+  Squiggles are edit chrome only, never exported; suggestions head the text context menu; the stored
+  text is checked, not its case transform.
+- **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every
+  `Ctrl+S` pins one. An optional label, editable in the version card, and a *Save named version…*
+  palette command that pins and asks for one.
+- **Colour-blind simulation** as a switch in the contrast check mode.
+- **Leading trim** — a text box trimmed from cap height to baseline.
+- **Diamond gradients.** The Figma importer reads them as radial.
+- **A luminance mask mode** beside Shape and Alpha (`MaskMode`).
+- **`.ai` files through the PDF import.** An Illustrator file saved with PDF compatibility is a PDF;
+  the import accepts the `pdf` extension only.
+
+## Illustrations
+
+Vector editing enough for icons, logos and simple illustrations without leaving Ondin.
+
+### Highest value
+
+- **A shape builder.** Drag across overlapping shapes to merge the regions crossed; `Alt`-drag removes
+  them. With it, **Divide**, which cuts overlaps into separate paths. The faces come from the planar
+  arrangement of the selection's outlines (`i_overlay` is already a dependency) and land as plain
+  paths. Weigh it, with the next two items, against vector networks (*Later · First*) before that
+  model change: for a designer they cover most of what a network offers.
+- **Snapping for points.** Pen anchors and dragged points snap to the pixel grid only
+  (`app-snapping.md`, `snap_point`). Add anchors and segments of other paths, intersections, and,
+  for node-tool handles, `Shift` angle steps (`canvas::handle_tx` reads `Alt` only; the pen already
+  steps by 45°).
+- **Cutting paths.** Split a path at an anchor into two subpaths, delete a segment to open a closed
+  path, and a knife that cuts along a drawn line. *Delete* on points always heals.
+- **Repeat with a transform.** *Repeat around origin…*: N copies turned about the transform origin
+  (rays, teeth, ticks); and *Transform again*, the last move, rotation or scale applied once more.
+- **Icon-ready SVG export.** Options for `currentColor`, a viewBox from the frame, number precision,
+  and outlined versus stroked output; and one action that writes every main of a component set as a
+  folder of SVGs.
+- **Pixel-fit.** A command moving anchors and stroke edges onto whole or half pixels, so 16–24px
+  icons render crisp.
+
+### Medium
+
+- **Warp and distort.** Free distort by four corners, and arc, flag and bulge presets, baked into
+  a plain path on commit.
+- **Image trace.** A raster sketch or logo to paths (a tracer such as `vtracer`, then `fit` and
+  *Simplify*).
+- **Mirror symmetry while drawing** about an axis. A flipped linked copy already works as a
+  workaround.
+- **Blend between two shapes** in N steps.
+- **Path cleanup.** Remove redundant points, add points evenly, and smooth only the selected anchors
+  (*Simplify* works on the whole path).
+
+### Small
+
+- **Segment length and angle** readout while drawing with the pen.
+- **Spiral and arc tools.**
 
 ## Later · Components and layout
 

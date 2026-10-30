@@ -362,6 +362,11 @@ pub(crate) struct FrameIndex {
     frames: Vec<NodeId>,
     /// Every layer that carries a canvas tag, in paint order ([`OndinApp::tagged`]).
     tagged: Vec<NodeId>,
+    /// Every slice on the page, bottom first ([`OndinApp::page_slices`]).
+    pub(crate) slices: Vec<NodeId>,
+    /// Every main's instances ([`OndinApp::instances_of`]), filled on the first ask
+    /// at this revision rather than with the walk: most documents have no mains.
+    instances: Option<std::collections::HashMap<NodeId, Vec<NodeId>>>,
     /// Those of them with world bounds, paired with the bounds.
     pub(crate) boxes: Vec<(NodeId, Rect)>,
     /// Whether the document has any main, linked layer or set, so a move's drop
@@ -3626,6 +3631,12 @@ impl OndinApp {
                 .copied()
                 .filter(|id| wears_tag(doc, *id))
                 .collect();
+            index.slices = all
+                .iter()
+                .copied()
+                .filter(|id| matches!(doc.get(*id).map(|n| n.kind()), Some(NodeKind::Slice { .. })))
+                .collect();
+            index.instances = None;
             index.frames = all
                 .into_iter()
                 .filter(|id| {
@@ -3650,6 +3661,20 @@ impl OndinApp {
     #[cfg(test)]
     pub(crate) fn frame_walks(&self) -> u64 {
         self.frame_index.borrow().walks
+    }
+
+    /// `component::instances_of`, answered from one pass per revision shared by
+    /// every main: the canvas and the component cards ask it every frame, a set's
+    /// card once per variant.
+    pub(crate) fn instances_of(&self, main: NodeId) -> Vec<NodeId> {
+        self.with_frames(|_| ());
+        let mut index = self.frame_index.borrow_mut();
+        index
+            .instances
+            .get_or_insert_with(|| ondin_core::component::instances_by_main(&self.session.doc))
+            .get(&main)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Every artboard, in paint order, from the [`FrameIndex`] memo.

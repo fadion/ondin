@@ -7170,6 +7170,17 @@ impl OndinApp {
             return None;
         }
         let corner = self.selection_quad(id, rect, ppp)?[0];
+        // A tag off the canvas is not laid out. It sits within three lines above
+        // the corner and runs right from it, no wider than `reach`: the name plus
+        // room for a mode, a count or a main's name, at a generous advance a glyph.
+        let reach = (node.name().chars().count() + 80) as f32 * PT * 1.5;
+        if corner.x > rect.right()
+            || corner.x + reach < rect.left()
+            || corner.y < rect.top()
+            || corner.y - 3.0 * PT > rect.bottom()
+        {
+            return None;
+        }
         let doc = &self.session.doc;
         // A component set's tag is a tab: glyph, name, then the clash or (while
         // selected) the variant count. `PLACEHOLDER` leaves the ink to
@@ -7225,7 +7236,7 @@ impl OndinApp {
             words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
             mode_word(&mut job, color::COMPONENT_INK_DIM);
             if self.session.selection.contains(id) {
-                let n = ondin_core::component::instances_of(doc, id).len();
+                let n = self.instances_of(id).len();
                 let count = match n {
                     1 => "1 instance".to_string(),
                     n => format!("{n} instances"),
@@ -7375,7 +7386,7 @@ impl OndinApp {
             if !doc.get(*main).is_some_and(|n| n.component()) {
                 continue;
             }
-            for inst in ondin_core::component::instances_of(doc, *main) {
+            for inst in self.instances_of(*main) {
                 // Another page's are not on this canvas.
                 if doc.page_of(inst) == Some(self.session.page)
                     && self.shown_visible(inst)
@@ -15585,6 +15596,36 @@ mod frame_menu_door_tests {
         app.session.adopt_document(doc, None);
         app.canvas_px = (800, 600);
         (app, frame)
+    }
+
+    /// A frame scrolled off the canvas has no tag, so neither the drawing nor a
+    /// hover pick lays one out.
+    /// flip: drop `frame_label`'s off-canvas return → fails at "scrolled far left".
+    #[test]
+    fn a_frame_off_the_canvas_has_no_tag() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, frame) = app_with_an_occupied_frame(&ctx);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let tagged = |app: &OndinApp| {
+            let mut out = false;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| out = app.frame_label(ui, frame, rect, 1.0).is_some(),
+            );
+            out
+        };
+        app.session.camera.zoom = 1.0;
+        app.session.camera.center = Point::new(100.0, 75.0);
+        assert!(tagged(&app), "the fixture: in view, tagged");
+        app.session.camera.center = Point::new(6000.0, 75.0);
+        assert!(!tagged(&app), "scrolled far left");
+        app.session.camera.center = Point::new(100.0, -2000.0);
+        assert!(!tagged(&app), "scrolled below");
     }
 
     /// A component set's tag is a tab on the frame's top edge; it adds the variant count

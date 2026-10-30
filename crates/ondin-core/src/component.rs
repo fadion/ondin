@@ -527,15 +527,26 @@ pub fn instance_root(doc: &Document, id: NodeId) -> Option<NodeId> {
 /// Never one inside the vault: a kit main nesting `main` holds a copy there that
 /// no one can see, pick or edit, and it must not be selected or counted.
 pub fn instances_of(doc: &Document, main: NodeId) -> Vec<NodeId> {
+    instances_by_main(doc).remove(&main).unwrap_or_default()
+}
+
+/// [`instances_of`] for every main at once, keyed by main: one pass over the
+/// document, for a reader that asks of many mains or every frame.
+pub fn instances_by_main(doc: &Document) -> std::collections::HashMap<NodeId, Vec<NodeId>> {
     let nodes = doc.node_map();
-    let mut out: Vec<NodeId> = nodes
+    let mut out: std::collections::HashMap<NodeId, Vec<NodeId>> = Default::default();
+    for n in nodes
         .values()
         .filter(|n| n.link.is_some() && is_instance_root(nodes, n))
         .filter(|n| !doc.in_vault(n.id))
-        .filter(|n| main_of(doc, n.id) == Some(main))
-        .map(|n| n.id)
-        .collect();
-    out.sort();
+    {
+        if let Some(main) = main_of(doc, n.id) {
+            out.entry(main).or_default().push(n.id);
+        }
+    }
+    for ids in out.values_mut() {
+        ids.sort();
+    }
     out
 }
 

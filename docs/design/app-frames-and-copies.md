@@ -15,7 +15,8 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
   sits, its chip or tab being its only handle. A frame or instance inside another frame, a group, a main or an instance wears none.
 - The tag sits above the top-left corner, outside the box: 5px in from the left edge, 5px between
   text bottom and the frame's top edge, 11pt, at the dark theme's `text::muted()` alpha in either theme, in the page's ink (`canvas::ground_text`), or `color::SELECT` when selected. Drawn
-  under every overlay but the pixel grid.
+  under every overlay but the pixel grid. A frame whose tag cannot reach the canvas has none, so
+  neither the drawing nor a pick lays out the tags of frames out of view.
 - Component tags: a main's is a violet chip (same selected or not); an instance's a violet label with
   an outline hexagon (`color::COMPONENT`); neither ever takes `color::SELECT` (§5.3d). **A frame instance
   on its page shows its tag only while it is selected or entered** (a group instance has none); a selected main does not bring its

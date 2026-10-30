@@ -494,7 +494,7 @@ impl OndinApp {
                 return Some(Face::Set { set: *one });
             }
             if node.component() {
-                let instances = component::instances_of(doc, *one).len();
+                let instances = self.instances_of(*one).len();
                 if let Some(set) = ondin_core::variant::set_of(doc, *one) {
                     return Some(Face::Variant {
                         main: *one,
@@ -2060,6 +2060,33 @@ mod tests {
     fn face_of(app: &mut OndinApp, ids: &[NodeId]) -> Option<Face> {
         app.session.selection.set(ids.to_vec());
         app.component_face()
+    }
+
+    /// A main's instance count, read through the per-revision memo, follows a
+    /// commit that removes an instance.
+    /// flip: keep `FrameIndex::instances` across a refill → fails at "after the
+    /// delete".
+    #[test]
+    fn the_instance_count_follows_a_commit() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            matches!(
+                face_of(&mut f.app, &[f.m]),
+                Some(Face::Main { instances: 1, .. })
+            ),
+            "the fixture: one instance"
+        );
+        f.app
+            .session
+            .commit(Transaction(vec![Operation::DeleteNode { id: f.i }]));
+        assert!(
+            matches!(
+                face_of(&mut f.app, &[f.m]),
+                Some(Face::Main { instances: 0, .. })
+            ),
+            "after the delete"
+        );
     }
 
     /// Each selection gets its face: a main, an instance, a child, two instances

@@ -826,10 +826,7 @@ impl OndinApp {
         let Some(vs) = s.set().cloned() else { return };
         let name = s.name().to_string();
         let variants = variant::variants(doc, set);
-        let instances: usize = variants
-            .iter()
-            .map(|v| component::instances_of(doc, *v).len())
-            .sum();
+        let instances: usize = variants.iter().map(|v| self.instances_of(*v).len()).sum();
         let clash = clash_text(doc, set);
         // Every write the card asks for, built after it is drawn (§15 D1009).
         let mut edits: Vec<Deferred> = Vec::new();
@@ -1001,7 +998,7 @@ impl OndinApp {
                                             variants: using.len(),
                                             instances: using
                                                 .iter()
-                                                .map(|u| component::instances_of(doc, *u).len())
+                                                .map(|u| self.instances_of(*u).len())
                                                 .sum(),
                                         },
                                     ));

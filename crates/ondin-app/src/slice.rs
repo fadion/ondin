@@ -19,23 +19,11 @@ use ondin_core::{NodeId, NodeKind};
 const FAINT: f32 = 0.45;
 
 impl OndinApp {
-    /// Every slice on the current page, bottom first.
+    /// Every slice on the current page, bottom first, from the walk the
+    /// [`crate::app::FrameIndex`] memo makes once per revision: the canvas asks
+    /// every frame.
     pub(crate) fn page_slices(&self) -> Vec<NodeId> {
-        fn walk(doc: &ondin_core::Document, id: NodeId, out: &mut Vec<NodeId>) {
-            let Some(node) = doc.get(id) else { return };
-            for c in node.children() {
-                if doc
-                    .get(*c)
-                    .is_some_and(|n| matches!(n.kind(), NodeKind::Slice { .. }))
-                {
-                    out.push(*c);
-                }
-                walk(doc, *c, out);
-            }
-        }
-        let mut out = Vec::new();
-        walk(&self.session.doc, self.session.page, &mut out);
-        out
+        self.with_frames(|i| i.slices.clone())
     }
 
     /// The topmost shown, unlocked slice whose box holds `world`: what a click with

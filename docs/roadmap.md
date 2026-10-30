@@ -18,10 +18,6 @@ Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, p
 1,090 effect layers), 2560×1440 on an RTX 4070 Ti: smooth at 80% zoom and above, dropping frames
 below it, and ~13 fps with the whole grid in view.
 
-- **Per-frame walks of the whole document in the chrome.** `page_slices` (every frame, with no
-  slices), `tree_is_all_collapsed` (the layers header's icon), `draw_frame_labels` (every label,
-  on screen or not), `frame_label_at` (every label rebuilt per hover pick, up to three picks a
-  frame), and `component::instances_of` (two full scans a frame while a main is selected).
 - **Level of detail in the scene walk.** Zoomed out, `build_scene` takes ~28 ms and the GPU side
   ~47 ms, a third of it effect jobs for layers a few pixels wide. Skip ink under half a device pixel;
   draw an effect's layer plain when its reach is under a pixel at the current zoom.

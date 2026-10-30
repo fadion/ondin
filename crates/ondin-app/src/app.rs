@@ -550,6 +550,15 @@ pub struct OndinApp {
     /// The row a Shift-click measures its range from: the last one clicked *without*
     /// Shift, so a range can be stretched and shrunk from one end.
     pub(crate) layers_range_anchor: Option<NodeId>,
+    /// The width the widest layer row in view wants, its whole name and the pinned
+    /// controls' room: measured by the tree's walk, and the width its scroll area
+    /// lays the rows out at on the next frame.
+    pub(crate) layers_tree_w: f32,
+    /// The x-range of the tree's scroll viewport, set before the scroll area each
+    /// frame: the rows pin their tint and controls to it. Not the content's clip
+    /// rect, which egui widens past the viewport by `clip_rect_margin`. `None` when
+    /// the tree is drawn bare, outside any scroll area, where each row is its own band.
+    pub(crate) layers_view_x: Option<egui::Rangef>,
     /// Layer-name filter. `Some` while the search field is open, even when empty;
     /// closing it clears the filter, so a search can be emptied and retyped without the
     /// tree jumping back to its collapsed state.
@@ -1340,6 +1349,8 @@ impl OndinApp {
             scroll_layers_to_selection: false,
             opening: None,
             layers_range_anchor: None,
+            layers_tree_w: 0.0,
+            layers_view_x: None,
             layer_filter: None,
             layer_drag: None,
             layers_edge: EdgeDwell::default(),
@@ -7582,12 +7593,15 @@ impl OndinApp {
                     if folded {
                         return;
                     }
-                    let tree = egui::ScrollArea::vertical()
+                    // The area fills the rest, and its bars never take room.
+                    self.layers_view_x = Some(ui.available_rect_before_wrap().x_range());
+                    let tree = egui::ScrollArea::both()
                         .auto_shrink([false, false])
                         // History may leave the tree no room at all; egui's default floor
                         // would draw it over History.
                         .min_scrolled_height(0.0)
-                        // No bar, though it still scrolls.
+                        // No bar, though it still scrolls: sideways on Shift+wheel, which
+                        // egui reads as horizontal.
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
                             // A row dragged to the tree's edge scrolls it, on the canvas autopan's
@@ -7621,6 +7635,10 @@ impl OndinApp {
                                 ))
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.y = 1.0;
+                                    // As wide as the longest name in view and no wider:
+                                    // a floor read off the scroll offset let a fling hold
+                                    // the view past every name.
+                                    ui.set_min_width(self.layers_tree_w);
                                     self.layers_tree(ui);
                                     // The empty space below the last row is a context-menu
                                     // target; allocated, so it cannot steal a row's right-click.

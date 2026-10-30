@@ -137,11 +137,11 @@ pub(crate) const DEFAULT_W: f32 = 300.0;
 ///
 /// 210 is chosen by one reading: a top-level row keeps 108.5pt of name while
 /// hovered, so `Rectangle 12` (75.06) fits and `Button primary hover` (124.34)
-/// clips, the same names as
+/// runs on under the eye, the same names as
 /// `panel_width_tests::the_minimum_keeps_a_real_layer_name_on_a_top_level_row`.
 /// The other reading, a four-deep row's hovered name room reaching zero, crosses at
-/// 194.5; 210 is left above it on purpose. Below this a nested row's name is drawn
-/// underneath the eye. The header is not binding: the search field flexes and the
+/// 194.5; 210 is left above it on purpose. Below this a nested row's name starts
+/// under the eye's cover. The header is not binding: the search field flexes and the
 /// eyebrow plus its three 20pt buttons want well under the 198pt of content.
 pub(crate) const MIN_W: f32 = 210.0;
 
@@ -359,7 +359,8 @@ enum RowBadge {
     Icon(&'static str, f32),
 }
 
-/// How far a layer name stops short of what the row draws on its right.
+/// How far short of what the row draws on its right a long name starts to be
+/// covered.
 const NAME_CLEAR: f32 = 6.0;
 
 /// What a row draws on its right, for [`name_limit`]: each is an x on the row, or
@@ -376,8 +377,9 @@ struct NameLimit {
     badge_left: Option<f32>,
 }
 
-/// Where a layer row's name must stop: short of the leftmost thing the row draws on
-/// its right, and a point inside the row's own edge, which is the panel's.
+/// Where a layer row's name room ends: short of the leftmost thing the row draws on
+/// its right, and a point inside the row's own edge, which is the panel's. A name
+/// running past it is covered from here ([`cover_row_end`]).
 fn name_limit(l: NameLimit) -> f32 {
     let mut right = match l.mark {
         true => l.row_right - MARK_SLOT,
@@ -394,6 +396,67 @@ fn name_limit(l: NameLimit) -> f32 {
         right = right.min(badge - NAME_CLEAR);
     }
     right
+}
+
+/// How far a name fades out before the row's pinned controls.
+const NAME_FADE: f32 = 24.0;
+/// The solid ground a covered name leaves before the controls, on top of
+/// [`NAME_CLEAR`].
+const COVER_PAD: f32 = 6.0;
+
+/// The tint a row lays over the panel: dragged, selected, hovered, or none.
+fn row_tint(dragged: bool, selected: bool, hovered: bool) -> Option<egui::Color32> {
+    if dragged {
+        Some(theme::color::text_a(20))
+    } else if selected {
+        Some(color::SELECT_ROW)
+    } else if hovered {
+        Some(theme::color::text_a(12))
+    } else {
+        None
+    }
+}
+
+/// What a row looks like under its tint, opaque, for covering a name with.
+fn row_ground(dragged: bool, selected: bool, hovered: bool) -> egui::Color32 {
+    let panel = color::PANEL;
+    row_tint(dragged, selected, hovered).map_or(panel, |t| panel.blend(t))
+}
+
+/// Hide a name that runs on under the row's pinned controls: the row's own ground
+/// from [`COVER_PAD`] before `from` to the right of `row`, the row's part in view,
+/// faded in over [`NAME_FADE`] before that.
+fn cover_row_end(p: &egui::Painter, row: egui::Rect, from: f32, ground: egui::Color32) {
+    let from = from - COVER_PAD;
+    let solid = egui::Rect::from_min_max(egui::pos2(from, row.top()), row.right_bottom());
+    p.rect_filled(
+        solid,
+        egui::CornerRadius {
+            ne: 5,
+            se: 5,
+            ..Default::default()
+        },
+        ground,
+    );
+    // A point into the solid, over its anti-aliased left edge, or the name shows
+    // through the seam between the two.
+    let fade = egui::Rect::from_min_max(
+        egui::pos2(from - NAME_FADE, row.top()),
+        egui::pos2(from + 1.0, row.bottom()),
+    );
+    let clear = egui::Color32::TRANSPARENT;
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(fade.left_top(), clear);
+    mesh.colored_vertex(egui::pos2(from, row.top()), ground);
+    mesh.colored_vertex(egui::pos2(from, row.bottom()), ground);
+    mesh.colored_vertex(fade.left_bottom(), clear);
+    mesh.colored_vertex(fade.right_top(), ground);
+    mesh.colored_vertex(fade.right_bottom(), ground);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    mesh.add_triangle(1, 4, 5);
+    mesh.add_triangle(1, 5, 2);
+    p.add(egui::Shape::mesh(mesh));
 }
 
 /// Type size for the base operand's `stack-simple`, so it inks the same height as
@@ -1017,6 +1080,8 @@ impl OndinApp {
 
         // Every row the walk draws, for the guides and the drop hint ([`TreeRow`]).
         let mut drawn = Vec::new();
+        // Measured afresh by the rows in view; the scroll area lays out next frame's.
+        let was_w = std::mem::take(&mut self.layers_tree_w);
         match &shown {
             Some(rows) if rows.is_empty() => {
                 ui.add_space(6.0);
@@ -1029,6 +1094,9 @@ impl OndinApp {
             // Collected whether or not the guides are on: cheaper than a second
             // preference read per row.
             _ => self.layers_row(ui, root, 0, shown.as_ref(), &mut drawn),
+        }
+        if self.layers_tree_w != was_w {
+            ui.ctx().request_repaint();
         }
         if self.prefs.tree_guides {
             paint_tree_guides(
@@ -1475,14 +1543,20 @@ impl OndinApp {
                     self.thumbs
                         .texture(ui.ctx(), self.canvas.images(), &b.image, THUMB)
                 });
+            // The part of the row in view, inset by the tree's padding: the row is as
+            // wide as the widest name in view and scrolls sideways under it, while
+            // the tint, the controls, the badge and the mark stay pinned to it.
+            let pad = f32::from(TREE_PAD_X);
+            let view = self.layers_view_x.map_or(rect.x_range(), |v| {
+                egui::Rangef::new(v.min + pad, v.max - pad)
+            });
+            // The view itself, not its overlap with the row: scrolled to the end, the
+            // row can stop a few points short of the view, and the controls with it.
+            let band = egui::Rect::from_x_y_ranges(view, rect.y_range());
             let p = ui.painter();
             let r5 = egui::CornerRadius::same(5);
-            if being_dragged {
-                p.rect_filled(rect, r5, theme::color::text_a(20));
-            } else if selected {
-                p.rect_filled(rect, r5, color::SELECT_ROW);
-            } else if hovered {
-                p.rect_filled(rect, r5, theme::color::text_a(12));
+            if let Some(tint) = row_tint(being_dragged, selected, hovered) {
+                p.rect_filled(band, r5, tint);
             }
             let cy = rect.center().y;
             let left = rect.left();
@@ -1490,7 +1564,8 @@ impl OndinApp {
             // Right-side controls: eye / lock (on hover, or when toggled off),
             // [`EYE_PITCH`] apart. Their x's are worked out before the caret is
             // painted because all three go into one [`RowTargets`].
-            let lock_x = rect.right() - LOCK_INSET;
+            let right = band.right();
+            let lock_x = right - LOCK_INSET;
             let eye_x = lock_x - EYE_PITCH;
             // Also while bound (§15 D1060), as a hidden layer's eye is.
             let show_eye = hovered || !visible || bound_eye;
@@ -1593,7 +1668,7 @@ impl OndinApp {
                     );
                 }
             }
-            // The badge is laid out before the name, which stops short of it. Drawn
+            // The badge is laid out before the name, which is covered short of it. Drawn
             // only while neither lock is: they share the row's end.
             let badge = badge.filter(|_| !locked && !show_lock).map(|b| {
                 // One layout for both, differing only in the font.
@@ -1607,12 +1682,12 @@ impl OndinApp {
                 // `bound_eye_tests`); a glyph badge clears it where it is.
                 let right = match worded && show_eye {
                     true => eye_x - BOUND_EYE.x / 2.0 - 4.0,
-                    false => rect.right() - edge,
+                    false => right - edge,
                 };
                 (p.layout_no_wrap(s, font, theme::text::FAINT), right)
             });
             let name_right = name_limit(NameLimit {
-                row_right: rect.right(),
+                row_right: right,
                 mark: mark.is_some(),
                 lock: (show_lock || locked).then_some(lock_x),
                 eye: show_eye.then_some((eye_x, bound_eye)),
@@ -1620,15 +1695,28 @@ impl OndinApp {
             });
             let renaming = matches!(&self.renaming_layer, Some((n, _)) if *n == id);
             if !renaming {
+                // Whole, never cut: the tree scrolls sideways to the rest.
                 let x = icon_x + NAME_GAP;
-                let mut job = egui::text::LayoutJob::simple_singleline(
-                    name.to_string(),
-                    egui::FontId::proportional(12.5),
-                    name_col,
-                );
-                job.wrap = egui::text::TextWrapping::truncate_at_width((name_right - x).max(0.0));
-                let galley = p.layout_job(job);
+                let galley =
+                    p.layout_no_wrap(name.to_string(), egui::FontId::proportional(12.5), name_col);
+                let name_end = x + galley.size().x;
                 p.galley(egui::pos2(x, cy - galley.size().y / 2.0), galley, name_col);
+                // Room for the whole name and, scrolled to its end, a hovered row's
+                // eye and lock after it. Hovered whatever the row is now, so a
+                // hover does not change the width.
+                let controls = right
+                    - name_limit(NameLimit {
+                        row_right: right,
+                        mark: mark.is_some(),
+                        lock: Some(lock_x),
+                        eye: Some((eye_x, bound_eye)),
+                        badge_left: None,
+                    });
+                self.layers_tree_w = self.layers_tree_w.max(name_end - rect.left() + controls);
+                if name_end > name_right {
+                    let ground = row_ground(being_dragged, selected, hovered);
+                    cover_row_end(p, band, name_right, ground);
+                }
             }
 
             if show_eye {
@@ -1684,7 +1772,7 @@ impl OndinApp {
             // The mark sits after the lock and eye at the row's very edge, in every
             // row state (§15 D981).
             if let Some(m) = mark {
-                let at = egui::pos2(rect.right() - MARK_SLOT / 2.0 + 1.0, cy);
+                let at = egui::pos2(right - MARK_SLOT / 2.0 + 1.0, cy);
                 match m {
                     RowMark::Override => {
                         p.circle_filled(at, 2.0, theme::text::MUTED);
@@ -1854,15 +1942,17 @@ impl OndinApp {
 
     /// Scroll to the selection once, on the frame it changed; the topmost selected
     /// row wins. Only when the row is not wholly in view, and a jump, not a glide
-    /// (§15 D1026).
+    /// (§15 D1026). Up and down only: the row is as wide as the widest name, so
+    /// asked of its whole box the scroll would also jump sideways every time.
     fn scroll_to_selected_row(&mut self, ui: &egui::Ui, rect: egui::Rect) {
         if !self.scroll_layers_to_selection {
             return;
         }
         self.scroll_layers_to_selection = false;
-        if !ui.clip_rect().contains_rect(rect) {
+        let clip = ui.clip_rect();
+        if rect.top() < clip.top() || rect.bottom() > clip.bottom() {
             ui.scroll_to_rect_animation(
-                rect,
+                egui::Rect::from_x_y_ranges(clip.x_range(), rect.y_range()),
                 Some(egui::Align::Center),
                 egui::style::ScrollAnimation::none(),
             );
@@ -2989,8 +3079,8 @@ mod name_limit_tests {
         })
     }
 
-    /// The name stops short of the leftmost thing on the row's right, and a point
-    /// inside the row when nothing is there.
+    /// The name's room ends short of the leftmost thing on the row's right, and a
+    /// point inside the row when nothing is there.
     #[test]
     fn the_name_stops_short_of_the_rows_right_hand_end() {
         assert_eq!(
@@ -3013,42 +3103,17 @@ mod name_limit_tests {
         );
     }
 
-    /// The painted text shapes of one whole frame, with their rects.
-    fn texts(
-        ctx: &egui::Context,
-        app: &mut OndinApp,
-        events: Vec<egui::Event>,
-    ) -> Vec<(String, egui::Rect)> {
-        let mut frame = eframe::Frame::_new_kittest();
-        let time = ctx.input(|i| i.time) + 0.1;
-        let out = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1320.0, 820.0),
-                )),
-                time: Some(time),
-                events,
-                ..Default::default()
-            },
-            |ui| eframe::App::ui(app, ui, &mut frame),
-        );
-        out.shapes
-            .iter()
-            .filter_map(|c| match &c.shape {
-                egui::Shape::Text(t) => {
-                    Some((t.galley.text().to_string(), t.visual_bounding_rect()))
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Drawn, a long frame name ends before the frame's size, and hovered, before the
-    /// eye that replaces it.
-    /// flip: the name laid out without `truncate_at_width` → fails at the size.
+    /// A long frame name is drawn whole, running on under the frame's size, which
+    /// sits on the row's own ground painted over the name; Shift+wheel scrolls the
+    /// name sideways while the size stays at the panel's edge.
+    /// flip: `layers_row` without its `cover_row_end` → fails at "covered";
+    /// `ScrollArea::vertical` for the tree → fails at "scrolled sideways"; a floor of
+    /// offset + view on the tree's width → fails at "no further than the longest name";
+    /// the tint painted on the whole row → fails at "the tint stays". The band read
+    /// off the content's clip rect does not bite: headless, the panel's clip caps
+    /// egui's widening of it, so this frame shows no gap between the two.
     #[test]
-    fn a_long_frame_name_clears_its_size_and_the_eye() {
+    fn a_long_frame_name_is_whole_and_scrolls_under_its_size() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
@@ -3061,35 +3126,144 @@ mod name_limit_tests {
                 name: long.into(),
             }
         ])));
-        let mut shapes = Vec::new();
-        for _ in 0..3 {
-            shapes = texts(&ctx, &mut app, vec![]);
-        }
-        let find = |shapes: &[(String, egui::Rect)], f: &dyn Fn(&str) -> bool| {
-            shapes.iter().find(|(t, _)| f(t)).map(|(_, r)| *r)
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut pass = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let time = ctx.input(|i| i.time) + 0.1;
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1320.0, 820.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut kitten),
+            );
+            out.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
         };
-        let name = find(&shapes, &|t| t.starts_with("Ko-padel")).expect("the row was drawn");
-        let size = find(&shapes, &|t| {
-            t.contains(" × ") && t.chars().next().is_some_and(|c| c.is_ascii_digit())
-        })
-        .expect("the frame's size was drawn");
+        let text_at = |shapes: &[egui::Shape], f: &dyn Fn(&str) -> bool| {
+            shapes
+                .iter()
+                .position(|s| matches!(s, egui::Shape::Text(t) if f(t.galley.text())))
+        };
+        let rect_of = |s: &egui::Shape| match s {
+            egui::Shape::Text(t) => t.visual_bounding_rect(),
+            _ => unreachable!(),
+        };
+        let is_size =
+            |t: &str| t.contains(" × ") && t.chars().next().is_some_and(|c| c.is_ascii_digit());
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let n = text_at(&shapes, &|t| t == long).expect("the whole name is drawn");
+        let s = text_at(&shapes, &is_size).expect("the frame's size is drawn");
+        let (name, size) = (rect_of(&shapes[n]), rect_of(&shapes[s]));
         assert!(
-            name.right() <= size.left() - NAME_CLEAR + 0.5,
-            "the name runs to {} over the size at {}",
+            name.right() > size.left(),
+            "the fixture: the name runs on under the size ({} past {})",
             name.right(),
             size.left()
         );
-
-        let at = name.center();
-        texts(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
-        let shapes = texts(&ctx, &mut app, vec![]);
-        let name = find(&shapes, &|t| t.starts_with("Ko-padel")).unwrap();
-        let eye = find(&shapes, &|t| t == icon::EYE).expect("hovered, the eye is drawn");
         assert!(
-            name.right() <= eye.left(),
-            "hovered, the name runs to {} under the eye at {}",
-            name.right(),
-            eye.left()
+            shapes[n..s]
+                .iter()
+                .any(|sh| matches!(sh, egui::Shape::Rect(r)
+                if r.fill == color::PANEL
+                    && r.rect.left() <= size.left() - NAME_CLEAR
+                    && r.rect.right() >= size.right())),
+            "covered: the row's ground lies between the name and its size"
+        );
+
+        // Hovered before any scroll: the tint and the eye to hold still against.
+        let hover_tint = |shapes: &[egui::Shape]| {
+            shapes.iter().find_map(|s| match s {
+                egui::Shape::Rect(r)
+                    if r.fill == theme::color::text_a(12)
+                        && r.rect.y_range().contains(name.center().y) =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+        };
+        pass(
+            &mut app,
+            vec![egui::Event::PointerMoved(name.left_center())],
+        );
+        for _ in 0..3 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let tint = hover_tint(&shapes).expect("hovered, the row is tinted");
+        let eye = rect_of(&shapes[text_at(&shapes, &|t| t == icon::EYE).expect("the eye")]);
+
+        let wheel = |dx: f32| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dx),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::SHIFT,
+        };
+        pass(&mut app, vec![wheel(-60.0)]);
+        // Off the row, or it shows its eye and lock in place of the size.
+        pass(&mut app, vec![egui::Event::PointerGone]);
+        for _ in 0..3 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let moved = rect_of(&shapes[text_at(&shapes, &|t| t == long).expect("still drawn")]);
+        let stayed = rect_of(&shapes[text_at(&shapes, &is_size).expect("the size")]);
+        assert!(
+            moved.left() < name.left() - 10.0,
+            "scrolled sideways: the name starts at {} after {}",
+            moved.left(),
+            name.left()
+        );
+        assert_eq!(
+            stayed.left(),
+            size.left(),
+            "the size stays at the panel's edge"
+        );
+
+        // Hovered at the far end of the scroll, the tint and the eye are where they
+        // were before it: pinned to the view, not to the row scrolling under them.
+        pass(
+            &mut app,
+            vec![egui::Event::PointerMoved(name.left_center())],
+        );
+        pass(&mut app, vec![wheel(-2000.0)]);
+        for _ in 0..3 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let far = rect_of(&shapes[text_at(&shapes, &|t| t == long).expect("still drawn")]);
+        assert!(
+            far.left() < moved.left(),
+            "the fixture: scrolled on past {} to {}",
+            moved.left(),
+            far.left()
+        );
+        assert_eq!(hover_tint(&shapes), Some(tint), "the tint stays in view");
+        let far_eye = rect_of(&shapes[text_at(&shapes, &|t| t == icon::EYE).expect("the eye")]);
+        assert_eq!(far_eye, eye, "the eye stays at the panel's edge");
+        pass(&mut app, vec![egui::Event::PointerGone]);
+
+        // The scroll reaches no further than the longest name in view: shortened,
+        // the name fits and the view comes back, rather than holding empty room.
+        let short = "Ko-padel";
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::SetName {
+                id: frame,
+                name: short.into(),
+            }
+        ])));
+        for _ in 0..3 {
+            shapes = pass(&mut app, vec![]);
+        }
+        let back = rect_of(&shapes[text_at(&shapes, &|t| t == short).expect("the short name")]);
+        assert_eq!(
+            back.left(),
+            name.left(),
+            "no further than the longest name: the short one starts where the long one did"
         );
     }
 }
@@ -4704,7 +4878,8 @@ mod panel_width_tests {
              the default name of a new shape lays out at {common:.2} — the panel \
              can be dragged to a width where nothing is readable"
         );
-        // A long name still clips, or `MIN_W` is a comfortable width, not a floor.
+        // A long name still runs under the eye, or `MIN_W` is a comfortable width,
+        // not a floor.
         let long = lays_out("Button primary hover");
         assert!(
             long > room,
@@ -4723,8 +4898,8 @@ mod panel_width_tests {
         let at_min = hovered_name_room(MIN_W, 4);
         assert!(
             at_min >= 0.0,
-            "four deep at the {MIN_W}pt minimum, the name has {at_min:.2}pt — it is \
-             drawn underneath the eye, which is a broken row rather than a tight one"
+            "four deep at the {MIN_W}pt minimum, the name has {at_min:.2}pt — it \
+             starts under the eye's cover, which is a broken row rather than a tight one"
         );
         // Just under the crossing, so this is a band rather than a one-sided bound.
         let below = hovered_name_room(194.0, 4);

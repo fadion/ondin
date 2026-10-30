@@ -16,6 +16,7 @@
 //! What has no counterpart is counted in [`Read::report`], one row per kind, worded
 //! as `svg_in` reports are.
 
+use crate::container::{AutoMargins, Insets, LengthPct};
 use crate::document::Document;
 use crate::effect::{Effect, EffectKind, Shadow};
 use crate::export::{ExportFormat, ExportScale, ExportSpec};
@@ -97,6 +98,7 @@ pub fn read(
         layers: FxHashMap::default(),
         masters: FxHashMap::default(),
         pending: Vec::new(),
+        pins: FxHashMap::default(),
         swatches: FxHashMap::default(),
         layer_styles: FxHashMap::default(),
         text_styles: FxHashMap::default(),
@@ -185,6 +187,8 @@ struct Builder<'a> {
     /// Symbol id → its master's node.
     masters: FxHashMap<String, NodeId>,
     pending: Vec<Pending>,
+    /// An instance's insets inside its master, by its Sketch id, for its copy.
+    pins: FxHashMap<String, Insets>,
     swatches: FxHashMap<String, VarId>,
     layer_styles: FxHashMap<String, LayerStyle>,
     text_styles: FxHashMap<String, (StyleId, TextStyle)>,
@@ -378,6 +382,10 @@ impl Builder<'_> {
         let mut masking = false;
         // The next free index: a layer left out takes none.
         let mut at = 0;
+        // A master's children are pinned as Sketch pins them, so a resized
+        // instance moves and stretches them as Sketch does.
+        let master_box = (str_of(parent_layer, "_class") == "symbolMaster")
+            .then(|| Frame::of(parent_layer).size());
         for layer in arr(parent_layer, "layers") {
             if masking && b(layer, "shouldBreakMaskChain") {
                 self.count(
@@ -390,7 +398,46 @@ impl Builder<'_> {
             masking |= b(layer, "hasClippingMask");
             if self.layer(layer, parent, at, master) {
                 at += 1;
+                if let Some(size) = master_box {
+                    self.pin(str_of(layer, "do_objectID"), layer, size);
+                }
+                // Sketch draws a mask's own paint under what it clips; Ondin's
+                // mask paints nothing, so a copy just above it carries the
+                // paint, clipped to the same outline.
+                if b(layer, "hasClippingMask") && paints(layer) {
+                    let mut ink = layer.clone();
+                    ink["hasClippingMask"] = false.into();
+                    ink["do_objectID"] = format!("{}/paint", str_of(layer, "do_objectID")).into();
+                    if let Some(o) = ink.as_object_mut() {
+                        o.remove("exportOptions");
+                        o.remove("flow");
+                    }
+                    if self.layer(&ink, parent, at, master) {
+                        at += 1;
+                        if let Some(size) = master_box {
+                            self.pin(str_of(&ink, "do_objectID"), &ink, size);
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    /// Pin the node made for the master child `layer` (Sketch id `sid`) inside
+    /// its master of `size`, as its resizing constraint says. A group takes no
+    /// insets; an instance's wait for its copy.
+    fn pin(&mut self, sid: &str, layer: &Value, size: Size) {
+        let class = str_of(layer, "_class");
+        if class == "group" {
+            return;
+        }
+        let Some(insets) = insets_of(layer, size) else {
+            return;
+        };
+        if class == "symbolInstance" {
+            self.pins.insert(sid.to_owned(), insets);
+        } else if let Some(&id) = self.layers.get(sid) {
+            self.push(Operation::SetInsets { id, insets });
         }
     }
 
@@ -422,7 +469,14 @@ impl Builder<'_> {
                     frame.placement(),
                     layer,
                 );
-                let fill = if b(layer, "hasBackgroundColor") {
+                let fill = if class == "symbolMaster" {
+                    // A master's background shows in its instances only when
+                    // it says so; Ondin's main and copies look alike, so the
+                    // instances decide.
+                    (b(layer, "hasBackgroundColor") && b(layer, "includeBackgroundColorInInstance"))
+                        .then(|| layer.get("backgroundColor").map(color))
+                        .flatten()
+                } else if b(layer, "hasBackgroundColor") {
                     layer.get("backgroundColor").map(color)
                 } else {
                     // Sketch draws an artboard without a background white.
@@ -1217,6 +1271,9 @@ impl Builder<'_> {
             id: root,
             name: str_of(&p.layer, "name").to_owned(),
         });
+        if let Some(&insets) = self.pins.get(&p.sketch_id) {
+            ops.push(Operation::SetInsets { id: root, insets });
+        }
         let master_size = match self.doc.get(main).map(|n| n.kind()) {
             Some(NodeKind::Artboard { size, .. }) => *size,
             _ => frame.size(),
@@ -1230,7 +1287,7 @@ impl Builder<'_> {
                 "Resized symbols",
                 1,
                 "instances",
-                "Their layers kept the master's positions",
+                "Their layers follow their pins, except inside groups",
             );
         }
         // The placeholder's own flags, written again on the copy.
@@ -1624,6 +1681,62 @@ fn num_in(v: &Value, path: &[&str]) -> f64 {
 
 fn b(v: &Value, k: &str) -> bool {
     b_of(v, k)
+}
+
+/// A layer's Sketch resizing constraint as insets inside a box of `outer`.
+/// Sketch clears a bit for each thing pinned: right 1, width 2, left 4,
+/// bottom 8, height 16, top 32. A pinned edge is a px inset; a free size between
+/// free edges scales, as percentages; a pinned size between free edges keeps its
+/// offset from the centre, centred by auto margins between insets that put it
+/// where it is.
+fn insets_of(layer: &Value, outer: Size) -> Option<Insets> {
+    let c = layer.get("resizingConstraint").and_then(Value::as_i64)?;
+    if !(1..=63).contains(&c) {
+        return None;
+    }
+    let pinned = |bit: i64| c & bit == 0;
+    let f = Frame::of(layer);
+    let axis = |start: bool, size: bool, end: bool, at: f64, len: f64, extent: f64| {
+        let after = extent - at - len;
+        match (start, end) {
+            (true, true) => (Some(LengthPct::Px(at)), Some(LengthPct::Px(after)), false),
+            (true, false) => (Some(LengthPct::Px(at)), None, false),
+            (false, true) => (None, Some(LengthPct::Px(after)), false),
+            _ if !size && extent > 0.0 => (
+                Some(LengthPct::Percent(at / extent * 100.0)),
+                Some(LengthPct::Percent(after / extent * 100.0)),
+                false,
+            ),
+            _ => {
+                let d = extent - 2.0 * at - len;
+                let (a, b) = if d >= 0.0 { (0.0, d) } else { (-d, 0.0) };
+                (Some(LengthPct::Px(a)), Some(LengthPct::Px(b)), true)
+            }
+        }
+    };
+    let (left, right, h) = axis(pinned(4), pinned(2), pinned(1), f.x, f.w, outer.width);
+    let (top, bottom, v) = axis(pinned(32), pinned(16), pinned(8), f.y, f.h, outer.height);
+    Some(Insets {
+        top,
+        right,
+        bottom,
+        left,
+        margin_auto: AutoMargins {
+            top: v,
+            bottom: v,
+            left: h,
+            right: h,
+        },
+    })
+}
+
+/// Whether a layer has a fill or border turned on.
+fn paints(layer: &Value) -> bool {
+    ["fills", "borders"].iter().any(|k| {
+        arr_in(layer, &["style", k])
+            .iter()
+            .any(|p| b_of(p, "isEnabled"))
+    })
 }
 
 fn str_in<'a>(v: &'a Value, path: &[&str]) -> &'a str {

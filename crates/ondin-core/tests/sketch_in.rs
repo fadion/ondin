@@ -420,6 +420,129 @@ fn instances_sharing_a_parent_keep_their_places() {
     }
 }
 
+/// A symbol master without a background shown in its instances comes in
+/// unfilled, so an instance does not draw the white Sketch shows only behind
+/// the master; an artboard without a background is still white.
+/// flip: fill a master as an artboard in `layer` → fails at the instance.
+#[test]
+fn a_masters_background_shows_only_when_its_instances_take_it() {
+    let master = json!({
+        "_class": "symbolMaster", "do_objectID": "M", "name": "Cover", "symbolID": "S",
+        "frame": frame(0.0, 0.0, 40.0, 40.0), "hasBackgroundColor": false,
+        "backgroundColor": color(1.0, 1.0, 1.0), "includeBackgroundColorInInstance": false,
+        "layers": [],
+    });
+    let board = json!({
+        "_class": "artboard", "do_objectID": "A", "name": "Screen",
+        "frame": frame(100.0, 0.0, 200.0, 200.0),
+        "layers": [{ "_class": "symbolInstance", "do_objectID": "I", "name": "Art",
+                     "symbolID": "S", "frame": frame(0.0, 0.0, 40.0, 40.0) }],
+    });
+    let r = import(sketch(
+        &[("P", "Page", json!([master, board]))],
+        json!({}),
+        &[],
+    ));
+    let fills = |name: &str| r.doc.get(one(&r.doc, name)).unwrap().paint().fills.len();
+    assert_eq!(fills("Art"), 0, "the instance");
+    assert_eq!(fills("Screen"), 1, "the artboard");
+}
+
+/// A master's layers are pinned as Sketch pins them, and an instance's copy
+/// carries the pins, so resizing it stretches them: both edges pinned is two px
+/// insets, nothing pinned scales by percentages, a pinned width alone centres.
+/// flip: skip `pin` in `children` → fails at the stretched layer.
+#[test]
+fn a_masters_layers_take_their_pins_as_insets() {
+    use ondin_core::container::{AutoMargins, Insets, LengthPct::*};
+    let layer = |id: &str, name: &str, x: f64, c: i64| {
+        let mut r = rectangle(id, x, 0.0, json!({}));
+        r["name"] = json!(name);
+        r["resizingConstraint"] = json!(c);
+        r
+    };
+    let master = json!({
+        "_class": "symbolMaster", "do_objectID": "M", "name": "Bar", "symbolID": "S",
+        "frame": frame(0.0, 0.0, 100.0, 20.0),
+        // Left and right and top pinned; nothing; width alone.
+        "layers": [layer("A", "Stretched", 30.0, 63 & !1 & !4 & !32),
+                   layer("B", "Scaled", 30.0, 63), layer("C", "Centred", 30.0, 63 & !2 & !16)],
+    });
+    let instance = json!({ "_class": "symbolInstance", "do_objectID": "I", "name": "Wide",
+        "symbolID": "S", "frame": frame(200.0, 0.0, 300.0, 20.0) });
+    let r = import(sketch(
+        &[("P", "Page", json!([master, instance]))],
+        json!({}),
+        &[],
+    ));
+    let copy = |name: &str| {
+        let wide = one(&r.doc, "Wide");
+        let found: Vec<NodeId> = ondin_core::build::subtree_nodes(&r.doc, &[wide])
+            .into_iter()
+            .filter(|&n| r.doc.get(n).is_some_and(|n| n.name() == name))
+            .collect();
+        *r.doc.get(found[0]).unwrap().insets()
+    };
+    let stretched = copy("Stretched");
+    assert_eq!(
+        (stretched.left, stretched.right),
+        (Some(Px(30.0)), Some(Px(30.0)))
+    );
+    assert_eq!((stretched.top, stretched.bottom), (Some(Px(0.0)), None));
+    let scaled = copy("Scaled");
+    assert_eq!(
+        (scaled.left, scaled.right),
+        (Some(Percent(30.0)), Some(Percent(30.0)))
+    );
+    assert_eq!(
+        copy("Centred"),
+        Insets {
+            left: Some(Px(0.0)),
+            right: Some(Px(0.0)),
+            top: Some(Px(0.0)),
+            bottom: Some(Px(0.0)),
+            margin_auto: AutoMargins {
+                top: true,
+                right: true,
+                bottom: true,
+                left: true
+            },
+        }
+    );
+}
+
+/// A mask's own fill is drawn under what it clips, as Sketch draws it: the mask
+/// paints nothing in Ondin, so an unmasking copy just above it carries the fill.
+/// flip: skip the copy in `children` → fails at the layer count.
+#[test]
+fn a_masks_fill_is_drawn_under_what_it_clips() {
+    let mut mask = rectangle(
+        "K",
+        0.0,
+        0.0,
+        json!({ "fills": [fill(color(0.8, 0.8, 0.8))] }),
+    );
+    mask["hasClippingMask"] = json!(true);
+    mask["name"] = json!("Mask");
+    let group = json!({
+        "_class": "group", "do_objectID": "G", "name": "Cover",
+        "frame": frame(0.0, 0.0, 40.0, 20.0), "layers": [mask, rectangle("R", 0.0, 0.0, json!({}))],
+    });
+    let r = import(sketch(&[("P", "Page", json!([group]))], json!({}), &[]));
+    let page = r.doc.first_page();
+    let masks = named(&r.doc, page, "Mask");
+    assert_eq!(masks.len(), 2, "the mask and its paint");
+    let (clip, ink) = (r.doc.get(masks[0]).unwrap(), r.doc.get(masks[1]).unwrap());
+    assert!(clip.mask() && !ink.mask());
+    assert_eq!(ink.paint().fills.len(), 1);
+    let cover = r.doc.get(one(&r.doc, "Cover")).unwrap().children().to_vec();
+    assert_eq!(
+        cover,
+        [masks[0], masks[1], one(&r.doc, "Rect")],
+        "under the clipped layer"
+    );
+}
+
 /// A swatch is a colour variable a fill naming it is bound to; a shared style is
 /// an Ondin style its users are bound to while they match it.
 #[test]

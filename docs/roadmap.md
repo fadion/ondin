@@ -16,10 +16,6 @@ Found testing Import files on real Sketch files.
 
 - **Convert a group to a frame and back.** No command does it; a dropdown in the identity card of a
   group or frame would.
-- **Nested frames read as groups.** A frame inside a frame draws its title like a top-level one, so a
-  design of nested frames is a wall of names. Hide the title of a nested frame and select it as a
-  group (by its content, not its title strip); only top-level frames are page containers.
-
 - **Background blur.** Not built: `EffectKind` has no such effect. Neither vello 0.9 nor vello_cpu 0.2
   has a backdrop filter, so both backends need a pass that renders what lies behind the layer, blurs
   it and clips it to the shape. The code export would write `backdrop-filter`; SVG cannot express a

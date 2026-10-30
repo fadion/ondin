@@ -324,13 +324,13 @@ pub fn pivot_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> 
 ///
 /// This is what "clicking a grouped layer selects the group" needs: the hit test
 /// finds a leaf and the picker decides how far up to hand the selection. The run
-/// stops at the root, and at a frame with no group above it, since a group is the
-/// only container the user assembled by hand.
+/// stops at the first ancestor that is neither a group, a boolean nor a frame.
 ///
-/// A frame inside a group is a rung, not a stop (§15 D876): a card frame in a row
-/// group is part of the row, so a click on its text selects the row and each
-/// double-click steps one level in. Only frames outside the outermost group are
-/// dropped, which keeps a top-level frame's contents directly clickable.
+/// A frame inside another frame or a group is a rung, as a group is: a card frame
+/// in a row is part of the row, so a click on its text selects the outermost such
+/// rung and each double-click steps one level in. Only a frame sitting on its
+/// page ([`is_page_frame`]) is dropped, which keeps a page frame's contents
+/// directly clickable.
 ///
 /// An instance root is a rung of its own whatever its kind (§15 D981 (b)), an
 /// exception to §15 D22 only for instance roots.
@@ -360,16 +360,16 @@ pub fn group_chain(doc: &Document, id: NodeId, inside: Option<NodeId>) -> Vec<No
         chain.push(c);
         cursor = node.parent();
     }
-    // Frames above the outermost group are not rungs, so the chain ends where the
-    // last group does, unless the walk stopped at `inside` (everything below it is
-    // inside a group). An instance root picks like a group (§15 D981 (b)) and ends
-    // the trimming.
+    // A page frame is not a rung, unless the walk stopped at `inside` (everything
+    // below it is inside a group). An instance root picks like a group (§15 D981
+    // (b)) and is kept.
     let nodes = doc.node_map();
-    while !reached_inside
-        && chain
-            .last()
-            .and_then(|c| doc.get(*c))
-            .is_some_and(|n| is_frame(n.kind()) && !crate::component::is_instance_root(nodes, n))
+    if !reached_inside
+        && let Some(&last) = chain.last()
+        && is_page_frame(doc, last)
+        && !doc
+            .get(last)
+            .is_some_and(|n| crate::component::is_instance_root(nodes, n))
     {
         chain.pop();
     }
@@ -379,6 +379,14 @@ pub fn group_chain(doc: &Document, id: NodeId, inside: Option<NodeId>) -> Vec<No
 
 fn is_frame(kind: &crate::node::NodeKind) -> bool {
     matches!(kind, crate::node::NodeKind::Artboard { .. })
+}
+
+/// Whether `id` is a frame sitting directly on its page: a page container, which
+/// wears a name tag and is picked by it or its edge, where a frame inside another
+/// frame or a group is picked as a group is.
+pub fn is_page_frame(doc: &Document, id: NodeId) -> bool {
+    doc.get(id)
+        .is_some_and(|n| is_frame(n.kind()) && n.parent().is_some_and(|p| doc.is_page(p)))
 }
 
 /// The kinds [`group_chain`] walks through: the containers a click resolves upward
@@ -781,6 +789,25 @@ mod tests {
             group_chain(&doc, card, Some(card)).is_empty(),
             "stepped into the card, a click on its body is the card"
         );
+    }
+
+    /// A frame inside a frame is a rung with no group around it: page frame →
+    /// section frame → card frame → text picks the section, then the card.
+    /// flip: trim every trailing frame, not the page frame alone → fails at the
+    /// first assertion (`[]`).
+    #[test]
+    fn a_frame_inside_a_frame_picks_as_a_group() {
+        let mut ids = IdSource::new(0xF4F4);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (board, section, card, text) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        create(&mut doc, board, root, frame());
+        create(&mut doc, section, board, frame());
+        create(&mut doc, card, section, frame());
+        create(&mut doc, text, card, leaf());
+        assert_eq!(group_chain(&doc, text, None), vec![section, card]);
+        assert_eq!(group_chain(&doc, text, Some(section)), vec![card]);
+        assert!(is_page_frame(&doc, board) && !is_page_frame(&doc, section));
     }
 
     /// A boolean behaves as a group for a click: otherwise the click selects an

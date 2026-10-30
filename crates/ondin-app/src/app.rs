@@ -334,6 +334,19 @@ mod in_flight_tests {
     }
 }
 
+/// Whether `id` wears a name tag on the canvas: a frame on its page, and a main
+/// or a component set, wherever it sits. A frame inside another frame or a group
+/// is part of the design, picked as a group is, and a tag on each would bury it.
+pub(crate) fn wears_tag(doc: &ondin_core::Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| match n.kind() {
+        NodeKind::Artboard { .. } => {
+            n.component() || n.set().is_some() || ondin_core::query::is_page_frame(doc, id)
+        }
+        NodeKind::Group => n.component(),
+        _ => false,
+    })
+}
+
 /// The document's artboards and their world boxes, cached against the revision they
 /// were read at (the walk is a full traversal a move drag would run per node, per frame).
 ///
@@ -3583,19 +3596,12 @@ impl OndinApp {
                 .filter_map(|id| doc.get(*id))
                 .any(|n| n.component() || n.link().is_some() || n.set().is_some());
             index.tagged = all
-                .into_iter()
-                .filter(|id| {
-                    doc.get(*id).is_some_and(|n| match n.kind() {
-                        NodeKind::Artboard { .. } => true,
-                        NodeKind::Group => n.component(),
-                        _ => false,
-                    })
-                })
-                .collect();
-            index.frames = index
-                .tagged
                 .iter()
                 .copied()
+                .filter(|id| wears_tag(doc, *id))
+                .collect();
+            index.frames = all
+                .into_iter()
                 .filter(|id| {
                     matches!(
                         doc.get(*id).map(|n| n.kind()),
@@ -3625,8 +3631,8 @@ impl OndinApp {
         self.with_frames(|i| i.frames.clone())
     }
 
-    /// Every layer that carries a tag on the canvas (every artboard, each group that is
-    /// a main) in paint order, from the same memo as [`Self::artboards`].
+    /// Every layer that carries a tag on the canvas ([`wears_tag`]) in paint order,
+    /// from the same memo as [`Self::artboards`].
     pub(crate) fn tagged(&self) -> Vec<NodeId> {
         self.with_frames(|i| i.tagged.clone())
     }

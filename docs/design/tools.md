@@ -79,7 +79,7 @@ canvas resolves five of the seven targets, in order:
 1. a live text session;
 2. a point selection;
 3. a guide (`guide_at` answers `None` while guides are locked, so the canvas menu carries *Lock guides* itself);
-4. `pick_at_pointer` → `pick_for_click`, the query a left-click runs, including `Ctrl` deep-select and a frame's name tag;
+4. `pick_at_pointer` → `pick_for_click`, the query a left-click runs, including `Ctrl` deep-select and a page frame's or main's name tag;
 5. the empty canvas.
 
 Between the second and the third, the edited gradient's handles keep the button and open no menu

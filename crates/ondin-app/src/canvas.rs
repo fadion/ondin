@@ -6975,9 +6975,10 @@ impl OndinApp {
 
     /// The node a click at `world` resolves to, before group policy.
     ///
-    /// [`hit_test`] minus occupied frames, whose background passes presses to the
-    /// marquee; an empty frame and the name tag ([`Self::frame_label_at`]) stay
-    /// clickable. A frame inside a group or an instance is not skipped.
+    /// [`hit_test`] minus occupied page frames, whose background passes presses to
+    /// the marquee; an empty frame and the name tag ([`Self::frame_label_at`]) stay
+    /// clickable. A frame inside another frame, a group or an instance is not
+    /// skipped.
     pub(crate) fn pick_leaf(&self, world: Point) -> Option<NodeId> {
         let doc = &self.session.doc;
         hit_test(
@@ -7010,11 +7011,12 @@ impl OndinApp {
         self.session.camera.zoom.max(1e-6) / f64::from(self.canvas_ppp.max(1e-3))
     }
 
-    /// A frame with at least one layer in it — the case `pick_leaf` skips.
+    /// A page frame with at least one layer in it — the case `pick_leaf` skips. A
+    /// frame inside another frame or a group is picked as a group is.
     fn is_occupied_frame(&self, id: NodeId) -> bool {
-        self.session.doc.get(id).is_some_and(|n| {
-            matches!(n.kind(), NodeKind::Artboard { .. }) && !n.children().is_empty()
-        })
+        let doc = &self.session.doc;
+        ondin_core::query::is_page_frame(doc, id)
+            && doc.get(id).is_some_and(|n| !n.children().is_empty())
     }
 
     /// A selected frame whose box `world` falls in: dragging from inside it moves
@@ -7114,17 +7116,7 @@ impl OndinApp {
 
         let node = self.session.doc.get(id)?;
         let is_main = node.component();
-        let tagged = match node.kind() {
-            NodeKind::Artboard { .. } => true,
-            NodeKind::Group => is_main,
-            _ => false,
-        };
-        if !tagged {
-            return None;
-        }
-        // No tag inside an instance, nor on an instance inside a main
-        // (`tag_withheld`); a main keeps its chip, its only handle.
-        if !is_main && tag_withheld(&self.session.doc, id) {
+        if !crate::app::wears_tag(&self.session.doc, id) {
             return None;
         }
         if !self.shown_visible(id) {
@@ -9271,25 +9263,6 @@ pub(crate) fn sibling_slot_above(doc: &Document, id: NodeId) -> Option<(NodeId, 
     let parent = doc.get(id)?.parent()?;
     let at = doc.get(parent)?.children().iter().position(|c| *c == id)?;
     Some((parent, at + 1))
-}
-
-/// Whether `id`'s canvas tag is withheld because it sits **strictly** inside a
-/// component (a main or an instance root answers for its own position):
-/// - **anything inside an instance**: the instance's tag is its label, and an
-///   inner tag would be a pick past its group-like picking;
-/// - **an instance inside a main**, which picks like a group and never needed the
-///   tag as a handle. A plain frame inside a main keeps its tag: occupied, it is
-///   the frame's one handle besides its edge.
-fn tag_withheld(doc: &Document, id: NodeId) -> bool {
-    let instance = ondin_core::component::instance_root(doc, id) == Some(id);
-    let mut at = doc.get(id).and_then(|n| n.parent());
-    while let Some(n) = at.and_then(|a| doc.get(a)) {
-        if n.link().is_some() || (instance && n.component()) {
-            return true;
-        }
-        at = n.parent();
-    }
-    false
 }
 
 /// The colour a component's selection chrome takes: `COMPONENT` for a main or an
@@ -16133,12 +16106,12 @@ mod frame_menu_door_tests {
         );
     }
 
-    /// No tag inside an instance or on an instance inside a main, while a plain
-    /// frame inside a main keeps its tag (occupied, it is that frame's handle).
-    /// flip: `frame_label` without `tag_withheld` → fails at "an instance inside the main";
-    /// `tag_withheld` withholding below any main → fails at "a plain frame inside the main".
+    /// Only page frames and mains wear tags: a frame or an instance inside another
+    /// frame, a main or an instance has none, while the mains and the instance on
+    /// the page keep theirs.
+    /// flip: tag every frame in `wears_tag` → fails at "an instance inside a frame".
     #[test]
-    fn no_tag_inside_an_instance_nor_on_an_instance_inside_a_main() {
+    fn nested_frames_and_instances_wear_no_tag() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
@@ -16189,10 +16162,7 @@ mod frame_menu_door_tests {
             );
             out
         };
-        assert!(
-            tagged(&mut app, nested),
-            "the control: inside a plain frame"
-        );
+        assert!(!tagged(&mut app, nested), "an instance inside a frame");
 
         let inst = main_with_an_instance(&mut app, main);
         let copy = |app: &OndinApp, name: &str| {
@@ -16209,7 +16179,7 @@ mod frame_menu_door_tests {
         assert!(tagged(&mut app, main), "the main's chip");
         assert!(tagged(&mut app, icon), "the other main's chip");
         assert!(tagged(&mut app, inst), "the instance's tag");
-        assert!(tagged(&mut app, inner), "a plain frame inside the main");
+        assert!(!tagged(&mut app, inner), "a plain frame inside the main");
         assert!(!tagged(&mut app, nested), "an instance inside the main");
         assert!(!tagged(&mut app, inner_copy), "a frame inside the instance");
         assert!(
@@ -16454,8 +16424,9 @@ mod frame_menu_door_tests {
         );
     }
 
-    /// Where two name tags coincide, the tag painted last (the inner frame's) is the one a
-    /// click picks; paint order and pick are asserted together so neither can be flipped alone.
+    /// Where two name tags coincide — a page frame's and a main's at its corner — the
+    /// tag painted last (the inner main's) is the one a click picks; paint order and
+    /// pick are asserted together so neither can be flipped alone.
     /// flip: remove `.rev()` from `frame_label_at` → fails at the pick assertion (`Page` for `Header`).
     #[test]
     fn the_name_tag_you_can_read_is_the_one_a_click_picks() {
@@ -16492,6 +16463,11 @@ mod frame_menu_door_tests {
                 },
                 transform: None,
                 name: Some("Header".into()),
+            },
+            // A nested frame wears a tag only as a main.
+            Operation::SetComponent {
+                id: header,
+                component: true,
             },
         ]))
         .expect("build the fixture");
@@ -16556,11 +16532,10 @@ mod frame_menu_door_tests {
                 _ => None,
             })
             .next_back();
-        assert_eq!(
-            on_screen.as_deref(),
-            Some("Header"),
+        assert!(
+            on_screen.as_deref().is_some_and(|t| t.ends_with("Header")),
             "the inner frame's tag is painted last and is therefore the only word \
-             legible at that point"
+             legible at that point: {on_screen:?}"
         );
 
         assert_eq!(

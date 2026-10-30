@@ -8,9 +8,11 @@ designation, the Alt measure overlay, and the layers panel's range selection and
 
 ### Group-first (Figma semantics)
 
-- A click selects the outermost `Group` above the hit. A frame between groups is one of the levels (a
-  click on text in a card in a row selects the row; double-click steps to the card, then the text). An
-  instance is a level whatever its kind (§5.3d).
+- A click selects the outermost group-like layer above the hit. A frame inside another frame or a
+  group is one of the levels, as a group is; only a page frame (`query::is_page_frame`) is not, so
+  its contents stay directly clickable. Page frame → section frame → card frame → text: a click
+  selects the section, double-clicks step to the card, then the text. A card in a row group works
+  the same way. An instance is a level whatever its kind, a page-frame instance included (§5.3d).
 - `Ctrl` reaches the leaf; `Ctrl+Alt` the immediate child of the outermost group. Over a selection
   handle band `Ctrl` means skew instead (bands are dispatched before deep-select).
 - Both modifiers also **enter the group**, like a double-click. While `OndinApp::entered_group` is set,
@@ -49,10 +51,11 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - *Select inverse* (palette only, `OndinApp::select_inverse`): the unselected children of each
   selected outermost layer's parent, locked ones and slices skipped; it needs a selection. *Select
   same* skips slices too: every door here asks `may_select_in_bulk`.
-- The frame edge (`canvas::frame_edge_at`) checks both lock and visibility.
+- The page-frame edge (`canvas::frame_edge_at`) checks both lock and visibility.
 - **Exception**: a layers-panel row selects a locked layer (`layers::select_from_row` reads no lock);
   once selected, inspector rules apply (a lock stops dragging, not recolouring).
-- **Exception**: a frame's name tag selects a locked frame (`canvas::frame_label_at` reads no lock).
+- **Exception**: a name tag (a page frame's, a main's) selects its locked layer
+  (`canvas::frame_label_at` reads no lock).
   A name is not artwork, which is the panel row's argument too, and the tag's layer menu is the
   canvas's only route to *Unlock*, the only one at all in focus mode.
 - **A selection holding an effectively locked layer is not dragged** (`canvas::selection_locked`): it

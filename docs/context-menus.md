@@ -59,9 +59,9 @@ variable*).
 - **C4** — A locked layer has no canvas menu, except a locked frame through its name tag
   (`app-selection.md`, *Locked layers*). The panel menu and the tag's carry the full set, *Unlock*
   included (§5.9).
-- **C5** — A frame is right-clickable where it is left-clickable: its name tag, its edge
-  (`FRAME_EDGE_PICK_PX`, world AABB), or anywhere while empty. An occupied frame's interior passes
-  through to its contents.
+- **C5** — A frame is right-clickable where it is left-clickable. A page frame: its name tag, its
+  edge (`FRAME_EDGE_PICK_PX`, world AABB), or anywhere while empty; occupied, its interior passes
+  through to its contents. A frame inside another frame or a group picks as a group does.
 - **C6** — In the panel, the right-press commits an open rename.
 - **C7** — An unlocked guide under the pointer out-ranks layers (and becomes the selection). With
   *Lock guides* on, guides are not targets.

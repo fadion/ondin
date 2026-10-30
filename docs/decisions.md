@@ -152,6 +152,7 @@ Decided non-goals are in `docs/non-goals.md`.
 
 - **D134** A control that does not apply is shown disabled, never removed.
 - **D345** Dropping in the layers panel chooses the parent level by horizontal travel.
+- **Only a frame on its page is a page container**, as in Figma: it wears a name tag and is picked by it or its edge. A frame inside another frame or a group wears no tag and picks as a group does, so a design of nested frames is not a wall of names.
 - **D750** Focus mode hides the panels but keeps the rulers, guides and layout grids: they are editing aids, not app chrome.
 - **Focus mode and present mode are separate modes**: focus mode is for editing with the chrome hidden; present mode is view-only.
 - **Present mode is its own branch of `OndinApp::ui`**, which reads only its own keys and returns, not a flag the overlays and commands check.

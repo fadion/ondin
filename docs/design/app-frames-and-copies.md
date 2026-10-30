@@ -1,29 +1,35 @@
 # Frames on the canvas, moving between them, and copies
 
-How an occupied frame is picked (name tag and edge), how a moved layer changes frame or reorders in a
+How an occupied page frame is picked (name tag and edge), how a moved layer changes frame or reorders in a
 layout, where duplicates, pastes and Alt-drag copies land, what the clipboard carries (including
 between windows), and the hand-kept lists of transient state. Part of §9.4.
 
 ## 9.4 Frame name tags and picking
 
-- Every frame draws its name above its top-left corner, outside the box: 5px in from the left edge,
-  5px between text bottom and the frame's top edge, 11pt, `text::MUTED`, or `color::SELECT` when
-  selected. Drawn under every overlay but the pixel grid.
-- Component frames: a main's tag is a violet chip (same selected or not); an instance's a violet label
-  with an outline hexagon (`color::COMPONENT`); neither ever takes `color::SELECT`. Group mains are
-  tagged too (§5.3d).
-- No tag on a frame inside an instance, nor on an instance inside a main. A main keeps its chip
-  anywhere; a plain frame inside a main keeps its tag. **An instance's tag shows only while it is
-  selected or entered**; a selected main does not bring its instances' tags.
-- **Why the tag exists**: an occupied frame's background passes the press through to the marquee
-  (`canvas::pick_leaf` skips it, §5.10). Exceptions: a frame with a group above it picks with its
-  group chain (a card in a row selects the row); an instance, or a frame inside one, picks like a
-  group, background included. An **empty** frame is clickable anywhere; a frame that is already the
-  selection stays draggable from anywhere inside it (`selected_frame_at`).
+- **Only page frames are page containers.** A frame sitting on its page (`query::is_page_frame`)
+  wears a name tag and is picked by it or its edge; a frame inside another frame or a group is part of
+  the design and picks as a group does (`app-selection.md`), so a design of nested frames is not a
+  wall of names.
+- **Who wears a tag** is `app::wears_tag`, read by `OndinApp::tagged` (`FrameIndex::tagged`) and
+  `canvas::frame_label`: a page frame, and a main (frame or group) or a component set wherever it
+  sits, its chip or tab being its only handle. A frame or instance inside another frame, a group, a main or an instance wears none.
+- The tag sits above the top-left corner, outside the box: 5px in from the left edge, 5px between
+  text bottom and the frame's top edge, 11pt, `text::MUTED`, or `color::SELECT` when selected. Drawn
+  under every overlay but the pixel grid.
+- Component tags: a main's is a violet chip (same selected or not); an instance's a violet label with
+  an outline hexagon (`color::COMPONENT`); neither ever takes `color::SELECT` (§5.3d). **A frame instance
+  on its page shows its tag only while it is selected or entered** (a group instance has none); a selected main does not bring its
+  instances' tags.
+- **Why the tag exists**: an occupied page frame's background passes the press through to the marquee
+  (`canvas::pick_leaf` skips it, §5.10), unless the frame is an instance, which picks like a group,
+  background included. A nested frame's own fill is clickable like any layer's. An **empty** frame is
+  clickable anywhere; a page frame that is already the selection stays draggable from anywhere inside
+  it (`selected_frame_at`).
 - **One pick chain**: `canvas::pick_at_pointer` = tag, then `pick_leaf`, then the **edge**
-  (`FRAME_EDGE_PICK_PX`, 8pt either side of the border). Used by the select click, the context menu,
-  and `canvas::hover_target` (via `pick_at_pointer` and `pick_preview`). `begin_select_drag` adds
-  `selected_frame_at` on top. A press-drag in the edge strip moves the frame.
+  (`canvas::frame_edge_at`, occupied page frames only; `FRAME_EDGE_PICK_PX`, 8pt either side of the
+  border). Used by the select click, the context menu, and `canvas::hover_target` (via
+  `pick_at_pointer` and `pick_preview`). `begin_select_drag` adds `selected_frame_at` on top. A
+  press-drag in the edge strip moves the frame.
 - **Coincident tags**: `OndinApp::artboards` is depth-first paint order; tag readers walk
   `OndinApp::tagged` and take the **last** match — the one painted on top and readable.
 

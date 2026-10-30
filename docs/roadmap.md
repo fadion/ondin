@@ -12,6 +12,27 @@ reads true.
 
 Nothing open.
 
+## Now · Performance
+
+Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, paths, booleans and
+1,090 effect layers), 2560×1440 on an RTX 4070 Ti: smooth at 80% zoom and above, dropping frames
+below it, and ~13 fps with the whole grid in view; the layers list scrolls unevenly.
+
+- **Virtualise the layers tree.** `layers_row` walks every expanded row each frame and allocates a
+  widget for each, painted or not; `tree_guide_segments` builds every row's guides before culling.
+  Cache the flattened rows (per revision and expansion) and lay out only those in view.
+- **Per-frame walks of the whole document in the chrome.** `page_slices` (every frame, with no
+  slices), `tree_is_all_collapsed` (the layers header's icon), `draw_frame_labels` (every label,
+  on screen or not), `frame_label_at` (every label rebuilt per hover pick, up to three picks a
+  frame), and `component::instances_of` (two full scans a frame while a main is selected).
+- **Level of detail in the scene walk.** Zoomed out, `build_scene` takes ~28 ms and the GPU side
+  ~47 ms, a third of it effect jobs for layers a few pixels wide. Skip ink under half a device pixel;
+  draw an effect's layer plain when its reach is under a pixel at the current zoom.
+- **Render only on change.** Every repaint — a caret blink, the status-bar fade, a hover over a
+  panel — rebuilds and rasterises the whole page (`render.md`: v1 rebuilds the in-view scene per
+  frame). Keep the canvas texture while the document, camera and overrides are unchanged. A design
+  change to `render.md`'s rule.
+
 ## Later · First
 
 - **Background blur.** Not built: `EffectKind` has no such effect. Neither vello 0.9 nor vello_cpu 0.2

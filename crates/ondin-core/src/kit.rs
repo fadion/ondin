@@ -738,7 +738,7 @@ fn frozen_page(doc: &Document) -> (Node, crate::page::Page) {
     let root = crate::document::root_node(id, format!("{} 1", crate::page::PAGE_STEM));
     let page = crate::page::Page {
         id,
-        ground: doc.ground(id),
+        ground: doc.own_ground(id),
         draft: false,
     };
     (root, page)

@@ -718,7 +718,7 @@ mod tests {
             id: other,
             index: 1,
             name: "Archive".into(),
-            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            ground: None,
             draft: false,
             mode: None,
         }])));

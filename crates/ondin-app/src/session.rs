@@ -713,12 +713,13 @@ impl EditorSession {
         self.overrides.set_outline(ink);
     }
 
-    /// The canvas ground, including a colour being dragged in the picker.
-    /// The current page's ground, including any live edit of it.
+    /// The current page's ground as drawn, including any live edit of it.
     pub fn preview_ground(&self) -> Color {
-        self.overrides
-            .ground(self.page)
-            .unwrap_or_else(|| self.doc.ground(self.page))
+        match self.overrides.ground(self.page) {
+            Some(Some(c)) => c,
+            Some(None) => theme_canvas(),
+            None => page_ground(&self.doc, self.page),
+        }
     }
 
     /// Make `page` current: this page's camera and selection are parked and the
@@ -1846,12 +1847,17 @@ impl EditorSession {
 /// What separates two messages joined on the status line.
 pub const STATUS_JOIN: &str = " · ";
 
-/// The canvas ground a document starts on, and the one the Appearance panel's
-/// reset button returns to: near-black `#171718`.
-///
-/// Lives in core because it is also what a file written before the ground was
-/// saved means (`io::schema`); re-exported for the panels.
-pub use ondin_core::DEFAULT_CANVAS_BACKGROUND;
+/// The ground `page` is drawn on in the app: its own colour, or the theme's
+/// canvas for a page with none.
+pub fn page_ground(doc: &Document, page: NodeId) -> Color {
+    doc.own_ground(page).unwrap_or_else(theme_canvas)
+}
+
+/// The theme's canvas colour as a document colour, opaque.
+pub fn theme_canvas() -> Color {
+    let c = crate::theme::color::canvas();
+    Color::from_rgb8(c.r(), c.g(), c.b())
+}
 
 /// The styles the commit detached where the edit wrote over them, by name, for
 /// [`said_detached`]. Empty when the edit itself detached something — the
@@ -3511,7 +3517,7 @@ mod tests {
             id: other,
             index: 1,
             name: "Archive".into(),
-            ground: Color::WHITE,
+            ground: Some(Color::WHITE),
             draft: false,
             mode: None,
         }])));

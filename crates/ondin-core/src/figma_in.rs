@@ -139,7 +139,7 @@ pub fn read(
                 id,
                 index: i,
                 name,
-                ground: crate::DEFAULT_CANVAS_BACKGROUND,
+                ground: None,
                 draft: false,
                 mode: None,
             });
@@ -147,7 +147,7 @@ pub fn read(
         if let Some(bg) = page.get("backgroundColor") {
             b.push(Operation::SetPageGround {
                 id,
-                ground: colour(bg).with_alpha(1.0),
+                ground: Some(colour(bg).with_alpha(1.0)),
             });
         }
         for (j, child) in arr(page, "children").iter().enumerate() {

@@ -754,7 +754,11 @@ fn a_v9_kit_reshapes_its_published_document() {
         let pages = o.remove("pages").expect("a v10 save lists its pages");
         assert_eq!(pages.as_array().unwrap().len(), 1, "fixture: one page");
         o.insert("root".into(), pages[0]["id"].clone());
-        o.insert("canvas_background".into(), pages[0]["ground"].clone());
+        // A v9 file stored the colour itself; the kit's page has none of its own.
+        o.insert(
+            "canvas_background".into(),
+            serde_json::to_value(ondin_core::DEFAULT_CANVAS_BACKGROUND).unwrap(),
+        );
         o.insert("schema_version".into(), 9.into());
     }
     to_v9(&mut v);

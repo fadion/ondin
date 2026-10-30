@@ -351,6 +351,7 @@ fn apca_scores_lc() {
     let options = contrast::Options {
         level: Level::Apca,
         non_text: false,
+        default_ground: None,
     };
     let r = contrast::check_with(&d.doc, d.page, options, None);
     let f = only(&r);
@@ -394,6 +395,7 @@ fn non_text_measures_marks_not_surfaces() {
     let options = contrast::Options {
         level: Level::Aa,
         non_text: true,
+        default_ground: None,
     };
     let r = contrast::check_with(&d.doc, d.page, options, None);
     let icon_f = r.findings.iter().find(|f| f.id == icon).expect("measured");
@@ -591,6 +593,7 @@ fn a_bordered_mark_is_scored_by_the_colour_it_draws() {
     let options = contrast::Options {
         level: Level::Aa,
         non_text: true,
+        default_ground: None,
     };
     let r = contrast::check_with(&d.doc, d.page, options, Some(&[check_box]));
     let f = only(&r);

@@ -1058,15 +1058,12 @@ impl OndinApp {
         open
     }
     /// With nothing selected, the inspector describes the current page: its card,
-    /// then its ground colour, and a reset to the default that is dead while
-    /// already there.
+    /// then its ground colour as drawn, and a reset that clears the page's own
+    /// colour, dead while the page has none.
     fn inspector_empty(&mut self, ui: &mut egui::Ui) {
         let ground = self.session.preview_ground();
         let page = self.session.page;
-        let is_default = ground.to_rgba8().to_u8_array()
-            == crate::session::DEFAULT_CANVAS_BACKGROUND
-                .to_rgba8()
-                .to_u8_array();
+        let is_default = self.session.doc.own_ground(page).is_none();
         self.page_header(ui);
         self.colour_panel(
             ui,
@@ -1084,7 +1081,7 @@ impl OndinApp {
             || {
                 Transaction(vec![Operation::SetPageGround {
                     id: page,
-                    ground: crate::session::DEFAULT_CANVAS_BACKGROUND,
+                    ground: None,
                 }])
             },
         );
@@ -9889,7 +9886,7 @@ impl OndinApp {
             PaintSlot::Canvas => match paint::stops_of(&brush).first() {
                 Some((_, colour)) => Transaction(vec![Operation::SetPageGround {
                     id: self.session.page,
-                    ground: colour.with_alpha(1.0),
+                    ground: Some(colour.with_alpha(1.0)),
                 }]),
                 None => Transaction(Vec::new()),
             },
@@ -22111,18 +22108,27 @@ mod colour_panel_tests {
         reset_glyph(ctx, app, events).0
     }
 
-    /// The canvas reset is painted dead on the default and puts the ground back otherwise.
+    /// The canvas reset is painted dead on a page with no colour of its own, and
+    /// otherwise clears the page's colour so it follows the theme again. Run in the
+    /// light theme, whose canvas differs from `DEFAULT_CANVAS_BACKGROUND`.
     ///
     /// flip: `enabled_if(resettable)` → `enabled_if(false)` → fails at the glyph colour assertion only;
     /// the `&& resettable` re-test after `.clicked()` is unpinned (`changes_nothing` absorbs the commit).
+    /// The reset writing `Some(DEFAULT_CANVAS_BACKGROUND)` → fails at "the reset puts the ground back".
     #[test]
     fn the_canvas_reset_is_dead_on_the_default_and_puts_the_ground_back_otherwise() {
         let ctx = egui::Context::default();
         let mut app = canvas_app(&ctx);
+        crate::theme::apply(&ctx, crate::theme::color::Theme::Light);
         let ground = |app: &OndinApp| app.session.preview_ground().to_rgba8().to_u8_array();
-        let default = crate::session::DEFAULT_CANVAS_BACKGROUND
-            .to_rgba8()
-            .to_u8_array();
+        let default = crate::session::theme_canvas().to_rgba8().to_u8_array();
+        assert_ne!(
+            ondin_core::DEFAULT_CANVAS_BACKGROUND
+                .to_rgba8()
+                .to_u8_array(),
+            default,
+            "the fixture: the light canvas is not the headless default"
+        );
         let click = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -22149,7 +22155,7 @@ mod colour_panel_tests {
         app.session
             .try_commit(Transaction(vec![Operation::SetPageGround {
                 id: app.session.page,
-                ground: moved,
+                ground: Some(moved),
             }]))
             .expect("a ground the user picked");
         assert_ne!(ground(&app), default, "the fixture: the ground has moved");
@@ -22167,6 +22173,11 @@ mod colour_panel_tests {
         );
         reset_at(&ctx, &mut app, vec![click(at, false)]);
         assert_eq!(ground(&app), default, "the reset puts the ground back");
+        assert_eq!(
+            app.session.doc.own_ground(app.session.page),
+            None,
+            "by clearing the page's own colour, not by writing the default"
+        );
         assert_eq!(
             app.session.history.undo_depth(),
             depth + 1,

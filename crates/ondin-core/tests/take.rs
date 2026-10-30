@@ -107,7 +107,7 @@ fn fixture() -> F {
             id: archive,
             index: 1,
             name: "Archive".into(),
-            ground: Color::WHITE,
+            ground: Some(Color::WHITE),
             draft: false,
             mode: None,
         },

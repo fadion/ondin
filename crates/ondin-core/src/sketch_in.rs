@@ -368,7 +368,7 @@ impl Builder<'_> {
                 id,
                 index,
                 name: name.to_owned(),
-                ground: crate::DEFAULT_CANVAS_BACKGROUND,
+                ground: None,
                 draft: false,
                 mode: None,
             });

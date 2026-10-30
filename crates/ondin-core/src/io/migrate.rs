@@ -39,6 +39,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             8 => migrate_8_to_9(&mut value),
             9 => migrate_9_to_10(&mut value),
             10 => migrate_10_to_11(&mut value),
+            11 => migrate_11_to_12(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -330,5 +331,41 @@ fn migrate_10_to_11(value: &mut Value) {
         .filter(|d| d.is_object())
     {
         inner["schema_version"] = Value::from(11u32);
+    }
+}
+
+/// v11 → v12: a page's ground became optional, absent for a page with no colour
+/// of its own. Before v12 there was no way to say so, and an untouched page
+/// stored exactly the default, so a `ground` equal to it is removed; any other
+/// colour was picked and stays. The published document is migrated with it.
+///
+/// Compared as a parsed colour, not as JSON: a file stores the `f32` components
+/// in their shortest text, which reads back as a different `f64` than
+/// `serde_json::to_value` makes of the same `f32`.
+fn migrate_11_to_12(value: &mut Value) {
+    unground_defaults(value);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        unground_defaults(inner);
+    }
+}
+
+/// [`migrate_11_to_12`] for one document value.
+fn unground_defaults(doc: &mut Value) {
+    doc["schema_version"] = Value::from(12u32);
+    let Some(pages) = doc.get_mut("pages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for page in pages.iter_mut().filter_map(Value::as_object_mut) {
+        let default = page.get("ground").is_some_and(|g| {
+            serde_json::from_value::<peniko::Color>(g.clone())
+                .is_ok_and(|c| c == crate::document::DEFAULT_CANVAS_BACKGROUND)
+        });
+        if default {
+            page.remove("ground");
+        }
     }
 }

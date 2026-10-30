@@ -320,7 +320,7 @@ pub fn snapshot(doc: &Document, res: &Resolved) -> Snapshot {
             name: doc
                 .get(p.id)
                 .map_or_else(String::new, |n| n.name().to_string()),
-            ground: hex(p.ground).0,
+            ground: hex(doc.ground(p.id)).0,
             draft: p.draft,
             mode: doc.get(p.id).and_then(|n| n.mode()).map(|m| m.0.to_wire()),
         })

@@ -270,7 +270,7 @@ impl OndinApp {
             id,
             index: doc.pages().len(),
             name,
-            ground: doc.ground(self.session.page),
+            ground: doc.own_ground(self.session.page),
             draft: false,
             mode: None,
         }]);
@@ -955,7 +955,7 @@ mod tests {
                 id: second,
                 index: 1,
                 name: "Pricing".into(),
-                ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+                ground: None,
                 draft: false,
                 mode: None,
             },
@@ -1413,7 +1413,7 @@ mod tests {
             id: third,
             index: 2,
             name: "Archive".into(),
-            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            ground: None,
             draft: false,
             mode: None,
         }])));

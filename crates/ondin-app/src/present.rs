@@ -319,7 +319,7 @@ impl crate::app::OndinApp {
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
         );
-        let ground = self.session.doc.ground(page);
+        let ground = crate::session::page_ground(&self.session.doc, page);
         let matte = egui::Color32::from_rgba_unmultiplied(
             (ground.components[0] * 255.0) as u8,
             (ground.components[1] * 255.0) as u8,
@@ -601,7 +601,7 @@ mod tests {
             id,
             index,
             name: name.into(),
-            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            ground: None,
             draft: false,
             mode: None,
         };

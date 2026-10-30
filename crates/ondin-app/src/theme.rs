@@ -42,6 +42,11 @@ pub mod color {
         /// `--color-text` — the one near-neutral foreground everything derives from.
         text,
 
+        /// The ground of a page with no colour of its own (`Page::ground` is
+        /// `None`). The dark value is `ondin_core::DEFAULT_CANVAS_BACKGROUND`,
+        /// what everything headless draws such a page on.
+        canvas,
+
         // Grounds (text mixed toward the far end).
         /// Main container, canvas, inspector pane.
         bg,
@@ -151,6 +156,7 @@ pub mod color {
     /// layers pane, 16% the cards, 17% the raised ground.
     const DARK: Palette = Palette {
         text: Color32::from_rgb(233, 233, 237),
+        canvas: Color32::from_rgb(23, 23, 24),
         bg: Color32::from_rgb(23, 23, 24),
         topbar: Color32::from_rgb(30, 30, 31),
         panel: Color32::from_rgb(33, 33, 33),
@@ -194,6 +200,7 @@ pub mod color {
     /// to hold contrast on white.
     const LIGHT: Palette = Palette {
         text: Color32::from_rgb(30, 30, 33),
+        canvas: Color32::from_rgb(238, 238, 240),
         bg: Color32::from_rgb(236, 236, 238),
         topbar: Color32::from_rgb(245, 245, 246),
         panel: Color32::from_rgb(247, 247, 248),

@@ -633,9 +633,9 @@ fn is_light_ground(ground: Color) -> bool {
 const MUTED_ON_PAGE: u8 = 158;
 
 /// Text drawn straight on the canvas, at `alpha`: light text on a dark page,
-/// near-black on a light one, so a frame's name survives either. The page is the
-/// document's, not the chrome's, so the light theme still writes light ink on a
-/// dark page.
+/// near-black on a light one, so a frame's name survives either. `ground` is the
+/// resolved page ground, not the chrome's theme: a page with a dark colour of its
+/// own still takes light ink under the light theme.
 fn ground_text(ground: Color, alpha: u8) -> egui::Color32 {
     if is_light_ground(ground) {
         egui::Color32::from_rgba_unmultiplied(24, 24, 24, alpha)
@@ -16158,7 +16158,7 @@ mod frame_menu_door_tests {
                 app.session
                     .commit(Transaction(vec![Operation::SetPageGround {
                         id: page,
-                        ground,
+                        ground: Some(ground),
                     }]))
             );
             let out = ctx.run_ui(

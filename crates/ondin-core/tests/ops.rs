@@ -1545,7 +1545,7 @@ fn cloning_a_document_shares_its_image_bytes_rather_than_copying_them() {
     let page = doc2.first_page();
     doc2.apply(&Transaction(vec![Operation::SetPageGround {
         id: page,
-        ground: Color::WHITE,
+        ground: Some(Color::WHITE),
     }]))
     .expect("any committed edit");
     assert_eq!(

@@ -123,11 +123,14 @@ fn one_place(x: f64) -> String {
 }
 
 /// What a check measures.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Options {
     pub level: Level,
     /// Also measure shapes under [`NON_TEXT_MAX`] across, at [`Level::non_text`].
     pub non_text: bool,
+    /// The ground a page with no colour of its own is measured over; `None` for
+    /// [`ondin_core::DEFAULT_CANVAS_BACKGROUND`].
+    pub default_ground: Option<Color>,
 }
 
 /// The largest a shape's shorter side may be, in world units, for the non-text
@@ -261,6 +264,7 @@ pub fn check(doc: &Document, page: NodeId, level: Level) -> Report {
         Options {
             level,
             non_text: false,
+            default_ground: None,
         },
         None,
     )
@@ -393,7 +397,10 @@ fn check_one(
 ) -> Report {
     let level = options.level;
     let mut report = Report::default();
-    let ground = doc.ground(page);
+    let ground = doc
+        .own_ground(page)
+        .or(options.default_ground)
+        .unwrap_or(ondin_core::DEFAULT_CANVAS_BACKGROUND);
     for &id in subjects {
         let Some(node) = doc.get(id) else { continue };
         let skip = |report: &mut Report, why| {

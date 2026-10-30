@@ -2392,7 +2392,7 @@ mod tests {
             id: second,
             index: 1,
             name: "Archive".into(),
-            ground: ondin_core::peniko::Color::WHITE,
+            ground: Some(ondin_core::peniko::Color::WHITE),
             draft: false,
             mode: None,
         }]))

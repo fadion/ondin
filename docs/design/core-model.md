@@ -177,7 +177,7 @@ pub struct Document {
 }
 pub struct Page {                  // page.rs — what a page has that is not a field of its root
     pub id: NodeId,                // the page's parentless Root node
-    pub ground: peniko::Color,     // opaque; behind and around the page's frames
+    pub ground: Option<peniko::Color>, // opaque; behind and around the page's frames; None = the viewer's default
     pub draft: bool,               // left out of everything gathered from every page
 }
 impl Document {
@@ -191,7 +191,8 @@ impl Document {
     pub fn page_ids(&self) -> impl Iterator<Item = NodeId>;
     pub fn gathered_pages(&self) -> impl Iterator<Item = NodeId>; // the non-draft pages, in order
     pub fn page_of(&self, id: NodeId) -> Option<NodeId>;          // None in the vault
-    pub fn ground(&self, page: NodeId) -> peniko::Color;
+    pub fn ground(&self, page: NodeId) -> peniko::Color;              // own, else DEFAULT_CANVAS_BACKGROUND
+    pub fn own_ground(&self, page: NodeId) -> Option<peniko::Color>;  // the stored colour, if any
     pub fn vault(&self) -> Option<NodeId>;
     pub fn in_vault(&self, id: NodeId) -> bool;   // the vault or under it — never resolved
     pub fn published(&self) -> Option<&kit::Published>;
@@ -215,7 +216,7 @@ pub struct Guide {                 // guide.rs
 - `Document::new` makes a one-page document named `Page 1` (`page::PAGE_STEM`); new pages take the lowest free `Page N` (`page::free_name`). The vault is never a page.
 - A **draft** page is left out of everything that gathers from every page — kit publishing (§5.3e), *Export all* and *Export frames, all pages…* (§7), presenting past the current page, batch rename's *All pages* past the current page, the library cover — and kept by everything aimed at it directly. `gathered_pages` is what those read.
 - **Document state that is not a node:** each page's `ground` and `draft`, and `guides`. People set them for the artwork, not the sitting, so they are saved with the file; neither loosens the document/view-data line (§9.2, §9.3). Which page is current is view state and never saved (`app-chrome.md`, *Pages*).
-- A page's `ground` is opaque (`DEFAULT_CANVAS_BACKGROUND` for a new document), changed only through `SetPageGround` (invariant 2). It is per page, not an `EditorSession` preference. (§15 D28)
+- A page's `ground` is a colour of its own, opaque, or `None`: no colour of its own, drawn on the viewer's default — the app's theme canvas (`theme::color::canvas()`), `DEFAULT_CANVAS_BACKGROUND` for everything headless (CLI, SVG/PNG, the MCP snapshot). `Document::ground` answers own-or-`DEFAULT_CANVAS_BACKGROUND`, so headless output is the same whichever; `own_ground` answers the stored colour, and the app resolves through `session::page_ground` instead. A new document, a new page made from a page without a colour, and an imported page without a colour of its own start at `None`. It is changed only through `SetPageGround` (invariant 2) and is per page, not an `EditorSession` preference. (§15 D28)
 - `guides` are the lines pulled from the rulers (§9.4). `color: None` follows `DEFAULT_GUIDE_COLOR` (`#a3332d`), so retuning the default carries every never-recoloured guide.
 - **A guide is deliberately not a `Node`:** no parent, transform, paint or bounds; never rendered into the scene, never hit-tested as artwork, never in the layers tree or Select All. Making it a node would need all of that special-cased away.
 - The list is **unordered** (no z, no operation names one by position). `apply` appends; IO sorts by id on save so bytes are stable (invariant 9).

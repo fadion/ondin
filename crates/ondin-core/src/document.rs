@@ -23,7 +23,8 @@ use kurbo::{Affine, RoundedRectRadii};
 use peniko::Color;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// The ground a document is drawn on until someone changes it.
+/// What a page without its own ground is drawn on outside the app — the CLI,
+/// exports, the MCP snapshot. The app draws such a page on its theme instead.
 ///
 /// Near-black. A file written before the ground was part of
 /// the format was drawn on exactly this, so it is also what such a file means
@@ -105,7 +106,7 @@ impl Document {
             nodes,
             pages: vec![crate::page::Page {
                 id: root_id,
-                ground: DEFAULT_CANVAS_BACKGROUND,
+                ground: None,
                 draft: false,
             }],
             vault: None,
@@ -286,11 +287,16 @@ impl Document {
         None
     }
 
-    /// The ground behind and around `page`'s frames; the default for an id that
-    /// is not a page.
+    /// The ground behind and around `page`'s frames; the default for a page with
+    /// no colour of its own and for an id that is not a page.
     pub fn ground(&self, page: NodeId) -> Color {
-        self.page(page)
-            .map_or(DEFAULT_CANVAS_BACKGROUND, |p| p.ground)
+        self.own_ground(page).unwrap_or(DEFAULT_CANVAS_BACKGROUND)
+    }
+
+    /// The colour `page` stores as its ground; `None` for a page with no colour
+    /// of its own and for an id that is not a page.
+    pub fn own_ground(&self, page: NodeId) -> Option<Color> {
+        self.page(page).and_then(|p| p.ground)
     }
 
     /// The document's library identity (`crate::meta`).
@@ -2580,7 +2586,11 @@ impl Document {
     /// The ground is not a node, so this dirties nothing: `Resolved` holds
     /// transforms and bounds, and neither depends on what colour is behind the
     /// frames.
-    fn op_set_page_ground(&mut self, id: NodeId, ground: Color) -> Result<Operation, OpError> {
+    fn op_set_page_ground(
+        &mut self,
+        id: NodeId,
+        ground: Option<Color>,
+    ) -> Result<Operation, OpError> {
         let old = std::mem::replace(&mut self.page_mut(id)?.ground, ground);
         Ok(Operation::SetPageGround { id, ground: old })
     }
@@ -2597,7 +2607,7 @@ impl Document {
         id: NodeId,
         index: usize,
         name: &str,
-        ground: Color,
+        ground: Option<Color>,
         draft: bool,
         mode: Option<crate::variable::ModeId>,
         dirty: &mut DirtySet,

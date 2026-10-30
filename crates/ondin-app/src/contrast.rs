@@ -205,6 +205,7 @@ impl crate::prefs::ContrastPrefs {
                 _ => Level::Aa,
             },
             non_text: self.non_text,
+            default_ground: Some(crate::session::theme_canvas()),
         }
     }
 
@@ -434,7 +435,8 @@ impl OndinApp {
             Some(old) => {
                 old.doc.variables() != doc.variables()
                     || old.doc.styles() != doc.styles()
-                    || old.doc.ground(page) != doc.ground(page)
+                    || crate::session::page_ground(&old.doc, page)
+                        != crate::session::page_ground(doc, page)
             }
         };
         let mut dirty: Vec<Rect> = Vec::new();

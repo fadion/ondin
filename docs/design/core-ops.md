@@ -80,9 +80,10 @@ pub enum Operation {
     AddStyle, RemoveStyle (refused while bound), SetStyleName, SetStyleValue, SetStyleOrigin,
     SetFillStyle, SetStrokeStyle, SetEffectsStyle, SetTypeStyle, SetLayoutStyle, // binding alone; style::settle writes the values; no ink
     // the page table (§5.5; `id` is the page's root):
-    AddPage { id, index, name, ground, draft, mode },   // an empty page; inverts to RemovePage
+    AddPage { id, index, name, ground: Option<Color>, draft, mode },   // an empty page; inverts to RemovePage
     RemovePage { id },          // refused for the last page or one holding layers or guides
-    MovePage { id, index }, SetPageDraft { id, draft }, SetPageGround { id, ground },
+    MovePage { id, index }, SetPageDraft { id, draft },
+    SetPageGround { id, ground: Option<Color> },   // None clears the page's own colour
     // guides (document state, §5.5):
     AddGuide { guide }, RemoveGuide { id }, SetGuidePosition { id, position }, SetGuideColor { id, color },
     SetGuideScope { id, owner: NodeId, position },  // both, or neither

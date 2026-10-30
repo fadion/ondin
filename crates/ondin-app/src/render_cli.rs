@@ -1234,7 +1234,7 @@ mod tests {
             id,
             index,
             name: name.into(),
-            ground: ondin_core::DEFAULT_CANVAS_BACKGROUND,
+            ground: None,
             draft: false,
             mode: None,
         };

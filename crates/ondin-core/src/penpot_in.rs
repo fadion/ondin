@@ -365,7 +365,7 @@ impl Builder<'_> {
                     id,
                     index: self.pages,
                     name,
-                    ground: crate::DEFAULT_CANVAS_BACKGROUND,
+                    ground: None,
                     draft: false,
                     mode: None,
                 });

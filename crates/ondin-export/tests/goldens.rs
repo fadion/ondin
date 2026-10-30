@@ -482,7 +482,7 @@ fn golden_document() -> (Document, Resolved) {
             id: second,
             index: 1,
             name: "Drafts".into(),
-            ground: Color::from_rgb8(30, 30, 34),
+            ground: Some(Color::from_rgb8(30, 30, 34)),
             draft: true,
             mode: Some(mode),
         },

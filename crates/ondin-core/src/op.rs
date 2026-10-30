@@ -275,10 +275,11 @@ pub enum Operation {
     },
     /// The ground behind and around a page's frames (`crate::page`). A solid
     /// colour, not a `Brush`: nothing lies behind it for a gradient or an alpha
-    /// to act on.
+    /// to act on. `None` clears the page's own colour, so it is drawn on the
+    /// viewer's default.
     SetPageGround {
         id: NodeId,
-        ground: Color,
+        ground: Option<Color>,
     },
     /// Add an empty page at `index` of the page order. Inverts to
     /// [`Self::RemovePage`]. The caller mints the id, as for a node.
@@ -289,7 +290,7 @@ pub enum Operation {
         id: NodeId,
         index: usize,
         name: String,
-        ground: Color,
+        ground: Option<Color>,
         draft: bool,
         mode: Option<crate::variable::ModeId>,
     },
@@ -1657,7 +1658,7 @@ mod changes_ink_tests {
                 id,
                 index: 0,
                 name: "p".into(),
-                ground: peniko::Color::BLACK,
+                ground: Some(peniko::Color::BLACK),
                 draft: false,
                 mode: None,
             },
@@ -1702,7 +1703,7 @@ mod changes_ink_tests {
             Operation::SetVisible { id, visible: false },
             Operation::SetPageGround {
                 id,
-                ground: peniko::Color::BLACK,
+                ground: Some(peniko::Color::BLACK),
             },
             Operation::SetOpacity { id, opacity: 0.5 },
             Operation::SetBlend {
@@ -1992,11 +1993,11 @@ mod changes_nothing_tests {
             (
                 Operation::SetPageGround {
                     id: doc.first_page(),
-                    ground: doc.ground(doc.first_page()),
+                    ground: doc.own_ground(doc.first_page()),
                 },
                 Operation::SetPageGround {
                     id: doc.first_page(),
-                    ground: peniko::Color::from_rgb8(1, 2, 3),
+                    ground: Some(peniko::Color::from_rgb8(1, 2, 3)),
                 },
             ),
             (

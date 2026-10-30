@@ -14,7 +14,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D21** The model type is `Artboard`; every user-facing word is "frame". Frames nest.
 - **D12** Polygon and Star are their own `NodeKind`s, not `Path`s.
 - **D400** A frame's fill is its fill list, the same as every painted layer; there is no separate background field.
-- **D28** Each page's ground is document state, saved with the file.
+- **D28** A page's picked ground is document state, saved with the file. An untouched page has none and is drawn on the viewer's default: the app's theme canvas, `DEFAULT_CANVAS_BACKGROUND` headless.
 - **A page is a parentless root listed in a page table**, not a node under one root: the structural operations, the loader's tree rules and the clipboard's rules hold unchanged (Delete, Reparent and Reorder refuse a page as a node), and `Document::new` stays a one-page document. Name and default mode are the root's; ground and draft flag are the table's.
 - **D119** A path's corner radius lives in the model, not in the geometry.
 - **D114** A pen anchor carries two independent handles, not one mirrored vector.

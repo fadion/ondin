@@ -172,7 +172,8 @@ pub(crate) enum ImageSourceDto {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct PageDto {
     pub id: String,
-    pub ground: Color,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<Color>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub draft: bool,
 }
@@ -714,7 +715,7 @@ impl DocumentDto {
             pages.push(crate::page::Page {
                 id,
                 // Opaque, always — the same rule the editor applies when setting it.
-                ground: dto.ground.with_alpha(1.0),
+                ground: dto.ground.map(|c| c.with_alpha(1.0)),
                 draft: dto.draft,
             });
         }

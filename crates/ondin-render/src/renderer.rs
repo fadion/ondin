@@ -180,7 +180,7 @@ pub struct RenderOverrides {
     /// A page's ground being dragged in the picker. Not part of the scene walk
     /// (the backdrop is the clear colour), so it rides here only to reach the
     /// caller.
-    ground: Option<(NodeId, Color)>,
+    ground: Option<(NodeId, Option<Color>)>,
     /// Artwork drawn to *explain* a mode rather than preview an edit — today the
     /// faded whole picture behind a layer being cropped — glued to the `NodeId`
     /// layer that [`Self::unsnapped`] needs.
@@ -247,9 +247,9 @@ impl RenderOverrides {
         ondin_core::container::laid_grid(&PreviewView { doc, ov: self, res }, id)
     }
 
-    /// The ground this preview asks for on `page`, if it touches that page's
-    /// ground at all.
-    pub fn ground(&self, page: NodeId) -> Option<Color> {
+    /// The ground this preview asks for on `page` (`Some(None)` for no colour of
+    /// its own), if it touches that page's ground at all.
+    pub fn ground(&self, page: NodeId) -> Option<Option<Color>> {
         self.ground.filter(|(p, _)| *p == page).map(|(_, c)| c)
     }
 

@@ -242,8 +242,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **Is a 38-row context menu past the ceiling?** (`context-menus.md` *Open*, §15 D981, D1003 (9)).
 - **`Ctrl+Alt` is `AltGr`** on many European layouts (`shortcuts.md` §12, §15 D987).
 - **Is the chrome meant to be keyboard-traversable?** (§15 D747) — deferred by the maintainer.
-- **Should the page ground follow the light theme?** A page's ground is the document's
-  (`ondin_core::DEFAULT_CANVAS_BACKGROUND`, near-black) and stays dark under the light chrome.
 - **One font-availability question for panel and snapshot** — only worth it if the snapshot ever
   reads a live `FontService`.
 

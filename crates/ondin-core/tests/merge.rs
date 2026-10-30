@@ -678,7 +678,7 @@ fn add_page(id: NodeId, index: usize, name: &str) -> Operation {
         id,
         index,
         name: name.into(),
-        ground: Color::from_rgba8(240, 240, 240, 255),
+        ground: Some(Color::from_rgba8(240, 240, 240, 255)),
         draft: false,
         mode: None,
     }

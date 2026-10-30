@@ -24,9 +24,11 @@ pub const PAGE_STEM: &str = "Page";
 pub struct Page {
     /// The page's root node.
     pub id: NodeId,
-    /// The colour behind and around the page's frames. Opaque by construction:
-    /// nothing behind the canvas could show through.
-    pub ground: Color,
+    /// The colour behind and around the page's frames, or `None` for no colour
+    /// of its own — drawn on the viewer's default (the app's theme;
+    /// [`crate::DEFAULT_CANVAS_BACKGROUND`] headless). Opaque when set: nothing
+    /// behind the canvas could show through.
+    pub ground: Option<Color>,
     /// Left out of everything that gathers from every page — kit publishing,
     /// exporting all pages, presenting on past the current page, the library
     /// thumbnail — and kept by everything aimed at it directly.

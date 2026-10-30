@@ -802,7 +802,7 @@ fn the_canvas_ground_round_trips_and_undoes() {
         &mut doc,
         Transaction(vec![Operation::SetPageGround {
             id: root,
-            ground: chosen,
+            ground: Some(chosen),
         }]),
     )
     .unwrap();
@@ -817,6 +817,48 @@ fn the_canvas_ground_round_trips_and_undoes() {
         doc.ground(doc.first_page()),
         ondin_core::DEFAULT_CANVAS_BACKGROUND
     );
+}
+
+/// A v11 page storing exactly the default loads with no ground of its own, and
+/// one storing another colour keeps it (`migrate_11_to_12`). The v11 file goes
+/// through text, so the stored colour is compared as a file holds it.
+///
+/// flip: `unground_defaults` comparing the JSON against `to_value` of the
+/// default → fails at the first `own_ground` assertion.
+#[test]
+fn a_v11_page_on_the_default_ground_loads_with_none_of_its_own() {
+    let (mut doc, root) = rich_document();
+    let other = Color::from_rgba8(90, 20, 40, 255);
+    let v11 = |doc: &Document| {
+        let mut value: serde_json::Value = serde_json::from_slice(&io::save(doc).unwrap()).unwrap();
+        value["schema_version"] = 11.into();
+        serde_json::to_vec(&value).unwrap()
+    };
+
+    doc.apply(&Transaction(vec![Operation::SetPageGround {
+        id: root,
+        ground: Some(ondin_core::DEFAULT_CANVAS_BACKGROUND),
+    }]))
+    .unwrap();
+    let text = String::from_utf8(v11(&doc)).unwrap();
+    assert!(
+        text.contains("\"ground\""),
+        "fixture: the default is stored"
+    );
+    let loaded = io::load(text.as_bytes()).unwrap();
+    assert_eq!(loaded.own_ground(loaded.first_page()), None);
+    assert_eq!(
+        loaded.ground(loaded.first_page()),
+        ondin_core::DEFAULT_CANVAS_BACKGROUND
+    );
+
+    doc.apply(&Transaction(vec![Operation::SetPageGround {
+        id: root,
+        ground: Some(other),
+    }]))
+    .unwrap();
+    let loaded = io::load(&v11(&doc)).unwrap();
+    assert_eq!(loaded.own_ground(loaded.first_page()), Some(other));
 }
 
 /// And a `clip` the user turned *off* survives the round trip — the default is

@@ -411,7 +411,7 @@ fn add_page(id: NodeId, index: usize, name: &str) -> Operation {
         id,
         index,
         name: name.into(),
-        ground: Color::from_rgba8(255, 255, 255, 255),
+        ground: Some(Color::from_rgba8(255, 255, 255, 255)),
         draft: false,
         mode: None,
     }
@@ -461,7 +461,7 @@ fn a_page_move_and_background_are_page_changes() {
         Operation::MovePage { id: page, index: 0 },
         Operation::SetPageGround {
             id: first,
-            ground: RED,
+            ground: Some(RED),
         },
     ]))
     .expect("the edit");

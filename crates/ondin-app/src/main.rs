@@ -1523,6 +1523,7 @@ mod tests {
                 options: ondin_export::contrast::Options {
                     level: ondin_export::contrast::Level::Aaa,
                     non_text: false,
+                    default_ground: None,
                 },
             })
         );
@@ -1534,6 +1535,7 @@ mod tests {
                 options: ondin_export::contrast::Options {
                     level: ondin_export::contrast::Level::Apca,
                     non_text: true,
+                    default_ground: None,
                 },
             })
         );

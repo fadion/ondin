@@ -4749,9 +4749,13 @@ impl OndinApp {
                     _ => 0.0,
                 };
                 let button_space = buttons * (28.0 + ui::CARD_COL_GAP);
-                // Two columns either way, so an ellipse's opacity lines up with the
-                // arc row under it.
-                let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP) / 2.0;
+                // Two columns where opacity has company, so an ellipse's lines up with
+                // the arc row under it; alone (a group, text, a line), the full width.
+                let alone = corners0.is_none() && vertices0.is_none() && arc0.is_none();
+                let fw = match alone {
+                    true => ui.available_width(),
+                    false => (ui.available_width() - button_space - ui::CARD_COL_GAP) / 2.0,
+                };
                 if let Some(vertices) = vertices0 {
                     app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
                     app.vertex_radius_field(ui, id, vertices.radius(), fw, &marks.radius);

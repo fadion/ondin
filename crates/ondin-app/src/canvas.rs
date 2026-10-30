@@ -6381,7 +6381,7 @@ impl OndinApp {
     }
 
     /// Outline whatever the pointer is over but has not selected: the exact shape,
-    /// so it says what a click will pick; a container outlines every leaf it holds.
+    /// so it says what a click will pick; a frame or a group by its box.
     fn draw_hover_outline(
         &self,
         ui: &egui::Ui,
@@ -6937,10 +6937,14 @@ impl OndinApp {
             }
             return;
         }
-        // Text and artboards have a box but no outline; a boolean with no derived
-        // outline is traced by its box, never its operands.
+        // Text, frames and groups have a box but no outline; a boolean with no
+        // derived outline is traced by its box, never its operands. A group's
+        // leaves each traced made a busy ring of a large one.
         match node.kind() {
-            NodeKind::Text { .. } | NodeKind::Artboard { .. } | NodeKind::Boolean { .. } => {
+            NodeKind::Text { .. }
+            | NodeKind::Artboard { .. }
+            | NodeKind::Group
+            | NodeKind::Boolean { .. } => {
                 if let Some(quad) = self.selection_quad(id, rect, ppp) {
                     painter.add(egui::Shape::closed_line(quad.to_vec(), stroke));
                 }
@@ -17320,7 +17324,8 @@ mod boolean_outline_tests {
 
 #[cfg(test)]
 mod outline_reject_tests {
-    //! What the hover ring refuses to trace: what is off screen and what is switched off.
+    //! What the hover ring traces of a group, and refuses to: what is off screen and
+    //! what is switched off.
     //! Asserts shape counts rather than timings.
 
     use super::*;
@@ -17405,8 +17410,9 @@ mod outline_reject_tests {
         (n, bbox)
     }
 
-    /// An off-screen group paints no ring; the on-screen row is the control.
+    /// A group is one ring, its box round its children, and an off-screen group none.
     /// The `outline_view` padding (a box ending at the view edge) is not covered here.
+    /// flip: `stroke_outlines` without its `NodeKind::Group` box arm → fails at "one ring".
     #[test]
     fn a_group_off_screen_is_not_traced_and_one_on_screen_still_is() {
         let ctx = egui::Context::default();
@@ -17416,12 +17422,12 @@ mod outline_reject_tests {
         let (app, group) = app_with_row(&ctx, 3, (0.0, 0.0), &[]);
         let (on_screen, bbox) = traced(&app, &ctx, group);
         assert_eq!(
-            on_screen, 3,
-            "the control: three rects in view, three marks"
+            on_screen, 1,
+            "one ring: the group's box, not a mark per rect"
         );
         assert!(
-            bbox.min.x < 10.0,
-            "and they are where they were put: {bbox:?}"
+            bbox.min.x < 10.0 && bbox.max.x > 490.0,
+            "round all three rects, where they were put: {bbox:?}"
         );
 
         let (app, group) = app_with_row(&ctx, 3, (1e6, 1e6), &[]);
@@ -17432,7 +17438,8 @@ mod outline_reject_tests {
         );
     }
 
-    /// The ring skips a hidden child, following the layers-panel eye preview via `display_node`.
+    /// A hidden child is not traced on its own but stays inside its group's ring, as
+    /// in the selection's box; a hidden group, via `display_node`, is no ring.
     #[test]
     fn a_hidden_child_is_not_traced() {
         let ctx = egui::Context::default();
@@ -17440,11 +17447,13 @@ mod outline_reject_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
 
         let (app, group) = app_with_row(&ctx, 2, (0.0, 0.0), &[1]);
+        let child = app.session.doc.get(group).expect("the group").children()[1];
+        assert_eq!(traced(&app, &ctx, child).0, 0, "a hidden child is no ring");
         let (n, bbox) = traced(&app, &ctx, group);
-        assert_eq!(n, 1, "one visible rect, one mark");
+        assert_eq!(n, 1, "the group is one ring");
         assert!(
-            bbox.max.x < 150.0,
-            "and the ring stops at the visible one: {bbox:?}"
+            bbox.max.x > 290.0,
+            "round the hidden child too, as the selection box is: {bbox:?}"
         );
 
         let (mut app, group) = app_with_row(&ctx, 2, (0.0, 0.0), &[]);

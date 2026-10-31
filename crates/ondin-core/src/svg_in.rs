@@ -67,8 +67,7 @@ const MAX_SVG_NESTING: usize = 64;
 ///
 /// [`MAX_SVG_NESTING`] bounds depth, not width: a `<defs>` of groups each
 /// instantiating the next twice expands exponentially from a tiny file. 50,000 sits
-/// above real artwork. It bounds the importer, not the paste: `Document::apply` of
-/// that many siblings is quadratic in `op_create`'s `child_names` walk.
+/// above real artwork.
 const MAX_SVG_NODES: usize = 50_000;
 
 /// How many CSS rules one stylesheet may declare before the rest is skipped and

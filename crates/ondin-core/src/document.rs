@@ -12,6 +12,7 @@ use crate::image::{ImageEntry, ImageId};
 use crate::io::{CURRENT_SCHEMA_VERSION, MAX_TREE_DEPTH};
 use crate::item::Keyed;
 use crate::meta::DocumentMeta;
+use crate::naming::Numbering;
 use crate::node::{
     BlendMode, BlockStyle, CharSpans, Fill, FillRule, MaskMode, Node, NodeKind, Paint, ParaSpans,
     ParagraphStyle, Pivot, Stroke, TextStyle,
@@ -1070,9 +1071,10 @@ impl Document {
         let mut working = self.clone();
         let mut inverse_ops: Vec<Operation> = Vec::with_capacity(tx.0.len());
         let mut dirty = DirtySet::default();
+        let mut numbering = Numbering::default();
 
         for op in &tx.0 {
-            let inverse = working.apply_one(op, &mut dirty)?;
+            let inverse = working.apply_one(op, &mut dirty, &mut numbering)?;
             inverse_ops.push(inverse);
         }
 
@@ -1151,8 +1153,9 @@ impl Document {
     /// is, and it is what refuses a transaction this lets through.
     pub(crate) fn apply_unchecked(&mut self, tx: &Transaction) -> Result<(), OpError> {
         let mut dirty = DirtySet::default();
+        let mut numbering = Numbering::default();
         for op in &tx.0 {
-            self.apply_one(op, &mut dirty)?;
+            self.apply_one(op, &mut dirty, &mut numbering)?;
         }
         Ok(())
     }
@@ -1198,12 +1201,29 @@ impl Document {
             published: None,
             restoring: self.restoring,
         };
-        one.apply_one(op, &mut DirtySet::default()).ok()
+        one.apply_one(op, &mut DirtySet::default(), &mut Numbering::default())
+            .ok()
     }
 
     /// Apply a single op to `self` (already a working copy), returning the op
-    /// that would undo it. Validates before mutating.
-    fn apply_one(&mut self, op: &Operation, dirty: &mut DirtySet) -> Result<Operation, OpError> {
+    /// that would undo it. Validates before mutating. `numbering` carries the
+    /// transaction's child names from one create to the next.
+    fn apply_one(
+        &mut self,
+        op: &Operation,
+        dirty: &mut DirtySet,
+        numbering: &mut Numbering,
+    ) -> Result<Operation, OpError> {
+        // A field setter writes its one node and never a name but `SetName`'s;
+        // anything structural can add, remove or move a child.
+        let keeps_names = match op {
+            Operation::CreateNode { .. } => true,
+            Operation::SetName { .. } => false,
+            _ => op.overwrites().is_some(),
+        };
+        if !keeps_names {
+            numbering.forget();
+        }
         match op {
             Operation::CreateNode {
                 id,
@@ -1212,7 +1232,9 @@ impl Document {
                 kind,
                 transform,
                 name,
-            } => self.op_create(*id, *parent, *index, kind, *transform, name, dirty),
+            } => self.op_create(
+                *id, *parent, *index, kind, *transform, name, dirty, numbering,
+            ),
             Operation::DeleteNode { id } => self.op_delete(*id, dirty),
             Operation::InsertSubtree {
                 nodes,
@@ -1741,6 +1763,7 @@ impl Document {
         transform: Option<Affine>,
         name: &Option<String>,
         dirty: &mut DirtySet,
+        numbering: &mut Numbering,
     ) -> Result<Operation, OpError> {
         if self.nodes.contains_key(&id) {
             return Err(OpError::DuplicateId(id));
@@ -1771,9 +1794,13 @@ impl Document {
         // The op's result thus depends on the document it lands in. Invariant 3's
         // determinism is about ids, which still ride inside the op; a name is not
         // structural, and multiplayer (§12) must resolve rename conflicts anyway.
-        let name = name
-            .clone()
-            .unwrap_or_else(|| crate::naming::created_name(&self.child_names(parent, &[]), kind));
+        let name = match name {
+            Some(name) => {
+                numbering.add(parent, name);
+                name.clone()
+            }
+            None => numbering.name(self, parent, kind),
+        };
 
         let node = Node {
             id,

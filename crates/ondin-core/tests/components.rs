@@ -365,18 +365,12 @@ fn load_on_a_small_stack(bytes: Vec<u8>) -> Result<Document, String> {
 
 /// A crafted file holding a long chain of mains loads on a small stack, and the
 /// same chain closed into a loop is refused as a cycle rather than aborting the
-/// process. `component::check`'s cycle search runs on every load and every
-/// `Document::apply`, and it recursed once per main along the chain: a
-/// stack overflow is an abort, not a panic, so nothing caught it — the cover
-/// worker's `catch_unwind` included (the rule `io::MAX_TREE_DEPTH`'s doc states
-/// for §15 D416, arriving by a new axis). The search is an explicit stack now.
+/// process: `component::check`'s cycle search, run on every load and every
+/// `Document::apply`, keeps an explicit stack, since a stack overflow is an abort
+/// no `catch_unwind` catches.
 ///
-/// Flip, run: the recursive search put back aborts the test binary on the open
-/// chain's load (`thread '<unknown>' has overflowed its stack`, exit
-/// `STATUS_STACK_OVERFLOW`), in debug on 256 KB and in release on 64 KB. In debug
-/// the recursion loaded 200 mains on 256 KB and overflowed at 500; the fixed
-/// search loads 20,000 there (slowly — ~200 s debug, the load being
-/// super-linear in mains elsewhere, so the test keeps to 2,000).
+/// flip: the search recursing once per main → aborts the test binary on the open
+/// chain's load (`STATUS_STACK_OVERFLOW`), in debug on 256 KB and in release on 64 KB.
 #[test]
 fn a_deep_chain_of_mains_loads_on_a_small_stack() {
     const N: usize = 2_000;

@@ -168,13 +168,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)) — trigger: a preset
   with a bindable field. The only one, `prefs::ExportPreset`, has none.
 
-## Later · Rendering and performance
-
-- **Loading a long chain of mains is super-linear** (§15 D416): 20,000 mains ≈200 s in debug vs ≈2 s
-  for 2,000, measured through a fixture that also builds and saves. Not in `component::reaches_itself`
-  or `io::schema`'s integrity pass; `variant::check`, `kit::check`, `variable::check` and
-  `style::check` are unread.
-
 ## Later · Code export (HTML/CSS, React, Vue)
 
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
@@ -227,9 +220,7 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - UI toolkit revisit (gpui / Xilem), `architecture.md` §9.1.
 - MCP transport hardening (auth, TCP/remote).
 - `vello_hybrid` as a third backend if low-end GPUs demand it.
-- **Per-edit cost**: `Resolved::update` reloads the R-tree per edit; and bulk-create naming is Θ(n²)
-  per parent (§15 D446, 62 s on a 32k-shape paste) — incremental name index, or number bulk creates
-  differently.
+- **Per-edit cost**: `Resolved::update` reloads the R-tree per edit.
 - **PNG goldens** — wait on an aarch64/NEON measurement (§15 D304); per-`vello_cpu` too (D414).
   `num_threads` is still a default.
 - **Layers panel `MIN_W = 210`** rests on one reading, not two (§15 D444): re-tighten or amend its prose.

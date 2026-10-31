@@ -115,7 +115,7 @@ pub use layout::{
     tracks as grid_tracks,
 };
 pub use meta::DocumentMeta;
-pub use naming::{copy_name, created_name, free_name, is_boolean_label, numbered};
+pub use naming::{copy_name, free_name, is_boolean_label, numbered};
 pub use node::{
     BlendMode, BoolOp, DashStyle, EllipseArc, Fill, FillRule, MIN_MITER_DEGREES, MaskMode, Node,
     NodeKind, Paint, Pivot, Side, Stroke, StrokeAlign, StrokeSides, TextRef, TextSizing,

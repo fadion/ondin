@@ -15,8 +15,10 @@
 //! back out of the names present, which makes freed numbers reusable and keeps
 //! numbering from resetting on reload.
 
+use crate::document::Document;
+use crate::id::NodeId;
 use crate::node::{BoolOp, NodeKind};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Every name [`NodeKind::default_name`] can produce.
 ///
@@ -147,13 +149,60 @@ pub fn copy_name(taken: &FxHashSet<&str>, current: &str) -> Option<String> {
     }
 }
 
-/// The name a fresh node of `kind` should carry among siblings called `taken` —
-/// `"Rectangle 1"` in an empty frame, then `"Rectangle 2"`, and the lowest gap
-/// after a delete.
+/// What `name: None` means on `Operation::CreateNode`: the kind's stem numbered
+/// among the parent's children by [`free_name`] from 1 — `"Rectangle 1"` in an
+/// empty frame, then `"Rectangle 2"`, and the lowest gap after a delete.
 ///
-/// The whole of what `name: None` means on `Operation::CreateNode`.
-pub fn created_name(taken: &FxHashSet<&str>, kind: &NodeKind) -> String {
-    free_name(taken, kind.default_name(), 1)
+/// Each parent's child names are read once per transaction and kept, with how far
+/// up each stem is known taken, so numbering `n` new layers under one parent is
+/// not a scan of its children per layer (an SVG of thousands of unnamed shapes in
+/// one group would be quadratic). The answers are [`free_name`]'s only while no
+/// child of a remembered parent is renamed, added or removed but through
+/// [`Self::name`] and [`Self::add`]; the caller [`Self::forget`]s on any other
+/// operation that could.
+#[derive(Default)]
+pub(crate) struct Numbering(FxHashMap<NodeId, Taken>);
+
+/// One parent's child names, and per stem the lowest number not yet known taken.
+struct Taken {
+    names: FxHashSet<String>,
+    from: FxHashMap<&'static str, u32>,
+}
+
+impl Numbering {
+    /// The name a fresh `kind` under `parent` gets, recorded as taken.
+    pub(crate) fn name(&mut self, doc: &Document, parent: NodeId, kind: &NodeKind) -> String {
+        let taken = self.0.entry(parent).or_insert_with(|| Taken {
+            names: doc
+                .child_names(parent, &[])
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            from: FxHashMap::default(),
+        });
+        let stem = kind.default_name();
+        let from = taken.from.entry(stem).or_insert(1);
+        let name = (*from..=u32::MAX)
+            .map(|n| (n, format!("{stem} {n}")))
+            .find(|(_, c)| !taken.names.contains(c));
+        // Every number taken is unreachable in memory; `free_name` answers the same.
+        let (n, name) = name.unwrap_or((u32::MAX, format!("{stem} 1")));
+        *from = n.saturating_add(1);
+        taken.names.insert(name.clone());
+        name
+    }
+
+    /// Record `name` as taken under `parent`, for a create that named itself.
+    pub(crate) fn add(&mut self, parent: NodeId, name: &str) {
+        if let Some(taken) = self.0.get_mut(&parent) {
+            taken.names.insert(name.to_string());
+        }
+    }
+
+    /// Drop everything remembered.
+    pub(crate) fn forget(&mut self) {
+        self.0.clear();
+    }
 }
 
 #[cfg(test)]

@@ -2034,3 +2034,99 @@ fn a_subtree_holding_an_orphan_is_refused() {
     assert_eq!(n, 1, "P alone by now — X was deleted above");
     assert!(doc.get(p).is_some());
 }
+
+/// One transaction numbers its unnamed creates exactly as the same operations
+/// applied one at a time do — through gaps, a create that names itself, a rename
+/// and a delete mid-transaction, and two parents in turn.
+///
+/// flip: `Document::apply_one` keeping its numbering across a `SetName` → fails
+/// at the create after the rename, which takes the name the rename just used.
+#[test]
+fn a_transaction_numbers_its_creates_as_single_operations_do() {
+    let mut ids = IdSource::new(0x4A3E);
+    let root = ids.mint();
+    let mut base = Document::new(root);
+    let [p, q, old1, old3] = [(); 4].map(|_| ids.mint());
+    let named = |id, parent, name: &str| Operation::CreateNode {
+        id,
+        parent,
+        index: 0,
+        kind: rect(),
+        transform: None,
+        name: Some(name.into()),
+    };
+    base.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: p,
+            parent: root,
+            index: 0,
+            kind: artboard(),
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: q,
+            parent: root,
+            index: 1,
+            kind: artboard(),
+            transform: None,
+            name: None,
+        },
+        named(old1, p, "Rectangle 1"),
+        named(old3, p, "Rectangle 3"),
+    ]))
+    .expect("the fixture");
+    let fresh: Vec<NodeId> = (0..8).map(|_| ids.mint()).collect();
+    let create = |k: usize, parent| Operation::CreateNode {
+        id: fresh[k],
+        parent,
+        index: 0,
+        kind: rect(),
+        transform: None,
+        name: None,
+    };
+    let ops = vec![
+        create(0, p),
+        create(1, q),
+        named(fresh[2], p, "Rectangle 4"),
+        create(3, p),
+        Operation::SetName {
+            id: old3,
+            name: "Rectangle 6".into(),
+        },
+        create(4, p),
+        Operation::DeleteNode { id: old1 },
+        create(5, p),
+        create(6, q),
+        create(7, p),
+    ];
+    let mut whole = base.clone();
+    whole
+        .apply(&Transaction(ops.clone()))
+        .expect("one transaction");
+    let mut single = base.clone();
+    for op in ops {
+        single.apply(&Transaction(vec![op])).expect("one operation");
+    }
+    let names = |doc: &Document| -> Vec<String> {
+        fresh
+            .iter()
+            .map(|id| doc.get(*id).expect("created").name().to_string())
+            .collect()
+    };
+    assert_eq!(
+        names(&whole),
+        [
+            "Rectangle 2",
+            "Rectangle 1",
+            "Rectangle 4",
+            "Rectangle 5",
+            "Rectangle 3",
+            "Rectangle 1",
+            "Rectangle 2",
+            "Rectangle 7",
+        ],
+        "fixture: the numbering this mix produces"
+    );
+    assert_eq!(names(&whole), names(&single));
+}

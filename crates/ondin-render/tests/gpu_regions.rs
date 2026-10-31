@@ -1,10 +1,10 @@
-//! A panned canvas patched by `render_regions` against the full frame, on-device.
+//! A canvas patched by `render_regions` against the full frame, on-device.
 //!
 //! The canvas keeps its texture across a whole-pixel pan: it copies what is still
 //! in view (`copy_shifted`) and draws only what the pan exposed
-//! (`Region::exposed`). This file holds that to drawing the whole frame at the
-//! new camera, pixel for pixel, over shapes, strokes, shadows and blurs cut by
-//! the canvas edge.
+//! (`Region::exposed`). A preview changing redraws only `scene::damage`
+//! (`copy_regions`). This file holds both to drawing the whole frame, over
+//! shapes, strokes, shadows and blurs cut by the canvas edge.
 //!
 //! `#[ignore]` like the rest of the on-device suite. Run with
 //! `cargo test -p ondin-render --release --test gpu_regions -- --ignored --nocapture`.
@@ -15,7 +15,7 @@ use ondin_core::{
     Brush, Document, Effect, EffectKind, Fill, IdSource, NodeKind, Operation, Resolved, Shadow,
     Stroke, Transaction, keyed_by_position,
 };
-use ondin_render::gpu::{Region, copy_shifted};
+use ondin_render::gpu::{Region, copy_regions, copy_shifted};
 use ondin_render::{ImageStore, RenderOverrides, VelloGpuRenderer, Viewport};
 
 const W: u32 = 320;
@@ -24,6 +24,9 @@ const GROUND: Color = Color::from_rgba8(30, 32, 36, 255);
 /// How many levels vello's antialiasing of an edge moves by when the drawing is
 /// rasterized at another whole-pixel offset.
 const AA_DRIFT: u8 = 2;
+/// How many levels a stroke's edge pixel moves by there: vello's stroke expansion
+/// places the edge up to about 0.05 px apart.
+const STROKE_DRIFT: u8 = 16;
 
 /// One test at a time holds the adapter: devices made side by side hung the
 /// on-device suite intermittently.
@@ -273,6 +276,18 @@ fn cards() -> (Document, Resolved) {
 }
 
 fn full(g: &mut Gpu, doc: &Document, res: &Resolved, vp: &Viewport, tex: &wgpu::Texture) {
+    full_under(g, doc, res, vp, &RenderOverrides::default(), tex);
+}
+
+/// `full` drawn under a preview.
+fn full_under(
+    g: &mut Gpu,
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    ov: &RenderOverrides,
+    tex: &wgpu::Texture,
+) {
     let view = tex.create_view(&Default::default());
     g.renderer
         .render(
@@ -281,7 +296,7 @@ fn full(g: &mut Gpu, doc: &Document, res: &Resolved, vp: &Viewport, tex: &wgpu::
             doc,
             res,
             vp,
-            &RenderOverrides::default(),
+            ov,
             &view,
             GROUND,
             &ImageStore::default(),
@@ -478,6 +493,196 @@ fn a_frame_shaped_by_where_the_canvas_sits_is_pinned() {
         )
         .expect("render regions");
     assert!(!drawn, "the regions of a pinned frame are refused");
+}
+
+/// A frame patched through a run of previews — a layer moved inside its card, a
+/// card moved whole, a recolour in another card, a new shape dragged out on the
+/// page, and back to nothing — redrawing only `scene::damage`, is the full frame
+/// under each preview at every step.
+///
+/// To within `AA_DRIFT`, but for one edge column of a stroke: an effect layer
+/// lands at another offset in its pass's packed texture when fewer layers share
+/// the pass, and vello's stroke expansion can place an edge 0.05 px apart there
+/// (`STROKE_DRIFT`). A region left stale is a shape off at full strength.
+///
+/// flip: `scene::damage` measuring the touched items under `after` alone → fails
+/// at the second step, where the card's old place is never redrawn.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_frame_patched_where_a_preview_changed_is_the_full_frame() {
+    let _one = ADAPTER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else {
+        eprintln!("no adapter; skipping");
+        return;
+    };
+    let (doc, res) = cards();
+    let page = doc.first_page();
+    let cards: Vec<_> = doc.get(page).expect("the page").children().to_vec();
+    let inside = |card: usize, at: usize| doc.get(cards[card]).expect("a card").children()[at];
+    let (dot, card, bar) = (inside(1, 1), cards[6], inside(9, 0));
+    let local = |id| doc.get(id).expect("a node").transform();
+    let new = IdSource::new(10_000).mint();
+    let steps: Vec<Transaction> = vec![
+        Transaction(vec![Operation::SetTransform {
+            id: dot,
+            transform: Affine::translate((-30.0, 12.0)) * local(dot),
+        }]),
+        Transaction(vec![Operation::SetTransform {
+            id: card,
+            transform: Affine::translate((47.0, -21.0)) * local(card),
+        }]),
+        Transaction(vec![
+            Operation::SetTransform {
+                id: card,
+                transform: Affine::translate((47.0, -21.0)) * local(card),
+            },
+            Operation::SetFills {
+                id: bar,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(250, 200, 0, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ]),
+        Transaction(vec![
+            Operation::CreateNode {
+                id: new,
+                parent: page,
+                index: cards.len(),
+                kind: NodeKind::Rect {
+                    size: Size::new(70.0, 40.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((150.0, 120.0))),
+                name: None,
+            },
+            Operation::SetFills {
+                id: new,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(255, 0, 200, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ]),
+        Transaction::default(),
+    ];
+    let size = (W, H);
+    let vp = viewport((7, -3), 0.83, size);
+    let shown = target(&g, size);
+    let spare = target(&g, size);
+    let mut before = RenderOverrides::default();
+    full(&mut g, &doc, &res, &vp, &shown);
+    for (i, tx) in steps.iter().enumerate() {
+        let after = RenderOverrides::from_transaction(&doc, &res, tx).expect("a preview");
+        let damage = ondin_render::scene::damage(&doc, &res, &vp, page, &before, &after)
+            .expect("bounded damage");
+        let regions: Vec<Region> = damage
+            .iter()
+            .filter_map(|r| Region::covering(*r, 2.0, size))
+            .collect();
+        let drawn = g
+            .renderer
+            .render_regions(
+                &g.device,
+                &g.queue,
+                &doc,
+                &res,
+                &vp,
+                &after,
+                &spare.create_view(&Default::default()),
+                &regions,
+                GROUND,
+                &ImageStore::default(),
+                page,
+            )
+            .expect("render regions");
+        assert!(drawn, "step {i}: not pinned");
+        copy_regions(&g.device, &g.queue, &spare, &shown, &regions);
+        let reference = target(&g, size);
+        full_under(&mut g, &doc, &res, &vp, &after, &reference);
+        let (now, want) = (read(&g, &shown, size), read(&g, &reference, size));
+        let (worst, count) = diff(&now, &want, |_, _| true);
+        let beyond = now
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(want.as_chunks::<4>().0)
+            .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > AA_DRIFT))
+            .count();
+        eprintln!(
+            "step {i}: {} regions, {count} pixels off by up to {worst}, {beyond} past the drift",
+            regions.len()
+        );
+        assert!(
+            worst <= STROKE_DRIFT && beyond <= 16,
+            "step {i}: {beyond} pixels are off the full frame by more than {AA_DRIFT}, the worst by {worst}"
+        );
+        before = after;
+    }
+}
+
+/// Damage cannot be bounded per item when the page's children depend on each
+/// other: a mask among them clips the ones after it, and a reorder changes which
+/// covers which.
+///
+/// flip: `top_level_ink` not looking for a mask among the page's children →
+/// fails at "a mask on the page".
+#[test]
+fn damage_is_unbounded_where_the_pages_children_depend_on_each_other() {
+    let (mut doc, res) = cards();
+    let page = doc.first_page();
+    let cards: Vec<_> = doc.get(page).expect("the page").children().to_vec();
+    let vp = viewport((0, 0), 1.0, (W, H));
+    let moved = Transaction(vec![Operation::SetTransform {
+        id: cards[0],
+        transform: Affine::translate((5.0, 5.0)),
+    }]);
+    let none = RenderOverrides::default();
+    let ov = RenderOverrides::from_transaction(&doc, &res, &moved).expect("a preview");
+    assert!(
+        ondin_render::scene::damage(&doc, &res, &vp, page, &none, &ov).is_some(),
+        "fixture: a move is bounded"
+    );
+    let reorder = Transaction(vec![Operation::Reorder {
+        id: cards[0],
+        index: 3,
+    }]);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &reorder).expect("a preview");
+    assert!(
+        ov.children_of(page).is_some(),
+        "fixture: the page is reordered"
+    );
+    assert!(
+        ondin_render::scene::damage(&doc, &res, &vp, page, &none, &ov).is_none(),
+        "a reorder of the page"
+    );
+    let mask = IdSource::new(10_000).mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: mask,
+            parent: page,
+            index: 2,
+            kind: NodeKind::Rect {
+                size: Size::new(50.0, 50.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetMask {
+            id: mask,
+            mask: true,
+        },
+    ]))
+    .expect("a mask");
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &moved).expect("a preview");
+    assert!(
+        ondin_render::scene::damage(&doc, &res, &vp, page, &none, &ov).is_none(),
+        "a mask on the page"
+    );
 }
 
 /// The exposed regions tile what the shift uncovered, without overlap.

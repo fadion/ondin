@@ -9,7 +9,7 @@
 use ondin_core::kurbo::Rect;
 use ondin_core::peniko::Color;
 use ondin_core::{Document, Resolved};
-use ondin_render::gpu::{Region, copy_shifted};
+use ondin_render::gpu::{Region, copy_regions, copy_shifted};
 use ondin_render::{ImageStore, RenderOverrides, VelloGpuRenderer, Viewport};
 use std::time::Instant;
 
@@ -159,4 +159,88 @@ fn a_pan_against_a_full_frame() {
         median(full),
         median(pan)
     );
+
+    // A drag of the top-level item nearest the middle, as the canvas previews it.
+    let vp = viewport(origin, zoom);
+    let middle = vp.view.center();
+    let Some(&dragged) = doc
+        .get(page)
+        .expect("the page")
+        .children()
+        .iter()
+        .min_by(|a, b| {
+            let d = |id: &ondin_core::NodeId| {
+                res.ink_bounds(*id)
+                    .map_or(f64::INFINITY, |r| (r.center() - middle).hypot())
+            };
+            d(a).total_cmp(&d(b))
+        })
+    else {
+        return;
+    };
+    let from = doc.get(dragged).expect("a node").transform();
+    let mut before = ov.clone();
+    let (mut patch, mut whole, mut unbounded) = (Vec::new(), Vec::new(), 0);
+    for i in 1..=30 {
+        let tx = ondin_core::Transaction(vec![ondin_core::Operation::SetTransform {
+            id: dragged,
+            transform: ondin_core::kurbo::Affine::translate((f64::from(i) * 9.0, 0.0)) * from,
+        }]);
+        let mut after = RenderOverrides::from_transaction(&doc, &res, &tx).expect("a preview");
+        after.set_level_of_detail(true);
+        let t = Instant::now();
+        let Some(damage) = ondin_render::scene::damage(&doc, &res, &vp, page, &before, &after)
+        else {
+            unbounded += 1;
+            continue;
+        };
+        let regions: Vec<Region> = damage
+            .iter()
+            .filter_map(|r| Region::covering(*r, 2.0, SIZE))
+            .collect();
+        let drawn = renderer
+            .render_regions(
+                &device,
+                &queue,
+                &doc,
+                &res,
+                &vp,
+                &after,
+                &spare.create_view(&Default::default()),
+                &regions,
+                ground,
+                &images,
+                page,
+            )
+            .expect("regions");
+        assert!(drawn, "the drag's regions are not pinned");
+        copy_regions(&device, &queue, &spare, &shown, &regions);
+        wait(&device);
+        patch.push(t.elapsed().as_secs_f64() * 1e3);
+        let t = Instant::now();
+        renderer
+            .render(
+                &device,
+                &queue,
+                &doc,
+                &res,
+                &vp,
+                &after,
+                &spare.create_view(&Default::default()),
+                ground,
+                &images,
+                page,
+            )
+            .expect("render");
+        wait(&device);
+        whole.push(t.elapsed().as_secs_f64() * 1e3);
+        before = after;
+    }
+    if !patch.is_empty() {
+        eprintln!(
+            "drag frame {:.1} ms patched, {:.1} ms whole (median), {unbounded} unbounded",
+            median(patch),
+            median(whole)
+        );
+    }
 }

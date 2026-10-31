@@ -358,6 +358,182 @@ impl<P: ScenePainter> ScenePainter for OutlinePainter<'_, P> {
     }
 }
 
+/// The device box of what the walk draws, never smaller: clips are not applied,
+/// a stroke is grown by its widest mitre or cap, a glyph run by three ems, and an
+/// effect layer counts its whole buffer box, escape and all.
+struct BoundsPainter {
+    /// World → device pixels.
+    base: Affine,
+    ink: Option<Rect>,
+}
+
+impl BoundsPainter {
+    fn add(&mut self, transform: Affine, local: Rect) {
+        let device = (self.base * transform).transform_rect_bbox(local);
+        self.ink = Some(self.ink.map_or(device, |r| r.union(device)));
+    }
+}
+
+impl ScenePainter for BoundsPainter {
+    /// A missing picture's placeholder lies inside the same path.
+    fn has_image(&self, _: &ondin_core::ImageId) -> bool {
+        true
+    }
+    fn fill_path(&mut self, t: Affine, path: &BezPath, _: &Brush, _: Option<Framing>, _: ClipRule) {
+        self.add(t, path.bounding_box());
+    }
+    fn stroke_path(&mut self, transform: Affine, path: &BezPath, stroke: &StrokePaint<'_>) {
+        let reach = stroke.width / 2.0 * stroke.miter_limit.max(std::f64::consts::SQRT_2);
+        self.add(transform, path.bounding_box().inflate(reach, reach));
+    }
+    fn draw_text(&mut self, transform: Affine, run: &TextRun<'_>) {
+        let Some(first) = run.glyphs.first() else {
+            return;
+        };
+        let at = |g: &TextGlyph| {
+            Rect::new(
+                f64::from(g.x),
+                f64::from(g.y),
+                f64::from(g.x),
+                f64::from(g.y),
+            )
+        };
+        let origins = run.glyphs.iter().fold(at(first), |r, g| r.union(at(g)));
+        let em = 3.0 * f64::from(run.font_size);
+        self.add(transform, origins.inflate(em, em));
+    }
+    fn push_layer(&mut self, _: Affine, _: Option<&BezPath>, _: ClipRule, _: f32) {}
+    fn push_mask_layer(&mut self) {}
+    fn push_effect_layer(
+        &mut self,
+        transform: Affine,
+        bounds: Rect,
+        _: &[ondin_core::Keyed<Effect>],
+    ) {
+        self.add(transform, bounds);
+    }
+    fn pop_layer(&mut self) {}
+}
+
+/// The device box of everything each of `tops` — children of `page` — draws
+/// under `overrides`, beside the box of every ghost hanging off the page: the
+/// damage a preview can do there. `None` when the page's children do not draw
+/// independently of each other: a mask among them clips the ones after it, and a
+/// preview reordering them changes which covers which.
+pub fn top_level_ink(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    page: NodeId,
+    tops: &[NodeId],
+) -> Option<Vec<Rect>> {
+    let node = doc.get(page)?;
+    let masked = |c: &NodeId| doc.get(*c).is_some_and(|n| n.mask());
+    if overrides.children_of(page).is_some() || node.children().iter().any(masked) {
+        return None;
+    }
+    let world = res.world_transform(page).unwrap_or(Affine::IDENTITY);
+    let items = tops
+        .iter()
+        .map(|id| Top::Node(*id))
+        .chain(overrides.ghosts_of(page).map(|g| Top::Ghost(&g.node)));
+    Some(
+        items
+            .filter_map(|item| ink_of(doc, res, vp, overrides, item, world))
+            .collect(),
+    )
+}
+
+/// The device rectangles a frame drawn under `before` has to redraw to show
+/// `after`, the document and the view standing still: what each top-level item
+/// either preview touches ([`RenderOverrides::touched`]) draws under both. `None`
+/// when that cannot be said ([`top_level_ink`]'s cases, or a touched node the
+/// document does not hold).
+pub fn damage(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    page: NodeId,
+    before: &RenderOverrides,
+    after: &RenderOverrides,
+) -> Option<Vec<Rect>> {
+    // A moved frame names every node under it, so the walk up is a set's work.
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut tops: Vec<NodeId> = Vec::new();
+    for id in before.touched().chain(after.touched()) {
+        if !seen.insert(id) {
+            continue;
+        }
+        // Up to the child of the page; the page itself stands for its ghosts,
+        // which `top_level_ink` measures whatever is named.
+        let mut at = id;
+        loop {
+            let parent = doc.get(at)?.parent();
+            match parent {
+                Some(p) if p == page => break,
+                Some(p) => at = p,
+                // The page itself, or a node on another page.
+                None => break,
+            }
+        }
+        if doc.get(at)?.parent() == Some(page) && (at == id || seen.insert(at)) {
+            tops.push(at);
+        }
+    }
+    let mut out = top_level_ink(doc, res, vp, before, page, &tops)?;
+    out.extend(top_level_ink(doc, res, vp, after, page, &tops)?);
+    Some(out)
+}
+
+/// One thing a page draws among its children.
+#[derive(Clone, Copy)]
+enum Top<'a> {
+    Node(NodeId),
+    Ghost(&'a GhostNode),
+}
+
+/// [`BoundsPainter`]'s box for `item`, walked as [`walk`] walks it — through
+/// outline mode's painter when that is on.
+fn ink_of(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    ov: &RenderOverrides,
+    item: Top<'_>,
+    page_world: Affine,
+) -> Option<Rect> {
+    fn draw<P: ScenePainter>(
+        doc: &Document,
+        res: &Resolved,
+        ov: &RenderOverrides,
+        item: Top<'_>,
+        (world, view, base): (Affine, &[Rect], Affine),
+        painter: &mut P,
+    ) {
+        match item {
+            Top::Node(id) => paint_node(doc, res, ov, id, world, view, base, painter),
+            Top::Ghost(g) => paint_ghost(doc, ov, g, true, world, base, painter, None),
+        }
+    }
+    let base = device_base(vp);
+    let at = (page_world, &[vp.view][..], base);
+    let mut bounds = BoundsPainter { base, ink: None };
+    match ov.outline() {
+        Some(ink) => {
+            let mut outline = OutlinePainter {
+                inner: &mut bounds,
+                ink: Brush::Solid(ink),
+                base,
+                erasing: Vec::new(),
+            };
+            draw(doc, res, ov, item, at, &mut outline);
+        }
+        None => draw(doc, res, ov, item, at, &mut bounds),
+    }
+    bounds.ink
+}
+
 /// Whether axis-aligned boxes snap to whole device pixels (see
 /// [`snapped_box_world`]).
 const SNAP_BOXES_TO_DEVICE_PIXELS: bool = true;

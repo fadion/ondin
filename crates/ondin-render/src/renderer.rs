@@ -156,7 +156,7 @@ impl GhostNode {
 /// `from_transaction` returns `None` for them. A reorder is a patch on the parent's
 /// child order ([`Self::children_of`]), read by the scene walk, the layout view and
 /// a boolean's operand order (a `Subtract`'s base) (§15 D877).
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct RenderOverrides {
     nodes: FxHashMap<NodeId, NodeOverride>,
     /// Parents whose child order this preview changes, each with its whole new
@@ -218,6 +218,25 @@ impl RenderOverrides {
             && self.ghosts.is_empty()
             && self.order.is_empty()
             && self.ground.is_none()
+    }
+
+    /// Every document node whose drawing this preview can change: the patched,
+    /// the moved, the leaving, the reshaped booleans, the reordered parents and
+    /// their children, the ghosts' and the chrome ghost's parents, and the chrome's
+    /// layer. The walk reads nothing else off a preview but the view fields
+    /// (outline, level of detail), so every other node draws as committed.
+    pub fn touched(&self) -> impl Iterator<Item = NodeId> + '_ {
+        let ghosts = self.ghosts.iter().chain(self.chrome.iter().map(|(_, g)| g));
+        self.nodes
+            .keys()
+            .chain(self.order.keys())
+            .chain(self.order.values().flatten())
+            .chain(&self.moved)
+            .chain(&self.escaping)
+            .chain(self.boolean.keys())
+            .chain(ghosts.map(|g| &g.parent))
+            .chain(self.chrome.iter().map(|(id, _)| id))
+            .copied()
     }
 
     /// `parent`'s children in the order this preview gives them, where it

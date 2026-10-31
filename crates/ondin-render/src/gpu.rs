@@ -599,6 +599,66 @@ pub fn copy_shifted(
     queue.submit([enc.finish()]);
 }
 
+/// Copy `regions` of `from` into the same place in `to`: a frame patched where a
+/// preview changed it, from the [`VelloGpuRenderer::render_regions`] frame drawn
+/// for those regions.
+pub fn copy_regions(
+    device: &Device,
+    queue: &Queue,
+    from: &wgpu::Texture,
+    to: &wgpu::Texture,
+    regions: &[Region],
+) {
+    let mut enc = device.create_command_encoder(&Default::default());
+    for r in regions {
+        let at = wgpu::Origin3d {
+            x: r.at.0,
+            y: r.at.1,
+            z: 0,
+        };
+        enc.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: from,
+                mip_level: 0,
+                origin: at,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: to,
+                mip_level: 0,
+                origin: at,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: r.size.0,
+                height: r.size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    queue.submit([enc.finish()]);
+}
+
+impl Region {
+    /// The canvas pixels `device` (a device-space box) touches, grown by
+    /// `margin` and cut to a canvas of `size`; `None` when nothing is left.
+    pub fn covering(device: Rect, margin: f64, size: (u32, u32)) -> Option<Region> {
+        let r = device.inflate(margin, margin);
+        let x0 = r.x0.floor().max(0.0);
+        let y0 = r.y0.floor().max(0.0);
+        let x1 = r.x1.ceil().min(f64::from(size.0));
+        let y1 = r.y1.ceil().min(f64::from(size.1));
+        // A NaN edge has become the canvas's own by `max` and `min`.
+        if x0 >= x1 || y0 >= y1 {
+            return None;
+        }
+        Some(Region {
+            at: (x0 as u32, y0 as u32),
+            size: ((x1 - x0) as u32, (y1 - y0) as u32),
+        })
+    }
+}
+
 /// How far past a region the walk keeps what it would cull, in device pixels: a
 /// snapped box moves by up to a pixel and antialiasing reaches past its edge.
 const REGION_CULL_MARGIN: f64 = 2.0;
@@ -961,7 +1021,8 @@ impl VelloGpuRenderer {
     /// Inside the regions the pixels are the full frame's: the device transform,
     /// the effect buffers and the target are the same, and only the cull differs.
     /// An effect layer may land at another offset in its pass's packed texture,
-    /// where vello's antialiasing of an edge moves by a level or two.
+    /// where vello's antialiasing of an edge moves by a level or two, and a
+    /// stroke's edge column by up to about fourteen.
     ///
     /// Returns `Ok(false)` when the drawing came out [`Self::pinned`], and then
     /// `target` holds nothing to keep: the caller draws the whole frame instead.

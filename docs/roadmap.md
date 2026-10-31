@@ -14,7 +14,20 @@ Nothing open.
 
 ## Now · Performance
 
-Nothing open.
+Figures are from the suite (`perf/README.md`), on the `wide` fixture unless named.
+
+- **Parse a current file straight into its types.** `io::load` parses into a `serde_json::Value`
+  (~650 ms), migrates it, then converts it with `from_value`. A file already at the current
+  `schema_version` can deserialize `DocumentDto` directly; migration stays as it is for older ones.
+- **Share text layouts between nodes.** Text is ~1,030 of resolve's ~1,290 ms (39k of 149k
+  layers), and the text memo is keyed by node, so identical text is shaped once per node. Key a
+  cache by content, style and wrap width. Measure the gain on real kits (`ONDIN_PERF_EXTRA`), as
+  the fixtures repeat a few strings.
+- **Apply a transaction without cloning the document.** `Document::apply` clones it for
+  atomicity (~200 ms) and drops the old copy (~53 ms); the operations and the four
+  whole-document checks are ~40 ms. Apply in place and roll a refused transaction back with the
+  inverses collected so far — which every inverse being exact makes safe, so it needs a test that
+  refuses at each step and compares against the starting document.
 
 ## Later · First
 

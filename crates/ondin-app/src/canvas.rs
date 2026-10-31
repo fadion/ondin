@@ -57,6 +57,12 @@ struct Gpu {
     render_state: RenderState,
     vello: VelloGpuRenderer,
     target: Option<CanvasTexture>,
+    /// The texture a pan draws its next frame into, swapped with `target` once
+    /// drawn; made on the first pan.
+    spare: Option<CanvasTexture>,
+    /// Whether `target`'s frame is `VelloGpuRenderer::pinned`, and so cannot be
+    /// moved by a pan.
+    pinned: bool,
     /// The eyedropper's copy of the pixels round its hotspot, in flight.
     readback: Option<Readback>,
 }
@@ -176,6 +182,30 @@ struct DrawnKey {
     chrome: Option<(NodeId, ondin_render::Ghost)>,
 }
 
+impl DrawnKey {
+    /// How many device pixels the drawing moved between a frame drawn from
+    /// `self` and one drawn from `next`, when that is all that changed and the
+    /// move is by whole pixels — a pan, which the canvas answers by moving its
+    /// last frame and drawing only what came into view.
+    fn pan_to(&self, next: &DrawnKey) -> Option<(i32, i32)> {
+        let mut same = self.clone();
+        same.camera.center = next.camera.center;
+        if same != *next {
+            return None;
+        }
+        let (a, b) = (
+            self.camera.viewport(self.size).view,
+            next.camera.viewport(next.size).view,
+        );
+        let whole = |from: f64, to: f64| {
+            let d = (from - to) * next.camera.zoom;
+            let r = d.round();
+            ((d - r).abs() < 1e-6 && r.abs() < f64::from(i32::MAX)).then_some(r as i32)
+        };
+        Some((whole(a.x0, b.x0)?, whole(a.y0, b.y0)?))
+    }
+}
+
 pub struct CanvasRenderer {
     /// `None` in a headless build (`CanvasRenderer::headless`), where there is no
     /// device to draw with.
@@ -205,6 +235,8 @@ impl CanvasRenderer {
                 render_state,
                 vello,
                 target: None,
+                spare: None,
+                pinned: false,
                 readback: None,
             }),
             shown: None,
@@ -298,10 +330,20 @@ impl CanvasRenderer {
         };
         // A picture still showing its reduced preview must be asked for again each
         // frame, or the store never promotes it (`ImageStore::wants_frame`).
-        if self.shown.as_ref() == Some(&key) && !self.images.wants_frame() {
+        let wants_frame = self.images.wants_frame();
+        if self.shown.as_ref() == Some(&key) && !wants_frame {
             return self.gpu.as_ref()?.target.as_ref().map(|t| t.id);
         }
-        self.shown = None;
+        // Past half the canvas, what came into view is most of a frame anyway.
+        let pan = self
+            .shown
+            .take()
+            .and_then(|shown| shown.pan_to(&key))
+            .filter(|&(dx, dy)| {
+                let (w, h) = (i64::from(pixel_size.0), i64::from(pixel_size.1));
+                let kept = (w - i64::from(dx).abs()).max(0) * (h - i64::from(dy).abs()).max(0);
+                !wants_frame && kept * 2 > w * h
+            });
         #[cfg(test)]
         {
             self.draws += 1;
@@ -313,24 +355,40 @@ impl CanvasRenderer {
             return None;
         };
         gpu.ensure_target(pixel_size);
-        let target = gpu.target.as_ref()?;
-        gpu.vello
-            .render(
-                &gpu.render_state.device,
-                &gpu.render_state.queue,
+        let vp = camera.viewport(pixel_size);
+        let panned = pan.is_some_and(|shift| {
+            gpu.pan(
                 doc,
                 res,
-                &camera.viewport(pixel_size),
                 overrides,
-                &target.view,
+                &vp,
+                shift,
                 backdrop,
                 &self.images,
                 page,
             )
-            .ok()?;
+        });
+        if !panned {
+            let target = gpu.target.as_ref()?;
+            gpu.vello
+                .render(
+                    &gpu.render_state.device,
+                    &gpu.render_state.queue,
+                    doc,
+                    res,
+                    &vp,
+                    overrides,
+                    &target.view,
+                    backdrop,
+                    &self.images,
+                    page,
+                )
+                .ok()?;
+            gpu.pinned = gpu.vello.pinned();
+        }
         self.shown = Some(key);
         self.drew = true;
-        Some(target.id)
+        gpu.target.as_ref().map(|t| t.id)
     }
 
     /// The eyedropper's latest sample, whatever it was read against.
@@ -498,9 +556,71 @@ impl Gpu {
         if self.target.as_ref().is_some_and(|c| c.size == pixel_size) {
             return;
         }
-        if let Some(old) = self.target.take() {
+        for old in [self.target.take(), self.spare.take()]
+            .into_iter()
+            .flatten()
+        {
             self.render_state.renderer.write().free_texture(&old.id);
         }
+        self.target = Some(self.texture(pixel_size));
+    }
+
+    /// Answer a pan of `shift` device pixels by moving the frame `target` shows
+    /// and drawing only what came into view, into `spare`, then swapping them.
+    /// False when the frame cannot be moved, and `target` is to be drawn whole.
+    #[allow(clippy::too_many_arguments)]
+    fn pan(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        overrides: &RenderOverrides,
+        vp: &ondin_render::Viewport,
+        shift: (i32, i32),
+        backdrop: Color,
+        images: &ondin_render::ImageStore,
+        page: NodeId,
+    ) -> bool {
+        if self.pinned {
+            return false;
+        }
+        let size = vp.pixel_size;
+        if self.spare.as_ref().is_none_or(|s| s.size != size) {
+            self.spare = Some(self.texture(size));
+        }
+        let (Some(target), Some(spare)) = (self.target.as_ref(), self.spare.as_ref()) else {
+            return false;
+        };
+        let (device, queue) = (&self.render_state.device, &self.render_state.queue);
+        let drawn = self.vello.render_regions(
+            device,
+            queue,
+            doc,
+            res,
+            vp,
+            overrides,
+            &spare.view,
+            &ondin_render::gpu::Region::exposed(size, shift),
+            backdrop,
+            images,
+            page,
+        );
+        if !matches!(drawn, Ok(true)) {
+            return false;
+        }
+        ondin_render::gpu::copy_shifted(
+            device,
+            queue,
+            &target.texture,
+            &spare.texture,
+            size,
+            shift,
+        );
+        std::mem::swap(&mut self.target, &mut self.spare);
+        true
+    }
+
+    /// A canvas texture of `pixel_size`, registered with egui.
+    fn texture(&self, pixel_size: (u32, u32)) -> CanvasTexture {
         let texture = self
             .render_state
             .device
@@ -518,7 +638,9 @@ impl Gpu {
                 usage: wgpu::TextureUsages::STORAGE_BINDING
                     | wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::COPY_SRC,
+                    | wgpu::TextureUsages::COPY_SRC
+                    // A pan copies the last frame in.
+                    | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -527,12 +649,12 @@ impl Gpu {
             &view,
             wgpu::FilterMode::Nearest,
         );
-        self.target = Some(CanvasTexture {
+        CanvasTexture {
             texture,
             view,
             size: pixel_size,
             id,
-        });
+        }
     }
 }
 
@@ -22258,5 +22380,66 @@ mod redraw_tests {
             )
             .expect("decodes");
         assert_eq!(idle_draws(&ctx, &mut app, 4), 1);
+    }
+
+    fn key(camera: Camera) -> DrawnKey {
+        DrawnKey {
+            revision: 1,
+            drawn: 1,
+            images: 0,
+            camera,
+            size: (801, 600),
+            backdrop: Color::WHITE,
+            page: ondin_core::IdSource::new(1).mint(),
+            outline: None,
+            detail: false,
+            chrome: None,
+        }
+    }
+
+    /// A pan of fractional deltas at a fractional zoom moves every world point on
+    /// screen by the whole pixels `pan_to` reports, and in all by the deltas to
+    /// within a pixel; anything else changing is not a pan.
+    ///
+    /// flip: `Camera::viewport` not rounding its corner → fails at the first
+    /// `pan_to` (a fractional move is no pan).
+    #[test]
+    fn a_pan_moves_the_drawing_by_whole_pixels() {
+        let start = Camera {
+            center: Point::new(123.456, -78.9),
+            zoom: 0.73,
+        };
+        let mut camera = start;
+        let mut shown = key(camera);
+        let mut total = Vec2::ZERO;
+        let p = Point::new(31.7, -12.2);
+        for d in [
+            Vec2::new(3.3, 0.0),
+            Vec2::new(0.4, -7.7),
+            Vec2::new(-12.25, 5.5),
+        ] {
+            camera.pan_pixels(d);
+            total += d;
+            let next = key(camera);
+            let (dx, dy) = shown.pan_to(&next).expect("a pan");
+            let moved =
+                camera.world_to_screen(p, next.size) - shown.camera.world_to_screen(p, shown.size);
+            assert!(
+                (moved - Vec2::new(dx.into(), dy.into())).hypot() < 1e-6,
+                "{d:?}: {moved:?} vs ({dx}, {dy})"
+            );
+            shown = next;
+        }
+        let (dx, dy) = key(start).pan_to(&key(camera)).expect("a pan");
+        assert!(
+            (Vec2::new(dx.into(), dy.into()) - total).hypot() <= 1.0,
+            "the content followed the pointer: ({dx}, {dy}) vs {total:?}"
+        );
+        let mut zoomed = key(camera);
+        zoomed.camera.zoom = 0.8;
+        assert_eq!(key(camera).pan_to(&zoomed), None, "a zoom");
+        let mut edited = key(camera);
+        edited.revision = 2;
+        assert_eq!(key(camera).pan_to(&edited), None, "an edit");
     }
 }

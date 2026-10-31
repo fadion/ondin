@@ -18,8 +18,8 @@ Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, p
 1,090 effect layers), 2560×1440 on an RTX 4070 Ti. With the whole grid in view (7% zoom) a frame is
 ~43 ms, nearly all of it CPU: the scene walk ~20 ms, the effect jobs ~13 ms, vello's own encoding
 ~7 ms, the GPU ~3 ms. Every item here is exact: what is drawn must not change (no approximate blurs,
-no stale or stretched frames while moving). A resting canvas already draws nothing (`render.md` §6.3:
-the canvas draws only on change). A continuous zoom changes the scale every frame, so the caches
+no stale or stretched frames while moving). A resting canvas already draws nothing and a pan draws only
+what came into view (`render.md` §6.3). A continuous zoom changes the scale every frame, so the caches
 below help pan and edits, not the zoom gesture itself.
 
 - **Retained scene fragments per top-level frame.** Encode each top-level frame's subtree into its own
@@ -32,13 +32,12 @@ below help pan and edits, not the zoom gesture itself.
   a whole-pixel-panning canvas runs no blur pass. Needs a texture budget and eviction
   beside `FxPool`, and invalidation from the same dirty set as the fragments. Targets the ~13 ms of
   effect jobs.
-- **Pan by shifting the last frame; redraw only damage.** Snap the camera's origin to whole device
-  pixels, shift the previous canvas texture and render only the exposed strips (scissored, with the
-  effect escape as margin, as `effect::buffer_box_within` already grows a buffer). An edit redraws the
-  union of its nodes' old and new ink bounds (`DirtySet` plus `Resolved`'s bounds before and after),
-  widened for ancestors that paint from their children (booleans, effects, masks); past a share of
-  the view, render whole. Builds on the kept canvas texture (`CanvasRenderer::render`'s `DrawnKey`),
-  which today is either kept whole or drawn whole.
+- **Redraw only damage.** An edit redraws the union of its nodes' old and new ink bounds (`DirtySet`
+  plus `Resolved`'s bounds before and after), widened for ancestors that paint from their children
+  (booleans, effects, masks); past a share of the view, render whole. A pan already moves the last
+  frame and draws only what came into view (`render.md` §6.3); an edit can build on the same
+  `VelloGpuRenderer::render_regions`, which draws chosen regions of a full frame and refuses a pinned
+  one. Today an edit draws the canvas whole.
 
 ## Later · First
 

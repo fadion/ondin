@@ -51,11 +51,18 @@ pub(crate) const MAX_ZOOM: f64 = 256.0;
 
 impl Camera {
     /// The world-space rectangle visible in a canvas of `pixel_size` device px.
+    ///
+    /// Its corner is moved by under half a pixel so that the world's origin lands
+    /// on a whole device pixel: a pan then moves the whole drawing by whole pixels,
+    /// which lets the canvas move its last frame instead of drawing a new one. The
+    /// center stays exact, so the rounding never accumulates.
     pub fn viewport(&self, pixel_size: (u32, u32)) -> Viewport {
         let w = pixel_size.0 as f64 / self.zoom;
         let h = pixel_size.1 as f64 / self.zoom;
+        let corner = |c: f64, span: f64| ((c - span / 2.0) * self.zoom).round() / self.zoom;
+        let (x0, y0) = (corner(self.center.x, w), corner(self.center.y, h));
         Viewport {
-            view: Rect::from_center_size(self.center, (w, h)),
+            view: Rect::new(x0, y0, x0 + w, y0 + h),
             pixel_size,
         }
     }
@@ -96,7 +103,8 @@ impl Camera {
         self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
     }
 
-    /// Zoom by `factor`, keeping the world point under `anchor_px` fixed on screen.
+    /// Zoom by `factor`, keeping the world point under `anchor_px` where it is on
+    /// screen to within a device pixel ([`Self::viewport`] rounds its corner).
     pub fn zoom_by(&mut self, factor: f64, anchor_px: Vec2, pixel_size: (u32, u32)) {
         let before = self.screen_to_world(anchor_px, pixel_size);
         self.set_zoom(self.zoom * factor);

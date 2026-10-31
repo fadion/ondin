@@ -671,7 +671,12 @@ mod tests {
 
         assert!(app.session.camera.zoom > zoom, "a scroll up zooms in");
         let after = app.session.camera.world_to_screen(target, app.canvas_px);
-        assert!((after - before).hypot() < 1e-2, "{after:?} vs {before:?}");
+        // Within the device pixel per axis that the camera's rounded corner, read
+        // before and after the zoom, allows.
+        assert!(
+            (after - before).hypot() < 2.0_f64.sqrt(),
+            "{after:?} vs {before:?}"
+        );
     }
 
     /// Focus mode keeps the map; the switch off hides it.

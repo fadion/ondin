@@ -64,9 +64,10 @@ impl ImageFormat {
 pub enum ImageSource {
     /// The encoded file itself, written into the document as base64.
     ///
-    /// **`Arc<[u8]>` rather than `Vec<u8>`** (§15 D301): `Document::apply` clones
-    /// the whole document, which would deep-copy every photograph per commit. Safe
-    /// because the bytes are immutable (*Replace…* writes a new entry).
+    /// **`Arc<[u8]>` rather than `Vec<u8>`** (§15 D301): `Document::apply` copies
+    /// the image table to roll back from, which would deep-copy every photograph
+    /// per commit. Safe because the bytes are immutable (*Replace…* writes a new
+    /// entry).
     Embedded(std::sync::Arc<[u8]>),
     /// A path on this machine, as written. **A string rather than a `PathBuf`**:
     /// a document is portable and a path is not. A stale link draws the

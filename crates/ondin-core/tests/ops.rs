@@ -1055,7 +1055,7 @@ fn removing_all_guides_is_a_single_undo_step() {
 }
 
 /// A guide op naming an id the document does not have is an error, and — since
-/// `apply` validates against a working copy — it takes the whole transaction
+/// `apply` rolls a refused transaction back — it takes the whole transaction
 /// down with it rather than leaving half of it applied.
 #[test]
 fn a_guide_op_on_a_missing_guide_fails_atomically() {
@@ -1485,13 +1485,10 @@ fn photo() -> (ImageId, ImageEntry) {
 
 /// **A committed edit does not copy the photographs** (§15 D301).
 ///
-/// `Document::apply` clones the whole document to get a working copy it can fail
-/// out of, so for as long as `ImageSource::Embedded` held a `Vec<u8>` every commit
-/// — and every undo and every redo, which go through the same function — deep-copied
-/// every embedded image. Measured before the fix, in release, for a one-transform
-/// nudge: **3.5 ms at 20 MB of images and 10.2 ms at 60 MB**, against 0.001 ms
-/// after. A held arrow key commits per repeat, so it was a stutter with no visible
-/// cause and no upper bound but the document's size.
+/// `Document::apply` copies the image table to roll a refused transaction back
+/// from, on every commit, undo and redo; a table holding the bytes themselves
+/// would deep-copy every embedded image each time, and a held arrow key commits
+/// per repeat.
 ///
 /// **Asserted as identity rather than as a time**, because the timing is the
 /// symptom and the sharing is the fact: the same allocation has to be reachable
@@ -1539,8 +1536,7 @@ fn cloning_a_document_shares_its_image_bytes_rather_than_copying_them() {
          every commit, undo and redo"
     );
 
-    // And through `apply` itself, which is where the clone actually happens and
-    // the only reason any of this matters.
+    // And through `apply` itself, which copies the table on every commit.
     let mut doc2 = doc.clone();
     let page = doc2.first_page();
     doc2.apply(&Transaction(vec![Operation::SetPageGround {
@@ -1554,7 +1550,7 @@ fn cloning_a_document_shares_its_image_bytes_rather_than_copying_them() {
             .expect("bytes")
             .as_ptr(),
         original.as_ptr(),
-        "a commit's working copy shares the table too"
+        "a commit's copy of the table shares the bytes too"
     );
 }
 

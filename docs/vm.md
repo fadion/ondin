@@ -214,8 +214,9 @@ that performs two hundred mutations, and a naive implementation gives two hundre
 
 **A script is one working copy, one commit, one undo step.**
 
-`Document::apply` is already atomic by clone-then-swap (`document.rs:199` builds a working copy). The
-VM widens that existing mechanism from one transaction to one script:
+`Document::apply` is atomic but builds no working copy: it applies in place and rolls a refused
+transaction back from a node journal and a snapshot of the other tables (§5.7). The VM's plan gives
+a script a working copy of its own:
 
 1. Clone the document once, at script start.
 2. Apply each operation into the working copy as the script runs, accumulating inverses.

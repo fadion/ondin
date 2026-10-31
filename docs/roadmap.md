@@ -20,11 +20,6 @@ Figures are from the suite (`perf/README.md`), on the `wide` fixture unless name
   layers), and the text memo is keyed by node, so identical text is shaped once per node. Key a
   cache by content, style and wrap width. Measure the gain on real kits (`ONDIN_PERF_EXTRA`), as
   the fixtures repeat a few strings.
-- **Apply a transaction without cloning the document.** `Document::apply` clones it for
-  atomicity (~200 ms) and drops the old copy (~53 ms); the operations and the four
-  whole-document checks are ~40 ms. Apply in place and roll a refused transaction back with the
-  inverses collected so far — which every inverse being exact makes safe, so it needs a test that
-  refuses at each step and compares against the starting document.
 
 ## Later · First
 

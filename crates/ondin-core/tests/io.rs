@@ -3208,8 +3208,8 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             matches!(doc.apply(&Transaction(vec![op])), Err(OpError::NonFinite)),
             "{name} must be refused"
         );
-        // ⚠️ **And refused without leaving anything behind.** `apply` mutates a
-        // working copy as it goes, so "returns Err" and "changed nothing" are two
+        // ⚠️ **And refused without leaving anything behind.** `apply` mutates the
+        // document in place as it goes, so "returns Err" and "changed nothing" are two
         // claims; the bytes are the only witness to the second.
         assert_eq!(
             io::save(&doc).unwrap(),

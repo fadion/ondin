@@ -321,7 +321,7 @@ the vendored mains it reaches and the paste vendors them.
 
 ### Post-conditions — `component::check`
 
-Run after the last op of `apply`, before `*self = working` (a transaction may pass through a breaking
+Run after the last op of `apply`, before the commit (a transaction may pass through a breaking
 state). Refused as `OpError::BadLink(NodeId, LinkRule)`:
 
 | Rule | Refuses |

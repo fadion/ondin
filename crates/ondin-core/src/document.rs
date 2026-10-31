@@ -24,6 +24,9 @@ use kurbo::{Affine, RoundedRectRadii};
 use peniko::Color;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+mod nodes;
+use nodes::NodeTable;
+
 /// What a page without its own ground is drawn on outside the app — the CLI,
 /// exports, the MCP snapshot. The app draws such a page on its theme instead.
 ///
@@ -35,7 +38,7 @@ pub const DEFAULT_CANVAS_BACKGROUND: Color = Color::from_rgba8(23, 23, 24, 255);
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
     schema_version: u32,
-    nodes: FxHashMap<NodeId, Node>,
+    nodes: NodeTable,
     /// The pages in order, never empty (`crate::page`). Each is a parentless
     /// `Root` in [`Self::nodes`].
     pages: Vec<crate::page::Page>,
@@ -84,9 +87,9 @@ pub struct Document {
     /// document.
     ///
     /// Outside undo for `meta`'s reason: an undo cannot take a publish back from
-    /// documents that already read it. Behind an `Arc` because `apply` clones the
-    /// document per transaction. Not derived state under invariant 4: it is the
-    /// tree as it was at the publish.
+    /// documents that already read it. Behind an `Arc` because a document is
+    /// cloned for scratch passes and background work. Not derived state under
+    /// invariant 4: it is the tree as it was at the publish.
     published: Option<std::sync::Arc<crate::kit::Published>>,
     /// **True only while [`Self::apply_restoring`] runs** — a history step putting
     /// back values this document already held, which the layout operations then
@@ -104,7 +107,7 @@ impl Document {
         );
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
-            nodes,
+            nodes: NodeTable::new(nodes),
             pages: vec![crate::page::Page {
                 id: root_id,
                 ground: None,
@@ -1015,7 +1018,7 @@ impl Document {
     ) -> Self {
         Self {
             schema_version,
-            nodes,
+            nodes: NodeTable::new(nodes),
             pages,
             vault,
             guides,
@@ -1058,23 +1061,32 @@ impl Document {
 
     /// The one mutation path (§5.7, invariant 2).
     ///
-    /// Atomic: every op is validated and applied against a working copy; if any
-    /// op fails, the document is left untouched and the error is returned. On
-    /// success returns the inverse transaction (apply it to undo) and the set of
-    /// nodes whose world bounds/appearance changed.
+    /// Atomic: if any op or post-condition refuses, the document is put back
+    /// exactly as it was and the error is returned. On success returns the
+    /// inverse transaction (apply it to undo) and the set of nodes whose world
+    /// bounds/appearance changed.
+    ///
+    /// Applied in place, not to a copy: the nodes table journals each node's
+    /// value before its first write, and [`InPlace`] restores those and the other
+    /// tables on refusal. The rollback writes the recorded values back rather than
+    /// applying the inverses, because an op can write before it refuses
+    /// (`op_add_mode` fills cells, then meets a missing variable) and an inverse
+    /// can carry a value the loader admits and the ops refuse.
     pub fn apply(&mut self, tx: &Transaction) -> Result<ApplyOutcome, OpError> {
-        // Work on a clone so a mid-transaction failure cannot leave partial
-        // state (§5.7 "validate all ops against a working copy"). apply() runs
-        // once per committed edit (gestures commit on release — §9.3), never
-        // per frame, so the clone cost is acceptable; a staged-diff optimization
-        // can replace this later behind the same signature.
-        let mut working = self.clone();
+        let txn = InPlace::open(self);
+        let outcome = txn.doc.apply_journaled(tx)?;
+        txn.commit();
+        Ok(outcome)
+    }
+
+    /// [`Self::apply`]'s body, run inside an [`InPlace`] that undoes it on `Err`.
+    fn apply_journaled(&mut self, tx: &Transaction) -> Result<ApplyOutcome, OpError> {
         let mut inverse_ops: Vec<Operation> = Vec::with_capacity(tx.0.len());
         let mut dirty = DirtySet::default();
         let mut numbering = Numbering::default();
 
         for op in &tx.0 {
-            let inverse = working.apply_one(op, &mut dirty, &mut numbering)?;
+            let inverse = self.apply_one(op, &mut dirty, &mut numbering)?;
             inverse_ops.push(inverse);
         }
 
@@ -1085,12 +1097,12 @@ impl Document {
         // `op_delete` so the next op that breaks it is caught too; `build::guides_of`
         // is still how the Delete verb carries its guides and orders the inverse.
         //
-        // It runs after the loop and before `*self = working`, so a transaction is
-        // still all-or-nothing. A per-op check would refuse the legal order
+        // It runs after the loop and before the commit, so a transaction is still
+        // all-or-nothing. A per-op check would refuse the legal order
         // frame-then-guides, which passes through an orphan on its way to a valid
         // document (`undoing_a_frame_delete_restores_its_guides` commits it).
-        for guide in &working.guides {
-            working.check_guide_owner(guide.owner)?;
+        for guide in &self.guides {
+            self.check_guide_owner(guide.owner)?;
         }
 
         // Item ids unique within each of a node's five lists (§15 D980), over the
@@ -1098,7 +1110,7 @@ impl Document {
         // instance's items to one of its main's. After the last op, for the guide
         // owners' reason; `dirty` covers every node an op wrote.
         for id in &dirty.0 {
-            if let Some(n) = working.nodes.get(id) {
+            if let Some(n) = self.nodes.get(id) {
                 n.check_item_ids()?;
             }
         }
@@ -1108,36 +1120,28 @@ impl Document {
         // it, no main holds an instance of itself. Over the whole document rather
         // than `dirty`, because a delete dirties the deleted node, not the
         // instance pointing at it (`component::check`).
-        crate::component::check(&working.nodes).map_err(|(id, rule)| OpError::BadLink(id, rule))?;
+        crate::component::check(&self.nodes).map_err(|(id, rule)| OpError::BadLink(id, rule))?;
 
         // The vault's rules (§15 D1012): an origin on every vault node and on
         // nothing else, a main or a set at each of its children. After the last op
         // for the guide owners' reason — vendoring opens the vault, then inserts.
-        crate::kit::check(&working.nodes, working.vault)
+        crate::kit::check(&self.nodes, self.vault)
             .map_err(|(id, rule)| OpError::Vault(id, rule))?;
 
         // The variables rules (§5.3f): every binding resolves to a variable of its
         // kind, every variable has a cell in every mode, no alias loops, a mode set
         // only on a frame. Over the whole document, for `component::check`'s reason.
-        crate::variable::check(&working.variables, working.nodes.values(), |id| {
-            working.in_vault(id)
-        })
-        .map_err(OpError::Variables)?;
+        crate::variable::check(&self.variables, self.nodes.values(), |id| self.in_vault(id))
+            .map_err(OpError::Variables)?;
 
         // The style rules (§15 D1062): every binding names a style of its slot,
         // names unique within a slot, a style's paints bound to colour variables,
         // and no vault node bound to one of the document's own — the same
         // whole-document reach.
-        crate::style::check(
-            &working.styles,
-            &working.variables,
-            working.nodes.values(),
-            |id| working.in_vault(id),
-        )
+        crate::style::check(&self.styles, &self.variables, self.nodes.values(), |id| {
+            self.in_vault(id)
+        })
         .map_err(OpError::Styles)?;
-
-        // All ops succeeded — commit the working copy.
-        *self = working;
 
         // To undo [a, b, c] applied in order, apply [c⁻¹, b⁻¹, a⁻¹].
         inverse_ops.reverse();
@@ -1190,7 +1194,7 @@ impl Document {
         }
         let mut one = Document {
             schema_version: self.schema_version,
-            nodes,
+            nodes: NodeTable::new(nodes),
             pages: self.pages.clone(),
             vault: self.vault,
             guides: Vec::new(),
@@ -1205,9 +1209,10 @@ impl Document {
             .ok()
     }
 
-    /// Apply a single op to `self` (already a working copy), returning the op
-    /// that would undo it. Validates before mutating. `numbering` carries the
-    /// transaction's child names from one create to the next.
+    /// Apply a single op to `self`, returning the op that would undo it.
+    /// `numbering` carries the transaction's child names from one create to the
+    /// next. An op may write before it refuses: [`Self::apply`] rolls back what
+    /// was written, not what was meant.
     fn apply_one(
         &mut self,
         op: &Operation,
@@ -1617,9 +1622,9 @@ impl Document {
     // **Every edit that can change what a bound field reads dirties every node
     // that reads a variable** (`bound_nodes`): no node changed, and `Resolved`'s
     // `update` returns early on an empty set. A scan, not a reverse index: a
-    // commit already clones the whole document. The table's rules are checked
-    // after the last op (`variable::check`), so these handlers refuse only a
-    // missing id or a duplicate one.
+    // commit's whole-document checks already walk every node. The table's rules
+    // are checked after the last op (`variable::check`), so these handlers refuse
+    // only a missing id or a duplicate one.
 
     fn op_add_variable(
         &mut self,
@@ -2153,7 +2158,7 @@ impl Document {
 
         // Index is validated against the target list as it stands at insertion
         // time (post-removal when reparenting within the same parent). Erroring
-        // here is safe: the working copy is discarded on any error.
+        // here is safe: `apply` restores every node written before an error.
         let new_len = self.nodes[&new_parent].children.len();
         if index > new_len {
             return Err(OpError::IndexOutOfRange);
@@ -2817,7 +2822,7 @@ impl Document {
         position: f64,
     ) -> Result<Operation, OpError> {
         // Validated before the guide is looked up mutably, so a rejected scope
-        // leaves nothing half-changed even inside the working copy.
+        // leaves nothing half-changed.
         if !position.is_finite() {
             return Err(OpError::NonFinite);
         }
@@ -3108,6 +3113,93 @@ impl Document {
                 .get(d)
                 .is_some_and(|n| matches!(n.kind, NodeKind::Artboard { .. }))
         })
+    }
+}
+
+/// A transaction being applied in place ([`Document::apply`]). Dropped without
+/// [`Self::commit`] — refused, or unwinding from a panic — it puts the document
+/// back as it was.
+struct InPlace<'a> {
+    doc: &'a mut Document,
+    /// The tables besides the nodes that an operation can write, as they were;
+    /// `None` once committed. The nodes are journaled by their own table.
+    tables: Option<Tables>,
+    /// The whole document as it was, which a rollback must equal. Debug builds
+    /// only: it is the clone this type exists to avoid.
+    #[cfg(debug_assertions)]
+    before: Document,
+}
+
+/// Every field of a [`Document`] an operation can write, except the nodes.
+/// `meta`, `published` and `schema_version` are not here: no operation reaches
+/// them, which the debug comparison in [`InPlace`]'s rollback checks.
+struct Tables {
+    pages: Vec<crate::page::Page>,
+    vault: Option<NodeId>,
+    guides: Vec<Guide>,
+    images: FxHashMap<ImageId, ImageEntry>,
+    variables: crate::variable::Variables,
+    styles: crate::style::Styles,
+}
+
+impl<'a> InPlace<'a> {
+    fn open(doc: &'a mut Document) -> Self {
+        let tables = Tables {
+            pages: doc.pages.clone(),
+            vault: doc.vault,
+            guides: doc.guides.clone(),
+            images: doc.images.clone(),
+            variables: doc.variables.clone(),
+            styles: doc.styles.clone(),
+        };
+        #[cfg(debug_assertions)]
+        let before = doc.clone();
+        doc.nodes.open_journal();
+        Self {
+            doc,
+            tables: Some(tables),
+            #[cfg(debug_assertions)]
+            before,
+        }
+    }
+
+    fn commit(mut self) {
+        self.doc.nodes.commit();
+        self.tables = None;
+    }
+}
+
+impl Drop for InPlace<'_> {
+    fn drop(&mut self) {
+        let Some(tables) = self.tables.take() else {
+            return;
+        };
+        let doc = &mut *self.doc;
+        doc.nodes.roll_back();
+        doc.pages = tables.pages;
+        doc.vault = tables.vault;
+        doc.guides = tables.guides;
+        doc.images = tables.images;
+        doc.variables = tables.variables;
+        doc.styles = tables.styles;
+        // Not while unwinding: a second panic would abort.
+        #[cfg(debug_assertions)]
+        if !std::thread::panicking() && *doc != self.before {
+            let nodes: Vec<NodeId> = doc
+                .nodes
+                .keys()
+                .chain(
+                    self.before
+                        .nodes
+                        .keys()
+                        .filter(|id| !doc.nodes.contains_key(id)),
+                )
+                .filter(|id| doc.nodes.get(id) != self.before.nodes.get(id))
+                .copied()
+                .take(8)
+                .collect();
+            panic!("a refused transaction was not rolled back exactly; nodes differing: {nodes:?}");
+        }
     }
 }
 

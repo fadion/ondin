@@ -8217,10 +8217,11 @@ impl OndinApp {
         let backdrop = self.session.preview_ground();
         let page = self.session.page;
         let (doc, res, overrides) = self.session.render_inputs();
-        if let Some(tex) = self
+        let drawn = self
             .canvas
-            .render(doc, res, overrides, &camera, px, backdrop, page)
-        {
+            .render(doc, res, overrides, &camera, px, backdrop, page);
+        self.meter.frame(std::time::Instant::now());
+        if let Some(tex) = drawn {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(tex, rect, uv, egui::Color32::WHITE);
         }

@@ -195,6 +195,11 @@ pub struct Prefs {
     /// Off. Whether a tree reads better folded depends on the person's habits,
     /// not on the file, hence a preference.
     pub collapse_groups_on_open: bool,
+    /// Show the top bar's resource meter (`meter.rs`): the app's CPU share, its
+    /// memory and the canvas frame rate.
+    ///
+    /// Off: a diagnostic, and while on it wakes the app once a second.
+    pub resource_meter: bool,
     /// Offer the web-font library at all — the catalog in the picker, and the faces
     /// behind it (`fonts::FontService`).
     ///
@@ -366,6 +371,7 @@ impl Default for Prefs {
             nudge: NudgeStep::default(),
             tree_guides: true,
             collapse_groups_on_open: false,
+            resource_meter: false,
             web_fonts: true,
             default_font: "Inter".into(),
             // An `f32`'s own default of 0.0 would clamp the panel to `MIN_W` on

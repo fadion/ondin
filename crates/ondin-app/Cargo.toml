@@ -73,7 +73,8 @@ ruzstd.workspace = true
 windows-sys.workspace = true
 
 # The same question on the two Unix platforms that ship: the library's local
-# dates, through `localtime_r` (`library::clock::local_offset`, §15 D959).
+# dates, through `localtime_r` (`library::clock::local_offset`, §15 D959), and the
+# resource meter's CPU time and memory (`meter.rs`).
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
 

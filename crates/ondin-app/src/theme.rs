@@ -811,6 +811,10 @@ pub mod icon {
     /// *JPEG quality* — a dial, for the one export setting that is a trade rather
     /// than a fact (§7).
     pub const GAUGE: &str = "\u{e628}";
+    /// The resource meter's CPU readout; [`GAUGE`] is its frame rate.
+    pub const CPU: &str = "\u{e610}";
+    /// The resource meter's memory readout.
+    pub const MEMORY: &str = "\u{e9c4}";
     /// *Slashes in names make folders* — the Export menu's switch.
     ///
     /// Not [`FOLDER_OPEN`], which is the same menu's *Show last export folder*:
@@ -1028,6 +1032,8 @@ pub mod icon {
         ("export", EXPORT),
         ("file-image", FILE_IMAGE),
         ("gauge", GAUGE),
+        ("cpu", CPU),
+        ("memory", MEMORY),
         ("file-zip", FILE_ZIP),
         ("folder-simple", FOLDER_SIMPLE),
         ("broom", BROOM),

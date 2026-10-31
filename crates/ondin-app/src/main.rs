@@ -101,6 +101,7 @@ mod logging;
 mod machine_dir;
 mod measure;
 mod menu;
+mod meter;
 mod minimap;
 mod pages;
 mod palette;

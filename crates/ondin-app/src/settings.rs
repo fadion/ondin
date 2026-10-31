@@ -84,6 +84,7 @@ pub(crate) struct Settings {
     nudge: NudgeStep,
     tree_guides: bool,
     collapse_groups_on_open: bool,
+    resource_meter: bool,
     default_font: String,
     web_fonts: bool,
 }
@@ -96,6 +97,7 @@ impl Settings {
             nudge: prefs.nudge,
             tree_guides: prefs.tree_guides,
             collapse_groups_on_open: prefs.collapse_groups_on_open,
+            resource_meter: prefs.resource_meter,
             default_font: prefs.default_font.clone(),
             web_fonts: prefs.web_fonts,
         }
@@ -122,6 +124,7 @@ impl Settings {
         prefs.nudge = self.nudge;
         prefs.tree_guides = self.tree_guides;
         prefs.collapse_groups_on_open = self.collapse_groups_on_open;
+        prefs.resource_meter = self.resource_meter;
         prefs.default_font.clone_from(&self.default_font);
         prefs.web_fonts = self.web_fonts;
         web_fonts_changed
@@ -197,6 +200,13 @@ impl OndinApp {
             // --- appearance --------------------------------------------
             ui.add_space(TITLE_GAP - SECTION_AIR);
             theme_section(ui, &mut draft.theme);
+            ui.add_space(ROW_GAP);
+            if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
+                .on_hover_text("CPU, memory and canvas frame rate in the top bar")
+                .clicked()
+            {
+                draft.resource_meter = !draft.resource_meter;
+            }
 
             // --- nudge -------------------------------------------------
             section(ui, "Nudge");
@@ -1132,6 +1142,7 @@ mod tests {
                 nudge: NudgeStep::default(),
                 tree_guides: true,
                 collapse_groups_on_open: false,
+                resource_meter: false,
                 default_font: "Inter".into(),
                 web_fonts: true,
             },
@@ -1146,6 +1157,7 @@ mod tests {
             },
             tree_guides: false,
             collapse_groups_on_open: true,
+            resource_meter: true,
             default_font: "Roboto".into(),
             web_fonts: false,
         };

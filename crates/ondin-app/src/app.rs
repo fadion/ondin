@@ -541,6 +541,8 @@ pub struct OndinApp {
     pub(crate) collapsed: crate::panels::layers::Folds,
     /// The layer tree flattened into rows, cached between frames.
     pub(crate) layers_flat: crate::panels::layers::FlatTree,
+    /// The top bar's resource meter and the canvas frame clock it reads.
+    pub(crate) meter: crate::meter::Meter,
     /// The first of a possible two opacity digits, and when it was typed; `None`
     /// outside the 600 ms window ([`OndinApp::opacity_digit`]).
     pub(crate) opacity_entry: Option<OpacityEntry>,
@@ -1349,6 +1351,7 @@ impl OndinApp {
             points: PointSet::default(),
             collapsed: Default::default(),
             layers_flat: Default::default(),
+            meter: Default::default(),
             opacity_entry: None,
             renaming_layer: None,
             pages: Default::default(),
@@ -6759,7 +6762,8 @@ impl OndinApp {
                     // In a kit opened by *Go to main*, the way back.
                     self.kit_back_link(ui);
 
-                    // Right cluster, reading undo/redo · View · Snap · zoom · Settings;
+                    // Right cluster, reading the resource meter (when on) · undo/redo ·
+                    // View · Snap · zoom · Settings;
                     // laid out `right_to_left`, so added in mirror order.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = TOP_GAP;
@@ -6797,6 +6801,12 @@ impl OndinApp {
                         {
                             self.finish_text_first();
                             self.undo();
+                        }
+                        if self.prefs.resource_meter {
+                            top_rule(ui);
+                            self.meter.show(ui);
+                        } else {
+                            self.meter.stop();
                         }
                     });
                 });
@@ -13004,6 +13014,35 @@ mod library_wiring_tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The resource meter is off by default; switched on, its three readouts sit
+    /// left of undo.
+    /// flip: draw the meter whatever the preference → fails at "off by default".
+    #[test]
+    fn the_resource_meter_sits_left_of_undo_when_on() {
+        use crate::theme::icon;
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let glyph_x = |app: &mut OndinApp, glyph: &str| {
+            let out = ctx.run_ui(Default::default(), |ui| app.top_bar(ui));
+            out.shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == glyph => Some(t.pos.x),
+                _ => None,
+            })
+        };
+        assert!(!app.prefs.resource_meter);
+        assert_eq!(glyph_x(&mut app, icon::CPU), None, "off by default");
+
+        app.prefs.resource_meter = true;
+        let undo = glyph_x(&mut app, icon::ARROW_U_UP_LEFT).expect("undo");
+        let [cpu, memory, fps] = [icon::CPU, icon::MEMORY, icon::GAUGE]
+            .map(|g| glyph_x(&mut app, g).expect("a readout"));
+        assert!(
+            cpu < memory && memory < fps && fps < undo,
+            "CPU, memory, frame rate, then undo: {cpu} {memory} {fps} {undo}"
+        );
     }
 
     /// The breadcrumb draws `Project / Document`, and just the document when

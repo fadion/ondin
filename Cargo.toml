@@ -204,11 +204,17 @@ libc = "0.2"
 #
 # **`Win32_Security_Credentials` is the Figma token's** (`keychain.rs`): the
 # Credential Manager entry *Import files* keeps it in when asked to remember it.
+#
+# **`Win32_System_ProcessStatus` is the resource meter's** (`meter.rs`): the
+# process's working set, beside `Threading`'s `GetProcessTimes` for its CPU time —
+# two calls, where a system-information crate would add a second Windows binding
+# tree to the lock.
 windows-sys = { version = "0.52.0", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Credentials",
   "Win32_System_JobObjects",
+  "Win32_System_ProcessStatus",
   "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_System_Time",

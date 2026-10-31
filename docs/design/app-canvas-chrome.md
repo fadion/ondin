@@ -173,6 +173,21 @@ document opens, it is never saved or exported, and present mode's own branch nev
 
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
 
+**The resource meter** (`meter.rs`), left of undo behind a rule, while Settings' *Show resource meter*
+is on (off by default): CPU (Phosphor `cpu`), memory (`memory`) and canvas frame rate (`gauge`), each
+a 15pt glyph in `text::dim()` and an 11.5pt value in `text::muted()`, in a slot as wide as its longest
+figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact figure.
+
+- CPU is the process's share of every core over the last second, from its CPU time
+  (`GetProcessTimes`, `getrusage`); memory is its working set on Windows
+  (`K32GetProcessMemoryInfo`) and its resident size elsewhere (`/proc/self/statm`, `proc_pidinfo`),
+  in MB under a gigabyte and GB with one decimal from one. Both are read once a second while the meter
+  shows, and that second is a `request_repaint_after`, the app being reactive. Switching the meter off
+  forgets the readings.
+- The frame rate counts the canvas frames `draw_canvas` drew in the last second. Under two it reads a
+  dash in `text::faint()`: one is the meter's own repaint.
+- CPU above 80% and a frame rate below 30 turn that readout `color::warn()`; memory has no threshold.
+
 - Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held
   while its own menu is open.
 - Rows are `ui::menu_check`, `ui::MENU_ITEM_H` (24) tall, in `ui::menu_frame`; width 160pt or the
@@ -216,7 +231,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 
 - Rightmost: Phosphor `sliders`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. The window's caption buttons are in the tab strip above.
-- Opens `settings.rs`'s modal: nudge step, *Show tree guides* and *Collapse groups on open* (under a
+- Opens `settings.rs`'s modal: the theme and *Show resource meter* (under **Appearance**; the
+  library's Settings shares the theme row only), nudge step, *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
   its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a), the web-font switch and
   cache row. `Ctrl+,` opens it (and only opens:

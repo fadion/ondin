@@ -1017,7 +1017,7 @@ fn paint_node_pass<P: ScenePainter>(
     if matches!(node.kind(), NodeKind::Slice { .. })
         || !over
             .and_then(|o| o.visible)
-            .unwrap_or_else(|| doc.shown(id))
+            .unwrap_or_else(|| doc.shown_node(node))
     {
         return;
     }
@@ -1052,20 +1052,18 @@ fn paint_node_pass<P: ScenePainter>(
     // placed the node).
     let local = over
         .and_then(|o| o.transform)
-        .or_else(|| res.used_local(doc, id))
-        .unwrap_or_else(|| node.transform());
+        .unwrap_or_else(|| res.used_local_of(node));
     let world = parent_world * local;
     // A bound opacity is drawn as its variable's percentage, never its literal's 0.
     let opacity = over
         .and_then(|o| o.opacity)
-        .unwrap_or_else(|| doc.drawn_opacity(id));
+        .unwrap_or_else(|| doc.drawn_opacity_of(node));
 
     // The box the paint is stored against: a gesture's kind is its stored one.
     let stored = over.and_then(|o| o.kind.as_ref()).unwrap_or(node.kind());
     let kind = over
         .and_then(|o| o.kind.as_ref())
-        .or_else(|| res.used_kind(doc, id))
-        .unwrap_or(node.kind());
+        .unwrap_or_else(|| res.used_kind_of(node));
     let mut painted = Painted {
         kind,
         // Gradients drawn on the box layout gives the layer, not the stored one.

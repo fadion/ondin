@@ -748,6 +748,12 @@ impl Document {
         self.shown_in(&self.variables, id)
     }
 
+    /// [`Self::shown`] for a node already in hand, which must be this document's
+    /// own: the scene walk holds each node and would otherwise look it up again.
+    pub fn shown_node(&self, n: &Node) -> bool {
+        self.shown_node_in(&self.variables, n)
+    }
+
     /// Whether `id` and every ancestor up to its page are [`Self::shown`]: whether
     /// the layer can be seen at all.
     pub fn shown_through(&self, id: NodeId) -> bool {
@@ -763,11 +769,15 @@ impl Document {
 
     /// [`Self::shown`] against table `t`.
     pub fn shown_in(&self, t: &crate::variable::Variables, id: NodeId) -> bool {
-        let Some(n) = self.nodes.get(&id) else {
-            return false;
-        };
+        self.nodes
+            .get(&id)
+            .is_some_and(|n| self.shown_node_in(t, n))
+    }
+
+    /// [`Self::shown_in`] for a node already in hand.
+    fn shown_node_in(&self, t: &crate::variable::Variables, n: &Node) -> bool {
         match n.visible_var {
-            Some(v) => match self.resolve_var_in(t, id, v) {
+            Some(v) => match self.resolve_var_in(t, n.id(), v) {
                 Some(crate::variable::Value::Boolean(b)) => b,
                 _ => n.visible,
             },
@@ -784,10 +794,15 @@ impl Document {
     /// which is 0 while bound, so a reader that skips this draws the layer
     /// invisible — chosen to be seen.
     pub fn drawn_opacity(&self, id: NodeId) -> f32 {
-        match self.nodes.get(&id) {
-            Some(n) => self.opacity_drawn_in(&self.variables, id, n.opacity, n.opacity_var),
-            None => 1.0,
-        }
+        self.nodes
+            .get(&id)
+            .map_or(1.0, |n| self.drawn_opacity_of(n))
+    }
+
+    /// [`Self::drawn_opacity`] for a node already in hand, under
+    /// [`Self::shown_node`]'s condition.
+    pub fn drawn_opacity_of(&self, n: &Node) -> f32 {
+        self.opacity_drawn_in(&self.variables, n.id(), n.opacity, n.opacity_var)
     }
 
     /// `literal` with the binding `var` read from table `t`, in the mode in force

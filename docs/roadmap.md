@@ -14,24 +14,7 @@ Nothing open.
 
 ## Now · Performance
 
-Measured by `tests/perf_pan.rs` on `~/.ondin/stress.ondin` (800 top-level frames) at 2560×1440, level of detail on. With
-the whole grid in view (7% zoom) a full frame is ~110 ms; a pan frame is ~2.2 ms, a frame of a
-top-level frame being dragged is ~1.7 ms patched against ~116 ms whole (1.5 against 23 ms at 25%), and
-redrawing after a commit moving it is ~2.3 ms patched against ~158 ms whole (2.0 against 33 ms at 25%).
-Every item here is exact: what is drawn must not change (no approximate blurs, no stale or stretched
-frames while moving). A resting canvas already draws nothing, a pan draws only what came into view,
-and a preview, commit, undo or redo only what it changed (`render.md` §6.3). A continuous zoom changes the scale every frame, so
-the caches below help pan and edits, not the zoom gesture itself.
-
-- **Retained scene fragments per top-level frame.** Encode each top-level frame's subtree into its own
-  `vello::Scene` once and `append` it every frame, re-walking only the frames an edit, preview or
-  ghost touches. Keyed by the frame's content and the exact device scale, since pixel snapping, level
-  of detail and the effect buffers all depend on it; a whole-pixel pan keeps it. The effect jobs a
-  fragment holds are per frame and must travel with it. Targets the scene walk.
-- **Reuse effect results across frames.** Keep each effect layer's filtered texture while its
-  subtree, its stack, the exact device scale and the sub-pixel phase of its origin are unchanged, so
-  a whole-pixel-panning canvas runs no blur pass. Needs a texture budget and eviction
-  beside `FxPool`, and invalidation from the same dirty set as the fragments. Targets the effect jobs.
+Nothing open.
 
 ## Later · First
 
@@ -187,9 +170,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 
 ## Later · Rendering and performance
 
-- **GPU device lost while zooming a component-heavy file, cause unmeasured** (§15 D992). The fx
-  textures are pooled since (D1003 (7)); whether that cured it is unconfirmed. Trigger: the
-  `GPU device lost (<reason>)` line in `ondin.log`.
 - **Loading a long chain of mains is super-linear** (§15 D416): 20,000 mains ≈200 s in debug vs ≈2 s
   for 2,000, measured through a fixture that also builds and saves. Not in `component::reaches_itself`
   or `io::schema`'s integrity pass; `variant::check`, `kit::check`, `variable::check` and

@@ -46,6 +46,9 @@ struct GpuScenePainter<'a> {
     /// Decoded images by id. vello takes the pixels inline, so resolving one is an
     /// `Arc` clone.
     images: &'a ImageStore,
+    /// Whether an effect buffer was shaped by where the target sits beyond being
+    /// cut by it — see [`VelloGpuRenderer::pinned`].
+    pinned: bool,
 }
 
 /// One open effect layer on the GPU: where its buffer sits, and the sub-scene
@@ -184,6 +187,23 @@ fn layer_shape<'a>(
             std::borrow::Cow::Owned(limit.inflate(1.0, 1.0).to_path(0.1)),
         ),
     }
+}
+
+/// Whether an effect buffer of `effects` at device `scale`, downscaled by `k`, is
+/// filtered on a grid coarser than its pixels: a downscaled buffer, or a shadow
+/// blurred over blocks (`effect::shadow_downscale`). That grid is anchored at the
+/// buffer's corner, so a buffer cut by the target sits on a grid that moves with
+/// the target.
+fn coarse(effects: &[ondin_core::Keyed<ondin_core::Effect>], scale: (f64, f64), k: f64) -> bool {
+    use ondin_core::EffectKind;
+    k > 1.0
+        || effects.iter().filter(|e| e.visible).any(|e| match &e.kind {
+            EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
+                let (sx, sy) = crate::effects::device_sigma(s.blur, scale.0 / k, scale.1 / k);
+                ondin_core::effect::shadow_downscale(f64::from(sx.max(sy))) > 1
+            }
+            _ => false,
+        })
 }
 
 impl ScenePainter for GpuScenePainter<'_> {
@@ -329,13 +349,9 @@ impl ScenePainter for GpuScenePainter<'_> {
             (m[2] * m[2] + m[3] * m[3]).sqrt(),
         );
         // The target grown by the escape, not the bare target (§15 D342).
-        let clipped = ondin_core::effect::buffer_box_within(
-            device,
-            self.limit,
-            ondin_core::effect::stack_escape(effects),
-            scale,
-            self.budget,
-        );
+        let escape = ondin_core::effect::stack_escape(effects);
+        let clipped =
+            ondin_core::effect::buffer_box_within(device, self.limit, escape, scale, self.budget);
         let (x0, y0) = (clipped.x0.floor(), clipped.y0.floor());
         // **The buffer is not always at device resolution** (§15 D395): a heavily
         // blurred layer is rasterized coarse (`effect::buffer_downscale`, as in
@@ -346,9 +362,14 @@ impl ScenePainter for GpuScenePainter<'_> {
         // `effect_buffer` grows `k` until the buffer fits, since `fx_gpu` allocates
         // scratch textures at `job.size`. `pack`'s `min(limit)` is not this guard;
         // it only bounds where a layer is placed in the batch texture.
-        let k = ondin_core::effect::buffer_downscale(effects, scale);
+        let wanted = ondin_core::effect::buffer_downscale(effects, scale);
         let ((w, h), k) =
-            crate::effects::effect_buffer((clipped.x1.ceil() - x0, clipped.y1.ceil() - y0), k);
+            crate::effects::effect_buffer((clipped.x1.ceil() - x0, clipped.y1.ceil() - y0), wanted);
+        if !self.pinned {
+            let whole = ondin_core::effect::buffer_box(device, self.limit, escape, scale);
+            self.pinned =
+                clipped != whole || k != wanted || (whole != device && coarse(effects, scale, k));
+        }
         let saved_base = self.base;
         let saved_limit = self.limit;
         // Shift so the buffer's top-left is the origin and scale into its resolution,
@@ -459,6 +480,21 @@ pub fn build_scene(
     images: &ImageStore,
     page: ondin_core::NodeId,
 ) -> (Scene, Vec<EffectJob>) {
+    let (scene, jobs, _) = walk_scene(doc, res, vp, overrides, images, page, &[vp.view]);
+    (scene, jobs)
+}
+
+/// [`build_scene`] culled to the world rectangles `cull`, and whether the scene
+/// is [`VelloGpuRenderer::pinned`].
+fn walk_scene(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    images: &ImageStore,
+    page: ondin_core::NodeId,
+    cull: &[Rect],
+) -> (Scene, Vec<EffectJob>, bool) {
     let base = scene::device_base(vp);
     let mut painter = GpuScenePainter {
         root: Scene::new(),
@@ -468,10 +504,104 @@ pub fn build_scene(
         limit: Rect::new(0.0, 0.0, vp.pixel_size.0 as f64, vp.pixel_size.1 as f64),
         budget: f64::from(vp.pixel_size.0) * f64::from(vp.pixel_size.1),
         images,
+        pinned: false,
     };
-    scene::build(doc, res, vp, overrides, page, &mut painter);
-    (painter.root, painter.jobs)
+    scene::build_within(doc, res, vp, overrides, page, cull, &mut painter);
+    (painter.root, painter.jobs, painter.pinned)
 }
+
+/// A rectangle of the canvas in its device pixels: corner, then size.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Region {
+    pub at: (u32, u32),
+    pub size: (u32, u32),
+}
+
+impl Region {
+    /// What a canvas of `size` shows that it did not before its content moved by
+    /// `shift` device pixels: a full-width band above or below, then a band beside
+    /// it of the remaining height. Empty for no shift; the whole canvas once the
+    /// shift reaches past it.
+    pub fn exposed(size: (u32, u32), shift: (i32, i32)) -> Vec<Region> {
+        let (w, h) = (i64::from(size.0), i64::from(size.1));
+        let (dx, dy) = (i64::from(shift.0), i64::from(shift.1));
+        if dx.abs() >= w || dy.abs() >= h {
+            return vec![Region { at: (0, 0), size }];
+        }
+        let mut out = Vec::new();
+        // Rows `top..bottom` are the ones the band above or below leaves.
+        let (top, bottom) = if dy > 0 { (dy, h) } else { (0, h + dy) };
+        if dy != 0 {
+            let y = if dy > 0 { 0 } else { h + dy };
+            out.push(Region {
+                at: (0, y as u32),
+                size: (size.0, dy.unsigned_abs() as u32),
+            });
+        }
+        if dx != 0 {
+            let x = if dx > 0 { 0 } else { w + dx };
+            out.push(Region {
+                at: (x as u32, top as u32),
+                size: (dx.unsigned_abs() as u32, (bottom - top) as u32),
+            });
+        }
+        out
+    }
+}
+
+/// Copy `from` into `to`, both `size`, moved by `shift` device pixels: what a
+/// canvas still shows after its content moved by that much, laid over the
+/// [`Region::exposed`] frame [`VelloGpuRenderer::render_regions`] drew. The rest
+/// of `to` is left as it is.
+pub fn copy_shifted(
+    device: &Device,
+    queue: &Queue,
+    from: &wgpu::Texture,
+    to: &wgpu::Texture,
+    size: (u32, u32),
+    shift: (i32, i32),
+) {
+    let span = |n: u32, d: i32| {
+        let kept = i64::from(n) - i64::from(d).abs();
+        (kept > 0).then(|| {
+            let (src, dst) = if d > 0 {
+                (0, d as u32)
+            } else {
+                ((-d) as u32, 0)
+            };
+            (src, dst, kept as u32)
+        })
+    };
+    let (Some((sx, dx, w)), Some((sy, dy, h))) = (span(size.0, shift.0), span(size.1, shift.1))
+    else {
+        return;
+    };
+    let mut enc = device.create_command_encoder(&Default::default());
+    enc.copy_texture_to_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: from,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: sx, y: sy, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyTextureInfo {
+            texture: to,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: dx, y: dy, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([enc.finish()]);
+}
+
+/// How far past a region the walk keeps what it would cull, in device pixels: a
+/// snapped box moves by up to a pixel and antialiasing reaches past its edge.
+const REGION_CULL_MARGIN: f64 = 2.0;
 
 /// Which renderer's atlas an effect layer's slot was registered in — the page's,
 /// or the one belonging to a numbered pass.
@@ -578,6 +708,8 @@ pub struct VelloGpuRenderer {
     /// layers and frames** (§15 D1003 (7)); see [`FxPool`]. It does not pool vello
     /// `Renderer`s, which stay one per pass as D344 requires (§15 D779).
     pool: FxPool,
+    /// Whether the last frame drawn is [`Self::pinned`].
+    pinned: bool,
 }
 
 impl VelloGpuRenderer {
@@ -592,7 +724,17 @@ impl VelloGpuRenderer {
             pass_high_water: 0,
             fx,
             pool: FxPool::new(),
+            pinned: false,
         })
+    }
+
+    /// Whether the last [`Self::render`] drew pixels that depend on where the
+    /// canvas sat, beyond what it showed: an effect buffer whose escape was given
+    /// up to the budget, resampled into the size cap, or filtered on a coarse grid
+    /// anchored at an edge the canvas cut. Such a frame cannot be moved by a
+    /// whole-pixel pan and patched with [`Self::render_regions`]; any other can.
+    pub fn pinned(&self) -> bool {
+        self.pinned
     }
 
     /// What the effect passes did in the last finished frame — textures and bind
@@ -806,7 +948,73 @@ impl VelloGpuRenderer {
         images: &ImageStore,
         page: ondin_core::NodeId,
     ) -> Result<(), vello::Error> {
-        let (scene, jobs) = build_scene(doc, res, vp, overrides, images, page);
+        let (scene, jobs, pinned) = walk_scene(doc, res, vp, overrides, images, page, &[vp.view]);
+        self.pinned = pinned;
+        self.draw(device, queue, &scene, jobs, vp, target, base_color)
+    }
+
+    /// Draw the frame [`Self::render`] would draw into `target`, but only what
+    /// lands in `regions`: the walk skips everything else, so outside them
+    /// `target` holds the ground and stray ink, for the caller to cover (with
+    /// [`copy_shifted`], after a pan).
+    ///
+    /// Inside the regions the pixels are the full frame's: the device transform,
+    /// the effect buffers and the target are the same, and only the cull differs.
+    /// An effect layer may land at another offset in its pass's packed texture,
+    /// where vello's antialiasing of an edge moves by a level or two.
+    ///
+    /// Returns `Ok(false)` when the drawing came out [`Self::pinned`], and then
+    /// `target` holds nothing to keep: the caller draws the whole frame instead.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_regions(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        doc: &Document,
+        res: &Resolved,
+        vp: &Viewport,
+        overrides: &RenderOverrides,
+        target: &TextureView,
+        regions: &[Region],
+        base_color: Color,
+        images: &ImageStore,
+        page: ondin_core::NodeId,
+    ) -> Result<bool, vello::Error> {
+        let to_world = scene::device_base(vp).inverse();
+        let cull: Vec<Rect> = regions
+            .iter()
+            .map(|r| {
+                let px = Rect::new(
+                    f64::from(r.at.0),
+                    f64::from(r.at.1),
+                    f64::from(r.at.0 + r.size.0),
+                    f64::from(r.at.1 + r.size.1),
+                );
+                to_world.transform_rect_bbox(px.inflate(REGION_CULL_MARGIN, REGION_CULL_MARGIN))
+            })
+            .collect();
+        let (scene, jobs, pinned) = walk_scene(doc, res, vp, overrides, images, page, &cull);
+        if pinned {
+            return Ok(false);
+        }
+        self.draw(device, queue, &scene, jobs, vp, target, base_color)?;
+        Ok(true)
+    }
+
+    /// Resolve `jobs`, then render `scene` into `target` (`vp.pixel_size`): the
+    /// frame's one pass on the page's renderer (§15 D344).
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        scene: &Scene,
+        jobs: Vec<EffectJob>,
+        vp: &Viewport,
+        target: &TextureView,
+        base_color: Color,
+    ) -> Result<(), vello::Error> {
+        let size = vp.pixel_size;
         // The page's pixel count is the budget every effect pass is held to (`pack`).
         let budget = u64::from(vp.pixel_size.0) * u64::from(vp.pixel_size.1);
         let mut registered = Vec::new();
@@ -815,12 +1023,12 @@ impl VelloGpuRenderer {
             .and_then(|()| {
                 let params = RenderParams {
                     base_color,
-                    width: vp.pixel_size.0,
-                    height: vp.pixel_size.1,
+                    width: size.0,
+                    height: size.1,
                     antialiasing_method: AaConfig::Area,
                 };
                 self.renderer
-                    .render_to_texture(device, queue, &scene, target, &params)
+                    .render_to_texture(device, queue, scene, target, &params)
             });
         // **Unregistered on the way out, whichever pass failed**, or the map entry
         // and its texture live as long as the renderer — and from the renderer that

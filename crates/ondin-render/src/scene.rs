@@ -187,6 +187,21 @@ pub fn build<P: ScenePainter>(
     build_of(doc, res, vp, overrides, &[page], painter);
 }
 
+/// [`build`] skipping what misses every rectangle of `cull`, world rectangles
+/// inside the view: the walk for redrawing parts of a canvas. Everything else is
+/// `vp`'s, so what is drawn inside `cull` is what [`build`] draws there.
+pub fn build_within<P: ScenePainter>(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    page: NodeId,
+    cull: &[Rect],
+    painter: &mut P,
+) {
+    walk(doc, res, vp, overrides, &[page], cull, painter);
+}
+
 /// Walk **these subtrees** and drive `painter`, in the order given.
 ///
 /// [`build`] is one call of this; the general form exports a *selection*.
@@ -205,6 +220,19 @@ pub fn build_of<P: ScenePainter>(
     origins: &[NodeId],
     painter: &mut P,
 ) {
+    walk(doc, res, vp, overrides, origins, &[vp.view], painter);
+}
+
+/// [`build_of`] culled to `cull` rather than the view.
+fn walk<P: ScenePainter>(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    origins: &[NodeId],
+    cull: &[Rect],
+    painter: &mut P,
+) {
     let base = device_base(vp);
     if let Some(ink) = overrides.outline() {
         let mut outline = OutlinePainter {
@@ -213,18 +241,18 @@ pub fn build_of<P: ScenePainter>(
             base,
             erasing: Vec::new(),
         };
-        walk_origins(doc, res, vp, overrides, origins, base, &mut outline);
+        walk_origins(doc, res, overrides, origins, cull, base, &mut outline);
     } else {
-        walk_origins(doc, res, vp, overrides, origins, base, painter);
+        walk_origins(doc, res, overrides, origins, cull, base, painter);
     }
 }
 
 fn walk_origins<P: ScenePainter>(
     doc: &Document,
     res: &Resolved,
-    vp: &Viewport,
     overrides: &RenderOverrides,
     origins: &[NodeId],
+    cull: &[Rect],
     base: Affine,
     painter: &mut P,
 ) {
@@ -234,7 +262,7 @@ fn walk_origins<P: ScenePainter>(
             .and_then(|n| n.parent())
             .and_then(|p| res.world_transform(p))
             .unwrap_or(Affine::IDENTITY);
-        paint_node(doc, res, overrides, *id, outer, vp.view, base, painter);
+        paint_node(doc, res, overrides, *id, outer, cull, base, painter);
     }
 }
 
@@ -759,7 +787,7 @@ fn paint_node<P: ScenePainter>(
     ov: &RenderOverrides,
     id: NodeId,
     parent_world: Affine,
-    view: Rect,
+    view: &[Rect],
     base: Affine,
     painter: &mut P,
 ) {
@@ -775,7 +803,7 @@ fn paint_node_pass<P: ScenePainter>(
     ov: &RenderOverrides,
     id: NodeId,
     parent_world: Affine,
-    view: Rect,
+    view: &[Rect],
     base: Affine,
     painter: &mut P,
     pass: Option<&FxPass>,
@@ -812,7 +840,8 @@ fn paint_node_pass<P: ScenePainter>(
         && !ov.moved(id)
         && ov.ghosts_of(id).next().is_none()
         && let Some(bounds) = res.ink_bounds(id)
-        && (!intersects(bounds, view) || (ov.level_of_detail() && sub_pixel(bounds, base)))
+        && (!view.iter().any(|v| intersects(bounds, *v))
+            || (ov.level_of_detail() && sub_pixel(bounds, base)))
     {
         return;
     }

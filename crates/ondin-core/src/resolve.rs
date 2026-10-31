@@ -599,6 +599,9 @@ pub struct Resolved {
     /// One tree per page, keyed by the page's root: a query is always about
     /// one canvas.
     index: FxHashMap<NodeId, RTree<BoundsEntry>>,
+    /// The entry `index` holds for each node and the page whose tree holds it, so
+    /// `update` takes out exactly what it put in rather than rebuilding the trees.
+    indexed: FxHashMap<NodeId, (NodeId, BoundsEntry)>,
     /// Used geometry, sparse — see [`Used`].
     ///
     /// `update` must keep it equal to `rebuild`
@@ -653,6 +656,7 @@ impl Resolved {
             );
         }
         let index = build_index(doc, &world_bounds);
+        let indexed = held(&index);
         let mut resolved = Self {
             world,
             world_bounds,
@@ -663,6 +667,7 @@ impl Resolved {
             boolean: FxHashMap::default(),
             failed: FxHashSet::default(),
             index,
+            indexed,
             used,
             text_memo: memo.into_inner(),
         };
@@ -711,9 +716,9 @@ impl Resolved {
             .filter(|id| !unresolved(*id))
             .collect();
         if existing.is_empty() {
-            // Only deletions happened; still refresh bounds up-tree from parents,
-            // which the op layer added to the dirty set, so this branch is rare.
-            self.reindex(doc);
+            // Only deletions happened. A delete dirties the deleted node's parent
+            // too, so this branch is rare.
+            self.reindex(doc, dirty.0.iter().copied().collect());
             return;
         }
 
@@ -831,7 +836,10 @@ impl Resolved {
             }
         }
 
-        self.reindex(doc);
+        // Every node whose world bounds this pass could have moved: the dirty ones
+        // (the deleted among them), their recomputed subtrees, and the ancestors.
+        let touched = dirty.0.iter().chain(&ordered).chain(&seen).copied();
+        self.reindex(doc, touched.collect());
     }
 
     pub fn world_transform(&self, id: NodeId) -> Option<Affine> {
@@ -1324,8 +1332,44 @@ impl Resolved {
             .reduce(|acc, b| acc.union(b))
     }
 
-    fn reindex(&mut self, doc: &Document) {
-        self.index = build_index(doc, &self.world_bounds);
+    /// Brings `ids`' entries in the per-page trees up to date with
+    /// `world_bounds`, on `build_index`'s rules: indexed kinds on a page (not the
+    /// vault) with a measurable box. A batch near the size of the index is
+    /// rebuilt whole instead: one removal and insertion per entry costs more than
+    /// a bulk load once most entries move.
+    fn reindex(&mut self, doc: &Document, ids: Vec<NodeId>) {
+        if ids.len() * 4 >= self.indexed.len() {
+            self.index = build_index(doc, &self.world_bounds);
+            self.indexed = held(&self.index);
+            return;
+        }
+        // Each node's page, shared down the batch: `Document::page_of` per node
+        // walks the parent chain each time, superlinear on a deep tree.
+        let mut pages: FxHashMap<NodeId, Option<NodeId>> = FxHashMap::default();
+        for id in ids {
+            if let Some((page, old)) = self.indexed.remove(&id)
+                && let Some(tree) = self.index.get_mut(&page)
+            {
+                tree.remove(&old);
+            }
+            if !doc.get(id).is_some_and(|n| is_indexed(n.kind())) {
+                continue;
+            }
+            let Some(page) = page_in(doc, id, &mut pages) else {
+                continue;
+            };
+            let Some(r) = self
+                .world_bounds
+                .get(&id)
+                .and_then(|b| geometry::measurable(*b))
+            else {
+                continue;
+            };
+            let e = entry(id, r);
+            self.index.entry(page).or_default().insert(e.clone());
+            self.indexed.insert(id, (page, e));
+        }
+        self.index.retain(|page, _| doc.is_page(*page));
     }
 }
 
@@ -1463,6 +1507,41 @@ fn resolve_subtree(
         c.ink_bounds.insert(id, b);
     }
     (bounds, ink)
+}
+
+/// The page `id` is on, as `Document::page_of` answers it, with every node
+/// walked through recorded in `memo` so the next lookup stops at the first one.
+fn page_in(
+    doc: &Document,
+    id: NodeId,
+    memo: &mut FxHashMap<NodeId, Option<NodeId>>,
+) -> Option<NodeId> {
+    let mut path = Vec::new();
+    let mut cursor = id;
+    let page = loop {
+        if let Some(&known) = memo.get(&cursor) {
+            break known;
+        }
+        path.push(cursor);
+        // Bounded by the node count, as `page_of`'s walk is.
+        match doc.get(cursor).map(|n| n.parent()) {
+            Some(Some(p)) if path.len() <= doc.len() => cursor = p,
+            Some(None) => break doc.is_page(cursor).then_some(cursor),
+            _ => break None,
+        }
+    };
+    for n in path {
+        memo.insert(n, page);
+    }
+    page
+}
+
+/// What `index` holds, by node: the `Resolved::indexed` map.
+fn held(index: &FxHashMap<NodeId, RTree<BoundsEntry>>) -> FxHashMap<NodeId, (NodeId, BoundsEntry)> {
+    index
+        .iter()
+        .flat_map(|(page, tree)| tree.iter().map(|e| (e.id, (*page, e.clone()))))
+        .collect()
 }
 
 /// The R-tree over every indexed node that has a box the tree can hold.

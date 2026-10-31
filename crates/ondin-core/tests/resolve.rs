@@ -633,6 +633,35 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
             stack.push(*c);
         }
     }
+    // The spatial index, which `update` edits entry by entry: the same nodes over
+    // the whole plane, and over a 4×4 grid of the page's ink so an entry left at
+    // its old box answers a cell the rebuilt one does not.
+    for page in doc.page_ids() {
+        let query = |res: &Resolved, area: Rect| {
+            let mut ids = ondin_core::nodes_in_view(res, page, area);
+            ids.sort();
+            ids
+        };
+        let plane = Rect::new(-1e9, -1e9, 1e9, 1e9);
+        assert_eq!(
+            query(live, plane),
+            query(&fresh, plane),
+            "index mismatch on page {page:?} (seed {seed})"
+        );
+        let Some(ink) = fresh.ink_bounds(page) else {
+            continue;
+        };
+        let (w, h) = (ink.width() / 4.0, ink.height() / 4.0);
+        for i in 0..16 {
+            let (x, y) = (ink.x0 + f64::from(i % 4) * w, ink.y0 + f64::from(i / 4) * h);
+            let cell = Rect::new(x, y, x + w, y + h);
+            assert_eq!(
+                query(live, cell),
+                query(&fresh, cell),
+                "index mismatch on page {page:?} in {cell:?} (seed {seed})"
+            );
+        }
+    }
 }
 
 fn pick<'a>(rng: &mut Lcg, items: &'a [NodeId]) -> Option<&'a NodeId> {

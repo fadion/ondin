@@ -367,7 +367,11 @@ impl crate::app::OndinApp {
         // Presenting shows the design, whatever the canvas view is.
         self.session.set_outline(None);
         self.session.set_level_of_detail(true);
-        let stamps = (self.session.revision(), self.session.drawn());
+        let stamps = (
+            self.session.revision(),
+            self.session.drawn(),
+            self.session.shaped(),
+        );
         let (doc, res, overrides) = self.session.render_inputs();
         if let Some(tex) = self
             .canvas

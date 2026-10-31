@@ -497,6 +497,9 @@ pub struct EditorSession {
     /// level of detail and the chrome ghost are not covered: they are re-installed
     /// every frame, and the canvas compares them by value.
     drawn: u64,
+    /// Bumped with `drawn` when text is re-shaped for a landed font, so the canvas
+    /// can tell that from a preview changing, whose damage it can bound.
+    shaped: u64,
     /// How many commits this session has seen — `revision` without undo and redo.
     /// [`FlexReceipt`] and a cut's move (`OndinApp::cut_move`, through
     /// [`Self::commits`]) read it: an undo and a redo with no commit between are
@@ -583,6 +586,7 @@ impl EditorSession {
             saved_at,
             revision: next_revision(),
             drawn: next_revision(),
+            shaped: next_revision(),
             commits: 0,
             flex_receipt: None,
             last_detached: Default::default(),
@@ -599,6 +603,12 @@ impl EditorSession {
     /// What the canvas draws apart from the document — see the field.
     pub fn drawn(&self) -> u64 {
         self.drawn
+    }
+
+    /// When `Resolved`'s text was last re-shaped without the document changing —
+    /// see the field.
+    pub fn shaped(&self) -> u64 {
+        self.shaped
     }
 
     /// How many commits this session has seen, undo and redo not counted — see
@@ -1669,9 +1679,11 @@ impl EditorSession {
     /// re-shapes it on the next keystroke, and rebuilding here would re-shape the
     /// node on a frame already re-shaping every text node.
     pub fn fonts_changed(&mut self) {
-        // `clear_preview` moves `drawn`, which is what tells the canvas the
-        // re-shaped text needs drawing.
+        // `shaped` tells the canvas the re-shaped text needs the whole page drawn:
+        // `drawn`, which `clear_preview` moves, alone reads as a preview change,
+        // whose damage the canvas would bound to the preview's layers.
         self.resolved.invalidate_text(&self.doc);
+        self.shaped = next_revision();
         self.clear_preview();
     }
 

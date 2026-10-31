@@ -14,30 +14,29 @@ Nothing open.
 
 ## Now · Performance
 
-Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, paths, booleans and
-1,090 effect layers), 2560×1440 on an RTX 4070 Ti. With the whole grid in view (7% zoom) a frame is
-~43 ms, nearly all of it CPU: the scene walk ~20 ms, the effect jobs ~13 ms, vello's own encoding
-~7 ms, the GPU ~3 ms. Every item here is exact: what is drawn must not change (no approximate blurs,
-no stale or stretched frames while moving). A resting canvas already draws nothing and a pan draws only
-what came into view (`render.md` §6.3). A continuous zoom changes the scale every frame, so the caches
-below help pan and edits, not the zoom gesture itself.
+Measured by `tests/perf_pan.rs` on `~/.ondin/stress.ondin` at 2560×1440, level of detail on. With
+the whole grid in view (7% zoom) a full frame is ~110 ms; a pan frame is ~3 ms, and a frame of a
+top-level frame being dragged is ~2.3 ms patched against ~138 ms whole (1.6 against 25 ms at 25%).
+Every item here is exact: what is drawn must not change (no approximate blurs, no stale or stretched
+frames while moving). A resting canvas already draws nothing, a pan draws only what came into view and
+a preview only what it changed (`render.md` §6.3). A continuous zoom changes the scale every frame, so
+the caches below help pan and edits, not the zoom gesture itself.
 
 - **Retained scene fragments per top-level frame.** Encode each top-level frame's subtree into its own
   `vello::Scene` once and `append` it every frame, re-walking only the frames an edit, preview or
   ghost touches. Keyed by the frame's content and the exact device scale, since pixel snapping, level
   of detail and the effect buffers all depend on it; a whole-pixel pan keeps it. The effect jobs a
-  fragment holds are per frame and must travel with it. Targets the ~20 ms walk.
+  fragment holds are per frame and must travel with it. Targets the scene walk.
 - **Reuse effect results across frames.** Keep each effect layer's filtered texture while its
   subtree, its stack, the exact device scale and the sub-pixel phase of its origin are unchanged, so
   a whole-pixel-panning canvas runs no blur pass. Needs a texture budget and eviction
-  beside `FxPool`, and invalidation from the same dirty set as the fragments. Targets the ~13 ms of
-  effect jobs.
-- **Redraw only damage.** An edit redraws the union of its nodes' old and new ink bounds (`DirtySet`
-  plus `Resolved`'s bounds before and after), widened for ancestors that paint from their children
-  (booleans, effects, masks); past a share of the view, render whole. A pan already moves the last
-  frame and draws only what came into view (`render.md` §6.3); an edit can build on the same
-  `VelloGpuRenderer::render_regions`, which draws chosen regions of a full frame and refuses a pinned
-  one. Today an edit draws the canvas whole.
+  beside `FxPool`, and invalidation from the same dirty set as the fragments. Targets the effect jobs.
+- **Redraw only an edit's damage.** A commit, undo or redo still draws the canvas whole. It should
+  redraw the union of its nodes' old and new ink bounds (`DirtySet` plus `Resolved`'s bounds before
+  and after), widened for ancestors that paint from their children (booleans, effects, masks); past a
+  share of the view, render whole. A preview already does this (`render.md` §6.3): an edit can reuse
+  `scene::damage`'s top-level granularity, `Region::covering`, `render_regions` and
+  `gpu::copy_regions`.
 
 ## Later · First
 

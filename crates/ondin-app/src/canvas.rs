@@ -38,6 +38,7 @@ use ondin_core::{
     CharSpans, Document, NodeId, NodeKind, Operation, ParaSpans, Pivot, Resolved, TextEdit,
     TextRef, Transaction, build, geometry, hit_test,
 };
+use ondin_render::gpu::Region;
 use ondin_render::{RenderOverrides, VelloGpuRenderer};
 
 /// The offscreen texture the Vello canvas renders into, exposed to egui.
@@ -49,6 +50,21 @@ struct CanvasTexture {
     size: (u32, u32),
     id: egui::TextureId,
 }
+
+/// What one canvas frame is drawn from, for the `Gpu` methods that draw part of it.
+struct Inputs<'a> {
+    doc: &'a Document,
+    res: &'a Resolved,
+    overrides: &'a RenderOverrides,
+    vp: &'a ondin_render::Viewport,
+    backdrop: Color,
+    images: &'a ondin_render::ImageStore,
+    page: NodeId,
+}
+
+/// How far a preview's damage is grown before it is redrawn, in device pixels: a
+/// snapped box moves by up to a pixel and antialiasing reaches past its edge.
+const DAMAGE_MARGIN: f64 = 2.0;
 
 /// Everything about the canvas that needs a GPU. Only [`CanvasRenderer::render`]
 /// and `ensure_target` touch it, so making it an `Option` is what lets the app
@@ -170,6 +186,8 @@ struct DrawnKey {
     revision: u64,
     /// The preview and re-shaped text (`EditorSession::drawn`).
     drawn: u64,
+    /// Re-shaped text alone (`EditorSession::shaped`).
+    shaped: u64,
     images: u64,
     camera: Camera,
     size: (u32, u32),
@@ -204,6 +222,15 @@ impl DrawnKey {
         };
         Some((whole(a.x0, b.x0)?, whole(a.y0, b.y0)?))
     }
+
+    /// Whether a frame drawn from `next` differs from one drawn from `self` only
+    /// by the preview — whose damage `ondin_render::scene::damage` can bound.
+    fn previews_to(&self, next: &DrawnKey) -> bool {
+        let mut same = self.clone();
+        same.drawn = next.drawn;
+        same.chrome.clone_from(&next.chrome);
+        same == *next
+    }
 }
 
 pub struct CanvasRenderer {
@@ -213,6 +240,8 @@ pub struct CanvasRenderer {
     /// What the texture holds now; `None` before the first draw and after a failed
     /// one.
     shown: Option<DrawnKey>,
+    /// The preview the texture was drawn under, for the damage the next one does.
+    shown_preview: Option<RenderOverrides>,
     /// Whether the last [`Self::render`] drew the page rather than keeping the
     /// texture: what the resource meter counts. Headless, a draw it would have made.
     drew: bool,
@@ -240,6 +269,7 @@ impl CanvasRenderer {
                 readback: None,
             }),
             shown: None,
+            shown_preview: None,
             drew: false,
             #[cfg(test)]
             draws: 0,
@@ -257,6 +287,7 @@ impl CanvasRenderer {
         Self {
             gpu: None,
             shown: None,
+            shown_preview: None,
             drew: false,
             draws: 0,
             images: ondin_render::ImageStore::interactive(),
@@ -292,17 +323,18 @@ impl CanvasRenderer {
     /// and return the egui texture to draw. Recreates the target on size change.
     /// `backdrop` is the ground round the frames, set by the Appearance panel.
     ///
-    /// `revision` and `drawn` are the session's stamps for `doc`/`res` and
-    /// `overrides` (`EditorSession::revision`, `EditorSession::drawn`). When they,
-    /// the view and the decoded images are what the texture was drawn from, the
-    /// texture is returned as it stands.
+    /// `revision`, `drawn` and `shaped` are the session's stamps for `doc`/`res`,
+    /// `overrides` and re-shaped text (`EditorSession::revision`, `drawn`,
+    /// `shaped`). When they, the view and the decoded images are what the texture
+    /// was drawn from, the texture is returned as it stands. A pan moves it and
+    /// draws what came into view; a preview changing draws only where it did.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         doc: &Document,
         res: &Resolved,
         overrides: &RenderOverrides,
-        (revision, drawn): (u64, u64),
+        (revision, drawn, shaped): (u64, u64, u64),
         camera: &Camera,
         pixel_size: (u32, u32),
         backdrop: Color,
@@ -319,6 +351,7 @@ impl CanvasRenderer {
         let key = DrawnKey {
             revision,
             drawn,
+            shaped,
             images: self.images.generation(),
             camera: *camera,
             size: pixel_size,
@@ -334,16 +367,19 @@ impl CanvasRenderer {
         if self.shown.as_ref() == Some(&key) && !wants_frame {
             return self.gpu.as_ref()?.target.as_ref().map(|t| t.id);
         }
+        let shown = self.shown.take();
+        let before = self.shown_preview.take();
         // Past half the canvas, what came into view is most of a frame anyway.
-        let pan = self
-            .shown
-            .take()
+        let pan = shown
+            .as_ref()
             .and_then(|shown| shown.pan_to(&key))
             .filter(|&(dx, dy)| {
                 let (w, h) = (i64::from(pixel_size.0), i64::from(pixel_size.1));
                 let kept = (w - i64::from(dx).abs()).max(0) * (h - i64::from(dy).abs()).max(0);
                 !wants_frame && kept * 2 > w * h
             });
+        let previewed =
+            before.filter(|_| !wants_frame && shown.as_ref().is_some_and(|s| s.previews_to(&key)));
         #[cfg(test)]
         {
             self.draws += 1;
@@ -351,24 +387,27 @@ impl CanvasRenderer {
         // Headless, the draw it would have made counts as made.
         let Some(gpu) = self.gpu.as_mut() else {
             self.shown = Some(key);
+            self.shown_preview = Some(overrides.clone());
             self.drew = true;
             return None;
         };
         gpu.ensure_target(pixel_size);
         let vp = camera.viewport(pixel_size);
-        let panned = pan.is_some_and(|shift| {
-            gpu.pan(
-                doc,
-                res,
-                overrides,
-                &vp,
-                shift,
-                backdrop,
-                &self.images,
-                page,
-            )
-        });
-        if !panned {
+        let inputs = Inputs {
+            doc,
+            res,
+            overrides,
+            vp: &vp,
+            backdrop,
+            images: &self.images,
+            page,
+        };
+        let patched = match (pan, &previewed) {
+            (Some(shift), _) => gpu.pan(&inputs, shift),
+            (None, Some(before)) => gpu.patch(&inputs, before),
+            (None, None) => false,
+        };
+        if !patched {
             let target = gpu.target.as_ref()?;
             gpu.vello
                 .render(
@@ -387,6 +426,7 @@ impl CanvasRenderer {
             gpu.pinned = gpu.vello.pinned();
         }
         self.shown = Some(key);
+        self.shown_preview = Some(overrides.clone());
         self.drew = true;
         gpu.target.as_ref().map(|t| t.id)
     }
@@ -568,48 +608,19 @@ impl Gpu {
     /// Answer a pan of `shift` device pixels by moving the frame `target` shows
     /// and drawing only what came into view, into `spare`, then swapping them.
     /// False when the frame cannot be moved, and `target` is to be drawn whole.
-    #[allow(clippy::too_many_arguments)]
-    fn pan(
-        &mut self,
-        doc: &Document,
-        res: &Resolved,
-        overrides: &RenderOverrides,
-        vp: &ondin_render::Viewport,
-        shift: (i32, i32),
-        backdrop: Color,
-        images: &ondin_render::ImageStore,
-        page: NodeId,
-    ) -> bool {
-        if self.pinned {
+    fn pan(&mut self, at: &Inputs<'_>, shift: (i32, i32)) -> bool {
+        let regions = Region::exposed(at.vp.pixel_size, shift);
+        if !self.draw_regions(at, &regions) {
             return false;
-        }
-        let size = vp.pixel_size;
-        if self.spare.as_ref().is_none_or(|s| s.size != size) {
-            self.spare = Some(self.texture(size));
         }
         let (Some(target), Some(spare)) = (self.target.as_ref(), self.spare.as_ref()) else {
             return false;
         };
-        let (device, queue) = (&self.render_state.device, &self.render_state.queue);
-        let drawn = self.vello.render_regions(
-            device,
-            queue,
-            doc,
-            res,
-            vp,
-            overrides,
-            &spare.view,
-            &ondin_render::gpu::Region::exposed(size, shift),
-            backdrop,
-            images,
-            page,
-        );
-        if !matches!(drawn, Ok(true)) {
-            return false;
-        }
+        let rs = &self.render_state;
+        let size = at.vp.pixel_size;
         ondin_render::gpu::copy_shifted(
-            device,
-            queue,
+            &rs.device,
+            &rs.queue,
             &target.texture,
             &spare.texture,
             size,
@@ -617,6 +628,79 @@ impl Gpu {
         );
         std::mem::swap(&mut self.target, &mut self.spare);
         true
+    }
+
+    /// Answer a preview changing from `before` to `at.overrides` by drawing only
+    /// where it can have changed (`ondin_render::scene::damage`) into `spare` and
+    /// copying that into `target`. False when the damage cannot be bounded, covers
+    /// half the canvas or more, or the frame cannot be patched.
+    fn patch(&mut self, at: &Inputs<'_>, before: &RenderOverrides) -> bool {
+        let size = at.vp.pixel_size;
+        let Some(damage) =
+            ondin_render::scene::damage(at.doc, at.res, at.vp, at.page, before, at.overrides)
+        else {
+            return false;
+        };
+        let regions: Vec<Region> = damage
+            .iter()
+            .filter_map(|r| Region::covering(*r, DAMAGE_MARGIN, size))
+            .collect();
+        let area: u64 = regions
+            .iter()
+            .map(|r| u64::from(r.size.0) * u64::from(r.size.1))
+            .sum();
+        if area * 2 >= u64::from(size.0) * u64::from(size.1) {
+            return false;
+        }
+        if regions.is_empty() {
+            return true;
+        }
+        if !self.draw_regions(at, &regions) {
+            return false;
+        }
+        let (Some(target), Some(spare)) = (self.target.as_ref(), self.spare.as_ref()) else {
+            return false;
+        };
+        let rs = &self.render_state;
+        ondin_render::gpu::copy_regions(
+            &rs.device,
+            &rs.queue,
+            &spare.texture,
+            &target.texture,
+            &regions,
+        );
+        true
+    }
+
+    /// Draw `regions` of the frame into `spare`, made on first use
+    /// (`VelloGpuRenderer::render_regions`). False when the shown frame or the
+    /// regions are pinned, or the draw failed.
+    fn draw_regions(&mut self, at: &Inputs<'_>, regions: &[Region]) -> bool {
+        if self.pinned {
+            return false;
+        }
+        let size = at.vp.pixel_size;
+        if self.spare.as_ref().is_none_or(|s| s.size != size) {
+            self.spare = Some(self.texture(size));
+        }
+        let Some(spare) = self.spare.as_ref() else {
+            return false;
+        };
+        let rs = &self.render_state;
+        let drawn = self.vello.render_regions(
+            &rs.device,
+            &rs.queue,
+            at.doc,
+            at.res,
+            at.vp,
+            at.overrides,
+            &spare.view,
+            regions,
+            at.backdrop,
+            at.images,
+            at.page,
+        );
+        matches!(drawn, Ok(true))
     }
 
     /// A canvas texture of `pixel_size`, registered with egui.
@@ -8423,7 +8507,11 @@ impl OndinApp {
         let px = self.canvas_px;
         let backdrop = self.session.preview_ground();
         let page = self.session.page;
-        let stamps = (self.session.revision(), self.session.drawn());
+        let stamps = (
+            self.session.revision(),
+            self.session.drawn(),
+            self.session.shaped(),
+        );
         let (doc, res, overrides) = self.session.render_inputs();
         let drawn = self
             .canvas
@@ -22386,6 +22474,7 @@ mod redraw_tests {
         DrawnKey {
             revision: 1,
             drawn: 1,
+            shaped: 1,
             images: 0,
             camera,
             size: (801, 600),
@@ -22441,5 +22530,65 @@ mod redraw_tests {
         let mut edited = key(camera);
         edited.revision = 2;
         assert_eq!(key(camera).pan_to(&edited), None, "an edit");
+    }
+
+    /// A preview or the chrome ghost changing is a preview change, whose damage
+    /// the canvas bounds; re-shaped text, a commit or a camera move is not.
+    ///
+    /// flip: `DrawnKey::previews_to` ignoring `shaped` → fails at "re-shaped text".
+    #[test]
+    fn only_a_preview_changing_is_patched() {
+        let camera = Camera::default();
+        let shown = key(camera);
+        let mut preview = key(camera);
+        preview.drawn = 2;
+        assert!(shown.previews_to(&preview), "a preview");
+        let mut chrome = key(camera);
+        chrome.chrome = Some((
+            ondin_core::IdSource::new(5).mint(),
+            ondin_render::Ghost {
+                parent: shown.page,
+                index: 0,
+                node: ondin_render::GhostNode {
+                    id: ondin_core::IdSource::new(6).mint(),
+                    transform: Affine::IDENTITY,
+                    kind: NodeKind::Group,
+                    paint: Default::default(),
+                    effects: Vec::new(),
+                    text: None,
+                    path: None,
+                    opacity: 1.0,
+                    blend: ondin_core::BlendMode::Normal,
+                    visible: true,
+                    clip: false,
+                    mask: false,
+                    mask_mode: Default::default(),
+                    children: Vec::new(),
+                },
+            },
+        ));
+        assert!(shown.previews_to(&chrome), "the chrome ghost");
+        let mut shaped = key(camera);
+        shaped.drawn = 2;
+        shaped.shaped = 2;
+        assert!(!shown.previews_to(&shaped), "re-shaped text");
+        let mut commit = key(camera);
+        commit.revision = 2;
+        assert!(!shown.previews_to(&commit), "a commit");
+        let mut moved = camera;
+        moved.pan_pixels(Vec2::new(5.0, 0.0));
+        assert!(!shown.previews_to(&key(moved)), "a camera move");
+    }
+
+    /// Re-shaped text moves `shaped`, not only `drawn`.
+    ///
+    /// flip: `EditorSession::fonts_changed` not moving `shaped` → fails here.
+    #[test]
+    fn re_shaped_text_moves_its_own_stamp() {
+        let mut session = EditorSession::new();
+        let (drawn, shaped) = (session.drawn(), session.shaped());
+        session.fonts_changed();
+        assert_ne!(session.drawn(), drawn, "fixture: drawn moved");
+        assert_ne!(session.shaped(), shaped, "re-shaped text");
     }
 }

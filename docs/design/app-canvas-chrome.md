@@ -184,9 +184,10 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   in MB under a gigabyte and GB with one decimal from one. Both are read once a second while the meter
   shows, and that second is a `request_repaint_after`, the app being reactive. Switching the meter off
   forgets the readings.
-- The frame rate counts the frames `draw_canvas` ran in the last second, a frame that kept the canvas
-  texture included. Under two it reads a
-  dash in `text::faint()`: one is the meter's own repaint.
+- The frame rate counts the frames in the last second that drew the page (`CanvasRenderer::drew`); a
+  frame that kept the canvas texture — a hover, a caret blink — is not one. Under two it reads a dash
+  in `text::faint()`: one is a single change drawn, not a rate. It is a trailing one-second count, so
+  it trails a slowdown by up to a second and averages a hitch away.
 - CPU above 80% and a frame rate below 30 turn that readout `color::warn()`; memory has no threshold.
 
 - Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held

@@ -4,7 +4,8 @@
 //!
 //! CPU and memory are read from the OS once a second while the meter shows, through
 //! `windows-sys` and `libc` rather than a system-information crate. The frame count
-//! is kept whether or not it shows: one timestamp per canvas frame.
+//! is kept whether or not it shows: one timestamp per frame that drew the page, so
+//! a frame that kept the canvas texture (a hover, a caret blink) is not counted.
 
 use crate::theme::{self, icon};
 use eframe::egui;
@@ -58,8 +59,14 @@ impl Meter {
         self.frames.push_back(now);
     }
 
+    /// How many frames the clock holds, for the canvas tests that pin what counts.
+    #[cfg(test)]
+    pub(crate) fn counted(&self) -> usize {
+        self.frames.len()
+    }
+
     /// Canvas frames drawn in the [`PERIOD`] before `now`, or `None` under two: one
-    /// is the meter's own once-a-second repaint, not a frame rate.
+    /// is a single change drawn, not a frame rate.
     fn fps(&self, now: Instant) -> Option<u32> {
         let n = self
             .frames

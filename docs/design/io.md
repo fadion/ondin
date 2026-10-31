@@ -21,6 +21,7 @@ The native `.ondin` file format (JSON, versioned DTO), its integrity checks, the
 
 - `save` emits nodes **sorted by NodeId** with stable field order, so re-saves are byte-identical (invariant 9). Guides are sorted by id too (the in-memory list is unordered, §5.5).
 - `load` reads `schema_version`, runs the `migrate.rs` chain, builds the `Document`, then verifies tree integrity.
+- A current file skips the chain: `load` deserializes it straight into `DocumentDto`, without the `serde_json::Value` the migrations work on, which on a large file was most of the load. Any file that path refuses or that is not at the current version goes through `load_migrating`, the chain, and its answer stands — so the fast path only ever adds speed. The two give the same document (`a_current_file_loads_the_same_by_either_path`); a duplicate key is where they part, refused by a struct and resolved to the last by a `Value`.
 - The version is compared in the header's own denomination (`u64`) and never narrowed: casting to `u32` first let 2³³ truncate to 0 and open. `IoError::UnsupportedVersion` carries a `u64` so a reintroduced cast does not compile.
 
 ### Integrity verification
@@ -40,7 +41,7 @@ Reachability and the duplicate check are what make cycles and orphan components 
 
 **Guides** are verified without a tree: malformed id, duplicate id and non-finite position are refused. A guide far off the artwork is legal. Ids come from the same reservation as nodes (§5.2). An `owner` is required; one that is dangling or neither a frame nor a page is refused rather than promoted to page-wide, since a scoped guide's position is in its owner's space. This also keeps drawing and snapping free of a fallback `check_guide_owner` will not let `apply` produce.
 
-**There is deliberately no finiteness check in the loader**: `serde_json` writes non-finite `f64` as `null` and refuses `null`/overflowing literals at `from_value`, above the integrity walk. Protection is at the operation (`OpError::NonFinite`, invariant 8), which covers every number the model carries including paint.
+**There is deliberately no finiteness check in the loader**: `serde_json` writes non-finite `f64` as `null` and refuses `null`/overflowing literals when deserializing the DTO, above the integrity walk. Protection is at the operation (`OpError::NonFinite`, invariant 8), which covers every number the model carries including paint.
 
 The save format and the MCP snapshot (§7 snapshot) are distinct schemas; never conflate them.
 

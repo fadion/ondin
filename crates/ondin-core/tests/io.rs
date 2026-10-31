@@ -205,6 +205,32 @@ fn save_is_byte_deterministic_through_load() {
     );
 }
 
+/// A current file reads the same straight into its types as through the
+/// migration chain's `Value`.
+#[test]
+fn a_current_file_loads_the_same_by_either_path() {
+    let (doc, _root) = rich_document();
+    let bytes = io::save(&doc).unwrap();
+    assert_eq!(
+        io::load(&bytes).unwrap(),
+        io::load_migrating(&bytes).unwrap()
+    );
+}
+
+/// A current file the direct path refuses still loads as it did: a duplicate
+/// key fails a struct's deserialize but resolves to the last in a `Value`.
+/// flip: `load` returning the direct path's error → fails at the `expect`.
+#[test]
+fn a_current_file_with_a_duplicate_key_falls_back_and_loads() {
+    let (doc, _root) = rich_document();
+    let text = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    let version = format!("\"schema_version\": {},", io::CURRENT_SCHEMA_VERSION);
+    let doubled = text.replacen(&version, &format!("{version}\n  {version}"), 1);
+    assert_ne!(doubled, text, "the fixture: the key is doubled");
+    let loaded = io::load(doubled.as_bytes()).expect("the duplicate key loads");
+    assert_eq!(loaded, doc);
+}
+
 #[test]
 fn saved_file_records_current_schema_version() {
     let (doc, _root) = rich_document();

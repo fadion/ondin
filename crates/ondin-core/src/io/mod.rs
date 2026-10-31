@@ -76,7 +76,24 @@ pub fn save(doc: &Document) -> Result<Vec<u8>, IoError> {
 
 /// Parse native bytes: read `schema_version`, migrate to current, then build
 /// and verify the document.
+///
+/// A current file is deserialized straight into its types, without the
+/// `Value` tree the migrations need, which is most of the time a large file
+/// takes. Anything that path does not take — an older or newer version, or a
+/// file it cannot read (a duplicate key, which a `Value` resolves to the last)
+/// — goes through [`load_migrating`], whose answer stands.
 pub fn load(bytes: &[u8]) -> Result<Document, IoError> {
+    if let Ok(dto) = serde_json::from_slice::<schema::DocumentDto>(bytes)
+        && dto.schema_version == CURRENT_SCHEMA_VERSION
+    {
+        return dto.into_document();
+    }
+    load_migrating(bytes)
+}
+
+/// [`load`] through the migration chain whatever the file's version: parsed
+/// into a `serde_json::Value`, migrated, then deserialized.
+pub fn load_migrating(bytes: &[u8]) -> Result<Document, IoError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let migrated = migrate::migrate(value)?;
     let dto: schema::DocumentDto = serde_json::from_value(migrated)?;

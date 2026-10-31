@@ -16,9 +16,6 @@ Nothing open.
 
 Figures are from the suite (`perf/README.md`), on the `wide` fixture unless named.
 
-- **Parse a current file straight into its types.** `io::load` parses into a `serde_json::Value`
-  (~650 ms), migrates it, then converts it with `from_value`. A file already at the current
-  `schema_version` can deserialize `DocumentDto` directly; migration stays as it is for older ones.
 - **Share text layouts between nodes.** Text is ~1,030 of resolve's ~1,290 ms (39k of 149k
   layers), and the text memo is keyed by node, so identical text is shaped once per node. Key a
   cache by content, style and wrap width. Measure the gain on real kits (`ONDIN_PERF_EXTRA`), as

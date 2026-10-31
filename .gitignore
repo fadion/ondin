@@ -31,10 +31,6 @@
 # splice there is unrecoverable, not a revert.
 /review/
 
-# Design working files — mockups, handoff notes and their uploads. Local scratch
-# for designing a feature, regenerated between sessions, never part of a commit.
-/design/
-
 # Throwaway probe binaries and their symbols. A `#[test]` that measures something
 # is deleted once it has answered (CLAUDE.md, *Checking the chrome without a
 # window*); a probe compiled to a binary leaves artifacts behind, and they are

@@ -1399,6 +1399,44 @@ fn outlined_type_gets_no_black_stand_in_fill() {
     assert_eq!(record_order(&doc, &res), vec![("text", 0)]);
 }
 
+/// What the walk emits for `doc` with its 2000-unit page `px` device pixels
+/// square: fills, strokes and glyphs.
+fn emitted(doc: &Document, res: &Resolved, px: u32, detail: bool) -> (usize, usize, usize) {
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 2000.0, 2000.0),
+        pixel_size: (px, px),
+    };
+    let mut ov = RenderOverrides::default();
+    ov.set_level_of_detail(detail);
+    let mut r = RecordingPainter::default();
+    scene::build(doc, res, &vp, &ov, doc.first_page(), &mut r);
+    (r.fills.len(), r.strokes, r.text_glyphs)
+}
+
+/// Level of detail draws type under four device pixels as one bar per line, in
+/// the fill, and outlined type as a bar in its stroke's ink with no outline
+/// stroked; readable type and a walk without the flag draw glyphs.
+///
+/// flip: `paint_shape` ignoring `greeked` → fails at "a bar".
+#[test]
+fn level_of_detail_draws_type_too_small_to_read_as_bars() {
+    let (doc, res, _t) = painted_text(vec![fill(1, true)], vec![]);
+    // 40-unit type at 0.05 px a unit is 2 px; at 0.2 it is 8 px.
+    assert_eq!(emitted(&doc, &res, 100, true), (1, 0, 0), "a bar");
+    assert_eq!(
+        emitted(&doc, &res, 100, false),
+        (0, 0, 2),
+        "glyphs without the flag"
+    );
+    assert_eq!(
+        emitted(&doc, &res, 400, true),
+        (0, 0, 2),
+        "glyphs once readable"
+    );
+    let (doc, res, _t) = painted_text(vec![], vec![stroke(9, true)]);
+    assert_eq!(emitted(&doc, &res, 100, true), (1, 0, 0), "outlined type");
+}
+
 // --- frame strokes ---------------------------------------------------------
 
 /// Enough of the sequence to say *where* a frame's stroke was drawn: what happened,

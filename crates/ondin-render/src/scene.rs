@@ -668,6 +668,9 @@ struct Painted<'a> {
     placeholder: Option<Rect>,
     /// How the geometry decides its interior; read by the fills only.
     rule: ClipRule,
+    /// Device pixels per local unit when the walk runs at level of detail
+    /// ([`stretch`]), `None` when every glyph is drawn.
+    detail: Option<f64>,
 }
 
 /// One pass of a layer whose effect stack holds a blending shadow
@@ -851,6 +854,7 @@ fn paint_node_pass<P: ScenePainter>(
             Some(_) => None,
             None => ondin_core::boolean_placeholder(doc, res, id),
         },
+        detail: ov.level_of_detail().then(|| stretch(base * world)),
     };
 
     // The snapped transform is this node's own ink, never its children's (passing
@@ -1138,6 +1142,15 @@ fn sub_pixel(ink: Rect, base: Affine) -> bool {
     device.width() < 0.5 && device.height() < 0.5
 }
 
+/// The most `device` lengthens any local distance: its largest singular value, so
+/// a length under a pixel through it is under a pixel in every direction.
+fn stretch(device: Affine) -> f64 {
+    let [a, b, c, d, _, _] = device.as_coeffs();
+    let sum = a * a + b * b + c * c + d * d;
+    let det = a * d - b * c;
+    ((sum + (sum * sum - 4.0 * det * det).max(0.0).sqrt()) / 2.0).sqrt()
+}
+
 /// `effects` without each shadow and layer blur whose reach is under one device
 /// pixel through `device` (the node's local-to-device transform): drawn, it would
 /// move the edge by less than a pixel, and it costs an offscreen buffer. `Filters`
@@ -1149,11 +1162,7 @@ fn detail_effects(
 ) -> std::borrow::Cow<'_, [ondin_core::Keyed<Effect>]> {
     use ondin_core::EffectKind;
     use ondin_core::effect::reach;
-    // The largest singular value: under a pixel along it is under a pixel every way.
-    let [a, b, c, d, _, _] = device.as_coeffs();
-    let sum = a * a + b * b + c * c + d * d;
-    let det = a * d - b * c;
-    let stretch = ((sum + (sum * sum - 4.0 * det * det).max(0.0).sqrt()) / 2.0).sqrt();
+    let stretch = stretch(device);
     let unseen = |e: &ondin_core::Keyed<Effect>| {
         let local = match &e.kind {
             EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
@@ -1342,6 +1351,7 @@ fn paint_ghost<P: ScenePainter>(
             path: ghost.path.as_ref(),
             // Never for a ghost: the original underneath carries the mark.
             placeholder: None,
+            detail: None,
         },
         shape_world,
         painter,
@@ -1494,6 +1504,50 @@ fn draw_run(
             },
         );
     }
+}
+
+/// The font size, in device pixels, under which a level-of-detail walk draws a
+/// run as bars: type that small cannot be read, and its glyphs are the costliest
+/// ink a zoomed-out page holds.
+const GREEK_BELOW: f64 = 4.0;
+
+/// `run` as bars when it is set under [`GREEK_BELOW`] device pixels at `stretch`
+/// device pixels per local unit, or `None` when it is drawn as glyphs: always for
+/// type on a path and for rotated glyphs.
+///
+/// One bar per span of glyphs on one baseline, over the band from 0.15 to 0.45 of
+/// the font size above it: about the ink a line of lowercase lays down, so the
+/// line keeps its colour, length and weight. The last glyph's advance is not
+/// stored and is taken as half the font size.
+fn greeked(run: &ondin_core::text::GlyphRun, stretch: f64, layout: &TextLayout) -> Option<BezPath> {
+    let size = f64::from(run.font_size);
+    // Asked this way round so a `NaN` scale draws glyphs.
+    let small = size * stretch < GREEK_BELOW;
+    if !small || layout.warp.is_some() || run.glyphs.iter().any(|g| g.rot != 0.0) {
+        return None;
+    }
+    let mut bars = BezPath::new();
+    let mut bar = |x0: f64, x1: f64, y: f64| {
+        let r = Rect::new(x0, y - 0.45 * size, x1 + 0.5 * size, y - 0.15 * size);
+        bars.extend(r.path_elements(TOLERANCE));
+    };
+    // The span being gathered: its left edge, its last glyph and its baseline.
+    let mut open: Option<(f64, f64, f64)> = None;
+    for g in &run.glyphs {
+        let (x, y) = (f64::from(g.x), f64::from(g.y));
+        open = match open {
+            Some((x0, last, at)) if at == y && x >= last => Some((x0, x, at)),
+            Some((x0, last, at)) => {
+                bar(x0, last, at);
+                Some((x, x, y))
+            }
+            None => Some((x, x, y)),
+        };
+    }
+    if let Some((x0, last, at)) = open {
+        bar(x0, last, at);
+    }
+    Some(bars)
 }
 
 /// The filled outline of one decoration band, in the text node's local space.
@@ -1679,26 +1733,39 @@ fn paint_shape<P: ScenePainter>(
         if inks.is_empty() && !inked {
             inks.push(&fallback);
         }
+        // Outlined type that is greeked fills its bars in its first stroke's ink.
+        let stroke_one = painted
+            .paint
+            .strokes
+            .iter()
+            .find(|s| s.visible)
+            .map(|s| [s.brush.drawn()]);
+        let mut all_greeked = true;
         // A run with its own colour draws once in it, else the node's whole fill
         // stack; paint order is per run (§15 D154).
         for run in &layout.runs {
+            let bars = painted.detail.and_then(|s| greeked(run, s, layout));
+            all_greeked &= bars.is_some();
             let own: Option<Brush> = run.color.map(Brush::Solid);
             let own_one = own.as_ref().map(|b| [b]);
-            let run_inks: &[&Brush] = match &own_one {
-                Some(one) => one,
-                None => &inks,
+            let run_inks: &[&Brush] = match (&own_one, &bars, &stroke_one) {
+                (Some(one), _, _) => one,
+                (None, Some(_), Some(one)) if inks.is_empty() => one,
+                _ => &inks,
             };
             for brush in run_inks {
                 // The frame is the whole text box, not the run's advance.
                 let framing = framing_of(doc, brush, layout.bounds());
-                clipped(painter, world, framing, |p| {
-                    draw_run(p, world, run, brush, framing);
+                clipped(painter, world, framing, |p| match &bars {
+                    Some(bars) => p.fill_path(world, bars, brush, framing, ClipRule::NonZero),
+                    None => draw_run(p, world, run, brush, framing),
                 });
             }
         }
         // Type strokes along its glyph outlines (`ondin_core::text::outline`) in the
-        // text box's frame; decoration bands are not stroked.
-        if inked {
+        // text box's frame; decoration bands are not stroked. Wholly greeked type
+        // skips it: the outline is every glyph's, the cost the bars avoid.
+        if inked && !all_greeked {
             let outline = ondin_core::text::outline(layout);
             if !outline.is_empty() {
                 paint_strokes(

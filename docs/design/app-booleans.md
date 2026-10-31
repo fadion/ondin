@@ -71,7 +71,7 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
   `Operation::Reorder` to index 0 (`canvas::designate_key`).
 - `layers::subtract_base` marks `children[0]` of a `Subtract` with a faint `stack-simple` glyph in the
   row's badge slot (shared `RowBadge`, `BADGE_ICON`), derived every frame. Only `Subtract`.
-- Badge slot priority: mask (`ph-circle-half`) > frame size badge > subtract base mark. No row can want
+- Badge slot priority: mask (`icon::CIRCLE_HALF`) > frame size badge > subtract base mark. No row can want
   two (a frame cannot be a mask; operands are not painted).
 - **Switching the operation is a `GeometryPatch`**: children and paint stay, undo restores the previous
   op, re-picking is an empty transaction. Travels the normal preview→commit valve.
@@ -190,7 +190,7 @@ Four controls: the op dropdown plus three 28×28 icon buttons, `ACTION_GLYPH` 16
   useful sentence. `inspector::popup_rule` draws the hairline via `ui::hairline_in_column`, sized from
   `available_width`, with gaps `ABOVE` 5pt / `BELOW` 4pt and the layout's `item_spacing.y` subtracted
   back out with `add_space`.
-- **Mask** (`ph-circle-half`) is a state: lit while the target is a mask, click again releases.
+- **Mask** (`icon::CIRCLE_HALF`) is a state: lit while the target is a mask, click again releases.
   `Inspector::mask_action` → `Make { members, key }` or `Release(id)`, behind both look and action.
   - Make goes through `build::mask` (wraps two or more in a group; a lone layer is flagged in place).
     Which layer becomes the mask is `build::mask_target`'s answer only: the key if designated, else the
@@ -202,13 +202,11 @@ Four controls: the op dropdown plus three 28×28 icon buttons, `ACTION_GLYPH` 16
     redundant for correctness (the dry run declines too) but load-bearing for the message.
   - Same verb on `Ctrl+Alt+M` and the context menu's *Use as mask*, which dims with the same sentence
     via `OndinApp::mask_refusal` → `menu::Context::mask_refused`.
-- **Group / Ungroup** (`ph-selection-plus`, `ph-selection-slash`), gated by `inspector::group_actions`:
+- **Group / Ungroup** (`icon::SELECTION_PLUS`, `icon::SELECTION_SLASH`), gated by `inspector::group_actions`:
   - Ungroup live when something selected is a `Group` or `Boolean`; both buttons call
     `app::ungroup_selection`, which builds through `build::ungroup_all` — one transaction however many
     containers, freed layers selected.
   - Group is a dry run of `build::group`, plus: a selection that is exactly one container is refused.
-- Phosphor codepoints are confirmed by an atlas dump: the font's `post` table is version 3.0 (no glyph
-  names), so a wrong codepoint lays out and renders nothing.
 
 ## The Mask card
 

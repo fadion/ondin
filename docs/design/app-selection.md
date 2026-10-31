@@ -89,7 +89,7 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - **Lasso chrome** (`OndinApp::draw_lasso`): a 1pt selection-blue line over a 6% selection-blue fill,
   closed by a dashed (3/3) straight run back to the start. The fill is non-zero scanline spans
   (`lasso::fill_spans`), since egui fills only convex paths. While on, the Select rail button wears
-  Phosphor `lasso` (`icon::LASSO`) and its tooltip reads *Select, lasso (V · Q for box)*; toggling
+  `icon::LASSO` and its tooltip reads *Select, lasso (V · Q for box)*; toggling
   says *Lasso select · Q for a box* or *Box select · Q for a lasso*. The switch is a View menu row
   (last of the switches, before *Present mode*), a palette row and a shortcut-sheet row under
   Tools; it is not on the canvas menu, being a tool setting rather than a view.

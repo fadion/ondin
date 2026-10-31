@@ -842,7 +842,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.add_space(2.0);
-                        ui.label(theme::icon_text(icon::FRAME_CORNERS, 12.0, size_ink()));
+                        ui.label(theme::icon_text(icon::FRAME, 12.0, size_ink()));
                         ui.label(egui::RichText::new(size).size(10.5).color(size_ink()));
                     });
                 });
@@ -3074,7 +3074,7 @@ mod tests {
                             ui.spacing_mut().interact_size.y = 0.0;
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 6.0;
-                                ui.label(theme::icon_text(icon::FRAME_CORNERS, 12.0, size_ink()));
+                                ui.label(theme::icon_text(icon::FRAME, 12.0, size_ink()));
                                 ui.label(
                                     egui::RichText::new("100×60").size(10.5).color(size_ink()),
                                 );

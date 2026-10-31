@@ -441,9 +441,9 @@ any other pass that recomputes a copy's value.
 ### Chrome
 
 **Component-ness is shape, never the selection accent**: a filled hexagon for a main, an outline
-hexagon for an instance. The filled hexagon is drawn (`ui::paint_hexagon_filled`) because the bundled
-font is Phosphor Regular only; used on canvas, layers, the Component card's faces and the *Create
-component* / *Duplicate as component* menu rows.
+hexagon for an instance. The filled hexagon is its own glyph, `icon::HEXAGON_FILL`, which
+`ui::paint_hexagon_filled` sets centred where `HEXAGON` would sit; used on canvas, layers, the
+Component card's faces and the *Create component* / *Duplicate as component* menu rows.
 
 Canvas:
 

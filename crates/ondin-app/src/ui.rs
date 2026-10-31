@@ -159,8 +159,8 @@ pub struct MenuRow<'a> {
     /// passes `Some(true)` on one row and `Some(false)` on the rest, so the pointer
     /// cannot paint a second ground.
     pub highlight: Option<bool>,
-    /// Paint the filled hexagon ([`paint_hexagon_filled`]) in the glyph's place, a
-    /// main's mark, which the bundled Regular font has no glyph for.
+    /// Paint the filled hexagon ([`paint_hexagon_filled`]), a main's mark, in the
+    /// glyph's place.
     pub filled_hexagon: bool,
 }
 
@@ -1470,13 +1470,13 @@ fn wrap_scrub(ctx: &egui::Context) {
 
 /// What a [`value_field`] puts in front of its number.
 ///
-/// A word (`X`, `LH`) or a Phosphor glyph, both in the same 38%-of-text grey. One
+/// A word (`X`, `LH`) or an icon glyph, both in the same 38%-of-text grey. One
 /// enum so a call site cannot pick the wrong size or grey.
 #[derive(Clone, Copy)]
 pub enum Prefix {
     /// A short word — `X`, `W`, `LH`.
     Text(&'static str),
-    /// A Phosphor glyph.
+    /// An icon glyph.
     Icon(&'static str),
     /// A CSS property's name — `flex-grow`, `min-width` — at the unit's size
     /// rather than [`PREFIX_PT`], so a whole word does not take the number's width.
@@ -1485,7 +1485,7 @@ pub enum Prefix {
 
 /// Type size of a [`Prefix::Text`].
 ///
-/// 13: at 10.5 a capital inks 8pt tall against a Phosphor
+/// 13: at 10.5 a capital inks 8pt tall against an icon
 /// glyph's 11; 13 inks 10pt, and matching fully would out-shout the value.
 const PREFIX_PT: f32 = 13.0;
 /// Type size of a [`Prefix::Icon`].
@@ -1537,17 +1537,9 @@ pub fn paint_prefix(
 }
 
 /// The top of a prefix's run, centred down a field whose middle is `centre_y`.
-///
-/// Phosphor's circle inks one row lower than the square glyphs at the same size
-/// (its top row matches theirs, its bottom row does not), so it is lifted one
-/// physical pixel: text snaps to pixels, and less would round away.
+/// Every icon is drawn centred in its em box, so no glyph needs its own nudge.
 fn prefix_top(lead: &egui::Galley, centre_y: f32) -> f32 {
-    let lift = if lead.text() == icon::CIRCLE {
-        1.0 / lead.pixels_per_point
-    } else {
-        0.0
-    };
-    centre_y - lead.size().y / 2.0 - lift
+    centre_y - lead.size().y / 2.0
 }
 
 impl Prefix {
@@ -1675,7 +1667,7 @@ pub fn disable_unless<R>(
     ui.add_enabled_ui(enabled || !ui.is_enabled(), add)
 }
 
-/// The arrow at the closed end of a `ComboBox` — a Phosphor chevron at one fixed
+/// The arrow at the closed end of a `ComboBox` — a caret glyph at one fixed
 /// colour, in place of egui's triangle, which goes white when open.
 ///
 /// Every new `ComboBox` owes `.icon(combo_chevron)`: `Style` has no hook for it.
@@ -1696,7 +1688,7 @@ pub fn combo_chevron(
     );
 }
 
-/// One Phosphor glyph as widget text, for a control whose closed state is an icon
+/// One icon glyph as widget text, for a control whose closed state is an icon
 /// and nothing else, in full-strength ink since no label sits beside it.
 pub fn glyph_only(glyph: &'static str) -> egui::WidgetText {
     let mut job = egui::text::LayoutJob::default();
@@ -1713,7 +1705,7 @@ pub fn glyph_only(glyph: &'static str) -> egui::WidgetText {
     job.into()
 }
 
-/// A dimmed Phosphor glyph followed by a label, as one run of widget text.
+/// A dimmed icon glyph followed by a label, as one run of widget text.
 ///
 /// For where a [`Prefix`] cannot reach: a `ComboBox`'s `selected_text` is a single
 /// `WidgetText`.
@@ -2921,12 +2913,9 @@ pub fn rule(ui: &mut egui::Ui, row_h: f32) {
     );
 }
 
-/// Paint a filled lock centred in a `size`-tall box.
-///
-/// Drawn rather than set in type, since the bundled `Phosphor.ttf` is the Regular
-/// weight only: Phosphor's `lock-simple-fill` geometry in its 256-unit box, a body
-/// from `32,80` to `224,224` (16-unit corners) and a 16-wide shackle stroke along
-/// radius 40 about `128,56`. `size` is the em size a glyph would be set at.
+/// Paint a locked layer's filled lock ([`theme::icon::LOCK_SIMPLE_FILL`]) centred
+/// on `center` and turned by `rot`, so a mark can follow a rotated frame. `size` is
+/// the em size the glyph is set at.
 pub fn paint_lock_filled(
     painter: &egui::Painter,
     center: egui::Pos2,
@@ -2934,9 +2923,14 @@ pub fn paint_lock_filled(
     color: egui::Color32,
     rot: f32,
 ) {
-    for shape in lock_filled_shapes(center, size, color, rot) {
-        painter.add(shape);
-    }
+    paint_glyph_centred(
+        painter,
+        theme::icon::LOCK_SIMPLE_FILL,
+        center,
+        size,
+        color,
+        rot,
+    );
 }
 
 /// Whether `resp`'s primary click this pass is the second of a double-click:
@@ -2996,85 +2990,31 @@ pub fn double_clicked(ui: &egui::Ui, resp: &egui::Response) -> bool {
     double
 }
 
-/// The filled hexagon a main component carries, drawn like the lock above.
-/// Phosphor's `hexagon` geometry in its 256-unit box, pointy-top, so it sits in
-/// the box [`crate::theme::icon::HEXAGON`] outlines at the same `size`
-/// (`the_filled_hexagon_sits_on_the_outline_glyphs_ink`).
+/// Paint a main component's filled hexagon ([`theme::icon::HEXAGON_FILL`]) centred
+/// on `center`, where [`theme::icon::HEXAGON`] would sit at the same `size`.
 pub fn paint_hexagon_filled(
     painter: &egui::Painter,
     center: egui::Pos2,
     size: f32,
     color: egui::Color32,
 ) {
-    painter.add(hexagon_filled_shape(center, size, color));
+    paint_glyph_centred(painter, theme::icon::HEXAGON_FILL, center, size, color, 0.0);
 }
 
-/// The polygon [`paint_hexagon_filled`] draws, centred on `center`.
-fn hexagon_filled_shape(center: egui::Pos2, size: f32, color: egui::Color32) -> egui::Shape {
-    const POINTS: [(f32, f32); 6] = [
-        (128.0, 20.0),
-        (220.0, 72.0),
-        (220.0, 184.0),
-        (128.0, 236.0),
-        (36.0, 184.0),
-        (36.0, 72.0),
-    ];
-    let k = size / 256.0;
-    let points = POINTS
-        .iter()
-        .map(|(x, y)| center + egui::vec2((x - 128.0) * k, (y - 128.0) * k))
-        .collect();
-    egui::Shape::convex_polygon(points, color, egui::Stroke::NONE)
-}
-
-/// The two shapes [`paint_lock_filled`] draws, split out so tests can check them.
-fn lock_filled_shapes(
+/// Set one icon glyph with the middle of its em box on `center`, turned by `rot`
+/// about that point. Every icon is drawn centred in its em box, so its ink is
+/// centred there too.
+fn paint_glyph_centred(
+    painter: &egui::Painter,
+    glyph: &str,
     center: egui::Pos2,
     size: f32,
     color: egui::Color32,
     rot: f32,
-) -> Vec<egui::Shape> {
-    /// Body and shackle in Phosphor's 256-unit design space.
-    const BODY: (f32, f32, f32, f32) = (32.0, 80.0, 224.0, 224.0);
-    const PIVOT: (f32, f32) = (128.0, 56.0);
-    const BAND: f32 = 40.0;
-    const BAND_W: f32 = 16.0;
-    /// The ink spans y = 8..224; its middle, not the box's, lands on `center`.
-    const INK_MID_Y: f32 = 116.0;
-
-    let k = size / 256.0;
-    let frame = Frame2::rotated(rot, center);
-    let at = |x: f32, y: f32| frame.to_screen(egui::pos2((x - 128.0) * k, (y - INK_MID_Y) * k));
-
-    // The shackle: one polyline, so the corners meet without a seam.
-    const STEPS: usize = 12;
-    let mut pts = vec![at(PIVOT.0 - BAND, BODY.1)];
-    for i in 0..=STEPS {
-        let t = std::f32::consts::PI * i as f32 / STEPS as f32;
-        pts.push(at(PIVOT.0 - BAND * t.cos(), PIVOT.1 - BAND * t.sin()));
-    }
-    pts.push(at(PIVOT.0 + BAND, BODY.1));
-
-    // A `RectShape` cannot be turned, so the body is a polygon in the same frame.
-    let body = Frame2::rotated(
-        rot,
-        at(
-            (BODY.0 + BODY.2) * 0.5,
-            // In the `at` frame, y is measured from INK_MID_Y.
-            (BODY.1 + BODY.3) * 0.5,
-        ),
-    );
-    vec![
-        egui::Shape::line(pts, egui::Stroke::new(BAND_W * k, color)),
-        egui::Shape::convex_polygon(
-            body.rounded_rect(
-                egui::vec2((BODY.2 - BODY.0) * k, (BODY.3 - BODY.1) * k),
-                16.0 * k,
-            ),
-            color,
-            egui::Stroke::NONE,
-        ),
-    ]
+) {
+    let galley = painter.layout_no_wrap(glyph.to_owned(), theme::icon_font(size), color);
+    let pos = center - egui::emath::Rot2::from_angle(rot) * (galley.size() / 2.0);
+    painter.add(egui::epaint::TextShape::new(pos, galley, color).with_angle(rot));
 }
 
 /// The hairline round a [`segmented`] track, and the width the cells give up to it
@@ -3223,7 +3163,7 @@ pub fn segmented_marked(
     (clicked, reset)
 }
 
-/// A centred Phosphor glyph for a [`segmented`] cell — the icon twin of
+/// A centred icon glyph for a [`segmented`] cell — the icon twin of
 /// [`segment_label`], for the controls whose choices are pictures (alignment).
 pub fn segment_glyph(painter: &egui::Painter, rect: egui::Rect, glyph: &str, on: bool) {
     painter.text(
@@ -4035,27 +3975,32 @@ mod prefix_tests {
         (top, bottom)
     }
 
-    /// At 100% the circle prefix (corner smoothing) inks to the same bottom row as
-    /// the square prefix glyphs once `prefix_top` lifts it.
+    /// At 100% a round prefix glyph inks centred on the same line as the square
+    /// prefix glyphs, with no nudge of its own.
     ///
-    /// flip: no lift in `prefix_top` → fails at the bottom-row assertion, a row low.
+    /// flip: a one-pixel lift for `SQUIRCLE` in `prefix_top` → fails at the squircle's
+    /// centre assertion.
     #[test]
-    fn the_circle_prefix_sits_level_with_the_others() {
+    fn a_round_prefix_sits_level_with_the_others() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
-        let mut bottoms = Vec::new();
+        let mut centres = Vec::new();
         let _ = ctx.run_ui(Default::default(), |ui| {
-            for g in [icon::CORNERS_OUT, icon::ARROW_CLOCKWISE, icon::CIRCLE] {
+            for g in [icon::CORNERS_OUT, icon::ARROW_CLOCKWISE, icon::SQUIRCLE] {
                 let lead = Prefix::Icon(g).galley(ui);
                 let top = prefix_top(&lead, 14.0).round();
-                bottoms.push(top + ink_rows(ui.ctx(), &lead).1);
+                let (ink_top, ink_bottom) = ink_rows(ui.ctx(), &lead);
+                centres.push(top + (ink_top + ink_bottom) / 2.0);
             }
         });
-        assert_eq!(bottoms[0], bottoms[1], "fixture: the square glyphs agree");
-        assert_eq!(
-            bottoms[2], bottoms[0],
-            "the circle's bottom row: {bottoms:?}"
+        assert!(
+            (centres[0] - centres[1]).abs() <= 0.5,
+            "fixture: the square glyphs agree: {centres:?}"
+        );
+        assert!(
+            (centres[2] - centres[0]).abs() <= 0.5,
+            "the squircle's ink centre: {centres:?}"
         );
     }
 }
@@ -4785,140 +4730,45 @@ mod tests {
         );
     }
 
-    /// Rasterizes `lock_filled_shapes` onto a pixel grid, `true` where it inks.
-    fn lock_coverage(size: f32, center: egui::Pos2, w: usize, h: usize) -> Vec<bool> {
-        let mut tess = egui::epaint::tessellator::Tessellator::new(
-            1.0,
-            egui::epaint::TessellationOptions::default(),
-            [16, 16],
-            vec![],
-        );
-        let mut mesh = egui::epaint::Mesh::default();
-        for s in lock_filled_shapes(center, size, egui::Color32::WHITE, 0.0) {
-            tess.tessellate_shape(s, &mut mesh);
-        }
-        let side = |p: egui::Pos2, q: egui::Pos2, r: egui::Pos2| {
-            (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y)
-        };
-        let mut grid = vec![false; w * h];
-        for tri in mesh.indices.chunks(3) {
-            let [a, b, c] = [0, 1, 2].map(|i| mesh.vertices[tri[i] as usize].pos);
-            for y in 0..h {
-                for x in 0..w {
-                    let p = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
-                    let (d0, d1, d2) = (side(p, a, b), side(p, b, c), side(p, c, a));
-                    let mixed =
-                        (d0 < 0.0 || d1 < 0.0 || d2 < 0.0) && (d0 > 0.0 || d1 > 0.0 || d2 > 0.0);
-                    grid[y * w + x] |= !mixed;
-                }
-            }
-        }
-        grid
-    }
-
-    /// The filled lock has a solid body and a banded shackle (with a hole), inside its em box.
+    /// The filled lock and hexagon land centred on the point they are given, the
+    /// lock also when turned with a rotated frame.
+    ///
+    /// flip: `paint_glyph_centred` placing the galley's corner on `center` → fails
+    /// at the centring assertion.
     #[test]
-    fn the_filled_lock_has_a_body_and_a_shackle_with_a_hole() {
-        const SIZE: f32 = 15.0;
-        const W: usize = 20;
-        let centre = egui::pos2(10.0, 10.0);
-        let grid = lock_coverage(SIZE, centre, W, W);
-        let ink = |x: usize, y: usize| grid[y * W + x];
-
-        let rows: Vec<usize> = (0..W).filter(|y| (0..W).any(|x| ink(x, *y))).collect();
-        let cols: Vec<usize> = (0..W).filter(|x| (0..W).any(|y| ink(*x, y))).collect();
-        let (top, bottom) = (rows[0], rows[rows.len() - 1]);
-        let (left, right) = (cols[0], cols[cols.len() - 1]);
-
-        // One pixel of slack for rounding.
-        let half = SIZE / 2.0;
-        assert!(
-            top as f32 >= centre.y - half - 1.0 && (bottom + 1) as f32 <= centre.y + half + 1.0,
-            "lock ink spans rows {top}..{bottom}, outside a {SIZE}px box at {centre:?}"
-        );
-        assert!(
-            left as f32 >= centre.x - half - 1.0 && (right + 1) as f32 <= centre.x + half + 1.0,
-            "lock ink spans columns {left}..{right}"
-        );
-
-        let width_of = |y: usize| (0..W).filter(|x| ink(*x, y)).count();
-        let widest = (top..=bottom).max_by_key(|y| width_of(*y)).unwrap();
-        assert!(
-            widest > (top + bottom) / 2,
-            "the widest row ({widest}) should be the body, in the lower half"
-        );
-
-        // A row above the body with a gap in the middle: the shackle's two legs.
-        let banded = (top..widest).any(|y| {
-            let on: Vec<usize> = (0..W).filter(|x| ink(*x, y)).collect();
-            !on.is_empty() && on.windows(2).any(|p| p[1] - p[0] > 1)
-        });
-        assert!(banded, "the shackle has no hole — it is a blob, not a lock");
-    }
-
-    /// The filled hexagon sits inside the outline `HEXAGON` glyph's ink box by about half the stroke on every side; the glyph is pointy-top.
-    #[test]
-    fn the_filled_hexagon_sits_on_the_outline_glyphs_ink() {
-        const SIZE: f32 = 64.0;
+    fn the_filled_marks_centre_on_their_point() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
-        let galley = ctx.fonts_mut(|f| {
-            f.layout_no_wrap(
-                theme::icon::HEXAGON.to_owned(),
-                theme::icon_font(SIZE),
-                egui::Color32::WHITE,
-            )
-        });
-        let row = &galley.rows[0];
-        let g = &row.row.glyphs[0];
-        let uv = g.uv_rect;
-        assert!(!uv.is_nothing(), "the glyph rasterized");
-        let cell = g.logical_rect().translate(row.pos.to_vec2());
-        let origin = row.pos + g.pos.to_vec2() + uv.offset;
-        // Locals first: nested `Context` accessors deadlock.
-        let atlas = ctx.fonts(|f| f.image());
-        let ppp = ctx.pixels_per_point();
-        let (gw, gh) = (
-            usize::from(uv.max[0] - uv.min[0]),
-            usize::from(uv.max[1] - uv.min[1]),
-        );
-        let ink = |x: usize, y: usize| {
-            let (ax, ay) = (usize::from(uv.min[0]) + x, usize::from(uv.min[1]) + y);
-            atlas.pixels[ay * atlas.size[0] + ax].a() > 127
-        };
-        let rows: Vec<usize> = (0..gh).filter(|y| (0..gw).any(|x| ink(x, *y))).collect();
-        let cols: Vec<usize> = (0..gw).filter(|x| (0..gh).any(|y| ink(*x, y))).collect();
-        let (r0, r1) = (rows[0], *rows.last().unwrap());
-        let (c0, c1) = (cols[0], *cols.last().unwrap());
-        let ink_box = egui::Rect::from_min_max(
-            origin + egui::vec2(c0 as f32, r0 as f32) / ppp,
-            origin + egui::vec2((c1 + 1) as f32, (r1 + 1) as f32) / ppp,
-        );
-        let poly =
-            hexagon_filled_shape(cell.center(), SIZE, egui::Color32::WHITE).visual_bounding_rect();
-        let half_stroke = SIZE * 8.0 / 256.0;
-        for (side, gap) in [
-            ("left", poly.left() - ink_box.left()),
-            ("right", ink_box.right() - poly.right()),
-            ("top", poly.top() - ink_box.top()),
-            ("bottom", ink_box.bottom() - poly.bottom()),
+        let centre = egui::pos2(40.0, 30.0);
+        for (name, rot) in [
+            ("lock", 0.0),
+            ("lock", std::f32::consts::FRAC_PI_2),
+            ("hexagon", 0.0),
         ] {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                let p = ui.painter();
+                if name == "lock" {
+                    paint_lock_filled(p, centre, 16.0, egui::Color32::WHITE, rot);
+                } else {
+                    paint_hexagon_filled(p, centre, 16.0, egui::Color32::WHITE);
+                }
+            });
+            let texts: Vec<_> = out
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) => Some(t),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(texts.len(), 1, "{name}: one glyph");
+            let at = texts[0].visual_bounding_rect().center();
             assert!(
-                (gap - half_stroke).abs() <= 1.5,
-                "{side}: the polygon sits {gap:.2} inside the ink, want about \
-                 {half_stroke:.2} — ink {ink_box:?}, polygon {poly:?}"
+                at.distance(centre) < 1.0,
+                "{name} at {rot} lands at {at:?}, not on {centre:?}"
             );
         }
-        let width = |y: usize| (0..gw).filter(|x| ink(*x, y)).count();
-        let near_top = width(r0 + (r1 - r0) / 10);
-        let mid = (r0 + r1) / 2;
-        let middle = (0..gw).rev().find(|x| ink(*x, mid)).unwrap_or(0)
-            - (0..gw).find(|x| ink(*x, mid)).unwrap_or(0);
-        assert!(
-            (near_top as f32) < middle as f32 / 2.0,
-            "the outline glyph is not pointy-top: {near_top} near the top, {middle} across"
-        );
     }
 
     /// A label too long for its button is elided inside it: the galley is elided and its ink stays within the button's rect.
@@ -5346,7 +5196,7 @@ mod head_tests {
                     Scrub::whole(0.5),
                     |d| d,
                 );
-                field_button(ui, icon::FRAME_CORNERS, H, 15.0, FieldButton::Off);
+                field_button(ui, icon::CORNERS_SEPARATE, H, 15.0, FieldButton::Off);
             });
         });
 

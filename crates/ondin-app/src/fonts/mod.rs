@@ -2652,7 +2652,7 @@ mod tests {
         let mut db = fontdb::Database::new();
         db.load_font_file(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/assets/fonts/Phosphor.ttf"
+            "/assets/fonts/OndinIcons.ttf"
         ))
         .expect("the bundled icon font is in the tree");
         let name = db
@@ -2690,11 +2690,11 @@ mod tests {
     }
 
     /// The bundled icon font as a one-face system scan, and its family name.
-    fn phosphor_scan() -> (SystemScan, String) {
+    fn icon_font_scan() -> (SystemScan, String) {
         let mut db = fontdb::Database::new();
         db.load_font_file(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/assets/fonts/Phosphor.ttf"
+            "/assets/fonts/OndinIcons.ttf"
         ))
         .expect("the bundled icon font is in the tree");
         let name = db.faces().next().expect("one face").families[0].0.clone();
@@ -2708,7 +2708,7 @@ mod tests {
     /// flip: `ensure` skipping `spelled` → fails at "queued under its own spelling".
     #[test]
     fn a_family_named_in_another_case_still_loads() {
-        let (scan, name) = phosphor_scan();
+        let (scan, name) = icon_font_scan();
         let mut service = FontService::inert();
         service.system = scan.families;
         service.db = Some(scan.db);
@@ -2736,7 +2736,7 @@ mod tests {
     /// at "an unchanged machine is not news".
     #[test]
     fn a_rescan_lists_a_font_installed_since_launch() {
-        let (scan, name) = phosphor_scan();
+        let (scan, name) = icon_font_scan();
         let mut service = FontService::inert();
         // Both sources landed: a family nothing lists is missing, not pending.
         service.system_rx = None;
@@ -2752,7 +2752,7 @@ mod tests {
             "and is no longer missing"
         );
 
-        let (again, _) = phosphor_scan();
+        let (again, _) = icon_font_scan();
         let mut out = FontPoll::default();
         service.land_rescan(again, &mut out);
         assert!(!out.families_changed, "an unchanged machine is not news");

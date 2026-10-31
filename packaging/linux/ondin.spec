@@ -88,7 +88,6 @@ cp -a %{_sourcedir}/payload/. %{buildroot}/
 %doc %{_datadir}/doc/ondin/Inter-OFL.txt
 %doc %{_datadir}/doc/ondin/Hack-LICENSE.txt
 %doc %{_datadir}/doc/ondin/NotoEmoji-OFL-1.1.txt
-%doc %{_datadir}/doc/ondin/Phosphor-LICENSE.txt
 %doc %{_datadir}/doc/ondin/Ubuntu-Font-Licence-1.0.txt
 %doc %{_datadir}/doc/ondin/emoji-icon-font-LICENSE.txt
 %dir %{_datadir}/doc/ondin

@@ -132,7 +132,7 @@ fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleVa
         .then_some(first)
 }
 
-/// A layout's glyph: Phosphor's *columns* for a row, the same picture
+/// A layout's glyph: *columns* for a row, the same picture
 /// turned, *rows*, for a column — the display glyph turned with the direction —
 /// and the four squares for a grid (§15 D1076).
 pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static str {

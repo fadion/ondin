@@ -255,7 +255,7 @@ different verb on the handles.
 - **Shared gates.** Click, marquee, move, rotate ring and pivot behave as under Select. `Tool::selects()` is the shared gate (click, drag start, hover outline, pivot marker, `rulers.rs` guide lines); the cursor shares one match arm.
 - Only `Tool::scaling()` differs; `canvas::resize_opts` passes it into `tools::Resize`.
 - **Proportional by default.** `canvas::keep_ratio` treats the tool as locked, so Shift releases it. Released, scalar properties take the geometric mean of the two factors.
-- **Cursor.** `Bitmap::Scale`, from the rail button's Phosphor glyph; over a handle, the resize arrows win.
+- **Cursor.** `Bitmap::Scale`, from the rail button's glyph (`icon::RESIZE`); over a handle, the resize arrows win.
 - **Numeric door.** The Transform card's Scale % row appears only while the tool is held (`inspector.md`).
 
 **Adding a `Tool` variant is found by the compiler; adding a `NodeKind` is not.** Every predicate
@@ -373,7 +373,7 @@ without undoing placed pivots.
 
 | State | When | Glyph |
 | --- | --- | --- |
-| Editable | toggle on, one layer selected | `icon::CROSSHAIR` |
+| Editable | toggle on, one layer selected | `icon::CROSSHAIR` (`CROSSHAIR_SIMPLE` with a filled centre) |
 | Read-only | hovered layer with a placed pivot, not selected, not mid-gesture, Select tool | `CROSSHAIR_SIMPLE` (also the toggle's glyph) |
 | Absent | otherwise | none |
 

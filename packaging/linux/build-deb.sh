@@ -44,9 +44,9 @@ ROOT="${STAGE}/ondin"
 bash "${HERE}/stage-payload.sh" "$VERSION" "$BINARY" "$ROOT"
 mkdir -p "${ROOT}/DEBIAN"
 
-# Debian's machine-readable copyright file. The bundled fonts and icon set have
-# their own terms and are named here rather than folded into the MIT blanket -
-# Inter and Phosphor, which the app draws with, and egui's four built-in fonts,
+# Debian's machine-readable copyright file. The bundled fonts have their own
+# terms and are named here rather than folded into the MIT blanket - Inter,
+# which the app draws with, and egui's four built-in fonts,
 # which stay in the binary as fallbacks (THIRD-PARTY-NOTICES.md, "egui's built-in
 # fonts"). `sed` turns the LICENSE into the indented, dot-for-blank-line form the
 # format requires.
@@ -65,12 +65,6 @@ Copyright: 2020 The Inter Project Authors (https://github.com/rsms/inter)
 License: OFL-1.1
  The Inter typeface is licensed under the SIL Open Font License 1.1; the full
  text is in /usr/share/doc/ondin/Inter-OFL.txt.
-
-Files: usr/share/doc/ondin/Phosphor-LICENSE.txt
-Copyright: 2020 Phosphor Icons
-License: MIT
- The Phosphor icon font is licensed under the MIT license; the full text is in
- /usr/share/doc/ondin/Phosphor-LICENSE.txt.
 
 Files: usr/share/doc/ondin/Ubuntu-Font-Licence-1.0.txt
 Copyright: Canonical Ltd.

@@ -1824,7 +1824,7 @@ fn square_button(ui: &mut egui::Ui, glyph: &str, on: bool) -> egui::Response {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         glyph,
-        egui::FontId::new(14.0, egui::FontFamily::Name("phosphor".into())),
+        crate::theme::icon_font(14.0),
         ink,
     );
     resp
@@ -1922,7 +1922,7 @@ fn styles_tab(
                     } else {
                         icon::CARET_RIGHT
                     },
-                    egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
+                    crate::theme::icon_font(11.0),
                     theme::text::faint(),
                 );
                 let name = p.layout_no_wrap(
@@ -2071,7 +2071,7 @@ fn style_group_row(
         } else {
             icon::CARET_RIGHT
         },
-        egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
+        crate::theme::icon_font(11.0),
         theme::text::faint(),
     );
     let name = p.layout_no_wrap(
@@ -2392,7 +2392,7 @@ fn group_row(
         } else {
             icon::CARET_RIGHT
         },
-        egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
+        crate::theme::icon_font(11.0),
         theme::text::faint(),
     );
     let name = p.layout_no_wrap(
@@ -3289,7 +3289,7 @@ impl OndinApp {
                 egui::pos2(rect.right() - 9.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 icon::CARET_DOWN,
-                egui::FontId::new(12.0, egui::FontFamily::Name("phosphor".into())),
+                crate::theme::icon_font(12.0),
                 theme::text::dim(),
             );
             let resp = resp.on_hover_text(match (page, set) {

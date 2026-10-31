@@ -732,15 +732,12 @@ pub(super) fn popup_rule(ui: &mut egui::Ui) {
 }
 
 use super::op_glyph;
-/// The kind glyph on an identity card, at its **optical** position.
-///
-/// `CIRCLE` is drawn a point lower: Phosphor's circle sits higher in the em box
-/// than the square glyphs, so the card would appear to step as the subject changes.
+/// The kind glyph on an identity card, centred in its cell. Every icon is drawn
+/// centred in its em box, so the card does not step as the subject changes.
 fn identity_glyph(ui: &mut egui::Ui, glyph: &'static str, colour: egui::Color32) {
-    let dy = if glyph == icon::CIRCLE { 1.0 } else { 0.0 };
     let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(IDENTITY_ICON), egui::Sense::empty());
     ui.painter().text(
-        rect.center() + egui::vec2(0.0, dy),
+        rect.center(),
         egui::Align2::CENTER_CENTER,
         glyph,
         theme::icon_font(IDENTITY_ICON),
@@ -2922,13 +2919,13 @@ impl OndinApp {
                 // vanishing button would move the fields.
                 ui::field_button(
                     ui,
-                    icon::FRAME_CORNERS,
+                    icon::CORNERS_SEPARATE,
                     28.0,
                     15.0,
                     ui::FieldButton::Disabled,
                 )
                 .on_hover_text("One rectangle at a time: each corner is set on its own layer");
-                ui::field_button(ui, icon::CIRCLE, 28.0, 15.0, ui::FieldButton::Disabled)
+                ui::field_button(ui, icon::SQUIRCLE, 28.0, 15.0, ui::FieldButton::Disabled)
                     .on_hover_text("One rectangle at a time: smoothing is set on its own layer");
             });
         });
@@ -4829,7 +4826,7 @@ impl OndinApp {
                 }
                 if ui::field_button(
                     ui,
-                    icon::FRAME_CORNERS,
+                    icon::CORNERS_SEPARATE,
                     28.0,
                     15.0,
                     ui::FieldButton::on_if(per_corner),
@@ -4874,13 +4871,13 @@ impl OndinApp {
             let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
             for pair in [
                 [
-                    (icon::ARROW_ELBOW_LEFT_DOWN, Corner::TopLeft, "Top left"),
-                    (icon::ARROW_ELBOW_RIGHT_DOWN, Corner::TopRight, "Top right"),
+                    (icon::CORNER_TOP_LEFT, Corner::TopLeft, "Top left"),
+                    (icon::CORNER_TOP_RIGHT, Corner::TopRight, "Top right"),
                 ],
                 [
-                    (icon::ARROW_ELBOW_LEFT_UP, Corner::BottomLeft, "Bottom left"),
+                    (icon::CORNER_BOTTOM_LEFT, Corner::BottomLeft, "Bottom left"),
                     (
-                        icon::ARROW_ELBOW_RIGHT_UP,
+                        icon::CORNER_BOTTOM_RIGHT,
                         Corner::BottomRight,
                         "Bottom right",
                     ),
@@ -4942,7 +4939,7 @@ impl OndinApp {
     }
     /// The button beside a radius that opens the corner smoothing field.
     fn smoothing_toggle(&mut self, ui: &mut egui::Ui, id: NodeId, open: bool) {
-        if ui::field_button(ui, icon::CIRCLE, 28.0, 15.0, ui::FieldButton::on_if(open))
+        if ui::field_button(ui, icon::SQUIRCLE, 28.0, 15.0, ui::FieldButton::on_if(open))
             .on_hover_text("Corner smoothing")
             .clicked()
         {
@@ -4966,7 +4963,7 @@ impl OndinApp {
             let (resp, hit) = ui::value_field_marked(
                 ui,
                 egui::vec2(fw, 28.0),
-                Prefix::Icon(icon::CIRCLE),
+                Prefix::Icon(icon::SQUIRCLE),
                 mark.as_ref().map(Mark::field),
                 &mut pct,
                 Scrub::whole(0.5).range(0.0..=100.0),

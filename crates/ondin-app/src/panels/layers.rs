@@ -357,7 +357,7 @@ impl RowTargets {
 enum RowBadge {
     /// An artboard's `800 × 600`.
     Text(String),
-    /// A Phosphor glyph and the type size that puts it on the word's ink height.
+    /// An icon glyph and the type size that puts it on the word's ink height.
     /// The size travels with the glyph because it differs per glyph
     /// ([`BADGE_STACK`], [`BADGE_MASK`]).
     Icon(&'static str, f32),
@@ -465,10 +465,11 @@ fn cover_row_end(p: &egui::Painter, row: egui::Rect, from: f32, ground: egui::Co
 
 /// Type size for the base operand's `stack-simple`, so it inks the same height as
 /// the worded badge beside it (`800 × 600` at 10.5). Measured from the galley's
-/// `uv_rect`; the two match at 100%–150% scaling, and
+/// `uv_rect`; the two match at 100%–200% scaling (pixel snapping makes the
+/// neighbouring quarter points miss by a row), and
 /// `the_base_badge_inks_as_tall_as_the_worded_one` holds it. It matches the word,
 /// not the 15pt hover controls: a badge is an annotation.
-const BADGE_STACK: f32 = 11.0;
+const BADGE_STACK: f32 = 11.25;
 
 /// Type size for a mask's `circle-half`, measured the same way; at 10.0 it inks
 /// the word's height at all four scalings (11.0 is too tall at 125% and 150%).
@@ -495,7 +496,7 @@ fn subtract_base(doc: &ondin_core::Document, node: &ondin_core::Node) -> bool {
 pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
     match kind {
         NodeKind::Root => (icon::SELECTION, theme::text::muted()),
-        NodeKind::Artboard { .. } => (icon::FRAME_CORNERS, color::accent_400()),
+        NodeKind::Artboard { .. } => (icon::FRAME, color::accent_400()),
         NodeKind::Group => (icon::SELECTION, theme::text::muted()),
         NodeKind::Rect { .. } => (icon::SQUARE, theme::text::muted()),
         NodeKind::Ellipse { .. } => (icon::CIRCLE, theme::text::muted()),
@@ -710,7 +711,7 @@ fn caret_column(left: f32, depth: usize) -> f32 {
 }
 
 /// Where a row's elbow stops: short of its leading glyph (caret, else kind icon).
-/// Two points off an 11pt caret box and four off a 15pt icon's (a Phosphor
+/// Two points off an 11pt caret box and four off a 15pt icon's (an icon
 /// glyph's ink stops well inside its box).
 fn row_lead(left: f32, depth: usize, has_children: bool) -> f32 {
     if has_children {
@@ -1944,19 +1945,21 @@ impl OndinApp {
                 ),
             );
         }
+        // An optical lift: a point up sits the lock level with the eye beside it.
+        let lock_at = egui::pos2(lock_x, cy - 1.0);
         if locked {
             // A locked layer wears a filled lock permanently, legible while
             // scanning rather than only on hover.
             crate::ui::paint_lock_filled(
                 p,
-                egui::pos2(lock_x, cy),
+                lock_at,
                 ICON_PT,
                 lit(under == Some(RowHit::Lock), theme::text::muted()),
                 0.0,
             );
         } else if show_lock {
             p.text(
-                egui::pos2(lock_x, cy),
+                lock_at,
                 egui::Align2::CENTER_CENTER,
                 icon::LOCK_SIMPLE_OPEN,
                 theme::icon_font(ICON_PT),
@@ -3186,7 +3189,7 @@ mod badge_ink_tests {
 
     /// Every glyph badge, at its own size, inks as tall as the worded badge across
     /// four display scalings. A new badge belongs in the loop with a measured size.
-    /// flip: `BADGE_STACK` at 12 → fails at every scaling above 100%.
+    /// flip: `BADGE_STACK` at 12 → fails at 125%.
     #[test]
     fn the_base_badge_inks_as_tall_as_the_worded_one() {
         for ppp in [1.0_f32, 1.25, 1.5, 2.0] {

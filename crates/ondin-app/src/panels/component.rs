@@ -16,9 +16,8 @@
 //! child, and an instance whose only drift is a deleted layer would read as
 //! untouched.
 //!
-//! **The main's glyph is the filled hexagon**, drawn by `ui::paint_hexagon_filled`
-//! since the bundled Phosphor Regular has none; a main's and a variant's face carry
-//! it, an instance's the outline one.
+//! **The main's glyph is the filled hexagon**, painted by `ui::paint_hexagon_filled`;
+//! a main's and a variant's face carry it, an instance's the outline one.
 
 use crate::app::OndinApp;
 use crate::theme::{self, icon};

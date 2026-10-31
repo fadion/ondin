@@ -52,7 +52,7 @@ allow = [
 ]
 confidence-threshold = 0.8
 
-# The fonts Ondin bundles ITSELF — Inter (OFL-1.1) and Phosphor (MIT) — are
+# The fonts Ondin bundles ITSELF — Inter and Noto Emoji (OFL-1.1) — are
 # embedded assets rather than crates, so cargo-deny cannot see them. They are
 # covered in THIRD-PARTY-NOTICES.md, with texts in the tree.
 

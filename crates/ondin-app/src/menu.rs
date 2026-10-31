@@ -523,8 +523,8 @@ pub struct Spec {
     pub group: Group,
     /// Destroys something: drawn red.
     pub danger: bool,
-    /// Draw the filled hexagon in the glyph's place (`ui::paint_hexagon_filled`);
-    /// the font has no filled weight, so the outline glyph is not drawn.
+    /// Draw the filled hexagon in the glyph's place (`ui::paint_hexagon_filled`)
+    /// instead of the row's outline glyph.
     pub filled_hexagon: bool,
 }
 
@@ -709,7 +709,7 @@ impl Item {
             ),
             Item::FrameSelection => s(
                 "Frame selection",
-                icon::FRAME_CORNERS,
+                icon::FRAME,
                 Some("Ctrl+Alt+G"),
                 Group::Structure,
             ),
@@ -947,12 +947,7 @@ impl Item {
             ),
 
             Item::SelectAll => s("Select all", icon::SCAN, Some("Ctrl+A"), Group::Clipboard),
-            Item::ZoomFit => s(
-                "Zoom to fit",
-                icon::FRAME_CORNERS,
-                Some("Ctrl+1"),
-                Group::Navigate,
-            ),
+            Item::ZoomFit => s("Zoom to fit", icon::FRAME, Some("Ctrl+1"), Group::Navigate),
             Item::ViewSwitch(sw) => s(
                 sw.label(),
                 match sw {
@@ -1086,7 +1081,7 @@ impl Item {
                     Tool::Select => ("Tool: Select", icon::CURSOR, "V"),
                     Tool::Hand => ("Tool: Hand", icon::HAND, "H"),
                     Tool::Scale => ("Tool: Scale", icon::RESIZE, "K"),
-                    Tool::Frame => ("Tool: Frame", icon::FRAME_CORNERS, "F"),
+                    Tool::Frame => ("Tool: Frame", icon::FRAME, "F"),
                     Tool::Slice => ("Tool: Slice", icon::KNIFE, "Shift+F"),
                     Tool::Rect => ("Tool: Rectangle", icon::SQUARE, "R"),
                     Tool::Ellipse => ("Tool: Ellipse", icon::CIRCLE, "O"),
@@ -3849,8 +3844,8 @@ mod tests {
             out.shapes
                 .iter()
                 .filter(|c| {
-                    matches!(&c.shape, egui::Shape::Path(p)
-                        if p.closed && p.points.len() == 6 && p.fill != egui::Color32::TRANSPARENT)
+                    matches!(&c.shape, egui::Shape::Text(t)
+                        if t.galley.text() == icon::HEXAGON_FILL)
                 })
                 .count()
         };

@@ -28,12 +28,12 @@ APP_ID="io.github.fadion.Ondin"
 # the same icon set the same way.
 ICON="${REPO}/icons/icon.png"
 
-# The licence texts of the third-party material the binary embeds (Phosphor,
-# and egui's built-in fallback fonts - THIRD-PARTY-NOTICES.md has which is
+# The licence texts of the third-party material the binary embeds (the bundled
+# emoji and egui's built-in fallback fonts - THIRD-PARTY-NOTICES.md has which is
 # which). Named one by one so each is checked to exist below, the same as every
 # other file here; the check after the loop is what stops this list going stale
 # when a new one is added to licenses/.
-LICENSE_FILES="Hack-LICENSE.txt NotoEmoji-OFL-1.1.txt Phosphor-LICENSE.txt Ubuntu-Font-Licence-1.0.txt emoji-icon-font-LICENSE.txt"
+LICENSE_FILES="Hack-LICENSE.txt NotoEmoji-OFL-1.1.txt Ubuntu-Font-Licence-1.0.txt emoji-icon-font-LICENSE.txt"
 
 required=("$BINARY" \
     "${HERE}/${APP_ID}.desktop" \

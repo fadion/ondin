@@ -426,16 +426,18 @@ pub mod text {
     }
 }
 
-/// Phosphor icon glyphs (Regular weight), by name. Codepoints extracted from
-/// `@phosphor-icons/web@2.1.1`. Render with [`icon_text`] so they use the
-/// Phosphor font family.
+/// The app's own icon glyphs, by name, in `assets/fonts/OndinIcons.ttf`. Render
+/// with [`icon_text`] or [`icon_font`] so they use the icon family.
 ///
 /// # Adding an icon
 ///
-/// Look the name up in **`assets/fonts/Phosphor.codepoints.txt`** and paste the
-/// codepoint in. `Phosphor.ttf`'s `post` table is version 3.0 and carries no
-/// glyph names, so the table was recovered from the font's ligatures; its header
-/// says how to regenerate it and why single-word names (`x`, `check`) are missing.
+/// Draw it into **`assets/icons/glyphs.json`** on the 16-unit grid (a 1-unit
+/// stroke centred on half units, so a straight line covers one pixel row at
+/// 100%), under the name this module derives from the constant (`FOLDER_SIMPLE` →
+/// `"folder-simple"`) and a free Private Use Area codepoint; rebuild the font with
+/// `assets/icons/build_font.py`; add the constant and its `ALL` row. The tests
+/// check that the JSON, the constants and the font agree, the font by a stamp of
+/// the JSON it was built from.
 ///
 /// The `#[allow(dead_code)]` sits on the individual unused constants, each with
 /// its reason, not on the module, so the next glyph to lose its last call site
@@ -457,7 +459,7 @@ pub mod icon {
     pub const SHAPES: &str = "\u{ec5e}";
     pub const MAGNIFYING_GLASS: &str = "\u{e30c}";
     pub const MAGNIFYING_GLASS_PLUS: &str = "\u{e310}";
-    pub const FRAME_CORNERS: &str = "\u{e626}";
+    pub const FRAME: &str = "\u{e626}";
     pub const SELECTION: &str = "\u{e69a}";
     /// The identity row's three actions, beside the boolean dropdown (§9.4).
     /// Also the Effects panel's **Layer blur** row glyph.
@@ -480,9 +482,14 @@ pub mod icon {
     pub const EYE: &str = "\u{e220}";
     pub const EYE_SLASH: &str = "\u{e224}";
     pub const LOCK_SIMPLE: &str = "\u{e308}";
+    /// A locked layer: [`LOCK_SIMPLE`] with its body filled, since fill marks the
+    /// state.
+    pub const LOCK_SIMPLE_FILL: &str = "\u{f001}";
     pub const LOCK_SIMPLE_OPEN: &str = "\u{e30a}"; // an unlocked layer
     pub const CURSOR: &str = "\u{e1dc}";
     pub const HAND: &str = "\u{e298}";
+    /// The open-hand cursor: [`HAND`] filled, so it reads over artwork.
+    pub const HAND_FILL: &str = "\u{f002}";
     pub const LINE_SEGMENT: &str = "\u{e6d2}";
     pub const PEN_NIB: &str = "\u{e3ac}";
     pub const BEZIER_CURVE: &str = "\u{eb00}"; // the node tool: a curve with its handles
@@ -535,45 +542,50 @@ pub mod icon {
     pub const INFO: &str = "\u{e2ce}";
     /// Mirror in x (and a gradient's stops).
     ///
-    /// Not a matched pair with [`FLIP_VERTICAL`]: the horizontal one is two
-    /// triangles about a dashed axis, the vertical one hangs triangles off a solid
-    /// bar, so side by side the second reads as a flag. Phosphor has no second
-    /// flip pair, which is why the image popover's mirror buttons are words
-    /// (§15 D182).
+    /// Two triangles about a dotted axis, one of them filled; [`FLIP_VERTICAL`] is
+    /// the same drawing turned, so the two are a matched pair.
     pub const FLIP_HORIZONTAL: &str = "\u{ed6a}";
-    /// Mirror in y. See [`FLIP_HORIZONTAL`] — the two do not match.
+    /// Mirror in y. See [`FLIP_HORIZONTAL`].
     pub const FLIP_VERTICAL: &str = "\u{ed6c}";
     pub const ARROWS_CLOCKWISE: &str = "\u{e094}"; // reverse a gradient's stops
     /// The dashboard's sort control, which is one button carrying whichever order
-    /// is in force (`ph-arrows-down-up`).
+    /// is in force.
     ///
     /// Not [`ARROWS_CLOCKWISE`], which means *reverse*: the button steps to the
     /// next key, and arrows passing each other read as "ordered by".
     pub const ARROWS_DOWN_UP: &str = "\u{e098}";
-    /// Opacity, and the **inner shadow**'s row glyph (`ph-drop-half`).
+    /// Opacity, and the **inner shadow**'s row glyph.
     /// The two never share a card. It is the same droplet as [`DROP_HALF_BOTTOM`],
     /// split vertically rather than horizontally, so the inner and drop shadow read
     /// as two states of one picture.
     pub const DROP_HALF: &str = "\u{e566}";
-    /// The **drop shadow**'s row glyph (`ph-drop-half-bottom`).
+    /// The **drop shadow**'s row glyph.
     /// See [`DROP_HALF`], which is its pair.
     pub const DROP_HALF_BOTTOM: &str = "\u{eb40}";
-    /// The **Filters** row's glyph (`ph-sun`).
+    /// The **Filters** row's glyph.
     pub const SUN: &str = "\u{e472}";
     pub const SQUARE_HALF: &str = "\u{e462}"; // stroke alignment
-    // Per-corner radius: each elbow points into the corner it sets.
-    pub const ARROW_ELBOW_LEFT_DOWN: &str = "\u{e04a}"; // top-left
-    pub const ARROW_ELBOW_RIGHT_DOWN: &str = "\u{e050}"; // top-right
-    pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}"; // bottom-left
-    pub const ARROW_ELBOW_RIGHT_UP: &str = "\u{e052}"; // bottom-right
+    // Per-corner radius: a box drawn in dots with the one corner it sets rounded
+    // and solid, one drawing turned into each corner.
+    pub const CORNER_TOP_LEFT: &str = "\u{f004}";
+    pub const CORNER_TOP_RIGHT: &str = "\u{f005}";
+    pub const CORNER_BOTTOM_LEFT: &str = "\u{f006}";
+    pub const CORNER_BOTTOM_RIGHT: &str = "\u{f007}";
+    /// The toggle that opens the four corner fields: four tiles, each with its
+    /// outer corner rounded, so it does not repeat the radius field's brackets.
+    pub const CORNERS_SEPARATE: &str = "\u{f009}";
+    /// Corner smoothing: a squircle, the shape smoothing turns a rounded box into.
+    pub const SQUIRCLE: &str = "\u{f008}";
+    /// A variable mode's *Inherit*: an arrow turning up to the level above.
+    pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
     pub const ARROW_UP: &str = "\u{e08e}";
     pub const ARROW_DOWN: &str = "\u{e03e}";
     /// *Bring to front*; [`ARROW_LINE_DOWN`] is *Send to back* (§15 D761). The
     /// arrow-to-a-bar pair is the *all the way* family against the plain
     /// `ARROW_UP`/`ARROW_DOWN` one-step pair, and `ARROW_LINE_LEFT`/`ARROW_LINE_RIGHT`
-    /// carry the same *against a wall* reading. Not `ph-stack` / `ph-stack-simple`:
-    /// `ph-stack-simple` is *Flatten* and the rows co-occur.
+    /// carry the same *against a wall* reading. Not [`STACK`] / [`STACK_SIMPLE`]:
+    /// `STACK_SIMPLE` is *Flatten* and the rows co-occur.
     pub const ARROW_LINE_UP: &str = "\u{e066}";
     /// *Send to back*; see [`ARROW_LINE_UP`].
     pub const ARROW_LINE_DOWN: &str = "\u{e05c}";
@@ -588,6 +600,8 @@ pub mod icon {
     pub const ARROWS_IN_LINE_VERTICAL: &str = "\u{e532}";
     pub const COLUMNS: &str = "\u{e546}";
     pub const ROWS: &str = "\u{e5a2}";
+    /// The closed-hand cursor, filled like [`HAND_FILL`]; nothing draws an outline
+    /// fist.
     pub const HAND_GRABBING: &str = "\u{e57c}";
     pub const RULER: &str = "\u{e6b8}"; // a guide, named for where it comes from
     /// Dragging a guide back onto its ruler throws it away; rasterized by
@@ -607,11 +621,11 @@ pub mod icon {
     /// `LINK_SIMPLE_BREAK` is diagonal and means the proportion lock.
     pub const LINK_SIMPLE_HORIZONTAL_BREAK: &str = "\u{e2ec}";
     pub const MAGNET: &str = "\u{e680}"; // the Snap menu
-    /// The transform origin, in two weights. `CROSSHAIR_SIMPLE` is the read-only
-    /// marker and the Transform panel's toggle; `CROSSHAIR` — the heavier one,
-    /// whose lines run through the ring — is the marker while it can be dragged.
-    /// One glyph in the panel and on the canvas, so the button names the thing it
-    /// arms rather than describing it, and the weight says whether it is live.
+    /// The transform origin, in two states. `CROSSHAIR_SIMPLE` is the read-only
+    /// marker and the Transform panel's toggle; `CROSSHAIR`, the same reticle with
+    /// a filled centre, is the marker while it can be dragged. One glyph in the
+    /// panel and on the canvas, so the button names the thing it arms rather than
+    /// describing it, and the fill says whether it is live.
     pub const CROSSHAIR_SIMPLE: &str = "\u{e1d8}";
     pub const CROSSHAIR: &str = "\u{e1d6}";
     /// A drag grip on a reorderable row — Fill's and Stroke's paint rows.
@@ -649,7 +663,7 @@ pub mod icon {
     pub const EXCLUDE_SQUARE: &str = "\u{e880}";
     /// Flatten, at the foot of the same dropdown. Deliberately not a set diagram:
     /// it happens once and discards the operands rather than being a fifth state.
-    /// Its ink box is narrower than the squares', but every Phosphor glyph advances
+    /// Its ink box is narrower than the squares', but every icon glyph advances
     /// the same, so the label beside it does not shift.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
     /// Dot and dash *spacing*: the gap between two things.
@@ -708,8 +722,7 @@ pub mod icon {
     pub const CROP: &str = "\u{e1d4}";
     /// Text direction — the two-way swap.
     pub const SWAP: &str = "\u{e83c}";
-    /// A swap property's filter on the Properties card (§15 D1000). `U+E268` beside
-    /// it is the three-bar *funnel-simple*.
+    /// A swap property's filter on the Properties card (§15 D1000).
     pub const FUNNEL: &str = "\u{e266}";
     /// A decoration's thickness — a single stroke, seen end on.
     pub const LINE_VERTICAL: &str = "\u{ed70}";
@@ -731,11 +744,12 @@ pub mod icon {
     pub const COPY_SIMPLE: &str = "\u{e1cc}";
     /// *Paste*.
     pub const CLIPBOARD: &str = "\u{e196}";
-    /// The outline hexagon §15 D981 gives components — an instance's mark. Regular
-    /// weight only: the bundled font has no filled hexagon, so a main's mark and
-    /// the *Create component* and *Duplicate as component* rows draw it
-    /// (`ui::paint_hexagon_filled`, §15 D985) over this glyph's box.
+    /// The outline hexagon §15 D981 gives components — an instance's mark.
+    /// [`HEXAGON_FILL`] is a main's.
     pub const HEXAGON: &str = "\u{e2ae}";
+    /// A main component's mark, and the *Create component* and *Duplicate as
+    /// component* rows': [`HEXAGON`] filled, since fill marks the state.
+    pub const HEXAGON_FILL: &str = "\u{f000}";
     /// A **kit** (§5.3e, §15 D1011): the top bar's *Kit* tag, the document menu's
     /// kit rows, and the insert and swap pickers' kit headings.
     pub const PACKAGE: &str = "\u{e390}";
@@ -801,9 +815,8 @@ pub mod icon {
     /// The Export panel's format dropdown — a picture in a sheet, saying "this row
     /// makes a file" (§7).
     ///
-    /// One glyph for all three formats: Phosphor's `file-png`/`file-jpg`/`file-svg`
-    /// are illegible micro-text at 15pt, and the word beside the glyph already
-    /// names the format.
+    /// One glyph for all three formats: the word beside it already names the
+    /// format, and a format written into the glyph is illegible at 15pt.
     pub const FILE_IMAGE: &str = "\u{ea24}";
     /// *Export as Zip* — the one button that produces an archive rather than
     /// files.
@@ -844,7 +857,8 @@ pub mod icon {
     pub const CURSOR_TEXT: &str = "\u{e7d8}";
     /// A History row's mark for a step made over MCP.
     pub const SPARKLE: &str = "\u{e6a2}";
-    /// Every icon this module names, paired with its Phosphor name (lower-kebab).
+    /// Every icon this module names, paired with its name in
+    /// `assets/icons/glyphs.json` (lower-kebab).
     ///
     /// Rust cannot reflect over `pub const`s, so this is the one list the tests
     /// read. The name is the join key: `declared_icons` derives it from each
@@ -868,7 +882,7 @@ pub mod icon {
         ("shapes", SHAPES),
         ("magnifying-glass", MAGNIFYING_GLASS),
         ("magnifying-glass-plus", MAGNIFYING_GLASS_PLUS),
-        ("frame-corners", FRAME_CORNERS),
+        ("frame", FRAME),
         ("selection", SELECTION),
         ("circle-half", CIRCLE_HALF),
         ("selection-plus", SELECTION_PLUS),
@@ -887,9 +901,11 @@ pub mod icon {
         ("eye", EYE),
         ("eye-slash", EYE_SLASH),
         ("lock-simple", LOCK_SIMPLE),
+        ("lock-simple-fill", LOCK_SIMPLE_FILL),
         ("lock-simple-open", LOCK_SIMPLE_OPEN),
         ("cursor", CURSOR),
         ("hand", HAND),
+        ("hand-fill", HAND_FILL),
         ("line-segment", LINE_SEGMENT),
         ("pen-nib", PEN_NIB),
         ("bezier-curve", BEZIER_CURVE),
@@ -925,10 +941,13 @@ pub mod icon {
         ("drop-half-bottom", DROP_HALF_BOTTOM),
         ("sun", SUN),
         ("square-half", SQUARE_HALF),
-        ("arrow-elbow-left-down", ARROW_ELBOW_LEFT_DOWN),
-        ("arrow-elbow-right-down", ARROW_ELBOW_RIGHT_DOWN),
+        ("corner-top-left", CORNER_TOP_LEFT),
+        ("corner-top-right", CORNER_TOP_RIGHT),
+        ("corner-bottom-left", CORNER_BOTTOM_LEFT),
+        ("corner-bottom-right", CORNER_BOTTOM_RIGHT),
+        ("corners-separate", CORNERS_SEPARATE),
+        ("squircle", SQUIRCLE),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),
-        ("arrow-elbow-right-up", ARROW_ELBOW_RIGHT_UP),
         ("arrow-up", ARROW_UP),
         ("arrow-down", ARROW_DOWN),
         ("arrow-line-up", ARROW_LINE_UP),
@@ -1007,6 +1026,7 @@ pub mod icon {
         ("copy-simple", COPY_SIMPLE),
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
+        ("hexagon-fill", HEXAGON_FILL),
         ("package", PACKAGE),
         ("browsers", BROWSERS),
         ("push-pin", PUSH_PIN),
@@ -1047,21 +1067,20 @@ pub mod icon {
     ];
 }
 
-/// Name of the Phosphor font family registered by [`install`].
-const PHOSPHOR: &str = "phosphor";
+/// Name of the icon font family registered by [`install`].
+const ICONS: &str = "ondin-icons";
 
-/// Build a `RichText` that renders `glyph` from the Phosphor icon font at
-/// `size`, in `col`.
+/// Build a `RichText` that renders `glyph` from the icon font at `size`, in `col`.
 pub fn icon_text(glyph: &str, size: f32, col: egui::Color32) -> egui::RichText {
     egui::RichText::new(glyph)
-        .family(egui::FontFamily::Name(PHOSPHOR.into()))
+        .family(egui::FontFamily::Name(ICONS.into()))
         .size(size)
         .color(col)
 }
 
-/// A `FontId` for the Phosphor icon font at `size` (for direct `painter.text`).
+/// A `FontId` for the icon font at `size` (for direct `painter.text`).
 pub fn icon_font(size: f32) -> egui::FontId {
-    egui::FontId::new(size, egui::FontFamily::Name(PHOSPHOR.into()))
+    egui::FontId::new(size, egui::FontFamily::Name(ICONS.into()))
 }
 
 /// Install the theme's fonts and style onto the egui context. Call once at
@@ -1077,9 +1096,9 @@ pub fn install(ctx: &egui::Context) {
 
 fn install_fonts(ctx: &egui::Context) {
     // Bundled Inter (the same variable font core shapes text with) for all UI
-    // text, and Phosphor for icon glyphs.
+    // text, and the app's own icon font for icon glyphs.
     static INTER: &[u8] = include_bytes!("../../ondin-core/assets/fonts/Inter-Variable.ttf");
-    static PHOSPHOR_TTF: &[u8] = include_bytes!("../assets/fonts/Phosphor.ttf");
+    static ICONS_TTF: &[u8] = include_bytes!("../assets/fonts/OndinIcons.ttf");
     static NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji.ttf");
 
     let mut fonts = egui::FontDefinitions::default();
@@ -1088,8 +1107,8 @@ fn install_fonts(ctx: &egui::Context) {
         Arc::new(egui::FontData::from_static(INTER)),
     );
     fonts.font_data.insert(
-        PHOSPHOR.to_owned(),
-        Arc::new(egui::FontData::from_static(PHOSPHOR_TTF)),
+        ICONS.to_owned(),
+        Arc::new(egui::FontData::from_static(ICONS_TTF)),
     );
 
     // A current Noto Emoji, monochrome, ahead of egui's own, which predates
@@ -1121,8 +1140,8 @@ fn install_fonts(ctx: &egui::Context) {
 
     // A dedicated family for icon glyphs; falls back to Inter for any stray text.
     fonts.families.insert(
-        egui::FontFamily::Name(PHOSPHOR.into()),
-        vec![PHOSPHOR.to_owned(), "inter".to_owned()],
+        egui::FontFamily::Name(ICONS.into()),
+        vec![ICONS.to_owned(), "inter".to_owned()],
     );
 
     ctx.set_fonts(fonts);
@@ -1303,12 +1322,11 @@ mod tests {
     }
 
     /// Every glyph the app names is laid out, read back out of the font atlas, and
-    /// has to have ink that differs from the missing-glyph box. A wrong Phosphor
-    /// codepoint lays out fine and renders blank or as `.notdef`; the font's `post`
-    /// table is version 3.0 and holds no names to check against. It reads
-    /// `icon::ALL`, so coverage cannot drift behind the constants. It cannot say
-    /// whether a glyph is the one that was wanted: a digit transposed onto a
-    /// neighbouring valid icon passes, and only an atlas dump catches that.
+    /// has to have ink that differs from the missing-glyph box: a wrong codepoint,
+    /// or a font not rebuilt after `glyphs.json` changed, lays out fine and renders
+    /// blank or as `.notdef`. It reads `icon::ALL`, so coverage cannot drift behind
+    /// the constants; `the_glyph_source_names_every_icon_at_its_codepoint` pins
+    /// each name to its codepoint.
     #[test]
     fn every_named_icon_has_a_glyph_behind_it() {
         let ctx = egui::Context::default();
@@ -1349,8 +1367,8 @@ mod tests {
             ((x1 - x0) as usize, (y1 - y0) as usize, px)
         };
 
-        // A Private Use Area codepoint Phosphor does not define, so the result is
-        // the fallback's answer.
+        // A Private Use Area codepoint the icon font does not define, so the result
+        // is the fallback's answer.
         let notdef = coverage("\u{efff}");
         assert!(
             notdef.2.iter().any(|a| *a > 0),
@@ -1370,7 +1388,8 @@ mod tests {
             assert!(
                 got != notdef,
                 "{name} (U+{:04X}) came back as the *missing-glyph box*, not as an icon \
-                 — Phosphor does not define that codepoint",
+                 — the icon font does not define that codepoint; rebuild it from \
+                 assets/icons/glyphs.json",
                 glyph.chars().next().map(u32::from).unwrap_or(0)
             );
         }
@@ -1427,8 +1446,8 @@ mod tests {
         }
     }
 
-    /// Every icon constant this module's own source declares, as its Phosphor name
-    /// paired with the glyph behind it.
+    /// Every icon constant this module's own source declares, as its name paired
+    /// with the glyph behind it.
     ///
     /// Rust cannot enumerate `pub const`s, so this parses this file's own source
     /// (`include_str!`), from `pub mod icon {` to the first closing brace at column
@@ -1496,7 +1515,7 @@ mod tests {
         assert_eq!(
             by_name.len(),
             declared.len(),
-            "two constants in the icon module derive one Phosphor name, so one of \
+            "two constants in the icon module derive one name, so one of \
              them can never be listed"
         );
 
@@ -1524,7 +1543,7 @@ mod tests {
             "ALL and the constants disagree. Declared but not listed: {missing:?} — \
              add them to ALL, or the atlas test stops covering them. Listed but not \
              declared: {unknown:?} — a name in ALL that no constant derives is a \
-             Phosphor name nothing draws."
+             glyph nothing draws."
         );
 
         for (name, glyph) in &listed {
@@ -1548,6 +1567,76 @@ mod tests {
              copy-paste slip in the table produces; {} of {before} entries are \
              distinct",
             glyphs.len()
+        );
+    }
+
+    /// `assets/icons/glyphs.json`, the font's source, draws exactly the icons
+    /// `icon::ALL` lists, each at the constant's codepoint. A drawing under another
+    /// name or codepoint builds into a font that inks every glyph, so the atlas
+    /// test cannot see it.
+    ///
+    /// flip: `hexagon-fill`'s codepoint in the JSON set to `U+E2AE` → fails at the
+    /// codepoint assertion.
+    #[test]
+    fn the_glyph_source_names_every_icon_at_its_codepoint() {
+        #[derive(serde::Deserialize)]
+        struct Glyph {
+            name: String,
+            codepoint: String,
+        }
+        let source: Vec<Glyph> = serde_json::from_str(include_str!("../assets/icons/glyphs.json"))
+            .expect("glyphs.json parses");
+        let drawn: std::collections::BTreeMap<&str, &str> = source
+            .iter()
+            .map(|g| (g.name.as_str(), g.codepoint.as_str()))
+            .collect();
+        assert_eq!(
+            drawn.len(),
+            source.len(),
+            "a name is drawn twice in glyphs.json"
+        );
+
+        let listed: std::collections::BTreeSet<&str> = icon::ALL.iter().map(|(n, _)| *n).collect();
+        let undrawn: Vec<&&str> = listed.iter().filter(|n| !drawn.contains_key(**n)).collect();
+        let unlisted: Vec<&&str> = drawn.keys().filter(|n| !listed.contains(**n)).collect();
+        assert!(
+            undrawn.is_empty() && unlisted.is_empty(),
+            "glyphs.json and icon::ALL disagree. Listed but not drawn: {undrawn:?}. \
+             Drawn but not listed: {unlisted:?}"
+        );
+
+        for (name, glyph) in icon::ALL {
+            let want = format!("U+{:04X}", glyph.chars().next().map_or(0, u32::from));
+            assert_eq!(
+                drawn[name], want,
+                "glyphs.json draws `{name}` at a codepoint the constant does not hold"
+            );
+        }
+    }
+
+    /// `OndinIcons.ttf` carries the stamp `build_font.py` writes from the
+    /// `glyphs.json` it was built from, so a drawing edited without a rebuild
+    /// fails here; the atlas test only sees that every codepoint inks.
+    ///
+    /// flip: one character of a path in glyphs.json changed without a rebuild →
+    /// fails at the stamp assertion.
+    #[test]
+    fn the_font_was_built_from_the_current_glyphs() {
+        // FNV-1a 64 with `\r` dropped, as `build_font.py`'s `source_stamp` does: a
+        // CRLF checkout must stamp alike.
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in include_str!("../assets/icons/glyphs.json")
+            .bytes()
+            .filter(|b| *b != b'\r')
+        {
+            h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let stamp = format!("glyphs {h:016x}");
+        let font = include_bytes!("../assets/fonts/OndinIcons.ttf");
+        assert!(
+            font.windows(stamp.len()).any(|w| w == stamp.as_bytes()),
+            "OndinIcons.ttf was not built from the current glyphs.json (want \
+             `{stamp}`); rebuild it with assets/icons/build_font.py"
         );
     }
 

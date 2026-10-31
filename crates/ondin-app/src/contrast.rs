@@ -1583,7 +1583,7 @@ fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
     p.text(
         egui::pos2(rect.left() + PAD + 6.0, rect.center().y),
         egui::Align2::CENTER_CENTER,
-        icon::FRAME_CORNERS,
+        icon::FRAME,
         theme::icon_font(12.0),
         color::accent_400(),
     );

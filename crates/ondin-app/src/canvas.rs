@@ -650,7 +650,7 @@ const MIN_CREATE_PX: f64 = 3.0;
 pub(crate) const SNAP_TARGET_LIMIT: usize = 200;
 /// Rotation snap step with Shift held: 15°.
 const ROTATE_SNAP: f64 = std::f64::consts::FRAC_PI_2 / 6.0;
-/// Type size for the pivot marker's glyph; Phosphor inks about `size - 4`.
+/// Type size for the pivot marker's glyph; the crosshair inks about `size - 4`.
 const PIVOT_GLYPH_PX: f32 = 22.0;
 /// How close the pointer must be to grab the pivot marker — a corner handle's
 /// distance, since the pivot beats the handles.
@@ -7312,7 +7312,7 @@ impl OndinApp {
             }
         } else if is_main {
             // A filled hexagon on a violet chip: the outline glyph holds the cell
-            // unpainted and `draw_frame_labels` fills it (no filled Phosphor one).
+            // unpainted and `draw_frame_labels` paints `ui::paint_hexagon_filled` in it.
             if clashing {
                 glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
             }
@@ -9230,7 +9230,7 @@ pub(crate) fn paint_anchor(painter: &egui::Painter, at: egui::Pos2, fill: egui::
     );
 }
 
-/// The marker: one Phosphor crosshair in the weight [`Marker`] picks, no ground.
+/// The marker: one crosshair glyph, in the state [`Marker`] picks, no ground.
 fn paint_pivot(painter: &egui::Painter, at: egui::Pos2, marker: Marker) {
     painter.text(
         at,
@@ -16055,15 +16055,18 @@ mod frame_menu_door_tests {
         let hexagons = tags
             .iter()
             .filter(|s| {
-                matches!(s, egui::Shape::Path(p)
-                    if p.closed && p.points.len() == 6 && p.fill == color::COMPONENT_INK)
+                matches!(s, egui::Shape::Text(t)
+                    if t.galley.text() == crate::theme::icon::HEXAGON_FILL
+                        && t.fallback_color == color::COMPONENT_INK)
             })
             .count();
         assert_eq!(hexagons, 1, "one filled hexagon, on the main's chip");
         let mut inks: Vec<_> = tags
             .iter()
             .filter_map(|s| match s {
-                egui::Shape::Text(t) => Some(t.fallback_color),
+                egui::Shape::Text(t) if t.galley.text() != crate::theme::icon::HEXAGON_FILL => {
+                    Some(t.fallback_color)
+                }
                 _ => None,
             })
             .collect();
@@ -16260,8 +16263,11 @@ mod frame_menu_door_tests {
             },
             |ui| app.draw_frame_labels(ui, ui.painter(), rect, 1.0),
         );
+        // The main's filled hexagon is a glyph too; only the tags' own text counts.
         for clipped in &out.shapes {
-            if let egui::Shape::Text(t) = &clipped.shape {
+            if let egui::Shape::Text(t) = &clipped.shape
+                && t.galley.text() != crate::theme::icon::HEXAGON_FILL
+            {
                 inks.push(t.fallback_color);
             }
         }

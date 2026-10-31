@@ -174,7 +174,7 @@ document opens, it is never saved or exported, and present mode's own branch nev
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
 
 **The resource meter** (`meter.rs`), left of undo behind a rule, while Settings' *Show resource meter*
-is on (off by default): CPU (Phosphor `cpu`), memory (`memory`) and canvas frame rate (`gauge`), each
+is on (off by default): CPU (`icon::CPU`), memory (`MEMORY`) and canvas frame rate (`GAUGE`), each
 a 15pt glyph in `text::dim()` and an 11.5pt value in `text::muted()`, in a slot as wide as its longest
 figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact figure.
 
@@ -231,7 +231,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 ### Settings
 
-- Rightmost: Phosphor `sliders`, 28pt, ten points clear of the document's controls. The update chip
+- Rightmost: `icon::SLIDERS`, 28pt, ten points clear of the document's controls. The update chip
   sits between it and that gap. The window's caption buttons are in the tab strip above.
 - Opens `settings.rs`'s modal: the theme and *Show resource meter* (under **Appearance**; the
   library's Settings shares the theme row only), nudge step, *Show tree guides* and *Collapse groups on open* (under a

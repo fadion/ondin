@@ -182,10 +182,10 @@ impl FieldKey {
     /// paint, which draws no badge.
     pub(crate) fn badge(self) -> &'static str {
         match self {
-            FieldKey::Corner { slot: 0, .. } => icon::ARROW_ELBOW_LEFT_DOWN,
-            FieldKey::Corner { slot: 1, .. } => icon::ARROW_ELBOW_RIGHT_DOWN,
-            FieldKey::Corner { slot: 2, .. } => icon::ARROW_ELBOW_RIGHT_UP,
-            FieldKey::Corner { .. } => icon::ARROW_ELBOW_LEFT_UP,
+            FieldKey::Corner { slot: 0, .. } => icon::CORNER_TOP_LEFT,
+            FieldKey::Corner { slot: 1, .. } => icon::CORNER_TOP_RIGHT,
+            FieldKey::Corner { slot: 2, .. } => icon::CORNER_BOTTOM_RIGHT,
+            FieldKey::Corner { .. } => icon::CORNER_BOTTOM_LEFT,
             FieldKey::Radius { .. } | FieldKey::Paint { .. } => icon::CORNERS_OUT,
             FieldKey::Visible { .. } => icon::EYE,
             FieldKey::Size { axis: 0, .. } => "W",
@@ -382,7 +382,7 @@ pub(crate) fn chip(
             xr.center(),
             egui::Align2::CENTER_CENTER,
             icon::X,
-            egui::FontId::new(9.0, egui::FontFamily::Name("phosphor".into())),
+            crate::theme::icon_font(9.0),
             color::text(),
         );
         if xresp.on_hover_text("Detach variable").clicked() {
@@ -2192,7 +2192,7 @@ fn face_row(
             egui::pos2(rect.right() - 3.0 - check_w / 2.0, y),
             egui::Align2::CENTER_CENTER,
             icon::CHECK,
-            egui::FontId::new(12.0, egui::FontFamily::Name("phosphor".into())),
+            crate::theme::icon_font(12.0),
             color::text_a(204),
         );
     }

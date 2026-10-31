@@ -6661,8 +6661,8 @@ fn status_color(status: &crate::session::Status) -> egui::Color32 {
 }
 
 /// The library's half of the status line: a dot with the whole message on hover, in a
-/// fixed box so it shows at every window width. A painted circle, not an icon glyph
-/// (`Phosphor.ttf` has no glyph names). The hit box ([`STATUS_DOT_HIT`]) is far larger
+/// fixed box so it shows at every window width. A painted circle, not an icon
+/// glyph. The hit box ([`STATUS_DOT_HIT`]) is far larger
 /// than the ink ([`STATUS_DOT_R`]).
 pub(crate) fn status_dot(ui: &mut egui::Ui, status: &crate::session::Status) {
     if status.text.is_empty() {
@@ -6884,7 +6884,7 @@ impl OndinApp {
                     "Zoom to fit",
                     crate::input::Action::ZoomFit,
                 ),
-                // `SELECTION`, not a guessed `corners-in`: a wrong Phosphor codepoint renders blank.
+                // `SELECTION`, not `CORNERS_IN`, which is *Fit frame to content*.
                 (
                     icon::SELECTION,
                     "Fit selection",
@@ -7411,7 +7411,7 @@ impl OndinApp {
                 "Scale — drag a handle to scale strokes, radii and type with the box (K)",
             ),
             E::Sep,
-            E::Btn(icon::FRAME_CORNERS, Some(Tool::Frame), "Frame (F)"),
+            E::Btn(icon::FRAME, Some(Tool::Frame), "Frame (F)"),
             E::Btn(
                 icon::KNIFE,
                 Some(Tool::Slice),

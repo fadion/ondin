@@ -4031,7 +4031,7 @@ fn a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it() {
 /// flip: `register_font_data` registering nothing → fails at "with the fonts".
 #[test]
 fn a_worker_given_the_text_fonts_lays_text_out_alike() {
-    let bytes = include_bytes!("../../ondin-app/assets/fonts/Phosphor.ttf");
+    let bytes = include_bytes!("../../ondin-app/assets/fonts/OndinIcons.ttf");
     let family = ondin_core::text::register_fonts(bytes.to_vec())
         .pop()
         .expect("a family");

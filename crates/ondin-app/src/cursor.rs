@@ -14,10 +14,11 @@
 //! - **The loaded Image cursor**, the crosshair with a count badge
 //!   ([`Bitmap::Loaded`]).
 //!
-//! The hands, pen, pencil, Scale box and bin are rasterized from the Phosphor glyphs the
-//! tool rail uses, so a tool's cursor and its rail button are one drawing; the
-//! crosshair, the rotate arc and the badge are drawn outright. Both paths meet at
-//! [`compose`], which gives them a common white core and dark rim.
+//! The hands, pen, pencil, Scale box and bin are rasterized from the icon glyphs the
+//! tool rail uses, so a tool's cursor and its rail button are one drawing (the
+//! hands filled, so they read over artwork); the crosshair, the rotate arc and the
+//! badge are drawn outright. Both paths meet at [`compose`], which gives them a
+//! common white core and dark rim.
 //!
 //! egui hands the result to the OS as a true cursor via
 //! `Context::set_cursor_image`, so it neither lags the pointer nor clips at the
@@ -138,7 +139,7 @@ pub enum Bitmap {
 }
 
 impl Bitmap {
-    /// The Phosphor glyph this cursor is drawn from and where in it the pointer
+    /// The icon glyph this cursor is drawn from and where in it the pointer
     /// aims — or `None` for the ones drawn from scratch.
     ///
     /// One function so a variant with no glyph has nowhere to put a hotspot:
@@ -148,7 +149,7 @@ impl Bitmap {
         match self {
             // A hand grabs with its palm; the bin and the Scale box aim from the
             // middle of the whole pointer.
-            Self::HandOpen => Some((theme::icon::HAND, Hotspot::Middle)),
+            Self::HandOpen => Some((theme::icon::HAND_FILL, Hotspot::Middle)),
             Self::HandClosed => Some((theme::icon::HAND_GRABBING, Hotspot::Middle)),
             // A pen draws from its nib, where the anchor point will appear.
             Self::Pen => Some((theme::icon::PEN_NIB, Hotspot::Nib)),
@@ -312,7 +313,7 @@ fn rasterize(
     };
     let (w, h) = (gw, gh);
     compose(ctx.pixels_per_point(), (w, h), hotspot, |x, y| {
-        // Mirrored, not turned, for a nib: Phosphor draws the tip bottom-left, and
+        // Mirrored, not turned, for a nib: the icon draws the tip bottom-left, and
         // every other cursor points up-left. A reflection puts the tip top-left; a
         // 180° turn would put it top-right.
         let y = if hotspot == Hotspot::Nib {
@@ -324,8 +325,8 @@ fn rasterize(
     })
 }
 
-/// A thin crosshair of four rectangles. `IDC_CROSS` is too large and Phosphor's
-/// `crosshair` glyphs carry a target ring. The geometry is [`Cross`], which the
+/// A thin crosshair of four rectangles. `IDC_CROSS` is too large and the
+/// `CROSSHAIR` glyphs carry a target ring. The geometry is [`Cross`], which the
 /// loaded Image cursor draws too.
 fn crosshair(scale: f32) -> Option<egui::CustomCursorImage> {
     let cross = Cross::new(scale);
@@ -620,8 +621,8 @@ fn digits(ctx: &egui::Context, scale: f32, text: &str) -> Option<(i32, i32, Vec<
 /// `angle` — a **screen** angle in radians, y down, pointing from the pivot out
 /// towards the handle under the pointer.
 ///
-/// Drawn rather than taken from Phosphor: its rings stay rings at any turn, so the
-/// orientation (which handle you have) would be invisible, and it has no
+/// Drawn rather than taken from the icon font: its rings stay rings at any turn, so
+/// the orientation (which handle you have) would be invisible, and it has no
 /// two-headed arc. An arc of about 120° with a head at each end (a rotate drag goes
 /// either way) reads at a glance.
 ///
@@ -824,7 +825,7 @@ mod tests {
         ctx
     }
 
-    /// Each cursor has ink, a light core and a dark rim: a wrong Phosphor codepoint
+    /// Each cursor has ink, a light core and a dark rim: a wrong icon codepoint
     /// lays out blank, and white-on-white is invisible over an artboard.
     #[test]
     fn every_bitmap_cursor_rasterizes_legibly() {

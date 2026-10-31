@@ -2157,7 +2157,7 @@ impl OndinApp {
             );
         }
         // The star sits on the cover's top-right corner so a grid can be scanned for
-        // it. Outline, as the bundled Phosphor has only Regular; the gold carries the state.
+        // it. Filled and gold, `star_shape`, since the star is the state.
         if self.is_starred(entry) {
             let at = egui::pos2(thumb.right() - 14.0, thumb.top() + 14.0);
             let p = ui.painter();
@@ -4531,8 +4531,8 @@ fn rounded_rect_path(rect: egui::Rect, r: f32, per_corner: usize) -> Vec<egui::P
 
 /// A filled five-pointed star, as a polygon.
 ///
-/// Drawn because the bundled Phosphor face is Regular only (no filled star); if a
-/// fill face is ever bundled, this should go. [`STAR_INNER`] sets the arm fatness and
+/// Drawn because the icon font has no filled star; a `star-fill` glyph would
+/// replace it. [`STAR_INNER`] sets the arm fatness and
 /// [`STAR_ROUND`] fillets every vertex so no needle remains at 15pt.
 fn star_shape(centre: egui::Pos2, r: f32, fill: egui::Color32) -> egui::Shape {
     const POINTS: usize = 5;

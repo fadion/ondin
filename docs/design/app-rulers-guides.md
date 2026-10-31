@@ -96,8 +96,8 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 - A frame-scoped guide shows a dotted continuation beyond its frame on hover/selection, same width and
   colour; none for page-wide guides or guides in rotated frames (`rulers::upright`). The solid segment is
   clipped by the frame, the dotted one by the viewport.
-- **Discard cursor**: dragging a guide back onto its ruler shows `Bitmap::Discard` (Phosphor
-  `trash-simple`; fallback `CursorIcon::NoDrop`), from `GuideDrag::announces_discard()` =
+- **Discard cursor**: dragging a guide back onto its ruler shows `Bitmap::Discard` (the
+  `icon::TRASH_SIMPLE` glyph; fallback `CursorIcon::NoDrop`), from `GuideDrag::announces_discard()` =
   `discarding && left_ruler`, shared with the fade. A guide that has not yet left the bars never
   announces discard. `ruler_cursor` returns `(CursorIcon, Option<Bitmap>)`.
 

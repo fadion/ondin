@@ -1980,9 +1980,11 @@ impl OndinApp {
                 .min;
             p.galley(at, galley, theme::text::faint());
         }
-        // The mark sits after the lock and eye at the row's very edge, in every
-        // row state (§15 D981).
-        if let Some(m) = mark {
+        // The mark sits after the lock and eye at the row's very edge, and steps
+        // aside while the row is hovered so the hover's controls stand alone; its
+        // slot stays reserved, so the eye and lock do not move. The row's tooltip
+        // still says what the mark stood for.
+        if let Some(m) = mark.filter(|_| !hovered) {
             let at = egui::pos2(right - MARK_SLOT / 2.0 + 1.0, cy);
             match m {
                 RowMark::Override => {
@@ -6004,6 +6006,50 @@ mod row_mark_tests {
         );
         app.collapsed.insert(i);
         assert_eq!(marks(&mut app, &ctx).0, 1, "collapsed: the same dot");
+    }
+
+    /// A row's mark steps aside while the row is hovered, and is back once the
+    /// pointer leaves.
+    ///
+    /// flip: the mark drawn whatever `hovered` says → fails at "hovered: no dot".
+    #[test]
+    fn a_rows_mark_steps_aside_while_the_row_is_hovered() {
+        let ctx = egui::Context::default();
+        let (mut app, _, [ca, _]) = instance(&ctx);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::DeleteNode { id: ca }]))
+        );
+        let pass = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.layers_tree(ui),
+            )
+        };
+        let mut out = pass(&mut app, vec![]);
+        for _ in 0..2 {
+            out = pass(&mut app, vec![]);
+        }
+        let dots = crate::ui::painted_override_dots(&out);
+        assert_eq!(dots.len(), 1, "the fixture: one dot");
+        for _ in 0..3 {
+            out = pass(&mut app, vec![egui::Event::PointerMoved(dots[0])]);
+        }
+        assert!(
+            crate::ui::painted_override_dots(&out).is_empty(),
+            "hovered: no dot"
+        );
+        for _ in 0..3 {
+            out = pass(&mut app, vec![egui::Event::PointerGone]);
+        }
+        assert_eq!(
+            crate::ui::painted_override_dots(&out).len(),
+            1,
+            "unhovered: the dot is back"
+        );
     }
 
     /// A main's or an instance's row wears the hexagon, never its picture's

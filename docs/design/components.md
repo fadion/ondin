@@ -472,8 +472,9 @@ Canvas:
   (`OndinApp::leave_a_scope_the_selection_left`). This chrome lies over the artwork, not the canvas
   ground, so it takes the violet: a neutral grey vanished on a light frame.
 
-Layers panel: neutral icons wearing the hexagon. Trailing mark: **+** for a local layer (unlinked
-inside an instance, or a local instance); a **dot** for an override on the row; on a collapsed row
+Layers panel: neutral icons wearing the hexagon. Trailing mark, hidden while the row is hovered (its
+slot stays, so the eye and lock hold still): **+** for a local layer (unlinked inside an instance, or a
+local instance); a **dot** for an override on the row; on a collapsed row
 inside an instance, or a collapsed instance root, a dot for any drift (`reset::Drift::any` or a local
 layer, from `drift_cache`), bubbling no further than the root. A removed or reordered child's dot goes
 on **its parent's row**, with a tooltip (`reset::child_drift`); the context menu then offers

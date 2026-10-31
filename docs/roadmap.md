@@ -14,12 +14,7 @@ Nothing open.
 
 ## Now · Performance
 
-Figures are from the suite (`perf/README.md`), on the `wide` fixture unless named.
-
-- **Share text layouts between nodes.** Text is ~1,030 of resolve's ~1,290 ms (39k of 149k
-  layers), and the text memo is keyed by node, so identical text is shaped once per node. Key a
-  cache by content, style and wrap width. Measure the gain on real kits (`ONDIN_PERF_EXTRA`), as
-  the fixtures repeat a few strings.
+Nothing open.
 
 ## Later · First
 

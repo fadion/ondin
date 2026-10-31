@@ -15825,7 +15825,8 @@ mod font_arrival_tests {
                     parent: root,
                     index: i + 1,
                     kind: NodeKind::Text {
-                        content: "hello world".into(),
+                        // Each its own, so a pass shapes each rather than sharing.
+                        content: format!("hello world {i}"),
                         style: Box::new(style),
                         spans: parts.spans.clone(),
                         para_spans: parts.para_spans.clone(),

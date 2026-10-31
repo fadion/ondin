@@ -3861,7 +3861,8 @@ fn an_incremental_update_is_not_slower_than_the_rebuild_it_replaces() {
     );
 }
 
-/// A group holding `n` text blocks, and the group's id.
+/// A group holding `n` text blocks, and the group's id. Each block's content is
+/// its own, so a pass shapes each one rather than sharing one layout.
 fn group_of_text(n: usize) -> (Document, NodeId, Vec<NodeId>) {
     let mut ids = IdSource::new(0x7E57);
     let root = ids.mint();
@@ -3883,7 +3884,7 @@ fn group_of_text(n: usize) -> (Document, NodeId, Vec<NodeId>) {
                 id,
                 group,
                 i,
-                text("hello world", 16.0),
+                text(&format!("hello world {i}"), 16.0),
                 Affine::translate((0.0, 20.0 * i as f64)),
             );
             id
@@ -3992,8 +3993,8 @@ fn a_translate_on_a_group_does_not_reshape_the_text_inside_it() {
 /// remembered across commits and dropped only for a dirty node.
 ///
 /// **Flip run**, `UsedView` measuring through the trait's default rather than
-/// the memo: fails on *"a translate re-shaped laid text"*, 9 against 0 — three
-/// shapes a label — the predicted site. The `SetText` control keeps a re-shape
+/// the memo: fails on *"a translate re-shaped laid text"*, 21 against 0, the
+/// predicted site. The `SetText` control keeps a re-shape
 /// for the edited block, so the memo is not simply never cleared.
 #[test]
 fn a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it() {
@@ -4102,4 +4103,103 @@ fn a_worker_given_the_text_fonts_lays_text_out_alike() {
         .unwrap()
     });
     assert_eq!(given, here, "with the fonts");
+}
+
+/// **Equal texts share one shaping; every text still gets exactly its own
+/// layout.** Labels repeated in a column (wrapped by the column's width) and
+/// free, beside labels that differ from them only in fields the shared cache
+/// does not hash — weight, italic, colour, letter spacing — or only in sizing.
+/// Each node's layout equals shaping its used kind alone, after a rebuild and
+/// after an update that edits one of the repeats.
+///
+/// flip: the shared cache matching on its hash bucket alone → the weight,
+/// italic, colour and spacing variants take the plain label's layout and fail
+/// at "the layout of a text equals shaping it alone".
+#[test]
+fn equal_texts_share_a_layout_and_each_text_keeps_its_own() {
+    use ondin_core::container::{Display, Flex, FlexDirection};
+    use ondin_core::peniko::Color;
+    let mut ids = IdSource::new(0x5A4E);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (ab, column) = (ids.mint(), ids.mint());
+    create(&mut doc, ab, root, 0, artboard(), Affine::IDENTITY);
+    create(&mut doc, column, ab, 0, NodeKind::Group, Affine::IDENTITY);
+    doc.apply(&Transaction(vec![Operation::SetDisplay {
+        id: column,
+        display: Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            ..Default::default()
+        })),
+    }]))
+    .expect("a column");
+
+    let restyled = |f: &dyn Fn(&mut TextStyle)| {
+        let mut kind = text("Continue to checkout", 14.0);
+        if let NodeKind::Text { style, .. } = &mut kind {
+            f(style);
+        }
+        kind
+    };
+    let mut kinds = vec![text("Continue to checkout", 14.0); 12];
+    kinds.push(restyled(&|s| s.weight = 700));
+    kinds.push(restyled(&|s| s.italic = true));
+    kinds.push(restyled(&|s| {
+        s.color = Some(Color::from_rgba8(200, 0, 0, 255))
+    }));
+    kinds.push(restyled(&|s| {
+        s.letter_spacing = ondin_core::Length::Em(0.1)
+    }));
+    let mut narrow = text("Continue to checkout", 14.0);
+    if let NodeKind::Text { sizing, .. } = &mut narrow {
+        *sizing = TextSizing::AutoHeight(60.0);
+    }
+    kinds.push(narrow);
+    let mut texts = Vec::new();
+    for (i, kind) in kinds.iter().enumerate() {
+        // Half in the column, half free on the frame.
+        let (parent, index) = if i % 2 == 0 {
+            (column, i / 2)
+        } else {
+            (ab, i / 2 + 1)
+        };
+        let id = ids.mint();
+        create(&mut doc, id, parent, index, kind.clone(), Affine::IDENTITY);
+        texts.push(id);
+    }
+
+    let each_is_its_own = |res: &Resolved, doc: &Document| {
+        for id in &texts {
+            let kind = res.used_kind(doc, *id).unwrap();
+            let alone = ondin_core::text::layout(ondin_core::TextRef::of(kind).unwrap());
+            assert_eq!(
+                res.text_layout(*id),
+                Some(&alone),
+                "the layout of a text equals shaping it alone"
+            );
+        }
+    };
+
+    let before = ondin_core::text::shapes();
+    let mut res = Resolved::rebuild(&doc);
+    let shaped = ondin_core::text::shapes() - before;
+    assert!(
+        shaped < texts.len() as u64,
+        "the repeats share: {shaped} shapings for {} texts",
+        texts.len()
+    );
+    each_is_its_own(&res, &doc);
+
+    let dirty = doc
+        .apply(&Transaction(vec![Operation::SetText {
+            id: texts[2],
+            content: "Back to cart".into(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        }]))
+        .unwrap()
+        .dirty;
+    res.update(&doc, &dirty);
+    each_is_its_own(&res, &doc);
+    assert_resolved_matches_rebuild(&doc, &res, 0);
 }

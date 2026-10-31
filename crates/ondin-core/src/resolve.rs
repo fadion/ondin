@@ -23,6 +23,10 @@ use kurbo::{Affine, BezPath, Rect};
 use peniko::FontData;
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
+
+mod shaper;
+use shaper::Shaper;
 
 /// R-tree leaf: the world bounds of one indexable node.
 #[derive(Clone, PartialEq, Debug)]
@@ -171,12 +175,14 @@ impl crate::container::LayoutView for DocView<'_> {
 }
 
 /// [`DocView`] with the pinned-child box read from the used geometry filled so far
-/// ([`frame_box`]) and text measured through the [`TextMemo`]. [`place_node`] lays
-/// a root out through it; every other answer is the document's.
+/// ([`frame_box`]) and text measured through the [`TextMemo`], and on a miss through
+/// the pass's [`Shaper`]. [`place_node`] lays a root out through it; every other
+/// answer is the document's.
 struct UsedView<'a> {
     doc: &'a Document,
     used: &'a FxHashMap<NodeId, Used>,
     memo: &'a std::cell::RefCell<FxHashMap<NodeId, TextMemo>>,
+    shaper: &'a std::cell::RefCell<Shaper>,
 }
 
 impl crate::container::LayoutView for UsedView<'_> {
@@ -219,7 +225,8 @@ impl crate::container::LayoutView for UsedView<'_> {
         {
             return *b;
         }
-        let b = geometry::local_bounds(kind, None);
+        let layout = self.shaper.borrow_mut().layout(kind);
+        let b = geometry::local_bounds(kind, layout.as_deref());
         self.memo
             .borrow_mut()
             .entry(id)
@@ -232,7 +239,7 @@ impl crate::container::LayoutView for UsedView<'_> {
         if let Some(w) = self.memo.borrow().get(&id).and_then(|m| m.widths) {
             return w;
         }
-        let w = crate::node::TextRef::of(kind).map(text::content_widths);
+        let w = self.shaper.borrow_mut().content_widths(kind);
         self.memo.borrow_mut().entry(id).or_default().widths = Some(w);
         w
     }
@@ -243,7 +250,7 @@ impl crate::container::LayoutView for UsedView<'_> {
         {
             return *b;
         }
-        let layout = text::layout(crate::node::TextRef::of(kind)?);
+        let layout = self.shaper.borrow_mut().layout(kind)?;
         let b = layout.baselines.first().map(|b| b - layout.origin.y);
         self.memo
             .borrow_mut()
@@ -338,14 +345,18 @@ struct TextMemo {
 type SizingKey = (u8, u64, u64);
 
 fn sizing_key(kind: &NodeKind) -> Option<SizingKey> {
-    use crate::node::TextSizing;
     match kind {
-        NodeKind::Text { sizing, .. } => Some(match sizing {
-            TextSizing::Auto => (0, 0, 0),
-            TextSizing::AutoHeight(w) => (1, w.to_bits(), 0),
-            TextSizing::Fixed(s) => (2, s.width.to_bits(), s.height.to_bits()),
-        }),
+        NodeKind::Text { sizing, .. } => Some(sizing_key_of(sizing)),
         _ => None,
+    }
+}
+
+fn sizing_key_of(sizing: &crate::node::TextSizing) -> SizingKey {
+    use crate::node::TextSizing;
+    match sizing {
+        TextSizing::Auto => (0, 0, 0),
+        TextSizing::AutoHeight(w) => (1, w.to_bits(), 0),
+        TextSizing::Fixed(s) => (2, s.width.to_bits(), s.height.to_bits()),
     }
 }
 
@@ -581,8 +592,9 @@ pub struct Resolved {
     /// during a preview). Only the `Group`/`Root` arm of `scene::effect_bounds`
     /// reads it.
     inner_ink: FxHashMap<NodeId, Rect>,
-    /// Shaped layout per `Text` node, invalidated through the `DirtySet`.
-    text: FxHashMap<NodeId, TextLayout>,
+    /// Shaped layout per `Text` node, invalidated through the `DirtySet`. Shared
+    /// between the nodes of one pass whose texts are equal ([`Shaper`]).
+    text: FxHashMap<NodeId, Arc<TextLayout>>,
     /// `geometry::local_path` of every node's used kind that has one, kept as
     /// [`Self::text`] is: the scene walk draws every visible shape every frame,
     /// and a rounded corner's arcs cost more to build than the rest of its node.
@@ -622,12 +634,14 @@ impl Resolved {
         let mut used: FxHashMap<NodeId, Used> = FxHashMap::default();
         let mut laid = FxHashMap::default();
         let memo = std::cell::RefCell::new(FxHashMap::default());
+        let shaper = std::cell::RefCell::new(Shaper::default());
         let pages: Vec<NodeId> = doc.page_ids().collect();
         for id in crate::subtree_nodes(doc, &pages) {
             let view = UsedView {
                 doc,
                 used: &used,
                 memo: &memo,
+                shaper: &shaper,
             };
             if let Some(u) = place_node(&view, &mut laid, id) {
                 used.insert(id, u);
@@ -639,6 +653,7 @@ impl Resolved {
         let mut inner_ink = FxHashMap::default();
         let mut text = FxHashMap::default();
         let mut outline = FxHashMap::default();
+        let mut shaper = shaper.into_inner();
         for page in &pages {
             resolve_subtree(
                 doc,
@@ -652,6 +667,7 @@ impl Resolved {
                     inner_ink: &mut inner_ink,
                     text: &mut text,
                     outline: &mut outline,
+                    shaper: &mut shaper,
                 },
             );
         }
@@ -765,12 +781,14 @@ impl Resolved {
                 .is_none_or(|n| n.text_vars().iter().all(Option::is_none))
         });
         let memo = std::cell::RefCell::new(memo);
+        let shaper = std::cell::RefCell::new(Shaper::default());
         for id in &ordered {
             let fresh = {
                 let view = UsedView {
                     doc,
                     used: &self.used,
                     memo: &memo,
+                    shaper: &shaper,
                 };
                 place_node(&view, &mut laid, *id)
             };
@@ -790,13 +808,14 @@ impl Resolved {
         // waste of more is invisible to the differential test; `text::shapes`
         // makes it assertable.
         // The outlines on the same rule: each is a function of the used kind alone.
+        let mut shaper = shaper.into_inner();
         for id in &existing {
-            self.reshape_text(doc, *id);
+            self.reshape_text(doc, *id, &mut shaper);
             self.reoutline(doc, *id);
         }
         // And the text whose used kind moved, if not already shaped above.
         for id in relaid.iter().filter(|id| !existing.contains(id)) {
-            self.reshape_text(doc, *id);
+            self.reshape_text(doc, *id, &mut shaper);
             self.reoutline(doc, *id);
         }
 
@@ -954,7 +973,7 @@ impl Resolved {
     /// The cached shaped layout of a `Text` node — glyph runs and box size.
     /// `None` for every other kind.
     pub fn text_layout(&self, id: NodeId) -> Option<&TextLayout> {
-        self.text.get(&id)
+        self.text.get(&id).map(Arc::as_ref)
     }
 
     /// The cached `geometry::local_path` of `id`'s used kind, in its local space:
@@ -1070,7 +1089,7 @@ impl Resolved {
                 NodeKind::Text { .. } => self
                     .text
                     .get(&id)
-                    .map(text::outline)
+                    .map(|layout| text::outline(layout))
                     .filter(|p| !p.elements().is_empty()),
                 _ => self.local_path(doc, id),
             },
@@ -1109,14 +1128,12 @@ impl Resolved {
 
     /// Recompute the cached layout for `id` if it is a `Text` node; clear any
     /// stale entry if it is not (a kind can change identity across undo/redo).
-    fn reshape_text(&mut self, doc: &Document, id: NodeId) {
+    fn reshape_text(&mut self, doc: &Document, id: NodeId, shaper: &mut Shaper) {
         // At the used kind: layout hands a text box a wrap width, and the glyphs
         // are shaped at that width, not the typed one.
         let laid_out = doc
             .get(id)
-            .map(|n| kind_in(&self.used, n))
-            .and_then(crate::TextRef::of)
-            .map(text::layout);
+            .and_then(|n| shaper.layout(kind_in(&self.used, n)));
         match laid_out {
             Some(laid_out) => {
                 self.text.insert(id, laid_out);
@@ -1246,7 +1263,7 @@ impl Resolved {
                 kind_in(&self.used, node),
                 &doc.resolved_paint(id, node.paint()),
                 world,
-                self.text.get(&id),
+                self.text.get(&id).map(Arc::as_ref),
             ),
         };
         match bounds {
@@ -1389,8 +1406,9 @@ struct Caches<'a> {
     world_bounds: &'a mut FxHashMap<NodeId, Rect>,
     ink_bounds: &'a mut FxHashMap<NodeId, Rect>,
     inner_ink: &'a mut FxHashMap<NodeId, Rect>,
-    text: &'a mut FxHashMap<NodeId, TextLayout>,
+    text: &'a mut FxHashMap<NodeId, Arc<TextLayout>>,
     outline: &'a mut FxHashMap<NodeId, BezPath>,
+    shaper: &'a mut Shaper,
 }
 
 /// Recursively compute world transforms and bounds for the subtree at `id`,
@@ -1412,8 +1430,8 @@ fn resolve_subtree(
     c.world.insert(id, w);
 
     // Shape before measuring: the text box size comes out of the layout.
-    if let Some(parts) = crate::TextRef::of(kind) {
-        c.text.insert(id, text::layout(parts));
+    if let Some(layout) = c.shaper.layout(kind) {
+        c.text.insert(id, layout);
     }
     if let Some(path) = geometry::local_path(kind) {
         c.outline.insert(id, path);
@@ -1476,7 +1494,7 @@ fn resolve_subtree(
             kind,
             &doc.resolved_paint(id, node.paint()),
             w,
-            c.text.get(&id),
+            c.text.get(&id).map(Arc::as_ref),
         ),
     };
     if let Some(b) = bounds {

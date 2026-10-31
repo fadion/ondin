@@ -633,16 +633,17 @@ fn snappable_box(kind: &NodeKind) -> Option<ondin_core::kurbo::Size> {
     }
 }
 
-/// How `brush` sits in `frame`: [`None`] for a solid, a gradient, or an image the
-/// document has no entry for. The intrinsic size comes from the document's table,
-/// not the decode cache (§5.5a), so a picture still decoding frames at its final
-/// size.
-fn framing_of(doc: &Document, brush: &Brush, frame: Rect) -> Option<Framing> {
+/// How `brush` sits in the box `frame` gives: [`None`] for a solid, a gradient, or
+/// an image the document has no entry for. The intrinsic size comes from the
+/// document's table, not the decode cache (§5.5a), so a picture still decoding
+/// frames at its final size. `frame` runs only for a picture: a curved path's box
+/// is a root solve per segment, which every shape would otherwise pay.
+fn framing_of(doc: &Document, brush: &Brush, frame: impl FnOnce() -> Rect) -> Option<Framing> {
     let Brush::Image(img) = brush else {
         return None;
     };
     let entry = doc.image(&img.image.id)?;
-    Some(img.image.framing(frame, entry.width, entry.height))
+    Some(img.image.framing(frame(), entry.width, entry.height))
 }
 
 /// Whether `brush` is a picture this painter cannot draw. An unknown id, an unread
@@ -1293,7 +1294,6 @@ fn paint_node_pass<P: ScenePainter>(
 
     close(painter, &mut open, &mut mask);
     if frame_stroke && let Some(frame) = geometry::local_path(painted.kind) {
-        let box_ = frame.bounding_box();
         // `shape_world`, not `world`: the border must run along the box the
         // background filled, or snapping opens a half-pixel gap.
         paint_strokes(
@@ -1304,7 +1304,7 @@ fn paint_node_pass<P: ScenePainter>(
             &painted.paint,
             &frame,
             ClipRule::NonZero,
-            box_,
+            || frame.bounding_box(),
         );
     }
     if outer_opacity {
@@ -1766,7 +1766,6 @@ fn paint_ghost<P: ScenePainter>(
         painter.pop_layer();
     }
     if frame_stroke && let Some(frame) = geometry::local_path(&ghost.kind) {
-        let box_ = frame.bounding_box();
         paint_strokes(
             doc,
             painter,
@@ -1775,7 +1774,7 @@ fn paint_ghost<P: ScenePainter>(
             &paint,
             &frame,
             ClipRule::NonZero,
-            box_,
+            || frame.bounding_box(),
         );
     }
     if outer_opacity {
@@ -2050,7 +2049,7 @@ fn paint_shape<P: ScenePainter>(
         // The rounded outline, the same one the children are clipped to.
         let path = geometry::local_path(painted.kind).unwrap_or_else(|| frame.to_path(TOLERANCE));
         for fill in painted.paint.fills.iter().filter(|f| f.visible) {
-            let framing = framing_of(doc, fill.brush.drawn(), frame);
+            let framing = framing_of(doc, fill.brush.drawn(), || frame);
             fill_or_placeholder(
                 painter,
                 world,
@@ -2106,7 +2105,7 @@ fn paint_shape<P: ScenePainter>(
             };
             for brush in run_inks {
                 // The frame is the whole text box, not the run's advance.
-                let framing = framing_of(doc, brush, layout.bounds());
+                let framing = framing_of(doc, brush, || layout.bounds());
                 clipped(painter, world, framing, |p| match &bars {
                     Some(bars) => p.fill_path(world, bars, brush, framing, ClipRule::NonZero),
                     None => draw_run(p, world, run, brush, framing),
@@ -2127,7 +2126,7 @@ fn paint_shape<P: ScenePainter>(
                     &painted.paint,
                     &outline,
                     ClipRule::NonZero,
-                    layout.bounds(),
+                    || layout.bounds(),
                 );
             }
         }
@@ -2144,7 +2143,7 @@ fn paint_shape<P: ScenePainter>(
             // would double its opacity); black for outlined type.
             let own = ink.color.map(recolour);
             let brush = own.as_ref().or(inks.first().copied()).unwrap_or(&fallback);
-            let framing = framing_of(doc, brush, layout.bounds());
+            let framing = framing_of(doc, brush, || layout.bounds());
             // Non-zero: the text node's own rule is read by its mask and hit test.
             clipped(painter, world, framing, |p| {
                 p.fill_path(world, &path, brush, framing, ClipRule::NonZero)
@@ -2171,7 +2170,7 @@ fn paint_shape<P: ScenePainter>(
 
     // Fills then strokes, in list order (the lists are the z-order). A line has no
     // interior to fill. The image frame is this path's box, shared by both.
-    let frame = path.bounding_box();
+    let frame = || path.bounding_box();
     if !matches!(painted.kind, NodeKind::Line { .. }) {
         for fill in painted.paint.fills.iter().filter(|f| f.visible) {
             let framing = framing_of(doc, fill.brush.drawn(), frame);
@@ -2221,8 +2220,9 @@ fn paint_strokes<P: ScenePainter>(
     paint: &Paint,
     shape: &BezPath,
     rule: ClipRule,
-    frame: Rect,
+    frame: impl Fn() -> Rect,
 ) {
+    let frame = &frame;
     let visible: Vec<&Stroke> = paint
         .strokes
         .iter()

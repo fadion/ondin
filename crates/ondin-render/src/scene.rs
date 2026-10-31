@@ -445,11 +445,37 @@ pub fn top_level_ink(
     )
 }
 
+/// The children of `page` that are or hold each of `ids`, once each. The page
+/// itself, nodes on other pages and nodes the document does not hold name none.
+pub fn tops_of(doc: &Document, page: NodeId, ids: impl IntoIterator<Item = NodeId>) -> Vec<NodeId> {
+    // A moved frame names every node under it, so the walk up is a set's work.
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut tops: Vec<NodeId> = Vec::new();
+    'ids: for id in ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        let mut at = id;
+        loop {
+            let Some(parent) = doc.get(at).and_then(|n| n.parent()) else {
+                continue 'ids;
+            };
+            if parent == page {
+                break;
+            }
+            at = parent;
+        }
+        if at == id || seen.insert(at) {
+            tops.push(at);
+        }
+    }
+    tops
+}
+
 /// The device rectangles a frame drawn under `before` has to redraw to show
 /// `after`, the document and the view standing still: what each top-level item
 /// either preview touches ([`RenderOverrides::touched`]) draws under both. `None`
-/// when that cannot be said ([`top_level_ink`]'s cases, or a touched node the
-/// document does not hold).
+/// when that cannot be said ([`top_level_ink`]'s cases).
 pub fn damage(
     doc: &Document,
     res: &Resolved,
@@ -458,32 +484,31 @@ pub fn damage(
     before: &RenderOverrides,
     after: &RenderOverrides,
 ) -> Option<Vec<Rect>> {
-    // A moved frame names every node under it, so the walk up is a set's work.
-    let mut seen = rustc_hash::FxHashSet::default();
-    let mut tops: Vec<NodeId> = Vec::new();
-    for id in before.touched().chain(after.touched()) {
-        if !seen.insert(id) {
-            continue;
-        }
-        // Up to the child of the page; the page itself stands for its ghosts,
-        // which `top_level_ink` measures whatever is named.
-        let mut at = id;
-        loop {
-            let parent = doc.get(at)?.parent();
-            match parent {
-                Some(p) if p == page => break,
-                Some(p) => at = p,
-                // The page itself, or a node on another page.
-                None => break,
-            }
-        }
-        if doc.get(at)?.parent() == Some(page) && (at == id || seen.insert(at)) {
-            tops.push(at);
-        }
-    }
+    // The page itself stands for its ghosts, which `top_level_ink` measures
+    // whatever is named.
+    let tops = tops_of(doc, page, before.touched().chain(after.touched()));
     let mut out = top_level_ink(doc, res, vp, before, page, &tops)?;
     out.extend(top_level_ink(doc, res, vp, after, page, &tops)?);
     Some(out)
+}
+
+/// The device box of what `overrides` changes about `page`'s drawing: each
+/// top-level item it touches and each ghost, as drawn under it. Empty for a
+/// preview that touches nothing; `None` in [`top_level_ink`]'s cases.
+pub fn preview_ink(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    page: NodeId,
+) -> Option<Vec<Rect>> {
+    let tops = tops_of(doc, page, overrides.touched());
+    top_level_ink(doc, res, vp, overrides, page, &tops)
+}
+
+/// The device box `world` covers through `vp`.
+pub fn device_box(vp: &Viewport, world: Rect) -> Rect {
+    device_base(vp).transform_rect_bbox(world)
 }
 
 /// One thing a page draws among its children.

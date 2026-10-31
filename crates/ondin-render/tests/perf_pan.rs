@@ -243,4 +243,71 @@ fn a_pan_against_a_full_frame() {
             median(whole)
         );
     }
+
+    // The same item committed step by step, redrawn as the canvas redraws an
+    // edit: its ink before (`Resolved`) and after (`scene::top_level_ink`).
+    let (mut doc, mut res) = (doc, res);
+    let (mut patch, mut whole) = (Vec::new(), Vec::new());
+    for i in 1..=12 {
+        let tx = ondin_core::Transaction(vec![ondin_core::Operation::SetTransform {
+            id: dragged,
+            transform: ondin_core::kurbo::Affine::translate((f64::from(i) * 9.0, 0.0)) * from,
+        }]);
+        let was = res.ink_bounds(dragged).expect("ink");
+        let dirty = doc.apply(&tx).expect("commits").dirty;
+        res.update(&doc, &dirty);
+        let t = Instant::now();
+        let Some(mut damage) =
+            ondin_render::scene::top_level_ink(&doc, &res, &vp, &ov, page, &[dragged])
+        else {
+            eprintln!("the page holds a mask; no commit is patched");
+            return;
+        };
+        damage.push(ondin_render::scene::device_box(&vp, was));
+        let regions: Vec<Region> = damage
+            .iter()
+            .filter_map(|r| Region::covering(*r, 2.0, SIZE))
+            .collect();
+        let drawn = renderer
+            .render_regions(
+                &device,
+                &queue,
+                &doc,
+                &res,
+                &vp,
+                &ov,
+                &spare.create_view(&Default::default()),
+                &regions,
+                ground,
+                &images,
+                page,
+            )
+            .expect("regions");
+        assert!(drawn, "the commit's regions are not pinned");
+        copy_regions(&device, &queue, &spare, &shown, &regions);
+        wait(&device);
+        patch.push(t.elapsed().as_secs_f64() * 1e3);
+        let t = Instant::now();
+        renderer
+            .render(
+                &device,
+                &queue,
+                &doc,
+                &res,
+                &vp,
+                &ov,
+                &spare.create_view(&Default::default()),
+                ground,
+                &images,
+                page,
+            )
+            .expect("render");
+        wait(&device);
+        whole.push(t.elapsed().as_secs_f64() * 1e3);
+    }
+    eprintln!(
+        "commit {:.1} ms patched, {:.1} ms whole (median)",
+        median(patch),
+        median(whole)
+    );
 }

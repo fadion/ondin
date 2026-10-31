@@ -713,6 +713,13 @@ impl EditorSession {
         self.overrides.set_outline(ink);
     }
 
+    /// Let the walk drop what the screen cannot show
+    /// (`RenderOverrides::set_level_of_detail`). Called once a frame for
+    /// [`Self::set_chrome_ghost`]'s reason.
+    pub fn set_level_of_detail(&mut self, on: bool) {
+        self.overrides.set_level_of_detail(on);
+    }
+
     /// The current page's ground as drawn, including any live edit of it.
     pub fn preview_ground(&self) -> Color {
         match self.overrides.ground(self.page) {

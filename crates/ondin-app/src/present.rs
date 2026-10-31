@@ -366,6 +366,7 @@ impl crate::app::OndinApp {
         self.session.set_chrome_ghost(None);
         // Presenting shows the design, whatever the canvas view is.
         self.session.set_outline(None);
+        self.session.set_level_of_detail(true);
         let (doc, res, overrides) = self.session.render_inputs();
         if let Some(tex) = self
             .canvas

@@ -6,11 +6,11 @@
 //! in `ondin-export`, since both backends share this exact scene walk.
 
 use ondin_core::Brush;
-use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
+use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size, Vec2};
 use ondin_core::peniko::Color;
 use ondin_core::{
-    BoolOp, Document, Fill, IdSource, MaskMode, NodeId, NodeKind, Operation, Resolved, StrokeAlign,
-    Transaction, keyed_by_position,
+    BoolOp, Document, Effect, EffectKind, Fill, Filters, IdSource, MaskMode, NodeId, NodeKind,
+    Operation, Resolved, Shadow, StrokeAlign, Transaction, keyed_by_position,
 };
 use ondin_render::scene::{self, ClipRule, ScenePainter, StrokePaint, TextRun};
 use ondin_render::{RenderOverrides, Viewport};
@@ -352,6 +352,112 @@ fn outline_view_draws_a_frames_overflow_with_the_frame_out_of_view() {
     };
     scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut outlined);
     assert!(!outlined.strokes.is_empty(), "the overflow is drawn");
+}
+
+/// Fills the level-of-detail walk emits for `two_rect_doc` with the whole frame
+/// in `px` device pixels square, and without it.
+fn fills_at(px: u32) -> (usize, usize) {
+    let (doc, res, _n, _f) = two_rect_doc();
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 2000.0, 2000.0),
+        pixel_size: (px, px),
+    };
+    let mut ov = RenderOverrides::default();
+    ov.set_level_of_detail(true);
+    let mut detail = RecordingPainter::default();
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut detail);
+    let mut exact = RecordingPainter::default();
+    let plain = RenderOverrides::default();
+    scene::build(&doc, &res, &vp, &plain, doc.first_page(), &mut exact);
+    (detail.fills.len(), exact.fills.len())
+}
+
+/// Level of detail skips a layer whose ink is under half a device pixel and
+/// draws one just over it; off, the walk draws both rects at any zoom.
+///
+/// flip: `paint_node` ignoring `sub_pixel` → fails at "skipped".
+#[test]
+fn level_of_detail_skips_ink_under_half_a_device_pixel() {
+    // The 20-unit rects at 0.02 px a unit are 0.4 px, at 0.03 they are 0.6 px.
+    assert_eq!(fills_at(40), (0, 2), "skipped, and drawn without the flag");
+    assert_eq!(fills_at(60), (2, 2), "drawn once over half a pixel");
+}
+
+/// A 40-unit square with `effects` on a 1000-unit page drawn `px` device pixels
+/// square under level of detail: the layers the walk pushes.
+fn effect_layers_at(effects: Vec<Effect>, px: u32) -> usize {
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let r = ids.mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: r,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((30.0, 30.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: r,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::WHITE).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetEffects {
+            id: r,
+            effects: keyed_by_position(effects),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 1000.0, 1000.0),
+        pixel_size: (px, px),
+    };
+    let mut ov = RenderOverrides::default();
+    ov.set_level_of_detail(true);
+    let mut painter = RecordingPainter::default();
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut painter);
+    assert_eq!(painter.fills.len(), 1, "the square itself is drawn");
+    painter.layers.len()
+}
+
+fn shadow(dy: f64) -> Effect {
+    Effect::new(EffectKind::DropShadow(Shadow {
+        offset: Vec2::new(0.0, dy),
+        blur: 0.0,
+        spread: 0.0,
+        color: Color::from_rgba8(0, 0, 0, 128),
+        blend: ondin_core::BlendMode::Normal,
+    }))
+}
+
+/// Level of detail draws a layer plain when its shadow reaches under a device
+/// pixel, and keeps the effect layer once it reaches over one. A `Filters` row
+/// recolours every pixel, so it keeps the layer at any zoom.
+///
+/// flip: `paint_node` ignoring `detail_effects` → fails at "drawn plain".
+#[test]
+fn level_of_detail_draws_a_layer_plain_when_its_effects_reach_under_a_pixel() {
+    // A 4-unit offset at 0.2 px a unit is 0.8 px; at 0.3 it is 1.2 px.
+    assert_eq!(effect_layers_at(vec![shadow(4.0)], 200), 0, "drawn plain");
+    assert_eq!(effect_layers_at(vec![shadow(4.0)], 300), 1, "drawn with it");
+    let dim = Effect::new(EffectKind::Filters(Filters {
+        brightness: 0.5,
+        ..Filters::default()
+    }));
+    assert_eq!(
+        effect_layers_at(vec![dim, shadow(4.0)], 200),
+        1,
+        "recoloured"
+    );
 }
 
 /// "Clip content", off. The frame stops pushing a clip layer — and stops being

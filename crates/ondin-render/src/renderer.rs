@@ -195,6 +195,11 @@ pub struct RenderOverrides {
     /// so it is re-installed every frame as [`Self::chrome`] is, and not a term
     /// of [`Self::is_empty`].
     outline: Option<Color>,
+    /// Level of detail for a screen: the walk skips ink under half a device pixel
+    /// and drops an effect whose reach is under one (`scene::detail_effects`).
+    /// Re-installed every frame as [`Self::outline`] is; off, the default, for
+    /// every export, which must draw what the document holds.
+    detail: bool,
     /// A text layout the caller has **already shaped** for one node, live only
     /// while [`Self::from_transaction_shaped`] builds.
     ///
@@ -317,6 +322,17 @@ impl RenderOverrides {
     /// Outline mode's ink, `None` when the artwork draws as itself.
     pub fn outline(&self) -> Option<Color> {
         self.outline
+    }
+
+    /// Turn the screen's level of detail on or off — see [`Self::detail`].
+    pub fn set_level_of_detail(&mut self, on: bool) {
+        self.detail = on;
+    }
+
+    /// Whether the walk may drop what the device cannot show — see
+    /// [`Self::detail`].
+    pub fn level_of_detail(&self) -> bool {
+        self.detail
     }
 
     /// Whether `id`'s box is exempt from device-pixel snapping

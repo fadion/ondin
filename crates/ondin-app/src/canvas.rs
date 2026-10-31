@@ -8210,6 +8210,7 @@ impl OndinApp {
             .outline_view
             .then(|| outline_ink(self.session.preview_ground()));
         self.session.set_outline(ink);
+        self.session.set_level_of_detail(true);
 
         // Split the borrow so the read-only inputs and the mutable renderer coexist.
         let camera = self.session.camera;

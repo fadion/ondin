@@ -18,9 +18,6 @@ Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, p
 1,090 effect layers), 2560×1440 on an RTX 4070 Ti: smooth at 80% zoom and above, dropping frames
 below it, and ~13 fps with the whole grid in view.
 
-- **Level of detail in the scene walk.** Zoomed out, `build_scene` takes ~28 ms and the GPU side
-  ~47 ms, a third of it effect jobs for layers a few pixels wide. Skip ink under half a device pixel;
-  draw an effect's layer plain when its reach is under a pixel at the current zoom.
 - **Render only on change.** Every repaint — a caret blink, the status-bar fade, a hover over a
   panel — rebuilds and rasterises the whole page (`render.md`: v1 rebuilds the in-view scene per
   frame). Keep the canvas texture while the document, camera and overrides are unchanged. A design

@@ -797,12 +797,13 @@ fn paint_node_pass<P: ScenePainter>(
         || (matches!(node.kind(), NodeKind::Group | NodeKind::Root) && !outline);
     // Never culled: a moving node (cached bounds describe where it *was*) or one
     // holding a ghost (the bounds cannot know about it). `ink_bounds`, not
-    // `world_bounds` (§5.3a): a drop shadow lands outside the layer's box.
+    // `world_bounds` (§5.3a): a drop shadow lands outside the layer's box. A
+    // level-of-detail walk also skips what lands under half a device pixel.
     if bounds_cover_subtree
         && !ov.moved(id)
         && ov.ghosts_of(id).next().is_none()
         && let Some(bounds) = res.ink_bounds(id)
-        && !intersects(bounds, view)
+        && (!intersects(bounds, view) || (ov.level_of_detail() && sub_pixel(bounds, base)))
     {
         return;
     }
@@ -879,6 +880,11 @@ fn paint_node_pass<P: ScenePainter>(
         over.and_then(|o| o.effects.as_deref())
             .unwrap_or(node.effects()),
     );
+    let stack = if ov.level_of_detail() {
+        detail_effects(stack, base * world)
+    } else {
+        stack
+    };
     let stack: &[ondin_core::Keyed<ondin_core::Effect>] = &stack;
     let effects = pass.map_or(stack, |p| &p.effects[..]);
     // `Some` exactly when a layer was pushed; a node with no cached bounds yet
@@ -1123,6 +1129,45 @@ pub(crate) fn mix(mode: BlendMode) -> ondin_core::peniko::Mix {
 /// Whether `mode` mixes with what is beneath rather than covering it.
 fn blends(mode: BlendMode) -> bool {
     !matches!(mode, BlendMode::Normal | BlendMode::PassThrough)
+}
+
+/// Whether a world `ink` box lands under half a device pixel on both axes, which
+/// a level-of-detail walk skips along with everything under it.
+fn sub_pixel(ink: Rect, base: Affine) -> bool {
+    let device = base.transform_rect_bbox(ink);
+    device.width() < 0.5 && device.height() < 0.5
+}
+
+/// `effects` without each shadow and layer blur whose reach is under one device
+/// pixel through `device` (the node's local-to-device transform): drawn, it would
+/// move the edge by less than a pixel, and it costs an offscreen buffer. `Filters`
+/// recolour every pixel and always stay. A shadow tucked under a translucent layer
+/// is what the cut can lose.
+fn detail_effects(
+    effects: std::borrow::Cow<'_, [ondin_core::Keyed<Effect>]>,
+    device: Affine,
+) -> std::borrow::Cow<'_, [ondin_core::Keyed<Effect>]> {
+    use ondin_core::EffectKind;
+    use ondin_core::effect::reach;
+    // The largest singular value: under a pixel along it is under a pixel every way.
+    let [a, b, c, d, _, _] = device.as_coeffs();
+    let sum = a * a + b * b + c * c + d * d;
+    let det = a * d - b * c;
+    let stretch = ((sum + (sum * sum - 4.0 * det * det).max(0.0).sqrt()) / 2.0).sqrt();
+    let unseen = |e: &ondin_core::Keyed<Effect>| {
+        let local = match &e.kind {
+            EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
+                s.offset.hypot() + reach(s.blur) + s.spread.abs()
+            }
+            EffectKind::LayerBlur { radius } => reach(*radius),
+            EffectKind::Filters(_) => return false,
+        };
+        local * stretch < 1.0
+    };
+    if !effects.iter().any(unseen) {
+        return effects;
+    }
+    std::borrow::Cow::Owned(effects.iter().filter(|e| !unseen(e)).cloned().collect())
 }
 
 /// The ink box an effect layer is allocated from, in the node's **own** space.

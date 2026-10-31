@@ -31,3 +31,5 @@ pollster = "1.0.1"
 # Writes the 2×2 fixture the decode tests read back. The decoder under test is
 # `image`; encoding with a different crate keeps the fixture honest.
 png.workspace = true
+# The performance suite's baselines (`tests/perf_suite.rs`).
+serde_json.workspace = true

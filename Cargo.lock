@@ -3019,6 +3019,7 @@ dependencies = [
  "png",
  "pollster 1.0.1",
  "rustc-hash 2.1.3",
+ "serde_json",
  "vello",
  "vello_cpu 0.2.0",
  "wgpu",

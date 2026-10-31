@@ -300,6 +300,9 @@ pub struct ImageStore {
     /// frame draws, or a photograph would resharpen as its neighbour scrolled off.
     /// `0` from `Default`, read as `1` ([`Self::atlas_factor`]).
     atlas_factor: u32,
+    /// Bumped whenever what [`Self::pixels`] or [`Self::atlas_pixels`] would
+    /// answer changes — see [`Self::generation`].
+    generation: u64,
 }
 
 impl ImageStore {
@@ -348,7 +351,18 @@ impl ImageStore {
             clock: 0,
             // "No reduction" until a `prepare` has seen what the document holds.
             atlas_factor: 1,
+            generation: 0,
         }
+    }
+
+    /// A number that moves whenever a picture would draw differently: a decode
+    /// lands or is evicted, the atlas factor changes, or a preview is promoted to
+    /// full resolution.
+    ///
+    /// What a cache of drawn pixels keys on beside the document. A first ask of an
+    /// adjustment does not move it, since the frame that asked drew the answer.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Decode everything `doc` carries that is not decoded yet, and drop what it
@@ -379,6 +393,7 @@ impl ImageStore {
         let was = self.atlas_factor;
         self.atlas_factor = atlas_downscale(&sizes, ATLAS_EDGE);
         if self.atlas_factor != was {
+            self.generation += 1;
             let f = self.atlas_factor;
             let mut cache = self.derived.lock().unwrap_or_else(|e| e.into_inner());
             cache.atlas.retain(|(_, at), _| *at == f);
@@ -467,6 +482,7 @@ impl ImageStore {
                 d.data = data;
                 d.to_source = Affine::IDENTITY;
                 d.full = true;
+                self.generation += 1;
             }
         }
     }
@@ -644,6 +660,7 @@ impl ImageStore {
                 touched: self.clock,
             },
         );
+        self.generation += 1;
     }
 
     fn ensure(&mut self, id: &ImageId, bytes: &[u8], format: ImageFormat) {
@@ -665,6 +682,7 @@ impl ImageStore {
                         touched: self.clock,
                     },
                 );
+                self.generation += 1;
             }
             Err(e) => {
                 self.failed.insert(id.clone(), e);
@@ -695,6 +713,7 @@ impl ImageStore {
             }
             if let Some(e) = self.entries.remove(&id) {
                 held -= e.bytes;
+                self.generation += 1;
             }
             self.failed.remove(&id);
         }
@@ -1841,6 +1860,7 @@ mod tests {
             // Released: the same value every frame from here on.
             let settled = reference("a", |a| a.exposure = 0.95);
             let mut widths = Vec::new();
+            let generation = store.generation();
             for _ in 0..4 {
                 store.prepare(&doc);
                 widths.push(store.pixels(&settled).expect("held").data.width);
@@ -1856,6 +1876,11 @@ mod tests {
             assert!(
                 !store.wants_frame(),
                 "and once it is the picture, no more frames are owed"
+            );
+            assert_ne!(
+                store.generation(),
+                generation,
+                "the promotion must move the generation, or a kept canvas goes on showing the preview"
             );
         }
 

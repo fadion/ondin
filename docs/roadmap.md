@@ -18,13 +18,10 @@ Measured on a 200-frame, 31,400-layer document (800×600 dashboards with text, p
 1,090 effect layers), 2560×1440 on an RTX 4070 Ti. With the whole grid in view (7% zoom) a frame is
 ~43 ms, nearly all of it CPU: the scene walk ~20 ms, the effect jobs ~13 ms, vello's own encoding
 ~7 ms, the GPU ~3 ms. Every item here is exact: what is drawn must not change (no approximate blurs,
-no stale or stretched frames while moving). A continuous zoom changes the scale every frame, so the
-caches below help rest, pan and edits, not the zoom gesture itself.
+no stale or stretched frames while moving). A resting canvas already draws nothing (`render.md` §6.3:
+the canvas draws only on change). A continuous zoom changes the scale every frame, so the caches
+below help pan and edits, not the zoom gesture itself.
 
-- **Render only on change.** Every repaint — a caret blink, the status-bar fade, a hover over a
-  panel — rebuilds and rasterises the whole page (`render.md`: v1 rebuilds the in-view scene per
-  frame). Keep the canvas texture while the document, camera and overrides are unchanged. A design
-  change to `render.md`'s rule.
 - **Retained scene fragments per top-level frame.** Encode each top-level frame's subtree into its own
   `vello::Scene` once and `append` it every frame, re-walking only the frames an edit, preview or
   ghost touches. Keyed by the frame's content and the exact device scale, since pixel snapping, level
@@ -32,7 +29,7 @@ caches below help rest, pan and edits, not the zoom gesture itself.
   fragment holds are per frame and must travel with it. Targets the ~20 ms walk.
 - **Reuse effect results across frames.** Keep each effect layer's filtered texture while its
   subtree, its stack, the exact device scale and the sub-pixel phase of its origin are unchanged, so
-  a resting or whole-pixel-panning canvas runs no blur pass. Needs a texture budget and eviction
+  a whole-pixel-panning canvas runs no blur pass. Needs a texture budget and eviction
   beside `FxPool`, and invalidation from the same dirty set as the fragments. Targets the ~13 ms of
   effect jobs.
 - **Pan by shifting the last frame; redraw only damage.** Snap the camera's origin to whole device
@@ -40,7 +37,8 @@ caches below help rest, pan and edits, not the zoom gesture itself.
   effect escape as margin, as `effect::buffer_box_within` already grows a buffer). An edit redraws the
   union of its nodes' old and new ink bounds (`DirtySet` plus `Resolved`'s bounds before and after),
   widened for ancestors that paint from their children (booleans, effects, masks); past a share of
-  the view, render whole. Builds on *Render only on change*.
+  the view, render whole. Builds on the kept canvas texture (`CanvasRenderer::render`'s `DrawnKey`),
+  which today is either kept whole or drawn whole.
 
 ## Later · First
 

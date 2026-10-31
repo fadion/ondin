@@ -155,10 +155,38 @@ fn loupe_pixels(
     out
 }
 
+/// Everything a canvas texture was drawn from. A frame whose key matches the
+/// texture's keeps it instead of drawing the page again: a caret blink or a hover
+/// over a panel repaints egui, not the document.
+#[derive(Clone, PartialEq, Debug)]
+struct DrawnKey {
+    /// The document and `Resolved` (`EditorSession::revision`).
+    revision: u64,
+    /// The preview and re-shaped text (`EditorSession::drawn`).
+    drawn: u64,
+    images: u64,
+    camera: Camera,
+    size: (u32, u32),
+    backdrop: Color,
+    page: NodeId,
+    /// The view fields of `RenderOverrides`, re-installed every frame and so
+    /// compared by value rather than stamped.
+    outline: Option<Color>,
+    detail: bool,
+    chrome: Option<(NodeId, ondin_render::Ghost)>,
+}
+
 pub struct CanvasRenderer {
     /// `None` in a headless build (`CanvasRenderer::headless`), where there is no
     /// device to draw with.
     gpu: Option<Gpu>,
+    /// What the texture holds now; `None` before the first draw and after a failed
+    /// one.
+    shown: Option<DrawnKey>,
+    /// How many times the page has been drawn, for the tests that pin when it is
+    /// not. Headless counts the draws it would have made.
+    #[cfg(test)]
+    draws: u64,
     /// Decoded images (§5.5a), kept across frames. Lives on the canvas because
     /// it is renderer state derived from the document, never edited.
     images: ondin_render::ImageStore,
@@ -176,6 +204,9 @@ impl CanvasRenderer {
                 target: None,
                 readback: None,
             }),
+            shown: None,
+            #[cfg(test)]
+            draws: 0,
             // The one store that may answer a moving adjustment with a reduced
             // picture; export takes `ImageStore::new`, which never previews.
             images: ondin_render::ImageStore::interactive(),
@@ -189,9 +220,17 @@ impl CanvasRenderer {
     pub(crate) fn headless() -> Self {
         Self {
             gpu: None,
+            shown: None,
+            draws: 0,
             images: ondin_render::ImageStore::interactive(),
             sample: None,
         }
+    }
+
+    /// How many times the page has been drawn — see the field.
+    #[cfg(test)]
+    pub(crate) fn draws(&self) -> u64 {
+        self.draws
     }
 
     /// The decode cache, for the one caller that puts something into it: an
@@ -210,12 +249,18 @@ impl CanvasRenderer {
     /// Render `page` of `doc`/`res` through `camera` at `pixel_size` device pixels
     /// and return the egui texture to draw. Recreates the target on size change.
     /// `backdrop` is the ground round the frames, set by the Appearance panel.
+    ///
+    /// `revision` and `drawn` are the session's stamps for `doc`/`res` and
+    /// `overrides` (`EditorSession::revision`, `EditorSession::drawn`). When they,
+    /// the view and the decoded images are what the texture was drawn from, the
+    /// texture is returned as it stands.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         doc: &Document,
         res: &Resolved,
         overrides: &RenderOverrides,
+        (revision, drawn): (u64, u64),
         camera: &Camera,
         pixel_size: (u32, u32),
         backdrop: Color,
@@ -224,12 +269,37 @@ impl CanvasRenderer {
         if pixel_size.0 == 0 || pixel_size.1 == 0 {
             return None;
         }
-        let vp = camera.viewport(pixel_size);
         // Every frame on purpose: it is cheap once decoded, and a missed change
-        // signal (undo) would leave a picture that does not update.
+        // signal (undo) would leave a picture that does not update. Runs headless
+        // too, before the device check: the layers panel reads it.
         self.images.prepare(doc);
-        // Runs headless too, before the device check: the layers panel reads it.
-        let gpu = self.gpu.as_mut()?;
+        let key = DrawnKey {
+            revision,
+            drawn,
+            images: self.images.generation(),
+            camera: *camera,
+            size: pixel_size,
+            backdrop,
+            page,
+            outline: overrides.outline(),
+            detail: overrides.level_of_detail(),
+            chrome: overrides.chrome_ghost().cloned(),
+        };
+        // A picture still showing its reduced preview must be asked for again each
+        // frame, or the store never promotes it (`ImageStore::wants_frame`).
+        if self.shown.as_ref() == Some(&key) && !self.images.wants_frame() {
+            return self.gpu.as_ref()?.target.as_ref().map(|t| t.id);
+        }
+        self.shown = None;
+        #[cfg(test)]
+        {
+            self.draws += 1;
+        }
+        // Headless, the draw it would have made counts as made.
+        let Some(gpu) = self.gpu.as_mut() else {
+            self.shown = Some(key);
+            return None;
+        };
         gpu.ensure_target(pixel_size);
         let target = gpu.target.as_ref()?;
         gpu.vello
@@ -238,7 +308,7 @@ impl CanvasRenderer {
                 &gpu.render_state.queue,
                 doc,
                 res,
-                &vp,
+                &camera.viewport(pixel_size),
                 overrides,
                 &target.view,
                 backdrop,
@@ -246,6 +316,7 @@ impl CanvasRenderer {
                 page,
             )
             .ok()?;
+        self.shown = Some(key);
         Some(target.id)
     }
 
@@ -8217,10 +8288,11 @@ impl OndinApp {
         let px = self.canvas_px;
         let backdrop = self.session.preview_ground();
         let page = self.session.page;
+        let stamps = (self.session.revision(), self.session.drawn());
         let (doc, res, overrides) = self.session.render_inputs();
         let drawn = self
             .canvas
-            .render(doc, res, overrides, &camera, px, backdrop, page);
+            .render(doc, res, overrides, stamps, &camera, px, backdrop, page);
         self.meter.frame(std::time::Instant::now());
         if let Some(tex) = drawn {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -21996,5 +22068,157 @@ mod bound_default_span_tests {
             CharAttr::Size(24.0),
             "an italic toggle"
         );
+    }
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    //! When the canvas draws the page again and when it keeps its texture.
+    use super::*;
+    use ondin_core::kurbo::Size;
+
+    /// One whole app frame with `events`, the clock a twentieth of a second on.
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let mut frame = eframe::Frame::_new_kittest();
+        let time = ctx.input(|i| i.time) + 0.05;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1320.0, 820.0),
+            )),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+    }
+
+    /// A headless app holding one 100 × 60 rect, settled: the frames after this
+    /// draw nothing unless something changes.
+    fn settled_app(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0x5EED);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 60.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a rect");
+        app.session.adopt_document(doc, None);
+        for _ in 0..10 {
+            frame(ctx, &mut app, Vec::new());
+        }
+        assert!(app.canvas.draws() > 0, "fixture: the canvas was drawn");
+        (app, id)
+    }
+
+    /// Draws made by `n` idle frames.
+    fn idle_draws(ctx: &egui::Context, app: &mut OndinApp, n: usize) -> u64 {
+        let before = app.canvas.draws();
+        for _ in 0..n {
+            frame(ctx, app, Vec::new());
+        }
+        app.canvas.draws() - before
+    }
+
+    /// Frames in which nothing the page is drawn from changed keep the texture,
+    /// a pointer moving over the window included.
+    ///
+    /// flip: `CanvasRenderer::render` ignoring the key it kept → fails at "idle".
+    /// Dropping its `wants_frame` term fails nothing here: the headless canvas does
+    /// not walk the page, so no adjusted picture is ever asked for.
+    #[test]
+    fn frames_that_change_nothing_draw_nothing() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = settled_app(&ctx);
+        assert_eq!(idle_draws(&ctx, &mut app, 5), 0, "idle");
+        let before = app.canvas.draws();
+        for x in [20.0, 400.0, 900.0, 1300.0] {
+            frame(
+                &ctx,
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(x, 300.0))],
+            );
+        }
+        assert_eq!(app.canvas.draws(), before, "a pointer moving");
+    }
+
+    /// A commit, an undo, a preview, its clear, a camera move, outline view and
+    /// re-shaped text each draw the page once, and the frames after draw nothing.
+    ///
+    /// flip: `EditorSession::clear_preview` not moving `drawn` → fails at "a
+    /// cleared preview".
+    #[test]
+    fn each_change_to_what_is_drawn_draws_once() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = settled_app(&ctx);
+        let moved = move |x: f64| {
+            Transaction(vec![Operation::SetTransform {
+                id,
+                transform: Affine::translate((x, 0.0)),
+            }])
+        };
+        type Change = Box<dyn Fn(&mut OndinApp)>;
+        let changes: Vec<(&str, Change)> = vec![
+            (
+                "a commit",
+                Box::new(move |a| {
+                    a.session.try_commit(moved(10.0)).expect("moves");
+                }),
+            ),
+            (
+                "an undo",
+                Box::new(|a| assert!(a.session.undo(), "fixture: undone")),
+            ),
+            (
+                "a preview",
+                Box::new(move |a| a.session.set_preview(&moved(40.0))),
+            ),
+            ("a cleared preview", Box::new(|a| a.session.clear_preview())),
+            ("a camera move", Box::new(|a| a.session.camera.zoom *= 2.0)),
+            ("outline view", Box::new(|a| a.outline_view = true)),
+            ("re-shaped text", Box::new(|a| a.session.fonts_changed())),
+        ];
+        for (what, change) in changes {
+            change(&mut app);
+            assert_eq!(idle_draws(&ctx, &mut app, 4), 1, "{what}");
+        }
+    }
+
+    /// A picture landing in the decode cache moves the store's generation, which
+    /// the canvas keys on.
+    ///
+    /// flip: `ImageStore::ensure` not moving `generation` → fails here.
+    #[test]
+    fn a_decoded_picture_draws_the_page_again() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = settled_app(&ctx);
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([255, 0, 0, 255]),
+        ))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("encode");
+        app.canvas
+            .images_mut()
+            .insert(
+                &ondin_core::ImageId("pic".into()),
+                &png,
+                ondin_core::ImageFormat::Png,
+            )
+            .expect("decodes");
+        assert_eq!(idle_draws(&ctx, &mut app, 4), 1);
     }
 }

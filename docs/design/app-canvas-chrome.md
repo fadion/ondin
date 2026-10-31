@@ -184,7 +184,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   in MB under a gigabyte and GB with one decimal from one. Both are read once a second while the meter
   shows, and that second is a `request_repaint_after`, the app being reactive. Switching the meter off
   forgets the readings.
-- The frame rate counts the canvas frames `draw_canvas` drew in the last second. Under two it reads a
+- The frame rate counts the frames `draw_canvas` ran in the last second, a frame that kept the canvas
+  texture included. Under two it reads a
   dash in `text::faint()`: one is the meter's own repaint.
 - CPU above 80% and a frame rate below 30 turn that readout `color::warn()`; memory has no threshold.
 

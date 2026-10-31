@@ -61,7 +61,7 @@ pub struct NodeOverride {
 /// Artwork that does not exist in the document yet, drawn among `parent`'s children at
 /// [`Self::index`] — a shape being dragged out with a create tool, or the copy an
 /// Alt-drag is carrying.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ghost {
     /// The document node the ghost hangs off. Only the root of the subtree has
     /// one; below it, parentage is the nesting of [`GhostNode::children`].
@@ -75,7 +75,7 @@ pub struct Ghost {
 /// One node of a ghost subtree: everything the scene walk reads off a `Node`,
 /// for artwork there is no `Node` for yet. It carries children so a gesture can
 /// preview a copy of a group or a frame.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GhostNode {
     pub id: NodeId,
     /// LOCAL to the parent ghost, or to `Ghost::parent` at the root.
@@ -311,6 +311,12 @@ impl RenderOverrides {
     /// `None` clears it.
     pub fn set_chrome_ghost(&mut self, glued: Option<(NodeId, Ghost)>) {
         self.chrome = glued;
+    }
+
+    /// The mode's explanatory artwork and the layer it is glued to, if any — see
+    /// [`Self::chrome`].
+    pub fn chrome_ghost(&self) -> Option<&(NodeId, Ghost)> {
+        self.chrome.as_ref()
     }
 
     /// Turn outline view on with `ink` as its colour, or off — see

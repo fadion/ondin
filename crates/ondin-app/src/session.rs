@@ -491,6 +491,12 @@ pub struct EditorSession {
     /// nothing a render would produce. Drawn from [`next_revision`], so it is also
     /// unique across sessions.
     revision: u64,
+    /// Bumped whenever the canvas would draw differently while `revision` stands
+    /// still: a preview installed or cleared, or text re-shaped for a landed font.
+    /// Drawn from [`next_revision`] too, so it is unique across sessions. Outline,
+    /// level of detail and the chrome ghost are not covered: they are re-installed
+    /// every frame, and the canvas compares them by value.
+    drawn: u64,
     /// How many commits this session has seen — `revision` without undo and redo.
     /// [`FlexReceipt`] and a cut's move (`OndinApp::cut_move`, through
     /// [`Self::commits`]) read it: an undo and a redo with no commit between are
@@ -576,6 +582,7 @@ impl EditorSession {
             style_edit: None,
             saved_at,
             revision: next_revision(),
+            drawn: next_revision(),
             commits: 0,
             flex_receipt: None,
             last_detached: Default::default(),
@@ -587,6 +594,11 @@ impl EditorSession {
     /// How many times this session's document has changed — see the field.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// What the canvas draws apart from the document — see the field.
+    pub fn drawn(&self) -> u64 {
+        self.drawn
     }
 
     /// How many commits this session has seen, undo and redo not counted — see
@@ -972,6 +984,7 @@ impl EditorSession {
             None,
         )
         .unwrap_or_default();
+        self.drawn = next_revision();
         self.preview_holds_gesture = true;
         // From the gesture's own operations, never the follows: a `SetPivot` on a
         // main's layer follows onto its copies, and the last of those would name a
@@ -1045,6 +1058,7 @@ impl EditorSession {
             shaped,
         )
         .unwrap_or_default();
+        self.drawn = next_revision();
         self.pivot_preview = tx.0.iter().rev().find_map(|op| match op {
             Operation::SetPivot { id, pivot } => Some((*id, *pivot)),
             _ => None,
@@ -1092,6 +1106,7 @@ impl EditorSession {
     /// [`Self::clear_gesture_preview`] is the one that spares the session.
     pub fn clear_preview(&mut self) {
         self.overrides = RenderOverrides::default();
+        self.drawn = next_revision();
         self.session_preview = None;
         self.preview_holds_gesture = false;
         self.pivot_preview = None;
@@ -1654,6 +1669,8 @@ impl EditorSession {
     /// re-shapes it on the next keystroke, and rebuilding here would re-shape the
     /// node on a frame already re-shaping every text node.
     pub fn fonts_changed(&mut self) {
+        // `clear_preview` moves `drawn`, which is what tells the canvas the
+        // re-shaped text needs drawing.
         self.resolved.invalidate_text(&self.doc);
         self.clear_preview();
     }

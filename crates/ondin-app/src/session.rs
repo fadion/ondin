@@ -17,8 +17,8 @@ use ondin_core::node::{
 use ondin_core::peniko::Color;
 use ondin_core::text::TextLayout;
 use ondin_core::{
-    Document, Fill, GuideId, History, IdSource, Node, NodeId, NodeKind, OpError, Operation, Paint,
-    Pivot, Resolved, Transaction, geometry, keyed_by_position,
+    DirtySet, Document, Fill, GuideId, History, IdSource, Node, NodeId, NodeKind, OpError,
+    Operation, Paint, Pivot, Resolved, Transaction, geometry, keyed_by_position,
 };
 use ondin_render::{NodeOverride, RenderOverrides};
 use std::path::PathBuf;
@@ -500,6 +500,8 @@ pub struct EditorSession {
     /// Bumped with `drawn` when text is re-shaped for a landed font, so the canvas
     /// can tell that from a preview changing, whose damage it can bound.
     shaped: u64,
+    /// What each recent commit, undo and redo did to the drawing.
+    ink: InkLog,
     /// How many commits this session has seen — `revision` without undo and redo.
     /// [`FlexReceipt`] and a cut's move (`OndinApp::cut_move`, through
     /// [`Self::commits`]) read it: an undo and a redo with no commit between are
@@ -539,6 +541,125 @@ pub struct FlexReceipt {
     )>,
     commit: u64,
     depth: usize,
+}
+
+/// What the last few document changes did to the drawing, so the canvas can redraw
+/// only that after a commit, an undo or a redo (`CanvasRenderer::render`).
+#[derive(Default)]
+pub struct InkLog(std::collections::VecDeque<Inked>);
+
+/// One change in an [`InkLog`].
+struct Inked {
+    /// The revisions on either side of it.
+    from: u64,
+    to: u64,
+    /// Every top-level layer — a child of a page or of the vault — holding a node
+    /// the change dirtied, as the document stands after it.
+    tops: Vec<NodeId>,
+    /// The world ink, before the change, of those layers and of every node it
+    /// deleted, on whichever page; `None` when some of that has no box.
+    was: Option<Vec<Rect>>,
+}
+
+/// What the changes between two revisions did ([`InkLog::between`]).
+pub struct EditInk {
+    /// The top-level layers they touched, on any page.
+    pub tops: Vec<NodeId>,
+    /// The world ink those layers and the deleted nodes had before.
+    pub was: Vec<Rect>,
+}
+
+impl InkLog {
+    /// How many changes are kept; a canvas further behind draws whole.
+    pub(crate) const KEPT: usize = 8;
+    /// How many separate boxes a change's old ink may come to before it counts as
+    /// unbounded: past that it is no patch, and sorting them out costs.
+    const BOXES: usize = 64;
+
+    /// Record a change from revision `from` to `to` that dirtied `dirty`: `doc` is
+    /// the document after it, `old` the derived state from before.
+    fn record(&mut self, (from, to): (u64, u64), doc: &Document, old: &Resolved, dirty: &DirtySet) {
+        let mut seen = std::collections::HashSet::new();
+        let mut tops: Vec<NodeId> = Vec::new();
+        let mut deleted: Vec<NodeId> = Vec::new();
+        for &id in &dirty.0 {
+            if !doc.contains(id) {
+                deleted.push(id);
+                continue;
+            }
+            let mut at = id;
+            while let Some(parent) = doc.get(at).and_then(|n| n.parent()) {
+                if doc.get(parent).is_some_and(|p| p.parent().is_none()) {
+                    break;
+                }
+                at = parent;
+            }
+            // A root itself (a page, the vault) is no layer.
+            if doc.get(at).and_then(|n| n.parent()).is_some() && seen.insert(at) {
+                tops.push(at);
+            }
+        }
+        let mut was: Option<Vec<Rect>> = Some(Vec::new());
+        for &id in tops.iter().chain(&deleted) {
+            // A node the old state never placed — new, or in the vault — drew nothing.
+            if old.world_transform(id).is_none() {
+                continue;
+            }
+            match old.ink_bounds(id) {
+                Some(r) => was.get_or_insert_with(Vec::new).push(r),
+                None => {
+                    was = None;
+                    break;
+                }
+            }
+        }
+        // A deleted subtree names every node in it; its root's box holds the rest.
+        let was = was.and_then(|mut boxes| {
+            boxes.sort_by(|a, b| b.area().total_cmp(&a.area()));
+            let mut kept: Vec<Rect> = Vec::new();
+            for r in boxes {
+                if kept.iter().any(|k| k.union(r) == *k) {
+                    continue;
+                }
+                if kept.len() == Self::BOXES {
+                    return None;
+                }
+                kept.push(r);
+            }
+            Some(kept)
+        });
+        if self.0.len() == Self::KEPT {
+            self.0.pop_front();
+        }
+        self.0.push_back(Inked {
+            from,
+            to,
+            tops,
+            was,
+        });
+    }
+
+    /// What the changes from revision `from` to `to` did, when every one of them is
+    /// recorded here with its old ink measured; `None` otherwise.
+    pub fn between(&self, from: u64, to: u64) -> Option<EditInk> {
+        let mut out = EditInk {
+            tops: Vec::new(),
+            was: Vec::new(),
+        };
+        let mut at = from;
+        for step in self.0.iter().skip_while(|s| s.from != from) {
+            if at == to {
+                break;
+            }
+            if step.from != at {
+                return None;
+            }
+            out.tops.extend(&step.tops);
+            out.was.extend(step.was.as_ref()?);
+            at = step.to;
+        }
+        (at == to).then_some(out)
+    }
 }
 
 impl Default for EditorSession {
@@ -587,6 +708,7 @@ impl EditorSession {
             revision: next_revision(),
             drawn: next_revision(),
             shaped: next_revision(),
+            ink: InkLog::default(),
             commits: 0,
             flex_receipt: None,
             last_detached: Default::default(),
@@ -609,6 +731,11 @@ impl EditorSession {
     /// see the field.
     pub fn shaped(&self) -> u64 {
         self.shaped
+    }
+
+    /// What recent commits, undos and redos did to the drawing — see the field.
+    pub fn ink(&self) -> &InkLog {
+        &self.ink
     }
 
     /// How many commits this session has seen, undo and redo not counted — see
@@ -1420,6 +1547,9 @@ impl EditorSession {
         // wins the status slot; the durable half is the layers row's warning colour
         // (`Resolved::boolean_failed`).
         let failures = ondin_core::boolean::failures();
+        let revision = next_revision();
+        self.ink
+            .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
         if ondin_core::boolean::failures() != failures {
             self.fail("A boolean could not be computed and draws nothing — undo to bring its operands back");
@@ -1431,7 +1561,7 @@ impl EditorSession {
         // through this door and bump it themselves; every reader keyed on it
         // (`FrameIndex`, the Export preview, the recovery gate, `finish_save`)
         // depends on that.
-        self.revision = next_revision();
+        self.revision = revision;
         self.commits = self.commits.wrapping_add(1);
         // Recorded after the bump, so the receipt names this commit; a run's
         // merged commit has no single step to undo and leaves none.
@@ -1557,13 +1687,16 @@ impl EditorSession {
         let Some(dirty) = moved else {
             return Ok(None);
         };
+        let revision = next_revision();
+        self.ink
+            .record((self.revision, revision), &self.doc, &self.resolved, &dirty);
         self.resolved.update(&self.doc, &dirty);
         self.keep_page();
         self.dirty = true;
         // `finish_save` above all must see it, or it marks the session clean over a
         // save queued before the undo. `commits` stays put, so a redo brings the
         // step's receipt back.
-        self.revision = next_revision();
+        self.revision = revision;
         Ok(Some((subjects, before)))
     }
 

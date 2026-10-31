@@ -14,12 +14,13 @@ Nothing open.
 
 ## Now · Performance
 
-Measured by `tests/perf_pan.rs` on `~/.ondin/stress.ondin` at 2560×1440, level of detail on. With
-the whole grid in view (7% zoom) a full frame is ~110 ms; a pan frame is ~3 ms, and a frame of a
-top-level frame being dragged is ~2.3 ms patched against ~138 ms whole (1.6 against 25 ms at 25%).
+Measured by `tests/perf_pan.rs` on `~/.ondin/stress.ondin` (800 top-level frames) at 2560×1440, level of detail on. With
+the whole grid in view (7% zoom) a full frame is ~110 ms; a pan frame is ~2.2 ms, a frame of a
+top-level frame being dragged is ~1.7 ms patched against ~116 ms whole (1.5 against 23 ms at 25%), and
+redrawing after a commit moving it is ~2.3 ms patched against ~158 ms whole (2.0 against 33 ms at 25%).
 Every item here is exact: what is drawn must not change (no approximate blurs, no stale or stretched
-frames while moving). A resting canvas already draws nothing, a pan draws only what came into view and
-a preview only what it changed (`render.md` §6.3). A continuous zoom changes the scale every frame, so
+frames while moving). A resting canvas already draws nothing, a pan draws only what came into view,
+and a preview, commit, undo or redo only what it changed (`render.md` §6.3). A continuous zoom changes the scale every frame, so
 the caches below help pan and edits, not the zoom gesture itself.
 
 - **Retained scene fragments per top-level frame.** Encode each top-level frame's subtree into its own
@@ -31,12 +32,6 @@ the caches below help pan and edits, not the zoom gesture itself.
   subtree, its stack, the exact device scale and the sub-pixel phase of its origin are unchanged, so
   a whole-pixel-panning canvas runs no blur pass. Needs a texture budget and eviction
   beside `FxPool`, and invalidation from the same dirty set as the fragments. Targets the effect jobs.
-- **Redraw only an edit's damage.** A commit, undo or redo still draws the canvas whole. It should
-  redraw the union of its nodes' old and new ink bounds (`DirtySet` plus `Resolved`'s bounds before
-  and after), widened for ancestors that paint from their children (booleans, effects, masks); past a
-  share of the view, render whole. A preview already does this (`render.md` §6.3): an edit can reuse
-  `scene::damage`'s top-level granularity, `Region::covering`, `render_regions` and
-  `gpu::copy_regions`.
 
 ## Later · First
 

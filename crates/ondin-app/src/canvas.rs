@@ -22,7 +22,7 @@ use crate::preview::{
     Drag, Handle, LineEnd, MarqueeMode, PenAnchor, PenEdit, PenState, PenSubpath, PointRef, Side,
     Target, TextSession,
 };
-use crate::session::EditorSession;
+use crate::session::{EditInk, EditorSession, InkLog};
 use crate::snap;
 use crate::theme::{self, color, icon};
 use crate::tools::{self, ClickCreate, Tool};
@@ -62,9 +62,51 @@ struct Inputs<'a> {
     page: NodeId,
 }
 
-/// How far a preview's damage is grown before it is redrawn, in device pixels: a
-/// snapped box moves by up to a pixel and antialiasing reaches past its edge.
+/// How far damage is grown before it is redrawn, in device pixels: a snapped box
+/// moves by up to a pixel and antialiasing reaches past its edge.
 const DAMAGE_MARGIN: f64 = 2.0;
+
+/// The canvas pixels covering `damage`, device boxes on a canvas of `size`;
+/// `None` from half the canvas up, where a patch is most of a frame anyway.
+fn patch_regions(damage: &[KRect], size: (u32, u32)) -> Option<Vec<Region>> {
+    let regions: Vec<Region> = damage
+        .iter()
+        .filter_map(|r| Region::covering(*r, DAMAGE_MARGIN, size))
+        .collect();
+    let area: u64 = regions
+        .iter()
+        .map(|r| u64::from(r.size.0) * u64::from(r.size.1))
+        .sum();
+    (area * 2 < u64::from(size.0) * u64::from(size.1)).then_some(regions)
+}
+
+/// The device boxes a frame drawn under the preview `before`, whose changes
+/// covered `before_ink` there, has to redraw to show `at` after the document
+/// changed by `edit`: the old ink `edit` recorded, `before_ink`, and what every
+/// top-level layer the edit or either preview touched draws now. `None` in
+/// `scene::top_level_ink`'s cases.
+fn edit_damage(
+    at: &Inputs<'_>,
+    before: &RenderOverrides,
+    before_ink: &[KRect],
+    edit: EditInk,
+) -> Option<Vec<KRect>> {
+    let named = edit
+        .tops
+        .into_iter()
+        .chain(before.touched())
+        .chain(at.overrides.touched());
+    let tops = ondin_render::scene::tops_of(at.doc, at.page, named);
+    let mut out =
+        ondin_render::scene::top_level_ink(at.doc, at.res, at.vp, at.overrides, at.page, &tops)?;
+    out.extend_from_slice(before_ink);
+    out.extend(
+        edit.was
+            .iter()
+            .map(|r| ondin_render::scene::device_box(at.vp, *r)),
+    );
+    Some(out)
+}
 
 /// Everything about the canvas that needs a GPU. Only [`CanvasRenderer::render`]
 /// and `ensure_target` touch it, so making it an `Option` is what lets the app
@@ -231,6 +273,18 @@ impl DrawnKey {
         same.chrome.clone_from(&next.chrome);
         same == *next
     }
+
+    /// Whether a frame drawn from `next` differs from one drawn from `self` only
+    /// by the document and the preview, outline mode off — what an edit's damage
+    /// can be bounded for. Outline mode draws a clipping frame's children past
+    /// the box `Resolved` keeps for it.
+    fn edits_to(&self, next: &DrawnKey) -> bool {
+        let mut same = self.clone();
+        same.revision = next.revision;
+        same.drawn = next.drawn;
+        same.chrome.clone_from(&next.chrome);
+        same == *next && next.outline.is_none()
+    }
 }
 
 pub struct CanvasRenderer {
@@ -242,6 +296,10 @@ pub struct CanvasRenderer {
     shown: Option<DrawnKey>,
     /// The preview the texture was drawn under, for the damage the next one does.
     shown_preview: Option<RenderOverrides>,
+    /// The device ink, in the texture, of what that preview changed
+    /// (`ondin_render::scene::preview_ink`), never smaller: what a commit ending
+    /// it has to redraw. `None` when it could not be measured.
+    shown_ink: Option<Vec<KRect>>,
     /// Whether the last [`Self::render`] drew the page rather than keeping the
     /// texture: what the resource meter counts. Headless, a draw it would have made.
     drew: bool,
@@ -249,6 +307,9 @@ pub struct CanvasRenderer {
     /// not. Headless counts the draws it would have made.
     #[cfg(test)]
     draws: u64,
+    /// The regions the last draw patched, `None` for a whole one or a pan.
+    #[cfg(test)]
+    patched: Option<Vec<Region>>,
     /// Decoded images (§5.5a), kept across frames. Lives on the canvas because
     /// it is renderer state derived from the document, never edited.
     images: ondin_render::ImageStore,
@@ -270,9 +331,12 @@ impl CanvasRenderer {
             }),
             shown: None,
             shown_preview: None,
+            shown_ink: None,
             drew: false,
             #[cfg(test)]
             draws: 0,
+            #[cfg(test)]
+            patched: None,
             // The one store that may answer a moving adjustment with a reduced
             // picture; export takes `ImageStore::new`, which never previews.
             images: ondin_render::ImageStore::interactive(),
@@ -288,8 +352,10 @@ impl CanvasRenderer {
             gpu: None,
             shown: None,
             shown_preview: None,
+            shown_ink: None,
             drew: false,
             draws: 0,
+            patched: None,
             images: ondin_render::ImageStore::interactive(),
             sample: None,
         }
@@ -304,6 +370,12 @@ impl CanvasRenderer {
     #[cfg(test)]
     pub(crate) fn draws(&self) -> u64 {
         self.draws
+    }
+
+    /// The regions the last draw patched — see the field.
+    #[cfg(test)]
+    pub(crate) fn patched(&self) -> Option<&[Region]> {
+        self.patched.as_deref()
     }
 
     /// The decode cache, for the one caller that puts something into it: an
@@ -327,7 +399,8 @@ impl CanvasRenderer {
     /// `overrides` and re-shaped text (`EditorSession::revision`, `drawn`,
     /// `shaped`). When they, the view and the decoded images are what the texture
     /// was drawn from, the texture is returned as it stands. A pan moves it and
-    /// draws what came into view; a preview changing draws only where it did.
+    /// draws what came into view; a preview changing draws only where it did, and
+    /// so does an edit `ink` records (`EditorSession::ink`).
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
@@ -335,6 +408,7 @@ impl CanvasRenderer {
         res: &Resolved,
         overrides: &RenderOverrides,
         (revision, drawn, shaped): (u64, u64, u64),
+        ink: &InkLog,
         camera: &Camera,
         pixel_size: (u32, u32),
         backdrop: Color,
@@ -369,6 +443,7 @@ impl CanvasRenderer {
         }
         let shown = self.shown.take();
         let before = self.shown_preview.take();
+        let before_ink = self.shown_ink.take();
         // Past half the canvas, what came into view is most of a frame anyway.
         let pan = shown
             .as_ref()
@@ -378,20 +453,13 @@ impl CanvasRenderer {
                 let kept = (w - i64::from(dx).abs()).max(0) * (h - i64::from(dy).abs()).max(0);
                 !wants_frame && kept * 2 > w * h
             });
-        let previewed =
-            before.filter(|_| !wants_frame && shown.as_ref().is_some_and(|s| s.previews_to(&key)));
-        #[cfg(test)]
-        {
-            self.draws += 1;
-        }
-        // Headless, the draw it would have made counts as made.
-        let Some(gpu) = self.gpu.as_mut() else {
-            self.shown = Some(key);
-            self.shown_preview = Some(overrides.clone());
-            self.drew = true;
-            return None;
-        };
-        gpu.ensure_target(pixel_size);
+        let previewed = before
+            .as_ref()
+            .filter(|_| !wants_frame && shown.as_ref().is_some_and(|s| s.previews_to(&key)));
+        let edited = shown
+            .as_ref()
+            .filter(|s| !wants_frame && s.edits_to(&key))
+            .and_then(|s| ink.between(s.revision, key.revision));
         let vp = camera.viewport(pixel_size);
         let inputs = Inputs {
             doc,
@@ -402,9 +470,47 @@ impl CanvasRenderer {
             images: &self.images,
             page,
         };
-        let patched = match (pan, &previewed) {
+        let damage = match (pan, previewed, edited) {
+            (Some(_), ..) => None,
+            (None, Some(before), _) => {
+                ondin_render::scene::damage(doc, res, &vp, page, before, overrides)
+            }
+            (None, None, Some(edit)) => before
+                .as_ref()
+                .zip(before_ink.as_deref())
+                .and_then(|(before, ink)| edit_damage(&inputs, before, ink, edit)),
+            (None, None, None) => None,
+        };
+        let regions = damage.as_deref().and_then(|d| patch_regions(d, pixel_size));
+        // What the preview changed, as the texture will hold it: a moved frame
+        // moves it, a preview's patch holds it in its damage, and anything else
+        // measures it — nothing to measure once an edit has ended the preview.
+        let previewing = previewed.is_some();
+        let ink_after = |patched: bool| match (patched, pan) {
+            (true, Some(shift)) => {
+                let by = Vec2::new(f64::from(shift.0), f64::from(shift.1));
+                before_ink.map(|ink| ink.into_iter().map(|r| r + by).collect())
+            }
+            (true, None) if previewing => damage,
+            _ => ondin_render::scene::preview_ink(doc, res, &vp, overrides, page),
+        };
+        #[cfg(test)]
+        {
+            self.draws += 1;
+            self.patched.clone_from(&regions);
+        }
+        // Headless, the draw it would have made counts as made.
+        let Some(gpu) = self.gpu.as_mut() else {
+            self.shown = Some(key);
+            self.shown_preview = Some(overrides.clone());
+            self.shown_ink = ink_after(pan.is_some() || regions.is_some());
+            self.drew = true;
+            return None;
+        };
+        gpu.ensure_target(pixel_size);
+        let patched = match (pan, &regions) {
             (Some(shift), _) => gpu.pan(&inputs, shift),
-            (None, Some(before)) => gpu.patch(&inputs, before),
+            (None, Some(regions)) => gpu.patch(&inputs, regions),
             (None, None) => false,
         };
         if !patched {
@@ -427,6 +533,7 @@ impl CanvasRenderer {
         }
         self.shown = Some(key);
         self.shown_preview = Some(overrides.clone());
+        self.shown_ink = ink_after(patched);
         self.drew = true;
         gpu.target.as_ref().map(|t| t.id)
     }
@@ -630,32 +737,13 @@ impl Gpu {
         true
     }
 
-    /// Answer a preview changing from `before` to `at.overrides` by drawing only
-    /// where it can have changed (`ondin_render::scene::damage`) into `spare` and
-    /// copying that into `target`. False when the damage cannot be bounded, covers
-    /// half the canvas or more, or the frame cannot be patched.
-    fn patch(&mut self, at: &Inputs<'_>, before: &RenderOverrides) -> bool {
-        let size = at.vp.pixel_size;
-        let Some(damage) =
-            ondin_render::scene::damage(at.doc, at.res, at.vp, at.page, before, at.overrides)
-        else {
-            return false;
-        };
-        let regions: Vec<Region> = damage
-            .iter()
-            .filter_map(|r| Region::covering(*r, DAMAGE_MARGIN, size))
-            .collect();
-        let area: u64 = regions
-            .iter()
-            .map(|r| u64::from(r.size.0) * u64::from(r.size.1))
-            .sum();
-        if area * 2 >= u64::from(size.0) * u64::from(size.1) {
-            return false;
-        }
+    /// Redraw only `regions` (`patch_regions`) by drawing them into `spare` and
+    /// copying them into `target`. False when the frame cannot be patched.
+    fn patch(&mut self, at: &Inputs<'_>, regions: &[Region]) -> bool {
         if regions.is_empty() {
             return true;
         }
-        if !self.draw_regions(at, &regions) {
+        if !self.draw_regions(at, regions) {
             return false;
         }
         let (Some(target), Some(spare)) = (self.target.as_ref(), self.spare.as_ref()) else {
@@ -667,7 +755,7 @@ impl Gpu {
             &rs.queue,
             &spare.texture,
             &target.texture,
-            &regions,
+            regions,
         );
         true
     }
@@ -8513,9 +8601,10 @@ impl OndinApp {
             self.session.shaped(),
         );
         let (doc, res, overrides) = self.session.render_inputs();
-        let drawn = self
-            .canvas
-            .render(doc, res, overrides, stamps, &camera, px, backdrop, page);
+        let ink = self.session.ink();
+        let drawn = self.canvas.render(
+            doc, res, overrides, stamps, ink, &camera, px, backdrop, page,
+        );
         if self.canvas.drew() {
             self.meter.frame(std::time::Instant::now());
         }
@@ -22590,5 +22679,268 @@ mod redraw_tests {
         session.fonts_changed();
         assert_ne!(session.drawn(), drawn, "fixture: drawn moved");
         assert_ne!(session.shaped(), shaped, "re-shaped text");
+    }
+
+    /// A page of two frames and a loose rect, each filled, the first frame
+    /// holding a rect of its own: (session, [frame a, its child, frame b, rect c]).
+    fn edit_fixture() -> (EditorSession, [NodeId; 4]) {
+        let mut ids = ondin_core::IdSource::new(0xED17);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [a, child, b, c] = [ids.mint(), ids.mint(), ids.mint(), ids.mint()];
+        let rect = |w, h| NodeKind::Rect {
+            size: Size::new(w, h),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        let board = |w, h| NodeKind::Artboard {
+            size: Size::new(w, h),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        let create = |id, parent, index, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let fill = |id, rgb: [u8; 3]| Operation::SetFills {
+            id,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::Brush::Solid(Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255))
+                    .into(),
+                visible: true,
+            }]),
+        };
+        doc.apply(&Transaction(vec![
+            create(a, root, 0, board(200.0, 150.0), (20.0, 20.0)),
+            create(child, a, 0, rect(60.0, 40.0), (10.0, 10.0)),
+            create(b, root, 1, board(120.0, 100.0), (300.0, 40.0)),
+            create(c, root, 2, rect(50.0, 50.0), (100.0, 250.0)),
+            fill(a, [240, 240, 240]),
+            fill(child, [200, 30, 30]),
+            fill(b, [30, 30, 200]),
+            fill(c, [30, 160, 30]),
+        ]))
+        .expect("the fixture");
+        let mut session = EditorSession::new();
+        session.adopt_document(doc, None);
+        (session, [a, child, b, c])
+    }
+
+    /// The page as `session` draws it now, through `vp`, on the CPU.
+    fn page_pixels(session: &EditorSession, vp: &ondin_render::Viewport) -> Vec<u8> {
+        let (doc, res, overrides) = session.render_inputs();
+        ondin_render::VelloCpuRenderer::new()
+            .render_subtrees_with(
+                doc,
+                res,
+                vp,
+                &ondin_render::ImageStore::default(),
+                &[session.page],
+                overrides,
+            )
+            .0
+    }
+
+    /// Draw `session` through the headless canvas, as a frame would.
+    fn draw(canvas: &mut CanvasRenderer, session: &EditorSession, camera: &Camera, px: (u32, u32)) {
+        let (doc, res, overrides) = session.render_inputs();
+        let stamps = (session.revision(), session.drawn(), session.shaped());
+        canvas.render(
+            doc,
+            res,
+            overrides,
+            stamps,
+            session.ink(),
+            camera,
+            px,
+            Color::WHITE,
+            session.page,
+        );
+    }
+
+    /// After each commit, undo and redo — a move, a recolour, a preview committed,
+    /// a delete and its undo and redo, a reparent across frames, a shadow, an
+    /// insert — the canvas patches rather than drawing whole, and every pixel the
+    /// edit changed lies inside the patch.
+    ///
+    /// flip: `edit_damage` leaving out the ink `InkLog` recorded → fails at "a
+    /// delete"; leaving out the preview's ink → fails at "its commit, elsewhere".
+    #[test]
+    fn an_edit_redraws_only_where_it_changed_the_page() {
+        let (mut session, [a, child, b, c]) = edit_fixture();
+        let mut canvas = CanvasRenderer::headless();
+        let camera = Camera {
+            center: Point::new(220.0, 170.0),
+            zoom: 1.5,
+        };
+        let px = (720, 520);
+        let vp = camera.viewport(px);
+        draw(&mut canvas, &session, &camera, px);
+        let moved = |id, x, y| Operation::SetTransform {
+            id,
+            transform: Affine::translate((x, y)),
+        };
+        let shadow = ondin_core::keyed_by_position([ondin_core::Effect {
+            kind: ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
+                offset: Vec2::new(0.0, 12.0),
+                blur: 10.0,
+                spread: 0.0,
+                color: Color::from_rgba8(0, 0, 0, 160),
+                blend: ondin_core::BlendMode::Normal,
+            }),
+            visible: true,
+            vars: Default::default(),
+        }]);
+        let fresh = ondin_core::IdSource::new(0xF4E5).mint();
+        type Edit = Box<dyn Fn(&mut EditorSession)>;
+        let commit = |tx: Vec<Operation>| -> Edit {
+            Box::new(move |s| s.try_commit(Transaction(tx.clone())).expect("commits"))
+        };
+        let edits: Vec<(&str, Edit)> = vec![
+            (
+                "a move inside a frame",
+                commit(vec![moved(child, 90.0, 70.0)]),
+            ),
+            (
+                "a recolour",
+                commit(vec![Operation::SetFills {
+                    id: c,
+                    fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                        brush: ondin_core::Brush::Solid(Color::from_rgba8(250, 200, 0, 255)).into(),
+                        visible: true,
+                    }]),
+                }]),
+            ),
+            (
+                "a preview",
+                Box::new(move |s| s.set_preview(&Transaction(vec![moved(c, 160.0, 260.0)]))),
+            ),
+            (
+                "its commit, elsewhere",
+                commit(vec![moved(c, 175.0, 260.0)]),
+            ),
+            ("a delete", commit(vec![Operation::DeleteNode { id: b }])),
+            ("its undo", Box::new(|s| assert!(s.undo(), "undone"))),
+            ("its redo", Box::new(|s| assert!(s.redo(), "redone"))),
+            (
+                "a reparent across frames",
+                commit(vec![Operation::Reparent {
+                    id: child,
+                    new_parent: session.page,
+                    index: 0,
+                }]),
+            ),
+            (
+                "a shadow",
+                commit(vec![Operation::SetEffects {
+                    id: a,
+                    effects: shadow,
+                }]),
+            ),
+            (
+                "an insert",
+                commit(vec![
+                    Operation::CreateNode {
+                        id: fresh,
+                        parent: session.page,
+                        index: 0,
+                        kind: NodeKind::Rect {
+                            size: Size::new(30.0, 30.0),
+                            corner_radii: Default::default(),
+                            corner_smoothing: 0.0,
+                        },
+                        transform: Some(Affine::translate((240.0, 220.0))),
+                        name: None,
+                    },
+                    Operation::SetFills {
+                        id: fresh,
+                        fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                            brush: ondin_core::Brush::Solid(Color::BLACK).into(),
+                            visible: true,
+                        }]),
+                    },
+                ]),
+            ),
+        ];
+        for (what, edit) in edits {
+            let before = page_pixels(&session, &vp);
+            edit(&mut session);
+            draw(&mut canvas, &session, &camera, px);
+            let regions = canvas
+                .patched()
+                .unwrap_or_else(|| panic!("{what}: drawn whole"));
+            let after = page_pixels(&session, &vp);
+            assert!(before != after, "fixture: {what} changed the page");
+            let inside = |x: u32, y: u32| {
+                regions.iter().any(|r| {
+                    (r.at.0..r.at.0 + r.size.0).contains(&x)
+                        && (r.at.1..r.at.1 + r.size.1).contains(&y)
+                })
+            };
+            for (i, (p, q)) in before.chunks(4).zip(after.chunks(4)).enumerate() {
+                let (x, y) = (i as u32 % px.0, i as u32 / px.0);
+                assert!(
+                    p == q || inside(x, y),
+                    "{what}: ({x}, {y}) changed outside the patch"
+                );
+            }
+        }
+    }
+
+    /// An edit draws whole where its damage cannot be bounded: in outline view,
+    /// with a mask among the page's layers, and when the canvas has missed a step.
+    ///
+    /// flip: `DrawnKey::edits_to` not refusing outline mode → fails at "outline".
+    #[test]
+    fn an_edit_draws_whole_where_its_damage_is_unbounded() {
+        let camera = Camera::default();
+        let px = (400, 300);
+        let nudge = |id, x| {
+            Transaction(vec![Operation::SetTransform {
+                id,
+                transform: Affine::translate((x, 0.0)),
+            }])
+        };
+
+        let (mut session, [_, child, _, c]) = edit_fixture();
+        let mut canvas = CanvasRenderer::headless();
+        draw(&mut canvas, &session, &camera, px);
+        session.try_commit(nudge(c, 5.0)).expect("moves");
+        draw(&mut canvas, &session, &camera, px);
+        assert!(canvas.patched().is_some(), "fixture: a plain edit patches");
+
+        // Re-installed every frame, as the app does: a commit clears it.
+        session.set_outline(Some(Color::BLACK));
+        draw(&mut canvas, &session, &camera, px);
+        session.try_commit(nudge(c, 9.0)).expect("moves");
+        session.set_outline(Some(Color::BLACK));
+        draw(&mut canvas, &session, &camera, px);
+        assert!(canvas.patched().is_none(), "outline");
+        session.set_outline(None);
+
+        session
+            .try_commit(Transaction(vec![Operation::SetMask { id: c, mask: true }]))
+            .expect("a mask");
+        draw(&mut canvas, &session, &camera, px);
+        assert!(canvas.patched().is_none(), "a mask among the page's layers");
+        session
+            .try_commit(Transaction(vec![Operation::SetMask { id: c, mask: false }]))
+            .expect("no mask");
+        draw(&mut canvas, &session, &camera, px);
+        assert!(
+            canvas.patched().is_none(),
+            "a mask gone from the page's layers"
+        );
+
+        draw(&mut canvas, &session, &camera, px);
+        for x in 0..=InkLog::KEPT {
+            session.try_commit(nudge(child, x as f64)).expect("moves");
+        }
+        draw(&mut canvas, &session, &camera, px);
+        assert!(canvas.patched().is_none(), "steps past what the log keeps");
     }
 }

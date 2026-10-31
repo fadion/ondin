@@ -373,10 +373,17 @@ impl crate::app::OndinApp {
             self.session.shaped(),
         );
         let (doc, res, overrides) = self.session.render_inputs();
-        if let Some(tex) = self
-            .canvas
-            .render(doc, res, overrides, stamps, &camera, px, ground, page)
-        {
+        if let Some(tex) = self.canvas.render(
+            doc,
+            res,
+            overrides,
+            stamps,
+            self.session.ink(),
+            &camera,
+            px,
+            ground,
+            page,
+        ) {
             painter.image(
                 tex,
                 rect,

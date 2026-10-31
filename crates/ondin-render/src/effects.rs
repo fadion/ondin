@@ -187,6 +187,24 @@ pub fn apply_matrix(s: &mut Surface<'_>, m: &[f32; 20]) {
     }
 }
 
+/// One straight colour through the colour matrix `m`, as [`apply_matrix`] maps a
+/// pixel of it before rounding to bytes, and whether a channel left `0..=1` and
+/// was clamped.
+pub fn matrix_colour(
+    c: ondin_core::peniko::Color,
+    m: &[f32; 20],
+) -> (ondin_core::peniko::Color, bool) {
+    let [r, g, b, a] = c.components;
+    let out: [f32; 4] = std::array::from_fn(|i| {
+        m[i * 5] * r + m[i * 5 + 1] * g + m[i * 5 + 2] * b + m[i * 5 + 3] * a + m[i * 5 + 4]
+    });
+    let clamped = out.iter().any(|v| !(0.0..=1.0).contains(v));
+    (
+        ondin_core::peniko::Color::new(out.map(|v| v.clamp(0.0, 1.0))),
+        clamped,
+    )
+}
+
 /// The half-width of the kernel a deviation of `sigma` needs, in pixels.
 ///
 /// `ceil(3σ)`, matching `ondin_core::effect::BLUR_CUTOFF` and `vello_common`'s

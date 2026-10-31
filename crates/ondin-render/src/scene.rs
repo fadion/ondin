@@ -673,6 +673,10 @@ struct Painted<'a> {
     /// Device pixels per local unit when the walk runs at level of detail
     /// ([`stretch`]), `None` when every glyph is drawn.
     detail: Option<f64>,
+    /// `Filters` rows applied to the inks instead of the pixels
+    /// ([`folded_filters`]), in order; `paint` is already through them, a text
+    /// run's and a decoration's own colour are taken through them as drawn.
+    filters: Vec<[f32; 20]>,
 }
 
 /// One pass of a layer whose effect stack holds a blending shadow
@@ -831,7 +835,7 @@ fn paint_node_pass<P: ScenePainter>(
         .and_then(|o| o.kind.as_ref())
         .or_else(|| res.used_kind(doc, id))
         .unwrap_or(node.kind());
-    let painted = Painted {
+    let mut painted = Painted {
         kind,
         // Gradients drawn on the box layout gives the layer, not the stored one.
         paint: ondin_core::paint_box::drawn_paint(
@@ -867,6 +871,7 @@ fn paint_node_pass<P: ScenePainter>(
             None => ondin_core::boolean_placeholder(doc, res, id),
         },
         detail: ov.level_of_detail().then(|| stretch(base * world)),
+        filters: Vec::new(),
     };
 
     // The snapped transform is this node's own ink, never its children's (passing
@@ -900,6 +905,19 @@ fn paint_node_pass<P: ScenePainter>(
         detail_effects(stack, base * world)
     } else {
         stack
+    };
+    // Filters that recolour the inks exactly leave the stack, so a layer with
+    // nothing else needs no buffer.
+    let stack = match folded_filters(&stack, &painted) {
+        Some(rows) => {
+            painted.paint = std::borrow::Cow::Owned(recoloured(&painted.paint, &rows));
+            painted.filters = rows;
+            let rest = stack
+                .iter()
+                .filter(|e| !matches!(e.kind, ondin_core::EffectKind::Filters(_)));
+            std::borrow::Cow::Owned(rest.cloned().collect())
+        }
+        None => stack,
     };
     let stack: &[ondin_core::Keyed<ondin_core::Effect>] = &stack;
     let effects = pass.map_or(stack, |p| &p.effects[..]);
@@ -1154,6 +1172,93 @@ fn sub_pixel(ink: Rect, base: Affine) -> bool {
     device.width() < 0.5 && device.height() < 0.5
 }
 
+/// The colour matrices of `stack`'s `Filters` rows when applying them to
+/// `painted`'s inks draws exactly what filtering its pixels would, or `None`.
+///
+/// A matrix is affine, so it commutes with the convex mix of inks inside the
+/// layer, and the shadows are cast from alpha it never changes. What breaks that
+/// is refused: a container (its children are not its inks), a non-solid ink, a
+/// layer blur (its mixing happens before or after the filter in list order), and
+/// a clamp on any ink while the layer holds more than one colour.
+fn folded_filters(
+    stack: &[ondin_core::Keyed<Effect>],
+    painted: &Painted<'_>,
+) -> Option<Vec<[f32; 20]>> {
+    use ondin_core::EffectKind;
+    let rows: Vec<[f32; 20]> = stack
+        .iter()
+        .filter(|e| e.visible)
+        .filter_map(|e| match &e.kind {
+            EffectKind::Filters(f) if !f.is_neutral() => Some(crate::effects::filter_matrix(f)),
+            _ => None,
+        })
+        .collect();
+    let blurs = stack
+        .iter()
+        .any(|e| e.visible && matches!(e.kind, EffectKind::LayerBlur { radius } if radius > 0.0));
+    let container = matches!(
+        painted.kind,
+        NodeKind::Group | NodeKind::Root | NodeKind::Artboard { .. }
+    );
+    if rows.is_empty() || blurs || container || painted.placeholder.is_some() {
+        return None;
+    }
+    let inks = inks_of(painted)?;
+    let one_colour = inks.windows(2).all(|w| w[0].components == w[1].components);
+    (one_colour || inks.iter().all(|c| !through(*c, &rows).1)).then_some(rows)
+}
+
+/// Every colour `painted` can draw in — visible fills and strokes, a text run's
+/// and a decoration's own, the black of type with no ink — or `None` when one
+/// is not a solid colour.
+fn inks_of(painted: &Painted<'_>) -> Option<Vec<ondin_core::peniko::Color>> {
+    let solid = |b: &Brush| match b {
+        Brush::Solid(c) => Some(*c),
+        _ => None,
+    };
+    let fills = painted.paint.fills.iter().filter(|f| f.visible);
+    let strokes = painted.paint.strokes.iter().filter(|s| s.visible);
+    let mut inks: Vec<_> = fills
+        .map(|f| solid(f.brush.drawn()))
+        .chain(strokes.map(|s| solid(s.brush.drawn())))
+        .collect::<Option<_>>()?;
+    if let NodeKind::Text { .. } = painted.kind {
+        if inks.is_empty() {
+            inks.push(ondin_core::peniko::Color::BLACK);
+        }
+        if let Some(layout) = painted.text {
+            inks.extend(layout.runs.iter().filter_map(|r| r.color));
+            inks.extend(layout.decorations.iter().filter_map(|d| d.color));
+        }
+    }
+    Some(inks)
+}
+
+/// `c` through each of `rows` in turn, clamped between them as the pixel passes
+/// clamp, and whether any clamp bit.
+fn through(c: ondin_core::peniko::Color, rows: &[[f32; 20]]) -> (ondin_core::peniko::Color, bool) {
+    rows.iter().fold((c, false), |(c, clamped), m| {
+        let (out, now) = crate::effects::matrix_colour(c, m);
+        (out, clamped || now)
+    })
+}
+
+/// `paint` with every solid fill and stroke taken [`through`] `rows`.
+fn recoloured(paint: &Paint, rows: &[[f32; 20]]) -> Paint {
+    let mut out = paint.clone();
+    for f in out.fills.iter_mut() {
+        if let Brush::Solid(c) = f.brush.drawn() {
+            f.brush = Brush::Solid(through(*c, rows).0).into();
+        }
+    }
+    for s in out.strokes.iter_mut() {
+        if let Brush::Solid(c) = s.brush.drawn() {
+            s.brush = Brush::Solid(through(*c, rows).0).into();
+        }
+    }
+    out
+}
+
 /// The most `device` lengthens any local distance: its largest singular value, so
 /// a length under a pixel through it is under a pixel in every direction.
 fn stretch(device: Affine) -> f64 {
@@ -1364,6 +1469,7 @@ fn paint_ghost<P: ScenePainter>(
             // Never for a ghost: the original underneath carries the mark.
             placeholder: None,
             detail: None,
+            filters: Vec::new(),
         },
         shape_world,
         painter,
@@ -1731,7 +1837,10 @@ fn paint_shape<P: ScenePainter>(
     // the walk), one pass per visible fill.
     if let NodeKind::Text { .. } = painted.kind {
         let Some(layout) = painted.text else { return };
-        let fallback = Brush::Solid(ondin_core::peniko::Color::BLACK);
+        // The fill and stroke inks are already through the folded filters; a
+        // colour the layout carries goes through them here.
+        let recolour = |c| Brush::Solid(through(c, &painted.filters).0);
+        let fallback = recolour(ondin_core::peniko::Color::BLACK);
         let inked = painted.paint.strokes.iter().any(|s| s.visible);
         let mut inks: Vec<&Brush> = painted
             .paint
@@ -1758,7 +1867,7 @@ fn paint_shape<P: ScenePainter>(
         for run in &layout.runs {
             let bars = painted.detail.and_then(|s| greeked(run, s, layout));
             all_greeked &= bars.is_some();
-            let own: Option<Brush> = run.color.map(Brush::Solid);
+            let own: Option<Brush> = run.color.map(recolour);
             let own_one = own.as_ref().map(|b| [b]);
             let run_inks: &[&Brush] = match (&own_one, &bars, &stroke_one) {
                 (Some(one), _, _) => one,
@@ -1803,7 +1912,7 @@ fn paint_shape<P: ScenePainter>(
             };
             // The decoration's colour, else the first ink (not one per fill, which
             // would double its opacity); black for outlined type.
-            let own = ink.color.map(Brush::Solid);
+            let own = ink.color.map(recolour);
             let brush = own.as_ref().or(inks.first().copied()).unwrap_or(&fallback);
             let framing = framing_of(doc, brush, layout.bounds());
             // Non-zero: the text node's own rule is read by its mask and hit test.
@@ -2167,6 +2276,32 @@ fn intersects(a: Rect, b: Rect) -> bool {
 mod tests {
     use super::*;
     use kurbo::{PathEl, Point};
+
+    /// The level-of-detail cut drops a shadow reaching under a device pixel and
+    /// keeps a `Filters` row, which recolours every pixel at any zoom.
+    ///
+    /// flip: `detail_effects` treating `Filters` as reach 0 → fails at "kept".
+    #[test]
+    fn the_detail_cut_keeps_filters_and_drops_a_sub_pixel_shadow() {
+        let dim = Effect::new(ondin_core::EffectKind::Filters(ondin_core::Filters {
+            brightness: 0.5,
+            ..Default::default()
+        }));
+        let shadow = Effect::new(ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
+            offset: kurbo::Vec2::new(0.0, 4.0),
+            blur: 0.0,
+            spread: 0.0,
+            color: ondin_core::peniko::Color::BLACK,
+            blend: BlendMode::Normal,
+        }));
+        let stack = ondin_core::keyed_by_position([dim, shadow]);
+        let cut = detail_effects(std::borrow::Cow::Owned(stack), Affine::scale(0.2));
+        assert_eq!(cut.len(), 1, "the 0.8 px shadow is cut");
+        assert!(
+            matches!(cut[0].kind, ondin_core::EffectKind::Filters(_)),
+            "kept"
+        );
+    }
 
     /// An outside stroke's clip ring encloses the widest mitre ink, not just the
     /// shape plus its own size.

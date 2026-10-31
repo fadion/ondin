@@ -686,3 +686,114 @@ fn render_view(effects: &[Effect], view: Rect) -> Vec<u8> {
         .render_to_rgba(&doc, &res, &vp, &ImageStore::default(), doc.first_page())
         .0
 }
+
+/// An ellipse filled in `fill` with a 3-unit centred stroke in `stroke`, its
+/// edges off the pixel grid, carrying `filters` on itself or, `grouped`, on a
+/// group around it.
+fn filtered_ellipse(fill: Color, stroke: Color, filters: Filters, grouped: bool) -> Vec<u8> {
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (g, e) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: g,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: e,
+            parent: g,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: Size::new(57.3, 41.7),
+                arc: Default::default(),
+            },
+            transform: Some(Affine::translate((20.4, 25.6))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: e,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(fill).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetStrokes {
+            id: e,
+            strokes: keyed_by_position([ondin_core::Stroke {
+                brush: Brush::Solid(stroke).into(),
+                width: 3.0,
+                ..ondin_core::Stroke::default()
+            }]),
+        },
+        Operation::SetEffects {
+            id: if grouped { g } else { e },
+            effects: keyed_by_position([Effect::new(EffectKind::Filters(filters))]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 100.0, 100.0),
+        pixel_size: (100, 100),
+    };
+    VelloCpuRenderer::new()
+        .render_to_rgba(&doc, &res, &vp, &ImageStore::default(), doc.first_page())
+        .0
+}
+
+/// **Filters folded into a leaf's inks draw what filtering its pixels draws.**
+/// The group cannot fold (its children are not its inks), so it takes the
+/// buffer; the ellipse alone folds. Two colours meet along the stroke's soft
+/// edges, where a fold that was not exact would show. Within 2/255
+/// premultiplied: the buffer rounds each edge pixel to bytes twice.
+///
+/// flip: `scene::recoloured` returning the paint unchanged → fails at "the
+/// filters change the drawing".
+#[test]
+fn filters_folded_into_the_inks_match_the_filtered_pixels() {
+    let fill = Color::from_rgba8(150, 100, 50, 255);
+    let stroke = Color::from_rgba8(40, 110, 160, 200);
+    let filters = Filters {
+        brightness: 0.9,
+        contrast: 1.1,
+        saturation: 0.7,
+        hue: 30.0,
+    };
+    let m = ondin_render::effects::filter_matrix(&filters);
+    for c in [fill, stroke] {
+        assert!(
+            !ondin_render::effects::matrix_colour(c, &m).1,
+            "the fixture stays in range, or the ellipse would not fold"
+        );
+    }
+    let folded = filtered_ellipse(fill, stroke, filters, false);
+    let buffered = filtered_ellipse(fill, stroke, filters, true);
+    let plain = filtered_ellipse(fill, stroke, Filters::default(), false);
+    assert_ne!(folded, plain, "the filters change the drawing");
+    // Premultiplied, which is what composites: the output is straight, and a
+    // faint edge pixel's straight colour carries the buffer's rounding magnified.
+    let premul = |px: &[u8]| -> Vec<u32> {
+        px.chunks(4)
+            .flat_map(|p| {
+                let a = u32::from(p[3]);
+                [0, 1, 2]
+                    .map(|i| (u32::from(p[i]) * a + 127) / 255)
+                    .into_iter()
+                    .chain([a])
+            })
+            .collect()
+    };
+    for (i, (a, b)) in premul(&folded).iter().zip(premul(&buffered)).enumerate() {
+        assert!(
+            a.abs_diff(b) <= 2,
+            "pixel {} channel {}: folded {a}, buffered {b}",
+            i / 4,
+            i % 4
+        );
+    }
+}

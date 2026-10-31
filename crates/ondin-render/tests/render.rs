@@ -440,8 +440,7 @@ fn shadow(dy: f64) -> Effect {
 }
 
 /// Level of detail draws a layer plain when its shadow reaches under a device
-/// pixel, and keeps the effect layer once it reaches over one. A `Filters` row
-/// recolours every pixel, so it keeps the layer at any zoom.
+/// pixel, and keeps the effect layer once it reaches over one.
 ///
 /// flip: `paint_node` ignoring `detail_effects` → fails at "drawn plain".
 #[test]
@@ -449,15 +448,6 @@ fn level_of_detail_draws_a_layer_plain_when_its_effects_reach_under_a_pixel() {
     // A 4-unit offset at 0.2 px a unit is 0.8 px; at 0.3 it is 1.2 px.
     assert_eq!(effect_layers_at(vec![shadow(4.0)], 200), 0, "drawn plain");
     assert_eq!(effect_layers_at(vec![shadow(4.0)], 300), 1, "drawn with it");
-    let dim = Effect::new(EffectKind::Filters(Filters {
-        brightness: 0.5,
-        ..Filters::default()
-    }));
-    assert_eq!(
-        effect_layers_at(vec![dim, shadow(4.0)], 200),
-        1,
-        "recoloured"
-    );
 }
 
 /// "Clip content", off. The frame stops pushing a clip layer — and stops being
@@ -1435,6 +1425,61 @@ fn level_of_detail_draws_type_too_small_to_read_as_bars() {
     );
     let (doc, res, _t) = painted_text(vec![], vec![stroke(9, true)]);
     assert_eq!(emitted(&doc, &res, 100, true), (1, 0, 0), "outlined type");
+}
+
+/// Effect layers the walk pushes for a text node in `fills` and `strokes`
+/// carrying one `Filters` row of `brightness`.
+fn filter_layers(fills: Vec<Fill>, strokes: Vec<ondin_core::Stroke>, brightness: f64) -> usize {
+    let (mut doc, _res, t) = painted_text(fills, strokes);
+    doc.apply(&Transaction(vec![Operation::SetEffects {
+        id: t,
+        effects: keyed_by_position([Effect::new(EffectKind::Filters(Filters {
+            brightness,
+            ..Filters::default()
+        }))]),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let mut r = RecordingPainter::default();
+    let vp = Viewport {
+        view: Rect::new(-100.0, -100.0, 200.0, 200.0),
+        pixel_size: (300, 300),
+    };
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut r,
+    );
+    assert!(r.text_glyphs > 0, "the type is drawn");
+    r.layers.len()
+}
+
+/// `Filters` on a layer of solid inks recolour the inks and need no buffer,
+/// unless a clamp would bite while two colours mix at the edges; one colour
+/// folds even through a clamp, since every pixel holds just that colour.
+///
+/// flip: `folded_filters` refusing every layer → fails at "folded".
+#[test]
+fn filters_fold_into_solid_inks_unless_a_clamp_meets_a_mix() {
+    // Reds of 200 and 100: ×1.2 stays in range, ×2 clamps the 200.
+    assert_eq!(
+        filter_layers(vec![fill(200, true)], vec![stroke(100, true)], 1.2),
+        0,
+        "folded"
+    );
+    assert_eq!(
+        filter_layers(vec![fill(200, true)], vec![stroke(100, true)], 2.0),
+        1,
+        "buffered"
+    );
+    assert_eq!(
+        filter_layers(vec![fill(200, true)], vec![], 2.0),
+        0,
+        "one colour"
+    );
 }
 
 // --- frame strokes ---------------------------------------------------------

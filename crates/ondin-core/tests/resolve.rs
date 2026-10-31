@@ -624,6 +624,11 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
             fresh.text_layout(id),
             "text layout mismatch for {id:?} (seed {seed})"
         );
+        assert_eq!(
+            live.shape_path(id),
+            fresh.shape_path(id),
+            "shape path mismatch for {id:?} (seed {seed})"
+        );
         for c in doc.get(id).unwrap().children() {
             stack.push(*c);
         }

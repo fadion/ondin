@@ -583,6 +583,10 @@ pub struct Resolved {
     inner_ink: FxHashMap<NodeId, Rect>,
     /// Shaped layout per `Text` node, invalidated through the `DirtySet`.
     text: FxHashMap<NodeId, TextLayout>,
+    /// `geometry::local_path` of every node's used kind that has one, kept as
+    /// [`Self::text`] is: the scene walk draws every visible shape every frame,
+    /// and a rounded corner's arcs cost more to build than the rest of its node.
+    outline: FxHashMap<NodeId, BezPath>,
     /// Combined outline per `Boolean` node, in that node's own local space.
     ///
     /// A boolean's outline is a function of its whole subtree, so the document
@@ -631,6 +635,7 @@ impl Resolved {
         let mut ink_bounds = FxHashMap::default();
         let mut inner_ink = FxHashMap::default();
         let mut text = FxHashMap::default();
+        let mut outline = FxHashMap::default();
         for page in &pages {
             resolve_subtree(
                 doc,
@@ -643,6 +648,7 @@ impl Resolved {
                     ink_bounds: &mut ink_bounds,
                     inner_ink: &mut inner_ink,
                     text: &mut text,
+                    outline: &mut outline,
                 },
             );
         }
@@ -653,6 +659,7 @@ impl Resolved {
             ink_bounds,
             inner_ink,
             text,
+            outline,
             boolean: FxHashMap::default(),
             failed: FxHashSet::default(),
             index,
@@ -691,6 +698,7 @@ impl Resolved {
             self.ink_bounds.remove(id);
             self.inner_ink.remove(id);
             self.text.remove(id);
+            self.outline.remove(id);
             self.boolean.remove(id);
             self.failed.remove(id);
             self.used.remove(id);
@@ -776,12 +784,15 @@ impl Resolved {
         // only when its own kind changed or its used kind moved (`relaid`). The
         // waste of more is invisible to the differential test; `text::shapes`
         // makes it assertable.
+        // The outlines on the same rule: each is a function of the used kind alone.
         for id in &existing {
             self.reshape_text(doc, *id);
+            self.reoutline(doc, *id);
         }
         // And the text whose used kind moved, if not already shaped above.
         for id in relaid.iter().filter(|id| !existing.contains(id)) {
             self.reshape_text(doc, *id);
+            self.reoutline(doc, *id);
         }
 
         // Transforms: parents before children, which `ordered` already is.
@@ -938,6 +949,13 @@ impl Resolved {
         self.text.get(&id)
     }
 
+    /// The cached `geometry::local_path` of `id`'s used kind, in its local space:
+    /// what the scene walk fills and strokes without rebuilding it. `None` for a
+    /// kind with no outline of its own (containers, text, a boolean).
+    pub fn shape_path(&self, id: NodeId) -> Option<&BezPath> {
+        self.outline.get(&id)
+    }
+
     /// Every font file a text layout here drew from, once each: what a worker
     /// that shapes this document's text again hands to
     /// [`crate::text::register_font_data`] first.
@@ -1068,6 +1086,17 @@ impl Resolved {
             return;
         }
         self.update(doc, &DirtySet(text_nodes));
+    }
+
+    /// Rebuild `id`'s entry in [`Self::outline`] from its used kind.
+    fn reoutline(&mut self, doc: &Document, id: NodeId) {
+        match doc
+            .get(id)
+            .and_then(|n| geometry::local_path(kind_in(&self.used, n)))
+        {
+            Some(path) => self.outline.insert(id, path),
+            None => self.outline.remove(&id),
+        };
     }
 
     /// Recompute the cached layout for `id` if it is a `Text` node; clear any
@@ -1309,7 +1338,7 @@ fn union_of(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
     }
 }
 
-/// The five maps [`resolve_subtree`] fills. The used-geometry map is not one of
+/// The maps [`resolve_subtree`] fills. The used-geometry map is not one of
 /// them: the walk reads it, since [`Resolved::rebuild`] computes it whole first.
 struct Caches<'a> {
     world: &'a mut FxHashMap<NodeId, Affine>,
@@ -1317,6 +1346,7 @@ struct Caches<'a> {
     ink_bounds: &'a mut FxHashMap<NodeId, Rect>,
     inner_ink: &'a mut FxHashMap<NodeId, Rect>,
     text: &'a mut FxHashMap<NodeId, TextLayout>,
+    outline: &'a mut FxHashMap<NodeId, BezPath>,
 }
 
 /// Recursively compute world transforms and bounds for the subtree at `id`,
@@ -1340,6 +1370,9 @@ fn resolve_subtree(
     // Shape before measuring: the text box size comes out of the layout.
     if let Some(parts) = crate::TextRef::of(kind) {
         c.text.insert(id, text::layout(parts));
+    }
+    if let Some(path) = geometry::local_path(kind) {
+        c.outline.insert(id, path);
     }
 
     let mut child_union: Option<Rect> = None;

@@ -23,7 +23,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **A lock blocking inspector edits** — a lock guards against canvas accidents, not deliberate panel edits (§15 D323).
 - **Paste at the pointer for `Ctrl+V`** — `Ctrl+V` keeps its fixed offset; *Paste here* is the pointer-aimed one (§15 D300).
 - **A frame's *Background…* context-menu row** — the Fill row already does it (§15 D800).
-- **A cached rounded `Path` outline map** — the per-frame rebuild is an accepted cost, with D741's local-box map (§15 D778).
+- **A cached local box on `Resolved`** — the chrome's six walks a frame are an accepted cost, and a gesture would bypass the cache (§15 D778).
 - **A rotation handle or mid-edge squares** — sides still resize (§15 D14).
 - **A user-draggable ruler origin** — the rulers would disagree with the world-space inspector; rulers re-origin only on a lone selected frame (§15 D137, D36).
 - **Middle-button pan over the origin fields** (§15 D254).

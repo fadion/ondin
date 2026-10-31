@@ -661,7 +661,9 @@ struct Painted<'a> {
     /// `BrushSource::drawn`.
     paint: std::borrow::Cow<'a, Paint>,
     text: Option<&'a TextLayout>,
-    /// The outline `Resolved` derived for a `Boolean`, in local space.
+    /// The outline to draw, in local space, when one is already built: a
+    /// `Boolean`'s derived one, or `Resolved::shape_path` for a kind no preview
+    /// changes. `None` builds it from [`Self::kind`].
     path: Option<&'a BezPath>,
     /// The box a `Boolean` whose arithmetic was abandoned draws its placeholder in
     /// (§15 D298); `None` otherwise, including a correctly empty boolean.
@@ -846,7 +848,17 @@ fn paint_node_pass<P: ScenePainter>(
         text: over
             .and_then(|o| o.text.as_ref())
             .or_else(|| res.text_layout(id)),
-        path: ov.boolean_path(id).or_else(|| res.boolean_path(id)),
+        // The cached outline only for the kind it was built from: a gesture
+        // reshaping the node draws from its own.
+        path: ov
+            .boolean_path(id)
+            .or_else(|| res.boolean_path(id))
+            .or_else(|| {
+                over.and_then(|o| o.kind.as_ref())
+                    .is_none()
+                    .then(|| res.shape_path(id))
+                    .flatten()
+            }),
         // Committed only, and only when no preview owns the node: a gesture
         // re-evaluating this boolean always leaves an entry, and without the gate a
         // drag would draw the placeholder over the last committed operand positions.
@@ -1811,9 +1823,9 @@ fn paint_shape<P: ScenePainter>(
     }
 
     let path = match painted.path {
-        Some(derived) => derived.clone(),
+        Some(built) => std::borrow::Cow::Borrowed(built),
         None => match local_path(painted.kind) {
-            Some(path) => path,
+            Some(path) => std::borrow::Cow::Owned(path),
             None => return,
         },
     };

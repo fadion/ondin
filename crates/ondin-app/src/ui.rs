@@ -159,9 +159,6 @@ pub struct MenuRow<'a> {
     /// passes `Some(true)` on one row and `Some(false)` on the rest, so the pointer
     /// cannot paint a second ground.
     pub highlight: Option<bool>,
-    /// Paint the filled hexagon ([`paint_hexagon_filled`]), a main's mark, in the
-    /// glyph's place.
-    pub filled_hexagon: bool,
 }
 
 impl<'a> MenuRow<'a> {
@@ -174,12 +171,7 @@ impl<'a> MenuRow<'a> {
             danger: false,
             enabled: true,
             highlight: None,
-            filled_hexagon: false,
         }
-    }
-    pub fn filled_hexagon(mut self, on: bool) -> Self {
-        self.filled_hexagon = on;
-        self
     }
     pub fn accel(mut self, accel: Option<&'a str>) -> Self {
         self.accel = accel;
@@ -244,11 +236,9 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         ),
     };
     // A row handed `""` sets its label at the row's own inset; no menu mixes the two.
-    let bare = row.glyph.is_empty() && !row.filled_hexagon;
+    let bare = row.glyph.is_empty();
     let glyph_at = egui::pos2(rect.left() + 8.0 + 7.5, rect.center().y);
-    if row.filled_hexagon {
-        paint_hexagon_filled(p, glyph_at, 15.0, glyph_col);
-    } else if !bare {
+    if !bare {
         p.text(
             glyph_at,
             egui::Align2::CENTER_CENTER,

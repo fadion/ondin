@@ -523,9 +523,6 @@ pub struct Spec {
     pub group: Group,
     /// Destroys something: drawn red.
     pub danger: bool,
-    /// Draw the filled hexagon in the glyph's place (`ui::paint_hexagon_filled`)
-    /// instead of the row's outline glyph.
-    pub filled_hexagon: bool,
 }
 
 impl Item {
@@ -635,7 +632,6 @@ impl Item {
             accel,
             group,
             danger: false,
-            filled_hexagon: false,
         };
         match self {
             Item::EnterGroup => s("Enter group", icon::SIGN_IN, None, Group::Head),
@@ -721,24 +717,18 @@ impl Item {
             ),
             // Component rows and chords (`shortcuts.md` §12); the filled hexagon
             // marks the main each of the first two makes.
-            Item::CreateComponent => Spec {
-                filled_hexagon: true,
-                ..s(
-                    "Create component",
-                    icon::HEXAGON,
-                    Some("Ctrl+Alt+K"),
-                    Group::Structure,
-                )
-            },
-            Item::DuplicateAsComponent => Spec {
-                filled_hexagon: true,
-                ..s(
-                    "Duplicate as component",
-                    icon::HEXAGON,
-                    None,
-                    Group::Structure,
-                )
-            },
+            Item::CreateComponent => s(
+                "Create component",
+                icon::HEXAGON_FILL,
+                Some("Ctrl+Alt+K"),
+                Group::Structure,
+            ),
+            Item::DuplicateAsComponent => s(
+                "Duplicate as component",
+                icon::HEXAGON_FILL,
+                None,
+                Group::Structure,
+            ),
             Item::SelectAllInstances => s(
                 "Select all instances",
                 icon::SELECTION_ALL,
@@ -2617,7 +2607,6 @@ impl OndinApp {
                             let mut style = crate::ui::MenuRow::new(spec.glyph, &row.label)
                                 .accel(spec.accel)
                                 .danger(spec.danger)
-                                .filled_hexagon(spec.filled_hexagon)
                                 .enabled(row.enabled);
                             if let Some(on) = row.checked {
                                 style = style.checked(on);
@@ -3462,7 +3451,6 @@ mod tests {
                                     enabled: true,
                                     danger: false,
                                     highlight: None,
-                                    filled_hexagon: false,
                                 },
                                 ROW_H,
                             );
@@ -3817,40 +3805,19 @@ mod tests {
     }
 
     /// Only *Create component* and *Duplicate as component* draw the filled
-    /// hexagon, as a six-point polygon in the glyph's place.
+    /// hexagon as their glyph.
     ///
-    /// flip: `menu_row` ignoring the flag → fails at "the filled row paints it".
+    /// flip: *Duplicate as component* back on `icon::HEXAGON` → fails at the
+    /// assertion for that item.
     #[test]
     fn the_rows_that_make_a_main_draw_its_filled_hexagon() {
         for item in Item::ALL {
             assert_eq!(
-                item.spec().filled_hexagon,
+                item.spec().glyph == icon::HEXAGON_FILL,
                 matches!(item, Item::CreateComponent | Item::DuplicateAsComponent),
                 "{item:?}"
             );
         }
-        let ctx = egui::Context::default();
-        crate::theme::install(&ctx);
-        let _ = ctx.run_ui(Default::default(), |_| {});
-        let hexagons = |filled: bool| {
-            let out = ctx.run_ui(Default::default(), |ui| {
-                crate::ui::menu_row(
-                    ui,
-                    crate::ui::MenuRow::new(icon::HEXAGON, "Create component")
-                        .filled_hexagon(filled),
-                    ROW_H,
-                );
-            });
-            out.shapes
-                .iter()
-                .filter(|c| {
-                    matches!(&c.shape, egui::Shape::Text(t)
-                        if t.galley.text() == icon::HEXAGON_FILL)
-                })
-                .count()
-        };
-        assert_eq!(hexagons(true), 1, "the filled row paints it");
-        assert_eq!(hexagons(false), 0, "an ordinary row paints its glyph");
     }
 
     /// A text layer's menu is 34 rows: head 4 · Clipboard 6 · Properties 2 ·

@@ -125,7 +125,6 @@ struct Cmd {
     item: Item,
     label: String,
     glyph: &'static str,
-    filled_hexagon: bool,
     accel: Option<&'static str>,
     group: Group,
     checked: Option<bool>,
@@ -153,7 +152,6 @@ impl Cmd {
             item: row.item,
             label,
             glyph: spec.glyph,
-            filled_hexagon: spec.filled_hexagon,
             accel: spec.accel,
             group: row.group.unwrap_or(spec.group),
             checked: row.checked,
@@ -173,7 +171,6 @@ impl Cmd {
             item,
             label: spec.label.to_string(),
             glyph: spec.glyph,
-            filled_hexagon: spec.filled_hexagon,
             accel: spec.accel,
             group: spec.group,
             checked: None,
@@ -1229,7 +1226,6 @@ fn cmd_row(ui: &mut egui::Ui, c: &Cmd, lit: bool) -> egui::Response {
             );
         }
         Some(false) => {}
-        None if c.filled_hexagon => crate::ui::paint_hexagon_filled(&p, glyph_at, 15.0, glyph_col),
         None => {
             p.text(
                 glyph_at,

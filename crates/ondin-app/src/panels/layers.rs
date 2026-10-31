@@ -1900,7 +1900,16 @@ impl OndinApp {
             let galley =
                 p.layout_no_wrap(name.to_string(), egui::FontId::proportional(12.5), name_col);
             let name_end = x + galley.size().x;
-            p.galley(egui::pos2(x, cy - galley.size().y / 2.0), galley, name_col);
+            // Clipped where the cover turns solid: the cover's right corners are
+            // rounded to the row's, and a name running under them would show
+            // through as a sliver at the panel's edge.
+            let mut name_clip = p.clip_rect();
+            name_clip.max.x = name_clip.max.x.min(name_right - COVER_PAD + 1.0);
+            p.with_clip_rect(name_clip).galley(
+                egui::pos2(x, cy - galley.size().y / 2.0),
+                galley,
+                name_col,
+            );
             // Room for the whole name and, scrolled to its end, a hovered row's
             // eye and lock after it. Hovered whatever the row is now, so a
             // hover does not change the width.
@@ -3255,6 +3264,61 @@ mod name_limit_tests {
             limit(None, Some((eye, true)), None, false),
             eye - BOUND_EYE.x / 2.0 - NAME_CLEAR,
             "the bound eye's capsule"
+        );
+    }
+
+    /// A long name is clipped where its cover turns solid, so none of its ink
+    /// reaches under the cover's rounded right corners at the panel's edge.
+    ///
+    /// flip: the name painted on the row's painter rather than the clipped one →
+    /// fails at "clipped short of the size".
+    #[test]
+    fn a_long_name_is_clipped_where_its_cover_turns_solid() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.view = crate::app::View::Editor;
+        let frame = app.session.doc.get(app.session.page).unwrap().children()[0];
+        let long = "Ko-padel — Home with a name far too long for the pane";
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::SetName {
+                id: frame,
+                name: long.into(),
+            }
+        ])));
+        let mut kitten = eframe::Frame::_new_kittest();
+        let mut out = None;
+        for _ in 0..4 {
+            out = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1320.0, 820.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(&mut app, ui, &mut kitten),
+            ));
+        }
+        let out = out.expect("drawn");
+        let text = |f: &dyn Fn(&str) -> bool| {
+            out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if f(t.galley.text()) => Some((c.clip_rect, t)),
+                _ => None,
+            })
+        };
+        let (clip, name) = text(&|t| t == long).expect("the name is drawn");
+        let (_, size) = text(&|t| t.contains(" × ")).expect("the frame's size is drawn");
+        let size_left = size.visual_bounding_rect().left();
+        assert!(
+            name.visual_bounding_rect().right() > size_left,
+            "the fixture: the name runs on under the size"
+        );
+        assert!(
+            clip.right() < size_left,
+            "clipped short of the size: the name's clip ends at {}, the size starts at \
+             {size_left}",
+            clip.right()
         );
     }
 

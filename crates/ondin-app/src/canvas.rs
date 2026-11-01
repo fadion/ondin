@@ -9831,11 +9831,11 @@ pub(crate) fn wheel_travel(ctx: &egui::Context, page: f32) -> (egui::Vec2, f32) 
     })
 }
 
-/// The zoom factor for `zoom` points of [`wheel_travel`], at egui's own
-/// `scroll_zoom_speed`. Clamped: a trackpad can deliver a whole gesture in one
-/// frame.
+/// The zoom factor for `zoom` points of [`wheel_travel`]: a 40pt wheel notch is
+/// about 7%, a third of egui's `scroll_zoom_speed`, so 100% to 30% takes ~18
+/// notches. Clamped: a trackpad can deliver a whole gesture in one frame.
 pub(crate) fn wheel_zoom_factor(zoom: f32) -> f64 {
-    (f64::from(zoom) / 200.0).exp().clamp(0.2, 5.0)
+    (f64::from(zoom) / 600.0).exp().clamp(0.2, 5.0)
 }
 
 /// The layer the origin fields for `id` live in, shared by `origin_fields` and

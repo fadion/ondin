@@ -2342,9 +2342,11 @@ struct Outline<'a> {
 /// is the mix `(1 − o)·under + o·blurred` at any coverage. Drawn over instead,
 /// the erased pixels would be faded a second time. Where a clip layer sits
 /// between that container and the node, the erase reaches only into the clip
-/// layer, and a translucent backdrop lets what is under it through. The canvas's ground ([`ScenePainter::ground`]) is part of a
-/// backdrop read from the walk's start. A layer met inside a repaint draws
-/// without its own backdrop, which bounds the cost at one repaint per layer.
+/// layer, and a translucent backdrop lets what is under it through. The canvas's
+/// ground ([`ScenePainter::ground`]) is part of a backdrop read from the walk's
+/// start. Under a clipping frame the backdrop ends at its edge and is mirrored
+/// past it ([`clip_box`]). A layer met inside a repaint draws without its own
+/// backdrop, which bounds the cost at one repaint per layer and mirror.
 #[allow(clippy::too_many_arguments)]
 fn paint_backdrop<P: ScenePainter>(
     (doc, res, ov): (&Document, &Resolved, &RenderOverrides),
@@ -2389,43 +2391,145 @@ fn paint_backdrop<P: ScenePainter>(
         .rev()
         .find(|o| o.isolates)
         .copied();
-    let repaint = Walk {
-        origins: walk.origins,
-        open: Default::default(),
-        in_shadow: Default::default(),
-        backdrop: Some(Backdrop {
-            upto: id,
-            bare: root.map(|o| o.id),
-            reached: std::cell::Cell::new(false),
-        }),
-        grown: Default::default(),
-    };
-    let cull = [world];
-    match root {
-        Some(o) => paint_node(
-            doc,
-            res,
-            ov,
-            o.id,
-            o.parent_world,
-            &cull,
-            base,
-            edges,
-            painter,
-            &repaint,
-        ),
-        None => {
-            if let Some(ground) = painter.ground() {
-                let rect = world.to_path(TOLERANCE);
-                let ink = Brush::Solid(ground);
-                painter.fill_path(Affine::IDENTITY, &rect, &ink, None, ClipRule::NonZero);
+    if root.is_none()
+        && let Some(ground) = painter.ground()
+    {
+        let rect = world.to_path(TOLERANCE);
+        let ink = Brush::Solid(ground);
+        painter.fill_path(Affine::IDENTITY, &rect, &ink, None, ClipRule::NonZero);
+    }
+    // What lies behind, moved by `mirror` (a world transform) and culled to
+    // `cull` before it: the repaint from the backdrop root.
+    let repaint_through = |painter: &mut P, mirror: Affine, cull: Rect| {
+        let repaint = Walk {
+            origins: walk.origins,
+            open: Default::default(),
+            in_shadow: Default::default(),
+            backdrop: Some(Backdrop {
+                upto: id,
+                bare: root.map(|o| o.id),
+                reached: std::cell::Cell::new(false),
+            }),
+            grown: Default::default(),
+        };
+        let cull = [cull];
+        match root {
+            Some(o) => paint_node(
+                doc,
+                res,
+                ov,
+                o.id,
+                mirror * o.parent_world,
+                &cull,
+                base,
+                edges,
+                painter,
+                &repaint,
+            ),
+            None => {
+                for origin in walk.origins {
+                    if repaint.stopped() {
+                        break;
+                    }
+                    let outer = doc
+                        .get(*origin)
+                        .and_then(|n| n.parent())
+                        .and_then(|p| res.world_transform(p))
+                        .unwrap_or(Affine::IDENTITY);
+                    paint_node(
+                        doc,
+                        res,
+                        ov,
+                        *origin,
+                        mirror * outer,
+                        &cull,
+                        base,
+                        edges,
+                        painter,
+                        &repaint,
+                    );
+                }
             }
-            walk_origins(doc, res, ov, &cull, base, edges, painter, &repaint);
         }
+    };
+    match clip_box(doc, res, ov, base, walk) {
+        // The glass is clipped by a frame: what lies behind ends at the frame's
+        // edge, and past it the blur reads the frame's content mirrored about the
+        // edge, as a browser's backdrop filter does. Read through the edge, it
+        // would blur in what lies outside the frame — the ground on the canvas,
+        // nothing in an export.
+        Some(edge) => {
+            let to_world = |r: Rect| base.inverse().transform_rect_bbox(r);
+            painter.push_layer(
+                Affine::IDENTITY,
+                Some(&to_world(edge).to_path(TOLERANCE)),
+                ClipRule::NonZero,
+                1.0,
+            );
+            repaint_through(painter, Affine::IDENTITY, world);
+            painter.pop_layer();
+            let spans = |lo: f64, hi: f64, e0: f64, e1: f64| {
+                [(-1, lo, e0), (0, e0, e1), (1, e1, hi)].map(|(side, a, b)| (side, a, b.min(hi)))
+            };
+            for (sx, x0, x1) in spans(device.x0, device.x1, edge.x0, edge.x1) {
+                for (sy, y0, y1) in spans(device.y0, device.y1, edge.y0, edge.y1) {
+                    let cell = Rect::new(x0.max(device.x0), y0.max(device.y0), x1, y1);
+                    if (sx, sy) == (0, 0) || cell.width() <= 0.0 || cell.height() <= 0.0 {
+                        continue;
+                    }
+                    // The device reflection about the edge the cell lies past.
+                    let flip = |side: i32, lo: f64, hi: f64| match side {
+                        -1 => (-1.0, 2.0 * lo),
+                        1 => (-1.0, 2.0 * hi),
+                        _ => (1.0, 0.0),
+                    };
+                    let ((ax, bx), (ay, by)) =
+                        (flip(sx, edge.x0, edge.x1), flip(sy, edge.y0, edge.y1));
+                    let reflect = Affine::new([ax, 0.0, 0.0, ay, bx, by]);
+                    let mirror = base.inverse() * reflect * base;
+                    painter.push_layer(
+                        Affine::IDENTITY,
+                        Some(&to_world(cell).to_path(TOLERANCE)),
+                        ClipRule::NonZero,
+                        1.0,
+                    );
+                    repaint_through(painter, mirror, to_world(reflect.transform_rect_bbox(cell)));
+                    painter.pop_layer();
+                }
+            }
+        }
+        None => repaint_through(painter, Affine::IDENTITY, world),
     }
     painter.pop_layer();
     painter.pop_layer();
     painter.pop_layer();
+}
+
+/// The device box of the clipping frame nearest the glass the walk is at, when
+/// it is axis-aligned on the device: what [`paint_backdrop`] reads the backdrop
+/// within. `None` with no clipping frame above it, or a turned one.
+fn clip_box(
+    doc: &Document,
+    res: &Resolved,
+    ov: &RenderOverrides,
+    base: Affine,
+    walk: &Walk<'_>,
+) -> Option<Rect> {
+    let open = walk.open.borrow();
+    let o = open.iter().rev().find(|o| {
+        doc.get(o.id)
+            .is_some_and(|n| n.clip() && matches!(n.kind(), NodeKind::Artboard { .. }))
+    })?;
+    let node = doc.get(o.id)?;
+    let size = snappable_box(res.used_kind_of(node))?;
+    let local = ov
+        .get(o.id)
+        .and_then(|v| v.transform)
+        .unwrap_or_else(|| res.used_local_of(node));
+    let device = base * snapped_box_world(o.parent_world * local, base, size);
+    let [_, b, c, _, _, _] = device.as_coeffs();
+    (b.abs() < 1e-9 && c.abs() < 1e-9)
+        .then(|| device.transform_rect_bbox(Rect::from_origin_size(Point::ORIGIN, size)))
 }
 
 /// The world box a ghost's own ink covers: [`effect_bounds`]'s answer for a node

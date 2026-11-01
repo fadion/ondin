@@ -503,3 +503,121 @@ fn a_blur_on_a_mask_leaves_it_masking() {
     );
     assert_eq!(render(true), plain, "masked at half");
 }
+
+/// A group's glass is its children's outlines, not its box: the gap between two
+/// cards stays sharp. Type's glass is its glyphs: an O's counter stays sharp.
+///
+/// flip: `backdrop_shape`'s group arm answering the group's box → fails at "the
+/// gap"; its text arm answering `None` → fails at "the O's ring".
+#[test]
+fn a_group_or_type_glass_is_its_outlines() {
+    let sharp = {
+        let mut s = Page::new();
+        let root = s.root;
+        s.stripes(root);
+        s.render()
+    };
+    let mut p = Page::new();
+    let root = p.root;
+    p.stripes(root);
+    let g = p.group(root);
+    p.rect(g, (20.0, 30.0, 25.0, 40.0), None);
+    p.rect(g, (55.0, 30.0, 25.0, 40.0), None);
+    p.effects(g, vec![BLUR]);
+    let px = p.render();
+    assert_ne!(
+        at(&px, 32, 50),
+        at(&sharp, 32, 50),
+        "fixture: a card is blurred"
+    );
+    for (x, y) in [(47, 50), (52, 50)] {
+        assert_eq!(at(&px, x, y), at(&sharp, x, y), "the gap at ({x}, {y})");
+    }
+
+    let mut p = Page::new();
+    let root = p.root;
+    p.stripes(root);
+    let o = p.add(
+        root,
+        NodeKind::Text {
+            content: "O".into(),
+            style: Box::new(ondin_core::TextStyle {
+                font_size: 60.0,
+                ..Default::default()
+            }),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: ondin_core::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        (20.0, 10.0),
+    );
+    // Clear type, so what shows in the ring is the glass alone.
+    p.apply(vec![Operation::SetFills {
+        id: o,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::TRANSPARENT).into(),
+            visible: true,
+        }]),
+    }]);
+    p.effects(o, vec![BLUR]);
+    let res = Resolved::rebuild(&p.doc);
+    let ring = ondin_core::text::outline(res.text_layout(o).expect("shaped"));
+    let middle = ondin_core::kurbo::Shape::bounding_box(&ring).center();
+    // The ring's left side, along the middle row: the first point inked.
+    let left = (0..200)
+        .map(|i| ondin_core::kurbo::Point::new(f64::from(i) * 0.5, middle.y))
+        .find(|q| ondin_core::kurbo::Shape::winding(&ring, *q) != 0)
+        .expect("the O's ring");
+    let device = |q: ondin_core::kurbo::Point| ((q.x + 20.0) as usize, (q.y + 10.0) as usize);
+    let px = p.render();
+    let (cx, cy) = device(middle);
+    assert_eq!(at(&px, cx, cy), at(&sharp, cx, cy), "the O's counter");
+    let (rx, ry) = device(left + ondin_core::kurbo::Vec2::new(2.0, 0.0));
+    assert_ne!(at(&px, rx, ry), at(&sharp, rx, ry), "the O's ring");
+}
+
+/// A glass along a clipping frame's edge blurs only what the frame holds: a
+/// white frame exported alone keeps a faint white bar at its top edge opaque and
+/// white, where reading past the edge blurred in transparency.
+///
+/// flip: `paint_backdrop` ignoring `clip_box` → fails at "the edge".
+#[test]
+fn a_glass_along_a_frames_edge_reads_only_the_frame() {
+    let mut p = Page::new();
+    let root = p.root;
+    let frame = p.add(
+        root,
+        NodeKind::Artboard {
+            size: Size::new(80.0, 80.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        (10.0, 10.0),
+    );
+    p.apply(vec![Operation::SetFills {
+        id: frame,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::WHITE).into(),
+            visible: true,
+        }]),
+    }]);
+    let bar = p.rect(
+        frame,
+        (0.0, 0.0, 80.0, 20.0),
+        Some(Color::from_rgba8(255, 255, 255, 40)),
+    );
+    p.effects(bar, vec![EffectKind::BackgroundBlur { radius: 16.0 }]);
+    let px = p.render_of(&[frame]);
+    for (x, y) in [(50, 10), (50, 13), (11, 20), (50, 20)] {
+        assert_eq!(
+            at(&px, x, y),
+            [255, 255, 255, 255],
+            "the edge at ({x}, {y})"
+        );
+    }
+}

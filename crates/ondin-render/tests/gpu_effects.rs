@@ -2017,6 +2017,80 @@ fn a_glass_over_the_bare_canvas_shows_the_ground() {
     }
 }
 
+/// On the canvas, a glass along a clipping frame's edge blurs only what the frame
+/// holds, never the ground past the edge: a white frame on a dark ground keeps a
+/// faint white bar white at its top edge.
+///
+/// flip: `paint_backdrop` ignoring `clip_box` → fails at "the edge", tinted by the
+/// ground.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_glass_along_a_frames_edge_reads_no_ground() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let mut ids = IdSource::new(3);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (frame, bar) = (ids.mint(), ids.mint());
+    let fill = |id, c: Color| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(c).into(),
+            visible: true,
+        }]),
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(80.0, 80.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((10.0, 10.0))),
+            name: None,
+        },
+        fill(frame, Color::WHITE),
+        Operation::CreateNode {
+            id: bar,
+            parent: frame,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 20.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        fill(bar, Color::from_rgba8(255, 255, 255, 40)),
+        Operation::SetEffects {
+            id: bar,
+            effects: keyed_by_position([Effect::new(EffectKind::BackgroundBlur { radius: 16.0 })]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let px = render_gpu_on(
+        &mut g,
+        &doc,
+        &res,
+        &ImageStore::default(),
+        &viewport(),
+        Color::from_rgba8(30, 30, 30, 255),
+    );
+    for (x, y) in [(50, 10), (50, 13), (11, 20)] {
+        let got = at(&px, x, y);
+        assert!(
+            [got.0, got.1, got.2].iter().all(|c| *c >= 253),
+            "the edge at ({x}, {y}): {got:?}"
+        );
+    }
+}
+
 /// A blended layer loose on the page mixes with the page's artwork, never the
 /// canvas's ground: over nothing it draws its own colour, as every export does.
 ///

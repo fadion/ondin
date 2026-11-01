@@ -88,11 +88,11 @@ and the slice's `Shift+F`, are read after the letters under `plain && m.shift`.
 
 | Key | Tool | |
 |---|---|---|
-| `V` | Select | ✅ Figma, Sketch, Illustrator |
+| `V` | Select with a box marquee — turns the lasso off, being the pointer member of the rail's Select slot | ✅ Figma, Sketch, Illustrator |
 | `H` | Hand | ✅ Figma |
 | `K` | Scale | ✅ Figma |
 | `F` | Frame | ✅ Figma (also `A`; taken here) |
-| `Shift+F` | Slice | ✅ on the frame's letter, as it sits beside the frame on the rail |
+| `Shift+F` | Slice | ✅ on the frame's letter, as it shares the frame's slot on the rail |
 | `R` | Rect | ✅ Figma, Sketch |
 | `O` | Ellipse | ✅ **primary** — Figma, Sketch |
 | `E` | Ellipse | ✅ alias; the rail tooltip shows `O` only |
@@ -104,7 +104,7 @@ and the slice's `Shift+F`, are read after the letters under `plain && m.shift`.
 | `A` | Node | ✅ Illustrator/Sketch direct-selection letter (Figma's `A` is Frame). **No lock check in the key's arm, and none wanted**: a locked layer can join the selection from the layers panel, so the refusal is in `canvas::edited_path` — the tool arms and finds no subject, as `A` over a rectangle does (§15 D321) |
 | `T` | Text — **click** plants an auto-width node, **drag** draws a fixed box | ✅ (§15 D170) |
 | `I` | Eyedropper — one shot; a second `I` hands back to the tool it was armed from (`choose_tool`) | ✅ Figma |
-| `Q` | Lasso select — not a tool: toggles the marquee between box and loop for Select and Node (`ViewSwitch::Lasso`) | ✅ no tool held the letter |
+| `Q` | Lasso select — not a tool: toggles the marquee between box and loop for Select and Node (`ViewSwitch::Lasso`); under a tool that draws no marquee (anything but Select, Scale and Node) it also arms Select | ✅ no tool held the letter |
 
 **`C` is unbound** (§15 D268): Crop's letter until image editing replaced the crop tool, which has
 neither rail slot nor letter. It is the letter a comment tool would want.
@@ -587,7 +587,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
   mode, the marquee's shape (lasso) and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows, labelled by one `label()` but for the View menu's
   short *Panels ▸* list, so a row and the state it drives stay in step while the chord is a second
-  caller that never sees the row. The lasso has no row: `Q` and the palette carry it.
+  caller that never sees the row. The lasso has no row: `Q`, the palette and the rail's Select slot carry it.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,
   because they address the buffer. A chord that reaches the *document* is the one that wants an
   `Action`: all five text-styling chords are `Action::TextStyle`. The arrows are the seam.

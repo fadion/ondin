@@ -121,7 +121,7 @@ ordinary stroked `Path` the node tool edits like a pen path.
 ## The path bar
 
 While a path's points are edited (`canvas::edited_path`), a short rail floats beside the tool rail,
-centred on its Pen button and free to overlap the ruler (`crate::path_bar`). It holds the tool's verbs:
+centred on its Pen slot (`OndinApp::pen_button`, whichever of Pen and Pencil it shows) and free to overlap the ruler (`crate::path_bar`). It holds the tool's verbs:
 select points (`A`) and the pen bias (`P`); *Make corner*, *Make smooth* and *Join*, dimmed until the
 point selection allows them; *Reverse* (`Shift+D`); *Simplify*; *Offset*; and *Done* (`Enter`). It shows
 nothing the canvas does not already offer except *Simplify* and *Offset*.

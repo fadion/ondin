@@ -80,7 +80,9 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   inside it.
 - **Lasso.** `Q` (`ViewSwitch::Lasso`, `OndinApp::lasso`, remembered in `prefs.view`, off by default)
   makes the marquee a loop; it is a shape for the marquee, not a tool, so it starts wherever a
-  marquee would, in Select and the node tool, with the same candidates and modes. The loop is
+  marquee would, in Select and the node tool, with the same candidates and modes. A `Tool` would
+  need a second switch for the node tool's point marquee. Under a tool that draws no marquee
+  (anything but Select, Scale and Node) `Q` also arms Select; `V` arms Select with the lasso off. The loop is
   `Drag::Marquee::lasso`, world points from the press, one taken each time the pointer has moved
   2 screen pt (`OndinApp::extend_lasso`). A layer is taken when its **shape** touches the loop's
   area (`ondin_core::touches_loop`, curves flattened at half a screen pt): what a click hits, so a
@@ -88,11 +90,11 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   the anchors inside the loop (`ondin_core::inside_loop`); a handle is never taken on its own.
 - **Lasso chrome** (`OndinApp::draw_lasso`): a 1pt selection-blue line over a 6% selection-blue fill,
   closed by a dashed (3/3) straight run back to the start. The fill is non-zero scanline spans
-  (`lasso::fill_spans`), since egui fills only convex paths. While on, the Select rail button wears
-  `icon::LASSO` and its tooltip reads *Select, lasso (V · Q for box)*; toggling
-  says *Lasso select · Q for a box* or *Box select · Q for a lasso*. The switch is a palette row
-  and a shortcut-sheet row under Tools, and is remembered in `prefs.view.lasso`; it is on no menu,
-  being a tool setting rather than a view.
+  (`lasso::fill_spans`), since egui fills only convex paths. While on, the rail's Select slot shows
+  its Lasso member (`icon::LASSO`, tooltip *Lasso select (Q)*; `tools.md`, *The tool rail*); toggling
+  says *Lasso select · Q for a box* or *Box select · Q for a lasso*. The switch is a palette row,
+  a shortcut-sheet row under Tools and the Select slot's second member, and is remembered in
+  `prefs.view.lasso`; it is on no menu, being a tool setting rather than a view.
 
 ### Double-click (`canvas::double_click_pick`)
 

@@ -49,7 +49,7 @@ pub enum Tool {
     /// Edits the *points* of a path rather than the path as a layer — anchors,
     /// their handles, add and remove.
     ///
-    /// A tool, not a mode: it has a rail button, a letter and canvas chrome. The pen is
+    /// A tool, not a mode: it has a letter and canvas chrome. The pen is
     /// reachable from inside it (`P` arms `app::pen_bias`), which reroutes no key.
     Node,
     Text,

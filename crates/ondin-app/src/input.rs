@@ -1416,7 +1416,7 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             }
         }
         // The common pencil chord, since `P` is the pen; the slice sits on the
-        // frame's letter, as it sits beside the frame on the rail.
+        // frame's letter, as it shares the frame's slot on the rail.
         if plain && m.shift && i.key_pressed(egui::Key::P) {
             out.push(Action::ChooseTool(Tool::Pencil));
         }

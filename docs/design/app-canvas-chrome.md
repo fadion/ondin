@@ -209,8 +209,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
   Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
   flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips
-  the area `OndinApp::flyout_id` names. The marquee's *Lasso select* is on no menu: `Q`, the palette
-  and the cheatsheet carry it (`app-selection.md`).
+  the area `OndinApp::flyout_id` names. The marquee's *Lasso select* is on no menu: `Q`, the palette,
+  the cheatsheet and the rail's Select slot carry it (`app-selection.md`).
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
@@ -237,7 +237,8 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
   *Show history*, *Show minimap*, *Lasso select*, outline view and focus mode; a launch never opens in focus mode
-  or outline view. Private mode is a preference of its own (`Prefs::private`), below.
+  or outline view. `prefs.view` also keeps what the rail's Frame and Pen slots last showed
+  (`rail_slice`, `rail_pencil`; `tools.md`, *The tool rail*). Private mode is a preference of its own (`Prefs::private`), below.
 
 ### Settings
 

@@ -494,6 +494,9 @@ pub mod icon {
     pub const PEN_NIB: &str = "\u{e3ac}";
     pub const BEZIER_CURVE: &str = "\u{eb00}"; // the node tool: a curve with its handles
     pub const EYEDROPPER: &str = "\u{e568}";
+    /// Unused: a comment tool is a non-goal. Kept because dropping it means
+    /// rebuilding the font (`assets/icons/build_font.py`).
+    #[allow(dead_code)]
     pub const CHAT: &str = "\u{e15c}";
     pub const ALIGN_LEFT: &str = "\u{e50e}";
     pub const ALIGN_CENTER_HORIZONTAL: &str = "\u{e50a}";

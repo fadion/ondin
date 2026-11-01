@@ -913,6 +913,8 @@ pub struct OndinApp {
     /// The marquee draws a loop rather than a box (`crate::lasso`), for Select and
     /// the Node tool alike. Remembered with the view switches.
     pub(crate) lasso: bool,
+    /// The tool rail's grouped slots: what each shows, and the open members' row.
+    pub(crate) rail: crate::rail::Rail,
 }
 
 /// Which top-bar dropdown is showing.
@@ -1459,6 +1461,11 @@ impl OndinApp {
             snap_grid: view.snap_grid,
             snap_baselines: view.snap_baselines,
             lasso: view.lasso,
+            rail: crate::rail::Rail {
+                slice: view.rail_slice,
+                pencil: view.rail_pencil,
+                flyout: None,
+            },
             clones: None,
             entered_group: None,
             gesture_cancelled: false,
@@ -2127,6 +2134,8 @@ impl OndinApp {
             Action::Restack(mv) => self.restack(mv),
             // Reads the layer selection when no points are picked.
             Action::ReverseSubpaths => self.reverse_subpaths(),
+            // `V` is the pointer, the box marquee's member of its rail slot.
+            Action::ChooseTool(Tool::Select) => self.rail_pick(crate::rail::Member::Pointer),
             Action::ChooseTool(tool) => self.choose_tool(tool),
             Action::ZoomIn => {
                 self.session
@@ -2634,6 +2643,7 @@ impl OndinApp {
             }
             _ => tool,
         };
+        self.remember_rail_pick(tool);
         self.dropper_pick = None;
         self.finish_text_first();
         // Abandons the drag in flight, its Alt copy and its preview — not `clear_preview`,
@@ -7196,9 +7206,10 @@ impl OndinApp {
             || self.batch_rename.is_some()
     }
 
-    /// Write the View and Snap switches to `prefs` when one has changed, so the next
-    /// launch opens on them. Once a frame rather than in [`Self::set_view_switch`]: a
-    /// guide pulled out of a ruler turns guides on, and a door shows the layers panel.
+    /// Write the View and Snap switches and the rail's slots to `prefs` when one has
+    /// changed, so the next launch opens on them. Once a frame rather than in
+    /// [`Self::set_view_switch`]: a guide pulled out of a ruler turns guides on, and a
+    /// door shows the layers panel.
     fn remember_view_switches(&mut self) {
         let now = crate::prefs::ViewPrefs {
             rulers: self.show_rulers,
@@ -7216,6 +7227,8 @@ impl OndinApp {
             snap_grid: self.snap_grid,
             snap_baselines: self.snap_baselines,
             lasso: self.lasso,
+            rail_slice: self.rail.slice,
+            rail_pencil: self.rail.pencil,
         };
         if now != self.prefs.view {
             self.prefs.view = now;
@@ -7292,6 +7305,10 @@ impl OndinApp {
             ViewSwitch::SnapBaselines => self.snap_baselines = on,
             ViewSwitch::Lasso => {
                 self.lasso = on;
+                // The marquee's shape is moot under a tool that draws no marquee.
+                if !matches!(self.tool, Tool::Select | Tool::Scale | Tool::Node) {
+                    self.choose_tool(Tool::Select);
+                }
                 self.session.info(if on {
                     "Lasso select · Q for a box"
                 } else {
@@ -7530,65 +7547,51 @@ impl OndinApp {
 
     /// The 46px vertical tool rail.
     fn tool_rail(&mut self, ui: &mut egui::Ui) {
+        use crate::rail::Group;
         enum E {
             Sep,
-            Btn(&'static str, Option<Tool>, &'static str),
+            Btn(&'static str, Tool, &'static str),
+            /// A slot standing for several tools (`crate::rail`).
+            Group(Group),
         }
-        // The lasso glyph while the marquee is a loop, so the mode never hides.
-        let select = if self.lasso {
-            E::Btn(
-                icon::LASSO,
-                Some(Tool::Select),
-                "Select, lasso (V · Q for box)",
-            )
-        } else {
-            E::Btn(icon::CURSOR, Some(Tool::Select), "Select (V)")
-        };
         let rail = [
-            select,
+            E::Group(Group::Select),
             E::Btn(
                 icon::HAND,
-                Some(Tool::Hand),
+                Tool::Hand,
                 "Hand — drag to pan (H; or hold space with any tool)",
             ),
             // With Select and Hand: it manipulates rather than draws.
             E::Btn(
                 icon::RESIZE,
-                Some(Tool::Scale),
+                Tool::Scale,
                 "Scale — drag a handle to scale strokes, radii and type with the box (K)",
             ),
             E::Sep,
-            E::Btn(icon::FRAME, Some(Tool::Frame), "Frame (F)"),
-            E::Btn(
-                icon::KNIFE,
-                Some(Tool::Slice),
-                "Slice — drag out a region to export (Shift+F)",
-            ),
-            E::Btn(icon::SQUARE, Some(Tool::Rect), "Rectangle (R)"),
-            E::Btn(icon::CIRCLE, Some(Tool::Ellipse), "Ellipse (E)"),
-            E::Btn(icon::TRIANGLE, Some(Tool::Polygon), "Polygon (G)"),
-            E::Btn(icon::STAR, Some(Tool::Star), "Star (S)"),
-            E::Btn(icon::LINE_SEGMENT, Some(Tool::Line), "Line (L)"),
+            E::Group(Group::Frame),
+            E::Btn(icon::SQUARE, Tool::Rect, "Rectangle (R)"),
+            E::Btn(icon::CIRCLE, Tool::Ellipse, "Ellipse (O)"),
+            E::Btn(icon::TRIANGLE, Tool::Polygon, "Polygon (G)"),
+            E::Btn(icon::STAR, Tool::Star, "Star (S)"),
+            E::Btn(icon::LINE_SEGMENT, Tool::Line, "Line (L)"),
             E::Sep,
-            E::Btn(icon::PEN_NIB, Some(Tool::Pen), "Pen (P)"),
-            E::Btn(icon::PENCIL_SIMPLE, Some(Tool::Pencil), "Pencil (Shift+P)"),
+            E::Group(Group::Pen),
             // No points button: like `Tool::ImageEdit`, `Tool::Node` is entered on a
             // subject (double-click, `Enter`, the context menu), and the path bar is
             // its chrome.
-            E::Btn(icon::TEXT_T, Some(Tool::Text), "Text (T)"),
+            E::Btn(icon::TEXT_T, Tool::Text, "Text (T)"),
             E::Btn(
                 icon::IMAGE,
-                Some(Tool::Image),
+                Tool::Image,
                 "Place image — pick files, then click to place each (Ctrl+Shift+K)",
             ),
             // No crop button: `Tool::ImageEdit` needs a subject (double-click or `Enter`).
             E::Sep,
             E::Btn(
                 icon::EYEDROPPER,
-                Some(Tool::Eyedropper),
+                Tool::Eyedropper,
                 "Eyedropper — pick a colour onto the selection (I)",
             ),
-            E::Btn(icon::CHAT, None, "Comment (soon)"),
         ];
         egui::Panel::left("rail")
             .exact_size(46.0)
@@ -7601,24 +7604,22 @@ impl OndinApp {
                         match e {
                             E::Sep => crate::path_bar::separator(ui),
                             E::Btn(glyph, tool, tip) => {
-                                // With the pen armed inside a node edit, Pen is lit.
-                                let active = tool.is_some_and(|t| {
-                                    t == self.tool || (self.pen_bias && t == Tool::Pen)
-                                });
-                                let enabled = tool.is_some();
-                                let resp = icon_button(ui, glyph, 30.0, 20.0, active, enabled)
+                                let active = *tool == self.tool;
+                                let resp = icon_button(ui, glyph, 30.0, 20.0, active, true)
                                     .on_hover_text(*tip);
-                                // The path bar centres itself on the Pen button.
-                                if *tool == Some(Tool::Pen) {
-                                    self.pen_button = resp.rect;
-                                }
                                 if resp.clicked() {
                                     match tool {
                                         // Arming the image tool is picking files.
-                                        Some(Tool::Image) => self.place_image_action(),
-                                        Some(t) => self.choose_tool(*t),
-                                        None => self.session.info(*tip),
+                                        Tool::Image => self.place_image_action(),
+                                        t => self.choose_tool(*t),
                                     }
+                                }
+                            }
+                            E::Group(group) => {
+                                let resp = self.rail_group(ui, *group);
+                                // The path bar centres itself on the pen's slot.
+                                if *group == Group::Pen {
+                                    self.pen_button = resp.rect;
                                 }
                             }
                         }
@@ -7643,6 +7644,7 @@ impl OndinApp {
                     }
                 });
             });
+        self.rail_flyout(ui.ctx());
     }
 
     /// The layers panel: header + the node tree, resizable within
@@ -9375,7 +9377,7 @@ mod image_edit_lock_tests {
         );
     }
 
-    /// `A` and the rail button arm `Tool::Node` without `Enter`'s guard, so the lock is
+    /// `A` arms `Tool::Node` without `Enter`'s guard, so the lock is
     /// asserted on `edited_path` (the one query every reader uses).
     /// flip: remove the guard from `edited_path` → fails at the locked `None` assertion
     #[test]
@@ -9399,8 +9401,8 @@ mod image_edit_lock_tests {
         assert_eq!(
             shut.edited_path(),
             None,
-            "a locked path is not a subject, however the tool was armed — `A` and the \
-             rail button do not go through `Enter`'s guard"
+            "a locked path is not a subject, however the tool was armed — `A` does not \
+             go through `Enter`'s guard"
         );
     }
 

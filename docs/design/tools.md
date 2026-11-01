@@ -1,6 +1,6 @@
 # Tools and canvas interaction
 
-The v1 tool set and how canvas gestures behave: the wheel, cancelling, context menus and their
+The v1 tool set, the tool rail and how canvas gestures behave: the wheel, cancelling, context menus and their
 chrome, selection chrome, multi-selection transforms, the Scale tool, skew, snapping during
 resize, drop outlines and the transform origin (pivot).
 
@@ -27,6 +27,33 @@ resize, drop outlines and the transform origin (pivot).
 - **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
 - **Paint editing**: stacked fills and strokes (§6.3), solid or linear, radial or angular gradient, in a detached picker with the gradient's handles on the canvas; stroke options, per-corner radius and corner smoothing, polygon sides, star points and ratio, a polygon's or star's radius, an ellipse's start, sweep and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
+
+### The tool rail (`rail.rs`)
+
+`OndinApp::tool_rail` is a 46pt left panel: the Select slot, Hand, Scale · the Frame slot and the
+five shapes · the Pen slot, Text, Place image · the eyedropper; at its foot the styles-and-variables
+and insert-picker buttons. The node tool and image editing have no slot: each is entered on a
+subject. The five shape tools keep a slot each while the rail has room for them.
+
+- **Grouped slots.** Three slots each stand for two tools (`rail::Group::members`): Select is
+  Pointer and Lasso, Frame is Frame and Slice, Pen is Pen and Pencil. A slot shows the armed tool
+  when it is a member, else the member last picked (`rail_shown`), and carries a small `text::dim()`
+  triangle in its bottom-right corner (`paint_more_mark`).
+- **Memory.** The Select slot's memory is the lasso switch itself (`app-selection.md`); Pointer
+  and Lasso arm Select with the switch off and on. The other two remember through `Rail::slice`
+  and `Rail::pencil`, set in `choose_tool` (`remember_rail_pick`) however the tool was armed —
+  slot, letter or palette — and kept in `prefs.view` (`rail_slice`, `rail_pencil`). The pen bias
+  inside a node edit shows Pen.
+- **Gestures** (`rail_group`, `rail_flyout`). A click arms what the slot shows. A press held
+  `HOLD_S` (0.45 s) or a right-click opens the members as a row of icon buttons beside the slot
+  (`ui::flyout_place`, a `ui::menu_frame` card, area `"rail-flyout"`), the shown member lit, each
+  with its name and key as a tooltip. A click in the row picks. At the end of the hold that opened
+  it, letting go over a member picks it (Photoshop's press-drag-release), and while the press is
+  dragged the member under the pointer is lit instead; letting go on the slot leaves the row open
+  and picks nothing. Escape, or a press anywhere but the row and its slot, closes it. The slot
+  shows no tooltip while pressed or while its row is open.
+- **The hold is 0.45 s**, the long-press convention (Photoshop, macOS): a longer wait reads as
+  broken, and the right-click and press-drag-release are the fast ways in.
 
 ### The wheel
 
@@ -275,7 +302,7 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
 
 ### The Slice tool (`slice.rs`)
 
-`Tool::Slice` (`Shift+F`, glyph `knife`, the rail button after Frame, crosshair cursor) cuts slices
+`Tool::Slice` (`Shift+F`, glyph `knife`, the Frame slot's second member, crosshair cursor) cuts slices
 (§5.3), the boxes that export a region of their page (§7).
 
 - **A drag cuts one** through the ordinary create gesture (`app-create-gestures.md`): one *Add slice*
@@ -414,6 +441,7 @@ Canvas skew and Alt-resize deliberately do not, each having its own fixed point 
 ## Traps
 
 - **Hidden is not disarmed.** `editing_in_place` hides the selection chrome but arms nothing off; `selection_handles`, `line_ends`, `grab_rail_handle` and `on_pivot` each refuse under `edited_gradient`, or a hidden handle takes the press from the gradient's (the pivot sits on a new radial's centre). `the_box_handles_step_aside` and `a_hidden_pivot_does_not_take_a_centre_s_press` pin the box handles and the pivot.
+- **The hold's release is not a pick.** egui reports the release that ends a hold as the slot's click; `rail_group`'s `ends_hold` guard keeps it from arming the shown member and closing the row. The row finds the member under a held drag from its own geometry, since the press belongs to the slot and no button in the row reads as hovered. `a_held_press_opens_the_row_and_a_release_over_a_member_picks_it` pins the guard, and its release over the lasso exercises the geometry.
 - **Same press, two consumers.** The cancel and the context menu share one press: `gesture_cancelled` must be read at the top of `canvas_context_menu`, before any branch selects.
 - **Dropdown keyboard focus.** A dropdown opened by clicking its head leaves `focused() == None`, so `egui_wants_keyboard_input` does not cover it.
 - **Popover flags outlive popovers.** Gate on `popover_heard`, not on the flags, or Escape is swallowed behind a popover nobody is drawing.

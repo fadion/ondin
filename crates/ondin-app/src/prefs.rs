@@ -40,7 +40,8 @@ pub struct ExportPreset {
     pub specs: Vec<ExportSpec>,
 }
 
-/// The View and Snap menus' switches as last set, so a launch opens on them.
+/// The View and Snap menus' switches and the tool rail's slots as last set, so a
+/// launch opens on them.
 /// Focus mode is not here: it is a mode a launch should never open in.
 ///
 /// Container-level `#[serde(default)]`, as on [`Prefs`]: a missing key takes
@@ -64,10 +65,15 @@ pub struct ViewPrefs {
     pub snap_baselines: bool,
     /// The marquee's shape: a lasso when on, a box when off.
     pub lasso: bool,
+    /// The tool rail's frame slot shows the slice tool, last picked there.
+    pub rail_slice: bool,
+    /// The tool rail's pen slot shows the pencil, last picked there.
+    pub rail_pencil: bool,
 }
 
 impl Default for ViewPrefs {
-    /// Every switch on but the guide lock, History, the minimap and the lasso.
+    /// Every switch on but the guide lock, History, the minimap and the lasso, and
+    /// the rail's slots on their first members.
     fn default() -> Self {
         Self {
             rulers: true,
@@ -85,6 +91,8 @@ impl Default for ViewPrefs {
             snap_grid: true,
             snap_baselines: true,
             lasso: false,
+            rail_slice: false,
+            rail_pencil: false,
         }
     }
 }

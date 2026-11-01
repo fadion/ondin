@@ -435,8 +435,8 @@ project dropdown, and the caret's list.
 - **Type controls in a text session** — the Type card is beside it.
 - **Show layers, Show history, Show minimap, Show toolbar, Focus mode, Private mode, Show messages** on the canvas menu —
   chrome-wide switches, in the top bar's View menu.
-- **Lasso select** on any menu — the marquee's shape is a tool setting, not a view; `Q` and the
-  palette carry it.
+- **Lasso select** on any menu — the marquee's shape is a tool setting, not a view; `Q`, the
+  palette and the rail's Select slot carry it.
 - **Collapse all / Expand all** — the layers panel header has the button.
 - **Guide colour and position** — the inspector, for a selected guide.
 - **Submenus** other than *Move to page ▸*'s list of pages, including *Copy as ▸* (the PNG scales

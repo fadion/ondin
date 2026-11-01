@@ -254,8 +254,11 @@ impl ScenePainter for GpuScenePainter<'_> {
             return;
         };
         let at = self.base * transform;
+        // A ClearType face's monochrome strikes would send its glyphs down vello's
+        // emoji path, which draws them blank (`outline_only`).
+        let stripped = crate::outline_only::outline_only(run.font);
         self.scene()
-            .draw_glyphs(run.font)
+            .draw_glyphs(stripped.as_ref().unwrap_or(run.font))
             .font_size(run.font_size)
             .normalized_coords(run.coords)
             .brush(&backend)

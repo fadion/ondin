@@ -19,6 +19,7 @@ pub mod effects;
 pub mod fx_gpu;
 pub mod gpu;
 pub mod images;
+mod outline_only;
 pub mod renderer;
 pub mod scene;
 

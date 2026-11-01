@@ -7438,7 +7438,7 @@ impl OndinApp {
     /// masked. Turning it on closes whatever is showing a real name to edit.
     pub(crate) fn set_private(&mut self, on: bool) {
         self.prefs.private = on;
-        self.prefs.save();
+        self.prefs.save_private();
         crate::private::set(on);
         if on {
             self.name_edit = None;

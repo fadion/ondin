@@ -1652,7 +1652,7 @@ fn filter_layers(fills: Vec<Fill>, strokes: Vec<ondin_core::Stroke>, brightness:
     filter_layers_underlined(fills, strokes, brightness, false)
 }
 
-/// [`filter_layers`], the type underlined in no colour of its own when asked.
+/// `filter_layers`, the type underlined in no colour of its own when asked.
 fn filter_layers_underlined(
     fills: Vec<Fill>,
     strokes: Vec<ondin_core::Stroke>,

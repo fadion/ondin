@@ -331,6 +331,7 @@ fn approximations(
             for line in ondin_core::text::export_lines(parts) {
                 for run in &line.runs {
                     if let Some(face) = &run.face
+                        && stands_in_for(&run.style.font_family, face)
                         && !ondin_core::text::is_family_available(&run.style.font_family)
                     {
                         note(&format!(
@@ -361,6 +362,18 @@ fn approximations(
         }
     }
     out
+}
+
+/// Whether `face` drew a run because `family` was missing: core's fallback or a
+/// stand-in of the family. A script's fallback draws characters the family lacks
+/// whether or not it is there, so it says nothing of the family; asking the engine
+/// instead answers wrong on an export worker, which holds only the faces a layout
+/// drew from.
+fn stands_in_for(family: &str, face: &str) -> bool {
+    face.eq_ignore_ascii_case(FALLBACK_FAMILY)
+        || ondin_core::fallback_fonts::stand_ins(family)
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case(face))
 }
 
 /// The nodes the SVG writes, in pre-order: a hidden layer is skipped with
@@ -398,6 +411,21 @@ fn fonts_used(res: &Resolved, shown: &[NodeId]) -> Vec<FontData> {
 mod tests {
     use super::*;
     use usvg::fontdb::{Database, Language, Source};
+
+    /// A run drawn in Inter or in the family's stand-in says the family was
+    /// missing; one drawn in a script's fallback does not.
+    ///
+    /// flip: `stands_in_for` answering true for any face → fails at "a script's
+    /// fallback".
+    #[test]
+    fn only_a_stand_in_or_inter_says_the_family_was_missing() {
+        assert!(stands_in_for("Montserrat", "Inter"), "core's fallback");
+        assert!(stands_in_for("Calibri", "Carlito"), "a stand-in");
+        assert!(
+            !stands_in_for("Montserrat", "Noto Sans JP"),
+            "a script's fallback"
+        );
+    }
 
     /// The glyph fallback reaches a face of the run's own family that has the
     /// character — one family's second subset file — and never another family's.

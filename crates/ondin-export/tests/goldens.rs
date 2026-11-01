@@ -517,6 +517,81 @@ fn golden_document() -> (Document, Resolved) {
     }]))
     .expect("the slice");
 
+    // Blend modes, arcs and a rounded clip: a Multiply leaf in a group set to an
+    // explicit Normal (not the group's Pass-through default), a ring sector and a
+    // wedge, and a clipping frame with corners whose child runs past them.
+    let (ring, wedge, card, inside) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+    let solid = |id, rgb: [u8; 3]| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255)).into(),
+            visible: true,
+        }]),
+    };
+    let arc = |start, sweep, ratio| NodeKind::Ellipse {
+        size: Size::new(50.0, 50.0),
+        arc: ondin_core::EllipseArc {
+            start,
+            sweep,
+            ratio,
+        },
+    };
+    doc.apply(&Transaction(vec![
+        Operation::SetBlend {
+            id: group,
+            blend: ondin_core::BlendMode::Normal,
+        },
+        Operation::SetBlend {
+            id: nested,
+            blend: ondin_core::BlendMode::Multiply,
+        },
+        Operation::CreateNode {
+            id: ring,
+            parent: artboard,
+            index: 9,
+            kind: arc(30.0, 270.0, 0.5),
+            transform: Some(Affine::translate((330.0, 240.0))),
+            name: Some("Ring".into()),
+        },
+        solid(ring, [200, 140, 30]),
+        Operation::CreateNode {
+            id: wedge,
+            parent: artboard,
+            index: 10,
+            kind: arc(0.0, 270.0, 0.0),
+            transform: Some(Affine::translate((310.0, 100.0))),
+            name: Some("Wedge".into()),
+        },
+        solid(wedge, [90, 60, 160]),
+        Operation::CreateNode {
+            id: card,
+            parent: artboard,
+            index: 11,
+            kind: NodeKind::Artboard {
+                size: Size::new(70.0, 55.0),
+                corner_radii: RoundedRectRadii::from_single_radius(12.0),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((140.0, 170.0))),
+            name: Some("Card".into()),
+        },
+        solid(card, [235, 235, 240]),
+        Operation::CreateNode {
+            id: inside,
+            parent: card,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(50.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((40.0, 30.0))),
+            name: None,
+        },
+        solid(inside, [230, 90, 40]),
+    ]))
+    .expect("blends, arcs and a rounded clip");
+
     let res = Resolved::rebuild(&doc);
     (doc, res)
 }

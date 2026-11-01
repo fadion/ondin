@@ -96,6 +96,7 @@
       "locked": false,
       "proportions_locked": false,
       "opacity": 1.0,
+      "blend": "Multiply",
       "clip": false,
       "mask": false,
       "mask_mode": "Shape",
@@ -463,6 +464,62 @@
       "strokes": []
     },
     {
+      "id": "601d:19",
+      "kind": "ellipse",
+      "name": "Ring",
+      "page": "601d:1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        330.0,
+        240.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        340.0,
+        250.0
+      ],
+      "world_bounds": [
+        340.0,
+        250.0,
+        390.0,
+        300.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Ellipse",
+        "width": 50.0,
+        "height": 50.0,
+        "arc": {
+          "start": 30.0,
+          "sweep": 270.0,
+          "ratio": 0.5
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#c88c1e",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
       "id": "601d:2",
       "kind": "artboard",
       "name": "Board",
@@ -478,6 +535,9 @@
         "601d:8",
         "601d:9",
         "601d:11",
+        "601d:19",
+        "601d:20",
+        "601d:21",
         "601d:14"
       ],
       "artboard": null,
@@ -519,6 +579,178 @@
         {
           "type": "Solid",
           "color": "#fafafc",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:20",
+      "kind": "ellipse",
+      "name": "Wedge",
+      "page": "601d:1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        310.0,
+        100.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        320.0,
+        110.0
+      ],
+      "world_bounds": [
+        320.0,
+        110.0,
+        370.0,
+        160.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Ellipse",
+        "width": 50.0,
+        "height": 50.0,
+        "arc": {
+          "start": 0.0,
+          "sweep": 270.0,
+          "ratio": 0.0
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#5a3ca0",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:21",
+      "kind": "artboard",
+      "name": "Card",
+      "page": "601d:1",
+      "parent": "601d:2",
+      "children": [
+        "601d:22"
+      ],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        140.0,
+        170.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        150.0,
+        180.0
+      ],
+      "world_bounds": [
+        150.0,
+        180.0,
+        220.0,
+        235.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": true,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Artboard",
+        "width": 70.0,
+        "height": 55.0,
+        "corner_radii": {
+          "top_left": 12.0,
+          "top_right": 12.0,
+          "bottom_right": 12.0,
+          "bottom_left": 12.0
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#ebebf0",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:22",
+      "kind": "rect",
+      "name": "Rectangle 1",
+      "page": "601d:1",
+      "parent": "601d:21",
+      "children": [],
+      "artboard": "601d:21",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        40.0,
+        30.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        190.0,
+        210.0
+      ],
+      "world_bounds": [
+        190.0,
+        210.0,
+        240.0,
+        250.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Rect",
+        "width": 50.0,
+        "height": 40.0,
+        "corner_radii": {
+          "top_left": 0.0,
+          "top_right": 0.0,
+          "bottom_right": 0.0,
+          "bottom_left": 0.0
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#e65a28",
           "alpha": 1.0
         }
       ],
@@ -958,6 +1190,7 @@
       "locked": false,
       "proportions_locked": false,
       "opacity": 0.6,
+      "blend": "Normal",
       "clip": false,
       "mask": false,
       "mask_mode": "Shape",

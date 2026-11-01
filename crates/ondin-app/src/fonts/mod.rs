@@ -152,6 +152,19 @@ const POPULAR: &[&str] = &[
     "Cabin",
 ];
 
+/// Whether `family` is the one core bundles, Inter: it covers its scripts and leads
+/// every stack, so neither its web file nor its subset files would ever draw.
+fn bundled(family: &str) -> bool {
+    family.eq_ignore_ascii_case("Inter")
+}
+
+/// How long after a fallback's files all failed to download it is chosen again:
+/// long enough that an offline machine does not loop on instant failures.
+#[cfg(not(test))]
+const FALLBACK_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const FALLBACK_RETRY: std::time::Duration = std::time::Duration::ZERO;
+
 /// How long a written `catalog.json` is trusted before the network is asked for a
 /// fresh one. The gate is in [`spawn_catalog`]; Google adds families monthly.
 const CATALOG_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
@@ -419,6 +432,9 @@ struct FamilyState {
     owners: Vec<String>,
     /// Loaded to draw a script other families lack ([`FontService::ensure_fallbacks`]).
     fallback: bool,
+    /// The key of the first face dispatched, the regular upright (the face lists put
+    /// it first): the one a fallback hands the UI, whichever face lands first.
+    primary: Option<String>,
 }
 
 /// The picker's memoized filter result: which family indices matched, for what
@@ -535,6 +551,9 @@ pub struct FontService {
     subsets: BTreeSet<Subset>,
     /// The family chosen to draw each subset Inter lacks, once one is on its way.
     fallbacks: HashMap<Subset, String>,
+    /// When a fallback none of whose files could be fetched is chosen again, by
+    /// [`Self::poll`] itself: an edit within the same scripts asks for nothing.
+    fallback_retry: Option<std::time::Instant>,
 }
 
 impl FontService {
@@ -648,6 +667,7 @@ impl FontService {
             rescanned_at: None,
             subsets: BTreeSet::new(),
             fallbacks: HashMap::new(),
+            fallback_retry: None,
         }
     }
 
@@ -705,6 +725,7 @@ impl FontService {
             rescanned_at: None,
             subsets: BTreeSet::new(),
             fallbacks: HashMap::new(),
+            fallback_retry: None,
         }
     }
 
@@ -874,7 +895,7 @@ impl FontService {
     /// it has in its own files.
     fn ensure_subsets(&mut self, family: &str) {
         let family = self.spelled(family);
-        if !self.web_fonts || self.system.contains(&family) {
+        if !self.web_fonts || self.system.contains(&family) || bundled(&family) {
             return;
         }
         let Some(entry) = self.catalog.get(&family).cloned() else {
@@ -1171,6 +1192,9 @@ impl FontService {
 
     fn ensure(&mut self, family: &str, want: Want, lane: Lane) {
         let family = &self.spelled(family);
+        if bundled(family) {
+            return;
+        }
         let specs = self.faces_of(family, want);
         self.dispatch(family, specs, want, lane);
     }
@@ -1193,6 +1217,9 @@ impl FontService {
         state.lane = state.lane.min(lane);
         if specs.is_empty() {
             return;
+        }
+        if state.primary.is_none() {
+            state.primary = Some(specs[0].key.clone());
         }
         state.outstanding += specs.len();
 
@@ -1240,6 +1267,13 @@ impl FontService {
     pub fn poll(&mut self) -> FontPoll {
         let mut out = FontPoll::default();
         self.clock += 1;
+        if self
+            .fallback_retry
+            .is_some_and(|at| std::time::Instant::now() >= at)
+        {
+            self.fallback_retry = None;
+            self.ensure_fallbacks();
+        }
 
         if let Some(rx) = &self.system_rx
             && let Ok(scan) = rx.try_recv()
@@ -1310,7 +1344,7 @@ impl FontService {
                     let for_ui = self
                         .state
                         .get(&family)
-                        .is_some_and(|s| s.fallback)
+                        .is_some_and(|s| s.fallback && s.primary.as_ref() == Some(&key))
                         .then(|| bytes.clone());
                     let registered = if alias {
                         ondin_core::text::register_fonts_as(bytes, &family)
@@ -1361,6 +1395,8 @@ impl FontService {
                     if abandon {
                         self.fallbacks
                             .retain(|s, f| *f != family && subset_alias(f, *s) != family);
+                        self.fallback_retry
+                            .get_or_insert(std::time::Instant::now() + FALLBACK_RETRY);
                     }
                     if variable {
                         // The variable file is the preferred form: a family whose file
@@ -2710,11 +2746,20 @@ mod tests {
         );
         assert!(service.families.len() > 500, "the picker has the library");
 
-        let family = "Roboto";
-        assert!(
-            service.catalog.contains_key(family),
-            "Roboto is in the Google catalog"
-        );
+        // A family this machine does not have installed: an installed one is drawn
+        // from its system files, which the wait below would take for the web's.
+        for _ in 0..600 {
+            if service.system_rx.is_none() {
+                break;
+            }
+            service.poll();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(service.system_rx.is_none(), "the system scan landed");
+        let family = ["Roboto", "Figtree", "Manrope", "Outfit", "Sora", "Onest"]
+            .into_iter()
+            .find(|f| service.catalog.contains_key(*f) && !service.system.contains(*f))
+            .expect("a catalog family that is not installed here");
         service.ensure_loaded(family);
         assert!(service.is_loading(family), "the field can say so");
 
@@ -3606,10 +3651,57 @@ mod tests {
         );
     }
 
-    /// A fallback face that lands is handed on for the UI's fonts; any other face
-    /// is not.
+    /// Text in the bundled Inter fetches nothing, neither its web file nor a
+    /// subset's: the bundled faces draw it.
+    /// flip: `ensure_subsets` without its `bundled` test → fails at "no subset file".
+    #[test]
+    fn the_bundled_family_downloads_nothing() {
+        let mut svc = settled_with(&["Inter"]);
+        svc.catalog.get_mut("Inter").unwrap().subsets = vec!["latin".into(), "cyrillic".into()];
+        svc.set_document_subsets([Subset::Cyrillic].into());
+        svc.ensure_loaded("Inter");
+        let alias = subset_alias("Inter", Subset::Cyrillic);
+        assert!(
+            svc.state.get(&alias).is_none_or(|s| s.outstanding == 0),
+            "no subset file"
+        );
+        assert_eq!(svc.state["Inter"].outstanding, 0, "no web file");
+    }
+
+    /// A fallback whose download failed is chosen again by a later poll on its own,
+    /// with no edit to ask for it.
+    /// flip: `poll` without its `fallback_retry` arm → fails at "asked again".
+    #[test]
+    fn a_failed_fallback_is_retried_without_an_edit() {
+        let (tx, rx) = channel();
+        let mut svc = FontService::inert();
+        svc.msg_rx = rx;
+        svc.settle_for_test();
+        svc.catalog
+            .insert("Noto Sans JP".into(), noto("Noto Sans JP", &["japanese"]));
+        svc.set_document_subsets([Subset::Japanese].into());
+        svc.ensure_fallbacks();
+        let alias = subset_alias("Noto Sans JP", Subset::Japanese);
+        for weight in [400, 700] {
+            tx.send(FontMsg::Failed {
+                family: alias.clone(),
+                key: format!("noto-sans-jp-japanese-{weight}-normal.ttf"),
+                variable: false,
+                reason: FaceFailure::Fetch,
+            })
+            .expect("the test owns the channel");
+        }
+        svc.poll();
+        assert_eq!(svc.state[&alias].outstanding, 0, "the fixture: abandoned");
+        svc.poll();
+        assert_eq!(svc.state[&alias].outstanding, 2, "asked again");
+    }
+
+    /// A fallback's regular upright face is handed on for the UI's fonts whichever
+    /// face lands first; any other face is not.
     ///
-    /// flip: `poll` not passing the fallback's bytes on → fails at "the fallback".
+    /// flip: `poll` not passing the fallback's bytes on → fails at "the fallback";
+    /// without its `primary` test → fails at "not the bold".
     #[test]
     fn only_a_fallback_face_is_handed_to_the_ui() {
         let (tx, rx) = channel();
@@ -3620,19 +3712,23 @@ mod tests {
         svc.set_document_subsets([Subset::Japanese].into());
         svc.ensure_fallbacks();
         let alias = subset_alias("Noto Sans JP", Subset::Japanese);
-        let face = |family: &str, alias: bool| FontMsg::Face {
+        let face = |family: &str, key: &str| FontMsg::Face {
             family: family.into(),
-            key: format!("{family}-key"),
+            key: key.into(),
             bytes: ondin_core::text::bundled_inter()[1].to_vec(),
-            alias,
+            alias: true,
         };
-        tx.send(face(&alias, true))
+        // The bold lands first; only the regular upright is the UI's.
+        tx.send(face(&alias, "noto-sans-jp-japanese-700-normal.ttf"))
+            .expect("the test owns the channel");
+        assert!(svc.poll().ui_fallbacks.is_empty(), "not the bold");
+        tx.send(face(&alias, "noto-sans-jp-japanese-400-normal.ttf"))
             .expect("the test owns the channel");
         let poll = svc.poll();
         assert_eq!(poll.ui_fallbacks.len(), 1, "the fallback");
         assert_eq!(poll.ui_fallbacks[0].0, alias.to_lowercase());
 
-        tx.send(face("Roboto", true))
+        tx.send(face("Roboto", "roboto-key"))
             .expect("the test owns the channel");
         assert!(svc.poll().ui_fallbacks.is_empty(), "a family's own face");
     }

@@ -14,13 +14,13 @@ and stays the same across clones and host renames. A reinstall gives a new name.
 
 ```bash
 # Measure and compare with this machine's baseline (about a minute):
-cargo test -p ondin-render --release --test perf_suite -- --ignored --nocapture measure
+ONDIN_PERF=1 cargo test -p ondin-render --release --test perf_suite -- --ignored --nocapture measure
 
 # The same, and write the results into baselines/<machine>.json:
-ONDIN_PERF_RECORD=1 cargo test -p ondin-render --release --test perf_suite -- --ignored --nocapture measure
+ONDIN_PERF=1 ONDIN_PERF_RECORD=1 cargo test -p ondin-render --release --test perf_suite -- --ignored --nocapture measure
 
 # Write the fixtures to target/perf/*.ondin, to open them in the app:
-cargo test -p ondin-render --release --test perf_suite -- --ignored --nocapture write_fixtures
+ONDIN_PERF=1 cargo test -p ondin-render --release --test perf_suite -- --ignored --nocapture write_fixtures
 ```
 
 Run with nothing else busy: the GPU figures move with load and clock state. Recording refuses a
@@ -28,6 +28,7 @@ debug build.
 
 | Variable | Does |
 | --- | --- |
+| `ONDIN_PERF=1` | Run the suite at all. Without it both tests skip, so the on-device suite's `--ignored` command does not run them. |
 | `ONDIN_PERF_RECORD=1` | Write the results into the baseline, replacing those fixtures' entries. |
 | `ONDIN_PERF_ONLY=control,wide` | Run only these fixtures. |
 | `ONDIN_PERF_EXTRA=a.ondin;b.ondin` | Also time local documents, recorded as `local:<stem>`. Use the platform's path separator. For files that cannot be committed, such as imported kits. |

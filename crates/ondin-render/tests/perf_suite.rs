@@ -26,9 +26,22 @@ const BUDGET: Duration = Duration::from_secs(4);
 const MIN_RUNS: usize = 3;
 const MAX_RUNS: usize = 30;
 
+/// Whether the suite was asked for: it shares `#[ignore]` with the on-device
+/// tests, whose command must not run it.
+fn asked(test: &str) -> bool {
+    let on = std::env::var("ONDIN_PERF").is_ok_and(|v| v == "1");
+    if !on {
+        eprintln!("{test}: skipped, set ONDIN_PERF=1 to run the performance suite");
+    }
+    on
+}
+
 #[test]
 #[ignore = "a benchmark: needs a GPU adapter and a release build"]
 fn measure() {
+    if !asked("measure") {
+        return;
+    }
     let only: Option<Vec<String>> = std::env::var("ONDIN_PERF_ONLY")
         .ok()
         .map(|s| s.split(',').map(|n| n.trim().to_string()).collect());
@@ -111,6 +124,9 @@ fn measure() {
 #[test]
 #[ignore = "writes files; run on demand"]
 fn write_fixtures() {
+    if !asked("write_fixtures") {
+        return;
+    }
     let dir = repo_root().join("target").join("perf");
     std::fs::create_dir_all(&dir).expect("mkdir");
     for &(name, build) in fixtures::ALL {

@@ -759,8 +759,9 @@ pub struct OndinApp {
     zoom_entry: Option<String>,
     /// The floating insert picker, while it is open.
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
-    /// The revision the bound families were last loaded at: a bind, a string cell, a new
-    /// variable or a paste can name a family not yet requested.
+    /// The revision the bound families and the text's scripts were last loaded at: a
+    /// bind, a string cell, a new variable or a paste can name a family not yet
+    /// requested, and an edit can add a script.
     bound_fonts_at: Option<u64>,
     /// `families::families_in_use` at a revision, for the *Missing fonts* card,
     /// which would otherwise walk the document every frame.
@@ -1633,7 +1634,9 @@ impl eframe::App for OndinApp {
 
         // Merge background font results; only font data invalidates the shaped-text
         // cache. A bound family is requested when the document changes, since a
-        // variable can name a family the open-time walk missed.
+        // variable can name a family the open-time walk missed, and so are the fonts
+        // for a script the text did not use before. The script walk reads every text
+        // layer's content once per revision.
         if self.bound_fonts_at != Some(self.session.revision()) {
             self.bound_fonts_at = Some(self.session.revision());
             let strings = self
@@ -1642,7 +1645,8 @@ impl eframe::App for OndinApp {
                 .variables()
                 .iter()
                 .any(|v| v.kind == ondin_core::VarKind::String);
-            if strings {
+            let scripts = ondin_core::fallback_fonts::subsets_of(&self.session.doc);
+            if strings || scripts != *self.fonts.document_subsets() {
                 self.ensure_document_fonts();
             }
         }
@@ -6172,12 +6176,16 @@ impl OndinApp {
     }
 
     /// Load every font family the document's text nodes reference, so an opened
-    /// file renders with its real fonts rather than the Inter fallback.
+    /// file renders with its real fonts rather than the Inter fallback, with their
+    /// files for the scripts the text uses and a fallback for any script none has.
     fn ensure_document_fonts(&mut self) {
+        let subsets = ondin_core::fallback_fonts::subsets_of(&self.session.doc);
+        self.fonts.set_document_subsets(subsets);
         let families: Vec<String> = self.document_families().into_iter().collect();
         for family in families {
             self.fonts.ensure_loaded(&family);
         }
+        self.fonts.ensure_fallbacks();
     }
 
     /// Load the Settings modal's default font ahead of the first text layer, so
@@ -15859,6 +15867,7 @@ mod font_arrival_tests {
             families_changed: false,
             fonts_registered: true,
             registered: vec![family.to_lowercase()],
+            fallback: false,
         }
     }
 

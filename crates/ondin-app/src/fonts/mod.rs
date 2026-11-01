@@ -36,6 +36,8 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 use std::time::SystemTime;
 
+use ondin_core::fallback_fonts::{Subset, subset_alias};
+
 mod preview;
 mod queue;
 
@@ -207,7 +209,12 @@ pub struct FontPoll {
     /// `fonts_registered` alone is too coarse for the document's cache: preview
     /// faces land continuously while the picker scrolls, and each arrival would
     /// re-shape every text node for families the document does not name.
+    ///
+    /// A subset face is reported as the family it belongs to as well as by its alias.
     pub registered: Vec<String>,
+    /// A fallback family registered ([`FontService::ensure_fallbacks`]): any text
+    /// in the script it draws may now draw differently, whatever its family.
+    pub fallback: bool,
 }
 
 impl FontPoll {
@@ -215,12 +222,12 @@ impl FontPoll {
         self.families_changed || self.fonts_registered
     }
 
-    /// Whether any family in [`Self::registered`] is one of `wanted` — the
-    /// question `Resolved`'s text cache should be invalidated on.
+    /// Whether any family in [`Self::registered`] is one of `wanted`, or a fallback
+    /// landed — the question `Resolved`'s text cache should be invalidated on.
     ///
     /// `wanted` is expected lowercased, as [`Self::registered`] is.
     pub fn touches(&self, wanted: &std::collections::HashSet<String>) -> bool {
-        self.registered.iter().any(|f| wanted.contains(f))
+        self.fallback || self.registered.iter().any(|f| wanted.contains(f))
     }
 }
 
@@ -232,6 +239,10 @@ struct CatalogEntry {
     weights: Vec<u16>,
     styles: Vec<String>,
     subset: String,
+    /// Every subset the family publishes, `subset` among them. Empty in a catalog
+    /// written before it was kept, which only means no subset face is fetched.
+    #[serde(default)]
+    subsets: Vec<String>,
     /// The axis-set name of the family's variable file, when it ships one —
     /// `wght`, `standard` or `full`; see [`variable_cut`]. `None` means the
     /// static cuts are all there is.
@@ -264,6 +275,9 @@ struct FaceSpec {
     /// Whether this is a variable file. The one failure the service reacts to:
     /// if the variable file cannot be decoded, the static cuts are tried.
     variable: bool,
+    /// Whether the face is registered under the name of the family that asked for
+    /// it — a subset's alias (`fallback_fonts::subset_alias`) — rather than its own.
+    alias: bool,
 }
 
 /// A face's bytes, or the news that they could not be had.
@@ -272,6 +286,8 @@ enum FontMsg {
         family: String,
         key: String,
         bytes: Vec<u8>,
+        /// [`FaceSpec::alias`]: register under `family`.
+        alias: bool,
     },
     Failed {
         family: String,
@@ -392,6 +408,11 @@ struct FamilyState {
     /// cannot deliver. A count rather than a flag: one failure is a verdict only
     /// alongside `faces` being empty.
     failed: usize,
+    /// For a subset's alias, the family it belongs to, lowercased — what a landed
+    /// face is also reported as ([`FontPoll::registered`]).
+    owner: Option<String>,
+    /// Loaded to draw a script other families lack ([`FontService::ensure_fallbacks`]).
+    fallback: bool,
 }
 
 /// The picker's memoized filter result: which family indices matched, for what
@@ -499,6 +520,12 @@ pub struct FontService {
     rescan_rx: Option<Receiver<SystemScan>>,
     /// When the last re-scan started, for [`RESCAN_EVERY`].
     rescanned_at: Option<std::time::Instant>,
+    /// The subsets the open document's text falls in
+    /// ([`Self::set_document_subsets`]): which subset files a web family fetches and
+    /// which fallbacks are loaded.
+    subsets: BTreeSet<Subset>,
+    /// The family chosen to draw each subset Inter lacks, once one is on its way.
+    fallbacks: HashMap<Subset, String>,
 }
 
 impl FontService {
@@ -554,6 +581,7 @@ impl FontService {
                             family: job.family,
                             key: job.face.key,
                             bytes,
+                            alias: job.face.alias,
                         },
                         Err(reason) => FontMsg::Failed {
                             family: job.family,
@@ -608,6 +636,8 @@ impl FontService {
             size_rx: None,
             rescan_rx: None,
             rescanned_at: None,
+            subsets: BTreeSet::new(),
+            fallbacks: HashMap::new(),
         }
     }
 
@@ -662,6 +692,8 @@ impl FontService {
             size_rx: None,
             rescan_rx: None,
             rescanned_at: None,
+            subsets: BTreeSet::new(),
+            fallbacks: HashMap::new(),
         }
     }
 
@@ -763,10 +795,90 @@ impl FontService {
 
     // --- loading -----------------------------------------------------------
 
-    /// Ensure every cut of `family` is registered with core's shaping engine.
-    /// No-op if already loaded, in flight, or unknown.
+    /// Ensure every cut of `family` is registered with core's shaping engine, with
+    /// the subset files the document's text needs. No-op if already loaded, in
+    /// flight, or unknown.
     pub fn ensure_loaded(&mut self, family: &str) {
         self.ensure(family, Want::Full, Lane::Urgent);
+        self.ensure_subsets(family);
+    }
+
+    /// Note the subsets the open document's text falls in. A family loaded after
+    /// this fetches its files for them; call before [`Self::ensure_loaded`], then
+    /// [`Self::ensure_fallbacks`].
+    pub fn set_document_subsets(&mut self, subsets: BTreeSet<Subset>) {
+        self.subsets = subsets;
+    }
+
+    /// The subsets last given to [`Self::set_document_subsets`].
+    pub fn document_subsets(&self) -> &BTreeSet<Subset> {
+        &self.subsets
+    }
+
+    /// Load a family for each document subset neither its text's families nor
+    /// Inter draw — `Subset::fallbacks` in order, an installed one before a
+    /// download, since the machine already has it.
+    ///
+    /// Waits for the system scan, which says what is installed, and asks again on
+    /// the next call for a subset nothing can answer yet (the catalog may land).
+    pub fn ensure_fallbacks(&mut self) {
+        if self.system_rx.is_some() {
+            return;
+        }
+        let wanted: Vec<Subset> = self
+            .subsets
+            .iter()
+            .copied()
+            .filter(|s| !s.inter_covers() && !self.fallbacks.contains_key(s))
+            .collect();
+        for subset in wanted {
+            let candidates = subset.fallbacks();
+            if let Some(family) = candidates.iter().find(|f| self.system.contains(**f)) {
+                self.ensure_loaded(family);
+                self.state.entry(family.to_string()).or_default().fallback = true;
+                self.fallbacks.insert(subset, family.to_string());
+                continue;
+            }
+            if !self.web_fonts {
+                continue;
+            }
+            let entry = candidates.iter().find_map(|f| {
+                self.catalog
+                    .get(*f)
+                    .filter(|e| e.subsets.iter().any(|s| s == subset.name()))
+            });
+            if let Some(entry) = entry.cloned() {
+                let alias = subset_alias(&entry.family, subset);
+                let specs = subset_faces(&entry, subset, &self.cache_dir);
+                self.dispatch(&alias, specs, Want::Full, Lane::Urgent);
+                self.state.entry(alias).or_default().fallback = true;
+                self.fallbacks.insert(subset, entry.family.clone());
+            }
+        }
+    }
+
+    /// Fetch the files of a web `family` for each document subset it publishes past
+    /// its default one, each under its alias. An installed family has every script
+    /// it has in its own files.
+    fn ensure_subsets(&mut self, family: &str) {
+        let family = self.spelled(family);
+        if !self.web_fonts || self.system.contains(&family) {
+            return;
+        }
+        let Some(entry) = self.catalog.get(&family).cloned() else {
+            return;
+        };
+        let owner = family.to_lowercase();
+        for subset in self.subsets.clone() {
+            let offered = entry.subsets.iter().any(|s| s == subset.name());
+            if !offered || entry.subset == subset.name() {
+                continue;
+            }
+            let alias = subset_alias(&family, subset);
+            let specs = subset_faces(&entry, subset, &self.cache_dir);
+            self.dispatch(&alias, specs, Want::Full, Lane::Urgent);
+            self.state.entry(alias).or_default().owner = Some(owner.clone());
+        }
     }
 
     /// Look at the machine's fonts again, so a family installed while the app was
@@ -1003,8 +1115,13 @@ impl FontService {
 
     fn ensure(&mut self, family: &str, want: Want, lane: Lane) {
         let family = &self.spelled(family);
-        let specs: Vec<FaceSpec> = self
-            .faces_of(family, want)
+        let specs = self.faces_of(family, want);
+        self.dispatch(family, specs, want, lane);
+    }
+
+    /// Queue the faces of `specs` not already claimed, as `family`'s, down `lane`.
+    fn dispatch(&mut self, family: &str, specs: Vec<FaceSpec>, want: Want, lane: Lane) {
+        let specs: Vec<FaceSpec> = specs
             .into_iter()
             .filter(|s| !self.claimed.contains(&s.key))
             .collect();
@@ -1116,10 +1233,19 @@ impl FontService {
 
         while let Ok(msg) = self.msg_rx.try_recv() {
             match msg {
-                FontMsg::Face { family, key, bytes } => {
+                FontMsg::Face {
+                    family,
+                    key,
+                    bytes,
+                    alias,
+                } => {
                     // Before the move: `register_fonts` consumes the blob.
                     let size = bytes.len();
-                    let registered = !ondin_core::text::register_fonts(bytes).is_empty();
+                    let registered = if alias {
+                        ondin_core::text::register_fonts_as(bytes, &family)
+                    } else {
+                        !ondin_core::text::register_fonts(bytes).is_empty()
+                    };
                     let lower = family.to_lowercase();
                     let state = self.state.entry(family).or_default();
                     state.outstanding = state.outstanding.saturating_sub(1);
@@ -1127,8 +1253,10 @@ impl FontService {
                         state.faces.push(key);
                         state.bytes += size;
                         out.fonts_registered = true;
+                        out.fallback |= state.fallback;
                         // Duplicates are left alone: the consumer is a membership test.
                         out.registered.push(lower);
+                        out.registered.extend(state.owner.clone());
                     } else {
                         // Not a usable font: un-claim it so a later attempt is not
                         // skipped, and count it as a failure.
@@ -1306,7 +1434,11 @@ fn spawn_catalog(
         // Freshness is asked of a copy we could actually read: a recent but corrupt
         // file has a good mtime and no catalog.
         let disk = read_catalog(&path);
-        let fresh = disk.is_some() && is_fresh(&path, CATALOG_MAX_AGE);
+        // A copy written before the subset lists were kept is stale whatever its age.
+        let fresh = disk
+            .as_ref()
+            .is_some_and(|d| d.iter().any(|e| !e.subsets.is_empty()))
+            && is_fresh(&path, CATALOG_MAX_AGE);
         if let Some(entries) = disk
             && tx.send(entries).is_ok()
         {
@@ -1456,6 +1588,7 @@ fn system_faces(db: &fontdb::Database, family: &str, want: Want) -> Vec<FaceSpec
             key: path.display().to_string(),
             source: FaceSource::File(path),
             variable: false,
+            alias: false,
         })
         .collect()
 }
@@ -1464,10 +1597,40 @@ fn system_faces(db: &fontdb::Database, family: &str, want: Want) -> Vec<FaceSpec
 fn web_faces(entry: &CatalogEntry, dir: &Path, want: Want) -> Vec<FaceSpec> {
     // A variable file is one download for every weight, and the axis rows and
     // variant list are read from its own `fvar` (§9.2 Font tab). Two files at most.
+    files_of(entry, &entry.subset, false, dir, want)
+}
+
+/// The files of one of `entry`'s other subsets, registered under its alias.
+///
+/// A CJK subset is a few megabytes a file and has no variable file, so it is the
+/// regular and the bold alone; any other comes as the family's default does.
+fn subset_faces(entry: &CatalogEntry, subset: Subset, dir: &Path) -> Vec<FaceSpec> {
+    if !subset.is_heavy() {
+        return files_of(entry, subset.name(), true, dir, Want::Full);
+    }
+    let mut weights: Vec<u16> = [400, 700]
+        .into_iter()
+        .map(|w| nearest(&entry.weights, w))
+        .collect();
+    weights.dedup();
+    weights
+        .into_iter()
+        .map(|w| static_face(entry, subset.name(), w, "normal", true, dir))
+        .collect()
+}
+
+/// The files of `entry`'s `subset`, the primary face first.
+fn files_of(
+    entry: &CatalogEntry,
+    subset: &str,
+    alias: bool,
+    dir: &Path,
+    want: Want,
+) -> Vec<FaceSpec> {
     if let Some(cut) = &entry.cut {
-        let mut out = vec![vf_face(entry, cut, "normal", dir)];
+        let mut out = vec![vf_face(entry, subset, cut, "normal", alias, dir)];
         if want == Want::Full && entry.vf_italic {
-            out.push(vf_face(entry, cut, "italic", dir));
+            out.push(vf_face(entry, subset, cut, "italic", alias, dir));
         }
         return out;
     }
@@ -1490,14 +1653,15 @@ fn web_faces(entry: &CatalogEntry, dir: &Path, want: Want) -> Vec<FaceSpec> {
         styles[0]
     };
 
-    let mut out = vec![static_face(entry, primary_weight, primary_style, dir)];
+    let face = |weight, style| static_face(entry, subset, weight, style, alias, dir);
+    let mut out = vec![face(primary_weight, primary_style)];
     if want == Want::Preview {
         return out;
     }
     for weight in &weights {
         for style in &styles {
             if (*weight, *style) != (primary_weight, primary_style) {
-                out.push(static_face(entry, *weight, style, dir));
+                out.push(face(*weight, style));
             }
         }
     }
@@ -1505,35 +1669,51 @@ fn web_faces(entry: &CatalogEntry, dir: &Path, want: Want) -> Vec<FaceSpec> {
     out
 }
 
-fn vf_face(entry: &CatalogEntry, cut: &str, style: &str, dir: &Path) -> FaceSpec {
+fn vf_face(
+    entry: &CatalogEntry,
+    subset: &str,
+    cut: &str,
+    style: &str,
+    alias: bool,
+    dir: &Path,
+) -> FaceSpec {
     // `.ttf`, not `.woff2`: the cache holds the decoded bytes so the decompress
     // happens once ever, not once per launch.
-    let key = format!("{}-{}-{}-{}.vf.ttf", entry.id, entry.subset, cut, style);
+    let key = format!("{}-{}-{}-{}.vf.ttf", entry.id, subset, cut, style);
     FaceSpec {
         source: FaceSource::Web {
             url: format!(
                 "{FONTSOURCE_CDN}/{}:vf@latest/{}-{}-{}.woff2",
-                entry.id, entry.subset, cut, style
+                entry.id, subset, cut, style
             ),
             cache: dir.join(&key),
         },
         key,
         variable: true,
+        alias,
     }
 }
 
-fn static_face(entry: &CatalogEntry, weight: u16, style: &str, dir: &Path) -> FaceSpec {
-    let key = format!("{}-{}-{}-{}.ttf", entry.id, entry.subset, weight, style);
+fn static_face(
+    entry: &CatalogEntry,
+    subset: &str,
+    weight: u16,
+    style: &str,
+    alias: bool,
+    dir: &Path,
+) -> FaceSpec {
+    let key = format!("{}-{}-{}-{}.ttf", entry.id, subset, weight, style);
     FaceSpec {
         source: FaceSource::Web {
             url: format!(
                 "{FONTSOURCE_CDN}/{}@latest/{}-{}-{}.ttf",
-                entry.id, entry.subset, weight, style
+                entry.id, subset, weight, style
             ),
             cache: dir.join(&key),
         },
         key,
         variable: false,
+        alias,
     }
 }
 
@@ -1676,6 +1856,8 @@ fn fetch_catalog(agent: &ureq::Agent) -> Option<Vec<CatalogEntry>> {
         styles: Vec<String>,
         #[serde(rename = "defSubset")]
         def_subset: String,
+        #[serde(default)]
+        subsets: Vec<String>,
         #[serde(rename = "type")]
         kind: String,
     }
@@ -1709,6 +1891,8 @@ fn fetch_catalog(agent: &ureq::Agent) -> Option<Vec<CatalogEntry>> {
                     weights: i.weights,
                     styles: i.styles,
                     subset: i.def_subset,
+                    // Only compared against `Subset::name`, never put in a path.
+                    subsets: i.subsets,
                 }
             })
             .collect(),
@@ -2012,6 +2196,7 @@ mod tests {
                 weights: vec![400],
                 styles: vec!["normal".into()],
                 subset: "latin".into(),
+                subsets: Vec::new(),
                 cut: None,
                 vf_italic: false,
             },
@@ -2079,6 +2264,7 @@ mod tests {
                 weights: vec![400],
                 styles: vec!["normal".into()],
                 subset: "latin".into(),
+                subsets: Vec::new(),
                 cut: None,
                 vf_italic: false,
             },
@@ -2115,6 +2301,7 @@ mod tests {
             weights: vec![100, 400, 700],
             styles: vec!["normal".into(), "italic".into()],
             subset: "latin".into(),
+            subsets: Vec::new(),
             cut: None,
             vf_italic: false,
         };
@@ -2138,6 +2325,7 @@ mod tests {
             weights: vec![100, 200, 300, 400, 500, 600, 700, 800, 900],
             styles: vec!["normal".into(), "italic".into()],
             subset: "latin".into(),
+            subsets: Vec::new(),
             cut: Some("standard".into()),
             vf_italic: true,
         };
@@ -2481,6 +2669,7 @@ mod tests {
             weights: vec![400],
             styles: vec!["normal".into()],
             subset: "latin".into(),
+            subsets: Vec::new(),
             cut: None,
             vf_italic: false,
         }
@@ -2861,6 +3050,7 @@ mod tests {
                 weights: vec![400, 700],
                 styles: vec!["normal".to_string()],
                 subset: "latin".to_string(),
+                subsets: Vec::new(),
                 cut: Some("standard".to_string()),
                 vf_italic: false,
             },
@@ -2911,5 +3101,151 @@ mod tests {
             "the control: a file the decoder cannot read must still fall back to \
              the static cuts"
         );
+    }
+
+    /// A catalog entry for `family` publishing `subsets` past `latin`, variable.
+    fn noto(family: &str, subsets: &[&str]) -> CatalogEntry {
+        CatalogEntry {
+            subsets: std::iter::once("latin")
+                .chain(subsets.iter().copied())
+                .map(String::from)
+                .collect(),
+            cut: Some("wght".into()),
+            weights: (1..=9).map(|w| w * 100).collect(),
+            ..entry(family)
+        }
+    }
+
+    /// A script Inter lacks is drawn by an installed family before any download,
+    /// and by the Noto family's own subset files when nothing installed has it.
+    ///
+    /// flip: `ensure_fallbacks` trying the catalog first → fails at "installed".
+    #[test]
+    fn a_fallback_is_an_installed_family_before_a_download() {
+        let mut svc = FontService::inert();
+        svc.settle_for_test();
+        svc.catalog
+            .insert("Noto Sans JP".into(), noto("Noto Sans JP", &["japanese"]));
+        svc.list_for_test(&["Yu Gothic"]);
+        svc.set_document_subsets([Subset::Japanese].into());
+        svc.ensure_fallbacks();
+        assert_eq!(svc.fallbacks[&Subset::Japanese], "Yu Gothic", "installed");
+
+        let mut svc = FontService::inert();
+        svc.settle_for_test();
+        svc.catalog
+            .insert("Noto Sans JP".into(), noto("Noto Sans JP", &["japanese"]));
+        svc.set_document_subsets([Subset::Japanese, Subset::Cyrillic].into());
+        svc.ensure_fallbacks();
+        assert_eq!(svc.fallbacks[&Subset::Japanese], "Noto Sans JP");
+        let alias = subset_alias("Noto Sans JP", Subset::Japanese);
+        let state = &svc.state[&alias];
+        // The regular and the bold of a CJK subset, not every weight.
+        assert_eq!(state.outstanding, 2, "two files");
+        assert!(state.fallback);
+        assert!(
+            svc.claimed.contains("noto-sans-jp-japanese-400-normal.ttf"),
+            "the japanese file, static: {:?}",
+            svc.claimed
+        );
+        assert!(
+            !svc.fallbacks.contains_key(&Subset::Cyrillic),
+            "Inter draws Cyrillic itself"
+        );
+    }
+
+    /// With nothing installed for it, Japanese text fetches Noto Sans JP's
+    /// `japanese` files, which draw kana (the family's default `latin` file has none).
+    // Network-gated: run with `cargo test -p ondin-app -- --ignored`.
+    #[test]
+    #[ignore = "requires network (Fontsource/jsDelivr); downloads about 5 MB"]
+    fn japanese_text_fetches_the_japanese_subset_end_to_end() {
+        let mut service = FontService::new(&egui::Context::default(), true);
+        service.prefetched = true;
+        for _ in 0..600 {
+            service.poll();
+            if service.system_rx.is_none() && service.catalog_done {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!service.catalog.is_empty(), "the catalog landed within 12s");
+        // As on a machine without Yu Gothic or Hiragino.
+        service
+            .system
+            .retain(|f| !Subset::Japanese.fallbacks().contains(&f.as_str()));
+        service.set_document_subsets([Subset::Japanese].into());
+        service.ensure_fallbacks();
+        assert_eq!(service.fallbacks[&Subset::Japanese], "Noto Sans JP");
+        let alias = subset_alias("Noto Sans JP", Subset::Japanese);
+        for _ in 0..1500 {
+            service.poll();
+            if ondin_core::text::is_family_available(&alias) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // One script at a time: a preview is one run, and kana and kanji itemize apart.
+        for probe in ["ひらがな", "カタカナ", "漢字"] {
+            assert!(
+                ondin_core::text::family_preview(&alias, probe, 15.0).is_some(),
+                "the subset face draws {probe}"
+            );
+        }
+    }
+
+    /// A fallback waits for the system scan rather than downloading what may be
+    /// installed.
+    #[test]
+    fn a_fallback_waits_for_the_system_scan() {
+        let mut svc = FontService::inert();
+        svc.catalog
+            .insert("Noto Sans JP".into(), noto("Noto Sans JP", &["japanese"]));
+        svc.set_document_subsets([Subset::Japanese].into());
+        svc.ensure_fallbacks();
+        assert!(svc.fallbacks.is_empty());
+    }
+
+    /// A web family loads its file for each script the document uses, under the
+    /// subset's alias, and the landed face is reported as the family too, so the
+    /// document's text is shaped again.
+    ///
+    /// flip: the `Face` arm not reporting `owner` → fails at "reported as Roboto".
+    #[test]
+    fn a_web_family_fetches_its_subset_files_and_reports_them_as_itself() {
+        let (mut svc, tx) = service_with_a_variable_family();
+        svc.catalog.get_mut("Roboto").unwrap().subsets = vec!["latin".into(), "cyrillic".into()];
+        svc.set_document_subsets([Subset::Cyrillic, Subset::Greek].into());
+        svc.ensure_loaded("Roboto");
+        let alias = subset_alias("Roboto", Subset::Cyrillic);
+        assert!(
+            svc.claimed
+                .contains("roboto-cyrillic-standard-normal.vf.ttf"),
+            "the cyrillic file: {:?}",
+            svc.claimed
+        );
+        assert!(
+            !svc.state
+                .contains_key(&subset_alias("Roboto", Subset::Greek)),
+            "a subset the family does not publish is not asked for"
+        );
+
+        tx.send(FontMsg::Face {
+            family: alias.clone(),
+            key: "roboto-cyrillic-standard-normal.vf.ttf".into(),
+            bytes: ondin_core::text::bundled_inter()[1].to_vec(),
+            alias: true,
+        })
+        .expect("the test owns the channel");
+        let poll = svc.poll();
+        assert!(
+            ondin_core::text::is_family_available(&alias),
+            "registered under the alias"
+        );
+        assert!(
+            poll.touches(&["roboto".to_string()].into()),
+            "reported as Roboto"
+        );
+        assert!(!poll.fallback);
     }
 }

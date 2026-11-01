@@ -4105,6 +4105,52 @@ fn a_worker_given_the_text_fonts_lays_text_out_alike() {
     assert_eq!(given, here, "with the fonts");
 }
 
+/// A face registered under a subset alias draws its script ahead of Inter, and a
+/// worker given the text fonts registers it under the alias again. Inter's italic
+/// stands in for a Cyrillic subset: upright text reaches it only through the alias.
+///
+/// flip: `register_font_data` ignoring `ALIASES` → fails at "on the worker".
+#[test]
+fn a_subset_face_draws_its_script_and_keeps_its_alias_on_a_worker() {
+    use ondin_core::fallback_fonts::{Subset, subset_alias};
+    let italic = ondin_core::text::bundled_inter()[1];
+    let family = "Subset Probe Sans";
+    assert!(ondin_core::text::register_fonts_as(
+        italic.to_vec(),
+        &subset_alias(family, Subset::Cyrillic)
+    ));
+    let mut ids = IdSource::new(0xF048);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let id = ids.mint();
+    let mut kind = text("Привет", 40.0);
+    if let NodeKind::Text { style, .. } = &mut kind {
+        style.font_family = family.into();
+    }
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind,
+        transform: None,
+        name: None,
+    }]))
+    .unwrap();
+    let uses_italic =
+        |fonts: &[ondin_core::peniko::FontData]| fonts.iter().any(|f| f.data.len() == italic.len());
+    let fonts = Resolved::rebuild(&doc).text_fonts();
+    assert!(uses_italic(&fonts), "the alias draws the Cyrillic");
+    let again = std::thread::scope(|s| {
+        s.spawn(|| {
+            ondin_core::text::register_font_data(&fonts);
+            Resolved::rebuild(&doc).text_fonts()
+        })
+        .join()
+        .unwrap()
+    });
+    assert!(uses_italic(&again), "on the worker");
+}
+
 /// **Equal texts share one shaping; every text still gets exactly its own
 /// layout.** Labels repeated in a column (wrapped by the column's width) and
 /// free, beside labels that differ from them only in fields the shared cache

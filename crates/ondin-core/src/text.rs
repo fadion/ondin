@@ -45,8 +45,11 @@ use kurbo::{
 use peniko::{Color, FontData};
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
+use std::sync::Arc;
 
+use crate::fallback_fonts::{Subset, font_stack};
 use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::style::{FontFeature, FontVariation, Language};
 use parley::{
@@ -102,16 +105,55 @@ pub fn register_fonts(bytes: Vec<u8>) -> Vec<String> {
     })
 }
 
+/// [`register_fonts`] under `family` instead of the name the font gives itself —
+/// how a subset face is kept apart from its family's other files
+/// (`fallback_fonts::subset_alias`). Returns whether anything registered.
+pub fn register_fonts_as(bytes: Vec<u8>, family: &str) -> bool {
+    let blob = Blob::from(bytes);
+    let id = blob.id();
+    let registered = ENGINE.with(|engine| {
+        engine.borrow_mut().font_cx.collection.register_fonts(
+            blob,
+            Some(parley::fontique::FontInfoOverride {
+                family_name: Some(family),
+                ..Default::default()
+            }),
+        )
+    });
+    if registered.is_empty() {
+        return false;
+    }
+    if let Ok(mut aliases) = ALIASES.lock() {
+        aliases.insert(id, Arc::from(family));
+    }
+    true
+}
+
+/// The family each blob registered through [`register_fonts_as`] was given, by
+/// blob id, so [`register_font_data`] on another thread names it the same way.
+/// Process-wide: blob ids are, and the threads that need it never registered it.
+static ALIASES: std::sync::LazyLock<std::sync::Mutex<HashMap<u64, Arc<str>>>> =
+    std::sync::LazyLock::new(Default::default);
+
 /// [`register_fonts`] for faces a layout already holds, sharing their bytes.
 ///
 /// A worker thread's engine holds only Inter, so one that shapes a document's
 /// text again registers the document's faces (`Resolved::text_fonts`) first, or
-/// every other family is laid out in Inter.
+/// every other family is laid out in Inter. A face registered under an alias is
+/// registered under it again.
 pub fn register_font_data(fonts: &[FontData]) {
+    let aliases = ALIASES.lock().map(|a| a.clone()).unwrap_or_default();
     ENGINE.with(|engine| {
         let collection = &mut engine.borrow_mut().font_cx.collection;
         for font in fonts {
-            collection.register_fonts(font.data.clone(), None);
+            let alias = aliases.get(&font.data.id());
+            collection.register_fonts(
+                font.data.clone(),
+                alias.map(|family| parley::fontique::FontInfoOverride {
+                    family_name: Some(family),
+                    ..Default::default()
+                }),
+            );
         }
     });
 }
@@ -1604,24 +1646,29 @@ fn axis_settings(style: &TextStyle, axes: &[FontAxis]) -> Vec<FontVariation> {
 /// synthesized oblique, and fontique's.
 const ITALIC_SLANT: f64 = 14.0;
 
+/// What every run of one text falls back to after its own family: the bundled
+/// family, then the fallbacks of the scripts in the text (`font_stack`).
+struct Fallback<'a> {
+    family: &'a str,
+    subsets: &'a BTreeSet<Subset>,
+}
+
 /// Push one style's properties onto the builder — as defaults when `range` is
 /// `None`, otherwise over that byte range — so the two sets cannot drift.
 fn push_style(
     builder: &mut parley::RangedBuilder<'_, RunIndex>,
     style: &TextStyle,
     paragraph: &ParagraphStyle,
-    fallback_family: &str,
+    fallback: &Fallback<'_>,
     axes: &[FontAxis],
     run_index: RunIndex,
     range: Option<Range<usize>>,
 ) {
     let mut props: Vec<StyleProperty<'_, RunIndex>> = Vec::with_capacity(20);
-    // Requested family first, bundled Inter as the fallback.
+    // Requested family first, bundled Inter, then whatever draws the scripts both lack.
+    let stack = font_stack(&style.font_family, fallback.subsets, fallback.family);
     props.push(StyleProperty::FontFamily(FontFamily::List(Cow::Owned(
-        vec![
-            FontFamilyName::named(&style.font_family),
-            FontFamilyName::named(fallback_family),
-        ],
+        stack.iter().map(|f| FontFamilyName::named(f)).collect(),
     ))));
     props.push(StyleProperty::FontSize(style.font_size as f32));
     props.push(StyleProperty::FontWeight(FontWeight::new(
@@ -1812,6 +1859,8 @@ fn shape(parts: TextRef<'_>) -> Shaped {
     let runs = parts.spans.runs(parts.style, parts.content.len());
     let cased = cased_text(parts.content, &runs);
     let text: &str = cased.as_deref().unwrap_or(parts.content);
+    // Read once for the whole text, so every run's stack names the same fallbacks.
+    let subsets = crate::fallback_fonts::subsets_in(text, parts.style.locale.as_deref());
 
     let mut layout = ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
@@ -1853,11 +1902,15 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         let mut builder = engine
             .layout_cx
             .ranged_builder(&mut engine.font_cx, text, 1.0, true);
+        let fallback = Fallback {
+            family: &default_family,
+            subsets: &subsets,
+        };
         push_style(
             &mut builder,
             parts.style,
             parts.paragraph,
-            &default_family,
+            &fallback,
             default_axes,
             DEFAULT_RUN,
             None,
@@ -1870,7 +1923,7 @@ fn shape(parts: TextRef<'_>) -> Shaped {
                 &mut builder,
                 style,
                 parts.paragraph,
-                &default_family,
+                &fallback,
                 axes_for(&style.font_family),
                 i as RunIndex,
                 Some(range.clone()),

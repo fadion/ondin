@@ -83,11 +83,6 @@ Nothing open.
   lists the family as *drawn in Carlito*, since the export rule is that an approximation is reported,
   and offers the stand-in first in *Replace with…*. Looked up in `FontService` before a family is
   declared `Missing`.
-- **Fallback fonts by script.** Inter has no Arabic, Hebrew, Devanagari, CJK or Hangul glyphs. When
-  a document's text uses one of those scripts and no installed family covers it, fetch the matching
-  Noto Sans (Arabic, Hebrew, Devanagari, SC, JP, KR) through the web-font source and register it as
-  a fallback. Check first whether such text draws as empty boxes today: fontique falls back to the
-  system's fonts, so the gap may only show on a sparse Linux install and in headless export.
 
 ## Gaps
 

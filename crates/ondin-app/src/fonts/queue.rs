@@ -122,6 +122,7 @@ mod tests {
                 key: name.to_string(),
                 source: FaceSource::File(PathBuf::from(name)),
                 variable: false,
+                alias: false,
             },
         }
     }

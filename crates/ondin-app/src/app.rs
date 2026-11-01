@@ -1651,6 +1651,7 @@ impl eframe::App for OndinApp {
             }
         }
         let fonts = self.fonts.poll();
+        add_ui_fallbacks(&ctx, &fonts.ui_fallbacks);
         if fonts.fonts_registered {
             // Re-shape only when the document names a landed family: the picker
             // fetches preview faces continuously while scrolled.
@@ -6226,6 +6227,28 @@ impl OndinApp {
             stack.extend(node.children().iter().copied());
         }
         families
+    }
+}
+
+/// Give the UI's two text families the script fallbacks that just landed, after
+/// every font they have, so document text shown in the chrome (a layer name, the
+/// Type card's fields) draws where the UI font has no glyph. egui keeps the first
+/// face added under a name; the faces of one fallback after it change nothing.
+fn add_ui_fallbacks(ctx: &egui::Context, faces: &[(String, Vec<u8>)]) {
+    use egui::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
+    for (name, bytes) in faces {
+        let lowest = |family| InsertFontFamily {
+            family,
+            priority: FontPriority::Lowest,
+        };
+        ctx.add_font(FontInsert::new(
+            name,
+            egui::FontData::from_owned(bytes.clone()),
+            vec![
+                lowest(egui::FontFamily::Proportional),
+                lowest(egui::FontFamily::Monospace),
+            ],
+        ));
     }
 }
 
@@ -15862,12 +15885,45 @@ mod font_arrival_tests {
         (app, text)
     }
 
+    /// A script fallback handed to the UI draws a character the UI's text font
+    /// lacks. The icon font stands in for a fallback: its glyphs are in no text
+    /// family.
+    ///
+    /// flip: `add_ui_fallbacks` leaving out the proportional family → fails at "drawn".
+    #[test]
+    fn a_ui_fallback_draws_what_the_ui_font_lacks() {
+        static ICONS: &[u8] = include_bytes!("../assets/fonts/OndinIcons.ttf");
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let uv = |s: &str| {
+            let g = ctx.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    s.to_owned(),
+                    egui::FontId::proportional(12.0),
+                    egui::Color32::WHITE,
+                )
+            });
+            g.rows[0].glyphs[0].uv_rect
+        };
+        let tofu = uv("\u{10FFFD}");
+        // An icon no text family has (egui's own fonts fill some private-use points).
+        let (_, icon) = *crate::theme::icon::ALL
+            .iter()
+            .find(|(_, c)| uv(c) == tofu)
+            .expect("the fixture: an icon the UI's text fonts lack");
+        super::add_ui_fallbacks(&ctx, &[("probe fallback".into(), ICONS.to_vec())]);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        assert_ne!(uv(icon), tofu, "drawn");
+    }
+
     fn poll_for(family: &str) -> FontPoll {
         FontPoll {
             families_changed: false,
             fonts_registered: true,
             registered: vec![family.to_lowercase()],
             fallback: false,
+            ui_fallbacks: Vec::new(),
         }
     }
 

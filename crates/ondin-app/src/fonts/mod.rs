@@ -215,6 +215,10 @@ pub struct FontPoll {
     /// A fallback family registered ([`FontService::ensure_fallbacks`]): any text
     /// in the script it draws may now draw differently, whatever its family.
     pub fallback: bool,
+    /// The fallback faces that landed, by the name they were registered under, for
+    /// the UI's own fonts to fall back on too: a layer name or a text field in the
+    /// inspector is set in the UI font, which has no CJK, Arabic or the like.
+    pub ui_fallbacks: Vec<(String, Vec<u8>)>,
 }
 
 impl FontPoll {
@@ -1303,6 +1307,11 @@ impl FontService {
                 } => {
                     // Before the move: `register_fonts` consumes the blob.
                     let size = bytes.len();
+                    let for_ui = self
+                        .state
+                        .get(&family)
+                        .is_some_and(|s| s.fallback)
+                        .then(|| bytes.clone());
                     let registered = if alias {
                         ondin_core::text::register_fonts_as(bytes, &family)
                     } else {
@@ -1316,6 +1325,9 @@ impl FontService {
                         state.bytes += size;
                         out.fonts_registered = true;
                         out.fallback |= state.fallback;
+                        if let Some(bytes) = for_ui {
+                            out.ui_fallbacks.push((lower.clone(), bytes));
+                        }
                         // Duplicates are left alone: the consumer is a membership test.
                         out.registered.push(lower);
                         out.registered.extend(state.owners.iter().cloned());
@@ -3592,6 +3604,37 @@ mod tests {
             0,
             "an unreadable file is not refetched"
         );
+    }
+
+    /// A fallback face that lands is handed on for the UI's fonts; any other face
+    /// is not.
+    ///
+    /// flip: `poll` not passing the fallback's bytes on → fails at "the fallback".
+    #[test]
+    fn only_a_fallback_face_is_handed_to_the_ui() {
+        let (tx, rx) = channel();
+        let mut svc = settled_with(&["Roboto"]);
+        svc.msg_rx = rx;
+        svc.catalog
+            .insert("Noto Sans JP".into(), noto("Noto Sans JP", &["japanese"]));
+        svc.set_document_subsets([Subset::Japanese].into());
+        svc.ensure_fallbacks();
+        let alias = subset_alias("Noto Sans JP", Subset::Japanese);
+        let face = |family: &str, alias: bool| FontMsg::Face {
+            family: family.into(),
+            key: format!("{family}-key"),
+            bytes: ondin_core::text::bundled_inter()[1].to_vec(),
+            alias,
+        };
+        tx.send(face(&alias, true))
+            .expect("the test owns the channel");
+        let poll = svc.poll();
+        assert_eq!(poll.ui_fallbacks.len(), 1, "the fallback");
+        assert_eq!(poll.ui_fallbacks[0].0, alias.to_lowercase());
+
+        tx.send(face("Roboto", true))
+            .expect("the test owns the channel");
+        assert!(svc.poll().ui_fallbacks.is_empty(), "a family's own face");
     }
 
     /// A fallback waits for the system scan rather than downloading what may be

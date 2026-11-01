@@ -470,6 +470,9 @@ impl CanvasRenderer {
                 .and_then(|(before, ink)| edit_damage(&inputs, before, ink, edit)),
             (None, None, None) => None,
         };
+        let damage = damage.map(|d| {
+            ondin_render::scene::spread_through_backdrops(doc, res, &vp, overrides, page, d)
+        });
         let regions = damage.as_deref().and_then(|d| patch_regions(d, pixel_size));
         // What the preview changed, as the texture will hold it: a moved frame
         // moves it, a preview's patch holds it in its damage, and anything else

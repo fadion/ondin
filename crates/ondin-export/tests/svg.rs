@@ -3442,6 +3442,44 @@ fn a_shadows_blend_mode_is_reported_where_it_cannot_be_written() {
     assert_eq!(rect.effects[0].blend.as_deref(), Some("Multiply"));
 }
 
+/// SVG has no backdrop, so a background blur is left out of the file and
+/// reported; a hidden one is not. The snapshot names the kind and its radius.
+/// flip: `report_node` without the backdrop note → fails at the visible arm.
+#[test]
+fn a_background_blur_is_left_out_of_svg_and_reported() {
+    const NOTE: &str = "a background blur, left out";
+    let mut f = common::fixture();
+    for (visible, reported) in [(false, false), (true, true)] {
+        f.doc
+            .apply(&Transaction(vec![Operation::SetEffects {
+                id: f.rect,
+                effects: keyed_by_position([Effect {
+                    visible,
+                    ..Effect::new(EffectKind::BackgroundBlur { radius: 10.0 })
+                }]),
+            }]))
+            .unwrap();
+        f.res = Resolved::rebuild(&f.doc);
+        let out =
+            ondin_export::svg::svg_with(&f.doc, &f.res, &[f.rect], ondin_core::ExportText::Live);
+        assert_eq!(
+            out.approximated.iter().any(|s| s == NOTE),
+            reported,
+            "visible {visible}: {:?}",
+            out.approximated
+        );
+        assert!(!out.svg.contains("<filter"), "nothing is written for it");
+    }
+    let snap = ondin_export::snapshot::snapshot(&f.doc, &f.res);
+    let rect = snap
+        .nodes
+        .iter()
+        .find(|n| n.id == f.rect.to_wire())
+        .unwrap();
+    assert_eq!(rect.effects[0].kind, "BackgroundBlur");
+    assert_eq!(rect.effects[0].blur, Some(10.0));
+}
+
 /// **The viewBox has to grow to hold the shadow**, which is the visible half of
 /// why `world_bounds` and `ink_bounds` are two questions (§5.3a).
 ///

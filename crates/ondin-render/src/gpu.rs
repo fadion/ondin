@@ -49,6 +49,8 @@ struct GpuScenePainter<'a> {
     /// Whether an effect buffer was shaped by where the target sits beyond being
     /// cut by it — see [`VelloGpuRenderer::pinned`].
     pinned: bool,
+    /// The colour the target is cleared to, when opaque ([`ScenePainter::ground`]).
+    ground: Option<Color>,
 }
 
 /// One open effect layer on the GPU: where its buffer sits, and the sub-scene
@@ -320,6 +322,18 @@ impl ScenePainter for GpuScenePainter<'_> {
         );
     }
 
+    fn push_add_layer(&mut self) {
+        self.opened_ordinary();
+        let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);
+        self.scene().push_layer(
+            Fill::NonZero,
+            BlendMode::new(Mix::Normal, Compose::Plus),
+            1.0,
+            at,
+            unbounded.as_ref(),
+        );
+    }
+
     fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
         self.opened_ordinary();
         let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);
@@ -409,6 +423,10 @@ impl ScenePainter for GpuScenePainter<'_> {
         }
     }
 
+    fn ground(&self) -> Option<Color> {
+        self.ground
+    }
+
     fn pop_layer(&mut self) {
         // An ordinary layer opened inside this effect layer closes first.
         match self.fx.last() {
@@ -483,12 +501,13 @@ pub fn build_scene(
     images: &ImageStore,
     page: ondin_core::NodeId,
 ) -> (Scene, Vec<EffectJob>) {
-    let (scene, jobs, _) = walk_scene(doc, res, vp, overrides, images, page, &[vp.view]);
+    let (scene, jobs, _) = walk_scene(doc, res, vp, overrides, images, page, &[vp.view], None);
     (scene, jobs)
 }
 
-/// [`build_scene`] culled to the world rectangles `cull`, and whether the scene
-/// is [`VelloGpuRenderer::pinned`].
+/// [`build_scene`] culled to the world rectangles `cull` over a target cleared to
+/// `base_color`, and whether the scene is [`VelloGpuRenderer::pinned`].
+#[allow(clippy::too_many_arguments)]
 fn walk_scene(
     doc: &Document,
     res: &Resolved,
@@ -497,6 +516,7 @@ fn walk_scene(
     images: &ImageStore,
     page: ondin_core::NodeId,
     cull: &[Rect],
+    base_color: Option<Color>,
 ) -> (Scene, Vec<EffectJob>, bool) {
     let base = scene::device_base(vp);
     let mut painter = GpuScenePainter {
@@ -508,6 +528,7 @@ fn walk_scene(
         budget: f64::from(vp.pixel_size.0) * f64::from(vp.pixel_size.1),
         images,
         pinned: false,
+        ground: base_color.filter(|c| c.components[3] >= 1.0),
     };
     scene::build_within(doc, res, vp, overrides, page, cull, &mut painter);
     (painter.root, painter.jobs, painter.pinned)
@@ -1032,7 +1053,16 @@ impl VelloGpuRenderer {
         images: &ImageStore,
         page: ondin_core::NodeId,
     ) -> Result<(), vello::Error> {
-        let (scene, jobs, pinned) = walk_scene(doc, res, vp, overrides, images, page, &[vp.view]);
+        let (scene, jobs, pinned) = walk_scene(
+            doc,
+            res,
+            vp,
+            overrides,
+            images,
+            page,
+            &[vp.view],
+            Some(base_color),
+        );
         self.pinned = pinned;
         self.draw(device, queue, scene, jobs, vp, target, base_color)
     }
@@ -1078,7 +1108,16 @@ impl VelloGpuRenderer {
                 to_world.transform_rect_bbox(px.inflate(REGION_CULL_MARGIN, REGION_CULL_MARGIN))
             })
             .collect();
-        let (scene, jobs, pinned) = walk_scene(doc, res, vp, overrides, images, page, &cull);
+        let (scene, jobs, pinned) = walk_scene(
+            doc,
+            res,
+            vp,
+            overrides,
+            images,
+            page,
+            &cull,
+            Some(base_color),
+        );
         if pinned {
             return Ok(false);
         }

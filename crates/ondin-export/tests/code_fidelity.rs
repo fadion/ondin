@@ -2201,6 +2201,40 @@ fn bound_text_colour_and_side_width_are_written_as_var() {
     );
 }
 
+/// A background blur on a box is `backdrop-filter` at half its radius, as a
+/// layer blur's `blur()` is; beside a shadow, whose `filter` would also apply
+/// over the backdrop, the layer is a picture and says why.
+#[test]
+fn a_background_blur_is_a_backdrop_filter_on_a_box() {
+    let render = |shadowed: bool| {
+        let mut d = Doc::new();
+        let f = d.frame(None, 0.0, 0.0, 100.0, 100.0, "Board");
+        let r = d.rect(f, 20.0, 20.0, 60.0, 60.0, 0.0);
+        d.fill(r, solid(255, 255, 255, 64));
+        let mut effects = vec![EffectKind::BackgroundBlur { radius: 16.0 }];
+        if shadowed {
+            effects.push(EffectKind::DropShadow(Shadow::default()));
+        }
+        d.effects(r, effects);
+        let (doc, res) = d.done();
+        html_of(&doc, &res, &[f])
+    };
+    let plain = render(false);
+    let css = String::from_utf8(plain.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(css.contains("backdrop-filter: blur(8px)"), "{css}");
+    assert!(plain.approximated.is_empty(), "{:?}", plain.approximated);
+
+    let shadowed = render(true);
+    assert!(
+        shadowed
+            .approximated
+            .iter()
+            .any(|s| s.contains("a background blur")),
+        "{:?}",
+        shadowed.approximated
+    );
+}
+
 /// A feature the SVG writer approximates goes to a PNG and is reported, not
 /// passed off as exact.
 #[test]

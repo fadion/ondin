@@ -628,7 +628,31 @@ fn a_bitmap_is_a_rect_showing_its_picture() {
 /// What has no counterpart is reported, one row a kind, and the rest still lands.
 #[test]
 fn what_does_not_map_is_reported() {
-    let mut blurred = rectangle(
+    let mut linked = rectangle("R", 0.0, 0.0, json!({}));
+    linked["flow"] = json!({ "destinationArtboardID": "X" });
+    let group = json!({
+        "_class": "group", "do_objectID": "G", "name": "Row",
+        "frame": frame(0.0, 0.0, 10.0, 10.0),
+        "groupLayout": { "_class": "MSImmutableInferredGroupLayout" },
+        "layers": [linked],
+    });
+    let r = import(sketch(&[("P", "Page", json!([group]))], json!({}), &[]));
+    let rows: Vec<(&str, &str)> = r.report.iter().map(|u| (u.what, u.how)).collect();
+    assert_eq!(
+        rows,
+        [
+            ("Prototype links", "Left out"),
+            ("Smart layout", "Kept at their drawn positions"),
+        ]
+    );
+    one(&r.doc, "Rect");
+}
+
+/// A background blur (blur type 3) lands as one, at its radius, and reports
+/// nothing.
+#[test]
+fn a_background_blur_lands_as_one() {
+    let blurred = rectangle(
         "R",
         0.0,
         0.0,
@@ -636,24 +660,17 @@ fn what_does_not_map_is_reported() {
             "blur": { "isEnabled": true, "type": 3, "radius": 10 },
         }),
     );
-    blurred["flow"] = json!({ "destinationArtboardID": "X" });
-    let group = json!({
-        "_class": "group", "do_objectID": "G", "name": "Row",
-        "frame": frame(0.0, 0.0, 10.0, 10.0),
-        "groupLayout": { "_class": "MSImmutableInferredGroupLayout" },
-        "layers": [blurred],
-    });
-    let r = import(sketch(&[("P", "Page", json!([group]))], json!({}), &[]));
-    let rows: Vec<(&str, &str)> = r.report.iter().map(|u| (u.what, u.how)).collect();
-    assert_eq!(
-        rows,
-        [
-            ("Background blur", "Left out"),
-            ("Prototype links", "Left out"),
-            ("Smart layout", "Kept at their drawn positions"),
-        ]
+    let r = import(sketch(&[("P", "Page", json!([blurred]))], json!({}), &[]));
+    assert!(r.report.is_empty(), "{:?}", r.report);
+    let node = r.doc.get(one(&r.doc, "Rect")).unwrap();
+    assert!(
+        matches!(
+            node.effects()[..],
+            [ref e] if matches!(e.kind, ondin_core::EffectKind::BackgroundBlur { radius } if radius == 10.0)
+        ),
+        "{:?}",
+        node.effects()
     );
-    one(&r.doc, "Rect");
 }
 
 /// A shape group of several shapes is a boolean of them carrying the group's

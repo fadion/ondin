@@ -69,6 +69,7 @@ fn effect_name(k: &ondin_core::EffectKind) -> &'static str {
         E::DropShadow(_) => "drop-shadow",
         E::InnerShadow(_) => "inner-shadow",
         E::LayerBlur { .. } => "layer-blur",
+        E::BackgroundBlur { .. } => "background-blur",
         E::Filters(_) => "filters",
     }
 }
@@ -425,7 +426,7 @@ fn golden_document() -> (Document, Resolved) {
             id: group,
             opacity: 0.6,
         },
-        // All four effect kinds on one node, so `effects` reaches the JSON golden
+        // Every effect kind on one node, so `effects` reaches the JSON golden
         // and a `<filter>` the SVG one; presence in the output is the point, and
         // one node keeps the diff readable. Every number is a literal so no default
         // can move the golden.
@@ -447,6 +448,7 @@ fn golden_document() -> (Document, Resolved) {
                     blend: ondin_core::BlendMode::Normal,
                 })),
                 ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 2.0 }),
+                ondin_core::Effect::new(ondin_core::EffectKind::BackgroundBlur { radius: 5.0 }),
                 ondin_core::Effect::new(ondin_core::EffectKind::Filters(ondin_core::Filters {
                     brightness: 1.1,
                     contrast: 0.9,

@@ -151,6 +151,18 @@ fn render_gpu_store(
     store: &ImageStore,
     vp: &Viewport,
 ) -> Vec<u8> {
+    render_gpu_on(g, doc, res, store, vp, Color::TRANSPARENT)
+}
+
+/// `render_gpu_store` over a target cleared to `ground`, as the canvas clears it.
+fn render_gpu_on(
+    g: &mut Gpu,
+    doc: &Document,
+    res: &Resolved,
+    store: &ImageStore,
+    vp: &Viewport,
+    ground: Color,
+) -> Vec<u8> {
     let tex = g.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("gpu-effects-target"),
         size: wgpu::Extent3d {
@@ -177,7 +189,7 @@ fn render_gpu_store(
             vp,
             &RenderOverrides::default(),
             &view,
-            Color::TRANSPARENT,
+            ground,
             store,
             doc.first_page(),
         )
@@ -1793,5 +1805,144 @@ fn both_backends_blend_alike() {
             .all(|d| *d <= 2);
             assert!(close, "{mode:?} at ({x}, {y}): gpu {a:?} vs cpu {b:?}");
         }
+    }
+}
+
+/// Black and white five-unit columns over the page (when `stripes`), and over
+/// them a 40×40 glass at (30, 30) at `opacity`, tinted blue at a quarter, with
+/// a background blur of 8.
+fn glass(stripes: bool, opacity: f32) -> (Document, Resolved) {
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let rect = |id, index, (x, y, w, h): (f64, f64, f64, f64), ink: Color| {
+        vec![
+            Operation::CreateNode {
+                id,
+                parent: root,
+                index,
+                kind: NodeKind::Rect {
+                    size: Size::new(w, h),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((x, y))),
+                name: None,
+            },
+            Operation::SetFills {
+                id,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(ink).into(),
+                    visible: true,
+                }]),
+            },
+        ]
+    };
+    let mut ops = Vec::new();
+    let columns = if stripes { SIDE as usize / 5 } else { 0 };
+    for i in 0..columns {
+        let ink = if i % 2 == 0 {
+            Color::BLACK
+        } else {
+            Color::WHITE
+        };
+        ops.extend(rect(ids.mint(), i, (i as f64 * 5.0, 0.0, 5.0, 100.0), ink));
+    }
+    let g = ids.mint();
+    ops.extend(rect(
+        g,
+        columns,
+        (30.0, 30.0, 40.0, 40.0),
+        Color::from_rgba8(0, 0, 255, 64),
+    ));
+    ops.push(Operation::SetEffects {
+        id: g,
+        effects: keyed_by_position([Effect::new(EffectKind::BackgroundBlur { radius: 8.0 })]),
+    });
+    if opacity < 1.0 {
+        ops.push(Operation::SetOpacity { id: g, opacity });
+    }
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    (doc, res)
+}
+
+/// The canvas draws a background blur as the CPU reference does: the backdrop
+/// repainted, blurred, erased and added back through the same passes. Within
+/// 2/255, the blend paths' tolerance; the glass's middle must differ from the
+/// sharp columns, or two unblurred pictures would agree.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn both_backends_draw_the_same_background_blur() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    for opacity in [1.0, 0.5] {
+        let (doc, res) = glass(true, opacity);
+        let gpu_px = render_gpu(&mut g, &doc, &res);
+        let cpu_px = render_cpu(&doc, &res);
+        assert!(
+            (20..80).any(
+                |x| at(&cpu_px, x, 50).0.abs_diff(at(&cpu_px, x + 1, 50).0) > 0
+                    && at(&cpu_px, x, 50).0 != 0
+                    && at(&cpu_px, x, 50).0 != 255
+            ),
+            "the fixture blurs the columns at {opacity}"
+        );
+        for y in (0..SIDE as usize).step_by(3) {
+            for x in 0..SIDE as usize {
+                let (a, b) = (at(&gpu_px, x, y), at(&cpu_px, x, y));
+                let d = [
+                    a.0.abs_diff(b.0),
+                    a.1.abs_diff(b.1),
+                    a.2.abs_diff(b.2),
+                    a.3.abs_diff(b.3),
+                ];
+                assert!(
+                    d.iter().all(|d| *d <= 2),
+                    "at ({x}, {y}), opacity {opacity}: gpu {a:?} vs cpu {b:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Over nothing but the canvas's ground, a glass shows the ground: the backdrop
+/// read from the top of the walk holds it (`ScenePainter::ground`), so erasing
+/// under the glass does not punch a hole through to transparency.
+///
+/// flip: `GpuScenePainter::ground` answering `None` → fails at the alpha.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_glass_over_the_bare_canvas_shows_the_ground() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let (doc, res) = glass(false, 1.0);
+    let ground = Color::from_rgba8(200, 180, 40, 255);
+    let px = render_gpu_on(
+        &mut g,
+        &doc,
+        &res,
+        &ImageStore::default(),
+        &viewport(),
+        ground,
+    );
+    let mid = at(&px, 50, 50);
+    assert_eq!(
+        mid.3, 255,
+        "the ground stays opaque under the glass: {mid:?}"
+    );
+    // The quarter-blue tint over the ground.
+    let want = |c: u8, t: u8| (f32::from(c) * 0.749 + f32::from(t) * 0.251).round() as u8;
+    for (got, want) in [
+        (mid.0, want(200, 0)),
+        (mid.1, want(180, 0)),
+        (mid.2, want(40, 255)),
+    ] {
+        assert!(
+            got.abs_diff(want) <= 2,
+            "{mid:?}: wanted the tint over the ground"
+        );
     }
 }

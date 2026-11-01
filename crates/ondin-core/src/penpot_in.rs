@@ -679,16 +679,14 @@ impl Builder<'_> {
             });
         }
         if let Some(blur) = shape.get("blur").filter(|b| b.is_object()) {
-            if str_of(blur, "type") == "background-blur" {
-                self.count("Background blur", 1, "layers", "Left out");
-            } else {
-                effects.push(Effect {
-                    visible: !b_of(blur, "hidden"),
-                    ..Effect::new(EffectKind::LayerBlur {
-                        radius: num(blur, "value"),
-                    })
-                });
-            }
+            let radius = num(blur, "value");
+            effects.push(Effect {
+                visible: !b_of(blur, "hidden"),
+                ..Effect::new(match str_of(blur, "type") {
+                    "background-blur" => EffectKind::BackgroundBlur { radius },
+                    _ => EffectKind::LayerBlur { radius },
+                })
+            });
         }
         if !effects.is_empty() {
             self.push(Operation::SetEffects {

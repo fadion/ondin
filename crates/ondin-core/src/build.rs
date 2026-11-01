@@ -108,7 +108,9 @@ pub fn effect_is_finite(effect: &crate::Effect) -> bool {
     }
     match &effect.kind {
         crate::EffectKind::DropShadow(s) | crate::EffectKind::InnerShadow(s) => shadow_ok(s),
-        crate::EffectKind::LayerBlur { radius } => radius.is_finite(),
+        crate::EffectKind::LayerBlur { radius } | crate::EffectKind::BackgroundBlur { radius } => {
+            radius.is_finite()
+        }
         crate::EffectKind::Filters(f) => {
             f.brightness.is_finite()
                 && f.contrast.is_finite()

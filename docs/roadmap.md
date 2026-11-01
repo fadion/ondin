@@ -19,10 +19,6 @@ Nothing open.
 
 ## Later · First
 
-- **Background blur.** Not built: `EffectKind` has no such effect. Neither vello 0.9 nor vello_cpu 0.2
-  has a backdrop filter, so both backends need a pass that renders what lies behind the layer, blurs
-  it and clips it to the shape. The code export would write `backdrop-filter`; SVG cannot express a
-  backdrop, so the SVG writer owes an answer (a reported approximation, at least).
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 

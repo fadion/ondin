@@ -576,6 +576,8 @@ pub mod icon {
     pub const CORNERS_SEPARATE: &str = "\u{f009}";
     /// Corner smoothing: a squircle, the shape smoothing turns a rounded box into.
     pub const SQUIRCLE: &str = "\u{f008}";
+    /// The **background blur**'s row glyph: a pane, frosted.
+    pub const SQUARE_DOTS: &str = "\u{f00a}";
     /// A variable mode's *Inherit*: an arrow turning up to the level above.
     pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
@@ -947,6 +949,7 @@ pub mod icon {
         ("corner-bottom-right", CORNER_BOTTOM_RIGHT),
         ("corners-separate", CORNERS_SEPARATE),
         ("squircle", SQUIRCLE),
+        ("square-dots", SQUARE_DOTS),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),
         ("arrow-up", ARROW_UP),
         ("arrow-down", ARROW_DOWN),

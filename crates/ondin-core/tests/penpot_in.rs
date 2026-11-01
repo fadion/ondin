@@ -367,6 +367,32 @@ fn paints_stack_as_penpot_draws_them() {
     );
 }
 
+/// A background blur lands as one, hidden as Penpot hid it, and a layer blur
+/// beside it stays a layer blur. flip: the `"background-blur"` arm in
+/// `penpot_in` back to a report → fails at the length of `G`'s stack.
+#[test]
+fn a_background_blur_lands_as_one() {
+    let mut glass = shape("G", "rect", ROOT, (0.0, 0.0, 10.0, 10.0));
+    glass["blur"] = json!({ "type": "background-blur", "value": 8, "hidden": true });
+    let mut soft = shape("S", "rect", ROOT, (20.0, 0.0, 10.0, 10.0));
+    soft["blur"] = json!({ "type": "layer-blur", "value": 4, "hidden": false });
+    let r = import(export(&["G", "S"], vec![glass, soft], &[]));
+    assert!(r.report.is_empty(), "{:?}", r.report);
+    let kind = |name| {
+        let fx = r.doc.get(one(&r.doc, name)).unwrap().effects().to_vec();
+        assert_eq!(fx.len(), 1, "{fx:?}");
+        (fx[0].kind.clone(), fx[0].visible)
+    };
+    assert!(matches!(
+        kind("G"),
+        (ondin_core::EffectKind::BackgroundBlur { radius }, false) if radius == 8.0
+    ));
+    assert!(matches!(
+        kind("S"),
+        (ondin_core::EffectKind::LayerBlur { radius }, true) if radius == 4.0
+    ));
+}
+
 /// Penpot 1's binary export is told apart from a zip, and an archive with no
 /// manifest is refused.
 #[test]

@@ -803,10 +803,13 @@ fn over(dst: &mut [u8], src: &[u8]) {
     }
 }
 
-/// Whether `effects` contains anything that would change a pixel.
+/// Whether `effects` contains anything that would change a pixel of the layer's
+/// own buffer.
 ///
 /// **Not `!effects.is_empty()`**: hidden entries and neutral `Filters` rows must
-/// answer `false`, or the layer pays for an offscreen buffer every frame.
+/// answer `false`, or the layer pays for an offscreen buffer every frame. A
+/// background blur answers `false` too: it is drawn behind the layer by the walk
+/// (`scene::paint_backdrop`), not by a pass over the layer.
 pub fn any_ink(effects: &[Keyed<Effect>]) -> bool {
     effects.iter().any(|e| {
         e.visible
@@ -815,6 +818,7 @@ pub fn any_ink(effects: &[Keyed<Effect>]) -> bool {
                     s.color.components[3] > 0.0
                 }
                 EffectKind::LayerBlur { radius } => *radius > 0.0,
+                EffectKind::BackgroundBlur { .. } => false,
                 EffectKind::Filters(f) => !f.is_neutral(),
             }
     })

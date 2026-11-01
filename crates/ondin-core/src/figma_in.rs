@@ -770,10 +770,9 @@ impl Builder<'_> {
                 "LAYER_BLUR" => EffectKind::LayerBlur {
                     radius: num(e, "radius"),
                 },
-                "BACKGROUND_BLUR" => {
-                    self.count("Background blur", 1, "layers", "Left out");
-                    continue;
-                }
+                "BACKGROUND_BLUR" => EffectKind::BackgroundBlur {
+                    radius: num(e, "radius"),
+                },
                 _ => {
                     self.count("Effects Ondin does not have", 1, "", "Left out");
                     continue;

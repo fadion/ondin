@@ -4,14 +4,14 @@
 //! order is the compositing order. [`Effect`] mirrors [`crate::Fill`]: a payload
 //! and a `visible` flag.
 //!
-//! **Four effects**: drop shadow, inner shadow, layer blur and colour filters
-//! are the ones that agree across the canvas (vello on wgpu), the raster export
-//! (`vello_cpu`) and the SVG writer. **Background blur** is planned but not
-//! built: SVG cannot express a backdrop (`BackgroundImage` was never implemented
-//! by any renderer), so that writer owes an answer — the reason it draws a
-//! [`Shadow::blend`] Normal and reports it. A layer's mode is
-//! `crate::Node::blend`. **Noise** is a non-goal: one generator written three
-//! times would have to agree to the pixel, and it belongs in the fill list.
+//! **Five effects**: drop shadow, inner shadow, layer blur, background blur and
+//! colour filters. The first four and the filters agree across the canvas (vello
+//! on wgpu), the raster export (`vello_cpu`) and the SVG writer; a background
+//! blur cannot be written to SVG (`BackgroundImage` was never implemented by any
+//! renderer), so that writer leaves it out and reports it, as it reports a
+//! [`Shadow::blend`] it draws Normal. A layer's mode is `crate::Node::blend`.
+//! **Noise** is a non-goal: one generator written three times would have to
+//! agree to the pixel, and it belongs in the fill list.
 
 use crate::item::Keyed;
 use kurbo::{Insets, Vec2};
@@ -34,7 +34,7 @@ pub const BLUR_DEVIATION: f64 = 0.5;
 /// disagree.
 pub const BLUR_CUTOFF: f64 = 3.0;
 
-/// The largest blur radius an effect may carry — a shadow's or a layer blur's.
+/// The largest blur radius an effect may carry — a shadow's or either blur's.
 ///
 /// The CPU backend allocates padding proportional to [`reach`], so an absurd
 /// radius is an enormous buffer. `Document::apply` refuses past it outside a
@@ -46,7 +46,7 @@ pub fn blur_within_cap(effect: &Effect) -> bool {
     let ok = |r: f64| r <= MAX_BLUR;
     match &effect.kind {
         EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => ok(s.blur),
-        EffectKind::LayerBlur { radius } => ok(*radius),
+        EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius } => ok(*radius),
         EffectKind::Filters(_) => true,
     }
 }
@@ -68,13 +68,13 @@ pub(crate) fn clamp_blur(effect: &mut Effect) {
                 s.blend = crate::BlendMode::Normal;
             }
         }
-        EffectKind::LayerBlur { radius } => clamp(radius),
+        EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius } => clamp(radius),
         EffectKind::Filters(_) => {}
     }
 }
 
-/// The radius a freshly added blur — a shadow's or a [`EffectKind::LayerBlur`]'s
-/// — starts on.
+/// The radius a freshly added blur — a shadow's or either blur effect's — starts
+/// on.
 ///
 /// One number for both, because it is one quantity in the same units
 /// ([`BLUR_DEVIATION`]); it is also why [`EffectKind::retyped`] can carry the
@@ -143,6 +143,31 @@ pub fn layer_blur_deviation(effects: &[Keyed<Effect>]) -> f64 {
             _ => None,
         })
         .fold(0.0, f64::max)
+}
+
+/// The one radius every visible [`EffectKind::BackgroundBlur`] of `effects` comes
+/// to, or `None` when none blurs: blurs applied in turn convolve, so their
+/// deviations compose as `σ = √(σ₁² + σ₂²)`, as a stack's layer blurs do in
+/// [`stack_escape`]. A radius, not a deviation, so it reads like the rows.
+pub fn backdrop_radius(effects: &[Keyed<Effect>]) -> Option<f64> {
+    let radii: Vec<f64> = effects
+        .iter()
+        .filter(|e| e.visible)
+        .filter_map(|e| match e.kind {
+            EffectKind::BackgroundBlur { radius } if radius > 0.0 => Some(radius),
+            _ => None,
+        })
+        .collect();
+    let largest = radii.iter().copied().fold(0.0_f64, f64::max);
+    // Divided through by the largest before squaring, for `stack_escape`'s reason.
+    (largest > 0.0).then(|| {
+        largest
+            * radii
+                .iter()
+                .map(|r| (r / largest).powi(2))
+                .sum::<f64>()
+                .sqrt()
+    })
 }
 
 /// How many device pixels one pixel of an effect layer's buffer should cover, so
@@ -214,7 +239,7 @@ pub struct Effect {
 }
 
 /// An effect's number bindings: a shadow's X, Y, blur and spread, in that order
-/// (§15 D1074). A layer blur's radius takes the blur slot and its other three are
+/// (§15 D1074). Either blur's radius takes the blur slot and its other three are
 /// always `None`; a filter's numbers bind nothing.
 pub type EffectVars = [Option<crate::variable::VarId>; 4];
 
@@ -239,8 +264,8 @@ impl Effect {
     }
 
     /// The effect's bindable numbers, in [`EffectVars`]' order — `None` where
-    /// its kind has no such number (a layer blur's X, Y and spread; all four of
-    /// a filter's). What a binding stands in for and a detach writes.
+    /// its kind has no such number (a blur's X, Y and spread; all four of a
+    /// filter's). What a binding stands in for and a detach writes.
     pub fn numbers(&self) -> [Option<f64>; 4] {
         match &self.kind {
             EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => [
@@ -249,7 +274,9 @@ impl Effect {
                 Some(s.blur),
                 Some(s.spread),
             ],
-            EffectKind::LayerBlur { radius } => [None, None, Some(*radius), None],
+            EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius } => {
+                [None, None, Some(*radius), None]
+            }
             EffectKind::Filters(_) => [None; 4],
         }
     }
@@ -269,7 +296,11 @@ impl Effect {
                 EFFECT_SPREAD => s.spread = x,
                 _ => {}
             },
-            EffectKind::LayerBlur { radius } if slot == EFFECT_BLUR => *radius = x,
+            EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius }
+                if slot == EFFECT_BLUR =>
+            {
+                *radius = x
+            }
             _ => {}
         }
     }
@@ -315,6 +346,13 @@ pub enum EffectKind {
         /// In the same units as a shadow's blur — see [`BLUR_DEVIATION`].
         radius: f64,
     },
+    /// Blurs what lies behind the layer, inside the layer's own outline: what was
+    /// drawn before it within the nearest enclosing layer that isolates (CSS's
+    /// backdrop root), never the layer itself.
+    BackgroundBlur {
+        /// As [`Self::LayerBlur`]'s.
+        radius: f64,
+    },
     Filters(Filters),
 }
 
@@ -338,6 +376,9 @@ impl EffectKind {
             // Drawn inside the shape's own alpha, so none of it lands outside.
             Self::InnerShadow(_) => Insets::ZERO,
             Self::LayerBlur { radius } => Insets::uniform(reach(*radius)),
+            // Drawn inside the layer's outline: the blur reads outside it but
+            // lands nowhere else.
+            Self::BackgroundBlur { .. } => Insets::ZERO,
             // Per-pixel, so every pixel it touches was already there.
             Self::Filters(_) => Insets::ZERO,
         }
@@ -349,6 +390,7 @@ impl EffectKind {
             Self::DropShadow(_) => "Drop shadow",
             Self::InnerShadow(_) => "Inner shadow",
             Self::LayerBlur { .. } => "Layer blur",
+            Self::BackgroundBlur { .. } => "Background blur",
             Self::Filters(_) => "Filters",
         }
     }
@@ -356,14 +398,17 @@ impl EffectKind {
     /// One of each kind, at its default, in the order the panel offers them.
     ///
     /// The order and the words are the model's, as with
-    /// [`crate::Adjustment::ALL`], so a panel cannot offer three of the four or
+    /// [`crate::Adjustment::ALL`], so a panel cannot offer four of the five or
     /// name one differently from the snapshot. A function rather than a `const`
     /// because every variant carries a payload.
-    pub fn all_defaults() -> [Self; 4] {
+    pub fn all_defaults() -> [Self; 5] {
         [
             Self::DropShadow(Shadow::default()),
             Self::InnerShadow(Shadow::default()),
             Self::LayerBlur {
+                radius: DEFAULT_BLUR_RADIUS,
+            },
+            Self::BackgroundBlur {
                 radius: DEFAULT_BLUR_RADIUS,
             },
             Self::Filters(Filters::default()),
@@ -382,8 +427,8 @@ impl EffectKind {
     /// when a row is retyped.
     ///
     /// Carries across what the two kinds share and defaults the rest, so a retype
-    /// does not throw tuned numbers away: the two shadows share every field, a
-    /// shadow and a blur share the radius, and [`Filters`] shares nothing.
+    /// does not throw tuned numbers away: the two shadows share every field, the
+    /// shadows and the two blurs share the radius, and [`Filters`] shares nothing.
     ///
     /// Only the kind of `to` is read, so a caller can pass one of
     /// [`Self::all_defaults`] as the name of a kind.
@@ -405,6 +450,7 @@ impl EffectKind {
                 }
             }
             Self::LayerBlur { .. } => Self::LayerBlur { radius: blur },
+            Self::BackgroundBlur { .. } => Self::BackgroundBlur { radius: blur },
             Self::Filters(_) => match self {
                 Self::Filters(f) => Self::Filters(*f),
                 _ => Self::Filters(Filters::default()),
@@ -420,7 +466,7 @@ impl EffectKind {
     fn blur_radius(&self) -> f64 {
         match self {
             Self::DropShadow(s) | Self::InnerShadow(s) => s.blur,
-            Self::LayerBlur { radius } => *radius,
+            Self::LayerBlur { radius } | Self::BackgroundBlur { radius } => *radius,
             Self::Filters(_) => DEFAULT_BLUR_RADIUS,
         }
     }
@@ -910,6 +956,32 @@ mod tests {
         );
     }
 
+    /// Background blurs compose as one radius, `√(r₁² + r₂²)`, and reach nowhere
+    /// outside the layer; a hidden or zero one adds nothing.
+    #[test]
+    fn background_blurs_compose_into_one_radius_and_escape_nothing() {
+        let hidden = Effect {
+            visible: false,
+            ..Effect::new(EffectKind::BackgroundBlur { radius: 50.0 })
+        };
+        let stack = crate::keyed_by_position([
+            Effect::new(EffectKind::BackgroundBlur { radius: 6.0 }),
+            Effect::new(EffectKind::BackgroundBlur { radius: 8.0 }),
+            Effect::new(EffectKind::BackgroundBlur { radius: 0.0 }),
+            hidden,
+        ]);
+        let r = backdrop_radius(&stack).expect("two of them blur");
+        assert!((r - 10.0).abs() < 1e-9, "√(36 + 64) is 10, got {r}");
+        assert_eq!(stack_escape(&stack), Insets::ZERO);
+        assert_eq!(
+            backdrop_radius(&crate::keyed_by_position([Effect::new(
+                EffectKind::LayerBlur { radius: 6.0 }
+            )])),
+            None,
+            "a layer blur is not a background blur"
+        );
+    }
+
     /// A drop shadow is cast from the blurred layer, so its reach starts one
     /// stage 1 further out: `[LayerBlur 12, DropShadow offset (0, 40) blur 4]`
     /// reaches `18 + 6 + 40 = 64` down, not `max(18, 6 + 40) = 46`.
@@ -1046,7 +1118,7 @@ mod tests {
             color: Color::from_rgba8(10, 20, 30, 40),
             blend: crate::BlendMode::Normal,
         };
-        let [drop, inner, blur, filters] = EffectKind::all_defaults();
+        let [drop, inner, blur, backdrop, filters] = EffectKind::all_defaults();
 
         // Two shadows share everything they have, so nothing is lost either way.
         let EffectKind::InnerShadow(s) = EffectKind::DropShadow(tuned.clone()).retyped(&inner)
@@ -1070,6 +1142,16 @@ mod tests {
             back.offset,
             Shadow::default().offset,
             "what a blur does not carry comes back at its default"
+        );
+        // The two blurs share their radius.
+        let EffectKind::BackgroundBlur { radius } =
+            EffectKind::LayerBlur { radius: 21.0 }.retyped(&backdrop)
+        else {
+            panic!("retyping to a background blur gave something else");
+        };
+        assert_eq!(
+            radius, 21.0,
+            "a layer blur's radius crosses to a background blur"
         );
 
         // `Filters` shares nothing with any of them, in either direction.
@@ -1110,7 +1192,7 @@ mod tests {
                 EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
                     assert!(s.blur > 0.0 && s.color.components[3] > 0.0, "{kind:?}");
                 }
-                EffectKind::LayerBlur { radius } => {
+                EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius } => {
                     assert_eq!(*radius, Shadow::default().blur, "{kind:?}");
                 }
                 // Neutral on purpose: off-neutral channels would change the

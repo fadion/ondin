@@ -458,6 +458,31 @@ fn an_image_fill_shows_its_fetched_picture() {
     ));
 }
 
+/// A background blur lands as one at Figma's radius, hidden as Figma hid it,
+/// and is not reported.
+#[test]
+fn a_background_blur_lands_as_one() {
+    let glass = node(
+        "10:1",
+        "RECTANGLE",
+        (0.0, 0.0, 20.0, 10.0),
+        json!({
+            "effects": [{ "type": "BACKGROUND_BLUR", "radius": 16, "visible": false }],
+        }),
+    );
+    let r = import(fetched(vec![glass], json!({}), &[]));
+    assert!(r.report.is_empty(), "{:?}", r.report);
+    let fx = r.doc.get(one(&r.doc, "10:1")).unwrap().effects().to_vec();
+    assert!(
+        matches!(
+            fx[..],
+            [ref e] if !e.visible
+                && matches!(e.kind, ondin_core::EffectKind::BackgroundBlur { radius } if radius == 16.0)
+        ),
+        "{fx:?}"
+    );
+}
+
 /// What the reader builds is a document the loader accepts.
 #[test]
 fn an_imported_file_saves_and_loads() {

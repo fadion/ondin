@@ -131,7 +131,8 @@ pub struct NodeSnapshot {
 /// not the gaussian deviation the writers take (`ondin_core::effect::BLUR_DEVIATION`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectSummary {
-    /// `"DropShadow"`, `"InnerShadow"`, `"LayerBlur"` or `"Filters"`.
+    /// `"DropShadow"`, `"InnerShadow"`, `"LayerBlur"`, `"BackgroundBlur"` or
+    /// `"Filters"`.
     pub kind: String,
     /// Shadows only: offset, blur radius, spread, and the colour whose alpha is
     /// the shadow's opacity.
@@ -485,6 +486,10 @@ fn effect_summary(e: &ondin_core::Effect) -> EffectSummary {
         EffectKind::LayerBlur { radius } => EffectSummary {
             blur: Some(*radius),
             ..base("LayerBlur")
+        },
+        EffectKind::BackgroundBlur { radius } => EffectSummary {
+            blur: Some(*radius),
+            ..base("BackgroundBlur")
         },
         EffectKind::Filters(f) => EffectSummary {
             brightness: Some(f.brightness),

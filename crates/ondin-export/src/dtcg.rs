@@ -462,10 +462,12 @@ impl Writer<'_> {
                     let (s, inset) = match &e.kind {
                         EffectKind::DropShadow(s) => (s, false),
                         EffectKind::InnerShadow(s) => (s, true),
-                        EffectKind::LayerBlur { .. } | EffectKind::Filters(_) => {
+                        EffectKind::LayerBlur { .. }
+                        | EffectKind::BackgroundBlur { .. }
+                        | EffectKind::Filters(_) => {
                             return left_out(
                                 &mut self.notes,
-                                "a layer blur or a colour filter has no DTCG type",
+                                "a blur or a colour filter has no DTCG type",
                             );
                         }
                     };

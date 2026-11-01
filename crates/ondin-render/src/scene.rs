@@ -133,6 +133,14 @@ pub trait ScenePainter {
         self.push_layer(Affine::IDENTITY, None, ClipRule::NonZero, 1.0);
     }
 
+    /// Begin a layer composited over the enclosing layer **by adding** to it
+    /// (`Compose::Plus`): what fills a hole [`Self::push_erase_layer`] left, in
+    /// proportion to how far it was erased. The default composites plainly;
+    /// shipping backends override.
+    fn push_add_layer(&mut self) {
+        self.push_layer(Affine::IDENTITY, None, ClipRule::NonZero, 1.0);
+    }
+
     /// Begin a layer **filtered** before it is composited: a node's effect stack
     /// (§5.3a). `bounds` is the node's ink box in `transform`'s space, grown by
     /// [`ondin_core::effect::stack_escape`]; it comes from the walk so both
@@ -169,6 +177,22 @@ pub trait ScenePainter {
     }
 
     fn pop_layer(&mut self);
+
+    /// The opaque colour the target holds before the walk draws, which a
+    /// background blur at the top of the walk reads behind the artwork: the
+    /// canvas's ground. `None` where any ground is laid after the drawing (every
+    /// export), and the backdrop is then transparent where nothing is drawn.
+    fn ground(&self) -> Option<ondin_core::peniko::Color> {
+        None
+    }
+
+    /// Whether a background blur's backdrop is drawn through this painter
+    /// ([`paint_backdrop`]). One measuring ink or tracing outlines says no: the
+    /// backdrop lies inside the layer's own outline, and repainting what is
+    /// behind it would measure or trace that twice.
+    fn paints_backdrops(&self) -> bool {
+        true
+    }
 }
 
 /// Walk `page` and drive `painter`.
@@ -235,6 +259,7 @@ fn walk<P: ScenePainter>(
 ) {
     let base = device_base(vp);
     let edges = Edges::of(doc, res, overrides, origins, cull, base);
+    let walk = Walk::new(origins);
     if let Some(ink) = overrides.outline() {
         let mut outline = OutlinePainter {
             inner: painter,
@@ -242,39 +267,93 @@ fn walk<P: ScenePainter>(
             base,
             erasing: Vec::new(),
         };
-        walk_origins(
-            doc,
-            res,
-            overrides,
-            origins,
-            cull,
-            base,
-            &edges,
-            &mut outline,
-        );
+        walk_origins(doc, res, overrides, cull, base, &edges, &mut outline, &walk);
     } else {
-        walk_origins(doc, res, overrides, origins, cull, base, &edges, painter);
+        walk_origins(doc, res, overrides, cull, base, &edges, painter, &walk);
     }
 }
 
+/// Paint each of `walk`'s origins under its parent's world transform, stopping
+/// once a backdrop's repaint has reached its layer.
 #[allow(clippy::too_many_arguments)]
 fn walk_origins<P: ScenePainter>(
     doc: &Document,
     res: &Resolved,
     overrides: &RenderOverrides,
-    origins: &[NodeId],
     cull: &[Rect],
     base: Affine,
     edges: &Edges<'_>,
     painter: &mut P,
+    walk: &Walk<'_>,
 ) {
-    for id in origins {
+    for id in walk.origins {
+        if walk.stopped() {
+            return;
+        }
         let outer = doc
             .get(*id)
             .and_then(|n| n.parent())
             .and_then(|p| res.world_transform(p))
             .unwrap_or(Affine::IDENTITY);
-        paint_node(doc, res, overrides, *id, outer, cull, base, edges, painter);
+        paint_node(
+            doc, res, overrides, *id, outer, cull, base, edges, painter, walk,
+        );
+    }
+}
+
+/// What a walk carries beyond the view: the subtrees it started from and the
+/// containers open above the node it is painting, which together say what a
+/// background blur reads behind a layer ([`paint_backdrop`]).
+struct Walk<'a> {
+    origins: &'a [NodeId],
+    /// Each container the walk is inside, outermost first.
+    open: std::cell::RefCell<Vec<Open>>,
+    /// How many shadow passes ([`shadow_passes`]) the walk is inside: a repaint
+    /// draws those whole, since the shadow lies behind everything in the layer.
+    in_shadow: std::cell::Cell<usize>,
+    /// Set while the walk repaints a backdrop, which it stops short of.
+    backdrop: Option<Backdrop>,
+}
+
+/// A container the walk is inside: the world transform it was painted under,
+/// and whether it draws its children into a layer of its own that composites
+/// as a whole (a blend, effect or opacity layer), which is where a backdrop
+/// stops.
+#[derive(Clone, Copy)]
+struct Open {
+    id: NodeId,
+    parent_world: Affine,
+    isolates: bool,
+}
+
+/// A backdrop being repainted: everything drawn before `upto`, from `bare` (the
+/// nearest container that isolates, drawn without the layers that isolate it)
+/// or from the walk's origins when none does.
+struct Backdrop {
+    upto: NodeId,
+    bare: Option<NodeId>,
+    reached: std::cell::Cell<bool>,
+}
+
+impl<'a> Walk<'a> {
+    fn new(origins: &'a [NodeId]) -> Self {
+        Self {
+            origins,
+            open: Default::default(),
+            in_shadow: Default::default(),
+            backdrop: None,
+        }
+    }
+
+    /// Whether a backdrop's repaint has reached its layer, after which nothing
+    /// more is drawn.
+    fn stopped(&self) -> bool {
+        self.backdrop.as_ref().is_some_and(|b| b.reached.get())
+    }
+
+    /// Whether `id` is the container a backdrop is repainted from.
+    fn bare(&self, id: NodeId) -> bool {
+        self.backdrop.as_ref().is_some_and(|b| b.bare == Some(id))
     }
 }
 
@@ -362,11 +441,17 @@ impl<P: ScenePainter> ScenePainter for OutlinePainter<'_, P> {
     fn push_erase_layer(&mut self) {
         self.erasing.push(true);
     }
+    fn push_add_layer(&mut self) {
+        self.erasing.push(false);
+    }
     fn push_effect_layer(&mut self, _: Affine, _: Rect, _: &[ondin_core::Keyed<Effect>]) {
         self.erasing.push(false);
     }
     fn pop_layer(&mut self) {
         self.erasing.pop();
+    }
+    fn paints_backdrops(&self) -> bool {
+        false
     }
 }
 
@@ -425,6 +510,9 @@ impl ScenePainter for BoundsPainter {
         self.add(transform, bounds);
     }
     fn pop_layer(&mut self) {}
+    fn paints_backdrops(&self) -> bool {
+        false
+    }
 }
 
 /// The device box of everything each of `tops` — children of `page` — draws
@@ -504,6 +592,60 @@ pub fn damage(
     Some(out)
 }
 
+/// `damage` (device boxes on `page`) with what it changes through a background
+/// blur added: a change behind a glass shows in the glass as far as the blur
+/// reaches, past the box of the change itself. Followed through glass behind
+/// glass, one glass further each round.
+pub fn spread_through_backdrops(
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    overrides: &RenderOverrides,
+    page: NodeId,
+    damage: Vec<Rect>,
+) -> Vec<Rect> {
+    let base = device_base(vp);
+    let glass: Vec<(Rect, f64)> = ondin_core::build::subtree_nodes(doc, &[page])
+        .into_iter()
+        .filter_map(|id| {
+            let node = doc.get(id)?;
+            let stack = overrides
+                .get(id)
+                .and_then(|o| o.effects.as_deref())
+                .unwrap_or(node.effects());
+            let radius = ondin_core::effect::backdrop_radius(&doc.resolved_effects(id, stack))?;
+            let world = res.world_transform(id)?;
+            let ink = base.transform_rect_bbox(res.ink_bounds(id)?);
+            Some((
+                ink,
+                ondin_core::effect::reach(radius) * stretch(base * world),
+            ))
+        })
+        .collect();
+    let mut out = damage.clone();
+    let mut frontier = damage;
+    for _ in 0..glass.len() {
+        let mut next = Vec::new();
+        for d in &frontier {
+            for (ink, reach) in &glass {
+                let hit = d.inflate(*reach, *reach).intersect(*ink);
+                if hit.width() > 0.0
+                    && hit.height() > 0.0
+                    && !out.iter().chain(&next).any(|o| o.contains_rect(hit))
+                {
+                    next.push(hit);
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        out.extend_from_slice(&next);
+        frontier = next;
+    }
+    out
+}
+
 /// The device box of what `overrides` changes about `page`'s drawing: each
 /// top-level item it touches and each ghost, as drawn under it. Empty for a
 /// preview that touches nothing; `None` in [`top_level_ink`]'s cases.
@@ -549,8 +691,11 @@ fn ink_of(
         painter: &mut P,
     ) {
         let edges = Edges::none();
+        let walk = Walk::new(&[]);
         match item {
-            Top::Node(id) => paint_node(doc, res, ov, id, world, view, base, &edges, painter),
+            Top::Node(id) => {
+                paint_node(doc, res, ov, id, world, view, base, &edges, painter, &walk)
+            }
             Top::Ghost(g) => paint_ghost(doc, ov, g, true, world, base, &edges, painter, None),
         }
     }
@@ -1301,6 +1446,7 @@ fn paint_node<P: ScenePainter>(
     base: Affine,
     edges: &Edges<'_>,
     painter: &mut P,
+    walk: &Walk<'_>,
 ) {
     paint_node_pass(
         doc,
@@ -1312,6 +1458,7 @@ fn paint_node<P: ScenePainter>(
         base,
         edges,
         painter,
+        walk,
         None,
     );
 }
@@ -1329,9 +1476,25 @@ fn paint_node_pass<P: ScenePainter>(
     base: Affine,
     edges: &Edges<'_>,
     painter: &mut P,
+    walk: &Walk<'_>,
     pass: Option<&FxPass>,
 ) {
     let Some(node) = doc.get(id) else { return };
+    // A backdrop's repaint draws what comes before its layer, and then nothing;
+    // inside a shadow pass the whole layer casts, so it does not stop there.
+    if let Some(b) = &walk.backdrop
+        && walk.in_shadow.get() == 0
+    {
+        if b.upto == id {
+            b.reached.set(true);
+        }
+        if b.reached.get() {
+            return;
+        }
+    }
+    // The container a backdrop is repainted from draws without the layers that
+    // isolate it: the backdrop is what lies inside them.
+    let bare = walk.bare(id);
     let over = ov.get(id);
 
     // A slice is never drawn.
@@ -1376,9 +1539,12 @@ fn paint_node_pass<P: ScenePainter>(
         .unwrap_or_else(|| res.used_local_of(node));
     let world = parent_world * local;
     // A bound opacity is drawn as its variable's percentage, never its literal's 0.
-    let opacity = over
-        .and_then(|o| o.opacity)
-        .unwrap_or_else(|| doc.drawn_opacity_of(node));
+    let opacity = match bare {
+        true => 1.0,
+        false => over
+            .and_then(|o| o.opacity)
+            .unwrap_or_else(|| doc.drawn_opacity_of(node)),
+    };
 
     // The box the paint is stored against: a gesture's kind is its stored one.
     let stored = over.and_then(|o| o.kind.as_ref()).unwrap_or(node.kind());
@@ -1475,15 +1641,42 @@ fn paint_node_pass<P: ScenePainter>(
     // `Some` exactly when a layer was pushed; a node with no cached bounds yet
     // draws unfiltered rather than not at all. Sized from the whole stack, so
     // every pass reads its silhouette from the same buffer box.
-    let effect_layer = crate::effects::any_ink(effects)
+    let effect_layer = (!bare && crate::effects::any_ink(effects))
         .then(|| effect_bounds(res, id, &painted, world, stack))
         .flatten();
+    // Behind everything the layer draws, its own shadows and blend included: what
+    // a background blur shows is what was there before the layer.
+    if pass.is_none()
+        && !bare
+        && walk.backdrop.is_none()
+        && painter.paints_backdrops()
+        && opacity > 0.0
+        && let Some(radius) = ondin_core::effect::backdrop_radius(stack)
+        && let Some(shape) = backdrop_shape(doc, res, ov, id, &painted)
+    {
+        let at = Outline {
+            at: shape_world,
+            path: &shape,
+            rule: painted.rule,
+        };
+        paint_backdrop(
+            (doc, res, ov),
+            id,
+            at,
+            radius,
+            opacity,
+            base,
+            edges,
+            painter,
+            walk,
+        );
+    }
     // The blend layer is outside even the effect layer: a layer's shadow blends
     // with it. A pass is drawn inside the one its first call pushed.
     let blend = over.and_then(|o| o.blend).unwrap_or(node.blend());
     let blend_layer = match pass {
-        None => blend_layer(doc, ov, id, painted.kind, blend),
-        Some(_) => None,
+        None if !bare => blend_layer(doc, ov, id, painted.kind, blend),
+        _ => None,
     };
     if let Some(mode) = blend_layer {
         painter.push_blend_layer(mode);
@@ -1496,6 +1689,8 @@ fn paint_node_pass<P: ScenePainter>(
             if blends(p.blend) {
                 painter.push_blend_layer(p.blend);
             }
+            walk.in_shadow
+                .set(walk.in_shadow.get() + usize::from(p.shadows));
             paint_node_pass(
                 doc,
                 res,
@@ -1506,8 +1701,11 @@ fn paint_node_pass<P: ScenePainter>(
                 base,
                 edges,
                 painter,
+                walk,
                 Some(p),
             );
+            walk.in_shadow
+                .set(walk.in_shadow.get() - usize::from(p.shadows));
             if blends(p.blend) {
                 painter.pop_layer();
             }
@@ -1547,7 +1745,7 @@ fn paint_node_pass<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun| {
         if let Some(id) = mask.alpha_to_composite() {
             painter.push_mask_layer();
-            paint_node(doc, res, ov, id, world, view, base, edges, painter);
+            paint_node(doc, res, ov, id, world, view, base, edges, painter, walk);
             painter.pop_layer();
         }
         mask.close(painter);
@@ -1578,6 +1776,16 @@ fn paint_node_pass<P: ScenePainter>(
         return;
     }
 
+    // A background blur under this node reads back to here if this node's
+    // children are drawn into a layer of its own.
+    walk.open.borrow_mut().push(Open {
+        id,
+        parent_world,
+        isolates: blend_layer.is_some()
+            || effect_layer.is_some()
+            || outer_opacity
+            || inner_opacity < 1.0,
+    });
     // Children and ghosts in one z-order: a ghost draws at its `InsertSubtree`
     // index.
     let mut ghosts: Vec<&crate::renderer::Ghost> = ov.ghosts_of(id).collect();
@@ -1620,11 +1828,30 @@ fn paint_node_pass<P: ScenePainter>(
         } else {
             reopen(painter, &mut open, &mut mask);
         }
-        paint_node(doc, res, ov, *child, world, view, base, edges, painter);
+        paint_node(
+            doc, res, ov, *child, world, view, base, edges, painter, walk,
+        );
+        if walk.stopped() {
+            break;
+        }
     }
+    walk.open.borrow_mut().pop();
 
-    close(painter, &mut open, &mut mask);
-    if frame_stroke && let Some(frame) = geometry::local_path(painted.kind) {
+    // A repaint that stopped short of a backdrop's layer leaves out what comes
+    // after it: an alpha mask composited at the end of its run, and the stroke.
+    let stopped = walk.stopped();
+    if stopped {
+        mask.close(painter);
+        if open {
+            painter.pop_layer();
+        }
+    } else {
+        close(painter, &mut open, &mut mask);
+    }
+    if !stopped
+        && frame_stroke
+        && let Some(frame) = geometry::local_path(painted.kind)
+    {
         // `shape_world`, not `world`: the border must run along the box the
         // background filled, or snapping opens a half-pixel gap.
         paint_strokes(
@@ -1847,7 +2074,9 @@ fn detail_effects(
             EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
                 s.offset.hypot() + reach(s.blur) + s.spread.abs()
             }
-            EffectKind::LayerBlur { radius } => reach(*radius),
+            EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius } => {
+                reach(*radius)
+            }
             EffectKind::Filters(_) => return false,
         };
         local * stretch < 1.0
@@ -1888,6 +2117,142 @@ fn effect_bounds(
     };
     let ink = ondin_core::effect::escaped(base, ondin_core::effect::stack_escape(effects), world);
     Some(world.inverse().transform_rect_bbox(ink))
+}
+
+/// The outline a background blur shows through, in the node's own space: its
+/// shape, a boolean's result, type's glyphs, a group's children's outlines
+/// united as a mask's are. `None` when there is no area to show it in.
+fn backdrop_shape(
+    doc: &Document,
+    res: &Resolved,
+    ov: &RenderOverrides,
+    id: NodeId,
+    painted: &Painted<'_>,
+) -> Option<BezPath> {
+    let path = match painted.kind {
+        NodeKind::Text { .. } => ondin_core::text::outline(painted.text?),
+        NodeKind::Group | NodeKind::Root => {
+            let node = doc.get(id)?;
+            let inner: Vec<BezPath> = ov
+                .children_of(id)
+                .unwrap_or(node.children())
+                .iter()
+                .filter(|c| !doc.get(**c).is_some_and(|n| n.mask()))
+                .filter_map(|c| mask_geometry(doc, res, ov, *c))
+                .collect();
+            ondin_core::boolean::evaluate(ondin_core::BoolOp::Union, &inner)?
+        }
+        kind => painted
+            .path
+            .cloned()
+            .or_else(|| geometry::local_path(kind))?,
+    };
+    (!path.elements().is_empty()).then_some(path)
+}
+
+/// A closed outline and the transform it is drawn under.
+#[derive(Clone, Copy)]
+struct Outline<'a> {
+    at: Affine,
+    path: &'a BezPath,
+    rule: ClipRule,
+}
+
+/// Draw what lies behind node `id`, blurred by `radius`, inside its outline,
+/// replacing what is already there at the node's `opacity`: its background
+/// blur.
+///
+/// What lies behind is everything the walk drew before the node inside the
+/// nearest enclosing container that draws into a layer of its own (CSS's
+/// backdrop root), or since the walk began when none does, repainted into an
+/// effect buffer blurred as a layer blur is. The outline is erased at the
+/// opacity and the blurred copy added into the hole at the same opacity, which
+/// is the mix `(1 − o)·under + o·blurred` at any coverage. Drawn over instead,
+/// the erased pixels would be faded a second time. Where a clip layer sits
+/// between that container and the node, the erase reaches only into the clip
+/// layer, and a translucent backdrop lets what is under it through. The canvas's ground ([`ScenePainter::ground`]) is part of a
+/// backdrop read from the walk's start. A layer met inside a repaint draws
+/// without its own backdrop, which bounds the cost at one repaint per layer.
+#[allow(clippy::too_many_arguments)]
+fn paint_backdrop<P: ScenePainter>(
+    (doc, res, ov): (&Document, &Resolved, &RenderOverrides),
+    id: NodeId,
+    shape: Outline<'_>,
+    radius: f64,
+    opacity: f32,
+    base: Affine,
+    edges: &Edges<'_>,
+    painter: &mut P,
+    walk: &Walk<'_>,
+) {
+    let reach = ondin_core::effect::reach(radius);
+    // What the blur reads: the outline's box grown by the blur's reach.
+    let local = shape.path.bounding_box().inflate(reach, reach);
+    // The repaint culls to that box in the world, a little wider so an edge's
+    // antialiasing is not cut.
+    let device = (base * shape.at)
+        .transform_rect_bbox(local)
+        .inflate(2.0, 2.0);
+    let world = base.inverse().transform_rect_bbox(device);
+
+    painter.push_erase_layer();
+    painter.fill_path(
+        shape.at,
+        shape.path,
+        &Brush::Solid(ondin_core::peniko::Color::BLACK.with_alpha(opacity)),
+        None,
+        shape.rule,
+    );
+    painter.pop_layer();
+
+    painter.push_add_layer();
+    painter.push_layer(shape.at, Some(shape.path), shape.rule, opacity);
+    let blur =
+        ondin_core::keyed_by_position([Effect::new(ondin_core::EffectKind::LayerBlur { radius })]);
+    painter.push_effect_layer(shape.at, local, &blur);
+    let root = walk
+        .open
+        .borrow()
+        .iter()
+        .rev()
+        .find(|o| o.isolates)
+        .copied();
+    let repaint = Walk {
+        origins: walk.origins,
+        open: Default::default(),
+        in_shadow: Default::default(),
+        backdrop: Some(Backdrop {
+            upto: id,
+            bare: root.map(|o| o.id),
+            reached: std::cell::Cell::new(false),
+        }),
+    };
+    let cull = [world];
+    match root {
+        Some(o) => paint_node(
+            doc,
+            res,
+            ov,
+            o.id,
+            o.parent_world,
+            &cull,
+            base,
+            edges,
+            painter,
+            &repaint,
+        ),
+        None => {
+            if let Some(ground) = painter.ground() {
+                let rect = world.to_path(TOLERANCE);
+                let ink = Brush::Solid(ground);
+                painter.fill_path(Affine::IDENTITY, &rect, &ink, None, ClipRule::NonZero);
+            }
+            walk_origins(doc, res, ov, &cull, base, edges, painter, &repaint);
+        }
+    }
+    painter.pop_layer();
+    painter.pop_layer();
+    painter.pop_layer();
 }
 
 /// The world box a ghost's own ink covers: [`effect_bounds`]'s answer for a node

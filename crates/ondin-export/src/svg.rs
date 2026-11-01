@@ -1102,6 +1102,10 @@ fn report_node(
     {
         report.approximate("a shadow's blend mode, drawn normal");
     }
+    // SVG has no backdrop: `BackgroundImage` was never implemented by any viewer.
+    if ondin_core::effect::backdrop_radius(effects).is_some() {
+        report.approximate("a background blur, left out");
+    }
     // Everything below is about `<text>`; outlined text is our own glyphs, placed.
     if outlined {
         return;

@@ -75,7 +75,7 @@ pub(crate) enum FieldKey {
         item: ondin_core::ItemId,
     },
     /// One of an effect's numbers — the effects popover's X, Y, Blur, Spread or a
-    /// layer blur's Radius (§15 D1074): effect `item` of layer `id`, `slot` an
+    /// blur's Radius: effect `item` of layer `id`, `slot` an
     /// `EffectVars` place. One layer only, as the stroke width's.
     EffectNumber {
         id: NodeId,

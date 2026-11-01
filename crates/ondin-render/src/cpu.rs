@@ -490,6 +490,17 @@ impl ScenePainter for CpuPainter<'_> {
         );
     }
 
+    fn push_add_layer(&mut self) {
+        self.opened_ordinary();
+        self.ctx().push_layer(
+            None,
+            Some(BlendMode::new(Mix::Normal, Compose::Plus)),
+            None,
+            None,
+            None,
+        );
+    }
+
     fn push_blend_layer(&mut self, mode: ondin_core::BlendMode) {
         self.opened_ordinary();
         self.ctx().push_layer(

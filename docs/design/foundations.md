@@ -17,7 +17,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 - Fonts: all installed system fonts, the full Google Fonts library (on-demand download with local cache), and a bundled fallback (§5.4a).
 - Paint: solid and linear, radial and angular gradient fills; strokes with width, join, cap, dash, mitre limit and alignment (inside/centre/outside, §6.3, since no backend has it natively); a rectangle's stroke on any of its four sides. Several fills and strokes per layer, painted and exported in list order.
 - Masks: any layer with an outline can mask the run of siblings drawn above it in the same parent, by its outline or by its own alpha (`MaskMode`). Luminance masks are deferred on a dependency (§15 D288).
-- Effects: a repeatable ordered stack per layer (drop shadow, inner shadow, layer blur, colour filters), meaningful on containers too. Drawn on the canvas, the raster export and the SVG file from one specification, `ondin_render::effects` (§5.3a, §6.4, §7).
+- Effects: a repeatable ordered stack per layer (drop shadow, inner shadow, layer blur, background blur, colour filters), meaningful on containers too. Drawn on the canvas, the raster export and the SVG file from one specification, `ondin_render::effects`, except a background blur, which SVG cannot express and leaves out, reported (§5.3a, §6.4, §7).
 - Blend modes per layer: the sixteen CSS/SVG/PDF modes plus Pass through on frames and groups, drawn alike on the canvas and in every export (§5.3, §6.2, §7).
 - Transform: translate/rotate/skew per node (local) about a movable per-node origin; resize edits geometry, not scale (§5.3, §5.6).
 - Selection, move, resize, z-order; copy/paste/duplicate via `InsertSubtree` (§5.7).
@@ -36,7 +36,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 
 ### Deferred (design for, do not build)
 
-- Background blur is planned work (`roadmap.md`, *Later · First*); blend modes per layer and per shadow are built. Noise is not built: three generators would have to agree to the pixel, and it is probably a fill (`non-goals.md`).
+- Noise is not built: three generators would have to agree to the pixel, and it is probably a fill (`non-goals.md`).
 - Hyphenation: a decided non-goal for v1 (§15 D399, `non-goals.md`), declined on price.
 - Persistent constraints in §13's sense (live relationships between arbitrary properties, a dependency graph). Layout insets are not this.
 - Real-time multiplayer: a real future goal. Operation and identity model are designed not to preclude it (§5.2, §12); the sync layer is not built.

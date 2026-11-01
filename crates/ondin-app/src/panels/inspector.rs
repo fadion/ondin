@@ -477,12 +477,13 @@ struct EffectRowOut {
     /// Its grip began a drag: the row is being carried to a new place in the stack.
     grabbed: bool,
 }
-/// The glyph an effect row wears; the four read as one set.
+/// The glyph an effect row wears; the five read as one set.
 fn effect_glyph(kind: &EffectKind) -> &'static str {
     match kind {
         EffectKind::DropShadow(_) => icon::DROP_HALF_BOTTOM,
         EffectKind::InnerShadow(_) => icon::DROP_HALF,
         EffectKind::LayerBlur { .. } => icon::CIRCLE_HALF,
+        EffectKind::BackgroundBlur { .. } => icon::SQUARE_DOTS,
         EffectKind::Filters(_) => icon::SUN,
     }
 }
@@ -495,7 +496,9 @@ fn effect_summary(kind: &EffectKind) -> String {
         EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
             format!("{:.0}%", f64::from(s.color.components[3]) * 100.0)
         }
-        EffectKind::LayerBlur { radius } => ui::number(2)(*radius, 0..=2),
+        EffectKind::LayerBlur { radius } | EffectKind::BackgroundBlur { radius } => {
+            ui::number(2)(*radius, 0..=2)
+        }
         EffectKind::Filters(f) => f.changed().to_string(),
     }
 }
@@ -510,6 +513,9 @@ fn effect_hint(kind: &EffectKind) -> &'static str {
         }
         EffectKind::LayerBlur { .. } => {
             "Blurs the layer's own drawing, children included. The number is the radius"
+        }
+        EffectKind::BackgroundBlur { .. } => {
+            "Blurs what lies behind the layer, inside its outline. The number is the radius"
         }
         EffectKind::Filters(_) => {
             "Brightness, contrast, saturation and hue. The number is how many are off their \
@@ -9430,6 +9436,23 @@ impl OndinApp {
                             ) {
                                 let _ = r.on_hover_text(
                                     "Blurs the layer's own drawing, children included",
+                                );
+                            }
+                        }
+                        EffectKind::BackgroundBlur { radius } => {
+                            if let Some(r) = self.effect_number_field(
+                                ui,
+                                subjects,
+                                index,
+                                ondin_core::EFFECT_BLUR,
+                                "Radius",
+                                egui::vec2(inner, CELL),
+                                *radius,
+                                0.0..=MAX_BLUR,
+                            ) {
+                                let _ = r.on_hover_text(
+                                    "Blurs what lies behind the layer, inside its outline. \
+                                     A translucent fill lets it show",
                                 );
                             }
                         }

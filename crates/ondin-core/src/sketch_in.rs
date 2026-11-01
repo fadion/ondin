@@ -920,7 +920,7 @@ impl Builder<'_> {
             let radius = num(blur, "radius");
             match num(blur, "type") as i64 {
                 0 => out.push(Effect::new(EffectKind::LayerBlur { radius })),
-                3 => self.count("Background blur", 1, "layers", "Left out"),
+                3 => out.push(Effect::new(EffectKind::BackgroundBlur { radius })),
                 _ => {
                     self.count("Motion and zoom blur", 1, "layers", "Read as a layer blur");
                     out.push(Effect::new(EffectKind::LayerBlur { radius }));

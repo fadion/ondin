@@ -1115,10 +1115,29 @@ impl Walk<'_> {
             }
         }
         let effects = doc.resolved_effects(id, node.effects());
+        let visible: Vec<_> = effects.iter().filter(|e| e.visible).collect();
+        if visible
+            .iter()
+            .any(|e| matches!(e.kind, EffectKind::BackgroundBlur { .. }))
+        {
+            // `backdrop-filter` shows through the element's box, where the canvas
+            // shows through the outline.
+            if matches!(kind, NodeKind::Group | NodeKind::Text { .. }) {
+                return Some("a background blur on a group or on type".into());
+            }
+            // An element's `filter` applies over its filtered backdrop too, where
+            // the canvas leaves the backdrop out of the layer's own effects.
+            if visible
+                .iter()
+                .any(|e| !matches!(e.kind, EffectKind::BackgroundBlur { .. }))
+            {
+                return Some("a background blur with another effect".into());
+            }
+        }
         let mut shadows = 0;
-        for e in effects.iter().filter(|e| e.visible) {
+        for e in visible {
             match &e.kind {
-                EffectKind::LayerBlur { .. } => {}
+                EffectKind::LayerBlur { .. } | EffectKind::BackgroundBlur { .. } => {}
                 // `drop-shadow()` has no blend mode of its own.
                 EffectKind::DropShadow(s) if s.blends() => {
                     return Some("a shadow with a blend mode".into());
@@ -1775,6 +1794,19 @@ impl Walk<'_> {
         }
         if !parts.is_empty() {
             el.set("filter", parts.join(" "));
+        }
+        let backdrop: Vec<String> = both
+            .iter()
+            .filter_map(|(kind, vars)| match kind {
+                EffectKind::BackgroundBlur { radius } => Some(match vars[EFFECT_BLUR] {
+                    Some(v) => format!("blur(calc({} * 0.5))", self.tokens.px_floored(v)),
+                    None => format!("blur({})", px(ondin_core::effect::deviation(*radius))),
+                }),
+                _ => None,
+            })
+            .collect();
+        if !backdrop.is_empty() {
+            el.set("backdrop-filter", backdrop.join(" "));
         }
     }
 

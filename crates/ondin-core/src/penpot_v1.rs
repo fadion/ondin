@@ -67,7 +67,9 @@ pub fn unpack(body: &[u8]) -> Result<Entries, String> {
                 }
                 let n = usize::try_from(long(body, at)?).map_err(|_| "a bad length")?;
                 at += 8;
-                let bytes = body.get(at..at + n).ok_or("an object cut short")?;
+                let bytes = body
+                    .get(at..at.saturating_add(n))
+                    .ok_or("an object cut short")?;
                 at += n;
                 let v = to_json(&Fressian::new(bytes).read()?);
                 if mark == 4 {
@@ -84,7 +86,9 @@ pub fn unpack(body: &[u8]) -> Result<Entries, String> {
             2 => {
                 let n = usize::try_from(long(body, at)?).map_err(|_| "a bad length")?;
                 at += 8;
-                let bytes = body.get(at..at + n).ok_or("a picture cut short")?;
+                let bytes = body
+                    .get(at..at.saturating_add(n))
+                    .ok_or("a picture cut short")?;
                 at += n;
                 let kind = sections
                     .get("v1/sobjects")
@@ -260,6 +264,16 @@ fn camel(s: &str) -> String {
     out
 }
 
+/// How deeply one object's values may nest. Penpot's data nests a dozen deep;
+/// each level is a stack frame here and again in `to_json`.
+const MAX_DEPTH: usize = 128;
+
+/// How many values one object may produce, a cached value counted at its full
+/// size each time it is used: a few bytes of nested cache references otherwise
+/// double the value per level. Ten million sits far above a real file's data
+/// (a few hundred values per shape) and well inside memory.
+const MAX_VALUES: usize = 10_000_000;
+
 /// A Fressian reader over one object's bytes, with Penpot's and Clojure's
 /// handlers for the tagged structs it writes.
 struct Fressian<'a> {
@@ -267,6 +281,10 @@ struct Fressian<'a> {
     at: usize,
     priority: Vec<F>,
     structs: Vec<(String, usize)>,
+    /// How many `read`s are under way.
+    depth: usize,
+    /// How many values have been produced, toward [`MAX_VALUES`].
+    made: usize,
 }
 
 impl<'a> Fressian<'a> {
@@ -276,7 +294,18 @@ impl<'a> Fressian<'a> {
             at: 0,
             priority: Vec::new(),
             structs: Vec::new(),
+            depth: 0,
+            made: 0,
         }
+    }
+
+    /// Count `n` values made, refusing past [`MAX_VALUES`].
+    fn made(&mut self, n: usize) -> Result<(), String> {
+        self.made = self.made.saturating_add(n);
+        if self.made > MAX_VALUES {
+            return Err("an object too large to read".into());
+        }
+        Ok(())
     }
 
     fn byte(&mut self) -> Result<u8, String> {
@@ -288,7 +317,7 @@ impl<'a> Fressian<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
         let b = self
             .buf
-            .get(self.at..self.at + n)
+            .get(self.at..self.at.saturating_add(n))
             .ok_or("an object cut short")?;
         self.at += n;
         Ok(b)
@@ -358,7 +387,20 @@ impl<'a> Fressian<'a> {
         Ok(((hi - centre) << (8 * n)) | low)
     }
 
+    /// One value, refused once it nests past [`MAX_DEPTH`] or the object has
+    /// made [`MAX_VALUES`].
     fn read(&mut self) -> Result<F, String> {
+        if self.depth >= MAX_DEPTH {
+            return Err("an object nested too deeply".into());
+        }
+        self.made(1)?;
+        self.depth += 1;
+        let v = self.value();
+        self.depth -= 1;
+        v
+    }
+
+    fn value(&mut self) -> Result<F, String> {
         let c = self.byte()?;
         Ok(match c {
             0x00..=0x7f | 0xff => F::Int(self.packed_int(c)?),
@@ -494,11 +536,15 @@ impl<'a> Fressian<'a> {
         })
     }
 
-    fn cached(&self, i: usize) -> Result<F, String> {
-        self.priority
-            .get(i)
-            .cloned()
-            .ok_or_else(|| "an unknown cached value".into())
+    /// A copy of cached value `i`, counted at its size and refused where it
+    /// would nest the value it lands in past [`MAX_DEPTH`].
+    fn cached(&mut self, i: usize) -> Result<F, String> {
+        let (n, depth) = extent(self.priority.get(i).ok_or("an unknown cached value")?);
+        if self.depth + depth > MAX_DEPTH {
+            return Err("an object nested too deeply".into());
+        }
+        self.made(n)?;
+        Ok(self.priority[i].clone())
     }
 
     /// A tagged struct of `n` fields. Penpot's records are one field holding
@@ -525,6 +571,21 @@ impl<'a> Fressian<'a> {
             _ => F::Null,
         })
     }
+}
+
+/// How many values `f` holds, itself included, and how deeply they nest.
+fn extent(f: &F) -> (usize, usize) {
+    let inner = |fs: &mut dyn Iterator<Item = &F>| {
+        fs.map(extent).fold((1usize, 0usize), |(n, d), (m, e)| {
+            (n.saturating_add(m), d.max(e))
+        })
+    };
+    let (n, d) = match f {
+        F::List(l) => inner(&mut l.iter()),
+        F::Map(m) => inner(&mut m.iter().flat_map(|(k, v)| [k, v])),
+        _ => (1, 0),
+    };
+    (n, d + 1)
 }
 
 /// A list of keys and values in turn as a map.
@@ -718,6 +779,146 @@ mod tests {
         w.0.push(0xda + 6);
         w.0.extend(b);
         assert_eq!(Fressian::new(&w.0).read().unwrap(), F::Str("🟪".into()));
+    }
+
+    /// A long run of values each wrapping the next is refused, not read until
+    /// the stack runs out. flip: return `self.value()` straight from `read` →
+    /// the test binary aborts with a stack overflow.
+    #[test]
+    fn a_deep_object_is_refused() {
+        let mut w = W::default();
+        w.0.extend(std::iter::repeat_n(0xc1, 200_000));
+        w.0.push(0xf7);
+        let mut body = Vec::new();
+        section(&mut body, Some("v1/files"), &w);
+        let err = unpack(&body).err().expect("refused");
+        assert!(err.contains("nested too deeply"), "{err}");
+    }
+
+    /// Cached values that each hold two copies of the one before are refused
+    /// once their copies pass the budget, in bounded time, rather than doubling
+    /// to the end of memory. flip: return the clone from `cached` without
+    /// `made` → the read runs on past the time limit and memory.
+    #[test]
+    fn cache_references_that_double_are_refused() {
+        let mut w = W::default();
+        w.0.extend([0xee, 0xcd, 0xf7]);
+        for k in 1..=40 {
+            w.0.extend([0xcd, 0xe6, 0xcc, k - 1, 0xcc, k - 1]);
+        }
+        w.0.push(0xfd);
+        let started = std::time::Instant::now();
+        let err = Fressian::new(&w.0).read().expect_err("refused");
+        assert!(err.contains("too large"), "{err}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    struct Placed;
+
+    impl crate::svg_in::ImageSink for Placed {
+        fn place(
+            &mut self,
+            bytes: Vec<u8>,
+            format: crate::image::ImageFormat,
+        ) -> Option<(crate::image::ImageId, crate::image::ImageEntry)> {
+            Some((
+                crate::image::ImageId(format!("test:{}", bytes.len())),
+                crate::image::ImageEntry {
+                    source: crate::image::ImageSource::Embedded(bytes.into()),
+                    format,
+                    width: 4,
+                    height: 4,
+                },
+            ))
+        }
+    }
+
+    /// A binfile's rect, its picture fill named through the file's media list
+    /// and the picture stored after `v1/sobjects`, reads through `penpot_in`
+    /// with the picture on it. flip: read the media list from `files.get(i * 2)`
+    /// in `unpack` → fails at the picture fill.
+    #[test]
+    fn a_binfiles_picture_reaches_the_reader() {
+        let mut body = Vec::new();
+        let mut meta = W::default();
+        meta.map(1).kw("files").tag("clj/vector", 1).list(1).uuid(1);
+        section(&mut body, Some("v1/metadata"), &meta);
+        let mut file = W::default();
+        file.map(3)
+            .kw("id")
+            .uuid(1)
+            .kw("name")
+            .s("Kit")
+            .kw("data")
+            .map(2);
+        file.kw("pages").tag("clj/vector", 1).list(1).uuid(2);
+        file.kw("pages-index").map(1).uuid(2).map(2);
+        file.kw("name").s("Cover").kw("objects").map(2);
+        file.uuid(0).tag("penpot/shape", 1).list(8);
+        file.kw("id")
+            .uuid(0)
+            .kw("type")
+            .kw("frame")
+            .kw("name")
+            .s("Root");
+        file.kw("shapes").tag("clj/vector", 1).list(1).uuid(3);
+        file.uuid(3).tag("penpot/shape", 1).list(18);
+        file.kw("id")
+            .uuid(3)
+            .kw("type")
+            .kw("rect")
+            .kw("name")
+            .s("R");
+        file.kw("parent-id").uuid(0);
+        file.kw("width").int(10).kw("height").int(10);
+        file.kw("x").int(0).kw("y").int(0);
+        file.kw("fills").tag("clj/vector", 1).list(1).map(1);
+        file.kw("fill-image")
+            .map(2)
+            .kw("id")
+            .uuid(5)
+            .kw("keep-aspect-ratio")
+            .0
+            .push(0xf5);
+        section(&mut body, Some("v1/files"), &file);
+        let mut media = W::default();
+        media.tag("clj/vector", 1).list(1).map(2);
+        media.kw("id").uuid(5).kw("media-id").uuid(6);
+        section(&mut body, None, &media);
+        let mut stored = W::default();
+        stored.map(1).kw("content-type").s("image/png");
+        section(&mut body, Some("v1/sobjects"), &stored);
+        body.push(3);
+        body.extend([0; 15]);
+        body.push(6);
+        let png = b"\x89PNG\r\n\x1a\nrest";
+        body.push(2);
+        body.extend((png.len() as u64).to_be_bytes());
+        body.extend(png);
+        let mut entries = unpack(&body).expect("the stream reads");
+        let mut ids = crate::IdSource::new(7);
+        let read =
+            crate::penpot_in::read(&mut entries, &mut ids, &mut Placed).expect("the file reads");
+        let doc = &read.doc;
+        let page = doc.page_ids().next().unwrap();
+        let rect = crate::build::subtree_nodes(doc, &[page])
+            .into_iter()
+            .find(|&id| doc.get(id).is_some_and(|n| n.name() == "R"))
+            .expect("the rect lands");
+        let fills = &doc.get(rect).unwrap().paint().fills;
+        assert!(
+            matches!(
+                &fills.iter().next().map(|f| &f.brush),
+                Some(crate::BrushSource::Literal(crate::peniko::Brush::Image(b)))
+                    if b.image.id.0 == format!("test:{}", png.len())
+                        && b.image.fit == crate::image::ImageFit::Fill
+            ),
+            "{fills:?}"
+        );
     }
 
     #[test]

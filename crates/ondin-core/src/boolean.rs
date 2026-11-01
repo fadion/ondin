@@ -336,6 +336,25 @@ fn is_straight(c: &kurbo::CubicBez) -> bool {
     })
 }
 
+/// How far apart, in units, two segments' lines may lie from the origin and
+/// still be measured against each other in [`split_overlaps`]; whether an end
+/// lies on a line is then [`SEAM_EPS`]'s.
+const LINE_EPS: f64 = 0.01;
+
+/// Straight segment `c`'s direction group — its angle in `step`s folded into a
+/// half turn of `turns` — and its line's signed distance from the origin, read
+/// along the direction folded the same way, so a line walked either way is one.
+fn line_of(c: &kurbo::CubicBez, step: f64, turns: f64) -> (i64, f64) {
+    let mut d = c.p3 - c.p0;
+    let mut turn = (d.y.atan2(d.x) / step).round();
+    if turn < 0.0 || turn >= turns {
+        turn = turn.rem_euclid(turns);
+        d = -d;
+    }
+    let axis = d / d.hypot();
+    (turn as i64, c.p0.to_vec2().cross(axis))
+}
+
 /// A straight segment from `a` to `b`, handles at the thirds — the form every
 /// straight piece takes in [`split_overlaps`], so a shared piece matches its partner.
 fn straight(a: Point, b: Point) -> kurbo::CubicBez {
@@ -345,63 +364,58 @@ fn straight(a: Point, b: Point) -> kurbo::CubicBez {
 /// `loops` with every straight segment cut at each end of another straight segment
 /// that lies on it, so a part of an edge two outlines share becomes a whole one.
 ///
-/// Segments are grouped by the line they lie on — its direction, then its distance
-/// from the origin, both coarsely quantised — and an end is taken only when it is
-/// within [`SEAM_EPS`] of the segment's own line. A cut lands on the other's end
-/// exactly, so the two pieces it makes match. A pair either side of a group's
-/// boundary is missed, as [`seam_cell`] misses one.
+/// Segments are grouped by direction, coarsely quantised, and a segment is
+/// measured against those in its group and the two beside it whose distance from
+/// the origin, along each one's own direction, is within [`LINE_EPS`]; an end is
+/// taken only when it is within [`SEAM_EPS`] of the segment's own line. A cut
+/// lands on the other's end exactly, so the two pieces it makes match.
 fn split_overlaps(loops: Vec<Vec<kurbo::CubicBez>>) -> Vec<Vec<kurbo::CubicBez>> {
-    // A thousandth of a degree of direction, a hundredth of a unit of offset.
+    // A thousandth of a degree of direction.
     const TURNS: f64 = 360_000.0;
     let step = std::f64::consts::PI / TURNS;
-    let mut lines: std::collections::HashMap<(i64, i64), Vec<(usize, usize)>> =
+    // Each straight segment's direction group and its line's offset, along its
+    // own direction modulo a half turn so a line walked either way is one line.
+    let mut groups: std::collections::HashMap<i64, Vec<(f64, usize, usize)>> =
         std::collections::HashMap::new();
     for (l, segs) in loops.iter().enumerate() {
         for (s, c) in segs.iter().enumerate() {
             if !is_straight(c) {
                 continue;
             }
-            let d = c.p3 - c.p0;
-            // Direction modulo a half turn, so a line walked either way is one line.
-            let turn = (d.y.atan2(d.x) / step).round().rem_euclid(TURNS);
-            let theta = turn * step;
-            let offset =
-                c.p0.to_vec2()
-                    .cross(kurbo::Vec2::new(theta.cos(), theta.sin()));
-            lines
-                .entry((turn as i64, (offset / 0.01).round() as i64))
-                .or_default()
-                .push((l, s));
+            let (turn, offset) = line_of(c, step, TURNS);
+            groups.entry(turn).or_default().push((offset, l, s));
         }
+    }
+    for members in groups.values_mut() {
+        members.sort_by(|a, b| a.0.total_cmp(&b.0));
     }
     let mut cuts: std::collections::HashMap<(usize, usize), Vec<Point>> =
         std::collections::HashMap::new();
-    for (&(turn, _), members) in &lines {
-        if members.len() < 2 {
-            continue;
-        }
-        let theta = turn as f64 * step;
-        let axis = kurbo::Vec2::new(theta.cos(), theta.sin());
-        // Every end on the line, in order along it.
-        let mut ends: Vec<(f64, Point)> = members
-            .iter()
-            .flat_map(|&(l, s)| [loops[l][s].p0, loops[l][s].p3])
-            .map(|p| (p.to_vec2().dot(axis), p))
-            .collect();
-        ends.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for &(l, s) in members {
+    for (&turn, members) in &groups {
+        for &(offset, l, s) in members {
             let c = &loops[l][s];
-            let (a, b) = (c.p0.to_vec2().dot(axis), c.p3.to_vec2().dot(axis));
-            let (lo, hi) = (a.min(b) + SEAM_EPS, a.max(b) - SEAM_EPS);
             let d = c.p3 - c.p0;
             let len = d.hypot();
-            let first = ends.partition_point(|e| e.0 <= lo);
-            for &(u, p) in &ends[first..] {
-                if u >= hi {
-                    break;
-                }
-                if (p - c.p0).cross(d).abs() / len <= SEAM_EPS {
-                    cuts.entry((l, s)).or_default().push(p);
+            let axis = d / len;
+            let (lo, hi) = (SEAM_EPS, len - SEAM_EPS);
+            // The bucket beside it too: a direction on a boundary rounds either way.
+            let around = [turn - 1, turn, turn + 1].map(|t| t.rem_euclid(TURNS as i64));
+            for others in around.iter().filter_map(|t| groups.get(t)) {
+                let first = others.partition_point(|o| o.0 < offset - LINE_EPS);
+                for &(o, ol, os) in &others[first..] {
+                    if o > offset + LINE_EPS {
+                        break;
+                    }
+                    if (ol, os) == (l, s) {
+                        continue;
+                    }
+                    let other = &loops[ol][os];
+                    for p in [other.p0, other.p3] {
+                        let u = (p - c.p0).dot(axis);
+                        if u > lo && u < hi && (p - c.p0).cross(d).abs() / len <= SEAM_EPS {
+                            cuts.entry((l, s)).or_default().push(p);
+                        }
+                    }
                 }
             }
         }

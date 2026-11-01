@@ -231,6 +231,32 @@ fn booleans_match_the_oracle() {
     common::run_all(&cases, |(operands, op)| boolean_case(operands, *op));
 }
 
+/// Exclude of two large squares sharing part of a side, turned and moved two
+/// hundred ways, takes the shared part out every time: segments a few hundred
+/// units apart on one line are measured against each other however their
+/// offsets round.
+///
+/// flip: `split_overlaps` reading offsets along the rounded direction and
+/// comparing only lines in one hundredth-of-a-unit bucket → fails, about one
+/// case in nine. Either change alone does not bite.
+#[test]
+fn a_long_shared_side_turned_any_way_leaves_no_seam() {
+    let cases: Vec<(String, Vec<BezPath>)> = (0..200)
+        .map(|i| {
+            let f = f64::from(i);
+            let at = Affine::translate((3.7 * f, 1.3 * f)) * Affine::rotate(0.1 + f * 0.0137);
+            (
+                format!("turn {i}"),
+                vec![
+                    at * rect(0.0, 0.0, 300.0, 300.0),
+                    at * rect(300.0, 100.0, 600.0, 450.0),
+                ],
+            )
+        })
+        .collect();
+    common::run_all(&cases, |operands| boolean_case(operands, BoolOp::Exclude));
+}
+
 /// Exclude over sixty by sixty adjacent tiles, every inner edge shared, splices
 /// them into one outline in a moment in a release build, where re-indexing every
 /// segment after each splice takes seconds; the bound is generous for a loaded

@@ -1281,6 +1281,11 @@ impl Walk<'_> {
             } => {
                 if node.clip() {
                     el.set("overflow", "hidden");
+                    // A clip is an isolation group on the canvas and in SVG, and
+                    // `overflow` makes no stacking context.
+                    if crate::svg::holds_blend(doc, node) {
+                        el.set("isolation", "isolate");
+                    }
                 }
                 self.border_radius(&mut el, node, *size, *corner_radii, *corner_smoothing);
                 over_children = self.paint(&mut el, node, *size);

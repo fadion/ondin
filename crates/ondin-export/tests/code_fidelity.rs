@@ -435,14 +435,30 @@ fn the_check_names_what_a_page_draws_differently() {
 }
 
 /// Blend modes as the browser draws them: a separable and a non-separable mode
-/// over the frame's fill, and a group set to Normal whose Difference child hangs
-/// off its white card onto the frame and has nothing to difference against there.
+/// over the frame's fill, a group set to Normal whose Difference child hangs off
+/// its white card onto the frame and has nothing to difference against there,
+/// and a fill-less clipping frame whose Multiply child has nothing under it
+/// inside the clip.
+///
+/// flip: `css_element` writing a clip as `overflow` alone → fails at "a clip
+/// isolates".
 #[test]
 fn blend_modes_match_the_canvas() {
     use ondin_core::BlendMode as B;
     let mut d = Doc::new();
-    let f = d.frame(None, 0.0, 0.0, 300.0, 120.0, "Board");
+    let f = d.frame(None, 0.0, 0.0, 400.0, 120.0, "Board");
     d.fill(f, solid(40, 90, 200, 255));
+    let row = d.frame(Some(f), 300.0, 20.0, 80.0, 80.0, "Row");
+    d.apply(vec![Operation::SetFills {
+        id: row,
+        fills: keyed_by_position(Vec::<ondin_core::Fill>::new()),
+    }]);
+    let through = d.rect(row, 10.0, 10.0, 60.0, 60.0, 0.0);
+    d.fill(through, solid(200, 100, 50, 255));
+    d.apply(vec![Operation::SetBlend {
+        id: through,
+        blend: B::Multiply,
+    }]);
     let m = d.rect(f, 20.0, 20.0, 60.0, 80.0, 0.0);
     d.fill(m, solid(240, 160, 80, 255));
     let l = d.rect(f, 100.0, 20.0, 60.0, 80.0, 8.0);
@@ -480,6 +496,12 @@ fn blend_modes_match_the_canvas() {
         "isolation: isolate",
     ] {
         assert!(css.contains(decl), "{decl} in {css}");
+    }
+    for rule in css.split('}').filter(|r| r.contains("overflow: hidden")) {
+        assert!(
+            rule.contains("isolation: isolate"),
+            "a clip isolates: {rule}"
+        );
     }
     holds("blend", &doc, &res);
 }

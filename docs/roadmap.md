@@ -1,29 +1,48 @@
 # Ondin — Roadmap
 
-Open work only. **Later · First** is the editor's remaining gaps, which land before MCP and Command
-Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it.
-**Gaps** is what other design tools have and Ondin lacks; **Illustrations** is vector editing for
-icons, logos and simple illustrations. The other **Later** sections are deferred with a stated reason or trigger;
+Open work only. **Now** is the editor's remaining work — its gaps, what other design tools have
+and Ondin lacks, and what Ondin can offer that they do not — roughly smallest first; it lands before
+MCP and Command Mode. **Illustrations** is vector editing for icons, logos and simple
+illustrations. The **Later** sections are deferred with a stated reason or trigger;
 **Considerations** are ideas not yet decided. Decided non-goals are in
 `non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
 reads true.
 
-## Now · Polish
+## Now
 
-Nothing open.
-
-## Now · Performance
-
-Nothing open.
-
-## Later · First
-
-- **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
-- **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
-
-## Later · Second
-
+- **`.ai` files through the PDF import.** An Illustrator file saved with PDF compatibility is a PDF;
+  the import accepts the `pdf` extension only.
+- **A luminance mask mode** beside Shape and Alpha (`MaskMode`).
+- **Colour-blind simulation** as a switch in the contrast check mode.
+- **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every
+  `Ctrl+S` pins one. An optional label, editable in the version card, and a *Save named version…*
+  palette command that pins and asks for one.
+- **Pixel preview.** The canvas rasterized at 1x and enlarged with hard pixel edges, so the
+  anti-aliasing a viewer gets is visible. The pixel grid (`grid.rs`) shows where pixels fall over
+  artwork drawn at device resolution, so a half-pixel edge looks sharp; the preview shows it blur.
+- **The code fidelity check in the app.** `ondin check code` reports what the HTML export draws
+  differently (`code::fidelity`); the export dialog could run it when a browser is found and list
+  the drifted layers beside the approximated ones. React and Vue pages need a bundler to be checked.
+- **Find and replace** in text across the page or the document. The layers search matches names only.
+- **Component documentation.** A description and a link on a main, shown in the insert picker; and
+  preferred values on a swap property, offered first in its picker.
+- **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
+  the dictionary, untagged text falls back to the system's input languages. The OS checker
+  (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.
+  Squiggles are edit chrome only, never exported; suggestions head the text context menu; the stored
+  text is checked, not its case transform.
+- **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
+  together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
+- **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
+  open is a visual diff marking the changed regions over the canvas, and the same compare in the
+  version history card (`versions.rs`). The git merge driver is built (`ondin merge`).
+- **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).
+  Import of the same file matches by the id in `$extensions`, then by path, so a rename made in code
+  is not a delete plus a create. It shows what is added, changed, removed and renamed, and applies it
+  as one transaction. A `tokens.json` can also be linked like a kit, with `watch_kits`' pill offering
+  its changes. Scoping (*Variable collections and scoping*, below) would make a number's `dimension`
+  or `number` explicit rather than read from its bindings.
 - **Colour review.** A card (Document menu, palette) over the selection or the document that groups
   near-identical raw colours — fills, strokes, gradient stops, effect and text-run colours — by OKLab
   distance, alpha compared apart. Each group grows around its most-used colour so A≈B≈C cannot chain,
@@ -32,18 +51,6 @@ Nothing open.
   recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
   colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
   eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
-- **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).
-  Import of the same file matches by the id in `$extensions`, then by path, so a rename made in code
-  is not a delete plus a create. It shows what is added, changed, removed and renamed, and applies it
-  as one transaction. A `tokens.json` can also be linked like a kit, with `watch_kits`' pill offering
-  its changes. Scoping, in *First*, would make a number's `dimension` or `number` explicit rather than
-  read from its bindings.
-- **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
-  open is a visual diff marking the changed regions over the canvas, and the same compare in the
-  version history card (`versions.rs`). The git merge driver is built (`ondin merge`).
-- **The code fidelity check in the app.** `ondin check code` reports what the HTML export draws
-  differently (`code::fidelity`); the export dialog could run it when a browser is found and list
-  the drifted layers beside the approximated ones. React and Vue pages need a bundler to be checked.
 - **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
   as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
   mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,
@@ -56,47 +63,13 @@ Nothing open.
   layers do not pair falls back to the prop and is reported
   approximated. The prop stays either way, for forcing a state. Live hover in present mode is
   prototyping, a non-goal.
-
-## Gaps
-
-What Figma, Sketch and Penpot have that Ondin lacks, beyond prototyping, animation and AI. Gaps
-already listed elsewhere in this file are not repeated.
-
-### Big
-
+- **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 - **Pattern fills.** A layer or component tiled as a fill, with spacing, scale and offset. Today only
   an image fill tiles (`app-image-editing.md`, framing modes).
 - **An editable way out.** Sketch, Penpot and Figma files come in (`library.md`, *Import files*);
   nothing editable goes back, only SVG and PDF. A `.penpot` export is the candidate: an open format,
   and `penpot_in` already maps it, so the writer is the reader's mapping in reverse.
-
-### Medium
-
-- **Find and replace** in text across the page or the document. The layers search matches names only.
-- **Component documentation.** A description and a link on a main, shown in the insert picker; and
-  preferred values on a swap property, offered first in its picker.
-- **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
-  together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
-
-### Small
-
-- **Pixel preview.** The canvas rasterized at 1x and enlarged with hard pixel edges, so the
-  anti-aliasing a viewer gets is visible. The pixel grid (`grid.rs`) shows where pixels fall over
-  artwork drawn at device resolution, so a half-pixel edge looks sharp; the preview shows it blur.
-- **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
-  the dictionary, untagged text falls back to the system's input languages. The OS checker
-  (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.
-  Squiggles are edit chrome only, never exported; suggestions head the text context menu; the stored
-  text is checked, not its case transform.
-- **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every
-  `Ctrl+S` pins one. An optional label, editable in the version card, and a *Save named version…*
-  palette command that pins and asks for one.
-- **Colour-blind simulation** as a switch in the contrast check mode.
-- **Leading trim** — a text box trimmed from cap height to baseline.
-- **Diamond gradients.** The Figma importer reads them as radial.
-- **A luminance mask mode** beside Shape and Alpha (`MaskMode`).
-- **`.ai` files through the PDF import.** An Illustrator file saved with PDF compatibility is a PDF;
-  the import accepts the `pdf` extension only.
+- **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 
 ## Illustrations
 
@@ -107,7 +80,7 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **A shape builder.** Drag across overlapping shapes to merge the regions crossed; `Alt`-drag removes
   them. With it, **Divide**, which cuts overlaps into separate paths. The faces come from the planar
   arrangement of the selection's outlines (`i_overlay` is already a dependency) and land as plain
-  paths. Weigh it, with the next two items, against vector networks (*Later · First*) before that
+  paths. Weigh it, with the next two items, against vector networks (*Now*) before that
   model change: for a designer they cover most of what a network offers.
 - **Snapping for points.** Pen anchors and dragged points snap to the pixel grid only
   (`app-snapping.md`, `snap_point`). Add anchors and segments of other paths, intersections, and,

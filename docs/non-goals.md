@@ -51,6 +51,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **A pool of reusable effect-pass renderers** — the build cost is a one-off hitch, and a pool conflicts with a correctness rule (§15 D779).
 - **Reading `Filters` (brightness/contrast) back from SVG** — the combined matrix doesn't identify its inputs (§15 D411).
 - **OKLCH or wide-gamut colour entry** — the document stores sRGB.
+- **Diamond gradients** — Figma-only; peniko has no such kind, so the model would need its own gradient type for it. The Figma import reads one as radial and says so.
 - **A CSS display format in the picker** — CSS colours are typed or pasted into any colour field; the value row shows Hex, RGB, HSL or HSB.
 - **Setting one channel across layers that disagree** — over a *Mixed* row the value row is the text field, which sets the whole colour.
 

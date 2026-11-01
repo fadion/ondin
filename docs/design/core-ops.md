@@ -211,9 +211,11 @@ pub struct Resolved {
     ink_bounds: FxHashMap<NodeId, Rect>,     // world_bounds grown by the effect stack — what is DRAWN
     inner_ink: FxHashMap<NodeId, Rect>,      // ink_bounds before this node's own effects escape
     text: FxHashMap<NodeId, Arc<TextLayout>>, // parley layouts, invalidated via DirtySet; equal texts in one pass share one
+    outline: FxHashMap<NodeId, BezPath>,     // each shape's local_path of its used kind, what shape_path reads
     boolean: FxHashMap<NodeId, BezPath>,     // combined outline per Boolean node, its own local space
     failed: FxHashSet<NodeId>,               // booleans whose arithmetic was abandoned
-    index: FxHashMap<NodeId, rstar::RTree<BoundsEntry>>, // one tree per page; leaves = paintable nodes and slices
+    index: FxHashMap<NodeId, PageIndex>,     // per page: a bulk-loaded tree (queries and removals only) and an insert tree; leaves = paintable nodes and slices
+    indexed: FxHashMap<NodeId, (NodeId, BoundsEntry)>, // each node's entry and its page's tree, so update patches rather than rebuilds
     used: FxHashMap<NodeId, Used>,           // SPARSE: only where layout moves/resizes a node, or bindings apply
     text_memo: FxHashMap<NodeId, TextMemo>,  // layout pass's text measurements, across commits
 }

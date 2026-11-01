@@ -593,7 +593,7 @@ pub mod icon {
     /// arrow-to-a-bar pair is the *all the way* family against the plain
     /// `ARROW_UP`/`ARROW_DOWN` one-step pair, and `ARROW_LINE_LEFT`/`ARROW_LINE_RIGHT`
     /// carry the same *against a wall* reading. Not [`STACK`] / [`STACK_SIMPLE`]:
-    /// `STACK_SIMPLE` is *Flatten* and the rows co-occur.
+    /// `STACK` is *Arrange ▸*, which holds these rows, and `STACK_SIMPLE` is *Flatten*.
     pub const ARROW_LINE_UP: &str = "\u{e066}";
     /// *Send to back*; see [`ARROW_LINE_UP`].
     pub const ARROW_LINE_DOWN: &str = "\u{e05c}";
@@ -795,11 +795,7 @@ pub mod icon {
     /// A component property's binding mark — `{}`, used only inside mains (§15
     /// D982).
     pub const BRACKETS_CURLY: &str = "\u{e860}";
-    /// A stack seen from the side. Drawn by nothing since *Bring to front* and
-    /// *Send to back* took [`ARROW_LINE_UP`]/[`ARROW_LINE_DOWN`] (§15 D761). Kept
-    /// under its own `allow` because it is the other candidate for *Bring to
-    /// front*, so a reversal of that ruling reaches for it.
-    #[allow(dead_code)]
+    /// A stack seen from the side: the context menu's *Arrange ▸*.
     pub const STACK: &str = "\u{e466}";
     /// *Flatten* — the same stack pressed into one sheet.
     pub const STACK_SIMPLE: &str = "\u{e468}";

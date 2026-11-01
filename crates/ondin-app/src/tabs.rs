@@ -1216,6 +1216,8 @@ impl OndinApp {
                 highlight = navigate_index(live.len(), at, step).map(|i| live[i]);
             }
             Some(Nav::Activate) => pick = highlight.map(|i| rows[i].0),
+            // No submenus here.
+            Some(Nav::Open | Nav::Back) => {}
             None if pointer_moved(ctx) => highlight = None,
             None => {}
         }

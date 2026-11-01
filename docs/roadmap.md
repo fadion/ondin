@@ -211,7 +211,6 @@ Ideas worth weighing, not yet decided or scheduled.
 - **Components: five unruled questions** — a group instance's canvas label; a main-scoped guide not
   copied; a linked node moved into a nested instance losing its link; instance roots exempt from
   membership (§15 D978); a moved-out layer previewed on copies (§15 D979 (xiv)).
-- **Is a 38-row context menu past the ceiling?** (`context-menus.md` *Open*, §15 D981, D1003 (9)).
 - **`Ctrl+Alt` is `AltGr`** on many European layouts (`shortcuts.md` §12, §15 D987).
 - **Is the chrome meant to be keyboard-traversable?** (§15 D747) — deferred by the maintainer.
 - **One font-availability question for panel and snapshot** — only worth it if the snapshot ever

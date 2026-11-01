@@ -158,6 +158,8 @@ fn anchored_menu(
             keys.highlight = navigate_index(rows, keys.highlight.filter(|i| *i < rows), step);
         }
         Some(MenuNav::Activate) => chosen = keys.highlight.filter(|i| *i < rows),
+        // No submenus here.
+        Some(MenuNav::Open | MenuNav::Back) => {}
         None if pointer_moved(ui.ctx()) => keys.highlight = None,
         None => {}
     }

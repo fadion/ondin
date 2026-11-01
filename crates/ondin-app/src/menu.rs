@@ -10,7 +10,7 @@
 //! undo a non-default state (*Reset crop*, *Reset origin*) is omitted when the
 //! state is default rather than shown dim.
 //!
-//! Opening, closing and placing the menu is `app.rs`'s `context_menu_ui`; painting
+//! Opening, closing and placing the menu is `OndinApp::context_menu_ui`; painting
 //! a row is `ui::menu_row`. This module answers which rows apply to a target, in
 //! what state.
 //!
@@ -62,8 +62,10 @@ pub enum Target {
 /// §3's canonical order, which is the order a menu is built in.
 ///
 /// The projection cannot reorder, only drop; empty groups collapse with their
-/// separator. [`Self::View`] is not one of §3's nine: §3 is a layer's menu and
-/// those switches are the page's.
+/// separator. A layer's menu draws four: Head, Clipboard, Structure and State.
+/// Its Properties, Order, Transform, Navigate and Export rows are in a submenu or
+/// off it, and those groups name them in the palette; the canvas menu still draws
+/// Navigate and Export.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Group {
     /// The kind's own "one level in" verbs — *Edit text*, *Enter group*, *Edit image*.
@@ -78,7 +80,7 @@ pub enum Group {
     State,
     Navigate,
     /// *Copy as SVG* · *Copy as CSS* · *Copy as PNG* · *Copy as PNG 2×*, semantic
-    /// then raster.
+    /// then raster, and the canvas menu's export rows.
     Export,
     /// The workspace switches §6.1 and §6.3 carry (rulers, guides, grid). Last.
     View,
@@ -187,10 +189,13 @@ pub enum Item {
     /// Each selected layer gives way to a copy of the whole clipboard, centred where it
     /// was, in its slot (`OndinApp::paste_to_replace`).
     PasteToReplace,
+    /// *Copy/Paste as ▸* — the layer menu's row holding the copies in other formats,
+    /// *Paste to replace* and the properties clipboard.
+    CopyPasteAs,
     Duplicate,
     Delete,
 
-    // --- properties (§3's third group) ------------------------------------
+    // --- properties: *Copy/Paste as ▸*'s second group ---------------------
     /// Lift the key layer's appearance — fills, strokes, effects, opacity — onto a
     /// clipboard of its own (`Ctrl+Alt+C`, `build::properties_of`).
     ///
@@ -223,6 +228,12 @@ pub enum Item {
     /// *Move to page ▸* — the layer menu's row that opens the list of the other
     /// pages ([`Self::MoveTo`]); runs nothing itself.
     MoveToPage,
+    /// *Arrange ▸* — the layer menu's row holding the four [`Self::Restack`]s.
+    Arrange,
+    /// *Align ▸* — the layer menu's row holding the six [`Self::Align`]s.
+    AlignMenu,
+    /// *Boolean ▸* — the layer menu's row holding the four [`Self::Boolean`]s.
+    BooleanMenu,
     /// Move the selection to this page (`OndinApp::move_selection_to_page`): a row
     /// of *Move to page ▸*'s list, and the palette's *Move to page: …*.
     MoveTo(NodeId),
@@ -308,7 +319,7 @@ pub enum Item {
     BatchRename,
     ZoomSelection,
 
-    // --- export (§3's ninth group) ----------------------------------------
+    // --- export: *Copy/Paste as ▸*'s first group --------------------------
     /// Put the selection on the system clipboard as an SVG document
     /// (`ondin_export::svg::svg_of`), so the other application receives editable
     /// groups and shapes.
@@ -548,6 +559,7 @@ impl Item {
         Item::PasteHere,
         Item::PasteInPlace,
         Item::PasteToReplace,
+        Item::CopyPasteAs,
         Item::Duplicate,
         Item::Delete,
         Item::CopyProperties,
@@ -561,6 +573,9 @@ impl Item {
         Item::GoToMain,
         Item::DetachInstance,
         Item::MoveToPage,
+        Item::Arrange,
+        Item::AlignMenu,
+        Item::BooleanMenu,
         Item::AcceptKitUpdates,
         Item::MakeLocal,
         Item::ResetInstance,
@@ -589,6 +604,12 @@ impl Item {
         Item::Restack(build::ZMove::Back),
         Item::Flip(build::Axis::X),
         Item::Flip(build::Axis::Y),
+        Item::Align(build::Axis::X, build::Edge::Min),
+        Item::Align(build::Axis::X, build::Edge::Mid),
+        Item::Align(build::Axis::X, build::Edge::Max),
+        Item::Align(build::Axis::Y, build::Edge::Min),
+        Item::Align(build::Axis::Y, build::Edge::Mid),
+        Item::Align(build::Axis::Y, build::Edge::Max),
         Item::ResetOrigin,
         Item::ToggleHidden,
         Item::ToggleLocked,
@@ -674,6 +695,7 @@ impl Item {
                 Group::Clipboard,
             ),
             Item::PasteToReplace => s("Paste to replace", icon::CLIPBOARD, None, Group::Clipboard),
+            Item::CopyPasteAs => s("Copy/Paste as", icon::CLIPBOARD, None, Group::Clipboard),
             Item::Duplicate => s(
                 "Duplicate",
                 icon::COPY_SIMPLE,
@@ -756,6 +778,9 @@ impl Item {
             ),
             // Labelled with the page's name by the list and the palette.
             Item::MoveTo(_) => s("Move to page", icon::FILE, None, Group::Pages),
+            Item::Arrange => s("Arrange", icon::STACK, None, Group::Structure),
+            Item::AlignMenu => s("Align", icon::ALIGN_LEFT, None, Group::Structure),
+            Item::BooleanMenu => s("Boolean", icon::UNITE_SQUARE, None, Group::Structure),
             Item::AcceptKitUpdates => s(
                 "Accept kit updates",
                 icon::ARROW_CIRCLE_DOWN,
@@ -880,12 +905,8 @@ impl Item {
                 Some("Shift+V"),
                 Group::Transform,
             ),
-            Item::ResetOrigin => s(
-                "Reset origin",
-                icon::CROSSHAIR_SIMPLE,
-                None,
-                Group::Transform,
-            ),
+            // In State, the menu's one transform row now the flips are the inspector's.
+            Item::ResetOrigin => s("Reset origin", icon::CROSSHAIR_SIMPLE, None, Group::State),
 
             // Labelled *Hide* and *Lock* here and renamed by `build` where the
             // state says otherwise — the spec is the default, not the truth.
@@ -916,7 +937,8 @@ impl Item {
             // `FILE_IMAGE` is the Export panel's raster-format glyph.
             Item::CopyAsPng(2) => s("Copy as PNG 2×", icon::FILE_IMAGE, None, Group::Export),
             Item::CopyAsPng(_) => s("Copy as PNG", icon::FILE_IMAGE, None, Group::Export),
-            Item::SliceSelection => s("Slice selection", icon::KNIFE, None, Group::Export),
+            // Beside *Frame selection*: it makes a layer out of the selection.
+            Item::SliceSelection => s("Slice selection", icon::KNIFE, None, Group::Structure),
             Item::ExportAll => s(
                 "Export all",
                 icon::EXPORT,
@@ -1454,6 +1476,9 @@ pub struct Row {
     /// into its head (*Ungroup* on a group, *Flatten* on a boolean) is moved, not
     /// duplicated.
     pub group: Option<Group>,
+    /// A submenu's rows, in groups with a separator between them, opened beside
+    /// this row. Empty for a row that runs its item.
+    pub sub: Vec<Vec<Row>>,
 }
 
 impl Row {
@@ -1465,7 +1490,13 @@ impl Row {
             enabled: true,
             why: None,
             group: None,
+            sub: Vec::new(),
         }
+    }
+    /// Make this row a submenu holding `groups`.
+    fn sub(mut self, groups: Vec<Vec<Row>>) -> Self {
+        self.sub = groups;
+        self
     }
     /// Move this row into the head (§3), where its kind wants it read.
     fn promote(mut self) -> Self {
@@ -1615,6 +1646,12 @@ pub struct Context<'a> {
     /// The document has one page — what dims *Delete page*, and leaves *Move to
     /// page* nowhere to go.
     pub one_page: bool,
+    /// The pages other than the current one, with their shown names: *Move to
+    /// page ▸*'s list.
+    pub other_pages: Vec<(NodeId, String)>,
+    /// The selection has something to align against (`OndinApp::align_target`):
+    /// what keeps *Align ▸* live.
+    pub can_align: bool,
 }
 
 /// A layer's part in a component, for the menu's component rows.
@@ -1867,34 +1904,44 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     let mut rows = head_rows(cx);
 
     // --- clipboard --------------------------------------------------------
+    // *Copy/Paste as ▸* holds the copies in other formats, which never dim since
+    // none changes the layer, then the two clipboards that are not the layers'
+    // own: the replace, and the appearance (present for every kind, a group being
+    // a valid destination; its source rule is state, so it dims).
+    let copy_paste_as = Row::new(Item::CopyPasteAs).sub(vec![
+        vec![
+            Row::new(Item::CopyAsSvg),
+            Row::new(Item::CopyAsCss),
+            Row::new(Item::CopyAsPng(1)),
+            Row::new(Item::CopyAsPng(2)),
+        ],
+        vec![
+            Row::new(Item::PasteToReplace)
+                .dim_if(!cx.can_replace, "No layers have been copied")
+                .dim_if(locked, why),
+            Row::new(Item::CopyProperties).dim_if(
+                !cx.can_copy_props,
+                // Three refusals: empty, ambiguous (no key), and a key with no paint.
+                match (cx.selection.len(), cx.has_key) {
+                    (0 | 1, _) => "This layer has no fill or stroke of its own",
+                    (_, false) => "Make one of these the key layer to copy from it",
+                    (_, true) => "The key layer has no fill or stroke of its own",
+                },
+            ),
+            Row::new(Item::PasteProperties)
+                .dim_if(!cx.has_props, "No properties have been copied yet")
+                .dim_if(locked, why),
+        ],
+    ]);
     rows.extend([
         Row::new(Item::Cut).dim_if(locked, why),
         Row::new(Item::Copy),
         Row::new(Item::PasteHere)
             .label(if panel { "Paste" } else { "Paste here" })
             .dim_if(!cx.can_paste, "Nothing has been copied yet"),
-        Row::new(Item::PasteToReplace)
-            .dim_if(!cx.can_replace, "No layers have been copied")
-            .dim_if(locked, why),
+        copy_paste_as,
         Row::new(Item::Duplicate).dim_if(locked, why),
         Row::new(Item::Delete).dim_if(locked, why),
-    ]);
-
-    // --- properties (§3's third group) ------------------------------------
-    // Present for every kind (a group is a valid destination); the source rule is state, so it dims.
-    rows.extend([
-        Row::new(Item::CopyProperties).dim_if(
-            !cx.can_copy_props,
-            // Three refusals: empty, ambiguous (no key), and a key with no paint.
-            match (cx.selection.len(), cx.has_key) {
-                (0 | 1, _) => "This layer has no fill or stroke of its own",
-                (_, false) => "Make one of these the key layer to copy from it",
-                (_, true) => "The key layer has no fill or stroke of its own",
-            },
-        ),
-        Row::new(Item::PasteProperties)
-            .dim_if(!cx.has_props, "No properties have been copied yet")
-            .dim_if(locked, why),
     ]);
 
     // --- structure --------------------------------------------------------
@@ -1908,6 +1955,10 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 "A frame cannot go inside a boolean or a mask",
             )
             .dim_if(locked, why),
+    );
+    // A slice on a slice would cut nothing new.
+    rows.push(
+        Row::new(Item::SliceSelection).dim_if(st.all_slices, "The selection is slices already"),
     );
     // Component rows by `Role`. A reset is omitted when nothing differs (§3's
     // exception). Mains of two kinds get *Combine as variants* dimmed with the
@@ -2027,25 +2078,34 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .dim_if(locked, why),
         );
     }
-    // Checkable while the target is a boolean, a plain verb over two or more layers otherwise.
+    // In *Boolean ▸*: checkable while the target is a boolean, a plain verb over two
+    // or more layers otherwise.
     let on_boolean = one && matches!(cx.kinds.first(), Some(Kind::Boolean(_)));
     if on_boolean || cx.selection.len() >= 2 {
         let current = match cx.kinds.first() {
             Some(Kind::Boolean(op)) if on_boolean => Some(*op),
             _ => None,
         };
-        for op in [
+        let ops = [
             BoolOp::Union,
             BoolOp::Subtract,
             BoolOp::Intersect,
             BoolOp::Exclude,
-        ] {
-            let mut row = Row::new(Item::Boolean(op)).dim_if(locked, why);
-            if let Some(current) = current {
-                row = row.checked(current == op);
+        ]
+        .into_iter()
+        .map(|op| {
+            let row = Row::new(Item::Boolean(op));
+            match current {
+                Some(current) => row.checked(current == op),
+                None => row,
             }
-            rows.push(row);
-        }
+        })
+        .collect();
+        rows.push(
+            Row::new(Item::BooleanMenu)
+                .dim_if(locked, why)
+                .sub(vec![ops]),
+        );
     }
     if !promoted_flatten && (cx.selection.len() >= 2 || on_boolean) {
         rows.push(Row::new(Item::Flatten).dim_if(locked, why));
@@ -2100,67 +2160,88 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .dim_if(locked, why),
         );
     }
-    // Last of the group: it takes the layers off this page. A list of the other
-    // pages opens beside it (`OndinApp::context_menu_ui`).
+    // The group ends on its three submenus. *Align ▸* is horizontal then vertical,
+    // as the inspector's row reads; distribute stays the inspector's and the
+    // palette's.
+    let align = [build::Axis::X, build::Axis::Y]
+        .into_iter()
+        .flat_map(|axis| {
+            [build::Edge::Min, build::Edge::Mid, build::Edge::Max]
+                .map(|edge| Row::new(Item::Align(axis, edge)).label(align_row_label(axis, edge)))
+        })
+        .collect();
+    rows.push(
+        Row::new(Item::AlignMenu)
+            .dim_if(
+                !cx.can_align,
+                "Select two or more layers, or a layer inside a frame",
+            )
+            .dim_if(locked, why)
+            .sub(vec![align]),
+    );
+    // The restacks are never dimmed for being already frontmost: `z_order` reports
+    // an empty transaction as an info line.
+    rows.push(Row::new(Item::Arrange).dim_if(locked, why).sub(vec![
+                [
+                    build::ZMove::Front,
+                    build::ZMove::Forward,
+                    build::ZMove::Backward,
+                    build::ZMove::Back,
+                ]
+                .into_iter()
+                .map(|mv| Row::new(Item::Restack(mv)))
+                .collect(),
+            ]));
+    // Last: it takes the layers off this page.
     rows.push(
         Row::new(Item::MoveToPage)
             .dim_if(cx.one_page, "This document has one page")
-            .dim_if(locked, why),
+            .dim_if(locked, why)
+            .sub(vec![
+                cx.other_pages
+                    .iter()
+                    .map(|(page, name)| Row::new(Item::MoveTo(*page)).label(name.clone()))
+                    .collect(),
+            ]),
     );
-
-    // --- order ------------------------------------------------------------
-    // Never dimmed for being already frontmost: `z_order` reports an empty transaction as an info line.
-    rows.extend(
-        [
-            build::ZMove::Front,
-            build::ZMove::Forward,
-            build::ZMove::Backward,
-            build::ZMove::Back,
-        ]
-        .into_iter()
-        .map(|mv| Row::new(Item::Restack(mv)).dim_if(locked, why)),
-    );
-
-    // --- transform --------------------------------------------------------
-    rows.extend([
-        Row::new(Item::Flip(build::Axis::X)).dim_if(locked, why),
-        Row::new(Item::Flip(build::Axis::Y)).dim_if(locked, why),
-    ]);
-    // Omitted at default (§3's exception), not dim.
-    if st.pivot_moved && one {
-        rows.push(Row::new(Item::ResetOrigin).dim_if(locked, why));
-    }
 
     // --- state ------------------------------------------------------------
     // The labels say what the action does over the whole selection.
     rows.extend([
         Row::new(Item::ToggleHidden).label(if st.all_hidden { "Show" } else { "Hide" }),
         Row::new(Item::ToggleLocked).label(if st.all_locked { "Unlock" } else { "Lock" }),
-        // One layer only, and not in focus mode, which hides the panel holding
-        // the field. Never dimmed by the lock: a name is not the layer's artwork.
+    ]);
+    // One rename row, as `Ctrl+R` is: the field for one layer, the box for several.
+    // Never dimmed by the lock: a name is not the layer's artwork.
+    rows.push(if one {
+        // Not in focus mode, which hides the panel holding the field.
         Row::new(Item::Rename)
-            .dim_if(!one, "Pick one layer to rename it")
             .dim_if(cx.focus, "Leave focus mode to rename")
-            .dim_if(crate::private::on(), crate::private::DECLINE_RENAME),
-        // Live but in private mode: the box is not in a panel, and takes any
-        // selection, but it shows every name.
-        Row::new(Item::BatchRename).dim_if(crate::private::on(), crate::private::DECLINE_RENAME),
-    ]);
-
-    // --- navigate ---------------------------------------------------------
-    rows.push(Row::new(Item::ZoomSelection));
-
-    // Export group: the copies never dim, since none changes the layer. A slice on
-    // a slice would cut nothing new.
-    rows.extend([
-        Row::new(Item::CopyAsSvg),
-        Row::new(Item::CopyAsCss),
-        Row::new(Item::CopyAsPng(1)),
-        Row::new(Item::CopyAsPng(2)),
-        Row::new(Item::SliceSelection).dim_if(st.all_slices, "The selection is slices already"),
-    ]);
+            .dim_if(crate::private::on(), crate::private::DECLINE_RENAME)
+    } else {
+        // The box is not in a panel, but it shows every name.
+        Row::new(Item::BatchRename).dim_if(crate::private::on(), crate::private::DECLINE_RENAME)
+    });
+    // Omitted at default (§3's exception), not dim.
+    if st.pivot_moved && one {
+        rows.push(Row::new(Item::ResetOrigin).dim_if(locked, why));
+    }
 
     rows
+}
+
+/// An align row's label inside *Align ▸*, which already says "Align": the palette's
+/// *Align horizontal centres* does not fit beside its chord at the menu's width.
+fn align_row_label(axis: build::Axis, edge: build::Edge) -> &'static str {
+    use build::{Axis, Edge};
+    match (axis, edge) {
+        (Axis::X, Edge::Min) => "Left",
+        (Axis::X, Edge::Mid) => "Horizontal centres",
+        (Axis::X, Edge::Max) => "Right",
+        (Axis::Y, Edge::Min) => "Top",
+        (Axis::Y, Edge::Mid) => "Vertical centres",
+        (Axis::Y, Edge::Max) => "Bottom",
+    }
 }
 
 /// §5 — the rows above group 2, per kind.
@@ -2359,10 +2440,30 @@ pub fn height(groups: &[Vec<Row>], row_h: f32, gap: f32, sep_h: f32, pad: f32) -
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Nav {
     Move(Step),
-    /// `Enter` — run the highlighted row. A no-op with nothing highlighted, so a
-    /// stray `Enter` on an accidental menu commits nothing.
+    /// `Enter` — run the highlighted row, or open it when it is a submenu. A no-op
+    /// with nothing highlighted, so a stray `Enter` on an accidental menu commits
+    /// nothing.
     Activate,
+    /// `→` — open the highlighted submenu.
+    Open,
+    /// `←` — close the open submenu, back to its row.
+    Back,
 }
+
+/// A submenu open beside its row.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Flyout {
+    /// The row that opened it.
+    pub parent: Item,
+    /// That row's rect, which the submenu sits beside; set as the row is drawn.
+    pub row: egui::Rect,
+    /// The submenu row the keyboard has walked to; `None` while the pointer drives.
+    pub highlight: Option<Item>,
+}
+
+/// How long the pointer rests on another row before it takes over from an open
+/// submenu, in seconds — long enough to cross a row on the way to the submenu.
+pub const AIM_GRACE: f64 = 0.25;
 
 /// Where a highlight goes (`docs/context-menus.md` §8).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -2451,6 +2552,55 @@ const MENU_PAD: f32 = 5.0;
 /// One separator as `ui::menu_sep` allocates it; agreeing with it keeps [`height`] exact.
 const SEP_H: f32 = crate::ui::MENU_SEP_H;
 
+/// Whether a pointer move from `from` to `to` heads into the submenu `fly`: `to`
+/// lies in the triangle from `from` to the submenu's near edge, the menus' usual
+/// aim test. A move down the card leaves the triangle at once.
+fn heads_into(from: egui::Pos2, to: egui::Pos2, fly: egui::Rect) -> bool {
+    let x = if fly.center().x >= from.x {
+        fly.left()
+    } else {
+        fly.right()
+    };
+    let (a, b, c) = (from, egui::pos2(x, fly.top()), egui::pos2(x, fly.bottom()));
+    let side = |p: egui::Pos2, q: egui::Pos2| (q - p).x * (to - p).y - (q - p).y * (to - p).x;
+    let (ab, bc, ca) = (side(a, b), side(b, c), side(c, a));
+    (ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
+}
+
+/// Paint one registry row, its reason as the tooltip of a dim one. `lit` is the
+/// keyboard's row, which takes the highlight from the pointer for every row; `held`
+/// is an open submenu's row, lit whatever the pointer does while the others still
+/// light on hover, so it stays lit across the gap to its submenu.
+fn menu_row_of(
+    ui: &mut egui::Ui,
+    row: &Row,
+    lit: Option<Item>,
+    held: Option<Item>,
+) -> egui::Response {
+    let spec = row.item.spec();
+    let mut style = crate::ui::MenuRow::new(spec.glyph, &row.label)
+        .accel(spec.accel)
+        .danger(spec.danger)
+        .enabled(row.enabled);
+    if let Some(on) = row.checked {
+        style = style.checked(on);
+    }
+    // Set on every row once on any: a row told `false` ignores the pointer, so no
+    // hover paints beside the keyboard's.
+    if let Some(lit) = lit {
+        style = style.highlight(row.item == lit);
+    } else if held == Some(row.item) {
+        style = style.highlight(true);
+    }
+    let resp = crate::ui::menu_row(ui, style, ROW_H);
+    // Hung off the row's own response: a `disable()`d `Ui` or `Ui::scope` is
+    // silently dead (`inspector::menu_action`).
+    match row.why {
+        Some(why) => resp.on_hover_text(why),
+        None => resp,
+    }
+}
+
 /// Take this frame's menu keypress, if there is one (`docs/context-menus.md` §8).
 ///
 /// Called from R3's gate at the top of the frame, and it consumes: the keys must
@@ -2465,6 +2615,8 @@ pub(crate) fn read_nav(ctx: &egui::Context) -> Option<Nav> {
             (egui::Key::Home, Nav::Move(Step::First)),
             (egui::Key::End, Nav::Move(Step::Last)),
             (egui::Key::Enter, Nav::Activate),
+            (egui::Key::ArrowRight, Nav::Open),
+            (egui::Key::ArrowLeft, Nav::Back),
         ]
         .into_iter()
         .find(|(key, _)| i.consume_key(none, *key))
@@ -2538,6 +2690,7 @@ impl OndinApp {
             // A fresh menu belongs to the pointer; the first `↓` takes it (§8).
             highlight: None,
             flyout: None,
+            leaving: None,
         }
     }
 
@@ -2554,6 +2707,7 @@ impl OndinApp {
         let (at, target, world, just_opened) = (menu.at, menu.target, menu.world, menu.just_opened);
         let mut highlight = menu.highlight;
         let mut flyout = menu.flyout;
+        let mut leaving = menu.leaving;
 
         // Rebuilt from live state every frame so checkable rows update; the
         // clipboard is the snapshot `menu` carries.
@@ -2574,27 +2728,79 @@ impl OndinApp {
         let pos = crate::ui::menu_place(ctx, at, size);
 
         let mut chosen = None;
+        // The submenu rows of a live row, `None` for a row that runs its item.
+        let sub_of = |item: Item| {
+            groups
+                .iter()
+                .flatten()
+                .find(|r| r.item == item && r.enabled && !r.sub.is_empty())
+                .map(|r| &r.sub)
+        };
+        // The open submenu goes with its row if a rebuild took or dimmed it.
+        flyout = flyout.filter(|f| sub_of(f.parent).is_some());
+        // Open `item`'s submenu, its first live row highlighted for the keyboard.
+        let open = |item: Item, keyboard: bool| {
+            sub_of(item).map(|sub| Flyout {
+                parent: item,
+                row: egui::Rect::NOTHING,
+                highlight: keyboard.then(|| navigate(sub, None, Step::First)).flatten(),
+            })
+        };
 
-        // The keyboard half (§8): an arrow moves the highlight, `Enter` runs it, a
-        // pointer move gives it back to the pointer. The keyboard wins a frame
-        // carrying both.
+        // The keyboard half (§8): an arrow moves the highlight, `Enter` runs it or
+        // opens its submenu, `→`/`←` open and close one, and a pointer move gives
+        // the highlight back to the pointer. The keyboard wins a frame carrying both.
+        // Inside a submenu the keys walk its rows.
         let moved = pointer_moved(ctx);
-        match nav {
-            Some(Nav::Move(step)) => highlight = navigate(&groups, highlight, step),
-            // Re-checked against this frame's build in case the row went dim.
-            Some(Nav::Activate) => {
-                chosen = groups
-                    .iter()
-                    .flatten()
-                    .find(|r| Some(r.item) == highlight && r.enabled)
-                    .map(|r| r.item);
+        let in_sub = flyout.and_then(|f| f.highlight.map(|_| f.parent));
+        match (nav, in_sub) {
+            (Some(Nav::Move(step)), Some(parent)) => {
+                if let (Some(f), Some(sub)) = (flyout.as_mut(), sub_of(parent)) {
+                    f.highlight = navigate(sub, f.highlight, step);
+                }
             }
-            None if moved => highlight = None,
-            None => {}
+            // Re-checked against this frame's build in case the row went dim.
+            (Some(Nav::Activate), Some(parent)) => {
+                chosen = sub_of(parent).and_then(|sub| {
+                    sub.iter()
+                        .flatten()
+                        .find(|r| Some(r.item) == flyout.and_then(|f| f.highlight) && r.enabled)
+                        .map(|r| r.item)
+                });
+            }
+            (Some(Nav::Back), Some(_)) => flyout = None,
+            (Some(Nav::Open), Some(_)) => {}
+            (Some(Nav::Move(step)), None) => {
+                highlight = navigate(&groups, highlight, step);
+                flyout = None;
+            }
+            (Some(Nav::Activate | Nav::Open), None) => {
+                if let Some(hl) = highlight
+                    && let Some(f) = open(hl, true)
+                {
+                    flyout = Some(f);
+                } else if nav == Some(Nav::Activate) {
+                    chosen = groups
+                        .iter()
+                        .flatten()
+                        .find(|r| Some(r.item) == highlight && r.enabled)
+                        .map(|r| r.item);
+                }
+            }
+            (Some(Nav::Back), None) => {}
+            (None, _) if moved => {
+                highlight = None;
+                if let Some(f) = flyout.as_mut() {
+                    f.highlight = None;
+                }
+            }
+            (None, _) => {}
         }
-        if let Some(m) = self.context_menu.as_mut() {
-            m.highlight = highlight;
-        }
+
+        let sub_id = egui::Id::new("context-menu-sub");
+        let parent = flyout.map(|f| f.parent);
+        let mut hovered = None;
+        let mut row_rect = None;
         let area = egui::Area::new(egui::Id::new("context-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
@@ -2607,81 +2813,112 @@ impl OndinApp {
                             crate::ui::menu_sep(ui);
                         }
                         for row in group {
-                            let spec = row.item.spec();
-                            let mut style = crate::ui::MenuRow::new(spec.glyph, &row.label)
-                                .accel(spec.accel)
-                                .danger(spec.danger)
-                                .enabled(row.enabled);
-                            if let Some(on) = row.checked {
-                                style = style.checked(on);
-                            }
-                            // Set on every row once on any: a row told `false` ignores
-                            // the pointer, so no hover paints beside the keyboard's.
-                            if let Some(hl) = highlight {
-                                style = style.highlight(row.item == hl);
-                            }
-                            let resp = crate::ui::menu_row(ui, style, ROW_H);
-                            // Hung off the row's own response: a `disable()`d `Ui` or
-                            // `Ui::scope` is silently dead (`inspector::menu_action`).
-                            let resp = match row.why {
-                                Some(why) => resp.on_hover_text(why),
-                                None => resp,
-                            };
-                            // *Move to page* opens its list on hover or click; any
-                            // other row hovered closes it.
-                            if row.item == Item::MoveToPage && row.enabled {
+                            let resp = menu_row_of(ui, row, highlight, parent);
+                            if !row.sub.is_empty() && row.enabled {
                                 crate::ui::paint_submenu_caret(ui, resp.rect);
-                                if resp.hovered() || resp.clicked() {
-                                    flyout = Some(resp.rect);
-                                }
-                            } else if resp.hovered() {
-                                flyout = None;
                             }
-                            if resp.clicked() && row.item != Item::MoveToPage {
-                                chosen = Some(row.item);
+                            if Some(row.item) == parent {
+                                row_rect = Some(resp.rect);
+                            }
+                            if resp.hovered() {
+                                hovered = Some((row.item, resp.rect));
+                            }
+                            if resp.clicked() {
+                                if row.sub.is_empty() {
+                                    chosen = Some(row.item);
+                                } else if let Some(f) = open(row.item, false) {
+                                    // A click opens a submenu at once, grace or not.
+                                    flyout = Some(Flyout {
+                                        row: resp.rect,
+                                        ..f
+                                    });
+                                    leaving = None;
+                                }
                             }
                         }
                     }
                 });
             })
             .response;
+        if let (Some(f), Some(rect)) = (flyout.as_mut(), row_rect) {
+            f.row = rect;
+        }
 
-        // *Move to page*'s list: every page but the current one, beside its row.
+        // The open submenu, beside its row.
         let mut in_flyout = false;
-        if let Some(row) = flyout {
-            let pages: Vec<(NodeId, String)> = self
-                .session
-                .doc
-                .page_ids()
-                .filter(|p| *p != self.session.page)
-                .map(|p| (p, self.shown_page_name(p)))
-                .collect();
-            let w = MENU_W;
-            // `height` for one group of these rows, 1pt apart.
-            let n = pages.len() as f32;
-            let h = crate::ui::MENU_BORDER * 2.0 + MENU_PAD * 2.0 + n * ROW_H + (n - 1.0).max(0.0);
-            let size = egui::vec2(w, h);
-            let pos = crate::ui::flyout_place(ctx, row, size, MENU_PAD);
-            let fly = egui::Area::new(egui::Id::new("context-menu-pages"))
+        let mut fly_rect = None;
+        if let Some(f) = flyout
+            && let Some(sub) = sub_of(f.parent)
+        {
+            let size = egui::vec2(MENU_W, height(sub, ROW_H, 1.0, SEP_H, MENU_PAD));
+            let pos = crate::ui::flyout_place(ctx, f.row, size, MENU_PAD);
+            let fly = egui::Area::new(sub_id)
                 .order(egui::Order::Foreground)
                 .fixed_pos(pos)
                 .show(ctx, |ui| {
                     crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                        ui.set_width(crate::ui::menu_inner_w(w, MENU_PAD));
+                        ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
                         ui.spacing_mut().item_spacing.y = 1.0;
-                        for (page, name) in &pages {
-                            let style = crate::ui::MenuRow::new("", name);
-                            if crate::ui::menu_row(ui, style, ROW_H).clicked() {
-                                chosen = Some(Item::MoveTo(*page));
+                        for (i, group) in sub.iter().enumerate() {
+                            if i > 0 {
+                                crate::ui::menu_sep(ui);
+                            }
+                            for row in group {
+                                if menu_row_of(ui, row, f.highlight, None).clicked() {
+                                    chosen = Some(row.item);
+                                }
                             }
                         }
                     });
                 })
                 .response;
             in_flyout = fly.contains_pointer();
+            fly_rect = Some(fly.rect);
+        }
+
+        // The pointer half: a live submenu row opens on hover when none is open. With
+        // one open, another row the pointer has just moved onto takes over at once,
+        // unless the move is heading into the submenu: then it waits `AIM_GRACE`, so
+        // the run can cross it, and reaching the submenu cancels the wait.
+        let now = ctx.input(|i| i.time);
+        let (pointer, delta) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.delta()));
+        let moved_away = moved
+            && delta != egui::Vec2::ZERO
+            && !pointer
+                .zip(fly_rect)
+                .is_some_and(|(p, fly)| heads_into(p - delta, p, fly));
+        match (hovered, flyout) {
+            _ if in_flyout || highlight.is_some() => leaving = None,
+            (Some((item, rect)), None) => {
+                flyout = open(item, false).map(|f| Flyout { row: rect, ..f });
+            }
+            (Some((item, _)), Some(f)) if item == f.parent => leaving = None,
+            (Some((item, rect)), Some(_)) if moved_away => {
+                flyout = open(item, false).map(|f| Flyout { row: rect, ..f });
+                leaving = None;
+            }
+            (Some((item, rect)), Some(_)) => match leaving {
+                Some((was, since)) if was == item => {
+                    if now - since >= AIM_GRACE {
+                        flyout = open(item, false).map(|f| Flyout { row: rect, ..f });
+                        leaving = None;
+                    } else {
+                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                            AIM_GRACE - (now - since),
+                        ));
+                    }
+                }
+                _ => {
+                    leaving = Some((item, now));
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(AIM_GRACE));
+                }
+            },
+            (None, _) => leaving = None,
         }
         if let Some(m) = self.context_menu.as_mut() {
+            m.highlight = highlight;
             m.flyout = flyout;
+            m.leaving = leaving;
         }
 
         if let Some(item) = chosen {
@@ -2857,6 +3094,14 @@ impl OndinApp {
                 _ => false,
             },
             one_page: self.session.doc.pages().len() == 1,
+            other_pages: self
+                .session
+                .doc
+                .page_ids()
+                .filter(|p| *p != self.session.page)
+                .map(|p| (p, self.shown_page_name(p)))
+                .collect(),
+            can_align: self.align_target().is_some(),
         }
     }
 
@@ -2955,8 +3200,12 @@ impl OndinApp {
             Item::StepPage(next) => self.dispatch(ctx, Action::StepPage(next)),
             Item::GoToPage(page) => self.go_to_page(page),
             Item::MoveTo(page) => self.move_selection_to_page(page),
-            // Opens its list beside it (`context_menu_ui`); a click on it does nothing.
-            Item::MoveToPage => {}
+            // Submenus: each opens its rows beside it (`context_menu_ui`) and runs nothing.
+            Item::MoveToPage
+            | Item::CopyPasteAs
+            | Item::Arrange
+            | Item::AlignMenu
+            | Item::BooleanMenu => {}
 
             // --- straight to the keymap's own verb -------------------------
             Item::Cut => self.dispatch(ctx, Action::Cut),
@@ -3369,6 +3618,8 @@ mod tests {
             any_frames: true,
             page_draft: false,
             one_page: false,
+            other_pages: Vec::new(),
+            can_align: true,
         }
     }
 
@@ -3403,7 +3654,12 @@ mod tests {
 
         for item in Item::ALL {
             let spec = item.spec();
-            let label_end = label_x + width(spec.label, 11.5);
+            // The label a menu draws: an align row's is *Align ▸*'s short one.
+            let label = match item {
+                Item::Align(axis, edge) => align_row_label(*axis, *edge),
+                _ => spec.label,
+            };
+            let label_end = label_x + width(label, 11.5);
             let accel_start = accel_x - spec.accel.map_or(0.0, |a| width(a, 10.5));
             assert!(
                 label_end + CLEAR <= accel_start,
@@ -3411,7 +3667,7 @@ mod tests {
                  {accel_start:.1} — the two are painted at fixed anchors, so they \
                  overlap rather than reflowing",
                 item,
-                spec.label,
+                label,
                 spec.accel.unwrap_or("")
             );
         }
@@ -3487,6 +3743,27 @@ mod tests {
         groups.iter().flatten().map(|r| &*r.label).collect()
     }
 
+    /// Every row a menu holds, its submenus' rows after their own row.
+    fn deep(groups: &[Vec<Row>]) -> Vec<&Row> {
+        groups
+            .iter()
+            .flatten()
+            .flat_map(|r| std::iter::once(r).chain(deep(&r.sub)))
+            .collect()
+    }
+
+    /// The labels of `item`'s submenu, a group to an inner `Vec`.
+    fn sub_labels(groups: &[Vec<Row>], item: Item) -> Vec<Vec<&str>> {
+        let row = deep(groups)
+            .into_iter()
+            .find(|r| r.item == item)
+            .unwrap_or_else(|| panic!("{item:?} is offered"));
+        row.sub
+            .iter()
+            .map(|g| g.iter().map(|r| &*r.label).collect())
+            .collect()
+    }
+
     /// Every row a menu can produce is in `Item::ALL`, and every entry there has a
     /// label, a glyph and a group. `ALL` is hand-written, so building every menu
     /// and demanding each row is in it is what makes the list answerable.
@@ -3531,7 +3808,13 @@ mod tests {
                 vec![Kind::Shape, Kind::Shape],
             ] {
                 let sel = &all[..kinds.len().min(2)];
-                for row in build(&open(target, sel, &kinds)).iter().flatten() {
+                let mut cx = open(target, sel, &kinds);
+                cx.other_pages = vec![(id(7), "Page 2".into())];
+                // A *Move to page ▸* row names a page, which `ALL` cannot list.
+                for row in deep(&build(&cx))
+                    .into_iter()
+                    .filter(|r| !matches!(r.item, Item::MoveTo(_)))
+                {
                     assert!(
                         Item::ALL.contains(&row.item),
                         "{:?} is produced by {target:?} and missing from Item::ALL",
@@ -3569,7 +3852,7 @@ mod tests {
                     &kinds,
                 );
                 cx.state = state;
-                for row in build(&cx).iter().flatten() {
+                for row in deep(&build(&cx)) {
                     assert_eq!(
                         row.enabled,
                         row.why.is_none(),
@@ -3581,23 +3864,26 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 31 rows in the canonical group order, with the empty
-    /// head collapsed. Asserts the label sequence, since `build` buckets by
+    /// A primitive's menu is 19 rows in three groups, the empty head collapsed, with
+    /// the clipboard's rest, the aligns and the order in *Copy/Paste as ▸*, *Align ▸*
+    /// and *Arrange ▸*. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_thirty_one_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_nineteen_rows_in_three_groups() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
-        let groups = build(&open(
+        let mut cx = open(
             Target::Layer {
                 id: id(1),
                 door: Door::Canvas,
             },
             &sel,
             &kinds,
-        ));
-        assert_eq!(flat(&groups).len(), 31, "{:?}", labels(&groups));
-        assert_eq!(groups.len(), 8, "the head is empty and must collapse");
+        );
+        cx.other_pages = vec![(id(7), "Page 2".into())];
+        let groups = build(&cx);
+        assert_eq!(flat(&groups).len(), 19, "{:?}", labels(&groups));
+        assert_eq!(groups.len(), 3, "the head is empty and must collapse");
 
         assert_eq!(
             labels(&groups),
@@ -3605,35 +3891,127 @@ mod tests {
                 "Cut",
                 "Copy",
                 "Paste here",
-                "Paste to replace",
+                "Copy/Paste as",
                 "Duplicate",
                 "Delete",
-                "Copy properties",
-                "Paste properties",
                 "Group selection",
                 "Frame selection",
+                "Slice selection",
                 "Create component",
                 "Use as mask",
                 "Outline shape",
                 "Outline stroke",
+                "Align",
+                "Arrange",
                 "Move to page",
-                "Bring to front",
-                "Bring forward",
-                "Send backward",
-                "Send to back",
-                "Flip horizontal",
-                "Flip vertical",
                 "Hide",
                 "Lock",
                 "Rename",
-                "Batch rename…",
-                "Zoom to selection",
-                "Copy as SVG",
-                "Copy as CSS",
-                "Copy as PNG",
-                "Copy as PNG 2×",
-                "Slice selection",
             ]
+        );
+        assert_eq!(
+            sub_labels(&groups, Item::AlignMenu),
+            [vec![
+                "Left",
+                "Horizontal centres",
+                "Right",
+                "Top",
+                "Vertical centres",
+                "Bottom",
+            ]]
+        );
+        assert_eq!(
+            sub_labels(&groups, Item::CopyPasteAs),
+            [
+                vec![
+                    "Copy as SVG",
+                    "Copy as CSS",
+                    "Copy as PNG",
+                    "Copy as PNG 2×"
+                ],
+                vec!["Paste to replace", "Copy properties", "Paste properties"],
+            ]
+        );
+        assert_eq!(
+            sub_labels(&groups, Item::Arrange),
+            [vec![
+                "Bring to front",
+                "Bring forward",
+                "Send backward",
+                "Send to back"
+            ]]
+        );
+        assert_eq!(sub_labels(&groups, Item::MoveToPage), [vec!["Page 2"]]);
+    }
+
+    /// *Align ▸* dims with its reason where the selection has nothing to align to
+    /// (a lone layer on the page), and *Boolean ▸* holds the four operations over
+    /// two layers.
+    ///
+    /// flip: `layer_menu` without *Align ▸*'s `can_align` dim → fails at "nothing to
+    /// align to".
+    #[test]
+    fn align_dims_with_nothing_to_align_to_and_boolean_holds_the_four() {
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let (sel, kinds) = ([id(1)], [Kind::Shape]);
+        let mut cx = open(target, &sel, &kinds);
+        cx.can_align = false;
+        let groups = build(&cx);
+        let align = deep(&groups)
+            .into_iter()
+            .find(|r| r.item == Item::AlignMenu)
+            .expect("Align is offered");
+        assert_eq!(
+            (align.enabled, align.why),
+            (
+                false,
+                Some("Select two or more layers, or a layer inside a frame")
+            ),
+            "nothing to align to"
+        );
+
+        let (two, kinds) = ([id(1), id(2)], [Kind::Shape, Kind::Shape]);
+        let groups = build(&open(target, &two, &kinds));
+        assert_eq!(
+            sub_labels(&groups, Item::BooleanMenu),
+            [vec!["Union", "Subtract", "Intersect", "Exclude"]]
+        );
+        assert!(
+            !flat(&groups).contains(&Item::Boolean(BoolOp::Union)),
+            "the operations are in the submenu, not on the card"
+        );
+    }
+
+    /// One rename row, as `Ctrl+R` is: *Rename* over one layer, *Batch rename…*
+    /// over several. *Reset origin* joins the State group when the pivot has moved.
+    #[test]
+    fn one_rename_row_names_what_ctrl_r_opens() {
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let one = build(&open(target, &[id(1)], &[Kind::Shape]));
+        let state = |groups: &[Vec<Row>]| -> Vec<String> {
+            groups
+                .last()
+                .expect("a State group")
+                .iter()
+                .map(|r| r.label.to_string())
+                .collect()
+        };
+        assert_eq!(state(&one), ["Hide", "Lock", "Rename"]);
+        let two = build(&open(target, &[id(1), id(2)], &[Kind::Shape, Kind::Shape]));
+        assert_eq!(state(&two), ["Hide", "Lock", "Batch rename…"]);
+
+        let (sel, kinds) = ([id(1)], [Kind::Shape]);
+        let mut cx = open(target, &sel, &kinds);
+        cx.state.pivot_moved = true;
+        assert_eq!(
+            state(&build(&cx)),
+            ["Hide", "Lock", "Rename", "Reset origin"]
         );
     }
 
@@ -3688,21 +4066,23 @@ mod tests {
         assert!(head.iter().any(|r| r.item == Item::Flatten));
         assert!(head.iter().any(|r| r.item == Item::Ungroup));
 
-        // The four operations are checkable here, and exactly one is ticked.
-        let ticked: Vec<&str> = groups
-            .iter()
-            .flatten()
+        // The four operations, in *Boolean ▸*, are checkable here, and exactly one
+        // is ticked.
+        assert_eq!(
+            sub_labels(&groups, Item::BooleanMenu),
+            [vec!["Union", "Subtract", "Intersect", "Exclude"]]
+        );
+        let ticked: Vec<&str> = deep(&groups)
+            .into_iter()
             .filter(|r| r.checked == Some(true))
             .map(|r| &*r.label)
             .collect();
         assert_eq!(ticked, ["Subtract"]);
     }
 
-    /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 6 ·
-    /// Properties 2 · Structure 10 · Order 4 · Transform 2 · State 4 · Navigate 1 ·
-    /// Export 5.
+    /// A plain boolean's menu: head 3 · Clipboard 6 · Structure 10 · State 3.
     #[test]
-    fn a_booleans_menu_is_the_long_end_of_the_range() {
+    fn a_booleans_menu_is_twenty_two_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Boolean(BoolOp::Subtract)];
         let groups = build(&open(
@@ -3713,11 +4093,12 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 37, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 22, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
-    /// arithmetic in each case's message. The linked boolean is the long end, at 38.
+    /// arithmetic in each case's message. The bound text child on a rail is the long
+    /// end, at 26.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -3734,41 +4115,41 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 34, plus *Flip to other side* and \
+                "text on a rail: the plain 22, plus *Flip to other side* and \
                  *Detach from path*",
-                36,
+                24,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
                 }),
             ),
             (
-                "a main frame: head 1 · Clipboard 6 · Properties 2 · Structure 5 \
-                 (*Group selection*, *Frame selection*, *Duplicate as component*, \
-                 *Select all instances*, *Move to page*) · Order 4 · Transform 2 · \
-                 State 4 · Navigate 1 · Export 5",
-                30,
+                "a main frame: head 1 · Clipboard 6 · Structure 8 (*Group \
+                 selection*, *Frame selection*, *Slice selection*, *Duplicate as \
+                 component*, *Select all instances*, *Align*, *Arrange*, *Move to \
+                 page*) · State 3",
+                18,
                 count(Kind::Frame, &|cx| cx.role = Role::Main),
             ),
             (
                 "an instance frame: a main's, with *Go to main component*, *Reset \
                  all* and *Detach instance* for its two",
-                31,
+                19,
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 31, with *Go to \
+                "a linked shape in an instance: the primitive's 19, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                32,
+                20,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
                 }),
             ),
             (
-                "a bound text child: text's 34, with *Go to main component*, \
+                "a bound text child: text's 22, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                36,
+                24,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -3777,9 +4158,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 36, with the bound \
-                 child's three rows for *Create component*",
-                38,
+                "a bound text child on a rail: the railed 24, with the bound \
+                 child's three rows for *Create component* — the long end",
+                26,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3790,9 +4171,8 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 37, with the bound child's three rows for *Create component* — \
-                 the long end",
-                39,
+                 22, with the bound child's three rows for *Create component*",
+                24,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3824,11 +4204,10 @@ mod tests {
         }
     }
 
-    /// A text layer's menu is 34 rows: head 4 · Clipboard 6 · Properties 2 ·
-    /// Structure 6 · Order 4 · Transform 2 · State 4 · Navigate 1 · Export 5. The
-    /// fixture must carry a `text_sizing`, which a real text layer always has.
+    /// A text layer's menu is 22 rows: head 4 · Clipboard 6 · Structure 9 · State 3.
+    /// The fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_thirty_four_rows() {
+    fn a_text_layers_menu_is_twenty_two_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -3844,17 +4223,18 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 34, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 22, "{:?}", labels(&groups));
     }
 
-    /// The component rows sit in Structure directly after *Frame selection*, one
-    /// role at a time in `context-menus.md` §4's order.
+    /// The component rows sit in Structure directly after *Slice selection*, the
+    /// last of the three rows that make a layer out of the selection, one role at a
+    /// time in `context-menus.md` §4's order.
     ///
     /// flip: filing *Go to main component* under `Group::Navigate` → fails at "an
     /// instance"; dropping the `holds_main` guard → fails at "several mains:
     /// Combine and nothing else".
     #[test]
-    fn the_component_rows_follow_frame_selection_in_structure() {
+    fn the_component_rows_follow_slice_selection_in_structure() {
         let sel = [id(1)];
         let target = Target::Layer {
             id: id(1),
@@ -3903,8 +4283,8 @@ mod tests {
                 .collect();
             let at = structure
                 .iter()
-                .position(|r| r.item == Item::FrameSelection)
-                .unwrap_or_else(|| panic!("no Frame selection in {:?}", labels(&groups)));
+                .position(|r| r.item == Item::SliceSelection)
+                .unwrap_or_else(|| panic!("no Slice selection in {:?}", labels(&groups)));
             structure[at + 1..]
                 .iter()
                 .map(|r| r.label.to_string())
@@ -3964,25 +4344,24 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 31, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 19, "{:?}", labels(&groups));
 
         let row = |item: Item| {
-            groups
-                .iter()
-                .flatten()
+            deep(&groups)
+                .into_iter()
                 .find(|r| r.item == item)
                 .unwrap_or_else(|| panic!("{item:?} is missing from a locked layer's menu"))
         };
-        // §5.9's live list plus *Copy properties*: reading a locked layer is not
-        // editing it. Its partner writes, so it dims with the lock's sentence.
+        // §5.9's live list plus *Copy properties*, and the submenu that holds it:
+        // reading a locked layer is not editing it. Its partner writes, so it dims
+        // with the lock's sentence.
         for live in [
             Item::Copy,
+            Item::CopyPasteAs,
             Item::CopyProperties,
             Item::Rename,
-            Item::BatchRename,
             Item::ToggleHidden,
             Item::ToggleLocked,
-            Item::ZoomSelection,
         ] {
             assert!(
                 row(live).enabled,
@@ -3994,7 +4373,8 @@ mod tests {
             Item::Cut,
             Item::Delete,
             Item::PasteProperties,
-            Item::Flip(build::Axis::X),
+            Item::AlignMenu,
+            Item::Arrange,
         ] {
             assert!(
                 !row(dim).enabled,
@@ -4530,7 +4910,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 31, "{:?}", labels(&groups));
+        assert_eq!(all, 19, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",
@@ -5088,9 +5468,8 @@ mod tests {
             build(&cx)
         };
         let row = |groups: &'_ [Vec<Row>], item: Item| {
-            groups
-                .iter()
-                .flatten()
+            deep(groups)
+                .into_iter()
                 .find(|r| r.item == item)
                 .map(|r| (r.enabled, r.why))
                 .expect("both property rows are on every layer menu")
@@ -5160,7 +5539,8 @@ mod tests {
             ] {
                 let sel = &all[..kinds.len().min(2)];
                 let groups = build(&open(target, sel, &kinds));
-                let rows = flat(&groups);
+                // Submenus included: an item there and on the card would be twice.
+                let rows: Vec<Item> = deep(&groups).iter().map(|r| r.item).collect();
                 assert!(
                     !rows.is_empty(),
                     "{target:?} over {kinds:?} builds nothing, so this asserts \
@@ -6033,5 +6413,283 @@ mod kit_rows_tests {
         assert_eq!(app.session.selection.ids(), &[small], "its main selected");
         app.open_path(&consumer);
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// The layer menu's submenus, driven through `context_menu_ui` by keys and pointer.
+#[cfg(test)]
+mod submenu_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, NodeKind, Operation, Transaction};
+
+    /// A headless app with one rectangle, its layer menu open from the panel.
+    fn open_on_a_rect(ctx: &egui::Context) -> OndinApp {
+        crate::theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x5B);
+        let root = ids.mint();
+        let rect = ids.mint();
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("one rect");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(rect);
+        app.open_context_menu(
+            ctx,
+            Target::Layer {
+                id: rect,
+                door: Door::Panel,
+            },
+            None,
+        );
+        app.context_menu.as_mut().expect("open").at = egui::pos2(100.0, 40.0);
+        app
+    }
+
+    /// One frame at `time`: the menu drawn with `nav` and `events`, its shapes back.
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        time: f64,
+        nav: Option<Nav>,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 900.0),
+            )),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| app.context_menu_ui(ui.ctx(), nav))
+            .shapes
+    }
+
+    /// Where the row labelled `label` is drawn.
+    fn at(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+        shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the row {label}"))
+    }
+
+    fn parent(app: &OndinApp) -> Option<Item> {
+        app.context_menu.as_ref()?.flyout.map(|f| f.parent)
+    }
+
+    /// `→` or `Enter` on a submenu row opens it on its first row, `↓` walks it,
+    /// `←` goes back to the row, and `Enter` inside runs the submenu's row.
+    ///
+    /// flip: `context_menu_ui` running `Enter` on a submenu row as a pick → fails at
+    /// "`Enter` opens *Arrange*".
+    #[test]
+    fn the_keys_walk_into_a_submenu_and_back() {
+        let ctx = egui::Context::default();
+        let mut app = open_on_a_rect(&ctx);
+        frame(&ctx, &mut app, 0.0, None, Vec::new());
+        app.context_menu.as_mut().expect("open").highlight = Some(Item::CopyPasteAs);
+
+        frame(&ctx, &mut app, 0.1, Some(Nav::Open), Vec::new());
+        let flyout = app.context_menu.as_ref().and_then(|m| m.flyout);
+        assert_eq!(
+            flyout.map(|f| f.parent),
+            Some(Item::CopyPasteAs),
+            "`→` opens it"
+        );
+        assert_eq!(
+            flyout.and_then(|f| f.highlight),
+            Some(Item::CopyAsSvg),
+            "on its first row"
+        );
+
+        frame(&ctx, &mut app, 0.2, Some(Nav::Move(Step::Next)), Vec::new());
+        let flyout = app.context_menu.as_ref().and_then(|m| m.flyout);
+        assert_eq!(
+            flyout.and_then(|f| f.highlight),
+            Some(Item::CopyAsCss),
+            "`↓` walks it"
+        );
+
+        frame(&ctx, &mut app, 0.3, Some(Nav::Back), Vec::new());
+        assert_eq!(parent(&app), None, "`←` closes it");
+        assert_eq!(
+            app.context_menu.as_ref().and_then(|m| m.highlight),
+            Some(Item::CopyPasteAs),
+            "back on its row"
+        );
+
+        app.context_menu.as_mut().expect("open").highlight = Some(Item::Arrange);
+        frame(&ctx, &mut app, 0.4, Some(Nav::Activate), Vec::new());
+        assert_eq!(parent(&app), Some(Item::Arrange), "`Enter` opens *Arrange*");
+        frame(&ctx, &mut app, 0.5, Some(Nav::Activate), Vec::new());
+        assert!(
+            app.context_menu.is_none(),
+            "`Enter` inside runs *Bring to front*"
+        );
+    }
+
+    /// Where the row labelled `label` is drawn, at the card's right edge: a step
+    /// there from its row's middle heads towards a submenu on the right.
+    fn at_right(
+        ctx: &egui::Context,
+        shapes: &[egui::epaint::ClippedShape],
+        label: &str,
+    ) -> egui::Pos2 {
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("context-menu")))
+            .expect("the card is drawn");
+        egui::pos2(card.right() - 12.0, at(shapes, label).y)
+    }
+
+    /// Hovering a submenu row opens it; another row crossed on a run heading into
+    /// the submenu does not take over, but one rested on for `AIM_GRACE` does.
+    ///
+    /// flip: `context_menu_ui` switching on the first hover of another row → fails
+    /// at "a row crossed on the way leaves it open".
+    #[test]
+    fn a_crossed_row_waits_out_the_grace_before_it_takes_over() {
+        let ctx = egui::Context::default();
+        let mut app = open_on_a_rect(&ctx);
+        frame(&ctx, &mut app, 0.0, None, Vec::new());
+        let shapes = frame(&ctx, &mut app, 0.0, None, Vec::new());
+        let copy_as = at(&shapes, "Copy/Paste as");
+        let duplicate = at_right(&ctx, &shapes, "Duplicate");
+        let mv = |p| vec![egui::Event::PointerMoved(p)];
+
+        frame(&ctx, &mut app, 0.1, None, mv(copy_as));
+        frame(&ctx, &mut app, 0.1, None, Vec::new());
+        assert_eq!(parent(&app), Some(Item::CopyPasteAs), "a hover opens it");
+
+        // Diagonally across *Duplicate* and into the submenu inside the grace.
+        frame(&ctx, &mut app, 0.15, None, mv(duplicate));
+        frame(&ctx, &mut app, 0.2, None, Vec::new());
+        assert_eq!(
+            parent(&app),
+            Some(Item::CopyPasteAs),
+            "a row crossed on the way leaves it open"
+        );
+        let sub = ctx
+            .memory(|m| m.area_rect(egui::Id::new("context-menu-sub")))
+            .expect("the submenu is drawn");
+        frame(&ctx, &mut app, 0.25, None, mv(sub.center()));
+        frame(&ctx, &mut app, 0.9, None, Vec::new());
+        assert_eq!(
+            parent(&app),
+            Some(Item::CopyPasteAs),
+            "reaching it keeps it"
+        );
+
+        // Back to its row, then the same diagonal step, resting on *Duplicate* past
+        // the grace: that closes it.
+        frame(&ctx, &mut app, 1.0, None, mv(copy_as));
+        frame(&ctx, &mut app, 1.05, None, mv(duplicate));
+        frame(&ctx, &mut app, 1.05 + AIM_GRACE / 2.0, None, Vec::new());
+        assert_eq!(
+            parent(&app),
+            Some(Item::CopyPasteAs),
+            "not before the grace"
+        );
+        frame(&ctx, &mut app, 1.05 + AIM_GRACE + 0.01, None, Vec::new());
+        assert_eq!(parent(&app), None, "a row rested on takes over");
+    }
+
+    /// An open submenu's row stays lit with the pointer between the row's end and
+    /// the submenu, where it is over neither.
+    ///
+    /// flip: `context_menu_ui` passing no `held` row to `menu_row_of` → fails at
+    /// "lit in the gap".
+    #[test]
+    fn a_submenus_row_stays_lit_across_the_gap() {
+        let ctx = egui::Context::default();
+        let mut app = open_on_a_rect(&ctx);
+        frame(&ctx, &mut app, 0.0, None, Vec::new());
+        let shapes = frame(&ctx, &mut app, 0.0, None, Vec::new());
+        let arrange = at(&shapes, "Arrange");
+        frame(
+            &ctx,
+            &mut app,
+            0.1,
+            None,
+            vec![egui::Event::PointerMoved(arrange)],
+        );
+        frame(&ctx, &mut app, 0.1, None, Vec::new());
+        let row = app
+            .context_menu
+            .as_ref()
+            .and_then(|m| m.flyout)
+            .filter(|f| f.parent == Item::Arrange)
+            .expect("the hover opens *Arrange*")
+            .row;
+
+        let gap = egui::pos2(row.right() + 2.0, row.center().y);
+        frame(
+            &ctx,
+            &mut app,
+            0.2,
+            None,
+            vec![egui::Event::PointerMoved(gap)],
+        );
+        let shapes = frame(&ctx, &mut app, 0.2, None, Vec::new());
+        let lit = shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Rect(r)
+                if r.fill == crate::theme::color::text_a(20) && r.rect == row)
+        });
+        assert!(lit, "lit in the gap");
+    }
+
+    /// A move down the card, away from the open submenu, switches at once: from
+    /// *Arrange ▸* straight down to *Move to page ▸* opens the page list without
+    /// waiting out the grace.
+    ///
+    /// flip: `context_menu_ui` without its `moved_away` arm → fails at "at once".
+    #[test]
+    fn a_move_down_the_card_switches_submenus_at_once() {
+        let ctx = egui::Context::default();
+        let mut app = open_on_a_rect(&ctx);
+        // A second page, so *Move to page ▸* is live and has a list.
+        let id = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::AddPage {
+            id,
+            index: 1,
+            name: "Second".into(),
+            ground: None,
+            draft: false,
+            mode: None,
+        }])));
+        frame(&ctx, &mut app, 0.0, None, Vec::new());
+        let shapes = frame(&ctx, &mut app, 0.0, None, Vec::new());
+        let (arrange, move_to) = (at(&shapes, "Arrange"), at(&shapes, "Move to page"));
+        let mv = |p| vec![egui::Event::PointerMoved(p)];
+
+        frame(&ctx, &mut app, 0.1, None, mv(arrange));
+        frame(&ctx, &mut app, 0.1, None, Vec::new());
+        assert_eq!(
+            parent(&app),
+            Some(Item::Arrange),
+            "the hover opens *Arrange*"
+        );
+        frame(&ctx, &mut app, 0.15, None, mv(move_to));
+        frame(&ctx, &mut app, 0.16, None, Vec::new());
+        assert_eq!(parent(&app), Some(Item::MoveToPage), "at once");
     }
 }

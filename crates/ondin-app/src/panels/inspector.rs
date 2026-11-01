@@ -10560,7 +10560,7 @@ impl OndinApp {
     /// designated, the selection's union when several layers are picked and none
     /// is, and the container's box when there is one. `None` for a lone top-level
     /// layer, where the only candidate is the whole document.
-    fn align_target(&self) -> Option<ondin_core::kurbo::Rect> {
+    pub(crate) fn align_target(&self) -> Option<ondin_core::kurbo::Rect> {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let res = &self.session.resolved;
         match ids.len() {

@@ -367,7 +367,8 @@ worded for the scope that plan was made for (`Plan::scope`).
   `TEXT_AA`) opens the box and is always live. With two or more layers selected, `Ctrl+R` and `F2`
   open the box rather than refusing.
 - **Doors.** The chord; the palette, offered with any target (aliases *find*, *replace*, *number*,
-  *bulk*); every layer menu's State group, after *Rename*, never dimmed; a `TEXT_AA` button in the
+  *bulk*); the layer menu's one rename row, which reads *Batch rename…* with several layers selected
+  and *Rename* with one, as `Ctrl+R` does; a `TEXT_AA` button in the
   Layers header between collapse-all and search (*Batch rename (Ctrl+Shift+R)*); the cheatsheet's
   Layer section.
 - **Placement and keys.** The palette's place: an `egui::Modal` with a transparent backdrop, 520

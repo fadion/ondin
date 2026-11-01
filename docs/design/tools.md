@@ -94,6 +94,7 @@ menu on the press would take the release as a row pick):
 
 - **One registry, seven targets.** `menu::Item` is one enum of verbs; `Item::spec()` gives each its label, glyph, accelerator and `Group`. `menu::build` sorts requested rows into the canonical group order, so a menu function chooses *which* rows appear, never which group they go in. Emitted order within a group is kept: a `Group` buys a separator, not a position. `build` returns `Vec<Vec<Row>>`, so an empty group takes its separator with it.
 - **Promotion.** `Row::promote()` is the one exception: a verb a kind lifts into its head is moved, not duplicated (*Ungroup* on a group, *Flatten* on a boolean).
+- **Submenus.** A row with children (`Row::sub: Vec<Vec<Row>>`) is a submenu, its groups written by the menu function rather than bucketed. Its parent `Item` runs nothing (`perform_menu_item` no-ops `CopyPasteAs`, `BooleanMenu`, `AlignMenu`, `Arrange`, `MoveToPage`); `context_menu_ui` draws the one open submenu beside its row (`context-menus.md` §8).
 - **Rows map to actions.** Most rows hand to an `input::Action`, so a row and its chord cannot mean different things. Rows with no chord (*Paste here*, *Add point here*, key-layer and base-operand designations, guide verbs, or anything `shortcuts.md` does not bind) call their canvas verb directly.
 - **Exhaustive matches.** `Item::spec`'s accelerator match and `menu::ViewState::get` are exhaustive. A chord comes from `ViewSwitch::accel()`; `Row::checked` takes an `Option` so a caller with no answer can say so.
 - `every_view_switch_is_on_exactly_one_menu` checks membership, not cardinality, across the hand-written `VIEW_CANVAS`, `VIEW_MODES`, `VIEW_PANELS` and `SNAP_MENU`; `Lasso` must be on none. The canvas menu's view rows derive from `VIEW_CANVAS` and `VIEW_MODES` minus `context-menus.md` §6.1's excludes.
@@ -323,7 +324,7 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
   when it is hovered (Select's hover target, or with the Slice tool the slice under the pointer) or
   selected, at 45% otherwise, so what is already cut shows.
   *Shown* here and in `slice_at` is `Document::shown_through`: a slice in a hidden group is hidden.
-- **Slice selection** (the layer menu's Export group, and the palette) cuts a slice fitted to the
+- **Slice selection** (the layer menu's Structure group, and the palette) cuts a slice fitted to the
   selection instead of dragging one (`OndinApp::slice_selection` → `build::slice_selection`): the
   selection's world bounds rounded out to whole units, just above the topmost selected layer in their
   nearest common container, a lone layer's name, one PNG 1× spec, selected afterwards. It dims, and

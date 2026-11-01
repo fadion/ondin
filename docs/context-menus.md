@@ -27,7 +27,7 @@ variable*).
   library file card or list row (its ⋮ file menu, at the press; `library.md`). Widgets that already use the secondary button keep it (gradient
   stop bar and the edited gradient's canvas handles, ruler).
 - **R3** — An open menu is `Escape`'s first rung, above focus mode: one press closes only the
-  menu. While open the menu holds the keyboard (`input::resolve` does not run). The same
+  menu, or only its open submenu. While open the menu holds the keyboard (`input::resolve` does not run). The same
   one-press-one-rung rule holds for the top-bar dropdowns and the inspector popovers.
 - **R4** — One floating slot: opening a context menu closes the top-bar dropdowns, the colour
   picker and the five inspector popovers (type, stroke, effects, Export row settings, Export
@@ -77,15 +77,15 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | # | Group | Contents |
 |---|---|---|
 | 1 | Head | the kind's own verbs (§5) |
-| 2 | Clipboard | Cut · Copy · Paste here · Paste to replace · Duplicate · Delete |
-| 3 | Properties | Copy properties · Paste properties |
-| 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions · Join paths · Move to page ▸ |
-| 5 | Order | four restack rows |
-| 6 | Transform | Flip H · Flip V · Reset origin |
-| 7 | State | Hide/Show · Lock/Unlock · Rename · Batch rename… |
-| 8 | Navigate | Zoom to selection |
-| 9 | Export | Copy as SVG · Copy as CSS · Copy as PNG · Copy as PNG 2× · Slice selection |
-| 10 | View | the canvas menu's view switches (§6.1, §6.3 only) |
+| 2 | Clipboard | Cut · Copy · Paste here · Copy/Paste as ▸ · Duplicate · Delete |
+| 3 | Structure | Group · Frame · Slice · component rows · Ungroup · mask · even-odd · Boolean ▸ · Flatten · conversions · Join paths · Align ▸ · Arrange ▸ · Move to page ▸ |
+| 4 | State | Hide/Show · Lock/Unlock · Rename *or* Batch rename… · Reset origin |
+| 5 | View | the canvas menu's view switches (§6.1, §6.3 only) |
+
+A layer menu emits no row in the registry's Properties, Order, Transform, Navigate or Export groups:
+those verbs sit in its submenus, the inspector or the palette, where the groups still name them. The
+canvas menu (§6.1) still uses Navigate and Export. A submenu's own groups are written by the menu
+function, not bucketed by `build`.
 
 - **Head at the top**: it holds the "one level in" verbs that are otherwise double-click only.
 - **Promoted, not duplicated**: *Ungroup* on a group and *Flatten*/*Ungroup* on a boolean move into
@@ -94,10 +94,12 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 31 rows, text 34, a boolean 37, railed text 36, a main frame 30, an
-  instance frame 31; component roles reach 39, a linked boolean in an instance
-  (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
-  Navigate goes first, then Export.
+- **Length**: a primitive is 19 rows in three groups, text 22, a boolean 22, railed text 24, a main
+  frame 18, an instance frame 19; the long end is a bound text child on a rail at 26
+  (`a_primitives_menu_is_nineteen_rows_in_three_groups`, `the_menus_the_two_ends_do_not_count`).
+  The ceiling is "needs neither a scrollbar nor a large monitor", which is why the alternate
+  clipboards, the boolean operations, the aligns and the restacks sit behind submenus and Flip H/V
+  and *Zoom to selection* are left to their other doors (§7).
 
 ---
 
@@ -110,14 +112,21 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | Cut | `Ctrl+X` | dims on lock |
 | Copy | `Ctrl+C` | always live |
 | Paste here (canvas) / Paste (panel) | `Ctrl+V` | dims *"Nothing has been copied yet"* unless the OS clipboard has a picture, the app's own payload is still current, or the OS clipboard has text. Canvas: at the pointer; a picture is aimed like a drop |
-| Paste to replace | — | dims *"No layers have been copied"* unless the app's own layers are on the clipboard and current (`Context::can_replace`); dims on lock. Each selected layer gives way to a copy of the whole clipboard, centred on it, in its slot (`app-frames-and-copies.md`). `Ctrl+Shift+R` is not spent on it: it is *Batch rename…* |
+| Copy/Paste as ▸ | — | `Item::CopyPasteAs`, `CLIPBOARD` glyph; a submenu (below), the row itself never dims |
 | Duplicate | `Ctrl+D` | dims on lock |
 | Delete | `Del` | dims on lock; destructive styling |
 
-### Properties
+**Copy/Paste as ▸** holds the copies in other formats, then the two clipboards that are not the
+layers' own. In order, two groups:
 
 | Row | Chord | Shown / enabled |
 |---|---|---|
+| Copy as SVG | — | always live; the committed document, in document order |
+| Copy as CSS | — | always live; under a `/* name */` comment, a leaf's own declarations, a container's rules for its whole subtree (`export.md`) |
+| Copy as PNG | — | always live; 1×, transparent, raw RGBA; the status line gives the pixel size |
+| Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`) |
+| *—* | | |
+| Paste to replace | — | dims *"No layers have been copied"* unless the app's own layers are on the clipboard and current (`Context::can_replace`); dims on lock. Each selected layer gives way to a copy of the whole clipboard, centred on it, in its slot (`app-frames-and-copies.md`). `Ctrl+Shift+R` is not spent on it: it is *Batch rename…* |
 | Copy properties | `Ctrl+Alt+C` | fills, strokes, effects and opacity off the key layer (or the lone layer). Dims when the source has no paint of its own (three sentences: lone layer, no key layer, key layer without paint). Live on a lock |
 | Paste properties | `Ctrl+Alt+V` | dims when nothing copied; dims on lock (lock sentence wins) |
 
@@ -129,12 +138,13 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 |---|---|---|
 | Group selection | `Ctrl+G` | always, one layer included; dims on lock |
 | Frame selection | `Ctrl+Alt+G` | always; dims *"A frame cannot go inside a boolean or a mask"* where `build::can_frame` refuses; dims on lock |
+| Slice selection | — | live for any selection, dims on one of slices only (a slice on a slice cuts nothing new). `build::slice_selection`: a slice fitted to the selection's world bounds rounded out to whole units, just above the topmost selected layer in their nearest common container (a boolean's operands counting as the boolean), with one PNG 1× spec; a lone layer's name; selected afterwards. Also a palette row |
 | Combine as variants | — | two or more mains outside any set under one parent; dims over mains of two kinds; dims on lock |
 | *component rows* | | by role — table below |
 | Ungroup | `Ctrl+Shift+G` | any member is a Group or Boolean, unless promoted to the head; dims on lock |
 | Use as mask ✓ | `Ctrl+Alt+M` | absent on a frames-only selection and on a boolean's operand. Ticked when the layer is a mask or holds one. Dims with the inspector's refusal (`mask_refusal`), and on lock |
 | Even-odd fill ✓ | — | a lone `Path` only; dims on lock |
-| Union / Subtract / Intersect / Exclude | `Ctrl+Alt+U` / `S` / `I` / `X` | two or more layers, or a lone boolean (then checkable, the current op ticked); dims on lock |
+| Boolean ▸ | — | `Item::BooleanMenu`, `UNITE_SQUARE` glyph; two or more layers, or a lone boolean; a submenu of the four operations (below); dims on lock |
 | Flatten | `Ctrl+E` | two or more layers (on a lone boolean it is in the head); dims on lock |
 | Convert to path | — | one text layer; dims *"This text has no glyphs to convert"*; dims on lock |
 | Flip to other side ✓ | — | one text layer on a rail; ticked when flipped; dims on lock |
@@ -142,11 +152,34 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Outline shape | — | one primitive or `Path`; on a path dims *"This path is already an outline"* when it has no radii to bake; dims on lock |
 | Outline stroke | — | one primitive, `Path` or boolean; dims *"This layer has no stroke"* without a visible stroke (`build::can_outline_stroke`); dims on lock. Each visible stroke becomes a filled path (`app-booleans.md`) |
 | Join paths | — | exactly two `Path` layers (not line-tool lines); dims *"Both paths need an open end"* unless each has an open subpath of two or more anchors, and *"One of these paths is locked"* when either is (`join_layers_subject`); the target's own lock dims with the lock sentence. The nearest pair of open ends splices into one layer (`app-pen-and-nodes.md`) |
-| Move to page ▸ | — | always, last of the group; opens a list of the other pages beside it, hovered or clicked (the menu's one flyout). A page there moves the selection to the top of that page, same place on the canvas, and clears it (`move_selection_to_page`). Dims *"This document has one page"*; dims on lock |
+| Align ▸ | — | always; `Item::AlignMenu`, `ALIGN_LEFT` glyph; a submenu of the six aligns (below). Dims *"Select two or more layers, or a layer inside a frame"* when `OndinApp::align_target` has none (a lone top-level layer; `Context::can_align`); dims on lock |
+| Arrange ▸ | — | always; `Item::Arrange`, `STACK` glyph; a submenu of the four restacks (below); dims on lock |
+| Move to page ▸ | — | always, last of the group: it takes the layers off this page. A submenu of the other pages, each an `Item::MoveTo(page)` row under the page's shown name with the `FILE` glyph (`Context::other_pages`). A page there moves the selection to the top of that page, same place on the canvas, and clears it (`move_selection_to_page`). Dims *"This document has one page"*; dims on lock |
 
 *Outline shape* and *Convert to path* never share a menu; neither appears beside *Flatten*.
 
-**Component rows**, directly after *Frame selection* (`Combine as variants` leads them):
+**Boolean ▸**, one group: *Union* (`Ctrl+Alt+U`) · *Subtract* (`S`) · *Intersect* (`I`) · *Exclude*
+(`X`). On a lone boolean they are checkable, its current operation ticked.
+
+**Align ▸**, one group, horizontal then vertical as the inspector's row reads: *Left* (`Alt+A`) ·
+*Horizontal centres* (`Alt+H`) · *Right* (`Alt+D`) · *Top* (`Alt+W`) · *Vertical centres* (`Alt+V`) ·
+*Bottom* (`Alt+S`), each an `Item::Align(axis, edge)`. The labels are short (`align_row_label`)
+because *Align horizontal centres* does not fit beside its chord at 210pt; the palette keeps the
+full *Align …* labels.
+
+**Arrange ▸**, one group:
+
+| Row | Chord | Shown / enabled |
+|---|---|---|
+| Bring to front | `Ctrl+Shift+]` | never dimmed for being already frontmost — a no-op says so on the status line |
+| Bring forward | `Ctrl+]` | as above |
+| Send backward | `Ctrl+[` | as above |
+| Send to back | `Ctrl+Shift+[` | as above |
+
+The submenus' own rows carry no lock dim: on a lock *Boolean ▸*, *Align ▸* and *Arrange ▸* dim and
+stay shut (`align_dims_with_nothing_to_align_to_and_boolean_holds_the_four`).
+
+**Component rows**, directly after *Slice selection* (`Combine as variants` leads them):
 
 | Role | Rows, in order | Shown / enabled |
 |---|---|---|
@@ -160,47 +193,14 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 *Go to main* and *Select all instances* change only the selection and never dim. *Create component*
 and *Duplicate as component* draw the filled hexagon.
 
-### Order
-
-| Row | Chord | Shown / enabled |
-|---|---|---|
-| Bring to front | `Ctrl+Shift+]` | dims on lock; never dimmed for being already frontmost — a no-op says so on the status line |
-| Bring forward | `Ctrl+]` | as above |
-| Send backward | `Ctrl+[` | as above |
-| Send to back | `Ctrl+Shift+[` | as above |
-
-### Transform
-
-| Row | Chord | Shown / enabled |
-|---|---|---|
-| Flip horizontal | `Shift+H` | dims on lock |
-| Flip vertical | `Shift+V` | dims on lock |
-| Reset origin | — | one layer whose pivot has been moved, otherwise omitted; dims on lock |
-
 ### State
 
 | Row | Chord | Shown / enabled |
 |---|---|---|
 | Hide / Show | `Ctrl+Shift+H` | *Show* only when every selected layer is hidden, as the action shows only then (a mixed selection hides); never dims |
 | Lock / Unlock | `Ctrl+Shift+L` | *Unlock* only when every selected layer's **own** flag is set, as the action unlocks only then; never dims |
-| Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer, and *"Leave focus mode to rename"* in focus mode, where the panel that holds the field is hidden; live on a lock |
-| Batch rename… | `Ctrl+Shift+R` | never dims: the box takes any selection and is not in a panel (`app-canvas-chrome.md`, *Batch rename*) |
-
-### Navigate
-
-| Row | Chord | Shown / enabled |
-|---|---|---|
-| Zoom to selection | `Shift+2` | always live |
-
-### Export
-
-| Row | Chord | Shown / enabled |
-|---|---|---|
-| Copy as SVG | — | always live; the committed document, in document order |
-| Copy as CSS | — | always live; under a `/* name */` comment, a leaf's own declarations, a container's rules for its whole subtree (`export.md`) |
-| Copy as PNG | — | always live; 1×, transparent, raw RGBA; the status line gives the pixel size |
-| Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`); a flat row (§7, *Submenus*) |
-| Slice selection | — | live for any selection, dims on one of slices only (a slice on a slice cuts nothing new). `build::slice_selection`: a slice fitted to the selection's world bounds rounded out to whole units, just above the topmost selected layer in their nearest common container (a boolean's operands counting as the boolean), with one PNG 1× spec; a lone layer's name; selected afterwards. Also a palette row |
+| Rename (one layer) / Batch rename… (several) | `Ctrl+R` (`F2`) / `Ctrl+Shift+R` | one row, naming what `Ctrl+R` opens for this selection (`one_rename_row_names_what_ctrl_r_opens`). *Rename* dims *"Leave focus mode to rename"* in focus mode, where the panel that holds the field is hidden; *Batch rename…* does not, its box being in no panel (`app-canvas-chrome.md`, *Batch rename*). Both dim in private mode. Live on a lock |
+| Reset origin | — | one layer whose pivot has been moved, otherwise omitted; dims on lock |
 
 ---
 
@@ -232,7 +232,7 @@ the same order as `double_click_pick`.
 | Ungroup | promoted (releases the operands); dims on lock |
 | Make this the base operand | on a layer inside a boolean; dims on lock |
 
-The four operations stay in Structure as checkable rows (§4).
+The four operations stay in Structure's *Boolean ▸*, checkable (§4).
 
 ### 5.4 Path
 
@@ -244,7 +244,7 @@ The four operations stay in Structure as checkable rows (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-No head. The baseline menu, 31 rows.
+No head. The baseline menu, 19 rows.
 
 ### 5.6 Text
 
@@ -275,8 +275,10 @@ needs a single layer.
 
 ### 5.9 Locked and hidden layers (panel only, per C4)
 
-The whole menu is present and every editing row dims. Live over a lock: *Copy*, *Paste*, *Copy
-properties*, *Unlock*, *Show*/*Hide*, *Rename*, *Batch rename…*, *Zoom to selection*, *Copy as SVG/CSS/PNG*, *Enter
+The whole menu is present and every editing row dims, *Boolean ▸*, *Align ▸*, *Arrange ▸* and *Move to page ▸*
+with it.
+Live over a lock: *Copy*, *Paste*, *Copy/Paste as ▸* with its *Copy as SVG/CSS/PNG* and *Copy
+properties*, *Unlock*, *Show*/*Hide*, *Rename* or *Batch rename…*, *Slice selection*, *Enter
 group/boolean*, *Make this the key layer*, *Go to main*, *Select all instances*. A layer inside a
 locked group is treated as locked, with the group's sentence; *Lock/Unlock* reads the layer's own
 flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
@@ -417,8 +419,11 @@ project dropdown, and the caret's list.
 
 ## 7. Deliberately not in these menus
 
-- **Align and distribute** — the inspector's cluster and `Alt`+letter own them; reconsider only
-  if submenus exist.
+- **Distribute** — the inspector's cluster, `Alt+Shift+H`/`Alt+Shift+V` and the palette. *Align*
+  is on the menu, under *Align ▸* (§4).
+- **Flip horizontal / vertical** — one click in the inspector's Transform card, `Shift+H`/`Shift+V`
+  and the palette.
+- **Zoom to selection** — `Shift+2` (`Ctrl+2`) and the palette.
 - **Reveal in layers panel** — built and removed: selecting already scrolls the tree to the row.
 - **Select same… and Select inverse** — palette-only verbs (`app-selection.md`).
 - **Rotate 90°** — the inspector's quarter-turn buttons (`inspector::rotate_selection_quarter`); the
@@ -439,8 +444,7 @@ project dropdown, and the caret's list.
   palette and the rail's Select slot carry it.
 - **Collapse all / Expand all** — the layers panel header has the button.
 - **Guide colour and position** — the inspector, for a selected guide.
-- **Submenus** other than *Move to page ▸*'s list of pages, including *Copy as ▸* (the PNG scales
-  are flat rows); **type-ahead** in menus.
+- **Type-ahead** in menus.
 - **A ruler menu** (units are px only).
 
 ---
@@ -457,9 +461,11 @@ project dropdown, and the caret's list.
 | Checkable row | no tick column; the glyph goes `accent()` when on, the label full strength on and muted off |
 | Disabled row | glyph / label / accelerator inks 79 / 65 / 49; the reason in the row's tooltip |
 | Destructive row | `color::danger()` (`#e0736b` dark, `#c83c34` light) on glyph and label, accelerator at 55%; neutral hover |
-| Order glyphs | arrow-line-up / arrow-up / arrow-down / arrow-line-down (a deliberate departure from the export's stack glyphs) |
+| Restack glyphs | arrow-line-up / arrow-up / arrow-down / arrow-line-down (a deliberate departure from the export's stack glyphs) |
 | Placement | `ui::menu_place`: flips up/left near an edge, clamps last; height computed, not measured |
-| Keyboard | `↑`/`↓` move, `Home`/`End` jump, `Enter` runs, `Escape` closes; only enabled rows are reachable; keyboard and pointer share one highlight |
+| Submenu | a row with children (`Row::sub`, filled by `build`); a live one wears a caret (`ui::paint_submenu_caret`) and a click on it opens it and runs nothing. One open at a time (`ContextMenu::flyout`, a `menu::Flyout`), beside its row by `ui::flyout_place`, area `"context-menu-sub"`, `MENU_W` wide, height from `menu::height`, rows painted as the card's. A submenu whose row the rebuild dims or drops closes |
+| Submenu, pointer | hovering a live submenu row opens it when none is open. With one open, a row the pointer has just moved onto takes over at once, unless the move heads into the submenu (`heads_into`: the new position lies in the triangle from the previous one to the submenu's near edge). Only a move heading in starts the `AIM_GRACE` wait (0.25 s, `ContextMenu::leaving`), so a diagonal run can cross a row; reaching the submenu cancels it, and resting on the row past it takes over. So a move straight down the card switches submenus without waiting (`submenu_tests::a_move_down_the_card_switches_submenus_at_once`, `a_crossed_row_waits_out_the_grace_before_it_takes_over`). A submenu's row stays lit for as long as it is open, wherever the pointer is — across the gap to the submenu too — while the other rows still light on hover (`menu_row_of`'s `held`; `submenu_tests::a_submenus_row_stays_lit_across_the_gap`). A click outside both card and submenu closes the menu |
+| Keyboard | `↑`/`↓` move, `Home`/`End` jump, `Enter` runs; on a submenu row `→` or `Enter` opens it with its first live row highlighted, inside it the same keys walk and run its rows, and `←` closes it back to its row (`submenu_tests::the_keys_walk_into_a_submenu_and_back`). `Escape` closes an open submenu first and the menu on the next press (R3). Only enabled rows are reachable; keyboard and pointer share one highlight. `read_nav` reads `→`/`←` for every menu; the tab and library menus have no submenus and ignore them |
 
 The inspector field menu (§6.7) is drawn with the same row and frame functions at 220pt wide and
 26pt rows.
@@ -468,6 +474,5 @@ The inspector field menu (§6.7) is drawn with the same row and frame functions 
 
 ## Open
 
-- Whether a 38-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
 - Whether the canvas menu should carry *Canvas background…* (a second door to the inspector's
   no-selection field).

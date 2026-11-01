@@ -1000,8 +1000,12 @@ pub(crate) struct ContextMenu {
     /// (`docs/context-menus.md` §8). An item rather than an index, as the menu is
     /// rebuilt each frame ([`crate::menu::navigate`]).
     pub highlight: Option<crate::menu::Item>,
-    /// The *Move to page* row's rect while its list of pages is open beside it.
-    pub flyout: Option<egui::Rect>,
+    /// The submenu open beside its row, if one is.
+    pub flyout: Option<crate::menu::Flyout>,
+    /// Another row the pointer has rested on while a submenu is open, and since when:
+    /// it takes over only after [`crate::menu::AIM_GRACE`], so a diagonal run to the
+    /// submenu can cross it.
+    pub leaving: Option<(crate::menu::Item, f64)>,
 }
 
 /// How long the selection chrome stays away after the last keystroke, or after a
@@ -1730,9 +1734,12 @@ impl eframe::App for OndinApp {
             // The palette owns the keyboard: its keys leave `Events` before its
             // field can read them, and nothing reaches `input::resolve`.
             palette_keys = crate::palette::read_keys(&ctx);
-        } else if self.context_menu.is_some() {
+        } else if let Some(menu) = self.context_menu.as_mut() {
+            // One rung a press: an open submenu first, then the menu.
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.context_menu = None;
+                if menu.flyout.take().is_none() {
+                    self.context_menu = None;
+                }
             } else {
                 nav = crate::menu::read_nav(&ctx);
             }

@@ -405,10 +405,11 @@ mod leak {
                 };
                 app.open_context_menu(ctx, target, None);
                 let menu = app.context_menu.as_mut().expect("the menu is open");
-                menu.flyout = Some(egui::Rect::from_min_size(
-                    egui::pos2(400.0, 300.0),
-                    egui::vec2(180.0, 24.0),
-                ));
+                menu.flyout = Some(crate::menu::Flyout {
+                    parent: crate::menu::Item::MoveToPage,
+                    row: egui::Rect::NOTHING,
+                    highlight: None,
+                });
             },
             |app| app.context_menu = None,
         ));

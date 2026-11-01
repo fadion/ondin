@@ -57,12 +57,21 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) {
-        let (pressed, released, shift, at) = ui.input(|i| {
+        let (pressed, released, shift, at, moves) = ui.input(|i| {
+            let moves: Vec<egui::Pos2> = i
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::PointerMoved(p) => Some(*p),
+                    _ => None,
+                })
+                .collect();
             (
                 i.pointer.primary_pressed(),
                 i.pointer.primary_released(),
                 i.modifiers.shift,
                 i.pointer.interact_pos(),
+                moves,
             )
         });
         if pressed
@@ -74,7 +83,11 @@ impl OndinApp {
         if self.pencil.is_some()
             && let Some(p) = at
         {
-            self.pencil_sample(self.to_world(p, rect, ppp), shift);
+            // Every move the OS reported this frame, not only the last: a fast
+            // stroke keeps its curve whatever the frame rate.
+            for m in moves.into_iter().chain([p]) {
+                self.pencil_sample(self.to_world(m, rect, ppp), shift);
+            }
             ui.ctx().request_repaint();
         }
         if released {
@@ -160,11 +173,13 @@ impl OndinApp {
             .fold(0.0, f64::max);
         if travel < MIN_DRAG_PT {
             // A click on a path's end only picks it up; anywhere else it leaves a dot,
-            // a run one screen pt long that the round caps draw round.
+            // a run short against the stroke's width that the round caps draw round
+            // at any zoom.
             if stroke.extend.is_some() {
                 return;
             }
-            stroke.samples = vec![start, start + Vec2::new(1.0 / ppw, 0.0)];
+            let run = (self.pencil_style().width * 0.01).max(1e-3);
+            stroke.samples = vec![start, start + Vec2::new(run, 0.0)];
             stroke.corners.clear();
         }
         let accuracy = FIT_PT / ppw;
@@ -510,7 +525,7 @@ mod tests {
         let b = app.session.resolved.world_bounds(id).expect("drawn");
         let center = b.center();
         assert!(
-            (center.x - 50.5).abs() < 0.01 && (center.y - 50.0).abs() < 0.01,
+            (center.x - 50.0).abs() < 0.05 && (center.y - 50.0).abs() < 0.01,
             "centred on the press: {b:?}"
         );
         let stroke = &app.session.doc.get(id).unwrap().paint().strokes[0].value;
@@ -521,6 +536,87 @@ mod tests {
             "one run: {:?}",
             path_of(&app, id)
         );
+    }
+
+    /// Zoomed out, a click still leaves a round dot, not a dash.
+    /// flip: the dot's run one screen pt long (`1.0 / ppw`) → fails at "round".
+    #[test]
+    fn a_click_zoomed_out_is_still_round() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_frame(&ctx);
+        app.session.camera.zoom = 0.25;
+        draw(&mut app, &[Point::new(50.0, 50.0)], |_| false);
+        let id = app.session.selection.single().expect("the dot");
+        let b = app.session.resolved.world_bounds(id).expect("drawn");
+        assert!((b.width() / b.height() - 1.0).abs() < 0.1, "round: {b:?}");
+    }
+
+    const RECT: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(800.0, 600.0),
+    };
+
+    /// One frame of the canvas alone, with these events.
+    fn canvas_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let time = ctx.input(|i| i.time) + 0.1;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(RECT),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| app.canvas_ui(ui),
+        );
+    }
+
+    fn space(pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Space,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn primary(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// A stroke let go while Space is held still commits, and every move a frame
+    /// reports is a sample.
+    /// flip: `normal_mode_input`'s pencil gate without its `pencil.is_some()` term →
+    /// fails at "committed under Space"; `pencil_input` sampling only the last
+    /// position → fails at "a sample per move".
+    #[test]
+    fn a_stroke_released_under_space_commits() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_frame(&ctx);
+        let at = |app: &OndinApp, x: f64| app.to_screen(Point::new(x, 100.0), RECT, 1.0);
+        let start = at(&app, 50.0);
+        canvas_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(start)]);
+        canvas_frame(&ctx, &mut app, vec![primary(start, true)]);
+        assert!(app.pencil.is_some(), "fixture: a stroke began");
+        let moves = (1..=4)
+            .map(|i| egui::Event::PointerMoved(at(&app, 50.0 + 10.0 * f64::from(i))))
+            .collect();
+        canvas_frame(&ctx, &mut app, moves);
+        let samples = app.pencil.as_ref().map_or(0, |s| s.samples.len());
+        assert!(samples >= 5, "a sample per move: {samples}");
+
+        let before = app.session.history.done().len();
+        canvas_frame(&ctx, &mut app, vec![space(true)]);
+        let end = at(&app, 90.0);
+        canvas_frame(&ctx, &mut app, vec![primary(end, false)]);
+        canvas_frame(&ctx, &mut app, vec![space(false)]);
+        assert!(app.pencil.is_none(), "committed under Space");
+        assert_eq!(app.session.history.done().len(), before + 1);
     }
 
     /// A click on the selected open path's end draws no dot there.

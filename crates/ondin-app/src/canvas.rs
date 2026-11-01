@@ -1921,7 +1921,11 @@ impl OndinApp {
             return;
         }
 
-        if self.tool == Tool::Pencil && !panning_armed && !matches!(self.drag, Drag::Pan) {
+        // A stroke in flight keeps the pencil's input under Space too, or its
+        // release would go unseen and the trail follow the hover.
+        if self.tool == Tool::Pencil
+            && (self.pencil.is_some() || !panning_armed && !matches!(self.drag, Drag::Pan))
+        {
             self.pencil_input(ui, resp, rect, ppp);
             return;
         }
@@ -2021,8 +2025,17 @@ impl OndinApp {
             && let Some(p) = resp.interact_pointer_pos()
         {
             let world = self.to_world(p, rect, ppp);
+            // The Slice tool stays armed over the slice it just cut, whose handles
+            // show: a press on one resizes it rather than cutting another.
+            let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+            let on_handle = self.tool == Tool::Slice
+                && handles
+                    .as_ref()
+                    .is_some_and(|h| h.armed(origin, false).is_some());
             if panning_armed {
                 self.drag = Drag::Pan;
+            } else if on_handle {
+                self.begin_select_drag(ui, p, rect, ppp, &handles, shift);
             } else if self.tool.drags_a_box() {
                 // The start corner takes the grid but no constraint: no extent yet.
                 self.begin_create(self.pixel_point(world));

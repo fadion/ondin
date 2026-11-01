@@ -311,7 +311,8 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
   units whether or not the pixel grid is on, since a raster cut on half a pixel blurs its border, and
   gives the slice one export spec, PNG at 1×, so *Export all* takes it at once.
 - **The tool stays on** after a cut, the new slice selected, so slices are cut in runs. A click
-  without a drag makes nothing (`click_makes` answers `None`).
+  without a drag makes nothing (`click_makes` answers `None`). A drag begun on the selection's
+  handles resizes it, as with Select, rather than cutting another.
 - **Picking.** With the tool on, a click inside a slice picks it (`OndinApp::slice_at`: the topmost
   shown, unlocked slice whose box holds the point); elsewhere it does nothing. With any other tool a
   click inside passes through to what lies under it, and the slice is picked by its edge band

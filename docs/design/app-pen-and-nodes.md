@@ -45,14 +45,17 @@ Drawing paths with the pen and the pencil, resuming them, editing their points w
 `Tool::Pencil` (`crate::pencil`) draws a path freehand. It makes geometry, not ink: what lands is an
 ordinary stroked `Path` the node tool edits like a pen path.
 
-- **The trail.** Press and drag leave a trail of samples (one per screen pt of movement), drawn as a
-  1 pt line in the selection blue, not as the final stroke, so nothing looks fitted before it is.
+- **The trail.** Press and drag leave a trail of samples (one per screen pt of movement, read from
+  every pointer move the OS reported in a frame, so the frame rate does not thin it), drawn as a
+  1 pt line in the selection blue, not as the final stroke, so nothing looks fitted before it is. A
+  stroke in flight keeps the pencil's input while Space is held, so its release still commits it.
 - **The fit.** On release `build::freehand_outline` fits the trail as *Simplify* does (`fit::fit_open`
   or `fit_closed`, then `straightened`), within 1.5 screen pt, so zoomed in you draw finer. Its corner
   angle is `build::FREEHAND_CORNER_DEG` (45°), wider than `SIMPLIFY_CORNER_DEG`: at the pencil's
   coarser reach a hand's jitter on a small loop turns by more than 15°, and 15° left a hand-drawn
   circle in far more segments. A drag that never gets 3 screen pt from its press is a click and draws
-  a dot: a run one screen pt long from the press, which the round caps draw round. On the end of a
+  a dot: a run a hundredth of the stroke's width long from the press, which the round caps draw round
+  at any zoom. On the end of a
   path it would carry on, a click draws nothing.
 - **What lands.** One stroke, no fill, round caps and joins, in the frame under the press
   (`draw_target`). Colour and width are the last pencil path's as it stands now

@@ -275,4 +275,144 @@ mod tests {
             "a slice on a slice"
         );
     }
+
+    /// The Slice tool picks no hidden and no locked slice.
+    /// flip: `slice_holds` without its `shown_through` test → fails at "a hidden
+    /// slice is not picked".
+    #[test]
+    fn the_tool_passes_over_a_hidden_or_locked_slice() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_a_frame(&ctx);
+        let id = cut(&mut app, Point::new(20.0, 20.0), Point::new(120.0, 120.0));
+        let inside = Point::new(70.0, 70.0);
+        assert_eq!(app.slice_at(inside), Some(id), "fixture");
+        app.session.commit(Transaction(vec![Operation::SetVisible {
+            id,
+            visible: false,
+        }]));
+        assert_eq!(app.slice_at(inside), None, "a hidden slice is not picked");
+        app.session.commit(Transaction(vec![
+            Operation::SetVisible { id, visible: true },
+            Operation::SetLocked { id, locked: true },
+        ]));
+        assert_eq!(app.slice_at(inside), None, "nor a locked one");
+        assert_eq!(app.selected_slice_at(inside), None);
+    }
+
+    const RECT: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(800.0, 600.0),
+    };
+
+    /// The outlines skip a hidden slice and draw a selected one at its live size.
+    /// flip: `draw_slices` reading the committed node instead of `display_node` →
+    /// fails at "at its previewed width".
+    #[test]
+    fn the_outlines_skip_hidden_slices_and_follow_a_preview() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_a_frame(&ctx);
+        let shown = cut(&mut app, Point::new(20.0, 20.0), Point::new(120.0, 120.0));
+        let hidden = cut(&mut app, Point::new(200.0, 150.0), Point::new(260.0, 200.0));
+        app.session.commit(Transaction(vec![Operation::SetVisible {
+            id: hidden,
+            visible: false,
+        }]));
+        app.session.selection.set_one(shown);
+        // Before the preview, which a tool change takes back.
+        app.choose_tool(Tool::Select);
+        app.session
+            .set_preview(&Transaction(vec![Operation::SetGeometry {
+                id: shown,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(200.0, 100.0)),
+            }]));
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(RECT),
+                ..Default::default()
+            },
+            |ui| {
+                let resp = ui.allocate_rect(RECT, egui::Sense::hover());
+                app.draw_slices(ui, ui.painter(), RECT, 1.0, &resp);
+            },
+        );
+        let segments: Vec<(egui::Pos2, egui::Pos2, egui::Color32)> = out
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::LineSegment { points, stroke } => {
+                    Some((points[0], points[1], stroke.color))
+                }
+                _ => None,
+            })
+            .collect();
+        let lit_right = segments
+            .iter()
+            .filter(|s| s.2 == color::SELECT)
+            .flat_map(|s| [s.0.x, s.1.x])
+            .fold(f32::MIN, f32::max);
+        let want = app.to_screen(Point::new(220.0, 20.0), RECT, 1.0).x;
+        assert!(
+            (lit_right - want).abs() < 1.0,
+            "at its previewed width: {lit_right} vs {want}"
+        );
+        let hidden_box = egui::Rect::from_two_pos(
+            app.to_screen(Point::new(199.0, 149.0), RECT, 1.0),
+            app.to_screen(Point::new(261.0, 201.0), RECT, 1.0),
+        );
+        assert!(
+            !segments
+                .iter()
+                .any(|s| s.2 != color::SELECT && hidden_box.contains(s.0)),
+            "no outline for the hidden slice"
+        );
+    }
+
+    /// With the Slice tool still on, the handles of the slice just cut resize it
+    /// instead of cutting another.
+    /// flip: `normal_mode_input` without its `on_handle` arm → fails at "resized,
+    /// not cut again".
+    #[test]
+    fn the_slice_tool_resizes_by_the_handles_it_shows() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_a_frame(&ctx);
+        let id = cut(&mut app, Point::new(20.0, 20.0), Point::new(120.0, 120.0));
+        let frame = |app: &mut OndinApp, events| {
+            let time = ctx.input(|i| i.time) + 0.1;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(RECT),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.canvas_ui(ui),
+            );
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let corner = app.to_screen(Point::new(120.0, 120.0), RECT, 1.0);
+        let to = app.to_screen(Point::new(160.0, 150.0), RECT, 1.0);
+        let slices = |app: &OndinApp| app.page_slices().len();
+        let before = slices(&app);
+        frame(&mut app, vec![egui::Event::PointerMoved(corner)]);
+        frame(&mut app, vec![button(corner, true)]);
+        for step in 1..=6 {
+            let p = corner + (to - corner) * (step as f32 / 6.0);
+            frame(&mut app, vec![egui::Event::PointerMoved(p)]);
+        }
+        frame(&mut app, vec![button(to, false)]);
+        frame(&mut app, Vec::new());
+        assert_eq!(slices(&app), before, "resized, not cut again");
+        assert_eq!(
+            app.session
+                .resolved
+                .world_bounds(id)
+                .map(|b| (b.width(), b.height())),
+            Some((140.0, 130.0))
+        );
+    }
 }

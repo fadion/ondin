@@ -18,6 +18,8 @@ use ondin_render::{RenderOverrides, Viewport};
 #[derive(Default)]
 struct RecordingPainter {
     fills: Vec<Affine>,
+    /// Each fill's alpha, for a solid brush; `None` for any other.
+    fill_alphas: Vec<Option<f32>>,
     strokes: usize,
     text_glyphs: usize,
     /// Layers pushed, and whether each carried a clip path — enough to assert
@@ -42,11 +44,15 @@ impl ScenePainter for RecordingPainter {
         &mut self,
         transform: Affine,
         _path: &ondin_core::kurbo::BezPath,
-        _brush: &Brush,
+        brush: &Brush,
         _framing: Option<ondin_core::Framing>,
         _rule: ondin_render::scene::ClipRule,
     ) {
         self.fills.push(transform);
+        self.fill_alphas.push(match brush {
+            Brush::Solid(c) => Some(c.components[3]),
+            _ => None,
+        });
     }
     fn stroke_path(
         &mut self,
@@ -1425,6 +1431,26 @@ fn level_of_detail_draws_type_too_small_to_read_as_bars() {
     );
     let (doc, res, _t) = painted_text(vec![], vec![stroke(9, true)]);
     assert_eq!(emitted(&doc, &res, 100, true), (1, 0, 0), "outlined type");
+}
+
+/// A greeked bar is filled lighter than its ink: glyphs that small cover less of
+/// the line than a solid bar does, which at full alpha reads as bold type.
+///
+/// flip: `scene::greek_ink` returning the brush unchanged → fails at "lighter".
+#[test]
+fn a_greeked_bar_is_lighter_than_its_ink() {
+    let (doc, res, _t) = painted_text(vec![fill(1, true)], vec![]);
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 2000.0, 2000.0),
+        pixel_size: (100, 100),
+    };
+    let mut ov = RenderOverrides::default();
+    ov.set_level_of_detail(true);
+    let mut r = RecordingPainter::default();
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut r);
+    assert_eq!(r.fill_alphas.len(), 1, "one bar");
+    let alpha = r.fill_alphas[0].expect("a solid bar");
+    assert!(alpha > 0.5 && alpha < 0.8, "lighter: {alpha}");
 }
 
 /// Effect layers the walk pushes for a text node in `fills` and `strokes`

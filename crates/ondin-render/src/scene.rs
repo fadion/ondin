@@ -1895,6 +1895,22 @@ fn greeked(run: &ondin_core::text::GlyphRun, stretch: f64, layout: &TextLayout) 
     Some(bars)
 }
 
+/// The share of a greeked bar's alpha that real type lays down: glyphs at these
+/// sizes ink about 0.7 of the bar's area, so a bar at full alpha reads as type
+/// set much bolder than it is.
+const GREEK_INK: f32 = 0.7;
+
+/// `brush` at [`GREEK_INK`] of its alpha, for a greeked run's bars.
+fn greek_ink(brush: &Brush) -> Brush {
+    let mut out = brush.clone();
+    match &mut out {
+        Brush::Solid(c) => *c = c.multiply_alpha(GREEK_INK),
+        Brush::Gradient(g) => g.opacity *= GREEK_INK,
+        Brush::Image(i) => i.sampler.alpha *= GREEK_INK,
+    }
+    out
+}
+
 /// The filled outline of one decoration band, in the text node's local space.
 ///
 /// Built here (parley draws no decoration) and filled rather than stroked, so all
@@ -2105,7 +2121,9 @@ fn paint_shape<P: ScenePainter>(
                 // The frame is the whole text box, not the run's advance.
                 let framing = framing_of(doc, brush, || layout.bounds());
                 clipped(painter, world, framing, |p| match &bars {
-                    Some(bars) => p.fill_path(world, bars, brush, framing, ClipRule::NonZero),
+                    Some(bars) => {
+                        p.fill_path(world, bars, &greek_ink(brush), framing, ClipRule::NonZero)
+                    }
                     None => draw_run(p, world, run, brush, framing),
                 });
             }

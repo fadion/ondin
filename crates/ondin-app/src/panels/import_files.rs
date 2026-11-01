@@ -740,6 +740,8 @@ fn fetch_figma(key: &str, token: &str) -> Result<Source, String> {
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_response(Some(Duration::from_secs(120)))
         .timeout_global(Some(Duration::from_secs(600)))
+        // A status is read here, since a 429's `Retry-After` says how long to wait.
+        .http_status_as_error(false)
         .build()
         .new_agent();
     let mut used = 0u64;
@@ -749,6 +751,15 @@ fn fetch_figma(key: &str, token: &str) -> Result<Source, String> {
             req = req.header("X-Figma-Token", token);
         }
         let mut resp = req.call().map_err(fetch_failed)?;
+        let status = resp.status().as_u16();
+        if !(200..300).contains(&status) {
+            let wait = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse().ok());
+            return Err(status_failed(status, wait));
+        }
         let bytes = resp
             .body_mut()
             .with_config()
@@ -786,27 +797,34 @@ fn fetch_figma(key: &str, token: &str) -> Result<Source, String> {
     read_figma(files, used)
 }
 
-/// What a failed request to Figma says: Figma's own answers by what they mean,
-/// any other status as Figma's error, and only a request that got no answer as
-/// Figma not being reached.
+/// What a request that got no answer says: Figma not being reached.
 fn fetch_failed(e: ureq::Error) -> String {
     match e {
-        ureq::Error::StatusCode(401) => {
-            "Figma did not accept the token: check it was copied whole".to_owned()
-        }
-        ureq::Error::StatusCode(403) => {
-            "Figma refused the token: it needs read access to file content".to_owned()
-        }
-        ureq::Error::StatusCode(404) => {
-            "Figma has no file at that link that this token can open".to_owned()
-        }
-        ureq::Error::StatusCode(429) => {
-            "Figma asked to wait: try Fetch again in a minute".to_owned()
-        }
-        ureq::Error::StatusCode(n) => {
-            format!("Figma answered with an error ({n}): try again later, or a smaller file")
-        }
+        ureq::Error::StatusCode(n) => status_failed(n, None),
         e => format!("Figma could not be reached: {e}"),
+    }
+}
+
+/// What Figma's answer `status` says, by what it means; a 429 with how long its
+/// `Retry-After` (`wait`, in seconds) asks, since a plan's file-read limit can
+/// hold for days, and any other status as Figma's error.
+fn status_failed(status: u16, wait: Option<u64>) -> String {
+    match status {
+        401 => "Figma did not accept the token: check it was copied whole".to_owned(),
+        403 => "Figma refused the token: it needs read access to file content".to_owned(),
+        404 => "Figma has no file at that link that this token can open".to_owned(),
+        429 => {
+            let wait = match wait {
+                None | Some(0..=90) => "a minute".to_owned(),
+                Some(s @ 91..=5400) => format!("{} minutes", s.div_ceil(60)),
+                Some(s @ 5401..=259_200) => format!("{} hours", s.div_ceil(3600)),
+                Some(s) => format!("{} days", s.div_ceil(86_400)),
+            };
+            format!(
+                "Figma's limit on file reads for this account was reached: try Fetch again in {wait}"
+            )
+        }
+        n => format!("Figma answered with an error ({n}): try again later, or a smaller file"),
     }
 }
 
@@ -3267,6 +3285,18 @@ mod tests {
             "Figma answered with an error (500): try again later, or a smaller file"
         );
         assert!(fetch_failed(ureq::Error::ConnectionFailed).contains("could not be reached"));
+    }
+
+    /// A 429 says how long Figma asks to wait, read from `Retry-After`, since a
+    /// plan's limit can hold for days. flip: `status_failed` ignoring `wait` →
+    /// fails at the hours.
+    #[test]
+    fn a_rate_limit_says_how_long_to_wait() {
+        let waits = |s| status_failed(429, s);
+        assert!(waits(None).ends_with("in a minute"));
+        assert!(waits(Some(600)).ends_with("in 10 minutes"));
+        assert!(waits(Some(181_924)).ends_with("in 51 hours"));
+        assert!(waits(Some(400_000)).ends_with("in 5 days"));
     }
 
     /// A JSON entry past its own limit is not read, whatever room the archive

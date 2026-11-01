@@ -477,9 +477,13 @@ fn run_random_session_with(seed: u64, layout: bool, grid: bool) {
             8 => pick(&mut rng, &movable).map(|&id| {
                 let effects = match rng.next_range(4) {
                     0 => vec![],
-                    1 => vec![Effect::new(EffectKind::LayerBlur {
-                        radius: rng.next_range(40) as f64,
-                    })],
+                    // With a glass beside it, which `glass_within` reads.
+                    1 => vec![
+                        Effect::new(EffectKind::LayerBlur {
+                            radius: rng.next_range(40) as f64,
+                        }),
+                        Effect::new(EffectKind::BackgroundBlur { radius: 6.0 }),
+                    ],
                     2 => vec![Effect::new(EffectKind::DropShadow(Shadow {
                         offset: Vec2::new(
                             (rng.next_range(40) as f64) - 20.0,
@@ -630,6 +634,11 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
             live.blends_within(id),
             fresh.blends_within(id),
             "blend mismatch for {id:?} (seed {seed})"
+        );
+        assert_eq!(
+            live.glass_within(id),
+            fresh.glass_within(id),
+            "glass mismatch for {id:?} (seed {seed})"
         );
         assert_eq!(
             live.text_layout(id),

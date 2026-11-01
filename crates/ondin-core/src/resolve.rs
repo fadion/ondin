@@ -598,6 +598,9 @@ pub struct Resolved {
     /// blends ([`Self::blends_within`]). Kept as the ink is, children first, so the
     /// walk's isolation question costs a lookup per child.
     blending: FxHashSet<NodeId>,
+    /// Every node whose subtree, the node included, holds a visible background
+    /// blur ([`Self::glass_within`]), kept as [`Self::blending`] is.
+    glassy: FxHashSet<NodeId>,
     /// Shaped layout per `Text` node, invalidated through the `DirtySet`. Shared
     /// between the nodes of one pass whose texts are equal ([`Shaper`]).
     text: FxHashMap<NodeId, Arc<TextLayout>>,
@@ -658,6 +661,7 @@ impl Resolved {
         let mut ink_bounds = FxHashMap::default();
         let mut inner_ink = FxHashMap::default();
         let mut blending = FxHashSet::default();
+        let mut glassy = FxHashSet::default();
         let mut text = FxHashMap::default();
         let mut outline = FxHashMap::default();
         let mut shaper = shaper.into_inner();
@@ -673,6 +677,7 @@ impl Resolved {
                     ink_bounds: &mut ink_bounds,
                     inner_ink: &mut inner_ink,
                     blending: &mut blending,
+                    glassy: &mut glassy,
                     text: &mut text,
                     outline: &mut outline,
                     shaper: &mut shaper,
@@ -687,6 +692,7 @@ impl Resolved {
             ink_bounds,
             inner_ink,
             blending,
+            glassy,
             text,
             outline,
             boolean: FxHashMap::default(),
@@ -728,6 +734,7 @@ impl Resolved {
             self.ink_bounds.remove(id);
             self.inner_ink.remove(id);
             self.blending.remove(id);
+            self.glassy.remove(id);
             self.text.remove(id);
             self.outline.remove(id);
             self.boolean.remove(id);
@@ -1349,6 +1356,17 @@ impl Resolved {
         } else {
             self.blending.remove(&id);
         }
+        if holds_glass(node) || node.children().iter().any(|c| self.glassy.contains(c)) {
+            self.glassy.insert(id);
+        } else {
+            self.glassy.remove(&id);
+        }
+    }
+
+    /// Whether `id`'s subtree, `id` included, holds a visible background blur —
+    /// where a change behind it can show (`scene::spread_through_backdrops`).
+    pub fn glass_within(&self, id: NodeId) -> bool {
+        self.glassy.contains(&id)
     }
 
     /// Whether `id`'s subtree, `id` included, holds a layer whose mode blends or a
@@ -1449,6 +1467,7 @@ struct Caches<'a> {
     ink_bounds: &'a mut FxHashMap<NodeId, Rect>,
     inner_ink: &'a mut FxHashMap<NodeId, Rect>,
     blending: &'a mut FxHashSet<NodeId>,
+    glassy: &'a mut FxHashSet<NodeId>,
     text: &'a mut FxHashMap<NodeId, Arc<TextLayout>>,
     outline: &'a mut FxHashMap<NodeId, BezPath>,
     shaper: &'a mut Shaper,
@@ -1577,7 +1596,17 @@ fn resolve_subtree(
     if blends_itself(node) || node.children().iter().any(|ch| c.blending.contains(ch)) {
         c.blending.insert(id);
     }
+    if holds_glass(node) || node.children().iter().any(|ch| c.glassy.contains(ch)) {
+        c.glassy.insert(id);
+    }
     (bounds, ink)
+}
+
+/// Whether `node` carries a visible background blur ([`Resolved::glass_within`]).
+fn holds_glass(node: &crate::Node) -> bool {
+    node.effects()
+        .iter()
+        .any(|e| e.visible && matches!(e.kind, crate::EffectKind::BackgroundBlur { .. }))
 }
 
 /// Whether `node` blends with what lies under it: its own mode, or a visible

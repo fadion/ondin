@@ -640,7 +640,11 @@ pub fn damage(
 /// `damage` (device boxes on `page`) with what it changes through a background
 /// blur added: a change behind a glass shows in the glass as far as the blur
 /// reaches, past the box of the change itself. Followed through glass behind
-/// glass, one glass further each round.
+/// glass, one glass further each round, and given up once the boxes cover half
+/// the canvas, past which the canvas draws whole.
+///
+/// The glass is found through `Resolved::glass_within`, so a page with none walks
+/// nothing, and among what the preview patches.
 pub fn spread_through_backdrops(
     doc: &Document,
     res: &Resolved,
@@ -650,7 +654,23 @@ pub fn spread_through_backdrops(
     damage: Vec<Rect>,
 ) -> Vec<Rect> {
     let base = device_base(vp);
-    let glass: Vec<(Rect, f64)> = ondin_core::build::subtree_nodes(doc, &[page])
+    let mut candidates: Vec<NodeId> = overrides
+        .patched()
+        .filter(|id| overrides.get(*id).is_some_and(|o| o.effects.is_some()))
+        .collect();
+    let mut stack = vec![page];
+    while let Some(id) = stack.pop() {
+        if !res.glass_within(id) {
+            continue;
+        }
+        candidates.push(id);
+        if let Some(node) = doc.get(id) {
+            stack.extend(node.children().iter().copied());
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    let glass: Vec<(Rect, f64)> = candidates
         .into_iter()
         .filter_map(|id| {
             let node = doc.get(id).filter(|n| !n.mask())?;
@@ -667,9 +687,26 @@ pub fn spread_through_backdrops(
             ))
         })
         .collect();
+    let canvas = Rect::new(
+        0.0,
+        0.0,
+        f64::from(vp.pixel_size.0),
+        f64::from(vp.pixel_size.1),
+    );
+    let on_canvas = |boxes: &[Rect]| -> f64 {
+        boxes
+            .iter()
+            .map(|b| b.intersect(canvas))
+            .filter(|b| b.width() > 0.0 && b.height() > 0.0)
+            .map(|b| b.area())
+            .sum()
+    };
     let mut out = damage.clone();
     let mut frontier = damage;
     for _ in 0..glass.len() {
+        if on_canvas(&out) * 2.0 > canvas.area() {
+            break;
+        }
         let mut next = Vec::new();
         for d in &frontier {
             for (ink, reach) in &glass {

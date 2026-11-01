@@ -362,6 +362,83 @@ fn damage_near_a_glass_spreads_into_it() {
     assert_eq!(far, vec![Rect::new(0.0, 0.0, 10.0, 10.0)], "out of reach");
 }
 
+/// The spread finds a glass inside a group and one a preview adds, and gives up
+/// on a chained grid of glass once its boxes cover half the canvas, where the
+/// canvas draws whole.
+///
+/// flip: `spread_through_backdrops` reading glass off `Resolved` alone → fails at
+/// "a previewed glass"; without its half-canvas stop → fails at "the grid".
+#[test]
+fn the_spread_finds_nested_and_previewed_glass_and_stops_at_half_the_canvas() {
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, SIDE as f64, SIDE as f64),
+        pixel_size: (SIDE as u32, SIDE as u32),
+    };
+    let mut p = Page::new();
+    let root = p.root;
+    let g = p.group(root);
+    let nested = p.rect(g, GLASS, None);
+    p.effects(nested, vec![BLUR]);
+    let res = Resolved::rebuild(&p.doc);
+    let near = Rect::new(0.0, 40.0, 20.0, 50.0);
+    let spread = |doc: &Document, res: &Resolved, ov: &ondin_render::RenderOverrides| {
+        ondin_render::scene::spread_through_backdrops(
+            doc,
+            res,
+            &vp,
+            ov,
+            doc.first_page(),
+            vec![near],
+        )
+    };
+    assert_eq!(
+        spread(&p.doc, &res, &Default::default()).len(),
+        2,
+        "a nested glass"
+    );
+
+    let mut p = Page::new();
+    let root = p.root;
+    let plain = p.rect(root, GLASS, None);
+    let res = Resolved::rebuild(&p.doc);
+    let ov = ondin_render::RenderOverrides::from_transaction(
+        &p.doc,
+        &res,
+        &Transaction(vec![Operation::SetEffects {
+            id: plain,
+            effects: keyed_by_position([Effect::new(BLUR)]),
+        }]),
+    )
+    .expect("a preview");
+    assert_eq!(spread(&p.doc, &res, &ov).len(), 2, "a previewed glass");
+
+    // Twelve by twelve cards of glass, 16 apart, each in reach of the next.
+    let mut p = Page::new();
+    let root = p.root;
+    for i in 0..12 {
+        for j in 0..12 {
+            let at = (f64::from(i) * 8.0, f64::from(j) * 8.0, 6.5, 6.5);
+            let card = p.rect(root, at, None);
+            p.effects(card, vec![EffectKind::BackgroundBlur { radius: 3.0 }]);
+        }
+    }
+    let res = Resolved::rebuild(&p.doc);
+    let out = ondin_render::scene::spread_through_backdrops(
+        &p.doc,
+        &res,
+        &vp,
+        &Default::default(),
+        p.doc.first_page(),
+        vec![Rect::new(0.0, 0.0, 2.0, 2.0)],
+    );
+    let covered: f64 = out.iter().map(|r| r.area()).sum();
+    assert!(
+        covered * 2.0 > (SIDE * SIDE) as f64,
+        "the grid: the spread reaches half the canvas"
+    );
+    assert!(out.len() < 400, "the grid: {} boxes", out.len());
+}
+
 /// A hidden background blur draws nothing, as if the row were not there.
 #[test]
 fn a_hidden_background_blur_draws_nothing() {

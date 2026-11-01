@@ -3,7 +3,8 @@
 Open work only. **Later · First** is the editor's remaining gaps, which land before MCP and Command
 Mode; **Later · Second** is what Ondin can offer that other design tools do not, and follows it.
 **Gaps** is what other design tools have and Ondin lacks; **Illustrations** is vector editing for
-icons, logos and simple illustrations. The other **Later** sections are deferred with a stated reason or trigger. Decided non-goals are in
+icons, logos and simple illustrations. The other **Later** sections are deferred with a stated reason or trigger;
+**Considerations** are ideas not yet decided. Decided non-goals are in
 `non-goals.md`; built work is described in `architecture.md`. Refs are file + function name, never line
 numbers. Read the code before picking an item up — an item's premise can go stale while its ask still
 reads true.
@@ -73,6 +74,20 @@ Nothing open.
   surface open (inspector, palette, menus, popovers, library), failing on any drawn text holding it.
   First the chrome, canvas labels, inspector, toasts and palette with that test; then the popovers,
   kits and library.
+- **Stand-ins for proprietary fonts.** An imported file often names a family no machine can fetch
+  (SF Pro, Helvetica, Calibri), which falls back to Inter and lands on the *Missing fonts* card. A
+  table of open stand-ins, metric-compatible where one exists (Arial and Helvetica → Arimo, Times →
+  Tinos, Courier → Cousine, Calibri → Carlito, Cambria → Caladea, so lines break where they did),
+  else the nearest look-alike (system UI faces → Inter, Georgia → Gelasio, Menlo and Consolas →
+  JetBrains Mono). The document keeps the original name and draws in the stand-in; the card still
+  lists the family as *drawn in Carlito*, since the export rule is that an approximation is reported,
+  and offers the stand-in first in *Replace with…*. Looked up in `FontService` before a family is
+  declared `Missing`.
+- **Fallback fonts by script.** Inter has no Arabic, Hebrew, Devanagari, CJK or Hangul glyphs. When
+  a document's text uses one of those scripts and no installed family covers it, fetch the matching
+  Noto Sans (Arabic, Hebrew, Devanagari, SC, JP, KR) through the web-font source and register it as
+  a fallback. Check first whether such text draws as empty boxes today: fontique falls back to the
+  system's fonts, so the gap may only show on a sparse Linux install and in headless export.
 
 ## Gaps
 
@@ -205,6 +220,33 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   and `release-review`'s fact sheet are descriptions a pass turns into commands. Trigger: the next
   review's Pass 0 — write each command down and run it against a fixture that must match and one
   that must not before trusting its count.
+
+## Considerations
+
+Ideas worth weighing, not yet decided or scheduled.
+
+- **One command registry.** Every menu item, tool, palette entry and gesture as a named command
+  with typed parameters, in one list that the UI, a CLI, MCP and Command Mode all call. Today the
+  MCP tools (`ondin-mcp`, `tools.rs`) are a list kept apart from the app's commands, and Command
+  Mode would be a third. One registry makes "an agent can do whatever a click can" true by
+  construction, and gives the CLI a way to run a script of commands against a file with no window
+  (`ondin run build.json --out card.ondin`).
+- **A control channel into the running app.** Loopback only: read UI state, drive tools with
+  synthetic pointer and key events, and screenshot the window. Agents never launch the GUI because
+  the window takes the user's mouse and keyboard; a window that accepts input only through the
+  channel (hidden or offscreen) would let an agent check chrome against the real app instead of
+  throwaway probe tests.
+- **Multiplayer without a server.** The host's app holds the session and peers join by link, peer
+  to peer over QUIC with NAT traversal and an end-to-end encrypted relay when no direct path exists.
+  Edits merge per property, a delete beats an edit, and each person's undo takes back only their
+  own edits; optional password, approval of each joiner, view-only access. §12 locks in the ids and
+  transactions such a layer needs and leaves the protocol and conflict rules undesigned; this shape
+  needs no hosting and no accounts. The cost: the session ends when the host closes the file.
+- **A tolerant pixel diff.** A compare with anti-aliasing detection and SSIM that writes an HTML
+  report. The PNG golden is absent because `vello_cpu`'s bytes vary with SIMD level and version
+  (*Parked decisions*); a compare that forgives edge pixels and still catches a moved shape is what
+  would unblock it. The same harness could hold approved screenshots of the chrome as regression
+  baselines.
 
 ## Parked decisions
 

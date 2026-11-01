@@ -202,7 +202,13 @@ impl OndinApp {
         let mut meta = doc.meta().clone();
         meta.id = self.session.doc.meta().id.clone();
         doc.set_meta(meta);
+        // A restore is not an open: the user keeps looking where they were.
+        let (page, camera) = (self.session.page, self.session.camera);
         self.adopt_opened(&path, doc);
+        if self.session.page == page {
+            self.session.camera = camera;
+            self.session.home_pending = false;
+        }
         self.session.mark_unsaved();
         if !self.save_file(false) {
             return;
@@ -219,10 +225,10 @@ mod tests {
     use super::*;
 
     /// A restore puts the pinned copy's content in the file under the same path and
-    /// id, and keeps the state it replaced as the newest version, so restoring that
-    /// one comes back.
+    /// id, keeps the view where it was, and keeps the state it replaced as the
+    /// newest version, so restoring that one comes back.
     /// flip: `restore_version` without its pin of the current state → fails at the
-    /// version count.
+    /// version count; without putting the camera back → fails at "and is not homed".
     #[test]
     fn a_restore_keeps_the_state_it_replaces_as_the_newest_version() {
         let ctx = egui::Context::default();
@@ -246,8 +252,15 @@ mod tests {
         // Unsaved work at the moment of the restore: it must survive too.
         let first = app.document_versions();
         assert_eq!(first.len(), 1, "the fixture: one pin");
+        // Zoomed in on a detail: the restore leaves the view there.
+        app.session.home_pending = false;
+        app.session.camera.center = ondin_core::kurbo::Point::new(321.0, 123.0);
+        app.session.camera.set_zoom(4.0);
+        let camera = app.session.camera;
 
         app.restore_version(&first[0].path);
+        assert_eq!(app.session.camera, camera, "the view stays");
+        assert!(!app.session.home_pending, "and is not homed");
         assert_eq!(name(&app).as_deref(), Some("First"), "the copy's content");
         assert_eq!(
             app.session.path.as_deref(),

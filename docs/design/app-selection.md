@@ -123,6 +123,10 @@ plain click or marquee replaces the selection and clears it.
   as apart; a `0` measure is dropped. Quotes **world bounding boxes**.
 - Target is `canvas::hover_target`; gated on `canvas::hover_chrome_live`. A ruler guide under the
   pointer wins over the layer below it and is measured on one axis.
+- `hover_target` answers only where the canvas's own layer is on top (`layer_id_at`): egui still
+  hovers the canvas widget within its interaction radius of a floating area's edge, so without the
+  test a menu's or popover's border outlined the layer beneath it
+  (`hover_under_area_tests::no_layer_is_hovered_through_an_areas_edge`).
 - Four pairings: selected layer → hovered layer / hovered guide; selected guide → hovered layer /
   hovered guide. `measure::to_guide` answers both mixed pairings. The branch is an `else` — `Selection`
   holds layers *or* guides (§9.3). Every selected guide measures. `rulers::measurable_guide` re-asks

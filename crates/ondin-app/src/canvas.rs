@@ -6826,6 +6826,12 @@ impl OndinApp {
             return None;
         }
         let p = resp.hover_pos()?;
+        // egui hovers through an area within its interaction radius of the area's
+        // edge, so beside a menu's border the canvas reads as hovered under it. A
+        // layer is pointed at only where the canvas's own layer is the one on top.
+        if ui.ctx().layer_id_at(p).is_some_and(|l| l != ui.layer_id()) {
+            return None;
+        }
         if let Some(h) = self.selection_handles(rect, ppp)
             && h.armed(p, false).is_some()
         {
@@ -23030,5 +23036,86 @@ mod redraw_tests {
         }
         draw(&mut canvas, &session, &camera, px);
         assert!(canvas.patched().is_none(), "steps past what the log keeps");
+    }
+}
+
+/// The hover outline under a floating area.
+#[cfg(test)]
+mod hover_under_area_tests {
+    use crate::app::OndinApp;
+    use eframe::egui;
+    use ondin_core::kurbo::{Affine, Size};
+    use ondin_core::{Document, IdSource, NodeKind, Operation, Transaction};
+
+    /// No layer is hovered through an area, even within egui's interaction radius
+    /// of the area's edge, where egui still reports the canvas widget as hovered.
+    /// A point well off the area must hover the layer, or the fixture hovers nothing.
+    ///
+    /// flip: `hover_target` without its `layer_id_at` test → fails at "beside the
+    /// area's edge".
+    #[test]
+    fn no_layer_is_hovered_through_an_areas_edge() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x40);
+        let root = ids.mint();
+        let rect = ids.mint();
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(20000.0, 20000.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((-10000.0, -10000.0))),
+            name: None,
+        }]))
+        .expect("one rect under everything");
+        app.session.adopt_document(doc, None);
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let card = egui::Rect::from_min_size(egui::pos2(200.0, 200.0), egui::vec2(200.0, 200.0));
+        let hover_at = |app: &OndinApp, p: egui::Pos2| {
+            let mut got = None;
+            for _ in 0..3 {
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        events: vec![egui::Event::PointerMoved(p)],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let resp = ui.interact(
+                            screen,
+                            egui::Id::new("canvas"),
+                            egui::Sense::click_and_drag(),
+                        );
+                        egui::Area::new(egui::Id::new("card"))
+                            .order(egui::Order::Foreground)
+                            .fixed_pos(card.min)
+                            .show(ui.ctx(), |ui| {
+                                ui.allocate_exact_size(card.size(), egui::Sense::hover());
+                            });
+                        got = app.hover_target(ui, screen, 1.0, &resp);
+                    },
+                );
+            }
+            got
+        };
+
+        assert_eq!(
+            hover_at(&app, egui::pos2(100.0, 100.0)),
+            Some(rect),
+            "off the area the layer is hovered"
+        );
+        assert_eq!(
+            hover_at(&app, egui::pos2(card.right() - 2.0, card.center().y)),
+            None,
+            "beside the area's edge"
+        );
     }
 }

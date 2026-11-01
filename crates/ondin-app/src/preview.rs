@@ -160,8 +160,9 @@ pub enum Drag {
     },
     /// Dragging a shape-parameter dot of layer `id` (`crate::shape_handles`): a
     /// corner's radius or an ellipse's arc. `press` is the press in the layer's
-    /// local space, `alt` whether one corner alone is dragged, and `last` the value
-    /// the previous frame set, so a sweep stops at 0 and 360 rather than wrapping.
+    /// local space, `alt` whether one corner alone is dragged, and `last` the
+    /// previous frame's unwrapped sweep, so a sweep stops at 0 and 360 rather than
+    /// wrapping, until the pointer comes back the way it went.
     ShapeHandle {
         id: NodeId,
         grab: crate::shape_handles::Grab,

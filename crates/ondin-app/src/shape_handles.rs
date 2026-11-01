@@ -93,16 +93,16 @@ fn on_ellipse(size: Size, deg: f64, k: f64) -> Point {
     Point::new(rx + rx * k * a.cos(), ry + ry * k * a.sin())
 }
 
-/// A sweep of `raw` degrees held at the end it was near: past 360 it stays at
-/// 360 rather than wrapping to 0, and below 0 at 0.
-fn stopped(raw: f64, last: f64) -> f64 {
-    if last > 270.0 && raw < 90.0 {
-        360.0
-    } else if last < 90.0 && raw > 270.0 {
-        0.0
-    } else {
-        raw
-    }
+/// A sweep of `raw` degrees (0..360) followed on from `last`, the previous
+/// frame's unwrapped sweep, by the shorter way round: the sweep drawn, clamped to
+/// 0..=360 so it stops at either end rather than wrapping, and the unwrapped value
+/// to follow on from next, which keeps the stop until the pointer comes back the
+/// way it went (at most a turn past either end).
+fn stopped(raw: f64, last: f64) -> (f64, f64) {
+    let delta = (raw - last).rem_euclid(360.0);
+    let delta = if delta > 180.0 { delta - 360.0 } else { delta };
+    let unwrapped = (last + delta).clamp(-360.0, 720.0);
+    (unwrapped.clamp(0.0, 360.0), unwrapped)
 }
 
 fn snapped(deg: f64, shift: bool) -> f64 {
@@ -325,9 +325,15 @@ impl OndinApp {
                 let node = self.session.doc.get(id)?;
                 let literal = radii_array(node.kind().corner_radii()?);
                 let half = size.width.min(size.height).max(0.0) * 0.5;
-                let r = (drawn[k] + inset(size, k, local) - inset(size, k, press))
+                // From where the dot is drawn: a radius past half draws at half.
+                let from = drawn[k].clamp(0.0, half);
+                let r = (from + inset(size, k, local) - inset(size, k, press))
                     .round()
                     .clamp(0.0, half.floor());
+                // A drag that ends where it began changes nothing, its binding included.
+                if (r - from).abs() < 0.5 {
+                    return Some((Transaction(Vec::new()), format!("Radius {r}"), last));
+                }
                 let mut vars = node.corner_vars();
                 let mut ops = Vec::new();
                 let label = if alt {
@@ -355,18 +361,20 @@ impl OndinApp {
                 let arc = arc.normalized();
                 let theta = angle_of(size, local);
                 let mut next: EllipseArc = arc;
+                let mut unwrapped = last;
                 let label = match grab {
                     Grab::ArcEnd => {
                         let raw = snapped((theta - arc.start).rem_euclid(360.0), shift);
-                        next.sweep = stopped(raw.rem_euclid(360.0), last);
+                        (next.sweep, unwrapped) = stopped(raw.rem_euclid(360.0), last);
                         format!("{}°", crate::ui::number(0)(next.sweep, 0..=0))
                     }
                     Grab::ArcStart => {
+                        // The end holds; a stopped sweep holds the start with it.
                         let start = snapped(theta, shift).rem_euclid(360.0);
                         let end = arc.start + arc.sweep;
-                        next.start = start;
-                        next.sweep = stopped((end - start).rem_euclid(360.0), last);
-                        format!("Start {}°", crate::ui::number(0)(start, 0..=0))
+                        (next.sweep, unwrapped) = stopped((end - start).rem_euclid(360.0), last);
+                        next.start = (end - next.sweep).rem_euclid(360.0);
+                        format!("Start {}°", crate::ui::number(0)(next.start, 0..=0))
                     }
                     _ => {
                         let (rx, ry) = (size.width * 0.5, size.height * 0.5);
@@ -384,7 +392,7 @@ impl OndinApp {
                 Some((
                     Transaction(vec![geo(GeometryPatch::Arc(next))]),
                     label,
-                    next.sweep,
+                    unwrapped,
                 ))
             }
             _ => None,
@@ -715,5 +723,123 @@ mod tests {
             panic!("not an ellipse");
         };
         assert_eq!(arc.sweep, 360.0, "stays whole");
+    }
+
+    /// Press, move through `path` a frame a point, release at its last point.
+    fn drag_through(ctx: &egui::Context, app: &mut OndinApp, path: &[Point]) {
+        let mods = egui::Modifiers::NONE;
+        let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, 1.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: mods,
+        };
+        let start = at(app, path[0]);
+        frame(ctx, app, mods, vec![egui::Event::PointerMoved(start)]);
+        frame(ctx, app, mods, vec![button(start, true)]);
+        for p in &path[1..] {
+            let p = at(app, *p);
+            frame(ctx, app, mods, vec![egui::Event::PointerMoved(p)]);
+        }
+        let end = at(app, *path.last().unwrap());
+        frame(ctx, app, mods, vec![button(end, false)]);
+        frame(ctx, app, mods, Vec::new());
+    }
+
+    /// Points on the 120 pt circle at (160, 120), from `from`° to `to`° clockwise
+    /// in 10° steps.
+    fn round(from: f64, to: f64) -> Vec<Point> {
+        let n = ((to - from).abs() / 10.0).ceil() as usize;
+        (0..=n)
+            .map(|i| {
+                let a = (from + (to - from) * i as f64 / n as f64).to_radians();
+                Point::new(160.0 + 60.0 * a.cos(), 120.0 + 60.0 * a.sin())
+            })
+            .collect()
+    }
+
+    fn arc_of(app: &OndinApp, id: NodeId) -> EllipseArc {
+        let NodeKind::Ellipse { arc, .. } = app.session.doc.get(id).unwrap().kind() else {
+            panic!("not an ellipse");
+        };
+        *arc
+    }
+
+    /// Dragged half way round past its start, a whole ellipse stays whole; the
+    /// stop holds until the pointer comes back the way it went.
+    /// flip: `stopped` without its unwrapping, holding only within 90° of the
+    /// crossing → fails at "still whole at 180°".
+    #[test]
+    fn the_sweep_stop_holds_until_the_pointer_comes_back() {
+        let ctx = egui::Context::default();
+        let whole = NodeKind::Ellipse {
+            size: Size::new(120.0, 120.0),
+            arc: EllipseArc::default(),
+        };
+        let (mut app, id) = app_with(&ctx, whole);
+        drag_through(&ctx, &mut app, &round(0.0, 180.0));
+        assert_eq!(arc_of(&app, id).sweep, 360.0, "still whole at 180°");
+    }
+
+    /// Dragged past its end, a start dot stops with the end held where it was.
+    /// flip: setting `next.start` to the pointer's angle in the `ArcStart` arm →
+    /// fails at "the end held".
+    #[test]
+    fn a_start_dragged_past_its_end_holds_the_end() {
+        let ctx = egui::Context::default();
+        let quarter = NodeKind::Ellipse {
+            size: Size::new(120.0, 120.0),
+            arc: EllipseArc {
+                sweep: 90.0,
+                ..EllipseArc::default()
+            },
+        };
+        let (mut app, id) = app_with(&ctx, quarter);
+        drag_through(&ctx, &mut app, &round(0.0, 120.0));
+        let arc = arc_of(&app, id);
+        assert_eq!(arc.sweep, 0.0, "stopped at nothing");
+        assert!(
+            ((arc.start + arc.sweep).rem_euclid(360.0) - 90.0).abs() < 1e-9,
+            "the end held: {arc:?}"
+        );
+    }
+
+    /// On a pill whose radius is past half its shorter side, the corner dot drags
+    /// from where it is drawn, and a click on it commits nothing.
+    /// flip: basing the drag on the stored radius → fails at "the drag lowers it".
+    #[test]
+    fn an_over_half_radius_drags_from_its_dot() {
+        let ctx = egui::Context::default();
+        let pill = NodeKind::Rect {
+            size: Size::new(160.0, 60.0),
+            corner_radii: RoundedRectRadii::from_single_radius(999.0),
+            corner_smoothing: 0.0,
+        };
+        let (mut app, id) = app_with(&ctx, pill);
+        let depth = app.session.history.undo_depth();
+        let dot = Point::new(130.0, 90.0);
+        let at = app.to_screen(dot, RECT, 1.0);
+        assert!(
+            matches!(
+                app.shape_handle_at(at, RECT, 1.0),
+                Some(super::Grab::Corner(_))
+            ),
+            "fixture: the dot is there"
+        );
+        drag_through(&ctx, &mut app, &[dot, dot]);
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth,
+            "a click is no step"
+        );
+        assert_eq!(radii(&app, id), [999.0; 4]);
+        // Straight left: the left dots coincide, and either reads this inset.
+        drag_through(
+            &ctx,
+            &mut app,
+            &[dot, Point::new(125.0, 90.0), Point::new(120.0, 90.0)],
+        );
+        assert_eq!(radii(&app, id), [25.0; 4], "the drag lowers it");
     }
 }

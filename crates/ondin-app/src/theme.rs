@@ -578,6 +578,9 @@ pub mod icon {
     pub const SQUIRCLE: &str = "\u{f008}";
     /// The **background blur**'s row glyph: a pane, frosted.
     pub const SQUARE_DOTS: &str = "\u{f00a}";
+    /// The **Private mode** pill's glyph: a hat and glasses, a browser's private
+    /// window.
+    pub const INCOGNITO: &str = "\u{f00b}";
     /// A variable mode's *Inherit*: an arrow turning up to the level above.
     pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
@@ -950,6 +953,7 @@ pub mod icon {
         ("corners-separate", CORNERS_SEPARATE),
         ("squircle", SQUIRCLE),
         ("square-dots", SQUARE_DOTS),
+        ("incognito", INCOGNITO),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),
         ("arrow-up", ARROW_UP),
         ("arrow-down", ARROW_DOWN),

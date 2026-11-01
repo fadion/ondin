@@ -143,7 +143,7 @@ pub(crate) struct Browser {
     /// Whether the search should take the keyboard next frame — once, on open.
     focus: bool,
     /// *In selection*, kept pressed across selection changes.
-    in_selection: bool,
+    pub(crate) in_selection: bool,
     /// Collapsed group paths — a copy of the document's own set
     /// (`OndinApp::var_collapsed`), loaded for [`Self::root`] (§15 D1054).
     collapsed: HashSet<String>,

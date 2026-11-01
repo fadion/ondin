@@ -40,9 +40,11 @@ pub(crate) const DECLINE_LIST: &str = "Leave private mode to see the names";
 /// What a search over names says while it declines.
 pub(crate) const DECLINE_SEARCH: &str = "Leave private mode to search names";
 
-/// The accent *Private* pill a top bar shows while names are masked, so whoever
-/// is sharing the screen can see it is on; `true` when it was clicked, which
-/// turns private mode off. Draws nothing while it is off.
+/// The accent *Private mode* pill a top bar shows while names are masked, so
+/// whoever is sharing the screen can see it is on; `true` when it was clicked,
+/// which turns private mode off. Draws nothing while it is off. Worded as the
+/// mode, with a browser's incognito glyph: a bare "Private" read as a document
+/// not shared with a team, which this personal app has no notion of.
 pub(crate) fn pill(ui: &mut egui::Ui) -> bool {
     use crate::theme::{self, color, icon};
     if !on() {
@@ -50,7 +52,7 @@ pub(crate) fn pill(ui: &mut egui::Ui) -> bool {
     }
     let galley = ui.ctx().fonts_mut(|f| {
         f.layout_no_wrap(
-            "Private".into(),
+            "Private mode".into(),
             egui::FontId::proportional(11.5),
             color::accent_100(),
         )
@@ -64,7 +66,7 @@ pub(crate) fn pill(ui: &mut egui::Ui) -> bool {
     p.text(
         egui::pos2(rect.left() + 9.0, y),
         egui::Align2::LEFT_CENTER,
-        icon::EYE_SLASH,
+        icon::INCOGNITO,
         theme::icon_font(13.0),
         color::accent_100(),
     );
@@ -236,13 +238,15 @@ mod leak {
         (app, [frame, rect, copy])
     }
 
-    /// Every string one whole frame of `app` draws, `events` delivered to it.
+    /// Every string one whole frame of `app` draws, `events` delivered to it. A
+    /// window tall enough for the whole inspector: a card below the fold is
+    /// culled, and would pass unread.
     fn drawn(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) -> Vec<String> {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::pos2(0.0, 0.0),
-                egui::vec2(1320.0, 820.0),
+                egui::vec2(1320.0, 2400.0),
             )),
             events,
             ..Default::default()
@@ -270,14 +274,76 @@ mod leak {
     /// Several frames of `app`, so what opens on one frame is drawn on the next;
     /// the strings holding the sentinel, labelled with `surface`.
     fn leaks(ctx: &egui::Context, app: &mut OndinApp, surface: &str) -> Vec<String> {
+        leaks_of(ctx, app, surface, &[SECRET])
+    }
+
+    /// [`leaks`] for a fixture whose names are `marks`, not [`SECRET`].
+    fn leaks_of(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        surface: &str,
+        marks: &[&str],
+    ) -> Vec<String> {
         let mut out = Vec::new();
         for _ in 0..4 {
             out = drawn(ctx, app, Vec::new());
         }
         out.into_iter()
-            .filter(|t| t.contains(SECRET))
+            .filter(|t| marks.iter().any(|m| t.contains(m)))
             .map(|t| format!("{surface}: {t}"))
             .collect()
+    }
+
+    /// One surface's share of the guard. With private mode off, opening it must
+    /// draw a string holding [`SECRET`] the app did not draw without it — so it really is a
+    /// surface that names something, and an empty answer below means something;
+    /// with it on, the strings holding it are the answer. `close` puts the app
+    /// back.
+    fn surface(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        label: &str,
+        open: impl Fn(&mut OndinApp, &egui::Context),
+        close: impl Fn(&mut OndinApp),
+    ) -> Vec<String> {
+        surface_of(ctx, app, label, &[SECRET], open, close)
+    }
+
+    /// [`surface`] for a fixture whose names are `marks`.
+    fn surface_of(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        label: &str,
+        marks: &[&str],
+        open: impl Fn(&mut OndinApp, &egui::Context),
+        close: impl Fn(&mut OndinApp),
+    ) -> Vec<String> {
+        app.prefs.private = false;
+        let without = leaks_of(ctx, app, label, marks);
+        open(app, ctx);
+        let with = leaks_of(ctx, app, label, marks);
+        // Strings counted with repeats, so a second copy of a name is new too.
+        let mut left = without.clone();
+        let new = with
+            .iter()
+            .filter(|t| match left.iter().position(|w| w == *t) {
+                Some(i) => {
+                    left.remove(i);
+                    false
+                }
+                None => true,
+            })
+            .count();
+        assert!(
+            new > 0,
+            "the {label} draws a name of its own with private mode off:\n{with:#?}\nagainst\n{without:#?}"
+        );
+        close(app);
+        app.prefs.private = true;
+        open(app, ctx);
+        let found = leaks_of(ctx, app, label, marks);
+        close(app);
+        found
     }
 
     /// With private mode on, no drawn string holds a layer's, page's,
@@ -299,28 +365,143 @@ mod leak {
         app.prefs.private = true;
 
         let mut found = leaks(&ctx, &mut app, "editor");
-        app.session.selection.set_one(copy);
-        found.extend(leaks(&ctx, &mut app, "instance selected"));
-        app.session.selection.set_one(rect);
-
-        app.toggle_palette(&ctx);
-        found.extend(leaks(&ctx, &mut app, "palette"));
-        if let Some(p) = app.palette.as_mut() {
-            p.query = SECRET[..4].to_string();
-        }
-        found.extend(leaks(&ctx, &mut app, "palette, typed"));
-        app.palette = None;
-
+        let c = &ctx;
+        found.extend(surface(
+            c,
+            &mut app,
+            "instance selected",
+            |app, _| app.session.selection.set_one(copy),
+            |app| app.session.selection.set_one(rect),
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "palette",
+            |app, ctx| app.toggle_palette(ctx),
+            |app| app.palette = None,
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "palette, typed",
+            |app, ctx| {
+                app.toggle_palette(ctx);
+                if let Some(p) = app.palette.as_mut() {
+                    p.query = SECRET[..4].to_string();
+                }
+            },
+            |app| app.palette = None,
+        ));
+        // A layer's menu names nothing until a flyout opens (no control), but
+        // it must not start to.
         app.open_context_menu(
-            &ctx,
+            c,
             crate::menu::Target::Layer {
                 id: rect,
                 door: crate::menu::Door::Canvas,
             },
             None,
         );
-        found.extend(leaks(&ctx, &mut app, "context menu"));
+        assert!(app.context_menu.is_some(), "the menu is open");
+        found.extend(leaks(c, &mut app, "context menu"));
         app.context_menu = None;
+        // The variables browser, pressed to *In selection*, says whose variables
+        // it lists. It stands beside the canvas, so one is laid out.
+        let canvas = app.canvas_rect;
+        app.canvas_rect =
+            egui::Rect::from_min_size(egui::pos2(300.0, 60.0), egui::vec2(700.0, 600.0));
+        found.extend(surface(
+            c,
+            &mut app,
+            "variables browser",
+            |app, _| {
+                app.toggle_var_browser();
+                if let Some(b) = app.var_browser.as_mut() {
+                    b.in_selection = true;
+                }
+            },
+            |app| app.var_browser = None,
+        ));
+        app.canvas_rect = canvas;
+        // The export card's button names the layer it exports.
+        found.extend(surface(
+            c,
+            &mut app,
+            "export card",
+            |app, _| {
+                let png = ondin_core::ExportSpec::new(
+                    ondin_core::ExportFormat::Png,
+                    ondin_core::ExportScale::Times(1.0),
+                );
+                app.session
+                    .try_commit(Transaction(vec![Operation::SetExports {
+                        id: rect,
+                        exports: ondin_core::keyed_by_position([png]),
+                    }]))
+                    .expect("an export on the rect");
+                // Folded while the layer exported nothing, the card stays so
+                // until the selection changes.
+                app.collapsed_panels.remove("Export");
+            },
+            |app| {
+                app.session
+                    .try_commit(Transaction(vec![Operation::SetExports {
+                        id: rect,
+                        exports: Vec::new(),
+                    }]))
+                    .expect("no export on the rect");
+            },
+        ));
+        // The contrast check's bar names its scope.
+        found.extend(surface(
+            c,
+            &mut app,
+            "contrast check",
+            |app, _| app.toggle_contrast(),
+            |app| app.contrast = None,
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "version history",
+            |app, _| app.versions_open = true,
+            |app| app.versions_open = false,
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "recovery card",
+            |app, _| {
+                app.recovery
+                    .pending
+                    .push(crate::library::recovery::Pending {
+                        key: "k".into(),
+                        path: std::env::temp_dir().join("ondin-private-no-snapshot"),
+                        name: format!("{SECRET} doc"),
+                        target: None,
+                        written: None,
+                    })
+            },
+            |app| app.recovery.pending.clear(),
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "close confirmation",
+            |app, _| {
+                app.session.mark_unsaved();
+                app.confirming_close = true;
+            },
+            |app| app.confirming_close = false,
+        ));
+        // Present mode's counter names the frame on show.
+        found.extend(surface(
+            c,
+            &mut app,
+            "present mode",
+            |app, ctx| app.start_presenting(ctx),
+            |app| app.presenting = None,
+        ));
 
         app.view = View::Dashboard;
         found.extend(leaks(&ctx, &mut app, "library"));
@@ -359,7 +540,7 @@ mod leak {
                 modifiers,
             }]
         };
-        let pill = |texts: &[String]| texts.iter().any(|t| t == "Private");
+        let pill = |texts: &[String]| texts.iter().any(|t| t == "Private mode");
         let frame_with = |app: &mut OndinApp, events: Vec<egui::Event>| {
             let mut frame = eframe::Frame::_new_kittest();
             let input = egui::RawInput {
@@ -397,6 +578,98 @@ mod leak {
         assert!(
             !pill(&drawn(&ctx, &mut app, Vec::new())),
             "and the pill goes"
+        );
+    }
+
+    /// No kit surface names the kit, its components or the document using them:
+    /// an instance's card, the insert picker, *Kits used*, *Make local*, and on
+    /// the kit itself *Publish*. The picker's fixture kit is *Atlas*, holding
+    /// *Badge* and a set in a frame *Forms*, used by *Landing*.
+    ///
+    /// flip: `kits_in` naming a kit by `display_name` → fails at the instance's
+    /// card, the picker, *Kits used* and *Make local*.
+    #[test]
+    fn no_kit_surface_draws_a_name_in_private_mode() {
+        use crate::kits::index::{Load, kits_in};
+        use crate::kits::picker::tests::{app_on, file_kit, temp_root};
+        const MARKS: [&str; 4] = ["Atlas", "Badge", "Forms", "Landing"];
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("private");
+        let (kit, _, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let k = kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit)
+            .expect("the kit is listed");
+        app.kit_shelf.ask(&k);
+        app.kit_shelf.settle();
+        let Some(Load::Ready(Some(p))) = app.kit_shelf.load(&kit) else {
+            panic!("the kit's published state loads");
+        };
+        let page = app.session.doc.first_page();
+        let (tx, inst) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            &kit,
+            4,
+            p,
+            badge,
+            page,
+        )
+        .expect("an instance of Badge");
+        assert!(app.session.commit(tx));
+        let main = ondin_core::component::main_of(&app.session.doc, inst).expect("its main");
+        let top = app.kit_line(main).expect("a kit main").top;
+
+        let c = &ctx;
+        let mut found = Vec::new();
+        let mut one = |app: &mut OndinApp,
+                       label,
+                       open: &dyn Fn(&mut OndinApp, &egui::Context),
+                       close: &dyn Fn(&mut OndinApp)| {
+            found.extend(surface_of(c, app, label, &MARKS, open, close));
+        };
+        one(
+            &mut app,
+            "kit instance selected",
+            &|app, _| app.session.selection.set_one(inst),
+            &|app| app.session.selection.clear(),
+        );
+        one(
+            &mut app,
+            "insert picker",
+            &|app, _| app.toggle_kit_picker(),
+            &|app| app.kit_picker = None,
+        );
+        one(
+            &mut app,
+            "kits used",
+            &|app, _| app.kits_used_open = true,
+            &|app| app.kits_used_open = false,
+        );
+        one(
+            &mut app,
+            "make local",
+            &|app, _| app.making_local = Some(top),
+            &|app| app.making_local = None,
+        );
+        // On the kit itself, with a change to publish.
+        app.open_path(&root.join("atlas.ondin"));
+        app.session
+            .try_commit(Transaction(vec![Operation::SetOpacity {
+                id: badge,
+                opacity: 0.5,
+            }]))
+            .expect("a change to publish");
+        one(&mut app, "publish", &|app, _| app.open_publish(), &|app| {
+            app.publishing = None
+        });
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            found.is_empty(),
+            "names drawn in private mode:\n{}",
+            found.join("\n")
         );
     }
 

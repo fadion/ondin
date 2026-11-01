@@ -511,8 +511,10 @@ the first segment of a component's. It hides names, not content.
 
 - **Doors.** `ViewSwitch::Private` (*Private mode*, `Ctrl+Shift+N`): the View menu after *Focus mode*,
   the palette and the cheatsheet; not the canvas menu. The library answers the chord too
-  (`dashboard_keys`). An accent *Private* pill (`private::pill`, eye-slash glyph) sits on both the
-  editor's and the library's top bar while it is on; clicking it turns it off.
+  (`dashboard_keys`). An accent *Private mode* pill (`private::pill`, the incognito glyph, hat and
+  glasses) sits on both the editor's and the library's top bar while it is on; clicking it turns it
+  off. It names the mode rather than reading "Private": the app is personal and offline-first, and a
+  bare "Private" read as a document not shared with a team.
 - **A preference, not a workspace switch** (`Prefs::private`), so a restart in the middle of a shared
   screen comes back masked. `OndinApp::set_private` writes and saves it, sets the switch at once and,
   turning on, drops whatever shows a real name for editing: the inline layer rename, the inspector's
@@ -628,8 +630,14 @@ runs (`pages` names each frame's page, index for index).
   `.name()` or `page_name`, which stay the real name for comparing, renaming and files. The guard is
   `private::leak`: a document whose every layer, page, component and file name carries a sentinel,
   whole frames drawn with each surface open, failing on any drawn string or viewport command holding
-  it, with a control that the names are drawn when it is off
-  (`no_surface_draws_a_name_in_private_mode`, `the_library_draws_no_name_in_private_mode`). It covers
-  only the surfaces it opens; a popover or dialog it does not open is unguarded.
+  it. Each surface carries its own control (`surface`): with private mode off, opening it must draw a
+  name the app did not draw without it, so a surface that is not drawn at all (culled below the
+  fold, a card folded shut) fails rather than passing unread. `no_surface_draws_a_name_in_private_mode`
+  opens the editor with a layer and an instance selected, the palette empty and typed, a layer's
+  menu, the variables browser, the Export card, the contrast check, version history, the recovery and
+  close cards and present mode; `no_kit_surface_draws_a_name_in_private_mode` an instance's kit
+  card, the insert picker, *Kits used*, *Make local* and *Publish*;
+  `the_library_draws_no_name_in_private_mode` the library. A surface it does not open is unguarded,
+  and a layer's menu has no control, since it names nothing until a flyout opens.
 - `set_private` must not write `layers_folded` or `pages_folded`: the fold is an overlay so leaving
   restores the panes as they were. `the_chord_turns_it_on_and_the_pill_says_so` pins it.

@@ -20,7 +20,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D114** A pen anchor carries two independent handles, not one mirrored vector.
 - **D68** A rectangle's stroke can sit on one side; a side is an open path. **D69** Dash mode is classified from the stored pattern, never stored beside it.
 - **D144** Frames stroke over their contents and outside their own clip. Type can be stroked, which is how outlined type is expressed.
-- **D282** A mask is a layer that paints nothing and clips the run of siblings above it. Alpha masking only. A mask is never hit, and what it masks is hit only inside it.
+- **D282** A mask is a layer that paints nothing and clips the run of siblings above it, by its outline, its alpha or its luminance (`MaskMode`). A mask is never hit, and what it masks is hit only inside it.
 - **D333** Layer effects are an ordered stack (drop shadow, inner shadow, layer blur, background blur, colour filters) on any node but the root, listed in model order. `Resolved::ink_bounds` is the drawn box and `world_bounds` the editing box. A layer and each shadow carry a blend mode; noise is a non-goal.
 - **D340** The effect stack is reordered by dragging its rows, as fills and strokes are, though order changes pixels only between `Filters` and `LayerBlur` and between two shadows on one side.
 - **D176** Image fills use `peniko::Brush<ImageBrush<ImageRef>>` with our reference in place of pixels; there is no brush enum of our own. **D178** peniko has no transparent extend, so a fitted picture needs a clip as well as a brush transform.

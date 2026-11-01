@@ -1930,9 +1930,7 @@ fn a_mask_keeps_the_ink_it_covers_and_removes_the_rest() {
 ///   passes every other assertion here and fails this one.
 /// - **Still red.** The mask is filled a half-transparent **blue**; if its colour
 ///   reached the page, this would be purple. It does not: an alpha mask reads
-///   alpha, and that is also what separates it from the luminance mode this app
-///   does not have (§15 D288) — a luminance mask would have read that blue as a
-///   brightness and produced a third number again.
+///   alpha, where a luminance mask reads that blue as a brightness (the next test).
 /// - **Outside, gone.** The mask still bounds the run; it fades within its own
 ///   shape rather than everywhere.
 #[test]
@@ -2003,6 +2001,82 @@ fn an_alpha_mask_fades_what_it_masks_and_reads_only_its_alpha() {
         0,
         "outside the mask's own shape there is still nothing"
     );
+}
+
+/// The red square under a 40×40 mask of `color` in `mode`, rendered on the CPU:
+/// the pixels inside the mask and outside it.
+fn under_mask(color: Color, mode: ondin_core::MaskMode) -> ([u8; 4], [u8; 4]) {
+    let (mut doc, _res) = red_square_doc();
+    let ab = doc.get(doc.first_page()).unwrap().children()[0];
+    let square = doc.get(ab).unwrap().children()[0];
+    let mut ids = IdSource::new(0x1A1A);
+    let mask = ids.mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: mask,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: mask,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(color).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetMask {
+            id: mask,
+            mask: true,
+        },
+        Operation::SetMaskMode { id: mask, mode },
+    ]))
+    .unwrap();
+    assert_eq!(doc.get(ab).unwrap().children(), &[mask, square]);
+    let res = Resolved::rebuild(&doc);
+    let (rgba, _, _) = VelloCpuRenderer::new().render_to_rgba(
+        &doc,
+        &res,
+        &viewport(),
+        &ondin_render::ImageStore::new(),
+        doc.first_page(),
+    );
+    (pixel(&rgba, 100, 20, 20), pixel(&rgba, 100, 80, 80))
+}
+
+/// A luminance mask keeps what it masks in proportion to its brightness times
+/// its alpha: opaque white keeps it whole, half-transparent blue (luminance
+/// 0.0721) keeps almost nothing where an alpha mask keeps half, and outside the
+/// mask nothing is left.
+///
+/// flip: `CpuPainter::push_luminance_mask_layer` removed (the trait's alpha
+/// default) → fails at "blue is dark".
+#[test]
+fn a_luminance_mask_reads_brightness_times_alpha() {
+    use ondin_core::MaskMode::{Alpha, Luminance};
+    let (white, outside) = under_mask(Color::from_rgba8(255, 255, 255, 255), Luminance);
+    assert!(
+        white[3] >= 253 && white[0] > 200,
+        "white keeps it: {white:?}"
+    );
+    assert_eq!(outside[3], 0, "outside the mask nothing is left");
+
+    let blue = Color::from_rgba8(0, 0, 255, 128);
+    let (lum, _) = under_mask(blue, Luminance);
+    // 0.0721 × 255 × 128/255 ≈ 9.
+    assert!((lum[3] as i32 - 9).abs() <= 2, "blue is dark: {lum:?}");
+    assert!(
+        lum[0] > 200 && lum[2] < 60,
+        "and its colour stays out: {lum:?}"
+    );
+    let (alpha, _) = under_mask(blue, Alpha);
+    assert!((alpha[3] as i32 - 128).abs() <= 2, "the control: {alpha:?}");
 }
 
 /// **A gradient on railed type is one gradient across the whole node, not one

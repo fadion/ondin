@@ -3040,9 +3040,8 @@ fn a_mask_inside_a_clipping_stroked_frame_nests_and_closes() {
 /// `mask-type: alpha` is the assertion that matters.
 ///
 /// SVG's `<mask>` defaults to **luminance**. Without that property every alpha
-/// mask we write would silently become the one mode this app deliberately does
-/// not have (§15 D288) — and would *look* right whenever the mask happened to be
-/// white, which is exactly the class of bug that ships. The element also has to
+/// mask we write would draw as a luminance one — and would *look* right whenever
+/// the mask happened to be white, which is exactly the class of bug that ships. The element also has to
 /// contain the mask's real drawing rather than its outline, since what masks is
 /// the ink.
 #[test]
@@ -3082,7 +3081,7 @@ fn an_alpha_mask_exports_as_a_mask_element_typed_alpha() {
         out.contains(&format!(
             r#"<mask id="mask-{wire}" maskUnits="userSpaceOnUse" x="0.6" y="4.2" width="76.8" height="57.6" style="mask-type:alpha">"#
         )),
-        "a <mask>, typed alpha — the default is luminance, which we do not have — \
+        "a <mask>, typed alpha — the default is luminance, the other ink mode — \
          carrying its own region, whose default is worse (§15 D458). The ellipse is \
          64×48 at (7, 9); the region is that box inflated a tenth:\n{out}"
     );

@@ -106,7 +106,8 @@ pub struct NodeSnapshot {
     /// Whether this node is a mask for the siblings above it — it draws nothing,
     /// and its outline clips them. Not `clip` above, which is about children.
     pub mask: bool,
-    /// *How* it masks: `"Shape"` or `"Alpha"`, reported for every node.
+    /// *How* it masks: `"Shape"`, `"Alpha"` or `"Luminance"`, reported for every
+    /// node.
     ///
     /// A string, not the enum, so a name survives a mode being added; owned
     /// because the type is `Deserialize` too.

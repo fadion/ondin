@@ -563,6 +563,51 @@ fn an_imported_clip_path_is_empty_outside_the_clip() {
     );
 }
 
+/// An ink mask comes back in its own mode: the writer's `mask-type` is what the
+/// reader decides alpha from luminance by.
+///
+/// flip: the writer's `mask_type` always `"alpha"` → fails at the Luminance arm.
+#[test]
+fn an_ink_mask_round_trips_its_mode() {
+    use ondin_core::MaskMode;
+    for mode in [MaskMode::Alpha, MaskMode::Luminance] {
+        let mut f = common::fixture();
+        let mut ids = IdSource::new(0x1C1C);
+        let mask = ids.mint();
+        f.doc
+            .apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: mask,
+                    parent: f.artboard,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(60.0, 60.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetMask {
+                    id: mask,
+                    mask: true,
+                },
+                Operation::SetMaskMode { id: mask, mode },
+            ]))
+            .unwrap();
+        let res = Resolved::rebuild(&f.doc);
+        let out = ondin_export::svg::svg(&f.doc, &res, f.doc.first_page(), None);
+        let (back, all) = reimport(&out);
+        let modes: Vec<MaskMode> = all
+            .iter()
+            .filter_map(|id| back.get(*id))
+            .filter(|n| n.mask() && n.mask_mode() != MaskMode::Shape)
+            .map(|n| n.mask_mode())
+            .collect();
+        assert_eq!(modes, vec![mode], "{mode:?} came back as {modes:?}:\n{out}");
+    }
+}
+
 /// Text comes back as text with its baseline where the writer put it; a paragraph
 /// comes back as lines, since the writer emits one `<text>` per line and nothing
 /// in the markup says they were one node. The picture closes; the structure does not.

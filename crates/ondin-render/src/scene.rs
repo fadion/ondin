@@ -124,6 +124,14 @@ pub trait ScenePainter {
     /// or the composite erases artwork behind it.
     fn push_mask_layer(&mut self);
 
+    /// [`Self::push_mask_layer`] reading the drawn ink's **luminance** rather than
+    /// its alpha: what is there survives in proportion to the brightness drawn
+    /// here times its alpha (sRGB weights 0.2125, 0.7154, 0.0721, vello's). The
+    /// default masks by alpha; shipping backends override.
+    fn push_luminance_mask_layer(&mut self) {
+        self.push_mask_layer();
+    }
+
     /// Begin a layer composited over the enclosing layer **as an eraser**: what is
     /// there survives in proportion to the alpha *not* drawn here
     /// (`Compose::DestOut`). The caller owes it an enclosing layer holding only
@@ -1202,17 +1210,27 @@ enum RunKind {
     /// [`MaskMode::Shape`]: the mask's outline in the **parent's** space, pushed
     /// as the layer's clip. The mask itself is never drawn.
     Clip(BezPath),
-    /// [`MaskMode::Alpha`]: the mask **node**, drawn at the *end* of the run and
-    /// composited over it with [`ScenePainter::push_mask_layer`]. A node, not
-    /// geometry, because what matters is the ink it lays down (fills, gradients,
-    /// a photograph's alpha), which only drawing yields.
-    Alpha(NodeId),
+    /// [`MaskMode::Alpha`] or [`MaskMode::Luminance`] (the `bool`): the mask
+    /// **node**, drawn at the *end* of the run and composited over it with
+    /// [`ScenePainter::push_mask_layer`] or
+    /// [`ScenePainter::push_luminance_mask_layer`]. A node, not geometry, because
+    /// what matters is the ink it lays down (fills, gradients, a photograph's
+    /// alpha), which only drawing yields.
+    Ink(NodeId, bool),
+}
+
+/// Open the layer that composites a mask's ink, by its luminance or its alpha.
+fn push_ink_mask<P: ScenePainter>(painter: &mut P, luminance: bool) {
+    match luminance {
+        true => painter.push_luminance_mask_layer(),
+        false => painter.push_mask_layer(),
+    }
 }
 
 impl MaskRun {
     /// Push the run's layer if it has one and is not already open; `world` is the
-    /// **parent's**. Opacity is 1.0 in both arms on purpose (an alpha mask's is
-    /// already in its ink). The alpha arm's clip-less layer is an isolation group,
+    /// **parent's**. Opacity is 1.0 in both arms on purpose (an ink mask's is
+    /// already in its ink). The ink arm's clip-less layer is an isolation group,
     /// so the final composite cannot reach the page behind.
     fn reopen<P: ScenePainter>(&mut self, painter: &mut P, world: Affine) {
         if self.open {
@@ -1223,7 +1241,7 @@ impl MaskRun {
                 painter.push_layer(world, Some(clip), ClipRule::NonZero, 1.0);
                 self.open = true;
             }
-            Some(RunKind::Alpha(_)) => {
+            Some(RunKind::Ink(..)) => {
                 painter.push_layer(world, None, ClipRule::NonZero, 1.0);
                 self.open = true;
             }
@@ -1231,12 +1249,12 @@ impl MaskRun {
         }
     }
 
-    /// The mask node to composite over this run before its layer is popped, or
-    /// `None` for a shape run or one that never opened. Split from [`Self::close`]
-    /// because drawing it needs `paint_node`'s context.
-    fn alpha_to_composite(&self) -> Option<NodeId> {
+    /// The mask node to composite over this run before its layer is popped, and
+    /// whether by luminance, or `None` for a shape run or one that never opened.
+    /// Split from [`Self::close`] because drawing it needs `paint_node`'s context.
+    fn ink_to_composite(&self) -> Option<(NodeId, bool)> {
         match self.kind {
-            Some(RunKind::Alpha(id)) if self.open => Some(id),
+            Some(RunKind::Ink(id, luminance)) if self.open => Some((id, luminance)),
             _ => None,
         }
     }
@@ -1252,7 +1270,7 @@ impl MaskRun {
 
 /// Whether `id` is drawn, once a live preview has had its say.
 ///
-/// Both mask modes ask this: hiding an alpha mask must reveal what it masks, not
+/// Every mask mode asks this: hiding an ink mask must reveal what it masks, not
 /// erase it.
 fn visible(ov: &RenderOverrides, doc: &Document, id: NodeId) -> bool {
     ov.get(id)
@@ -1741,10 +1759,10 @@ fn paint_node_pass<P: ScenePainter>(
         }
         mask.reopen(painter, world);
     };
-    // Ends the mask run, first compositing an alpha mask's ink inside its layer.
+    // Ends the mask run, first compositing an ink mask's ink inside its layer.
     let end_run = |painter: &mut P, mask: &mut MaskRun| {
-        if let Some(id) = mask.alpha_to_composite() {
-            painter.push_mask_layer();
+        if let Some((id, luminance)) = mask.ink_to_composite() {
+            push_ink_mask(painter, luminance);
             paint_node(doc, res, ov, id, world, view, base, edges, painter, walk);
             painter.pop_layer();
         }
@@ -1817,9 +1835,10 @@ fn paint_node_pass<P: ScenePainter>(
             mask.kind = match node.mask_mode() {
                 // No geometry means no clip: the run draws unmasked.
                 MaskMode::Shape => mask_geometry(doc, res, ov, *child).map(RunKind::Clip),
-                // An empty alpha mask legitimately erases everything above it; a
+                // An empty ink mask legitimately erases everything above it; a
                 // hidden one masks nothing.
-                MaskMode::Alpha => visible(ov, doc, *child).then_some(RunKind::Alpha(*child)),
+                mode @ (MaskMode::Alpha | MaskMode::Luminance) => visible(ov, doc, *child)
+                    .then_some(RunKind::Ink(*child, mode == MaskMode::Luminance)),
             };
             continue;
         }
@@ -1838,7 +1857,7 @@ fn paint_node_pass<P: ScenePainter>(
     walk.open.borrow_mut().pop();
 
     // A repaint that stopped short of a backdrop's layer leaves out what comes
-    // after it: an alpha mask composited at the end of its run, and the stroke.
+    // after it: an ink mask composited at the end of its run, and the stroke.
     let stopped = walk.stopped();
     if stopped {
         mask.close(painter);
@@ -2435,8 +2454,8 @@ fn paint_ghost<P: ScenePainter>(
     // A ghost masks its own children; nothing leaves a ghost, so no `escape_clip`.
     let mut mask = MaskRun::default();
     let end_run = |painter: &mut P, mask: &mut MaskRun, ghost: &GhostNode| {
-        if mask.alpha_to_composite().is_some() {
-            painter.push_mask_layer();
+        if let Some((_, luminance)) = mask.ink_to_composite() {
+            push_ink_mask(painter, luminance);
             paint_ghost(doc, ov, ghost, false, world, base, edges, painter, None);
             painter.pop_layer();
         }
@@ -2454,12 +2473,12 @@ fn paint_ghost<P: ScenePainter>(
             mask.kind = match child.mask_mode {
                 MaskMode::Shape => ghost_mask_geometry(child).map(RunKind::Clip),
                 // `alpha_ghost` must stay `None` for a hidden mask, or `end_run`
-                // pushes the `DestIn` layer this arm declined.
-                MaskMode::Alpha if child.visible => {
+                // pushes the mask layer this arm declined.
+                mode @ (MaskMode::Alpha | MaskMode::Luminance) if child.visible => {
                     alpha_ghost = Some(child);
-                    Some(RunKind::Alpha(child.id))
+                    Some(RunKind::Ink(child.id, mode == MaskMode::Luminance))
                 }
-                MaskMode::Alpha => None,
+                MaskMode::Alpha | MaskMode::Luminance => None,
             };
             continue;
         }

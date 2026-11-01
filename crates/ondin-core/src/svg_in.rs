@@ -34,8 +34,7 @@
 //! decided non-goal: nothing in the model draws HTML), an `<image>` whose href points
 //! at a file the paste never had, a reference that resolves to nothing, and a CSS
 //! selector needing sibling order, a pseudo-class or an attribute. **[`Import::approximated`]**
-//! is what is there and slightly wrong: a `<mask>` whose luminance and alpha readings
-//! differ, `objectBoundingBox` clip units, a stretched image, a substituted font, a
+//! is what is there and slightly wrong: `objectBoundingBox` clip units, a stretched image, a substituted font, a
 //! `<tspan>` whose own gradient or stroke was dropped, an `feGaussianBlur` with two
 //! unequal deviations, averaged, and a `mix-blend-mode` the model lacks, drawn normal. Nothing is lost silently.
 //!
@@ -990,8 +989,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     ///
     /// A mask node clips the siblings above it, so a wrapper holding `[clip, content]`
     /// is `clip-path`; the transform goes on both children, since `userSpaceOnUse`
-    /// includes the element's own. `<mask>` is [`MaskMode::Alpha`] where SVG's is
-    /// luminance; [`luminance_equivalent`] decides whether the gap is reported.
+    /// includes the element's own. `<mask>` is [`MaskMode::Luminance`], or
+    /// [`MaskMode::Alpha`] under `mask-type: alpha`, as SVG's.
     #[allow(clippy::too_many_arguments)]
     fn masked(
         &mut self,
@@ -1058,6 +1057,16 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             id: clip,
             mask: true,
         });
+        // A `<mask>` reads its brightness unless its `mask-type` says alpha.
+        let mode = match mode {
+            MaskMode::Shape => MaskMode::Shape,
+            MaskMode::Alpha | MaskMode::Luminance => {
+                match property(def, "mask-type", &self.gradients.css).map(str::trim) {
+                    Some("alpha") => MaskMode::Alpha,
+                    _ => MaskMode::Luminance,
+                }
+            }
+        };
         if mode != MaskMode::default() {
             self.push(Operation::SetMaskMode { id: clip, mode });
         }
@@ -1069,10 +1078,6 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         self.in_clip = mode == MaskMode::Shape;
         self.children(def, clip, &seed);
         self.in_clip = was;
-
-        if mode == MaskMode::Alpha && !luminance_equivalent(def, &self.gradients.css) {
-            self.approximate("mask");
-        }
 
         if !hoist {
             self.node_ignoring(el, wrapper, inherited, &ig);
@@ -1138,7 +1143,10 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         }
         // `clip-path` goes first: an element with both is clipped, then masked, one
         // wrapper each. Read as properties, since `style="clip-path:url(#c)"` is legal.
-        for (attr, mode) in [("clip-path", MaskMode::Shape), ("mask", MaskMode::Alpha)] {
+        for (attr, mode) in [
+            ("clip-path", MaskMode::Shape),
+            ("mask", MaskMode::Luminance),
+        ] {
             if ignore.contains(&attr) {
                 continue;
             }
@@ -2675,32 +2683,6 @@ fn flood_color<'a>(p: roxmltree::Node<'a, '_>, css: &Css<'a>, current: Color) ->
         .and_then(parse_len)
         .unwrap_or(1.0);
     Some(base.with_alpha(alpha.clamp(0.0, 1.0) as f32))
-}
-
-/// Whether reading `def`'s ink as alpha gives the same answer as luminance, which is
-/// what SVG's `<mask>` means.
-///
-/// They agree on opaque white (the common mask) and are opposites for black.
-/// Conservative: any paint but an opaque near-white answers `false`.
-fn luminance_equivalent(def: roxmltree::Node<'_, '_>, css: &Css<'_>) -> bool {
-    def.descendants()
-        .filter(roxmltree::Node::is_element)
-        .filter(|el| !matches!(el.tag_name().name(), "mask" | "clipPath" | "defs"))
-        .all(|el| {
-            let prop = |name: &str| property(el, name, css);
-            let Some(v) = prop("fill") else {
-                // No fill is SVG's initial black, where the readings disagree.
-                return false;
-            };
-            match parse_paint_color(v) {
-                Some(c) => {
-                    let [r, g, b, a] = c.components;
-                    // Unlinearised on purpose: this asks "is it white".
-                    a >= 0.999 && 0.2126 * r + 0.7152 * g + 0.0722 * b >= 0.99
-                }
-                None => v.trim() == "none",
-            }
-        })
 }
 
 /// The id inside a `url(#id)`, and `None` for anything else.
@@ -4480,44 +4462,39 @@ mod tests {
         assert!(doc.get(inner[0]).unwrap().mask());
         assert_eq!(
             doc.get(inner[0]).unwrap().mask_mode(),
-            MaskMode::Alpha,
+            MaskMode::Luminance,
             "the second one hoisted into the group rather than joining the first"
         );
     }
 
-    /// A `<mask>` imports as an alpha mask (SVG's is luminance); opaque white agrees exactly, anything else is reported as approximated.
+    /// A `<mask>` imports as the luminance mask it is, unreported, and as an alpha
+    /// mask under `mask-type: alpha`, as an attribute or in `style`.
+    ///
+    /// flip: `masked` ignoring `mask-type` → fails at "alpha by its mask-type".
     #[test]
-    fn a_mask_is_an_alpha_mask_and_says_when_that_is_a_guess() {
-        let white = imported(
-            r##"<svg xmlns="http://www.w3.org/2000/svg">
+    fn a_mask_reads_its_mask_type() {
+        let mode_of = |mask: &str| {
+            let (doc, out) = imported(&format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg">
                   <rect width="100" height="100" mask="url(#m)"/>
-                  <defs><mask id="m"><rect width="40" height="40" fill="white"/></mask></defs>
-                </svg>"##,
-        );
-        let wrapper = white.0.get(white.1.root).unwrap().children()[0];
-        let clip = white.0.get(wrapper).unwrap().children()[0];
-        assert!(white.0.get(clip).unwrap().mask());
-        assert_eq!(white.0.get(clip).unwrap().mask_mode(), MaskMode::Alpha);
-        assert!(
-            white.1.approximated.is_empty(),
-            "opaque white reads the same either way: {:?}",
-            white.1.approximated
-        );
-
-        let grey = imported(
-            r##"<svg xmlns="http://www.w3.org/2000/svg">
-                  <rect width="100" height="100" mask="url(#m)"/>
-                  <defs><mask id="m"><rect width="40" height="40" fill="#808080"/></mask></defs>
-                </svg>"##,
+                  <defs>{mask}<rect width="40" height="40" fill="#808080"/></mask></defs>
+                </svg>"##
+            ));
+            assert!(out.approximated.is_empty(), "{:?}", out.approximated);
+            let wrapper = doc.get(out.root).unwrap().children()[0];
+            let clip = doc.get(wrapper).unwrap().children()[0];
+            assert!(doc.get(clip).unwrap().mask());
+            doc.get(clip).unwrap().mask_mode()
+        };
+        assert_eq!(mode_of(r#"<mask id="m">"#), MaskMode::Luminance);
+        assert_eq!(
+            mode_of(r#"<mask id="m" mask-type="alpha">"#),
+            MaskMode::Alpha,
+            "alpha by its mask-type"
         );
         assert_eq!(
-            grey.1.approximated,
-            vec!["mask"],
-            "a grey mask means something different under luminance"
-        );
-        assert!(
-            grey.1.skipped.is_empty(),
-            "and it is not *skipped* — it is there"
+            mode_of(r#"<mask id="m" style="mask-type:alpha">"#),
+            MaskMode::Alpha
         );
     }
 

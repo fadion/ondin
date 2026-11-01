@@ -1333,14 +1333,18 @@ fn emit_node(
                         child_depth = content_depth + 1;
                     }
                 }
-                // An alpha mask is a `<mask>` holding the layer's own markup, since
-                // what masks is its ink. `mask-type: alpha` is load-bearing (SVG
-                // defaults to luminance), written as CSS for better support. An
-                // ink-less alpha mask erases the run, as on the canvas.
+                // An ink mask is a `<mask>` holding the layer's own markup, since
+                // what masks is its ink. `mask-type` is written either way, as CSS
+                // for better support; for alpha it is load-bearing (SVG defaults
+                // to luminance). An ink-less mask erases the run, as on the canvas.
                 //
                 // The `doc.shown` guard: a hidden mask would leave an empty `<mask>`
                 // and erase the whole run.
-                MaskMode::Alpha if doc.shown(*child) => {
+                mode @ (MaskMode::Alpha | MaskMode::Luminance) if doc.shown(*child) => {
+                    let mask_type = match mode {
+                        MaskMode::Luminance => "luminance",
+                        _ => "alpha",
+                    };
                     // The region is written ([`ink_in`] inflated by a tenth):
                     // `<mask>`'s default is relative to the viewport and erases
                     // everything outside it.
@@ -1361,7 +1365,7 @@ fn emit_node(
                     };
                     let _ = writeln!(
                         out,
-                        r#"{content_pad}<mask id="{mid}" maskUnits="userSpaceOnUse"{region} style="mask-type:alpha">"#,
+                        r#"{content_pad}<mask id="{mid}" maskUnits="userSpaceOnUse"{region} style="mask-type:{mask_type}">"#,
                     );
                     emit_node(
                         out,
@@ -1379,7 +1383,7 @@ fn emit_node(
                     child_depth = content_depth + 1;
                 }
                 // A hidden mask erases nothing: no wrapper, `masked` stays false.
-                MaskMode::Alpha => {}
+                MaskMode::Alpha | MaskMode::Luminance => {}
             }
             continue;
         }

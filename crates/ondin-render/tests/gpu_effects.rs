@@ -600,6 +600,76 @@ fn both_backends_draw_the_same_shadow() {
     }
 }
 
+/// A luminance mask draws the same on both backends: a red square under an opaque
+/// mid-grey luminance mask comes out red at half alpha on each. Vello's GPU
+/// backend masks in a drawn layer, `vello_cpu` through a converted buffer, so this
+/// is the parity the two separate implementations owe.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn both_backends_draw_the_same_luminance_mask() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (mask, square) = (ids.mint(), ids.mint());
+    let mut ops = Vec::new();
+    for (id, color) in [
+        (mask, Color::from_rgba8(128, 128, 128, 255)),
+        (square, Color::from_rgba8(220, 30, 40, 255)),
+    ] {
+        ops.push(Operation::CreateNode {
+            id,
+            parent: root,
+            index: usize::from(id == square),
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 40.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((30.0, 30.0))),
+            name: None,
+        });
+        ops.push(Operation::SetFills {
+            id,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(color).into(),
+                visible: true,
+            }]),
+        });
+    }
+    ops.push(Operation::SetMask {
+        id: mask,
+        mask: true,
+    });
+    ops.push(Operation::SetMaskMode {
+        id: mask,
+        mode: ondin_core::MaskMode::Luminance,
+    });
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let gpu_px = render_gpu(&mut g, &doc, &res);
+    let cpu_px = render_cpu(&doc, &res);
+
+    let (g_mid, c_mid) = (at(&gpu_px, 50, 50), at(&cpu_px, 50, 50));
+    assert!(
+        g_mid.0 > 200 && g_mid.3.abs_diff(128) <= 2,
+        "the GPU keeps red at the grey's luminance: {g_mid:?}"
+    );
+    assert_eq!(at(&gpu_px, 10, 10).3, 0, "outside the mask nothing is left");
+    let worst = gpu_px
+        .iter()
+        .zip(&cpu_px)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        worst <= 2,
+        "the backends disagree by {worst}: gpu {g_mid:?} vs cpu {c_mid:?} at the centre"
+    );
+}
+
 /// A shadow and an opacity together: the pairing that panicked the CPU backend
 /// (§15 D338). The GPU painter counts ordinary layers for the same reason.
 #[test]

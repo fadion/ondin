@@ -310,6 +310,15 @@ impl ScenePainter for GpuScenePainter<'_> {
         );
     }
 
+    /// The clip is unbounded on purpose: vello leaves a pixel outside the clip
+    /// unmasked, where everywhere else no ink means erased.
+    fn push_luminance_mask_layer(&mut self) {
+        self.opened_ordinary();
+        let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);
+        self.scene()
+            .push_luminance_mask_layer(Fill::NonZero, 1.0, at, unbounded.as_ref());
+    }
+
     fn push_erase_layer(&mut self) {
         self.opened_ordinary();
         let (at, unbounded) = layer_shape(self.limit, self.base, Affine::IDENTITY, None);

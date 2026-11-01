@@ -17,8 +17,8 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 #### Masks
 
 - A **shape mask** is `<clipPath id="mask-{id}">` plus a `<g clip-path="url(#mask-...)">` wrapping the run of siblings above it; it emits no element of its own (the markup shape of `scene::MaskRun`). No transform and no `clip-rule` (defaults match the canvas). A mask whose path is `None` wraps nothing.
-- An **alpha mask** is `<mask id maskUnits="userSpaceOnUse" style="mask-type:alpha">` holding the layer's own markup, with `<g mask="url(#...)">` over the run. `mask-type: alpha` is load-bearing (SVG defaults to luminance). It is written as the CSS property, not the attribute, for support.
-- The alpha arm has a `visible()` guard: a hidden mask must not erase the run (an alpha mask laying no ink does erase, which is correct). No emptiness test, matching the canvas.
+- An **alpha or luminance mask** is `<mask id maskUnits="userSpaceOnUse" style="mask-type:alpha|luminance">` holding the layer's own markup, with `<g mask="url(#...)">` over the run. `mask-type` is written for both modes; for alpha it is load-bearing (SVG defaults to luminance). It is written as the CSS property, not the attribute, for support. PDF export inherits both through usvg.
+- The ink arm has a `doc.shown` guard: a hidden mask must not erase the run (an ink mask laying no ink does erase, which is correct). No emptiness test, matching the canvas.
 - The `<mask>` region is written explicitly, as the mask's own `ink_bounds` mapped into the referencing node's local space and inflated a tenth. The default `-10%..120%` is relative to the viewport in the current (possibly transformed) user space and loses artwork under a scaled group. A mask with no ink keeps the absent region. `<clipPath>` takes no region.
 
 #### Effects
@@ -57,6 +57,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
   - A `<tspan>` is read at any depth, content flattened to one piece per text node carrying the innermost element's resolved style.
   - Text whitespace collapses to XML's four characters (`XML_SPACE`: space, tab, CR, LF), not Unicode's set (no-break and ideographic spaces must survive). `text_node`'s two trims share the constant; `lead` re-bases span byte ranges onto the trimmed string.
   - A duplicate id is **first-wins** in all three id maps (`ids`, `clips` (clipPath and mask), `by_id`), as browsers do.
+  - A `<clipPath>` imports as a `Shape` mask and a `<mask>` as a `Luminance` one, SVG's own meaning and exact, or as `Alpha` when its `mask-type` (attribute, style or sheet) says alpha (`svg_in::masked`). A PDF soft mask written as a luminance `<mask>` reads exactly through the same path.
 
 #### Paint emission
 
@@ -73,7 +74,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 - **Image fill** is a `<pattern>` (a paint server, through `Defs`, `image_id` spelled like `gradient_id`; `paint_attr` names it). The tile is the source's intrinsic pixel box; the whole framing is one `patternTransform`, omitted at identity via `matrix_attr`. A pattern repeats where the canvas pads with the edge pixels; that differs only where a pad-extended framing's picture box does not cover the frame — a hand-edited crop outside `0..1` — and is reported as an approximation (Fit's letterbox is clipped, so it does not count). Inside the pattern is a `<use>` of one shared `<image id="pix-<hash>">` per distinct `ImageId`, written once in `<defs>` and carrying `ImageEntry::href` (data URI, or a link's path as written). Per-node `<pattern>` stays (its transform is the node's framing); `opacity` and `filter` sit on the `<use>`; no `width`/`height` on the `<use>`. An **adjusted** picture gets a `<filter>` on the `<use>` (never on the pattern): `feColorMatrix` and `feComponentTransfer` straight from `ImageAdjust::pipeline`, each only where not identity, no `feFuncA`, sRGB interpolation, region pinned to the element's own box (the default 10% bleed would show between tiles). Unadjusted emits no filter. A letterboxing picture forces stacking (the clip belongs to one paint). The framing frame mirrors the walk: an artboard's own box, a text node's layout bounds, otherwise the outline's bounding box.
 - An image fill the table cannot answer for exports as the **missing-image placeholder** (`emit_missing`, off `ondin_core::missing_placeholder`, with `clipPath` `mi-<node>-<slot>`), never as a dangling `url(#...)`, and forces stacking. A stroke with an unanswerable image writes `none` (the canvas draws nothing). A frame's ground is an ordinary fill and goes through the same path.
 - **Two-walk gate**: `ondin-export/tests/two_walks.rs` compares the *ink set* (which nodes each walk puts paint down for, through a unique solid colour per node) between this emitter and the scene walk (§4 invariant 11). The two recorded divergences were of that kind.
-- **Variables** arrive as resolved values: each node's paint is taken through `paint_box::node_paint` (`Document::resolved_paint` in the mode in force there, then gradients mapped onto the box layout draws, as the canvas does, §6.2) in `collect_defs` and both emitters; helpers read only literal brushes; a bound corner arrives as `rx` through the used kind. Paint is presentation attributes; `style` appears only for an alpha mask's `mask-type` and a blend wrapper's `mix-blend-mode` or `isolation`.
+- **Variables** arrive as resolved values: each node's paint is taken through `paint_box::node_paint` (`Document::resolved_paint` in the mode in force there, then gradients mapped onto the box layout draws, as the canvas does, §6.2) in `collect_defs` and both emitters; helpers read only literal brushes; a bound corner arrives as `rx` through the used kind. Paint is presentation attributes; `style` appears only for an ink mask's `mask-type` and a blend wrapper's `mix-blend-mode` or `isolation`.
 
 ### Code export
 
@@ -232,6 +233,7 @@ The export crate: SVG, PDF, PNG, JPEG, WebP, code export (HTML/CSS, React, Vue),
 
 - `local_transform` and `geometry` are **used** values (§5.3 layout), not what the user set; `world_transform`/`world_bounds` come from `Resolved`. A local an agent computes from these and writes back is a used value saved as typed. Whether the snapshot also carries specified values is MCP-work's question.
 - `NodeSnapshot::pivot` is skipped when unset and reports the **resolved local point** (fraction resolved against `local_box`). It is the one derived field: a node with no measurable box falls to `Rect::ZERO`, so its fraction reports `[0, 0]`. Additive, no bump. `pivot` is not rounded.
+- `mask_mode`'s `"Luminance"` joined version 7's strings with no bump, which is why the field is a string.
 - Shape fields absent at their default are additive, no bump: `Geometry::Ellipse::arc` (absent at the default 0 · 360 · 0), `Artboard::corner_radii` (absent when square) and `corner_smoothing` on a frame, rect, polygon or star.
 - `name` is usually distinguishing (numbered generated names, §5.7b) but **not unique**; `id`, `parent` and `children` sit beside it for disambiguation.
 
@@ -243,7 +245,7 @@ A page's ground and the guides are in neither SVG nor PNG, and the guides are no
 
 - Image markup has no gate: the §11 golden holds no image and `svg_in` has no `<pattern>` handling. Check changes in a browser: export, hand-rewrite a copy into the new shape, serve both over HTTP, draw to canvases, difference the pixels.
 - A filter's region and the layer's ink bounds differ for inner shadows; the pad is not slack.
-- `mask-type: alpha` and explicit mask/filter regions are all load-bearing; the markup is well-formed in every wrong version.
+- `mask-type: alpha` (on the reader's side too: without it a `<mask>` imports as luminance) and explicit mask/filter regions are all load-bearing; the markup is well-formed in every wrong version.
 - Report claims from `emit_node` under the visibility guard, never from `collect_defs`.
 - Do not use `id` for layer names (collides with synthesised ids).
 - Do not turn `Defs` into a map (byte order) or its membership into a scan (quadratic).

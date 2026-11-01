@@ -440,6 +440,15 @@ impl Builder<'_> {
                 self.count("Frames used as masks", 1, "", "Left unmasked");
             } else {
                 self.push(Operation::SetMask { id, mask: true });
+                // `VECTOR`, an outline mask, is the default mode.
+                let mode = match str_of(n, "maskType") {
+                    "ALPHA" => Some(crate::node::MaskMode::Alpha),
+                    "LUMINANCE" => Some(crate::node::MaskMode::Luminance),
+                    _ => None,
+                };
+                if let Some(mode) = mode {
+                    self.push(Operation::SetMaskMode { id, mode });
+                }
             }
         }
         if frame {

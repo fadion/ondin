@@ -247,9 +247,30 @@ struct FxFrame {
     /// How many ordinary layers are open inside this one; what tells `pop_layer`
     /// which kind of layer it is closing (see [`CpuPainter::opened_ordinary`]).
     depth: usize,
-    /// Whether the layer itself is composited, or only the shadows it casts
-    /// (`push_shadow_layer`).
-    layer: bool,
+    /// What is done to the buffer before it is painted back.
+    pass: Pass,
+}
+
+/// What an [`FxFrame`]'s buffer goes through on the way out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    /// The effect stack, the layer included.
+    Effects,
+    /// Only the shadows the layer casts (`push_shadow_layer`).
+    Shadows,
+    /// Turned into its luminance as alpha and composited `DestIn`: a luminance
+    /// mask, which `vello_cpu` has no drawn-layer form of.
+    Luminance,
+}
+
+/// Premultiplied RGBA to a luminance mask in place: each pixel becomes black at
+/// alpha `lum(rgb) × a`. On premultiplied values that is the weighted sum itself.
+fn luminance_to_alpha(rgba: &mut [u8]) {
+    for px in rgba.as_chunks_mut::<4>().0 {
+        let lum = 0.2125 * f32::from(px[0]) + 0.7154 * f32::from(px[1]) + 0.0721 * f32::from(px[2]);
+        let a = (lum.round() as u8).min(px[3]);
+        px.copy_from_slice(&[0, 0, 0, a]);
+    }
 }
 
 impl CpuPainter<'_> {
@@ -590,7 +611,27 @@ impl ScenePainter for CpuPainter<'_> {
             scale: (scale.0 / k, scale.1 / k),
             downscale: k,
             depth: 0,
-            layer: true,
+            pass: Pass::Effects,
+        });
+    }
+
+    /// Redirect the mask's drawing into a buffer the size of the enclosing target,
+    /// pixel for pixel, so `base` stands; [`Self::pop_layer`] turns it into alpha.
+    fn push_luminance_mask_layer(&mut self) {
+        let size = match self.fx.last() {
+            Some(f) => f.size,
+            None => (self.root.width(), self.root.height()),
+        };
+        self.fx.push(FxFrame {
+            ctx: RenderContext::new_with(size.0, size.1, export_settings()),
+            origin: (0, 0),
+            size,
+            effects: Vec::new(),
+            saved_base: self.base,
+            scale: (1.0, 1.0),
+            downscale: 1.0,
+            depth: 0,
+            pass: Pass::Luminance,
         });
     }
 
@@ -602,7 +643,7 @@ impl ScenePainter for CpuPainter<'_> {
     ) {
         self.push_effect_layer(transform, bounds, effects);
         if let Some(f) = self.fx.last_mut() {
-            f.layer = false;
+            f.pass = Pass::Shadows;
         }
     }
 
@@ -631,18 +672,33 @@ impl ScenePainter for CpuPainter<'_> {
         frame
             .ctx
             .render_with(&mut pixmap, &mut *self.resources, raster_settings());
-        {
-            // `Pixmap` is already premultiplied sRGB, which the passes want: a
-            // borrow, not a conversion, so the backends cannot round differently.
-            let (w, h) = (pixmap.width() as usize, pixmap.height() as usize);
-            let mut surface = crate::effects::Surface::new(pixmap.data_as_u8_slice_mut(), w, h);
-            match frame.layer {
-                true => crate::effects::run(&mut surface, &frame.effects, frame.scale),
-                false => crate::effects::run_shadows(&mut surface, &frame.effects, frame.scale),
+        // `Pixmap` is already premultiplied sRGB, which the passes want: a borrow,
+        // not a conversion, so the backends cannot round differently.
+        let (w, h) = (pixmap.width() as usize, pixmap.height() as usize);
+        let data = pixmap.data_as_u8_slice_mut();
+        match frame.pass {
+            Pass::Effects => {
+                let mut surface = crate::effects::Surface::new(data, w, h);
+                crate::effects::run(&mut surface, &frame.effects, frame.scale);
             }
+            Pass::Shadows => {
+                let mut surface = crate::effects::Surface::new(data, w, h);
+                crate::effects::run_shadows(&mut surface, &frame.effects, frame.scale);
+            }
+            Pass::Luminance => luminance_to_alpha(data),
         }
 
+        let mask = frame.pass == Pass::Luminance;
         let ctx = self.ctx();
+        if mask {
+            ctx.push_layer(
+                None,
+                Some(BlendMode::new(Mix::Normal, Compose::DestIn)),
+                None,
+                None,
+                None,
+            );
+        }
         // Buffer → device: the origin and the buffer's resolution.
         ctx.set_transform(
             Affine::translate((frame.origin.0 as f64, frame.origin.1 as f64))
@@ -659,6 +715,9 @@ impl ScenePainter for CpuPainter<'_> {
             frame.size.0 as f64,
             frame.size.1 as f64,
         ));
+        if mask {
+            ctx.pop_layer();
+        }
     }
 }
 

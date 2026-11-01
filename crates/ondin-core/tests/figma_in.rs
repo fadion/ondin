@@ -167,6 +167,46 @@ fn nodes_are_placed_in_their_parent() {
     assert_eq!(doc.get(page).unwrap().name(), "Flows");
 }
 
+/// A mask keeps its `maskType`: `VECTOR` (or none) an outline, `ALPHA` and
+/// `LUMINANCE` the ink modes of the same names.
+#[test]
+fn a_mask_keeps_its_mask_type() {
+    use ondin_core::MaskMode;
+    let mask = |id: &str, kind: Value| {
+        let mut extra = json!({ "isMask": true });
+        if !kind.is_null() {
+            extra["maskType"] = kind;
+        }
+        node(id, "RECTANGLE", (0.0, 0.0, 10.0, 10.0), extra)
+    };
+    let groups = [
+        ("1:1", json!(null)),
+        ("1:2", json!("VECTOR")),
+        ("1:3", json!("ALPHA")),
+        ("1:4", json!("LUMINANCE")),
+    ]
+    .into_iter()
+    .map(|(id, kind)| {
+        node(
+            &format!("g{id}"),
+            "GROUP",
+            (0.0, 0.0, 10.0, 10.0),
+            json!({ "children": [mask(id, kind)] }),
+        )
+    })
+    .collect();
+    let r = import(fetched(groups, json!({}), &[]));
+    let mode = |name: &str| {
+        let n = r.doc.get(one(&r.doc, name)).unwrap();
+        assert!(n.mask(), "{name} is a mask");
+        n.mask_mode()
+    };
+    assert_eq!(mode("1:1"), MaskMode::Shape);
+    assert_eq!(mode("1:2"), MaskMode::Shape);
+    assert_eq!(mode("1:3"), MaskMode::Alpha);
+    assert_eq!(mode("1:4"), MaskMode::Luminance);
+}
+
 /// A vector is its fill geometry; an open one is its network's centre line,
 /// stroked and unfilled, its segments chained however Figma lists them; without
 /// a network, its stroke geometry filled with the stroke's paint.

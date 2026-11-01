@@ -391,12 +391,8 @@ impl Node {
 
 /// How a [`Node::mask`] decides what survives of the layers it masks.
 ///
-/// One mode asks *where* the mask is, the other *how much of it* is there.
-///
-/// **Luminance** (brightness is the amount) is absent because the GPU backend
-/// cannot express it: vello's `push_layer` takes no mask and no compose or blend
-/// mode moves colour into alpha, while `vello_cpu` could. Shipping it would make
-/// the canvas and the export disagree, which §3 exists to prevent.
+/// `Shape` asks *where* the mask is; `Alpha` and `Luminance` ask *how much of it*
+/// is there, read from its ink's transparency or its brightness.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MaskMode {
     /// The mask's **outline** clips: a hard edge, and everything inside it
@@ -409,6 +405,10 @@ pub enum MaskMode {
     /// The mask's own **alpha** is the amount that survives, per pixel; its
     /// colour is not read.
     Alpha,
+    /// The mask's **brightness** is the amount that survives, per pixel: white
+    /// keeps, black erases, and its alpha scales both. SVG's `<mask>`, weighted
+    /// on sRGB values as browsers do.
+    Luminance,
 }
 
 /// How a path's interior is decided where it crosses itself or another subpath
@@ -465,6 +465,7 @@ impl MaskMode {
         match self {
             MaskMode::Shape => "Shape",
             MaskMode::Alpha => "Alpha",
+            MaskMode::Luminance => "Luminance",
         }
     }
 
@@ -473,10 +474,13 @@ impl MaskMode {
         match self {
             MaskMode::Shape => "The mask's outline clips, with a hard edge",
             MaskMode::Alpha => "The mask's own transparency fades what it masks",
+            MaskMode::Luminance => {
+                "The mask's brightness fades what it masks: white keeps, black hides"
+            }
         }
     }
 
-    pub const ALL: [MaskMode; 2] = [MaskMode::Shape, MaskMode::Alpha];
+    pub const ALL: [MaskMode; 3] = [MaskMode::Shape, MaskMode::Alpha, MaskMode::Luminance];
 }
 
 /// How a layer mixes with what is drawn beneath it ([`Node::blend`]): the

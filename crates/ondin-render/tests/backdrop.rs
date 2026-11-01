@@ -382,3 +382,47 @@ fn a_hidden_background_blur_draws_nothing() {
     sharp.stripes(root);
     assert_eq!(got, sharp.render());
 }
+
+/// A background blur on an alpha mask leaves the mask masking: its backdrop is
+/// never poured into the mask layer.
+///
+/// flip: `paint_node_pass` drawing a mask's backdrop → fails at "masked at half".
+#[test]
+fn a_blur_on_a_mask_leaves_it_masking() {
+    let render = |blurred: bool| {
+        let mut p = Page::new();
+        let root = p.root;
+        p.rect(root, (0.0, 0.0, 100.0, 100.0), Some(Color::WHITE));
+        let g = p.group(root);
+        let mask = p.rect(
+            g,
+            (20.0, 20.0, 60.0, 60.0),
+            Some(Color::from_rgba8(0, 0, 0, 128)),
+        );
+        p.apply(vec![
+            Operation::SetMask {
+                id: mask,
+                mask: true,
+            },
+            Operation::SetMaskMode {
+                id: mask,
+                mode: ondin_core::MaskMode::Alpha,
+            },
+        ]);
+        p.rect(
+            g,
+            (0.0, 0.0, 100.0, 100.0),
+            Some(Color::from_rgba8(255, 0, 0, 255)),
+        );
+        if blurred {
+            p.effects(mask, vec![BLUR]);
+        }
+        at(&p.render(), 50, 50)
+    };
+    let plain = render(false);
+    assert!(
+        plain[1].abs_diff(127) <= 2,
+        "fixture: masked at half without a blur, {plain:?}"
+    );
+    assert_eq!(render(true), plain, "masked at half");
+}

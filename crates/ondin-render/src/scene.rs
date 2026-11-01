@@ -616,7 +616,7 @@ pub fn spread_through_backdrops(
     let glass: Vec<(Rect, f64)> = ondin_core::build::subtree_nodes(doc, &[page])
         .into_iter()
         .filter_map(|id| {
-            let node = doc.get(id)?;
+            let node = doc.get(id).filter(|n| !n.mask())?;
             let stack = overrides
                 .get(id)
                 .and_then(|o| o.effects.as_deref())
@@ -1716,9 +1716,11 @@ fn paint_node_pass<P: ScenePainter>(
     };
     let view: &[Rect] = &child_view;
     // Behind everything the layer draws, its own shadows and blend included: what
-    // a background blur shows is what was there before the layer.
+    // a background blur shows is what was there before the layer. A mask's ink
+    // is drawn into its mask layer, where a backdrop would become mask.
     if pass.is_none()
         && !bare
+        && !node.mask()
         && walk.backdrop.is_none()
         && painter.paints_backdrops()
         && opacity > 0.0

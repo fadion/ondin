@@ -22779,9 +22779,11 @@ mod redraw_tests {
     }
 
     /// A preview or the chrome ghost changing is a preview change, whose damage
-    /// the canvas bounds; re-shaped text, a commit or a camera move is not.
+    /// the canvas bounds; re-shaped text, a commit or a camera move is not, and
+    /// re-shaped text is no edit or pan either.
     ///
-    /// flip: `DrawnKey::previews_to` ignoring `shaped` → fails at "re-shaped text".
+    /// flip: `DrawnKey::previews_to` ignoring `shaped` → fails at "re-shaped text";
+    /// `edits_to` ignoring it → fails at "re-shaped text is no edit".
     #[test]
     fn only_a_preview_changing_is_patched() {
         let camera = Camera::default();
@@ -22818,6 +22820,8 @@ mod redraw_tests {
         shaped.drawn = 2;
         shaped.shaped = 2;
         assert!(!shown.previews_to(&shaped), "re-shaped text");
+        assert!(!shown.edits_to(&shaped), "re-shaped text is no edit");
+        assert_eq!(shown.pan_to(&shaped), None, "re-shaped text is no pan");
         let mut commit = key(camera);
         commit.revision = 2;
         assert!(!shown.previews_to(&commit), "a commit");
@@ -22919,18 +22923,20 @@ mod redraw_tests {
         );
     }
 
-    /// After each commit, undo and redo — a move, a recolour, a preview committed,
-    /// a delete and its undo and redo, a reparent across frames, a wrap into a new
-    /// group, a shadow, an insert, deleting a trimmed text and a mitred star, a
-    /// page's mode — the canvas patches rather than drawing whole, and every pixel
-    /// the edit changed lies inside the patch.
+    /// After each commit, undo, redo and preview of every kind — moves, recolours,
+    /// deletes, reparents, a wrap, effects, an insert, ink past its box, a page's
+    /// mode, a fill-less glass, a reorder, opacity, visibility, a boolean operand,
+    /// a clip escape, a ghost — the canvas patches rather than drawing whole, and
+    /// every pixel the edit changed lies inside the patch.
     ///
     /// flip: `edit_damage` leaving out the ink `InkLog` recorded → fails at "a
     /// delete"; leaving out the preview's ink → fails at "its commit, elsewhere";
     /// `InkLog::record` measuring only the tops and the deleted → fails at "a wrap
     /// into a new group"; `world_ink_of_parts` returning `world_bounds_of_parts` →
     /// fails at "a delete of the trimmed text"; `SetMode` dirtying only its node →
-    /// fails at "a page's mode".
+    /// fails at "a page's mode"; `touched` without the ghosts' parents → fails at
+    /// "a ghost in a group previewed". Dropping its `order` chain does not bite:
+    /// `absorb` gives a reordered node an entry of its own.
     #[test]
     fn an_edit_redraws_only_where_it_changed_the_page() {
         let (mut session, [a, child, b, c]) = edit_fixture();
@@ -22946,11 +22952,67 @@ mod redraw_tests {
             (minted.mint(), minted.mint(), minted.mint(), minted.mint());
         let (light, dark, tint) = (minted.mint_mode(), minted.mint_mode(), minted.mint_var());
         let (bar, glass) = (minted.mint(), minted.mint());
+        let clipper = minted.mint();
+        let board = |w, h| NodeKind::Artboard {
+            size: Size::new(w, h),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        let (stack, under, over, union, left, right, inside, ghost) = (
+            minted.mint(),
+            minted.mint(),
+            minted.mint(),
+            minted.mint(),
+            minted.mint(),
+            minted.mint(),
+            minted.mint(),
+            minted.mint(),
+        );
         let square = |w, h| NodeKind::Rect {
             size: Size::new(w, h),
             corner_radii: Default::default(),
             corner_smoothing: 0.0,
         };
+        let solid = |id, rgb: [u8; 3]| Operation::SetFills {
+            id,
+            fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::Brush::Solid(Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255))
+                    .into(),
+                visible: true,
+            }]),
+        };
+        let made = |id, parent, index, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        // For the previews: a group of two overlapping rects, a union of two, and
+        // a rect in a small clipping frame.
+        let previewed = vec![
+            made(stack, session.page, 0, NodeKind::Group, (232.0, 30.0)),
+            made(under, stack, 0, square(30.0, 30.0), (0.0, 0.0)),
+            solid(under, [20, 120, 200]),
+            made(over, stack, 1, square(30.0, 30.0), (15.0, 15.0)),
+            solid(over, [200, 120, 20]),
+            made(
+                union,
+                session.page,
+                0,
+                NodeKind::Boolean {
+                    op: ondin_core::BoolOp::Union,
+                },
+                (235.0, 100.0),
+            ),
+            made(left, union, 0, square(30.0, 30.0), (0.0, 0.0)),
+            made(right, union, 1, square(30.0, 30.0), (20.0, 20.0)),
+            solid(union, [120, 20, 160]),
+            made(clipper, session.page, 0, board(50.0, 50.0), (260.0, 170.0)),
+            made(inside, clipper, 0, square(30.0, 30.0), (10.0, 10.0)),
+            solid(inside, [20, 160, 120]),
+        ];
         // Ink that reaches past its box, and a fill-less glass over a bar, placed
         // before the first draw: new text is shaped, which draws whole.
         let placed = vec![
@@ -23033,6 +23095,9 @@ mod redraw_tests {
         session
             .try_commit(Transaction(placed))
             .expect("the fixture");
+        session
+            .try_commit(Transaction(previewed))
+            .expect("the previews' fixture");
         draw(&mut canvas, &session, &camera, px);
         let moved = |id, x, y| Operation::SetTransform {
             id,
@@ -23109,7 +23174,7 @@ mod redraw_tests {
                 "a shadow",
                 commit(vec![Operation::SetEffects {
                     id: a,
-                    effects: shadow,
+                    effects: shadow.clone(),
                 }]),
             ),
             (
@@ -23215,6 +23280,65 @@ mod redraw_tests {
                 "the glass's commit, elsewhere",
                 commit(vec![moved(glass, 400.0, 275.0)]),
             ),
+            (
+                "a reorder previewed inside a group",
+                Box::new(move |s| {
+                    s.set_preview(&Transaction(vec![Operation::Reorder {
+                        id: under,
+                        index: 1,
+                    }]))
+                }),
+            ),
+            (
+                "an opacity previewed",
+                Box::new(move |s| {
+                    s.set_preview(&Transaction(vec![Operation::SetOpacity {
+                        id: over,
+                        opacity: 0.3,
+                    }]))
+                }),
+            ),
+            (
+                "a visibility previewed",
+                Box::new(move |s| {
+                    s.set_preview(&Transaction(vec![Operation::SetVisible {
+                        id: over,
+                        visible: false,
+                    }]))
+                }),
+            ),
+            (
+                "effects previewed",
+                Box::new({
+                    let shadow = shadow.clone();
+                    move |s| {
+                        s.set_preview(&Transaction(vec![Operation::SetEffects {
+                            id: under,
+                            effects: shadow.clone(),
+                        }]))
+                    }
+                }),
+            ),
+            (
+                "a boolean's operand previewed",
+                Box::new(move |s| s.set_preview(&Transaction(vec![moved(right, 35.0, 5.0)]))),
+            ),
+            (
+                "a drag out of a frame's clip previewed",
+                Box::new(move |s| {
+                    s.set_preview_escaping(&Transaction(vec![moved(inside, 35.0, 10.0)]), &[inside])
+                }),
+            ),
+            (
+                "a ghost in a group previewed",
+                Box::new(move |s| {
+                    s.set_preview(&Transaction(vec![
+                        made(ghost, stack, 2, square(20.0, 20.0), (30.0, 0.0)),
+                        solid(ghost, [0, 0, 0]),
+                    ]))
+                }),
+            ),
+            ("the previews ended", Box::new(|s| s.clear_preview())),
         ];
         for (what, edit) in edits {
             let before = page_pixels(&session, &vp);

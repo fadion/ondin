@@ -150,6 +150,7 @@ fn read_one(file: Incoming, ids: &mut IdSource, parent: NodeId) -> Read {
         Read::Refused(match why {
             SvgImport::TooDeep => format!("{name} is nested too deeply to read"),
             SvgImport::Locked => format!("{name} is password-protected"),
+            SvgImport::TooLarge => format!("{name} draws shadings or pictures too large to read"),
             SvgImport::Placed(_) | SvgImport::Unreadable => {
                 format!("{name} could not be read as {kind}")
             }

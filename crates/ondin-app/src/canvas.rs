@@ -1267,6 +1267,9 @@ pub(crate) enum SvgImport {
     TooDeep,
     /// A PDF the empty password does not open.
     Locked,
+    /// A PDF whose every page would rasterise or decode past the budget
+    /// (`ondin_export::pdf_in::MAX_SHADING_PIXELS`).
+    TooLarge,
     /// Not SVG, no shapes in it, or the build did not apply.
     Unreadable,
 }
@@ -1370,6 +1373,7 @@ pub(crate) fn read_pdf(
         Ok(pdf) => pdf,
         Err(PdfInError::Encrypted) => return Err(SvgImport::Locked),
         Err(PdfInError::Unreadable) => return Err(SvgImport::Unreadable),
+        Err(PdfInError::TooLarge) => return Err(SvgImport::TooLarge),
     };
     let pages = pdf.pages;
     let mut read = PdfRead {
@@ -1385,7 +1389,11 @@ pub(crate) fn read_pdf(
         ),
         left_out: pdf.left_out,
         shapes: 0,
-        skipped: Vec::new(),
+        skipped: match pdf.too_large {
+            0 => Vec::new(),
+            1 => vec!["1 page too large to draw".to_owned()],
+            n => vec![format!("{n} pages too large to draw")],
+        },
         approximated: Vec::new(),
     };
     let mut x = 0.0;

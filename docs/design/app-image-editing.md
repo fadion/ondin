@@ -173,7 +173,9 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   edge — named *brochure*, or *brochure — page 2* of several, in a row `PDF_PAGE_GAP` apart on the
   page, centred where a paste would land: one step, the frames selected, *Imported brochure.pdf —
   340 layers on 12 pages*. Past `pdf_in::MAX_PAGES` the rest
-  are left out and the report says so. A password-protected PDF is
+  are left out and the report says so; a page that would rasterise or decode past
+  `pdf_in`'s pixel budget is left out and reported (*skipped 1 page too large to draw*), and a PDF
+  with no page left is refused by name. A password-protected PDF is
   refused by name. An Illustrator `.ai` saved with PDF compatibility is a PDF and comes in as one
   (*Place image* lists the extension, the drop pill counts it); one without is refused with the
   re-save that fixes it (`import::is_illustrator`).

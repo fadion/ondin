@@ -37,7 +37,8 @@ pub(crate) fn forget() {
 
 #[cfg(test)]
 mod tests {
-    /// The store keeps, answers and forgets a token, under an account of its own.
+    /// The store keeps, answers and forgets a token, under an account of its own,
+    /// and an empty one reads as none rather than as a slice of nothing.
     /// Ignored: it writes to the real keychain. Run it by hand with `--ignored`.
     #[test]
     #[ignore]
@@ -47,6 +48,10 @@ mod tests {
         assert_eq!(super::os::read(account).as_deref(), Some("figd_test"));
         super::os::forget(account);
         assert_eq!(super::os::read(account), None);
+        if super::os::store(account, "").is_ok() {
+            assert_eq!(super::os::read(account).filter(|t| !t.is_empty()), None);
+            super::os::forget(account);
+        }
     }
 }
 
@@ -76,11 +81,17 @@ mod os {
             return None;
         }
         // SAFETY: a successful read hands back a valid credential whose blob is
-        // `CredentialBlobSize` bytes long; it is copied before being freed.
+        // `CredentialBlobSize` bytes long; it is copied before being freed. An
+        // empty credential may carry a null blob, which no slice may be made of.
         unsafe {
             let c = &*cred;
-            let blob = std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize);
-            let token = String::from_utf8(blob.to_vec()).ok();
+            let token = if c.CredentialBlob.is_null() || c.CredentialBlobSize == 0 {
+                None
+            } else {
+                let blob =
+                    std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize);
+                String::from_utf8(blob.to_vec()).ok()
+            };
             CredFree(cred.cast());
             token
         }

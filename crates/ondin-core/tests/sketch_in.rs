@@ -910,7 +910,8 @@ fn a_zip_that_is_not_a_sketch_file_is_refused() {
 }
 
 /// Two shared styles sharing a name, and two swatches, are numbered apart
-/// rather than failing the build, and the renaming is reported.
+/// rather than failing the build, and each renaming is reported as about the
+/// styles or the variables, so an import leaving those out drops its row.
 /// flip: `Names::unique` answering the name as given → the read fails.
 #[test]
 fn a_name_used_twice_is_numbered_apart() {
@@ -934,8 +935,19 @@ fn a_name_used_twice_is_numbered_apart() {
     let mut vars: Vec<&str> = r.doc.variables().iter().map(|v| v.name.as_str()).collect();
     vars.sort();
     assert_eq!(vars, ["Red", "Red 2"]);
-    let rows: Vec<(&str, String)> = r.report.iter().map(|u| (u.what, u.count.clone())).collect();
-    assert_eq!(rows, [("Names used twice", "2".to_owned())]);
+    let rows: Vec<(&str, String, ondin_core::sketch_in::Part)> = r
+        .report
+        .iter()
+        .map(|u| (u.what, u.count.clone(), u.part))
+        .collect();
+    use ondin_core::sketch_in::Part;
+    assert_eq!(
+        rows,
+        [
+            ("Colour names used twice", "1".to_owned(), Part::Variables),
+            ("Style names used twice", "1".to_owned(), Part::Styles),
+        ]
+    );
 }
 
 /// A layer left out (a hotspot) takes no index, so the siblings after it still

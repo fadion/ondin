@@ -38,13 +38,19 @@ pub enum Part {
     Layers,
     Components,
     Pictures,
+    Styles,
+    Variables,
 }
 
 impl Part {
     /// The part each row is about, by its words.
     fn of(what: &str) -> Self {
         let lower = what.to_ascii_lowercase();
-        if lower.starts_with("picture") {
+        if what == STYLE_NAMES_TWICE {
+            Self::Styles
+        } else if what == COLOUR_NAMES_TWICE || what == "Gradient and picture colours" {
+            Self::Variables
+        } else if lower.starts_with("picture") {
             Self::Pictures
         } else if lower.contains("symbol")
             || lower.contains("component")
@@ -94,6 +100,11 @@ impl Tally {
     }
 }
 
+/// The report rows for a repeated style name and a repeated colour-variable
+/// name, apart so an import that leaves styles or variables out drops its own.
+const STYLE_NAMES_TWICE: &str = "Style names used twice";
+const COLOUR_NAMES_TWICE: &str = "Colour names used twice";
+
 /// The names given out so far, per kind of name. Other tools let two styles or
 /// two colours share a name, which a document refuses, so a repeat is numbered
 /// apart: the second "Shadow" becomes "Shadow 2".
@@ -107,7 +118,8 @@ impl<K> Default for Names<K> {
 
 impl<K: Copy + Eq + std::hash::Hash> Names<K> {
     /// `name`, or the first free numbering of it, among `kind`'s; `blank` stands
-    /// in for an empty one. Counts each renaming on `tally`.
+    /// in for an empty one, "Colour" for a colour variable's and "Style" for a
+    /// style's. Counts each renaming on `tally`, in the row that `blank` names.
     pub(crate) fn unique(&mut self, kind: K, name: &str, blank: &str, tally: &mut Tally) -> String {
         let stem = if name.trim().is_empty() { blank } else { name };
         let mut out = stem.to_owned();
@@ -117,7 +129,12 @@ impl<K: Copy + Eq + std::hash::Hash> Names<K> {
             out = format!("{stem} {n}");
         }
         if n > 1 {
-            tally.count("Names used twice", 1, "", "Numbered apart");
+            let row = if blank == "Colour" {
+                COLOUR_NAMES_TWICE
+            } else {
+                STYLE_NAMES_TWICE
+            };
+            tally.count(row, 1, "", "Numbered apart");
         }
         out
     }

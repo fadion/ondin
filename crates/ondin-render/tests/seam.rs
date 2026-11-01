@@ -206,14 +206,19 @@ fn a_sub_pixel_shape_survives_snapping() {
 /// `y = SPLIT - 0.5`, as a path, and, when `covered`, a white rect over it from
 /// the frame's top down to `y = SPLIT`, which ends exactly where the line does.
 fn line_under_a_box(covered: bool) -> (Document, Resolved) {
+    line_by_a_box(SPLIT - 0.5, covered)
+}
+
+/// `line_under_a_box` with the line centred on `y = centre` instead.
+fn line_by_a_box(centre: f64, covered: bool) -> (Document, Resolved) {
     use ondin_core::kurbo::BezPath;
     let mut ids = IdSource::new(21);
     let root = ids.mint();
     let mut d = Document::new(root);
     let (ab, line, cover) = (ids.mint(), ids.mint(), ids.mint());
     let mut path = BezPath::new();
-    path.move_to((0.0, SPLIT - 0.5));
-    path.line_to((800.0, SPLIT - 0.5));
+    path.move_to((0.0, centre));
+    path.line_to((800.0, centre));
     let white = || {
         keyed_by_position([Fill {
             brush: Brush::Solid(Color::WHITE).into(),
@@ -367,6 +372,54 @@ fn a_sub_pixel_stroke_keeps_its_ink() {
     for &(zoom, phase) in &[(0.5, 0.3), (0.5, 0.0), (0.3, 0.6)] {
         // Rows about the line only: at low zoom the window reaches past the
         // frame, where nothing is drawn and the red channel reads 0.
+        let col = column_at(&d, &res, zoom, phase);
+        let ink: f64 = col[90..110]
+            .iter()
+            .map(|&v| f64::from(255 - v) / 255.0)
+            .sum();
+        assert!(
+            (ink - zoom).abs() < 0.03,
+            "zoom {zoom} phase {phase}: ink {ink}, the line's own is {zoom}"
+        );
+    }
+}
+
+/// A line under a pixel wide, ending where a box over it ends, stays covered when
+/// both its edges round to the box's edge: it is laid on the box's side of it.
+/// Every phase here rounds the line's two edges together.
+///
+/// flip: `snapped_stroke` laying such a line where it lies → fails at zoom 0.5,
+/// phase 0.3.
+#[test]
+fn a_sub_pixel_stroke_ending_where_a_box_over_it_ends_stays_covered() {
+    let (d, res) = line_under_a_box(true);
+    for &(zoom, phase) in &[(0.5, 0.3), (0.37, 0.2), (0.6, 0.4), (0.25, 0.1)] {
+        let col = column_at(&d, &res, zoom, phase);
+        if let Some((y, &v)) = col[90..110].iter().enumerate().find(|&(_, &v)| v != 255) {
+            panic!(
+                "zoom {zoom} phase {phase}: row {} reads {v} under a white box",
+                y + 90
+            );
+        }
+    }
+    let (bare, bare_res) = line_under_a_box(false);
+    assert!(
+        column_at(&bare, &bare_res, 0.5, 0.3)[90..110]
+            .iter()
+            .any(|&v| v < 255),
+        "the line is drawn when nothing covers it"
+    );
+}
+
+/// A line under a pixel wide starting where a box above it ends keeps its ink
+/// when both its edges round to the box's edge: it is laid on its own side.
+///
+/// flip: `snapped_stroke` laying such a line where it lies → fails at zoom 0.3,
+/// phase 0.6, with the ink under the box.
+#[test]
+fn a_sub_pixel_stroke_starting_where_a_box_ends_keeps_its_ink() {
+    let (d, res) = line_by_a_box(SPLIT + 0.5, true);
+    for &(zoom, phase) in &[(0.3, 0.6), (0.5, 0.55)] {
         let col = column_at(&d, &res, zoom, phase);
         let ink: f64 = col[90..110]
             .iter()

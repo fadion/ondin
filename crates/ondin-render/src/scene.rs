@@ -234,6 +234,7 @@ fn walk<P: ScenePainter>(
     painter: &mut P,
 ) {
     let base = device_base(vp);
+    let edges = Edges::of(doc, res, overrides, origins, cull, base);
     if let Some(ink) = overrides.outline() {
         let mut outline = OutlinePainter {
             inner: painter,
@@ -241,12 +242,22 @@ fn walk<P: ScenePainter>(
             base,
             erasing: Vec::new(),
         };
-        walk_origins(doc, res, overrides, origins, cull, base, &mut outline);
+        walk_origins(
+            doc,
+            res,
+            overrides,
+            origins,
+            cull,
+            base,
+            &edges,
+            &mut outline,
+        );
     } else {
-        walk_origins(doc, res, overrides, origins, cull, base, painter);
+        walk_origins(doc, res, overrides, origins, cull, base, &edges, painter);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_origins<P: ScenePainter>(
     doc: &Document,
     res: &Resolved,
@@ -254,6 +265,7 @@ fn walk_origins<P: ScenePainter>(
     origins: &[NodeId],
     cull: &[Rect],
     base: Affine,
+    edges: &Edges<'_>,
     painter: &mut P,
 ) {
     for id in origins {
@@ -262,7 +274,7 @@ fn walk_origins<P: ScenePainter>(
             .and_then(|n| n.parent())
             .and_then(|p| res.world_transform(p))
             .unwrap_or(Affine::IDENTITY);
-        paint_node(doc, res, overrides, *id, outer, cull, base, painter);
+        paint_node(doc, res, overrides, *id, outer, cull, base, edges, painter);
     }
 }
 
@@ -536,9 +548,10 @@ fn ink_of(
         (world, view, base): (Affine, &[Rect], Affine),
         painter: &mut P,
     ) {
+        let edges = Edges::none();
         match item {
-            Top::Node(id) => paint_node(doc, res, ov, id, world, view, base, painter),
-            Top::Ghost(g) => paint_ghost(doc, ov, g, true, world, base, painter, None),
+            Top::Node(id) => paint_node(doc, res, ov, id, world, view, base, &edges, painter),
+            Top::Ghost(g) => paint_ghost(doc, ov, g, true, world, base, &edges, painter, None),
         }
     }
     let base = device_base(vp);
@@ -659,9 +672,15 @@ fn strokes_snap(kind: &NodeKind, ov: &RenderOverrides, id: NodeId) -> bool {
 /// leaving a sliver of stroke under a box that covered it.
 ///
 /// A stroke under a pixel wide keeps its width, centred in the one row its edges
-/// round into, so a zoomed-out grid of hairlines stays as light; when both edges
-/// round to one pixel boundary it stays where it lies.
-fn snapped_stroke(path: &BezPath, device: Affine, s: &Stroke) -> Option<BezPath> {
+/// round into, so a zoomed-out grid of hairlines stays as light. When both edges
+/// round to one pixel boundary, it is laid against that boundary on the side the
+/// box edges rounding there put it ([`Edges`]), or where it lies when none does.
+fn snapped_stroke(
+    path: &BezPath,
+    device: Affine,
+    s: &Stroke,
+    edges: &Edges<'_>,
+) -> Option<BezPath> {
     use kurbo::{Cap, Join};
     if !SNAP_BOXES_TO_DEVICE_PIXELS
         || s.width.is_nan()
@@ -720,14 +739,49 @@ fn snapped_stroke(path: &BezPath, device: Affine, s: &Stroke) -> Option<BezPath>
     let laid = s.width * scale;
     let half = laid / 2.0;
     let cap = if s.cap == Cap::Square { half } else { 0.0 };
+    // Which side of the pixel boundary `at` a segment across `c`, running over
+    // `along`, belongs on: before it (`Some(true)`) when every box edge rounding
+    // to `at` alongside it has the line before it, after it when every one has it
+    // after, `None` when none decides or two disagree.
+    let side = |c: f64, along: (f64, f64), horizontal: bool, at: f64| {
+        let mut vote = None;
+        for r in edges.boxes() {
+            let (span, sides) = if horizontal {
+                ((r.x0, r.x1), [r.y0, r.y1])
+            } else {
+                ((r.y0, r.y1), [r.x0, r.x1])
+            };
+            if span.1 <= along.0 || span.0 >= along.1 {
+                continue;
+            }
+            for e in sides.into_iter().filter(|e| e.round() == at) {
+                let before = if c + half <= e + SAME {
+                    true
+                } else if c - half >= e - SAME {
+                    false
+                } else {
+                    continue;
+                };
+                if vote.is_some_and(|v| v != before) {
+                    return None;
+                }
+                vote = Some(before);
+            }
+        }
+        vote
+    };
     // Across a segment: its two edges rounded. Under a pixel wide, its own width
     // centred in the row they round to, so the row carries exactly its ink; where
-    // they round together, where it lies, as no rounding can tell which side a
-    // box over it ends on.
-    let across = |c: f64| {
+    // they round together, against that boundary on the side [`side`] gives, as a
+    // box edge there rounds to it too.
+    let across = |c: f64, along: (f64, f64), horizontal: bool| {
         let (near, far) = ((c - half).round(), (c + half).round());
         if far <= near {
-            (c - half, c + half)
+            match side(c, along, horizontal, near) {
+                Some(true) => (near - laid, near),
+                Some(false) => (near, near + laid),
+                None => (c - half, c + half),
+            }
         } else if laid < 1.0 {
             let mid = (near + far) / 2.0;
             (mid - half, mid + half)
@@ -761,17 +815,126 @@ fn snapped_stroke(path: &BezPath, device: Affine, s: &Stroke) -> Option<BezPath>
             };
             let r = if (p.y - q.y).abs() < SAME {
                 let (x0, x1) = span(p.x, q.x);
-                let (y0, y1) = across((p.y + q.y) / 2.0);
+                let (y0, y1) = across((p.y + q.y) / 2.0, (p.x.min(q.x), p.x.max(q.x)), true);
                 Rect::new(x0, y0, x1, y1)
             } else {
                 let (y0, y1) = span(p.y, q.y);
-                let (x0, x1) = across((p.x + q.x) / 2.0);
+                let (x0, x1) = across((p.x + q.x) / 2.0, (p.y.min(q.y), p.y.max(q.y)), false);
                 Rect::new(x0, y0, x1, y1)
             };
             ink.extend(r.path_elements(TOLERANCE));
         }
     }
     Some(device.inverse() * ink)
+}
+
+/// The axis-aligned boxes a walk draws, on the device as laid before rounding,
+/// for [`snapped_stroke`] to keep a hairline on its side of a box edge both of its
+/// edges round onto. Gathered from `Resolved` on first use, so a frame drawing no
+/// such line pays nothing. A box a gesture moves or reshapes is left out: its
+/// cached geometry is stale.
+pub(crate) struct Edges<'a> {
+    from: Option<EdgeSource<'a>>,
+    boxes: std::cell::OnceCell<Vec<Rect>>,
+}
+
+struct EdgeSource<'a> {
+    doc: &'a Document,
+    res: &'a Resolved,
+    ov: &'a RenderOverrides,
+    origins: &'a [NodeId],
+    cull: &'a [Rect],
+    base: Affine,
+}
+
+impl<'a> Edges<'a> {
+    fn of(
+        doc: &'a Document,
+        res: &'a Resolved,
+        ov: &'a RenderOverrides,
+        origins: &'a [NodeId],
+        cull: &'a [Rect],
+        base: Affine,
+    ) -> Self {
+        Self {
+            from: Some(EdgeSource {
+                doc,
+                res,
+                ov,
+                origins,
+                cull,
+                base,
+            }),
+            boxes: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// No boxes, for a walk measuring ink, where a hairline's place within its
+    /// pixel is moot.
+    fn none() -> Self {
+        Self {
+            from: None,
+            boxes: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn boxes(&self) -> &[Rect] {
+        self.boxes.get_or_init(|| {
+            let mut out = Vec::new();
+            if let Some(s) = &self.from {
+                for id in s.origins {
+                    gather_boxes(s, *id, &mut out);
+                }
+            }
+            out
+        })
+    }
+}
+
+/// Push the device box of every snapping box under `id` that the walk would draw
+/// inside `s.cull`, culled as the walk culls. A box under a device pixel in either
+/// axis is skipped: the collapse floor moves its far edge off the rounding rule.
+fn gather_boxes(s: &EdgeSource<'_>, id: NodeId, out: &mut Vec<Rect>) {
+    let Some(node) = s.doc.get(id) else { return };
+    if matches!(node.kind(), NodeKind::Slice { .. })
+        || node.mask()
+        || !s.doc.shown_node(node)
+        || s.ov.moved(id)
+    {
+        return;
+    }
+    let covers_subtree = node.children().is_empty()
+        || node.clip()
+        || matches!(
+            node.kind(),
+            NodeKind::Boolean { .. } | NodeKind::Group | NodeKind::Root
+        );
+    if covers_subtree
+        && let Some(bounds) = s.res.ink_bounds(id)
+        && !s.cull.iter().any(|v| intersects(bounds, *v))
+    {
+        return;
+    }
+    if s.ov.get(id).is_none()
+        && !s.ov.unsnapped(id)
+        && let Some(size) = snappable_box(s.res.used_kind_of(node))
+        && let Some(world) = s.res.world_transform(id)
+    {
+        let device = s.base * world;
+        let [_, b, c, _, _, _] = device.as_coeffs();
+        if b.abs() < 1e-9 && c.abs() < 1e-9 {
+            let r = device.transform_rect_bbox(Rect::from_origin_size(Point::ORIGIN, size));
+            if r.width() >= 1.0 && r.height() >= 1.0 {
+                out.push(r);
+            }
+        }
+    }
+    if matches!(node.kind(), NodeKind::Boolean { .. }) {
+        return;
+    }
+    for child in node.children() {
+        gather_boxes(s, *child, out);
+    }
 }
 
 /// How `brush` sits in the box `frame` gives: [`None`] for a solid, a gradient, or
@@ -1045,8 +1208,9 @@ struct Painted<'a> {
     /// ([`stretch`]), `None` when every glyph is drawn.
     detail: Option<f64>,
     /// The local-to-device transform when the node's centred strokes snap to
-    /// device pixels ([`strokes_snap`]), `None` when they are laid as stored.
-    stroke_device: Option<Affine>,
+    /// device pixels ([`strokes_snap`]), with the box edges they keep their side
+    /// of; `None` when they are laid as stored.
+    stroke_device: Option<(Affine, &'a Edges<'a>)>,
     /// `Filters` rows applied to the inks instead of the pixels
     /// ([`folded_filters`]), in order; `paint` is already through them, a text
     /// run's and a decoration's own colour are taken through them as drawn.
@@ -1135,9 +1299,21 @@ fn paint_node<P: ScenePainter>(
     parent_world: Affine,
     view: &[Rect],
     base: Affine,
+    edges: &Edges<'_>,
     painter: &mut P,
 ) {
-    paint_node_pass(doc, res, ov, id, parent_world, view, base, painter, None);
+    paint_node_pass(
+        doc,
+        res,
+        ov,
+        id,
+        parent_world,
+        view,
+        base,
+        edges,
+        painter,
+        None,
+    );
 }
 
 /// [`paint_node`], or one of its [`FxPass`]es when `pass` is given — drawn
@@ -1151,6 +1327,7 @@ fn paint_node_pass<P: ScenePainter>(
     parent_world: Affine,
     view: &[Rect],
     base: Affine,
+    edges: &Edges<'_>,
     painter: &mut P,
     pass: Option<&FxPass>,
 ) {
@@ -1244,7 +1421,7 @@ fn paint_node_pass<P: ScenePainter>(
             None => ondin_core::boolean_placeholder(doc, res, id),
         },
         detail: ov.level_of_detail().then(|| stretch(base * world)),
-        stroke_device: strokes_snap(kind, ov, id).then(|| base * world),
+        stroke_device: strokes_snap(kind, ov, id).then(|| (base * world, edges)),
         filters: Vec::new(),
     };
 
@@ -1319,7 +1496,18 @@ fn paint_node_pass<P: ScenePainter>(
             if blends(p.blend) {
                 painter.push_blend_layer(p.blend);
             }
-            paint_node_pass(doc, res, ov, id, parent_world, view, base, painter, Some(p));
+            paint_node_pass(
+                doc,
+                res,
+                ov,
+                id,
+                parent_world,
+                view,
+                base,
+                edges,
+                painter,
+                Some(p),
+            );
             if blends(p.blend) {
                 painter.pop_layer();
             }
@@ -1359,7 +1547,7 @@ fn paint_node_pass<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun| {
         if let Some(id) = mask.alpha_to_composite() {
             painter.push_mask_layer();
-            paint_node(doc, res, ov, id, world, view, base, painter);
+            paint_node(doc, res, ov, id, world, view, base, edges, painter);
             painter.pop_layer();
         }
         mask.close(painter);
@@ -1406,7 +1594,7 @@ fn paint_node_pass<P: ScenePainter>(
                 reopen(painter, &mut open, &mut mask);
             }
             let top = matches!(node.kind(), NodeKind::Root);
-            paint_ghost(doc, ov, &ghost.node, top, world, base, painter, None);
+            paint_ghost(doc, ov, &ghost.node, top, world, base, edges, painter, None);
             next_ghost += 1;
         }
         let Some(child) = children.get(pos) else {
@@ -1432,7 +1620,7 @@ fn paint_node_pass<P: ScenePainter>(
         } else {
             reopen(painter, &mut open, &mut mask);
         }
-        paint_node(doc, res, ov, *child, world, view, base, painter);
+        paint_node(doc, res, ov, *child, world, view, base, edges, painter);
     }
 
     close(painter, &mut open, &mut mask);
@@ -1749,6 +1937,7 @@ fn paint_ghost<P: ScenePainter>(
     top: bool,
     parent_world: Affine,
     base: Affine,
+    edges: &Edges<'_>,
     painter: &mut P,
     pass: Option<&FxPass>,
 ) {
@@ -1805,7 +1994,17 @@ fn paint_ghost<P: ScenePainter>(
             if blends(p.blend) {
                 painter.push_blend_layer(p.blend);
             }
-            paint_ghost(doc, ov, ghost, top, parent_world, base, painter, Some(p));
+            paint_ghost(
+                doc,
+                ov,
+                ghost,
+                top,
+                parent_world,
+                base,
+                edges,
+                painter,
+                Some(p),
+            );
             if blends(p.blend) {
                 painter.pop_layer();
             }
@@ -1843,7 +2042,7 @@ fn paint_ghost<P: ScenePainter>(
             // Never for a ghost: the original underneath carries the mark.
             placeholder: None,
             detail: None,
-            stroke_device: strokes_snap(&ghost.kind, ov, ghost.id).then(|| base * world),
+            stroke_device: strokes_snap(&ghost.kind, ov, ghost.id).then(|| (base * world, edges)),
             filters: Vec::new(),
         },
         shape_world,
@@ -1873,7 +2072,7 @@ fn paint_ghost<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun, ghost: &GhostNode| {
         if mask.alpha_to_composite().is_some() {
             painter.push_mask_layer();
-            paint_ghost(doc, ov, ghost, false, world, base, painter, None);
+            paint_ghost(doc, ov, ghost, false, world, base, edges, painter, None);
             painter.pop_layer();
         }
         mask.close(painter);
@@ -1900,7 +2099,7 @@ fn paint_ghost<P: ScenePainter>(
             continue;
         }
         mask.reopen(painter, world);
-        paint_ghost(doc, ov, child, false, world, base, painter, None);
+        paint_ghost(doc, ov, child, false, world, base, edges, painter, None);
     }
     if let Some(g) = alpha_ghost.take() {
         end_run(painter, &mut mask, g);
@@ -2388,7 +2587,7 @@ fn paint_strokes<P: ScenePainter>(
     shape: &BezPath,
     rule: ClipRule,
     frame: impl Fn() -> Rect,
-    device: Option<Affine>,
+    device: Option<(Affine, &Edges<'_>)>,
 ) {
     let frame = &frame;
     let visible: Vec<&Stroke> = paint
@@ -2422,7 +2621,7 @@ fn paint_strokes<P: ScenePainter>(
                             .per_side(s.width)
                             .is_none()
                     })
-                    .and_then(|d| snapped_stroke(shape, d, s));
+                    .and_then(|(d, edges)| snapped_stroke(shape, d, s, edges));
                 match snapped {
                     Some(ink) => clipped(painter, world, framing, |p| {
                         p.fill_path(world, &ink, s.brush.drawn(), framing, ClipRule::NonZero)

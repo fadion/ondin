@@ -140,18 +140,29 @@ impl Archive {
             .filter(|v| !matches!(v, P::Str(s) if s == "$null"))
     }
 
+    /// A string, or the one an `NSString` object holds. The walk is bounded,
+    /// since an object may name itself as its own string.
     fn string(&self, p: &P) -> Option<String> {
-        match self.deref(p) {
-            P::Str(s) => Some(s.clone()),
-            obj => self.get(obj, "NS.string").and_then(|s| self.string(s)),
+        let mut at = p;
+        for _ in 0..MAX_DEPTH {
+            match self.deref(at) {
+                P::Str(s) => return Some(s.clone()),
+                obj => at = self.get(obj, "NS.string")?,
+            }
         }
+        None
     }
 
+    /// Bytes, or those an `NSData` object holds, bounded as [`Self::string`] is.
     fn data(&self, p: &P) -> Option<Vec<u8>> {
-        match self.deref(p) {
-            P::Data(d) => Some(d.clone()),
-            obj => self.get(obj, "NS.data").and_then(|d| self.data(d)),
+        let mut at = p;
+        for _ in 0..MAX_DEPTH {
+            match self.deref(at) {
+                P::Data(d) => return Some(d.clone()),
+                obj => at = self.get(obj, "NS.data")?,
+            }
         }
+        None
     }
 
     fn number(&self, p: &P) -> Option<f64> {
@@ -261,7 +272,10 @@ fn varints(b: &[u8]) -> Vec<usize> {
     let mut out = Vec::new();
     let (mut v, mut shift) = (0usize, 0);
     for &byte in b {
-        v |= usize::from(byte & 0x7f) << shift;
+        // Bits past a `usize` are dropped rather than shifted out of range.
+        if shift < usize::BITS {
+            v |= usize::from(byte & 0x7f) << shift;
+        }
         if byte & 0x80 == 0 {
             out.push(v);
             v = 0;
@@ -273,6 +287,15 @@ fn varints(b: &[u8]) -> Vec<usize> {
     out
 }
 
+/// How deeply a plist's containers may nest; a text archive nests a few deep.
+const MAX_DEPTH: usize = 64;
+
+/// What one plist may cost to read: one per object read plus one per byte of
+/// string or data it copies. An object shared by several containers is read once
+/// per container, so without this a few hundred bytes sharing each level's
+/// object twice cost 2ᴺ; a real text archive costs a few thousand.
+const MAX_COST: usize = 1 << 24;
+
 /// A binary property list's top object.
 fn bplist(b: &[u8]) -> Option<P> {
     if !b.starts_with(b"bplist00") || b.len() < 40 {
@@ -281,101 +304,151 @@ fn bplist(b: &[u8]) -> Option<P> {
     let t = &b[b.len() - 32..];
     let off_size = usize::from(t[6]);
     let ref_size = usize::from(t[7]);
-    let be = |s: &[u8]| s.iter().fold(0usize, |v, x| (v << 8) | usize::from(*x));
+    if !(1..=8).contains(&off_size) || !(1..=8).contains(&ref_size) {
+        return None;
+    }
     let count = be(&t[8..16]);
     let top = be(&t[16..24]);
     let table = be(&t[24..32]);
+    // Every offset takes bytes of the file (an offset size of 0 is refused
+    // above), so a count past its length stops at the first offset missing.
     let offsets: Vec<usize> = (0..count)
-        .map(|i| {
-            b.get(table + i * off_size..table + (i + 1) * off_size)
-                .map(be)
-        })
+        .map(|i| slice(b, table.checked_add(i * off_size)?, off_size).map(be))
         .collect::<Option<_>>()?;
-    let mut seen = vec![false; count];
-    read_object(b, &offsets, ref_size, top, &mut seen)
+    let mut r = Reader {
+        b,
+        offsets,
+        refs: ref_size,
+        seen: vec![false; count],
+        cost: 0,
+        depth: 0,
+    };
+    r.object(top)
 }
 
-fn read_object(b: &[u8], offsets: &[usize], refs: usize, i: usize, seen: &mut [bool]) -> Option<P> {
-    // A reference back into the object being read would recurse for ever.
-    if *seen.get(i)? {
-        return None;
+/// A big-endian unsigned number.
+fn be(s: &[u8]) -> usize {
+    s.iter().fold(0usize, |v, x| (v << 8) | usize::from(*x))
+}
+
+/// `n` bytes of `b` from `at`, or `None` past its end.
+fn slice(b: &[u8], at: usize, n: usize) -> Option<&[u8]> {
+    b.get(at..at.checked_add(n)?)
+}
+
+/// A plist's objects being read, with what reading them has cost.
+struct Reader<'a> {
+    b: &'a [u8],
+    offsets: Vec<usize>,
+    refs: usize,
+    /// The objects being read, so a reference back into one is refused.
+    seen: Vec<bool>,
+    cost: usize,
+    depth: usize,
+}
+
+impl Reader<'_> {
+    /// Count `n` toward [`MAX_COST`], `None` once it is passed.
+    fn spend(&mut self, n: usize) -> Option<()> {
+        self.cost = self.cost.saturating_add(n);
+        (self.cost <= MAX_COST).then_some(())
     }
-    seen[i] = true;
-    let be = |s: &[u8]| s.iter().fold(0usize, |v, x| (v << 8) | usize::from(*x));
-    let mut at = *offsets.get(i)?;
-    let marker = *b.get(at)?;
-    at += 1;
-    let low = usize::from(marker & 0x0f);
-    let mut len = || -> Option<usize> {
-        if low != 0x0f {
-            return Some(low);
+
+    /// Object `i`, `None` for a reference back into the object being read, past
+    /// [`MAX_DEPTH`] or [`MAX_COST`], or anything cut short.
+    fn object(&mut self, i: usize) -> Option<P> {
+        if *self.seen.get(i)? || self.depth >= MAX_DEPTH {
+            return None;
         }
-        let n = 1 << (b.get(at)? & 0x0f);
-        let v = be(b.get(at + 1..at + 1 + n)?);
-        at += 1 + n;
-        Some(v)
-    };
-    let p = match marker >> 4 {
-        0x0 => match low {
-            8 => P::Bool(false),
-            9 => P::Bool(true),
-            _ => P::Null,
-        },
-        // Eight bytes are signed, fewer unsigned; both fit an `i64` this way.
-        0x1 => {
-            let raw = b.get(at..at + (1 << low))?;
-            P::Int(raw.iter().fold(0u64, |v, x| (v << 8) | u64::from(*x)) as i64)
-        }
-        0x2 => match low {
-            2 => P::Real(f64::from(f32::from_be_bytes(
-                b.get(at..at + 4)?.try_into().ok()?,
-            ))),
-            _ => P::Real(f64::from_be_bytes(b.get(at..at + 8)?.try_into().ok()?)),
-        },
-        0x4 => {
-            let n = len()?;
-            P::Data(b.get(at..at + n)?.to_vec())
-        }
-        0x5 => {
-            let n = len()?;
-            P::Str(b.get(at..at + n)?.iter().map(|c| char::from(*c)).collect())
-        }
-        0x6 => {
-            let n = len()?;
-            let units: Vec<u16> = b
-                .get(at..at + 2 * n)?
-                .chunks(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
-                .collect();
-            P::Str(String::from_utf16_lossy(&units))
-        }
-        0x8 => P::Uid(be(b.get(at..at + low + 1)?)),
-        0xa => {
-            let n = len()?;
-            let items = (0..n)
-                .map(|k| {
-                    let r = be(b.get(at + k * refs..at + (k + 1) * refs)?);
-                    read_object(b, offsets, refs, r, seen)
-                })
-                .collect::<Option<_>>()?;
-            P::Array(items)
-        }
-        0xd => {
-            let n = len()?;
-            let entry = |k: usize, seen: &mut [bool]| {
-                let r = be(b.get(at + k * refs..at + (k + 1) * refs)?);
-                read_object(b, offsets, refs, r, seen)
-            };
-            let mut d = Vec::with_capacity(n);
-            for k in 0..n {
-                d.push((entry(k, seen)?, entry(n + k, seen)?));
+        self.spend(1)?;
+        self.seen[i] = true;
+        self.depth += 1;
+        let p = self.value(i);
+        self.depth -= 1;
+        self.seen[i] = false;
+        p
+    }
+
+    fn value(&mut self, i: usize) -> Option<P> {
+        let b = self.b;
+        let mut at = *self.offsets.get(i)?;
+        let marker = *b.get(at)?;
+        at += 1;
+        let low = usize::from(marker & 0x0f);
+        let mut len = || -> Option<usize> {
+            if low != 0x0f {
+                return Some(low);
             }
-            P::Dict(d)
-        }
-        _ => P::Null,
-    };
-    seen[i] = false;
-    Some(p)
+            let n = 1 << (b.get(at)? & 0x0f);
+            let v = be(slice(b, at + 1, n)?);
+            at += 1 + n;
+            Some(v)
+        };
+        Some(match marker >> 4 {
+            0x0 => match low {
+                8 => P::Bool(false),
+                9 => P::Bool(true),
+                _ => P::Null,
+            },
+            // Eight bytes are signed, fewer unsigned; both fit an `i64` this way.
+            0x1 => {
+                let raw = slice(b, at, 1 << low.min(4))?;
+                P::Int(raw.iter().fold(0u64, |v, x| (v << 8) | u64::from(*x)) as i64)
+            }
+            0x2 => match low {
+                2 => P::Real(f64::from(f32::from_be_bytes(
+                    slice(b, at, 4)?.try_into().ok()?,
+                ))),
+                _ => P::Real(f64::from_be_bytes(slice(b, at, 8)?.try_into().ok()?)),
+            },
+            0x4 => {
+                let n = len()?;
+                let bytes = slice(b, at, n)?;
+                self.spend(n)?;
+                P::Data(bytes.to_vec())
+            }
+            0x5 => {
+                let n = len()?;
+                let bytes = slice(b, at, n)?;
+                self.spend(n)?;
+                P::Str(bytes.iter().map(|c| char::from(*c)).collect())
+            }
+            0x6 => {
+                let n = len()?;
+                let bytes = slice(b, at, n.checked_mul(2)?)?;
+                self.spend(n)?;
+                let units: Vec<u16> = bytes
+                    .chunks(2)
+                    .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                    .collect();
+                P::Str(String::from_utf16_lossy(&units))
+            }
+            0x8 => P::Uid(be(slice(b, at, low + 1)?)),
+            0xa => {
+                let n = len()?;
+                let refs = self.refs;
+                let list = slice(b, at, n.checked_mul(refs)?)?;
+                let items = list
+                    .chunks(refs)
+                    .map(|r| self.object(be(r)))
+                    .collect::<Option<_>>()?;
+                P::Array(items)
+            }
+            0xd => {
+                let n = len()?;
+                let refs = self.refs;
+                // Keys, then values, each a reference.
+                let list = slice(b, at, n.checked_mul(2 * refs)?)?;
+                let (keys, values) = list.split_at(n * refs);
+                let mut d = Vec::with_capacity(n);
+                for (k, v) in keys.chunks(refs).zip(values.chunks(refs)) {
+                    d.push((self.object(be(k))?, self.object(be(v))?));
+                }
+                P::Dict(d)
+            }
+            _ => P::Null,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -588,6 +661,77 @@ mod tests {
         let root = k.obj(root);
         let v = attributed_string(&k.finish(root)).unwrap();
         assert_eq!(v["attributes"][0]["length"], 2);
+    }
+
+    /// A dictionary claiming 2⁴⁰ entries reads as nothing rather than asking
+    /// for that much memory up front. flip: size the dictionary from `len()`
+    /// unchecked in `Reader::value` → the test binary aborts on the allocation.
+    #[test]
+    fn a_length_past_the_bytes_reads_as_nothing() {
+        let mut p = Plist::default();
+        let mut huge = vec![0xdf, 0x13];
+        huge.extend((1u64 << 40).to_be_bytes());
+        let top = p.add(huge);
+        let b64 = p.finish(top);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .unwrap();
+        assert_eq!(bplist(&bytes), None);
+    }
+
+    /// A trailer whose offsets take no bytes, claiming 2⁵⁰ objects, reads as
+    /// nothing. flip: let an offset size of 0 through in `bplist` → the offset
+    /// table is built 2⁵⁰ long.
+    #[test]
+    fn a_count_past_the_bytes_reads_as_nothing() {
+        let mut b = b"bplist00".to_vec();
+        b.extend([0x08; 8]);
+        b.extend([0, 0, 0, 0, 0, 0, 0, 1]);
+        b.extend((1u64 << 50).to_be_bytes());
+        b.extend(0u64.to_be_bytes());
+        b.extend(8u64.to_be_bytes());
+        assert_eq!(bplist(&b), None);
+    }
+
+    /// Forty arrays each holding the next twice would be read 2⁴⁰ times; the
+    /// read stops at its cost and answers nothing, in bounded time.
+    /// flip: make `spend` always succeed → the read runs on past the limit.
+    #[test]
+    fn objects_shared_level_by_level_stop_at_the_cost_limit() {
+        let mut p = Plist::default();
+        let n = 40u8;
+        for k in 0..n {
+            p.add(vec![0xa2, k + 1, k + 1]);
+        }
+        p.s("leaf");
+        let b64 = p.finish(0);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(bplist(&bytes), None);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    /// An `NSString` naming itself as its own string reads as nothing rather
+    /// than following itself for ever. flip: follow `NS.string` with no bound
+    /// in `Archive::string` → the read never returns.
+    #[test]
+    fn a_string_that_names_itself_reads_as_nothing() {
+        let mut k = Keyed::new();
+        let key = k.p.s("NS.string");
+        // The object about to be added is `$objects[1]`.
+        let me = k.p.uid(1);
+        let d = k.p.dict(&[(key, me)]);
+        let s = k.obj(d);
+        let ks = k.p.s("NSString");
+        let root = k.p.dict(&[(ks, s)]);
+        let root = k.obj(root);
+        assert!(attributed_string(&k.finish(root)).is_none());
     }
 
     #[test]

@@ -266,7 +266,10 @@ fn walk<P: ScenePainter>(
     painter: &mut P,
 ) {
     let base = device_base(vp);
-    let edges = Edges::of(doc, res, overrides, origins, cull, base);
+    // Against the view, not `cull`: a hairline's side is voted on by the boxes
+    // along its whole span, which run past a patch or a pan's band.
+    let view = [vp.view];
+    let edges = Edges::of(doc, res, overrides, origins, &view, base);
     let walk = Walk::new(origins);
     if let Some(ink) = overrides.outline() {
         let mut outline = OutlinePainter {
@@ -1045,8 +1048,9 @@ impl<'a> Edges<'a> {
 }
 
 /// Push the device box of every snapping box under `id` that the walk would draw
-/// inside `s.cull`, culled as the walk culls. A box under a device pixel in either
-/// axis is skipped: the collapse floor moves its far edge off the rounding rule.
+/// inside `s.cull` — the whole view, so a walk culled to a patch votes as the full
+/// frame does. A box under a device pixel in either axis is skipped: the collapse
+/// floor moves its far edge off the rounding rule.
 fn gather_boxes(s: &EdgeSource<'_>, id: NodeId, out: &mut Vec<Rect>) {
     let Some(node) = s.doc.get(id) else { return };
     if matches!(node.kind(), NodeKind::Slice { .. })

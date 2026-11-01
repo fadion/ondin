@@ -411,6 +411,240 @@ fn a_sub_pixel_stroke_ending_where_a_box_over_it_ends_stays_covered() {
     );
 }
 
+/// Each fill's outline on the device, as the walk lays it.
+#[derive(Default)]
+struct Fills(Vec<ondin_core::kurbo::BezPath>);
+
+impl Fills {
+    /// Each fill's box.
+    fn boxes(&self) -> Vec<Rect> {
+        use ondin_core::kurbo::Shape;
+        self.0.iter().map(|p| p.bounding_box()).collect()
+    }
+
+    /// The box of each subpath of every fill, in the order laid.
+    fn pieces(&self) -> Vec<Rect> {
+        use ondin_core::kurbo::Shape;
+        self.0
+            .iter()
+            .flat_map(ondin_core::geometry::subpaths)
+            .map(|p| p.bounding_box())
+            .collect()
+    }
+}
+
+/// `d`'s first page through a 200×100 view at 1:1, culled to `cull` when given.
+fn fills_of(d: &Document, res: &Resolved, cull: Option<Rect>) -> Fills {
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 200.0, 100.0),
+        pixel_size: (200, 100),
+    };
+    let ov = ondin_render::RenderOverrides::default();
+    let page = d.first_page();
+    let mut fills = Fills::default();
+    match cull {
+        None => ondin_render::scene::build(d, res, &vp, &ov, page, &mut fills),
+        Some(c) => ondin_render::scene::build_within(d, res, &vp, &ov, page, &[c], &mut fills),
+    }
+    fills
+}
+
+impl ondin_render::scene::ScenePainter for Fills {
+    fn has_image(&self, _: &ondin_core::ImageId) -> bool {
+        true
+    }
+    fn fill_path(
+        &mut self,
+        t: Affine,
+        path: &ondin_core::kurbo::BezPath,
+        _: &Brush,
+        _: Option<ondin_core::Framing>,
+        _: ondin_render::scene::ClipRule,
+    ) {
+        self.0.push(t * path.clone());
+    }
+    fn stroke_path(
+        &mut self,
+        _: Affine,
+        _: &ondin_core::kurbo::BezPath,
+        _: &ondin_render::scene::StrokePaint<'_>,
+    ) {
+    }
+    fn draw_text(&mut self, _: Affine, _: &ondin_render::scene::TextRun<'_>) {}
+    fn push_layer(
+        &mut self,
+        _: Affine,
+        _: Option<&ondin_core::kurbo::BezPath>,
+        _: ondin_render::scene::ClipRule,
+        _: f32,
+    ) {
+    }
+    fn push_mask_layer(&mut self) {}
+    fn pop_layer(&mut self) {}
+}
+
+/// A hairline whose edges both round onto a box's edge is laid on the same row
+/// by a walk culled to a strip clear of the box as by the full walk: the side
+/// vote reads the boxes along the line's whole span.
+///
+/// flip: `walk` building `Edges` from its cull instead of the view → fails at
+/// "the strip".
+#[test]
+fn a_hairline_lies_on_one_row_whatever_the_walk_is_culled_to() {
+    let mut ids = IdSource::new(31);
+    let root = ids.mint();
+    let mut d = Document::new(root);
+    let (bar, line) = (ids.mint(), ids.mint());
+    d.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: bar,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(50.0, 10.3),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: bar,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(GREY).into(),
+                visible: true,
+            }]),
+        },
+        Operation::CreateNode {
+            id: line,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Line {
+                end: ondin_core::kurbo::Point::new(100.0, 0.0),
+            },
+            transform: Some(Affine::translate((0.0, 10.0))),
+            name: None,
+        },
+        Operation::SetStrokes {
+            id: line,
+            strokes: keyed_by_position([ondin_core::Stroke {
+                width: 0.6,
+                ..ondin_core::Stroke::default()
+            }]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&d);
+    let laid = |cull: Option<Rect>| {
+        fills_of(&d, &res, cull)
+            .boxes()
+            .into_iter()
+            .find(|r| r.width() > 90.0)
+            .expect("the line")
+    };
+    let full = laid(None);
+    assert!(
+        (full.y1 - 10.0).abs() < 1e-6,
+        "fixture: the full walk lays the line above the box's edge, {full:?}"
+    );
+    assert_eq!(
+        laid(Some(Rect::new(80.0, 0.0, 90.0, 20.0))),
+        full,
+        "the strip"
+    );
+}
+
+/// A snapped stroke is one whole-pixel rectangle per segment: across, each edge
+/// rounded; along, reaching over a join by half the width and past an end by its
+/// cap. Covers the vertical, square-cap, corner and closing arms.
+///
+/// flip: `snapped_stroke` leaving out a closed subpath's closing segment → fails
+/// at "closing"; ignoring the square cap's reach → fails at "square cap".
+#[test]
+fn a_snapped_stroke_is_one_whole_pixel_rect_per_segment() {
+    use ondin_core::kurbo::BezPath;
+    let laid = |path: BezPath, cap: ondin_core::kurbo::Cap| {
+        let mut ids = IdSource::new(41);
+        let root = ids.mint();
+        let mut d = Document::new(root);
+        let line = ids.mint();
+        d.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: line,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Path {
+                    path,
+                    corner_radii: Vec::new(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetStrokes {
+                id: line,
+                strokes: keyed_by_position([ondin_core::Stroke {
+                    width: 2.0,
+                    cap,
+                    ..ondin_core::Stroke::default()
+                }]),
+            },
+        ]))
+        .unwrap();
+        let res = Resolved::rebuild(&d);
+        fills_of(&d, &res, None).pieces()
+    };
+    let poly = |pts: &[(f64, f64)], closed: bool| {
+        let mut p = BezPath::new();
+        p.move_to(pts[0]);
+        for q in &pts[1..] {
+            p.line_to(*q);
+        }
+        if closed {
+            p.close_path();
+        }
+        p
+    };
+    use ondin_core::kurbo::Cap;
+    assert_eq!(
+        laid(poly(&[(10.3, 20.0), (10.3, 60.0)], false), Cap::Butt),
+        [Rect::new(9.0, 20.0, 11.0, 60.0)],
+        "vertical"
+    );
+    assert_eq!(
+        laid(poly(&[(10.2, 20.2), (50.2, 20.2)], false), Cap::Square),
+        [Rect::new(9.0, 19.0, 51.0, 21.0)],
+        "square cap"
+    );
+    assert_eq!(
+        laid(
+            poly(&[(10.3, 50.3), (40.3, 50.3), (40.3, 80.3)], false),
+            Cap::Butt
+        ),
+        [
+            Rect::new(10.0, 49.0, 41.0, 51.0),
+            Rect::new(39.0, 49.0, 41.0, 80.0)
+        ],
+        "corner"
+    );
+    assert_eq!(
+        laid(
+            poly(
+                &[(10.3, 10.3), (40.3, 10.3), (40.3, 30.3), (10.3, 30.3)],
+                true
+            ),
+            Cap::Butt
+        ),
+        [
+            Rect::new(9.0, 9.0, 41.0, 11.0),
+            Rect::new(39.0, 9.0, 41.0, 31.0),
+            Rect::new(9.0, 29.0, 41.0, 31.0),
+            Rect::new(9.0, 9.0, 11.0, 31.0)
+        ],
+        "closing"
+    );
+}
+
 /// A line under a pixel wide starting where a box above it ends keeps its ink
 /// when both its edges round to the box's edge: it is laid on its own side.
 ///

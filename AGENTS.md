@@ -156,7 +156,7 @@ Keep the whole log; a red run here cannot be asked for again.
   and read the struct.
 - **Platform arms:** `cfg(unix)`/`target_os` code compiles only on CI here. WSL Ubuntu has
   Rust and runs the Unix arms locally (pipe output through `tr -d '\0'`):
-  `wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/Users/jonid/Projects/ondin && CARGO_TARGET_DIR=$HOME/ondin-wsl-target cargo test -p ondin-app --bin ondin -- <filter>'`.
+  `wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/<path-to-repo> && CARGO_TARGET_DIR=$HOME/ondin-wsl-target cargo test -p ondin-app --bin ondin -- <filter>'`.
   WSL also runs Docker, for throwaway Fedora containers. From Git Bash, put commands in a
   script and run it with `MSYS_NO_PATHCONV=1`.
 - **Windows CI checks out with `core.autocrlf=true`** and this machine does not, so an

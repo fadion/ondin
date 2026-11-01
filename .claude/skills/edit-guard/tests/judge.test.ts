@@ -13,7 +13,7 @@ const refused = [
   "python - <<'EOF'\np='crates/ondin-app/src/app.rs'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nEOF",
   'Set-Content -Path crates\\ondin-app\\src\\app.rs -Value $x',
   "Get-Content x | Out-File docs\\decisions.md",
-  "[IO.File]::WriteAllText('C:\\Users\\jonid\\Projects\\ondin\\docs\\vm.md', $t)",
+  "[IO.File]::WriteAllText('C:\\Users\\dev\\Projects\\ondin\\docs\\vm.md', $t)",
   // The git commands that sweep or discard.
   'git add -A',
   'git add . && git commit -m "x"',
@@ -78,7 +78,7 @@ const allowed = [
   'grep -n "fn foo" crates/x.rs | head',
   'cargo test --workspace --release 2>&1 | tee /tmp/release-run.log',
   'cargo build -p ondin-app > /dev/null 2>&1',
-  "cat > C:/Users/jonid/AppData/Local/Temp/claude/x/scratchpad/probe.md <<'EOF'\nhi\nEOF",
+  "cat > C:/Users/dev/AppData/Local/Temp/claude/x/scratchpad/probe.md <<'EOF'\nhi\nEOF",
   'echo $x > $TMPDIR/out.json',
   'git diff --stat > notes.txt',
   // A commit message may mention what it fixed.
@@ -101,8 +101,8 @@ const allowed = [
   'rg -n "fn x() -> Vec<u8>" crates/ondin-core/src/lib.rs',
   // [X7-L1-06]: the review method's own append, a script writing scratch, a
   // slashed branch, a dry run.
-  'cat C:/Users/jonid/AppData/Local/Temp/claude/x/scratchpad/X7.md >> review/release-v0.5.0/passes/X7.md',
-  "python -c \"s=open('crates/x.rs').read(); open('C:/Users/jonid/AppData/Local/Temp/o.txt','w').write(s)\"",
+  'cat C:/Users/dev/AppData/Local/Temp/claude/x/scratchpad/X7.md >> review/release-v0.5.0/passes/X7.md',
+  "python -c \"s=open('crates/x.rs').read(); open('C:/Users/dev/AppData/Local/Temp/o.txt','w').write(s)\"",
   'git checkout origin/main',
   'git checkout feature/x',
   'git add -A --dry-run',
@@ -119,7 +119,7 @@ const allowed = [
   'git add LICENSE .gitignore Cargo.lock',
   'git add crates/ondin-app/src/*.rs',
   'perl -Ilib -e "print 1"',
-  'cp crates/ondin-app/src/app.rs C:/Users/jonid/AppData/Local/Temp/app.rs',
+  'cp crates/ondin-app/src/app.rs C:/Users/dev/AppData/Local/Temp/app.rs',
   'Copy-Item crates/x.rs $env:TEMP/x.rs',
   'mv crates/a.rs crates/b.rs',
   'New-Item -ItemType Directory -Force crates/new',
@@ -136,11 +136,11 @@ const allowed = [
   // pathspecs.
   'S="$TEMP/claude/x/scratchpad"; cp crates/ondin-app/src/app.rs "$S/app.rs.bak"',
   'cp crates/ondin-app/src/app.rs "$SP/app.rs.bak"',
-  'S=/c/Users/jonid/AppData/Local/Temp/claude/x/scratchpad; D=/c/Users/jonid/Projects/ondin/review/release-v0.4.1; cp $S/X1.md $D/passes/X1.md',
+  'S=/c/Users/dev/AppData/Local/Temp/claude/x/scratchpad; D=/c/Users/dev/Projects/ondin/review/release-v0.4.1; cp $S/X1.md $D/passes/X1.md',
   'cp review/findings.md review/.snapshots/findings-S13.1.md',
   // Copying a backup back is that backup's use (CLAUDE.md: copy a file to the
   // scratchpad before an experiment you expect to revert).
-  'S=/c/Users/jonid/AppData/Local/Temp/claude/x/scratchpad; cp $S/app.rs crates/ondin-app/src/app.rs',
+  'S=/c/Users/dev/AppData/Local/Temp/claude/x/scratchpad; cp $S/app.rs crates/ondin-app/src/app.rs',
   'cp /tmp/boolean.bak crates/ondin-core/src/boolean.rs',
   'cp /tmp/theme.orig2.rs crates/ondin-app/src/theme.rs',
   'git add crates/ondin-app/src/app.rs 2>&1 >/dev/null',

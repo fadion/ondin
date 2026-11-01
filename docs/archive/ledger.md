@@ -18242,7 +18242,7 @@ twice at to see the field is empty.
 **D370 — A headless app cannot write the preferences file. *Fixed and tested 2026-08-26; Resolved.***
 ⚠️ **This is not a deviation from the design; it is a harness fault that reached the maintainer's own
 machine**, and it is recorded here because nothing else in the project would have caught it. Reported as
-*"my base folder is some random directory: `C:\Users\jonid\AppData\Local\Temp\ondin-wiring-crumb-25960`.
+*"my base folder is some random directory: `C:\Users\<user>\AppData\Local\Temp\ondin-wiring-crumb-25960`.
 I'm doing `cargo run`."*
 
 `OndinApp::headless` had always pointed `Prefs::base_folder` somewhere harmless — **in memory**. But

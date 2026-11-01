@@ -434,6 +434,28 @@ fn the_check_names_what_a_page_draws_differently() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `fidelity::check` holds a page of body text that matches, whose antialiasing
+/// alone puts the whole page's mean past `MAX_MEAN_ERROR`.
+///
+/// flip: `compare_page` taking the mean over every pixel → fails at "a page of
+/// type".
+#[test]
+fn the_check_holds_a_page_of_type() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 230.0, "Board");
+    let body = "Nine lines of plain body text\n".repeat(9);
+    let t = text_node(&body, TextSizing::Auto, body_style(), |_| {});
+    d.add(Some(f), t, Affine::translate((10.0, 10.0)), "Body");
+    let (doc, res) = d.done();
+    let Some(browser) = browser_or_skip("type") else {
+        return;
+    };
+    let dir = scratch("check-type");
+    let found = fidelity::check(&doc, &res, &[f], &browser, &dir).expect("the check runs");
+    assert!(found.holds(), "a page of type: {found:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Blend modes as the browser draws them: a separable and a non-separable mode
 /// over the frame's fill, a group set to Normal whose Difference child hangs off
 /// its white card onto the frame and has nothing to difference against there,

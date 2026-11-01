@@ -797,3 +797,172 @@ fn filters_folded_into_the_inks_match_the_filtered_pixels() {
         );
     }
 }
+
+/// A group holding the leaf `leaf` builds, with `filters` on the leaf, or on the
+/// group when `grouped` (which buffers), drawn on a 100×100 page.
+fn filtered_leaf(
+    leaf: impl Fn(ondin_core::NodeId, ondin_core::NodeId) -> Vec<Operation>,
+    filters: Filters,
+    grouped: bool,
+) -> Vec<u8> {
+    let mut ids = IdSource::new(2);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (g, l) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: g,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Group,
+        transform: None,
+        name: None,
+    }]))
+    .unwrap();
+    doc.apply(&Transaction(leaf(g, l))).unwrap();
+    doc.apply(&Transaction(vec![Operation::SetEffects {
+        id: if grouped { g } else { l },
+        effects: keyed_by_position([Effect::new(EffectKind::Filters(filters))]),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 100.0, 100.0),
+        pixel_size: (100, 100),
+    };
+    VelloCpuRenderer::new()
+        .render_to_rgba(&doc, &res, &vp, &ImageStore::default(), doc.first_page())
+        .0
+}
+
+/// The largest premultiplied channel difference between two drawings.
+fn premul_diff(a: &[u8], b: &[u8]) -> u32 {
+    let premul = |p: &[u8], i: usize| (u32::from(p[i]) * u32::from(p[3]) + 127) / 255;
+    a.chunks(4)
+        .zip(b.chunks(4))
+        .map(|(p, q)| {
+            (0..3)
+                .map(|i| premul(p, i).abs_diff(premul(q, i)))
+                .chain([u32::from(p[3]).abs_diff(u32::from(q[3]))])
+                .max()
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// A colour type carries of its own — a span's, an underline's — folds through
+/// the filters as its fills do, so the folded type draws what the buffer draws.
+///
+/// flip: `paint_shape` drawing a run's own colour unfiltered → fails at "a
+/// span's colour"; the same for a decoration's → fails there too.
+#[test]
+fn type_folds_its_own_colours_through_the_filters() {
+    let filters = Filters {
+        brightness: 0.9,
+        contrast: 1.1,
+        saturation: 0.7,
+        hue: 30.0,
+    };
+    let leaf = |g, t| {
+        let style = ondin_core::TextStyle {
+            font_size: 30.0,
+            underline: Some(ondin_core::Decoration {
+                color: Some(Color::from_rgba8(30, 140, 90, 255)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut spans = ondin_core::node::CharSpans::default();
+        spans.set(
+            0..2,
+            ondin_core::CharAttr::Color(Some(Color::from_rgba8(160, 60, 40, 255))),
+            &style,
+        );
+        vec![
+            Operation::CreateNode {
+                id: t,
+                parent: g,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "Hello".into(),
+                    style: Box::new(style),
+                    spans,
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: Default::default(),
+                    sizing: ondin_core::TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: Some(Affine::translate((10.0, 20.0))),
+                name: None,
+            },
+            Operation::SetFills {
+                id: t,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(60, 60, 150, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ]
+    };
+    let folded = filtered_leaf(leaf, filters, false);
+    let buffered = filtered_leaf(leaf, filters, true);
+    assert_ne!(
+        folded,
+        filtered_leaf(leaf, Filters::default(), false),
+        "fixture: the filters change the type"
+    );
+    let worst = premul_diff(&folded, &buffered);
+    assert!(worst <= 2, "a span's colour: off by {worst}");
+}
+
+/// A gradient is no ink a filter folds into: the layer is buffered and draws
+/// what the group's buffer draws.
+///
+/// flip: `inks_of` taking a gradient's first stop as a solid → fails at "a
+/// gradient", the filter gone.
+#[test]
+fn a_gradient_is_buffered_not_folded() {
+    let filters = Filters {
+        brightness: 0.6,
+        ..Filters::default()
+    };
+    let leaf = |g, r| {
+        vec![
+            Operation::CreateNode {
+                id: r,
+                parent: g,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(60.0, 40.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((20.0, 30.0))),
+                name: None,
+            },
+            Operation::SetFills {
+                id: r,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Gradient(
+                        ondin_core::peniko::Gradient::new_linear((20.0, 0.0), (80.0, 0.0))
+                            .with_stops([
+                                (0.0_f32, Color::from_rgba8(240, 200, 40, 255)),
+                                (1.0_f32, Color::from_rgba8(40, 120, 240, 255)),
+                            ])
+                            .into(),
+                    )
+                    .into(),
+                    visible: true,
+                }]),
+            },
+        ]
+    };
+    let worst = premul_diff(
+        &filtered_leaf(leaf, filters, false),
+        &filtered_leaf(leaf, filters, true),
+    );
+    assert!(worst <= 2, "a gradient: off by {worst}");
+}

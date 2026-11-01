@@ -1749,13 +1749,13 @@ impl OndinApp {
     fn spawn_export(
         &mut self,
         label: String,
-        work: impl FnOnce(&AtomicBool) -> Delivered + Send + 'static,
+        work: impl FnOnce(&ExportFlags) -> Delivered + Send + 'static,
     ) {
         let ctx = self.egui_ctx.clone();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = cancel.clone();
-        let job = crate::job::Job::spawn("ondin-export", &ctx, move || work(&flag));
-        self.exports.push(RunningExport { job, cancel, label });
+        let flags = Arc::new(ExportFlags::default());
+        let theirs = flags.clone();
+        let job = crate::job::Job::spawn("ondin-export", &ctx, move || work(&theirs));
+        self.exports.push(RunningExport { job, flags, label });
     }
 
     /// What the status bar says while exports run, `None` when none does: the
@@ -1773,12 +1773,12 @@ impl OndinApp {
 
     /// Cancel every running export: none writes a file it has not started
     /// writing. A render already under way finishes on its worker, unwritten, and
-    /// stays in [`Self::exports`] until it does, so quitting still waits for a
-    /// write in progress.
+    /// stays in [`Self::exports`] until it does; quitting waits only for a write
+    /// in progress.
     pub(crate) fn cancel_exports(&mut self) {
         let mut n = 0;
         for e in self.exports.iter().filter(|e| !e.cancelled()) {
-            e.cancel.store(true, Ordering::Relaxed);
+            e.flags.cancel.store(true, Ordering::SeqCst);
             n += 1;
         }
         match n {
@@ -1788,11 +1788,15 @@ impl OndinApp {
         }
     }
 
-    /// Wait for every export still running: quitting mid-write would leave a
-    /// file torn. Their reports have nowhere left to go.
+    /// Wait for every export that will still write: quitting mid-write would
+    /// leave a file torn. A cancelled one that has not begun writing never will,
+    /// so its render is left to die with the process. Their reports have nowhere
+    /// left to go.
     pub(crate) fn drain_exports(&mut self) {
         for e in std::mem::take(&mut self.exports) {
-            let _ = e.job.wait();
+            if !e.cancelled() || e.flags.writing.load(Ordering::SeqCst) {
+                let _ = e.job.wait();
+            }
         }
     }
 
@@ -2110,10 +2114,13 @@ impl OndinApp {
                 asker,
                 ..Delivered::empty(path.parent().map(Into::into).unwrap_or_default())
             };
+            if cancel.cancelled() {
+                return Delivered::cancelled();
+            }
             let made =
                 ondin_export::pdf::pdf_pages(&doc, &resolved, &pages, ondin_core::ExportText::Live);
             turn.wait();
-            if cancel.load(Ordering::Relaxed) {
+            if !cancel.begin_write() {
                 return Delivered::cancelled();
             }
             let Some(export) = made else {
@@ -2229,10 +2236,15 @@ fn write_code(
     subjects: &[NodeId],
     target: ondin_export::code::Target,
     path: &std::path::Path,
-    cancel: &AtomicBool,
+    cancel: &ExportFlags,
 ) -> Delivered {
+    if cancel.cancelled() {
+        return Delivered::cancelled();
+    }
+    // A kit's components are laid out again on this thread, in the document's faces.
+    ondin_core::text::register_font_data(&resolved.text_fonts());
     let export = target.export(doc, resolved, subjects);
-    if cancel.load(Ordering::Relaxed) {
+    if !cancel.begin_write() {
         return Delivered::cancelled();
     }
     let written = export.zip().and_then(|bytes| std::fs::write(path, bytes));
@@ -2519,17 +2531,44 @@ impl Delivered {
     }
 }
 
-/// An export on its worker, with the flag that cancels it and what the status
+/// An export on its worker, with the flags it shares with it and what the status
 /// bar calls it.
 pub(crate) struct RunningExport {
     job: crate::job::Job<Delivered>,
-    cancel: Arc<AtomicBool>,
+    flags: Arc<ExportFlags>,
     label: String,
 }
 
 impl RunningExport {
     fn cancelled(&self) -> bool {
-        self.cancel.load(Ordering::Relaxed)
+        self.flags.cancelled()
+    }
+}
+
+/// What the UI thread and an export's worker share: the UI sets `cancel`, the
+/// worker sets `writing` once it has committed to writing, so quitting knows
+/// which cancelled exports it must still wait for.
+#[derive(Default)]
+pub(crate) struct ExportFlags {
+    cancel: AtomicBool,
+    writing: AtomicBool,
+}
+
+impl ExportFlags {
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+
+    /// Claim the write: `false` when the export is cancelled, which then writes
+    /// nothing. Marked before the check, so a cancel that lands between the two
+    /// either stops the write or finds it marked.
+    fn begin_write(&self) -> bool {
+        self.writing.store(true, Ordering::SeqCst);
+        if self.cancelled() {
+            self.writing.store(false, Ordering::SeqCst);
+            return false;
+        }
+        true
     }
 }
 
@@ -2550,12 +2589,12 @@ fn deliver(
     files: &[PlannedFile],
     destination: Destination,
     turn: &Turn,
-    cancel: &AtomicBool,
+    cancel: &ExportFlags,
 ) -> Delivered {
     let mut rendered: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
     let mut skipped = 0usize;
     for f in files {
-        if cancel.load(Ordering::Relaxed) {
+        if cancel.cancelled() {
             return Delivered::cancelled();
         }
         match ondin_export::plan::render(doc, resolved, f) {
@@ -2574,7 +2613,7 @@ fn deliver(
     }
     // Asked after the wait too: an earlier export can hold the turn a while.
     turn.wait();
-    if cancel.load(Ordering::Relaxed) {
+    if !cancel.begin_write() {
         return Delivered::cancelled();
     }
     // The folder arm owes a replacement count (§15 D636): a File or Archive was
@@ -4055,16 +4094,58 @@ mod code_export_tests {
             &subjects,
             Target::React,
             &zip,
-            &AtomicBool::new(false),
+            &ExportFlags::default(),
         );
         app.land_export(d);
         assert!(
             std::fs::metadata(&zip).is_ok_and(|m| m.len() > 0),
             "the zip"
         );
+        // Cancelled before it starts, it writes nothing.
+        let early = dir.join("Early.zip");
+        let flags = ExportFlags::default();
+        flags.cancel.store(true, Ordering::SeqCst);
+        let d = write_code(
+            &app.session.doc,
+            &app.session.resolved,
+            &subjects,
+            Target::React,
+            &early,
+            &flags,
+        );
+        assert!(d.cancelled && !early.exists(), "nothing written");
         assert_eq!(app.session.status().text, "Exported React code");
         assert_eq!(app.prefs.export_dir.as_deref(), Some(dir.as_path()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Quitting does not wait for a cancelled export's render, which will write
+    /// nothing, but does for one that has begun writing.
+    /// flip: `drain_exports` waiting on every job → fails at "not waited for".
+    #[test]
+    fn quitting_skips_a_cancelled_render() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let (_keep, never) = std::sync::mpsc::channel::<()>();
+        app.spawn_export("slow.pdf".into(), move |_| {
+            let _ = never.recv_timeout(std::time::Duration::from_secs(5));
+            Delivered::cancelled()
+        });
+        app.cancel_exports();
+        let start = std::time::Instant::now();
+        app.drain_exports();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "not waited for"
+        );
+
+        let flags = ExportFlags::default();
+        assert!(flags.begin_write(), "a live export writes");
+        flags.cancel.store(true, Ordering::SeqCst);
+        assert!(flags.writing.load(Ordering::SeqCst), "and stays waited for");
+        let late = ExportFlags::default();
+        late.cancel.store(true, Ordering::SeqCst);
+        assert!(!late.begin_write() && !late.writing.load(Ordering::SeqCst));
     }
 
     /// The status line names the target and counts each list the report holds.

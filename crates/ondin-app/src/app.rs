@@ -1867,7 +1867,6 @@ impl eframe::App for OndinApp {
         self.watch_kits(&ctx);
         self.poll_simplify();
         self.poll_imports();
-        self.poll_png_copy();
         if !self.focus {
             self.inspector_panel(&ctx);
             self.path_bar(&ctx);
@@ -1896,6 +1895,8 @@ impl eframe::App for OndinApp {
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
         self.settings_ui(&ctx);
         self.cheatsheet_ui(&ctx);
+        // Last, once every field and verb that copies text this frame has.
+        self.poll_png_copy(&ctx);
 
         // A button click's commit requests no repaint of its own.
         if self.pending_edit.is_some() {
@@ -4252,11 +4253,21 @@ impl OndinApp {
         self.session.info("Copying as PNG…");
     }
 
-    /// Put *Copy as PNG*'s picture on the clipboard once its render lands.
-    fn poll_png_copy(&mut self) {
+    /// Put *Copy as PNG*'s picture on the clipboard once its render lands — unless
+    /// something was copied since, which the picture would overwrite.
+    fn poll_png_copy(&mut self, ctx: &egui::Context) {
         let Some((job, _)) = &self.png_copy else {
             return;
         };
+        let copied = ctx.output(|o| {
+            o.commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::CopyText(_)))
+        });
+        if copied {
+            self.png_copy = None;
+            return;
+        }
         let raster = match job.poll() {
             Ok(None) => return,
             Ok(Some(raster)) => raster,
@@ -9558,6 +9569,43 @@ mod copy_as_png_tests {
             "Copying to the clipboard is off in this build"
         );
         assert!(app.png_copy.is_none(), "no render");
+    }
+
+    /// A copy made while *Copy as PNG* still renders wins: the picture is dropped
+    /// rather than written over the newer copy when it lands.
+    /// flip: `poll_png_copy` without its `CopyText` check → fails at "dropped".
+    #[test]
+    fn a_newer_copy_drops_a_png_still_rendering() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let (doc, _, rect) = one_rect();
+        app.session.doc = doc;
+        app.session.resolved = Resolved::rebuild(&app.session.doc);
+        app.session.selection.set_one(rect);
+        let (_keep, never) = std::sync::mpsc::channel::<()>();
+        let pending = crate::job::Job::spawn("test-png", &ctx, move || {
+            let _ = never.recv();
+            None
+        });
+        app.png_copy = Some((pending, 1));
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = |events| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input(Vec::new()), |ui| {
+            eframe::App::ui(&mut app, ui, &mut frame)
+        });
+        assert!(app.png_copy.is_some(), "fixture: still rendering");
+        let _ = ctx.run_ui(input(vec![egui::Event::Copy]), |ui| {
+            eframe::App::ui(&mut app, ui, &mut frame)
+        });
+        assert!(app.png_copy.is_none(), "dropped");
     }
 
     /// *Copy as PNG* hands the clipboard raw RGBA at one device pixel per world unit.

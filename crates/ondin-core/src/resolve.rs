@@ -21,11 +21,13 @@ use crate::op::DirtySet;
 use crate::text::{self, TextLayout};
 use kurbo::{Affine, BezPath, Rect};
 use peniko::FontData;
-use rstar::{AABB, RTree, RTreeObject};
+use rstar::{AABB, RTreeObject};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
+mod page_index;
 mod shaper;
+use page_index::PageIndex;
 use shaper::Shaper;
 
 /// R-tree leaf: the world bounds of one indexable node.
@@ -610,7 +612,7 @@ pub struct Resolved {
     failed: FxHashSet<NodeId>,
     /// One tree per page, keyed by the page's root: a query is always about
     /// one canvas.
-    index: FxHashMap<NodeId, RTree<BoundsEntry>>,
+    index: FxHashMap<NodeId, PageIndex>,
     /// The entry `index` holds for each node and the page whose tree holds it, so
     /// `update` takes out exactly what it put in rather than rebuilding the trees.
     indexed: FxHashMap<NodeId, (NodeId, BoundsEntry)>,
@@ -1555,7 +1557,7 @@ fn page_in(
 }
 
 /// What `index` holds, by node: the `Resolved::indexed` map.
-fn held(index: &FxHashMap<NodeId, RTree<BoundsEntry>>) -> FxHashMap<NodeId, (NodeId, BoundsEntry)> {
+fn held(index: &FxHashMap<NodeId, PageIndex>) -> FxHashMap<NodeId, (NodeId, BoundsEntry)> {
     index
         .iter()
         .flat_map(|(page, tree)| tree.iter().map(|e| (e.id, (*page, e.clone()))))
@@ -1572,7 +1574,7 @@ fn held(index: &FxHashMap<NodeId, RTree<BoundsEntry>>) -> FxHashMap<NodeId, (Nod
 fn build_index(
     doc: &Document,
     world_bounds: &FxHashMap<NodeId, Rect>,
-) -> FxHashMap<NodeId, RTree<BoundsEntry>> {
+) -> FxHashMap<NodeId, PageIndex> {
     doc.page_ids()
         .map(|page| {
             let entries: Vec<BoundsEntry> = crate::subtree_nodes(doc, &[page])
@@ -1583,7 +1585,7 @@ fn build_index(
                     Some(entry(id, r))
                 })
                 .collect();
-            (page, RTree::bulk_load(entries))
+            (page, PageIndex::bulk_load(entries))
         })
         .collect()
 }

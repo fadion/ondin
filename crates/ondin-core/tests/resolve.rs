@@ -4203,3 +4203,54 @@ fn equal_texts_share_a_layout_and_each_text_keeps_its_own() {
     each_is_its_own(&res, &doc);
     assert_resolved_matches_rebuild(&doc, &res, 0);
 }
+
+/// **An update can index into a page the rebuild bulk-loaded.** A page of 100
+/// scattered frames — a size at which the bulk loader puts leaves at uneven
+/// depths — then a new rect per commit, each commit small enough to patch the
+/// index entry by entry rather than rebuild it, and the index still matches a
+/// rebuild. Opening a large file crashed in exactly this insert.
+///
+/// flip: `PageIndex::insert` inserting into its bulk-loaded tree → panics inside
+/// `rstar` ("This is a bug in rstar") during the creates.
+#[test]
+fn creates_after_a_rebuild_patch_a_bulk_loaded_index() {
+    let at = |i: u64| ((i * 7919 % 10_007) as f64, (i * 104_729 % 10_009) as f64);
+    let mut ids = IdSource::new(0xB01C);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let frame = |w| NodeKind::Artboard {
+        size: Size::new(w, w),
+        corner_radii: RoundedRectRadii::default(),
+        corner_smoothing: 0.0,
+    };
+    // Each new rect goes into a frame of its own, so a create dirties that frame
+    // and not the page, which would take the whole page into the batch.
+    let frames: Vec<NodeId> = (0..100u64)
+        .map(|i| {
+            let id = ids.mint();
+            let t = Affine::translate(at(i));
+            create(&mut doc, id, root, i as usize, frame(5.0), t);
+            id
+        })
+        .collect();
+    let mut res = Resolved::rebuild(&doc);
+    for (k, parent) in frames.iter().enumerate().take(30) {
+        let id = ids.mint();
+        let s = k as u64 + 1_000_000;
+        let dirty = doc
+            .apply(&Transaction(vec![Operation::CreateNode {
+                id,
+                parent: *parent,
+                index: 0,
+                kind: rect(5.0, 5.0),
+                transform: Some(
+                    Affine::translate(at(s)) * Affine::translate(at(k as u64)).inverse(),
+                ),
+                name: None,
+            }]))
+            .unwrap()
+            .dirty;
+        res.update(&doc, &dirty);
+    }
+    assert_resolved_matches_rebuild(&doc, &res, 0);
+}

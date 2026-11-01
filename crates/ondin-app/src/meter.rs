@@ -49,13 +49,21 @@ impl Meter {
             return left;
         }
         let cpu_time = process_cpu_time();
-        if let (Some(at), Some(was), Some(is)) = (self.read_at, self.cpu_time, cpu_time) {
-            self.cpu = Some(cpu_share(
+        // Two periods without a tick is a meter that was not drawn (the library,
+        // present mode): a share over that gap would average the absence, so the
+        // reading starts afresh, as after `stop`.
+        let fresh = self
+            .read_at
+            .is_some_and(|at| now.duration_since(at) > 2 * PERIOD);
+        self.cpu = match (self.read_at, self.cpu_time, cpu_time) {
+            (Some(at), Some(was), Some(is)) if !fresh => Some(cpu_share(
                 is.saturating_sub(was),
                 now.duration_since(at),
                 cores(),
-            ));
-        }
+            )),
+            _ if fresh => None,
+            _ => self.cpu,
+        };
         self.read_at = Some(now);
         self.cpu_time = cpu_time;
         self.memory = process_memory();
@@ -306,5 +314,22 @@ mod tests {
         assert_eq!(m.tick(t0), PERIOD, "not due again at once");
         m.tick(t0 + PERIOD);
         assert!(m.cpu.is_some(), "a share after a period");
+    }
+
+    /// A meter not drawn for a while starts afresh rather than showing the
+    /// average over the time it was hidden, and reads a share a period later.
+    /// flip: `tick` without its `fresh` arm → fails at "afresh".
+    #[test]
+    fn a_meter_back_from_hiding_starts_afresh() {
+        let mut m = Meter::default();
+        let t0 = Instant::now();
+        m.tick(t0);
+        m.tick(t0 + PERIOD);
+        assert!(m.cpu.is_some(), "the fixture has a share");
+        let back = t0 + 10 * PERIOD;
+        m.tick(back);
+        assert!(m.cpu.is_none(), "afresh");
+        m.tick(back + PERIOD);
+        assert!(m.cpu.is_some(), "and a share a period on");
     }
 }

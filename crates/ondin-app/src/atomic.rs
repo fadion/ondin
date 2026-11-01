@@ -104,8 +104,40 @@ pub fn forget(path: &Path) {
 /// An `io::Error` carries no path. `Error::new` keeps `kind()` and drops
 /// `raw_os_error()`, which is already in the OS's message text. The verbs are in a
 /// user's words ("could not replace"); `flush` is `sync_all`.
-fn at(e: std::io::Error, step: &str, on: &Path) -> std::io::Error {
-    std::io::Error::new(e.kind(), format!("could not {step} {}: {e}", on.display()))
+fn at(e: std::io::Error, step: &'static str, on: &Path) -> std::io::Error {
+    let failed = Failed {
+        step,
+        on: on.to_path_buf(),
+        cause: e.to_string(),
+    };
+    std::io::Error::new(e.kind(), failed)
+}
+
+/// A step of [`fn@write`] that failed, kept apart from its path so a message can
+/// leave the path out ([`without_path`]).
+#[derive(Debug)]
+struct Failed {
+    step: &'static str,
+    on: PathBuf,
+    cause: String,
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Failed { step, on, cause } = self;
+        write!(f, "could not {step} {}: {cause}", on.display())
+    }
+}
+
+impl std::error::Error for Failed {}
+
+/// `e` as a message naming no file: a failed [`fn@write`] says its step and the
+/// OS's error without the path; any other error is its own message.
+pub fn without_path(e: &std::io::Error) -> String {
+    match e.get_ref().and_then(|i| i.downcast_ref::<Failed>()) {
+        Some(Failed { step, cause, .. }) => format!("could not {step} the file: {cause}"),
+        None => e.to_string(),
+    }
 }
 
 /// The suffix every temp file this module writes ends with.

@@ -3419,6 +3419,10 @@ impl OndinApp {
             self.session.info("Select main components to combine");
             return;
         };
+        if crate::private::on() {
+            self.session.info(crate::private::DECLINE_COMBINE);
+            return;
+        }
         // Said before `variant::combine` refuses it as a bare `WrongKindForOp`.
         if !ondin_core::variant::one_kind(&self.session.doc, &mains) {
             self.session.fail(crate::menu::COMBINE_MIXED);
@@ -5194,6 +5198,7 @@ impl OndinApp {
                 }
             }
             Err(e) => {
+                let e = crate::private::io_error(&e);
                 self.session.fail(format!("Save failed: {e}"));
                 return false;
             }
@@ -5209,7 +5214,10 @@ impl OndinApp {
                     Ok(Some(_)) => self.session.info("Version saved"),
                     // No id (opened from outside the library): nothing to pin to.
                     Ok(None) => {}
-                    Err(e) => self.session.fail(format!("Version failed: {e}")),
+                    Err(e) => {
+                        let e = crate::private::io_error(&e);
+                        self.session.fail(format!("Version failed: {e}"))
+                    }
                 }
             }
         }
@@ -5250,6 +5258,7 @@ impl OndinApp {
                 Some(path)
             }
             Err(e) => {
+                let e = crate::private::io_error(&e);
                 self.session.fail(format!("Could not create the file: {e}"));
                 None
             }
@@ -5412,6 +5421,7 @@ impl OndinApp {
                 // No latch, unlike the snapshot's: each failed save is reported.
                 Done::SaveFailed(e) => {
                     self.session.save_failed();
+                    let e = crate::private::io_error(&e);
                     self.session.fail(format!("Save failed: {e}"));
                 }
             }
@@ -12086,6 +12096,40 @@ mod library_wiring_tests {
         );
         app.disk_settle();
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// In private mode a failed save, by hand or by autosave, says why without the
+    /// document's path, which holds its name and its project's.
+    /// flip: `private::io_error` answering `e.to_string()` → fails at "by hand".
+    #[test]
+    fn a_failed_save_names_no_file_in_private_mode() {
+        let ctx = egui::Context::default();
+        let root = temp_root("private-save-fails");
+        let mut app = app_at(&ctx, root.clone());
+        let blocked = root.join("Zqxsecret doc.ondin");
+        std::fs::create_dir_all(&blocked).unwrap();
+        app.session.mark_saved(blocked.clone());
+        app.session.mark_unsaved();
+        assert!(!app.save_file(false), "the fixture's save fails");
+        let status = app.session.status().text.clone();
+        assert!(status.contains("Zqxsecret"), "control, names it: {status}");
+        crate::private::set(true);
+
+        // A pass apart each, or the status line joins their messages.
+        app.session.next_status_pass();
+        assert!(!app.save_file(false), "the fixture's save fails");
+        let by_hand = app.session.status().text.clone();
+        app.session.next_status_pass();
+        arm_autosave(&mut app);
+        app.autosave_tick(&ctx);
+        app.disk_settle();
+        let autosaved = app.session.status().text.clone();
+        crate::private::set(false);
+        let _ = std::fs::remove_dir_all(&root);
+        for (how, said) in [("by hand", by_hand), ("autosaved", autosaved)] {
+            assert!(said.starts_with("Save failed"), "{how}: {said}");
+            assert!(!said.contains("Zqxsecret"), "{how}: {said}");
+        }
     }
 
     /// A writer that dies mid-save is noticed by the frame: with the worker gone no

@@ -1970,7 +1970,8 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                     cx.combine_refused.is_some(),
                     cx.combine_refused.unwrap_or(""),
                 )
-                .dim_if(locked, why),
+                .dim_if(locked, why)
+                .dim_if(crate::private::on(), crate::private::DECLINE_COMBINE),
         );
     }
     match cx.role {

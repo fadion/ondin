@@ -127,8 +127,9 @@ pub enum Done {
     Forgot,
     /// The document at `path` now holds revision `at`.
     Saved { path: PathBuf, at: u64 },
-    /// It does not, and this is why.
-    SaveFailed(String),
+    /// It does not, and this is why. The error itself, not its message: the
+    /// status line words it, without the path in private mode.
+    SaveFailed(std::io::Error),
 }
 
 impl Writer {
@@ -173,7 +174,7 @@ impl Writer {
                                 }
                                 Done::Saved { path, at }
                             }
-                            Err(e) => Done::SaveFailed(e.to_string()),
+                            Err(e) => Done::SaveFailed(e),
                         }
                     }
                 };
@@ -227,7 +228,7 @@ impl Writer {
         // write of that kind this session is lost, and `settle` finding an empty
         // queue says nothing, so a `Done` is the only thing a status line reads.
         let failure = match &job {
-            Job::Document { .. } => Done::SaveFailed(WORKER_STOPPED.to_string()),
+            Job::Document { .. } => Done::SaveFailed(std::io::Error::other(WORKER_STOPPED)),
             _ => Done::SnapshotFailed(WORKER_STOPPED.to_string()),
         };
         match self.tx.as_ref().map(|tx| tx.send(job)) {
@@ -266,7 +267,7 @@ impl Writer {
                     if self.in_flight > 0 {
                         self.in_flight = 0;
                         out.push(Done::SnapshotFailed(WORKER_DIED.to_string()));
-                        out.push(Done::SaveFailed(WORKER_DIED.to_string()));
+                        out.push(Done::SaveFailed(std::io::Error::other(WORKER_DIED)));
                     }
                     break;
                 }
@@ -300,7 +301,7 @@ impl Writer {
                 Err(_) => {
                     self.in_flight = 0;
                     out.push(Done::SnapshotFailed(WORKER_DIED.to_string()));
-                    out.push(Done::SaveFailed(WORKER_DIED.to_string()));
+                    out.push(Done::SaveFailed(std::io::Error::other(WORKER_DIED)));
                     break;
                 }
             }

@@ -40,6 +40,21 @@ pub(crate) const DECLINE_LIST: &str = "Leave private mode to see the names";
 /// What a search over names says while it declines.
 pub(crate) const DECLINE_SEARCH: &str = "Leave private mode to search names";
 
+/// What *Combine as variants* says while it declines: each main's name would
+/// become a variant value, which the variants card draws.
+pub(crate) const DECLINE_COMBINE: &str =
+    "Leave private mode to combine: variants take their mains' names";
+
+/// A failed write as the status line says it: without the file's path while
+/// names are masked, since a document's path holds its name and its project's.
+pub(crate) fn io_error(e: &std::io::Error) -> String {
+    if on() {
+        crate::atomic::without_path(e)
+    } else {
+        e.to_string()
+    }
+}
+
 /// The accent *Private mode* pill a top bar shows while names are masked, so
 /// whoever is sharing the screen can see it is on; `true` when it was clicked,
 /// which turns private mode off. Draws nothing while it is off. Worded as the
@@ -153,9 +168,12 @@ mod leak {
     const SECRET: &str = "Zqxsecret";
 
     /// The app in the editor on a document whose layers, pages, components and
-    /// file all carry [`SECRET`], private mode on, a layer selected. Returns it
-    /// and the ids of a frame, a rect in it and an instance.
-    fn fixture(ctx: &egui::Context) -> (OndinApp, [NodeId; 3]) {
+    /// file all carry [`SECRET`], private mode on, a layer selected. The main
+    /// holds a nested instance of another main, bound to a swap property whose
+    /// filter is that main's name; a set holds two variant mains. Returns it and
+    /// the ids of a frame, a rect in it, an instance, the main and the set.
+    fn fixture(ctx: &egui::Context) -> (OndinApp, [NodeId; 5]) {
+        use ondin_core::variant::{PropKind, Property, VariantProp, VariantSet};
         let mut app = OndinApp::headless(ctx);
         app.view = View::Editor;
         app.show_minimap = true;
@@ -168,6 +186,18 @@ mod leak {
             ids.mint(),
             ids.mint(),
             ids.mint(),
+        );
+        let (icons, slot, set, small, large) =
+            (ids.mint(), ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let swap = ondin_core::Keyed::new(
+            ids.mint_item(),
+            Property {
+                name: "Icon".into(),
+                kind: PropKind::Swap,
+                bound: vec![slot],
+                filter: format!("{SECRET} Icons"),
+                preferred: Vec::new(),
+            },
         );
         let node = |id, parent, index, kind, name: &str| Operation::CreateNode {
             id,
@@ -217,10 +247,52 @@ mod leak {
                     id: main,
                     component: true,
                 },
-                node(copy, page, 2, frame_kind(), "button"),
+                node(icons, page, 2, frame_kind(), "Icons / Star"),
+                Operation::SetComponent {
+                    id: icons,
+                    component: true,
+                },
+                node(slot, main, 0, frame_kind(), "icon"),
+                Operation::SetLink {
+                    id: slot,
+                    link: Some(icons),
+                },
+                Operation::SetProperties {
+                    id: main,
+                    props: vec![swap],
+                },
+                node(copy, page, 3, frame_kind(), "button"),
                 Operation::SetLink {
                     id: copy,
                     link: Some(main),
+                },
+                node(set, page, 4, frame_kind(), "set"),
+                node(small, set, 0, frame_kind(), "small"),
+                node(large, set, 1, frame_kind(), "large"),
+                Operation::SetComponent {
+                    id: small,
+                    component: true,
+                },
+                Operation::SetComponent {
+                    id: large,
+                    component: true,
+                },
+                Operation::SetVariantSet {
+                    id: set,
+                    set: Some(VariantSet {
+                        props: vec![VariantProp {
+                            name: "Size".into(),
+                            values: vec!["Small".into(), "Large".into()],
+                        }],
+                    }),
+                },
+                Operation::SetVariant {
+                    id: small,
+                    values: vec!["Small".into()],
+                },
+                Operation::SetVariant {
+                    id: large,
+                    values: vec!["Large".into()],
                 },
                 Operation::AddPage {
                     id: page2,
@@ -235,13 +307,25 @@ mod leak {
         app.session.path = Some(std::env::temp_dir().join(format!("{SECRET} doc.ondin")));
         app.session.selection.set_one(rect);
         app.prefs.private = true;
-        (app, [frame, rect, copy])
+        (app, [frame, rect, copy, main, set])
     }
 
     /// Every string one whole frame of `app` draws, `events` delivered to it. A
     /// window tall enough for the whole inspector: a card below the fold is
     /// culled, and would pass unread.
     fn drawn(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) -> Vec<String> {
+        drawn_at(ctx, app, events)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    /// [`drawn`], each string with the rect it was drawn in.
+    fn drawn_at(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -253,9 +337,11 @@ mod leak {
         };
         let out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
         let mut texts = Vec::new();
-        fn walk(shape: &egui::Shape, texts: &mut Vec<String>) {
+        fn walk(shape: &egui::Shape, texts: &mut Vec<(String, egui::Rect)>) {
             match shape {
-                egui::Shape::Text(t) => texts.push(t.galley.text().to_string()),
+                egui::Shape::Text(t) => {
+                    texts.push((t.galley.text().to_string(), t.visual_bounding_rect()))
+                }
                 egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts)),
                 _ => {}
             }
@@ -265,10 +351,23 @@ mod leak {
         }
         for v in out.viewport_output.values() {
             for c in &v.commands {
-                texts.push(format!("{c:?}"));
+                texts.push((format!("{c:?}"), egui::Rect::NOTHING));
             }
         }
         texts
+    }
+
+    /// Press and release at `at`, the pointer moved there first.
+    fn click(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        drawn(ctx, app, vec![egui::Event::PointerMoved(at)]);
+        drawn(ctx, app, vec![press(true)]);
+        drawn(ctx, app, vec![press(false)]);
     }
 
     /// Several frames of `app`, so what opens on one frame is drawn on the next;
@@ -350,12 +449,14 @@ mod leak {
     /// component's or document's name, whichever surface is open.
     ///
     /// flip: `set` ignoring its argument (names never masked) → fails at the
-    /// editor's own frame.
+    /// editor's own frame; `property_row` drawing the filter field in private
+    /// mode → "main selected"; `preferred_rows` naming a main by `.name()` →
+    /// "swap picker open".
     #[test]
     fn no_surface_draws_a_name_in_private_mode() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        let (mut app, [_, rect, copy]) = fixture(&ctx);
+        let (mut app, [_, rect, copy, main, set]) = fixture(&ctx);
         // Control: the fixture's names are drawn when private mode is off.
         app.prefs.private = false;
         assert!(
@@ -372,6 +473,42 @@ mod leak {
             "instance selected",
             |app, _| app.session.selection.set_one(copy),
             |app| app.session.selection.set_one(rect),
+        ));
+        // The main's card lists its swap property, whose filter is a main's name.
+        found.extend(surface(
+            c,
+            &mut app,
+            "main selected",
+            |app, _| app.session.selection.set_one(main),
+            |app| app.session.selection.set_one(rect),
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "set selected",
+            |app, _| app.session.selection.set_one(set),
+            |app| app.session.selection.set_one(rect),
+        ));
+        // The swap property's picker, clicked open, lists mains by name.
+        found.extend(surface(
+            c,
+            &mut app,
+            "swap picker open",
+            |app, ctx| {
+                app.session.selection.set_one(main);
+                drawn(ctx, app, Vec::new());
+                let at = drawn_at(ctx, app, Vec::new())
+                    .into_iter()
+                    .find(|(t, _)| t == "Add a preferred main…")
+                    .expect("the swap property's picker")
+                    .1
+                    .center();
+                click(ctx, app, at);
+            },
+            |app| {
+                egui::Popup::close_all(c);
+                app.session.selection.set_one(rect);
+            },
         ));
         found.extend(surface(
             c,
@@ -518,6 +655,35 @@ mod leak {
             found.is_empty(),
             "names drawn in private mode:\n{}",
             found.join("\n")
+        );
+    }
+
+    /// *Combine as variants* declines in private mode, since each main's name
+    /// would become a variant value the variants card draws; off, it combines.
+    /// flip: `combine_as_variants` without its `private::on()` check → fails at
+    /// "declined".
+    #[test]
+    fn combine_as_variants_declines_in_private_mode() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, [_, _, _, main, _]) = fixture(&ctx);
+        let page = app.session.page;
+        let icons = app.session.doc.get(page).unwrap().children()[2];
+        app.session.selection.set(vec![main, icons]);
+        super::set(true);
+        app.combine_as_variants();
+        super::set(false);
+        assert_eq!(
+            app.session.doc.get(main).and_then(|n| n.parent()),
+            Some(page),
+            "declined"
+        );
+        assert_eq!(app.session.status().text, super::DECLINE_COMBINE);
+        app.combine_as_variants();
+        assert_ne!(
+            app.session.doc.get(main).and_then(|n| n.parent()),
+            Some(page),
+            "control: combined with private mode off"
         );
     }
 

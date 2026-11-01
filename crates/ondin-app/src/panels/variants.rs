@@ -398,15 +398,23 @@ fn swap_picker(
                 let mut search = ui
                     .data(|d| d.get_temp::<String>(search_id))
                     .unwrap_or_default();
-                // The family list's search field (§15 D1085).
-                ui.add(
+                // The family list's search field.
+                let private = crate::private::on();
+                ui.add_enabled(
+                    !private,
                     egui::TextEdit::singleline(&mut search)
                         .margin(ui::SEARCH_PAD)
                         .desired_width(width.max(160.0))
-                        .hint_text("Search…"),
+                        .hint_text(if private {
+                            crate::private::DECLINE_SEARCH
+                        } else {
+                            "Search…"
+                        }),
                 );
                 ui.data_mut(|d| d.insert_temp(search_id, search.clone()));
-                let found = options(&search);
+                // Private mode lists every row: a search over hidden names would
+                // say what they hold.
+                let found = options(if private { "" } else { &search });
                 if found.is_empty() {
                     ui.label(
                         egui::RichText::new("No main matches")
@@ -2431,7 +2439,9 @@ impl OndinApp {
         let shows = n
             .link()
             .filter(|l| doc.get(*l).is_some_and(|l| l.component()));
-        let layer = n.name().to_string();
+        // A new property is named for the layer as drawn: in private mode its real
+        // name would show on the card, where property names stay visible.
+        let layer = crate::private::layer(doc, node).into_owned();
         let filter = shows
             .and_then(|m| doc.get(m))
             .map(|m| swap::suggested_filter(m.name()))
@@ -2704,6 +2714,26 @@ fn property_row(
                     .color(theme::text::muted()),
             );
             let w = ui.available_width();
+            // A filter is a prefix of a main's name, so private mode masks it
+            // and leaves it unedited.
+            if crate::private::on() {
+                let shown = if p.filter.is_empty() {
+                    "Every main"
+                } else {
+                    "Filtered by name"
+                };
+                ui.add_sized(
+                    egui::vec2(w, ui::CONTROL_H),
+                    egui::Label::new(
+                        egui::RichText::new(shown)
+                            .size(12.0)
+                            .color(theme::text::dim()),
+                    )
+                    .truncate(),
+                )
+                .on_hover_text("Leave private mode to see or edit the filter");
+                return;
+            }
             let id = ui.id().with(("prop-filter", owner, p.id));
             if let Some(f) = filter_field(ui, id, &p.filter, egui::vec2(w, ui::CONTROL_H)) {
                 edits.push(defer(move |cx| {
@@ -2822,7 +2852,7 @@ fn card_rule(ui: &mut egui::Ui) {
 }
 
 /// A new swap property on `owner` bound to the nested instance `slot`, named for
-/// it and filtered by the main it shows — the binding line's *New property…*
+/// it as drawn and filtered by the main it shows — the binding line's *New property…*
 /// for an *Instance* (§15 D983 (5)), from the Properties card's `+` menu (§15
 /// D1000, D1005).
 fn new_swap_property(
@@ -2838,7 +2868,8 @@ fn new_swap_property(
         .map(|m| swap::suggested_filter(m.name()))
         .unwrap_or_default();
     let mut props = doc.get(owner)?.props().to_vec();
-    let name = fresh_name(&props, n.name());
+    // For the slot as drawn, as `bind_line` names one.
+    let name = fresh_name(&props, &crate::private::layer(doc, slot));
     props.push(Keyed::new(
         ids.mint_item(),
         Property {
@@ -3009,6 +3040,111 @@ mod tests {
         assert_eq!(
             (made.name.as_str(), made.filter.as_str()),
             ("Icon", "Icons")
+        );
+    }
+
+    /// A new swap property is named for its slot as drawn, so in private mode
+    /// the card it is listed on shows no hidden name. `bind_line`'s *New
+    /// property…* takes the name the same way and is not driven here.
+    /// flip: `new_swap_property` naming it `n.name()` → fails at "masked".
+    #[test]
+    fn a_new_swap_property_takes_its_slots_masked_name() {
+        use ondin_core::Operation;
+        let mut ids = IdSource::new(0xC2);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (icons, owner, slot) = (ids.mint(), ids.mint(), ids.mint());
+        let frame = |id, parent, index, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: ondin_core::NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        let page = doc.first_page();
+        doc.apply(&Transaction(vec![
+            frame(icons, page, 0, "Acme / Star"),
+            Operation::SetComponent {
+                id: icons,
+                component: true,
+            },
+            frame(owner, page, 1, "Acme card"),
+            Operation::SetComponent {
+                id: owner,
+                component: true,
+            },
+            frame(slot, owner, 0, "Acme logo"),
+            Operation::SetLink {
+                id: slot,
+                link: Some(icons),
+            },
+        ]))
+        .unwrap();
+        crate::private::set(true);
+        let tx = new_swap_property(&doc, &mut ids, owner, slot).expect("a property");
+        crate::private::set(false);
+        let ondin_core::Operation::SetProperties { props, .. } = &tx.0[0] else {
+            panic!("the properties written: {tx:?}")
+        };
+        assert_eq!(props[0].name, "Instance 1", "masked");
+    }
+
+    /// In private mode the swap picker's search filters nothing: the open list
+    /// asks for every main, whatever is typed.
+    /// flip: `swap_picker` passing `&search` to `options` in private mode → fails
+    /// at "every main".
+    #[test]
+    fn the_swap_pickers_search_filters_nothing_in_private_mode() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let doc = ondin_core::Document::new(IdSource::new(0xC1).mint());
+        let salt = "private-swap-search";
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        let frame = |events: Vec<egui::Event>| {
+            asked.borrow_mut().clear();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let options = |s: &str| {
+                    asked.borrow_mut().push(s.to_string());
+                    Vec::new()
+                };
+                swap_picker(ui, salt, 200.0, "Pick", None, &doc, options, None);
+            });
+        };
+        let at = egui::pos2(40.0, 10.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        crate::private::set(true);
+        frame(vec![egui::Event::PointerMoved(at)]);
+        frame(vec![press(true)]);
+        frame(vec![press(false)]);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("swap-search", salt)), "Zqx".to_string()));
+        frame(Vec::new());
+        let masked = asked.borrow().clone();
+        crate::private::set(false);
+        frame(Vec::new());
+        let asked = asked.into_inner();
+        assert_eq!(asked, ["Zqx"], "control: the search reaches the list");
+        assert!(!masked.is_empty(), "the list opened");
+        assert!(
+            masked.iter().all(String::is_empty),
+            "every main: {masked:?}"
         );
     }
 

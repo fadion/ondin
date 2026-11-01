@@ -555,13 +555,22 @@ the first segment of a component's. It hides names, not content.
   names*. The History section is hidden, its steps carrying layer names.
 - **Doors that need the real name decline** with a toast: rename (`rename_selection`, and the
   inspector's layer and page name header, drawn masked), batch rename, page rename, the library's
-  document rename and *Edit project* (*Leave private mode to rename*), and *Import files* (*Leave
-  private mode to import*). Searches over names find nothing and say *Leave private mode to search
-  names*: the palette's layer search, the kit picker's and the library's, whose remembered searches
-  are hidden too.
+  document rename and *Edit project* (*Leave private mode to rename*), *Import files* (*Leave
+  private mode to import*) and *Combine as variants*, whose values would be the mains' names
+  (`private::DECLINE_COMBINE`). Searches over names find nothing and say *Leave private mode to search
+  names*: the palette's layer search, the kit picker's, the library's, whose remembered searches
+  are hidden too, and the swap picker's, which lists every main. A property made from a layer
+  (`bind_line`'s *New property…*, a new swap property) is named for the layer as drawn. A swap
+  property's filter, a prefix of a main's name, is drawn as *Filtered by name* and not edited.
+- **Failed writes name no file**: `atomic::write` keeps the path apart from its message, and the
+  status lines of a failed save, version, duplicate, move, restore, rename or new file go through
+  `private::io_error`, which leaves the path out. The library settings' list of files a migration
+  left behind masks their names.
 - **Known limits.** The OS save dialog an export opens prefills a file name made from the layer's or
   document's name; the export folder path in a toast is shown as is; a toast written before private
-  mode was turned on keeps its text until it fades.
+  mode was turned on keeps its text until it fades. No test reaches a tooltip: its ink never enters
+  `FullOutput::shapes`, so the masked tooltips (the tab's cut name, the crumb's, the minimap's frame
+  names, a kit card's back link) are held by review alone.
 
 ## Present mode (`present.rs`)
 
@@ -649,7 +658,8 @@ runs (`pages` names each frame's page, index for index).
   it. Each surface carries its own control (`surface`): with private mode off, opening it must draw a
   name the app did not draw without it, so a surface that is not drawn at all (culled below the
   fold, a card folded shut) fails rather than passing unread. `no_surface_draws_a_name_in_private_mode`
-  opens the editor with a layer and an instance selected, the palette empty and typed, a layer's
+  opens the editor with a layer, an instance, a main with a swap property and a variant set
+  selected, the swap property's picker open, the palette empty and typed, a layer's
   menu with its *Move to page* list open, the variables browser, the Export card, the contrast check,
   version history, the recovery and close cards and present mode;
   `no_kit_surface_draws_a_name_in_private_mode` an instance's kit card, the insert picker, *Kits

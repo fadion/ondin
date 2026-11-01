@@ -2925,7 +2925,10 @@ impl OndinApp {
                                 self.library.local.save();
                             }
                         }
-                        Err(e) => self.session.fail(format!("Duplicate failed: {e}")),
+                        Err(e) => {
+                            let e = crate::private::io_error(&e);
+                            self.session.fail(format!("Duplicate failed: {e}"))
+                        }
                     }
                 }
             }
@@ -2940,7 +2943,10 @@ impl OndinApp {
                             self.open_document_follows(&path, moved, |m| m.project = id);
                             self.library.refresh();
                         }
-                        Err(e) => self.session.fail(format!("Move failed: {e}")),
+                        Err(e) => {
+                            let e = crate::private::io_error(&e);
+                            self.session.fail(format!("Move failed: {e}"))
+                        }
                     }
                 }
                 self.dash.moving = None;
@@ -2957,7 +2963,10 @@ impl OndinApp {
                             self.open_document_follows(&path, moved, |m| m.project = id);
                             self.library.refresh();
                         }
-                        Err(e) => self.session.fail(format!("Restore failed: {e}")),
+                        Err(e) => {
+                            let e = crate::private::io_error(&e);
+                            self.session.fail(format!("Restore failed: {e}"))
+                        }
                     }
                 }
             }
@@ -3154,7 +3163,10 @@ impl OndinApp {
                 self.library.refresh();
                 self.open_path(&path);
             }
-            Err(e) => self.session.fail(format!("Could not create the file: {e}")),
+            Err(e) => {
+                let e = crate::private::io_error(&e);
+                self.session.fail(format!("Could not create the file: {e}"))
+            }
         }
     }
 
@@ -3242,7 +3254,10 @@ impl OndinApp {
                 self.open_document_follows(&path, moved, |m| m.name = Some(name.to_string()));
                 self.library.refresh();
             }
-            Err(e) => self.session.fail(format!("Rename failed: {e}")),
+            Err(e) => {
+                let e = crate::private::io_error(&e);
+                self.session.fail(format!("Rename failed: {e}"))
+            }
         }
     }
 
@@ -3925,11 +3940,12 @@ impl OndinApp {
                 );
                 settings::caption(ui, &report.from.display().to_string());
                 // Capped ([`STRANDED_ROWS`]) and the remainder counted, not scrolled.
-                for path in report.failed.iter().take(STRANDED_ROWS) {
+                for (i, path) in report.failed.iter().take(STRANDED_ROWS).enumerate() {
                     let name = path
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.display().to_string());
+                    let name = crate::private::document(&name, i);
                     settings::caption(ui, &format!("• {name}"));
                 }
                 if let Some(rest) = report.failed.len().checked_sub(STRANDED_ROWS)

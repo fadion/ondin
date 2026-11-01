@@ -73,6 +73,11 @@ pub enum PenpotError {
 /// The id Penpot gives every page's root frame.
 const ROOT: &str = "00000000-0000-0000-0000-000000000000";
 
+/// How deep shapes may nest before the rest is left out. Shapes link by id, so
+/// nothing in the JSON bounds the depth, and each level is a stack frame on the
+/// reading worker; Penpot's own files nest a few dozen deep at most.
+const MAX_NESTING: usize = 128;
+
 /// Whether `bytes` are Penpot's older binary export rather than a zip; the
 /// version `crate::penpot_v1` reads is told apart by `penpot_v1::is_binfile`.
 pub fn is_old_format(bytes: &[u8]) -> bool {
@@ -374,7 +379,7 @@ impl Builder<'_> {
             if let Some(root) = root {
                 let mut placed = 0;
                 for child in &child_ids(&root) {
-                    placed += usize::from(self.shape(child, id, placed, Affine::IDENTITY));
+                    placed += usize::from(self.shape(child, id, placed, Affine::IDENTITY, 1));
                 }
             }
         }
@@ -382,12 +387,33 @@ impl Builder<'_> {
     }
 
     /// One shape and what it holds, at `index` under `parent`, whose world
-    /// placement is `parent_world`. False when it was left out, so the caller's
-    /// next sibling takes the same index.
-    fn shape(&mut self, sid: &str, parent: NodeId, index: usize, parent_world: Affine) -> bool {
+    /// placement is `parent_world`, `depth` levels below the page. False when it
+    /// was left out, so the caller's next sibling takes the same index. A shape
+    /// already placed (one listed inside itself, or by two parents) is left out.
+    fn shape(
+        &mut self,
+        sid: &str,
+        parent: NodeId,
+        index: usize,
+        parent_world: Affine,
+        depth: usize,
+    ) -> bool {
+        if self.nodes.contains_key(sid) {
+            self.count(
+                "Layers listed inside themselves or twice",
+                1,
+                "",
+                "Placed once",
+            );
+            return false;
+        }
         let Some(shape) = self.shapes.get(sid).cloned() else {
             return false;
         };
+        if depth > MAX_NESTING {
+            self.count("Layers nested too deeply", 1, "", "Left out");
+            return false;
+        }
         let kind = str_of(&shape, "type");
         if !arr(&shape, "interactions").is_empty() {
             self.count("Prototype interactions", 1, "", "Left out");
@@ -525,10 +551,11 @@ impl Builder<'_> {
         if kind == "image" {
             let media = shape.get("metadata").map(|m| str_of(m, "id").to_owned());
             match media.and_then(|m| self.picture(&m)) {
+                // Penpot stretches an image layer's picture onto its box.
                 Some(image) => self.push(Operation::SetFills {
                     id,
                     fills: keyed_by_position([Fill {
-                        brush: image_brush(image).into(),
+                        brush: fitted_brush(image, ImageFit::Crop).into(),
                         visible: true,
                     }]),
                 }),
@@ -538,7 +565,7 @@ impl Builder<'_> {
         let children = child_ids(&shape);
         let mut placed = 0;
         for child in &children {
-            placed += usize::from(self.shape(child, id, placed, world));
+            placed += usize::from(self.shape(child, id, placed, world, depth + 1));
         }
         // A masked group's first shape is its mask.
         if kind == "group"
@@ -592,7 +619,9 @@ impl Builder<'_> {
             .filter_map(|s| {
                 let brush = self.brush(s, "stroke", size)?;
                 let width = num_or(s, "strokeWidth", 1.0);
-                // Penpot's own pattern, which grows with the width.
+                // Penpot's own pattern, which grows with the width; its dots
+                // are always round, whatever the stroke's caps.
+                let dotted = str_of(s, "strokeStyle") == "dotted";
                 let dashes = match str_of(s, "strokeStyle") {
                     "dashed" => vec![
                         num_or(s, "strokeDash", width + 10.0),
@@ -602,9 +631,10 @@ impl Builder<'_> {
                     "mixed" => vec![width + 5.0, width + 5.0, width + 1.0, width + 5.0],
                     _ => Vec::new(),
                 };
-                if !matches!(str_of(s, "strokeCapStart"), "" | "round" | "square")
-                    || !matches!(str_of(s, "strokeCapEnd"), "" | "round" | "square")
-                {
+                let plain = |k: &str| matches!(str_of(s, k), "" | "round" | "square");
+                if dotted {
+                    // Round dots, whatever the caps say.
+                } else if !plain("strokeCapStart") || !plain("strokeCapEnd") {
                     self.count("Arrow and marker caps", 1, "strokes", "Drawn without them");
                 } else if str_of(s, "strokeCapStart") != str_of(s, "strokeCapEnd") {
                     self.count(
@@ -615,6 +645,7 @@ impl Builder<'_> {
                     );
                 }
                 let cap = match str_of(s, "strokeCapEnd") {
+                    _ if dotted => crate::kurbo::Cap::Round,
                     "round" => crate::kurbo::Cap::Round,
                     "square" => crate::kurbo::Cap::Square,
                     _ => crate::kurbo::Cap::Butt,
@@ -679,12 +710,16 @@ impl Builder<'_> {
             });
         }
         if let Some(blur) = shape.get("blur").filter(|b| b.is_object()) {
-            let radius = num(blur, "value");
+            // Penpot draws a background blur at half its value, as Ondin draws a
+            // radius, but a layer blur's value is the deviation itself.
+            let value = num(blur, "value");
             effects.push(Effect {
                 visible: !b_of(blur, "hidden"),
                 ..Effect::new(match str_of(blur, "type") {
-                    "background-blur" => EffectKind::BackgroundBlur { radius },
-                    _ => EffectKind::LayerBlur { radius },
+                    "background-blur" => EffectKind::BackgroundBlur { radius: value },
+                    _ => EffectKind::LayerBlur {
+                        radius: value / crate::effect::BLUR_DEVIATION,
+                    },
                 })
             });
         }
@@ -711,15 +746,12 @@ impl Builder<'_> {
                 self.count("Pictures", 1, "", "Could not be read");
                 return None;
             };
-            let mut brush = image_brush(id);
-            if let peniko::Brush::Image(b) = &mut brush {
-                b.image.fit = if b_of(img, "keepAspectRatio") {
-                    ImageFit::Fill
-                } else {
-                    ImageFit::Crop
-                };
-            }
-            return Some(brush.into());
+            let fit = if b_of(img, "keepAspectRatio") {
+                ImageFit::Fill
+            } else {
+                ImageFit::Crop
+            };
+            return Some(fitted_brush(id, fit).into());
         }
         let colour = f.get(format!("{key}Color")).and_then(Value::as_str)?;
         if let Some(&(var, own)) = f
@@ -1011,6 +1043,16 @@ fn child_ids(shape: &Value) -> Vec<String> {
         .collect()
 }
 
+/// A picture's brush at `fit`; `Crop` with the whole picture maps it onto the
+/// box exactly, which is how Penpot draws a picture whose aspect is not kept.
+fn fitted_brush(id: ImageId, fit: ImageFit) -> crate::Brush {
+    let mut brush = image_brush(id);
+    if let peniko::Brush::Image(b) = &mut brush {
+        b.image.fit = fit;
+    }
+    brush
+}
+
 /// A box's size, `selrect`'s for a shape without its own.
 fn box_size(shape: &Value) -> Size {
     let w = shape.get("width").and_then(Value::as_f64);
@@ -1088,9 +1130,12 @@ fn path_of(shape: &Value, world: Affine) -> Option<BezPath> {
     Some(path)
 }
 
-/// A gradient in a box of `size`: Penpot's points are fractions of the box.
+/// A gradient in a box of `size`: Penpot's points are fractions of the box. A
+/// radial one is a circle in those fractions, so an ellipse on a box that is not
+/// square, its axis across the start-to-end line `width` times the other.
 fn gradient(g: &Value, size: Size, alpha: f32) -> crate::Brush {
     let at = |x: &str, y: &str| Point::new(num(g, x) * size.width, num(g, y) * size.height);
+    let unit = |x: &str, y: &str| Point::new(num(g, x), num(g, y));
     let stops: Vec<peniko::ColorStop> = arr(g, "stops")
         .iter()
         .map(|s| peniko::ColorStop {
@@ -1102,14 +1147,34 @@ fn gradient(g: &Value, size: Size, alpha: f32) -> crate::Brush {
         })
         .collect();
     let (start, end) = (at("startX", "startY"), at("endX", "endY"));
-    let gradient = if str_of(g, "type") == "radial" {
-        peniko::Gradient::new_radial((start.x, start.y), (end - start).hypot() as f32)
+    let (s, axis) = (
+        unit("startX", "startY"),
+        unit("endX", "endY") - unit("startX", "startY"),
+    );
+    let r = axis.hypot();
+    let (gradient, transform) = if str_of(g, "type") == "radial" && r > 1e-9 {
+        // The unit circle placed as Penpot's `gradientTransform` places it,
+        // then the box's fractions scaled to the box.
+        let turn = axis.y.atan2(axis.x) + std::f64::consts::FRAC_PI_2;
+        let onto = Affine::scale_non_uniform(size.width, size.height)
+            * Affine::translate(s.to_vec2())
+            * Affine::rotate(turn)
+            * Affine::scale_non_uniform(num_or(g, "width", 1.0) * r, r);
+        (peniko::Gradient::new_radial((0.0, 0.0), 1.0), onto)
+    } else if str_of(g, "type") == "radial" {
+        (
+            peniko::Gradient::new_radial((start.x, start.y), 0.0),
+            Affine::IDENTITY,
+        )
     } else {
-        peniko::Gradient::new_linear((start.x, start.y), (end.x, end.y))
+        (
+            peniko::Gradient::new_linear((start.x, start.y), (end.x, end.y)),
+            Affine::IDENTITY,
+        )
     };
     peniko::Brush::Gradient(GradientBrush {
         gradient: gradient.with_stops(stops.as_slice()),
-        transform: Affine::IDENTITY,
+        transform,
         opacity: alpha,
     })
 }

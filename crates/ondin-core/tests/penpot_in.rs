@@ -3,8 +3,8 @@
 //! `shapeRef` with their overrides kept, and what has no counterpart reported.
 
 use ondin_core::foreign::Archive;
-use ondin_core::image::{ImageEntry, ImageFormat, ImageId, ImageSource};
-use ondin_core::kurbo::Affine;
+use ondin_core::image::{ImageEntry, ImageFit, ImageFormat, ImageId, ImageSource};
+use ondin_core::kurbo::{Affine, Cap};
 use ondin_core::peniko::{self, Color};
 use ondin_core::penpot_in::{Read, read};
 use ondin_core::svg_in::ImageSink;
@@ -353,23 +353,26 @@ fn paints_stack_as_penpot_draws_them() {
         [[0, 0, 255], [255, 0, 0]],
         "the first listed is on top"
     );
-    let strokes: Vec<([u8; 3], Vec<f64>)> = paint
+    let strokes: Vec<([u8; 3], Vec<f64>, Cap)> = paint
         .strokes
         .iter()
-        .map(|s| (colour(&s.brush), s.dashes.clone()))
+        .map(|s| (colour(&s.brush), s.dashes.clone(), s.cap))
         .collect();
     assert_eq!(
         strokes,
         [
-            ([255, 255, 255], vec![12.0, 12.0]),
-            ([0, 0, 0], vec![0.0, 7.0])
-        ]
+            ([255, 255, 255], vec![12.0, 12.0], Cap::Butt),
+            ([0, 0, 0], vec![0.0, 7.0], Cap::Round)
+        ],
+        "Penpot's dots are round"
     );
+    assert!(r.report.is_empty(), "{:?}", r.report);
 }
 
 /// A background blur lands as one, hidden as Penpot hid it, and a layer blur
-/// beside it stays a layer blur. flip: the `"background-blur"` arm in
-/// `penpot_in` back to a report → fails at the length of `G`'s stack.
+/// beside it stays a layer blur at twice its value, Penpot's value being the
+/// deviation itself. flip: the `"background-blur"` arm in `penpot_in` back to
+/// a report → fails at the length of `G`'s stack.
 #[test]
 fn a_background_blur_lands_as_one() {
     let mut glass = shape("G", "rect", ROOT, (0.0, 0.0, 10.0, 10.0));
@@ -389,8 +392,200 @@ fn a_background_blur_lands_as_one() {
     ));
     assert!(matches!(
         kind("S"),
-        (ondin_core::EffectKind::LayerBlur { radius }, true) if radius == 4.0
+        (ondin_core::EffectKind::LayerBlur { radius }, true) if radius == 8.0
     ));
+}
+
+/// A group that lists itself, and two groups that list each other, read with
+/// each shape placed once and the repeat reported. flip: drop the
+/// `nodes.contains_key` test in `shape` → fails at `one(doc, "G")`, the group
+/// placed again at every level down to the depth limit.
+#[test]
+fn a_shape_listed_inside_itself_is_placed_once() {
+    let mut own = shape("G", "group", ROOT, (0.0, 0.0, 10.0, 10.0));
+    own["shapes"] = json!(["G"]);
+    let mut a = shape("A", "group", ROOT, (0.0, 0.0, 10.0, 10.0));
+    a["shapes"] = json!(["B"]);
+    let mut b = shape("B", "group", "A", (0.0, 0.0, 10.0, 10.0));
+    b["shapes"] = json!(["A"]);
+    let r = import(export(&["G", "A"], vec![own, a, b], &[]));
+    let doc = &r.doc;
+    let (g, a, b) = (one(doc, "G"), one(doc, "A"), one(doc, "B"));
+    assert!(doc.get(g).unwrap().children().is_empty());
+    assert_eq!(doc.get(a).unwrap().children(), [b]);
+    assert!(doc.get(b).unwrap().children().is_empty());
+    let rows: Vec<(&str, &str)> = r
+        .report
+        .iter()
+        .map(|u| (u.what, u.count.as_str()))
+        .collect();
+    assert_eq!(rows, [("Layers listed inside themselves or twice", "2")]);
+}
+
+/// A chain of groups thousands deep is cut off and reported, and what came in
+/// saves and loads. flip: pass `depth` unchanged to the children in `shape` →
+/// the test binary aborts with a stack overflow.
+#[test]
+fn a_chain_nested_past_the_limit_is_cut_off() {
+    let n = 5_000;
+    let shapes: Vec<Value> = (0..n)
+        .map(|i| {
+            let parent = if i == 0 {
+                ROOT.to_owned()
+            } else {
+                format!("G{}", i - 1)
+            };
+            let mut g = shape(&format!("G{i}"), "group", &parent, (0.0, 0.0, 1.0, 1.0));
+            g["shapes"] = json!([format!("G{}", i + 1)]);
+            g
+        })
+        .collect();
+    let r = import(export(&["G0"], shapes, &[]));
+    let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+    assert_eq!(rows, ["Layers nested too deeply"]);
+    let bytes = ondin_core::io::save(&r.doc).unwrap();
+    ondin_core::io::load(&bytes).expect("the document loads");
+}
+
+/// Shapes under a board turned a quarter, or mirrored, land where Penpot puts
+/// them on the page: each child is divided by its parent's whole placement.
+/// flip: divide by only the parent's translation in `shape` → fails at the
+/// rect's corner under the turned board.
+#[test]
+fn children_of_a_turned_or_mirrored_board_keep_their_place() {
+    for (name, m) in [
+        (
+            "turned",
+            json!({ "a": 0, "b": 1, "c": -1, "d": 0, "e": 0, "f": 0 }),
+        ),
+        (
+            "mirrored",
+            json!({ "a": -1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 }),
+        ),
+    ] {
+        let mut board = shape("B", "frame", ROOT, (100.0, 100.0, 100.0, 100.0));
+        board["transform"] = m.clone();
+        board["shapes"] = json!(["R", "P"]);
+        // Both stored in page space, the rect turned with its board.
+        let mut rect = shape("R", "rect", "B", (110.0, 120.0, 20.0, 10.0));
+        rect["transform"] = m.clone();
+        let mut path = shape("P", "path", "B", (0.0, 0.0, 0.0, 0.0));
+        path["selrect"] = json!({ "x": 150, "y": 160, "width": 10, "height": 10 });
+        path["content"] = json!("M150,160L160,170");
+        let r = import(export(&["B"], vec![board, rect, path], &[]));
+        let doc = &r.doc;
+        let world = |id| {
+            let mut t = Affine::IDENTITY;
+            let mut at = Some(id);
+            while let Some(n) = at.and_then(|i: NodeId| doc.get(i)) {
+                t = n.transform() * t;
+                at = n.parent();
+            }
+            t
+        };
+        let near = |a: ondin_core::kurbo::Point, b: (f64, f64)| {
+            (a.x - b.0).abs() < 1e-9 && (a.y - b.1).abs() < 1e-9
+        };
+        // Penpot's box turns about its centre (120, 125), as the board's does.
+        let c = ondin_core::kurbo::Vec2::new(120.0, 125.0);
+        let mm = match &m {
+            v if v["a"] == 0 => Affine::new([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]),
+            _ => Affine::new([-1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+        };
+        let expect = Affine::translate(c)
+            * mm
+            * Affine::translate(-c)
+            * ondin_core::kurbo::Point::new(110.0, 120.0);
+        let corner = world(one(doc, "R")) * ondin_core::kurbo::Point::ZERO;
+        assert!(near(corner, (expect.x, expect.y)), "{name}: {corner:?}");
+        let NodeKind::Path { path, .. } = doc.get(one(doc, "P")).unwrap().kind() else {
+            panic!("a path");
+        };
+        let start = match path.elements()[0] {
+            ondin_core::kurbo::PathEl::MoveTo(p) => p,
+            _ => panic!("starts with a move"),
+        };
+        assert!(
+            near(world(one(doc, "P")) * start, (150.0, 160.0)),
+            "{name}: the path stays where the page has it"
+        );
+    }
+}
+
+/// An image layer stretches its picture onto its box, a picture fill keeps its
+/// aspect when Penpot says so, a masked group's first shape is its mask, and a
+/// board that shows what passes its edge does not clip. flip: give the image
+/// layer `image_brush`'s own fit in `shape` → fails at the image layer's fit.
+#[test]
+fn pictures_masks_and_unclipped_boards_land() {
+    let mut board = shape("B", "frame", ROOT, (0.0, 0.0, 400.0, 400.0));
+    board["showContent"] = json!(true);
+    board["shapes"] = json!(["I", "F", "M"]);
+    let mut image = shape("I", "image", "B", (0.0, 0.0, 200.0, 100.0));
+    image["metadata"] = json!({ "id": "m1", "width": 100, "height": 100 });
+    let mut filled = shape("F", "rect", "B", (0.0, 0.0, 50.0, 50.0));
+    filled["fills"] = json!([{ "fillImage": { "id": "m1", "keepAspectRatio": true } }]);
+    let mut group = shape("M", "group", "B", (0.0, 0.0, 50.0, 50.0));
+    group["maskedGroup"] = json!(true);
+    group["shapes"] = json!(["MK", "MC"]);
+    let mask = shape("MK", "rect", "M", (0.0, 0.0, 50.0, 50.0));
+    let masked = shape("MC", "rect", "M", (0.0, 0.0, 80.0, 80.0));
+    let mut files = export(&["B"], vec![board, image, filled, group, mask, masked], &[]);
+    files.0.insert(
+        format!("files/{FILE}/media/m1.json"),
+        json!({ "id": "m1", "mediaId": "o1" })
+            .to_string()
+            .into_bytes(),
+    );
+    files
+        .0
+        .insert("objects/o1.png".into(), b"\x89PNG\r\n\x1a\nrest".to_vec());
+    let r = import(files);
+    let doc = &r.doc;
+    assert!(r.report.is_empty(), "{:?}", r.report);
+    let picture = |name| match solid(doc, one(doc, name)) {
+        BrushSource::Literal(peniko::Brush::Image(b)) => (b.image.id.0.clone(), b.image.fit),
+        other => panic!("{name}: {other:?}"),
+    };
+    assert_eq!(picture("I"), ("test:12".to_owned(), ImageFit::Crop));
+    assert_eq!(picture("F"), ("test:12".to_owned(), ImageFit::Fill));
+    assert_eq!(doc.images().count(), 1, "one picture, placed once");
+    assert!(doc.get(one(doc, "MK")).unwrap().mask());
+    assert!(!doc.get(one(doc, "MC")).unwrap().mask());
+    assert!(!doc.get(one(doc, "B")).unwrap().clip());
+}
+
+/// A radial gradient is a circle in the box's fractions, so on a 200×100 box
+/// it reaches the box's sides and its top and bottom alike. flip: build it as
+/// a circle of the scaled points' distance in `gradient` → fails at the right
+/// edge, which a circle of radius 50 never reaches.
+#[test]
+fn a_radial_gradient_is_an_ellipse_of_the_box() {
+    let mut rect = shape("R", "rect", ROOT, (0.0, 0.0, 200.0, 100.0));
+    rect["fills"] = json!([{ "fillColorGradient": {
+        "type": "radial", "startX": 0.5, "startY": 0.5, "endX": 0.5, "endY": 1.0, "width": 1.0,
+        "stops": [{ "offset": 0, "color": "#000000" }, { "offset": 1, "color": "#ffffff" }],
+    }}]);
+    let r = import(export(&["R"], vec![rect], &[]));
+    let BrushSource::Literal(peniko::Brush::Gradient(g)) = solid(&r.doc, one(&r.doc, "R")) else {
+        panic!("a gradient");
+    };
+    let peniko::GradientKind::Radial(radial) = g.gradient.kind else {
+        panic!("radial");
+    };
+    // The gradient's own unit circle, wherever `transform` places it.
+    let (c, radius) = (radial.end_center, f64::from(radial.end_radius));
+    let at = |angle: f64| {
+        g.transform
+            * ondin_core::kurbo::Point::new(c.x + radius * angle.cos(), c.y + radius * angle.sin())
+    };
+    let near = |p: ondin_core::kurbo::Point, x: f64, y: f64| {
+        (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6
+    };
+    let edge = [0.0, 0.5, 1.0, 1.5].map(|q| at(q * std::f64::consts::PI));
+    let hits = |x: f64, y: f64| edge.iter().any(|&p| near(p, x, y));
+    assert!(hits(200.0, 50.0) && hits(0.0, 50.0), "{edge:?}");
+    assert!(hits(100.0, 0.0) && hits(100.0, 100.0), "{edge:?}");
 }
 
 /// Penpot 1's binary export is told apart from a zip, and an archive with no

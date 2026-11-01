@@ -1499,6 +1499,78 @@ fn level_of_detail_draws_type_too_small_to_read_as_bars() {
     assert_eq!(emitted(&doc, &res, 100, true), (1, 0, 0), "outlined type");
 }
 
+/// Stroked type half greeked strokes the outlines of the runs drawn as glyphs
+/// only: a greeked run's bar stands for its glyphs.
+///
+/// flip: `paint_shape` stroking every run's outline once any run is drawn as
+/// glyphs → fails at "the small line's outline".
+#[test]
+fn a_greeked_run_of_stroked_type_strokes_no_outline() {
+    #[derive(Default)]
+    struct Strokes(Vec<Rect>);
+    impl ScenePainter for Strokes {
+        fn has_image(&self, _: &ondin_core::ImageId) -> bool {
+            true
+        }
+        fn fill_path(
+            &mut self,
+            _: Affine,
+            _: &ondin_core::kurbo::BezPath,
+            _: &Brush,
+            _: Option<ondin_core::Framing>,
+            _: ClipRule,
+        ) {
+        }
+        fn stroke_path(&mut self, t: Affine, p: &ondin_core::kurbo::BezPath, _: &StrokePaint<'_>) {
+            use ondin_core::kurbo::Shape;
+            self.0.push((t * p.clone()).bounding_box());
+        }
+        fn draw_text(&mut self, _: Affine, _: &TextRun<'_>) {}
+        fn push_layer(
+            &mut self,
+            _: Affine,
+            _: Option<&ondin_core::kurbo::BezPath>,
+            _: ClipRule,
+            _: f32,
+        ) {
+        }
+        fn push_mask_layer(&mut self) {}
+        fn pop_layer(&mut self) {}
+    }
+    let (mut doc, _res, t) = painted_text(vec![], vec![stroke(9, true)]);
+    let NodeKind::Text { style, .. } = doc.get(t).unwrap().kind() else {
+        unreachable!("the fixture is type")
+    };
+    let style = (**style).clone();
+    let mut spans = ondin_core::node::CharSpans::default();
+    spans.set(4..9, ondin_core::CharAttr::Size(4.0), &style);
+    doc.apply(&Transaction(vec![Operation::SetText {
+        id: t,
+        content: "Big\nsmall".into(),
+        spans,
+        para_spans: Default::default(),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let small = res.text_layout(t).unwrap().baselines[1];
+    // 40-unit type at 0.2 px a unit is 8 px, readable; 4-unit type is 0.8 px.
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 2000.0, 2000.0),
+        pixel_size: (400, 400),
+    };
+    let mut ov = RenderOverrides::default();
+    ov.set_level_of_detail(true);
+    let mut r = Strokes::default();
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut r);
+    assert_eq!(r.0.len(), 1, "fixture: the big line's outline is stroked");
+    // The small line's glyphs stand from its baseline up to its cap height, 3 units.
+    assert!(
+        r.0[0].y1 < small - 3.0,
+        "the small line's outline: {:?} reaches to its baseline {small}",
+        r.0[0]
+    );
+}
+
 /// A greeked bar is filled lighter than its ink: glyphs that small cover less of
 /// the line than a solid bar does, which at full alpha reads as bold type.
 ///

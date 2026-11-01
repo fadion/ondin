@@ -1357,8 +1357,13 @@ fn bend(layout: &mut TextLayout, warp: PathWarp) {
 /// a visible stroke. Every contour comes back closed, forced if the face did not say so:
 /// `geometry::stroke_align_applies` needs a clip with an interior (§15 D145).
 pub fn outline(layout: &TextLayout) -> BezPath {
+    outline_of(&layout.runs)
+}
+
+/// [`outline`] of `runs` alone, some of a layout's.
+pub fn outline_of<'a>(runs: impl IntoIterator<Item = &'a GlyphRun>) -> BezPath {
     let mut out = BezPath::new();
-    for run in &layout.runs {
+    for run in runs {
         append_run_outline(run, &mut out);
     }
     out

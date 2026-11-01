@@ -2913,12 +2913,13 @@ fn paint_shape<P: ScenePainter>(
             .iter()
             .find(|s| s.visible)
             .map(|s| [s.brush.drawn()]);
-        let mut all_greeked = true;
+        // Which runs drew as bars, whose glyph outlines are then not stroked.
+        let mut greeked_runs: Vec<bool> = Vec::with_capacity(layout.runs.len());
         // A run with its own colour draws once in it, else the node's whole fill
         // stack; paint order is per run (§15 D154).
         for run in &layout.runs {
             let bars = painted.detail.and_then(|s| greeked(run, s, layout));
-            all_greeked &= bars.is_some();
+            greeked_runs.push(bars.is_some());
             let own: Option<Brush> = run.color.map(recolour);
             let own_one = own.as_ref().map(|b| [b]);
             let run_inks: &[&Brush] = match (&own_one, &bars, &stroke_one) {
@@ -2938,10 +2939,17 @@ fn paint_shape<P: ScenePainter>(
             }
         }
         // Type strokes along its glyph outlines (`ondin_core::text::outline`) in the
-        // text box's frame; decoration bands are not stroked. Wholly greeked type
-        // skips it: the outline is every glyph's, the cost the bars avoid.
-        if inked && !all_greeked {
-            let outline = ondin_core::text::outline(layout);
+        // text box's frame; decoration bands are not stroked. A greeked run's
+        // glyphs are left out: their bars stand for them, at the cost they avoid.
+        if inked && greeked_runs.contains(&false) {
+            let outline = ondin_core::text::outline_of(
+                layout
+                    .runs
+                    .iter()
+                    .zip(&greeked_runs)
+                    .filter(|(_, g)| !**g)
+                    .map(|(run, _)| run),
+            );
             if !outline.is_empty() {
                 paint_strokes(
                     doc,

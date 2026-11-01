@@ -86,7 +86,7 @@ pub fn svg_of_reported(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Ex
 /// [`svg_of_reported`] with text written as `text` asks: `<text>` elements, or the
 /// glyph outlines the canvas draws.
 pub fn svg_with(doc: &Document, res: &Resolved, origins: &[NodeId], text: ExportText) -> Export {
-    svg_linking(doc, res, origins, Default::default(), text, None)
+    svg_linking(doc, res, origins, Default::default(), text, None, false)
 }
 
 /// [`svg_with`] with `view`, a world-space box, as the `viewBox`, so whatever of
@@ -98,12 +98,27 @@ pub fn svg_region(
     view: Rect,
     text: ExportText,
 ) -> Export {
-    svg_linking(doc, res, origins, Default::default(), text, Some(view))
+    svg_linking(
+        doc,
+        res,
+        origins,
+        Default::default(),
+        text,
+        Some(view),
+        false,
+    )
 }
 
 /// [`svg_with`], each picture in `linked` written as a link to its path there
 /// rather than embedded: code export's pages share one file per picture. `view`
 /// frames the file on a box of its own rather than on the origins' extent.
+///
+/// `faces` cuts each text run where the face drawing it changes and names the
+/// face, for the PDF converter: given the document's family, it draws a whole run
+/// in a fallback face that covers it all, Latin included, where the canvas drew
+/// only the characters the family lacks. A file someone reads keeps the
+/// document's family, which a viewer falls back from by itself, and reads back
+/// without a family change per cut.
 pub(crate) fn svg_linking(
     doc: &Document,
     res: &Resolved,
@@ -111,6 +126,7 @@ pub(crate) fn svg_linking(
     linked: std::collections::HashMap<ondin_core::ImageId, String>,
     text: ExportText,
     view: Option<Rect>,
+    faces: bool,
 ) -> Export {
     // `crate::extent`, shared with the PNG writer so the two frame the same box.
     let view = view
@@ -121,6 +137,7 @@ pub(crate) fn svg_linking(
     let mut defs = Defs {
         linked,
         text,
+        faces,
         ..Default::default()
     };
     for id in origins {
@@ -185,6 +202,10 @@ struct Defs {
     /// Not a def: the pass's text mode, kept here because every emitter is
     /// handed the defs.
     text: ExportText,
+    /// Not a def: name each run's face as its own file names it
+    /// (`ExportRun::face`) rather than the document's family — for the PDF
+    /// converter, which looks faces up by those names (see [`svg_linking`]).
+    faces: bool,
 }
 
 /// A def's id: a `String` whose equality is counted in tests. Blind spot: a
@@ -811,6 +832,7 @@ fn emit_missing(
         &ground,
         "",
         "",
+        false,
     );
     let cid = format!("mi-{}-{slot}", id.to_wire().replace(':', "_"));
     // The shape as a clip, so the rim reads as an inner border and the cross stops
@@ -1483,6 +1505,7 @@ fn emit_shape(
         &fill,
         &stroke,
         &op,
+        defs.faces,
     );
 }
 
@@ -1660,6 +1683,7 @@ fn emit_stacked(
                 &fill,
                 "",
                 "",
+                defs.faces,
             );
         });
     }
@@ -1750,6 +1774,7 @@ fn emit_strokes(
                         defs,
                     ),
                     "",
+                    defs.faces,
                 ),
             }
         };
@@ -1857,6 +1882,8 @@ fn write_element(
     fill: &str,
     stroke: &str,
     op: &str,
+    // [`Defs::faces`], for text.
+    faces: bool,
 ) {
     match kind {
         NodeKind::Rect { .. } => {
@@ -1965,14 +1992,7 @@ fn write_element(
             if on_path.is_some() {
                 let mut spans = String::new();
                 for line in ondin_core::text::export_lines(parts) {
-                    for run in &line.runs {
-                        let _ = write!(
-                            spans,
-                            "<tspan{attrs}>{text}</tspan>",
-                            attrs = run_attrs(&run.style),
-                            text = escape_xml(&run.text),
-                        );
-                    }
+                    spans.push_str(&tspans(&line.runs, faces));
                 }
                 // Percent plus `text-anchor` survives a different font. The node's
                 // offset is added to the percentage and leaves the anchor alone: the
@@ -1999,15 +2019,7 @@ fn write_element(
             for line in ondin_core::text::export_lines(parts) {
                 // No `text-anchor`: alignment, indent and justification are already
                 // in the run's `x`, read after `Layout::align`.
-                let mut spans = String::new();
-                for run in &line.runs {
-                    let _ = write!(
-                        spans,
-                        "<tspan{attrs}>{text}</tspan>",
-                        attrs = run_attrs(&run.style),
-                        text = escape_xml(&run.text),
-                    );
-                }
+                let spans = tspans(&line.runs, faces);
                 // `xml:space`: a viewer collapses runs of spaces and drops an
                 // indent by default, and the PDF converter is such a viewer.
                 let _ = writeln!(
@@ -2028,15 +2040,41 @@ fn write_element(
     }
 }
 
+/// One line's runs as `<tspan>`s. Naming faces ([`Defs::faces`]), a run is cut
+/// wherever its face changes; otherwise neighbouring runs of one style are one
+/// `<tspan>`, so a face change alone writes nothing.
+fn tspans(runs: &[ondin_core::text::ExportRun], faces: bool) -> String {
+    let mut merged: Vec<(String, &ondin_core::TextStyle, Option<&str>)> = Vec::new();
+    for run in runs {
+        let face = run.face.as_deref().filter(|_| faces);
+        match merged.last_mut() {
+            Some((text, style, f)) if **style == run.style && *f == face => {
+                text.push_str(&run.text);
+            }
+            _ => merged.push((run.text.clone(), &run.style, face)),
+        }
+    }
+    let mut out = String::new();
+    for (text, style, face) in merged {
+        let _ = write!(
+            out,
+            "<tspan{attrs}>{text}</tspan>",
+            attrs = run_attrs(style, face),
+            text = escape_xml(&text),
+        );
+    }
+    out
+}
+
 /// Everything one run's style contributes to its `<tspan>`: face, spacing and
-/// decorations. `agreed` resolves an underline disagreeing with a strikethrough on
-/// the same run.
-fn run_attrs(style: &ondin_core::TextStyle) -> String {
+/// decorations, the family named `face` when one is given ([`Defs::faces`]).
+/// `agreed` resolves an underline disagreeing with a strikethrough on the same run.
+fn run_attrs(style: &ondin_core::TextStyle, face: Option<&str>) -> String {
     let mut out = String::new();
     let _ = write!(
         out,
         r#" font-family="{family}" font-size="{size}" font-weight="{weight}""#,
-        family = escape_xml(&style.font_family),
+        family = escape_xml(face.unwrap_or(&style.font_family)),
         size = fmt(style.font_size),
         weight = style.weight,
     );

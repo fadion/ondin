@@ -2234,6 +2234,7 @@ impl Walk<'_> {
             linked,
             ondin_core::ExportText::Live,
             None,
+            false,
         );
         let mut pic = if svg.approximated.is_empty() {
             self.report.position(format!(

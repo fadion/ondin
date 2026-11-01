@@ -95,13 +95,11 @@ fn pdf_framed(
     let mut outline = krilla::outline::Outline::new();
     let mut approximated: Vec<String> = Vec::new();
     for (index, (name, origins, view)) in pages.iter().enumerate() {
-        let svg = match view {
-            Some(view) => crate::svg::svg_region(doc, res, origins, *view, text),
-            None => {
-                crate::extent(res, origins)?;
-                crate::svg::svg_with(doc, res, origins, text)
-            }
-        };
+        if view.is_none() {
+            crate::extent(res, origins)?;
+        }
+        // Each run names the face that drew it (`svg_linking`'s `faces`).
+        let svg = crate::svg::svg_linking(doc, res, origins, Default::default(), text, *view, true);
         let shown = shown_nodes(doc, origins);
         for note in approximations(doc, res, &shown, svg.approximated, text) {
             if !approximated.contains(&note) {
@@ -119,7 +117,11 @@ fn pdf_framed(
             fontdb: Arc::new(fonts),
             font_resolver: usvg::FontResolver {
                 select_font: select_font(&missed),
-                ..Default::default()
+                // No glyph fallback: every run names the face that drew it, so a run
+                // fills its own characters. usvg shapes a line's whole text in its
+                // first run's face and, when a fallback face covers all of it,
+                // redraws the whole line in that face, under every run.
+                select_fallback: Box::new(|_, _, _| None),
             },
             // Only our own `data:` pictures are read. A linked picture's path names a
             // file, or an SMB share, that a received document chose.
@@ -247,7 +249,7 @@ pub fn approximated(
     origins: &[NodeId],
     text: ExportText,
 ) -> Vec<String> {
-    let svg = crate::svg::svg_with(doc, res, origins, text);
+    let svg = crate::svg::svg_linking(doc, res, origins, Default::default(), text, None, true);
     approximations(doc, res, &shown_nodes(doc, origins), svg.approximated, text)
 }
 
@@ -286,6 +288,30 @@ fn approximations(
                 .any(|(_, s)| s.underline.is_some() || s.strikethrough.is_some())
         {
             note("underlines and strikethroughs, drawn as the font's plain line");
+        }
+        // A family with no face here was drawn in another, which the PDF names
+        // (`svg_linking`'s `faces`) and so never misses. Shaped again only when some
+        // family is absent: this runs on every edit for the export card.
+        if text == ExportText::Live
+            && let Some(parts) = ondin_core::TextRef::of(res.used_kind_of(node))
+            && parts
+                .spans
+                .runs(parts.style, parts.content.len())
+                .iter()
+                .any(|(_, s)| !ondin_core::text::is_family_available(&s.font_family))
+        {
+            for line in ondin_core::text::export_lines(parts) {
+                for run in &line.runs {
+                    if let Some(face) = &run.face
+                        && !ondin_core::text::is_family_available(&run.style.font_family)
+                    {
+                        note(&format!(
+                            "{}, which is not available, drawn in {face}",
+                            run.style.font_family
+                        ));
+                    }
+                }
+            }
         }
         let paint = doc.resolved_paint(id, node.paint());
         let adjusted = paint.fills.iter().filter(|f| f.visible).any(

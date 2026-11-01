@@ -2537,6 +2537,18 @@ pub struct ExportRun {
     pub text: String,
     /// The style these characters carry.
     pub style: TextStyle,
+    /// The family the face that drew them gives itself in its own file, when that
+    /// is not `style`'s family: a script fallback, a stand-in, or Inter for a family
+    /// nothing has. A run is cut wherever this changes.
+    pub face: Option<String>,
+}
+
+/// The family a face's own `name` table gives it — the typographic family, else
+/// the family — which is the name a font database built from the file finds it by.
+fn file_family(font: &FontData) -> Option<String> {
+    let face = skrifa::FontRef::from_index(font.data.as_ref(), font.index).ok()?;
+    localized_name(&face, skrifa::string::StringId::TYPOGRAPHIC_FAMILY_NAME)
+        .or_else(|| localized_name(&face, skrifa::string::StringId::FAMILY_NAME))
 }
 
 /// One line of a text node, as an exporter needs to place it.
@@ -2552,11 +2564,12 @@ pub struct ExportLine {
 }
 
 /// A text node's content as the shaper broke it: one [`ExportLine`] per line, each
-/// carrying its runs.
+/// carrying its runs, a style run cut where the face drawing it changes
+/// ([`ExportRun::face`]).
 ///
-/// For the exporters, not the render path: SVG needs one `<text>` per line with one
-/// `<tspan>` per run (§15 D81), which the cached [`TextLayout`] cannot give (glyph
-/// ids do not map back to characters). [`cased_text`] preserves byte length, so the
+/// For the exporters, not the render path: SVG needs one `<text>` per line with
+/// `<tspan>`s for its runs, which the cached [`TextLayout`] cannot give (glyph ids
+/// do not map back to characters). [`cased_text`] preserves byte length, so the
 /// cased text and `content` share one index space.
 pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
     let shaped = shape(parts);
@@ -2571,6 +2584,8 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
         .filter(|j| *j != JustifyLast::Start);
     let line_count = shaped.layout.len();
     let markers = ListMarkers::of(parts);
+    // A face's family by blob id: read once, not once per glyph run.
+    let mut names: HashMap<u64, Option<String>> = HashMap::new();
     let mut paragraph = 0_usize;
     let mut first_line = true;
     let mut lines: Vec<ExportLine> = Vec::new();
@@ -2583,7 +2598,11 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
             lines.push(ExportLine {
                 x: right - marker_advance(&style, &text),
                 baseline: ymap.to_local(f64::from(line.metrics().baseline)),
-                runs: vec![ExportRun { text, style }],
+                runs: vec![ExportRun {
+                    text,
+                    style,
+                    face: None,
+                }],
             });
         }
         if line.break_reason() == BreakReason::Explicit {
@@ -2609,20 +2628,40 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
             continue;
         }
         let span = line.text_range();
+        // The line's glyph runs in text order, each with the family its face names
+        // itself: where a run's characters change face, the run is cut.
+        let mut drawn: Vec<(Range<usize>, Option<String>)> = line
+            .items()
+            .filter_map(|item| match item {
+                PositionedLayoutItem::GlyphRun(g) => {
+                    let font = g.run().font();
+                    let name = names
+                        .entry(font.data.id())
+                        .or_insert_with(|| file_family(font))
+                        .clone();
+                    Some((g.run().text_range(), name))
+                }
+                _ => None,
+            })
+            .collect();
+        drawn.sort_by_key(|(r, _)| r.start);
         let mut runs: Vec<ExportRun> = Vec::new();
         for (range, style) in &spans {
             let piece = range.start.max(span.start)..range.end.min(span.end);
             if piece.start >= piece.end {
                 continue;
             }
-            // Guarded rather than indexed: a non-char-edge boundary would panic.
-            let Some(slice) = text.get(piece) else {
-                continue;
-            };
-            runs.push(ExportRun {
-                text: slice.to_owned(),
-                style: style.clone(),
-            });
+            for (cut, face) in faces_over(&piece, &drawn, &style.font_family) {
+                // Guarded rather than indexed: a non-char-edge boundary would panic.
+                let Some(slice) = text.get(cut) else {
+                    continue;
+                };
+                runs.push(ExportRun {
+                    text: slice.to_owned(),
+                    style: style.clone(),
+                    face,
+                });
+            }
         }
         if runs.is_empty() {
             continue;
@@ -2649,9 +2688,49 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
         last.runs.push(ExportRun {
             text: "…".into(),
             style,
+            face: None,
         });
     }
     lines
+}
+
+/// `piece` cut where the face drawing it changes, by the line's glyph runs
+/// (`drawn`, in text order, each with its face's own family), each cut with that
+/// family when it is not `family`. Text no glyph run covers keeps `family`;
+/// neighbouring cuts of one face are one.
+fn faces_over(
+    piece: &Range<usize>,
+    drawn: &[(Range<usize>, Option<String>)],
+    family: &str,
+) -> Vec<(Range<usize>, Option<String>)> {
+    let other = |name: &Option<String>| {
+        name.as_ref()
+            .filter(|n| !n.eq_ignore_ascii_case(family))
+            .cloned()
+    };
+    let mut out: Vec<(Range<usize>, Option<String>)> = Vec::new();
+    let mut push = |cut: Range<usize>, face: Option<String>| {
+        if cut.start >= cut.end {
+            return;
+        }
+        match out.last_mut() {
+            Some((last, f)) if *f == face && last.end == cut.start => last.end = cut.end,
+            _ => out.push((cut, face)),
+        }
+    };
+    let mut at = piece.start;
+    for (range, name) in drawn {
+        let start = range.start.max(at);
+        let end = range.end.min(piece.end);
+        if start >= end {
+            continue;
+        }
+        push(at..start, None);
+        push(start..end, other(name));
+        at = end;
+    }
+    push(at..piece.end, None);
+    out
 }
 
 /// Flatten a shaped layout into the box, glyph runs and decoration ink the
@@ -4477,6 +4556,55 @@ mod tests {
     }
 
     // --- export_lines -----------------------------------------------------
+
+    /// A run names the face that drew it only when that face is not its family's:
+    /// Inter text names none, text in a family nothing has names Inter, which drew it.
+    #[test]
+    fn export_lines_names_a_face_only_where_it_is_not_the_familys() {
+        let face_of = |family: &str| {
+            let d = TextStyle {
+                font_family: family.into(),
+                ..style(20.0)
+            };
+            let p = parts(&d, &TextSizing::Auto);
+            let lines = export_lines(p.as_ref("Hamburg"));
+            lines[0]
+                .runs
+                .iter()
+                .map(|r| r.face.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(face_of("Inter"), vec![None]);
+        assert_eq!(
+            face_of("No Such Family Here"),
+            vec![Some("Inter".to_string())]
+        );
+    }
+
+    /// A piece is cut where the glyph runs change face, a cut of the family's own
+    /// face names none, neighbouring cuts of one face join, and text no glyph run
+    /// covers keeps the family.
+    ///
+    /// flip: `faces_over` not joining neighbours → fails at the joined pair.
+    #[test]
+    fn faces_over_cuts_where_the_face_changes() {
+        let named = |s: &str| Some(s.to_string());
+        let drawn = vec![
+            (0..6, named("Inter")),
+            (6..9, named("Noto Sans JP")),
+            (9..12, named("Noto Sans JP")),
+            (12..14, named("inter")),
+        ];
+        assert_eq!(
+            faces_over(&(0..16), &drawn, "Inter"),
+            vec![(0..6, None), (6..12, named("Noto Sans JP")), (12..16, None),]
+        );
+        // Clipped to the piece.
+        assert_eq!(
+            faces_over(&(7..10), &drawn, "Inter"),
+            vec![(7..10, named("Noto Sans JP"))]
+        );
+    }
 
     /// A wrapped node exports as lines whose text together is the content, each
     /// lower than the last.

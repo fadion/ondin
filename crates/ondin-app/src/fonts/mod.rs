@@ -3378,6 +3378,78 @@ mod tests {
         );
     }
 
+    /// A PDF of Inter text with kana in it draws the Latin in Inter and the kana in
+    /// the fallback face, as the canvas does, so both are embedded; given the
+    /// document's family alone the converter would draw the whole run in the
+    /// fallback, which covers Latin too. The SVG someone exports stays one run.
+    ///
+    /// flip: the PDF's `svg_linking` not naming faces, or its converter keeping
+    /// usvg's glyph fallback → fails at "both faces embedded".
+    // Network-gated: run with `cargo test -p ondin-app -- --ignored`.
+    #[test]
+    #[ignore = "requires network (jsDelivr); downloads about 3 MB"]
+    fn a_pdf_embeds_the_fallback_face_its_script_was_drawn_in() {
+        use ondin_core::{NodeKind, Operation, TextStyle, Transaction};
+        let export = || {
+            let mut ids = ondin_core::IdSource::new(0xCA12);
+            let root = ids.mint();
+            let mut doc = ondin_core::Document::new(root);
+            let id = ids.mint();
+            let kind = NodeKind::Text {
+                content: "Hello ひらがな".into(),
+                style: Box::new(TextStyle {
+                    font_size: 24.0,
+                    ..TextStyle::default()
+                }),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: ondin_core::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            };
+            doc.apply(&Transaction(vec![Operation::CreateNode {
+                id,
+                parent: root,
+                index: 0,
+                kind,
+                transform: None,
+                name: None,
+            }]))
+            .expect("a text layer");
+            let res = ondin_core::Resolved::rebuild(&doc);
+            let live = ondin_core::ExportText::Live;
+            let pdf = ondin_export::pdf::pdf_of(&doc, &res, &[id], live).expect("a pdf");
+            let programs = pdf.pdf.windows(10).filter(|w| w == b"/FontFile2").count();
+            let svg = ondin_export::svg::svg_with(&doc, &res, &[id], live).svg;
+            (programs, pdf.approximated, svg.matches("<tspan").count())
+        };
+        // Each on its own thread, so the control's engine has no fallback registered.
+        let bare = std::thread::spawn(export).join().unwrap();
+        assert_eq!(bare.0, 1, "the control: Inter alone");
+
+        let bytes = download(
+            &agent(),
+            &format!("{FONTSOURCE_CDN}/noto-sans-jp@latest/japanese-400-normal.ttf"),
+        )
+        .expect("Noto Sans JP's japanese file");
+        let alias = subset_alias("Noto Sans JP", Subset::Japanese);
+        let (programs, notes, tspans) = std::thread::spawn(move || {
+            assert!(ondin_core::text::register_fonts_as(bytes, &alias));
+            export()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(programs, 2, "both faces embedded");
+        assert!(notes.is_empty(), "nothing approximated: {notes:?}");
+        assert_eq!(
+            tspans, 1,
+            "the exported SVG keeps one run in the document's family"
+        );
+    }
+
     /// A service whose catalog lists `families`, both sources landed.
     fn settled_with(families: &[&str]) -> FontService {
         let mut svc = FontService::inert();

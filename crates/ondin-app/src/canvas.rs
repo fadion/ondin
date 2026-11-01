@@ -22945,9 +22945,44 @@ mod redraw_tests {
         let (fresh, wrap, words, star) =
             (minted.mint(), minted.mint(), minted.mint(), minted.mint());
         let (light, dark, tint) = (minted.mint_mode(), minted.mint_mode(), minted.mint_var());
-        // Ink that reaches past its box, placed before the first draw: new text
-        // is shaped, which draws whole.
+        let (bar, glass) = (minted.mint(), minted.mint());
+        let square = |w, h| NodeKind::Rect {
+            size: Size::new(w, h),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        };
+        // Ink that reaches past its box, and a fill-less glass over a bar, placed
+        // before the first draw: new text is shaped, which draws whole.
         let placed = vec![
+            Operation::CreateNode {
+                id: bar,
+                parent: session.page,
+                index: 0,
+                kind: square(70.0, 20.0),
+                transform: Some(Affine::translate((380.0, 290.0))),
+                name: None,
+            },
+            Operation::SetFills {
+                id: bar,
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                    brush: ondin_core::Brush::Solid(Color::from_rgba8(220, 20, 20, 255)).into(),
+                    visible: true,
+                }]),
+            },
+            Operation::CreateNode {
+                id: glass,
+                parent: session.page,
+                index: 1,
+                kind: square(40.0, 40.0),
+                transform: Some(Affine::translate((390.0, 280.0))),
+                name: None,
+            },
+            Operation::SetEffects {
+                id: glass,
+                effects: ondin_core::keyed_by_position([ondin_core::Effect::new(
+                    ondin_core::EffectKind::BackgroundBlur { radius: 10.0 },
+                )]),
+            },
             Operation::CreateNode {
                 id: words,
                 parent: session.page,
@@ -23171,6 +23206,14 @@ mod redraw_tests {
             (
                 "its undo, the page's mode",
                 Box::new(|s| assert!(s.undo(), "undone")),
+            ),
+            (
+                "a fill-less glass, previewed",
+                Box::new(move |s| s.set_preview(&Transaction(vec![moved(glass, 405.0, 285.0)]))),
+            ),
+            (
+                "the glass's commit, elsewhere",
+                commit(vec![moved(glass, 400.0, 275.0)]),
             ),
         ];
         for (what, edit) in edits {

@@ -52,6 +52,7 @@ pub trait ScenePainter {
                                      // walk draws: the GPU canvas's clear colour; None
                                      // (the default) wherever a ground is laid after
     fn paints_backdrops(&self) -> bool;  // false for BoundsPainter and OutlinePainter
+    fn backdrop_box(&mut self, transform: Affine, local: Rect);  // the glass's box, for those
 }
 ```
 
@@ -80,7 +81,7 @@ pub trait ScenePainter {
   - A repaint from the walk's origins is first filled with `ScenePainter::ground()`, so a glass over bare canvas does not erase through to nothing. Exports answer `None`: their background is laid after the drawing, and erase-then-add over transparency is exact under it by linearity.
   - **The outline** (`backdrop_shape`) is the kind's path, a boolean's result, text's glyph outline, or a group's children's outlines united as a mask's are; a snapped box uses the fill's snapped transform.
   - **Limit**: where a clip layer (a clipping frame, a shape mask run) sits between the root and the node, the erase reaches only into the clip layer, so a translucent backdrop lets what is under it show through. Exact wherever the backdrop is opaque.
-  - No backdrop is drawn through a painter answering `paints_backdrops() == false` (outline view traces no backdrop, and `BoundsPainter` would measure it twice), nor for a ghost: an Alt-drag copy of a glass draws without its blur until release.
+  - No backdrop is drawn through a painter answering `paints_backdrops() == false` (outline view traces no backdrop, and `BoundsPainter` would measure it twice); such a painter is handed the outline's box instead (`backdrop_box`), which `BoundsPainter` counts, so a fill-less glass is damage where it moves. Nor is one drawn for a ghost: an Alt-drag copy of a glass draws without its blur until release.
 - **`RenderOverrides` is how a gesture is drawn** (invariant 5): per-node patches (transform, kind, paint, effects, opacity, blend, visibility, re-shaped text), *ghosts*, a page's ground being dragged (absorbed from `SetPageGround`, read back by `RenderOverrides::ground(page)`; the backdrop is the clear colour, handed to the renderer separately), and a per-parent child order (`children_of`, for `Reorder`). All count towards `is_empty`.
 
 ### Ghosts

@@ -201,6 +201,13 @@ pub trait ScenePainter {
     fn paints_backdrops(&self) -> bool {
         true
     }
+
+    /// The local box a background blur draws inside, under `transform`, for a
+    /// painter that draws no backdrop ([`Self::paints_backdrops`]) but must still
+    /// count where one lands: a fill-less glass draws nothing else.
+    fn backdrop_box(&mut self, transform: Affine, local: Rect) {
+        let _ = (transform, local);
+    }
 }
 
 /// Walk `page` and drive `painter`.
@@ -523,6 +530,9 @@ impl ScenePainter for BoundsPainter {
     fn pop_layer(&mut self) {}
     fn paints_backdrops(&self) -> bool {
         false
+    }
+    fn backdrop_box(&mut self, transform: Affine, local: Rect) {
+        self.add(transform, local);
     }
 }
 
@@ -1726,27 +1736,30 @@ fn paint_node_pass<P: ScenePainter>(
         && !bare
         && !node.mask()
         && walk.backdrop.is_none()
-        && painter.paints_backdrops()
         && opacity > 0.0
         && let Some(radius) = ondin_core::effect::backdrop_radius(stack)
         && let Some(shape) = backdrop_shape(doc, res, ov, id, &painted)
     {
-        let at = Outline {
-            at: shape_world,
-            path: &shape,
-            rule: painted.rule,
-        };
-        paint_backdrop(
-            (doc, res, ov),
-            id,
-            at,
-            radius,
-            opacity,
-            base,
-            edges,
-            painter,
-            walk,
-        );
+        if !painter.paints_backdrops() {
+            painter.backdrop_box(shape_world, shape.bounding_box());
+        } else {
+            let at = Outline {
+                at: shape_world,
+                path: &shape,
+                rule: painted.rule,
+            };
+            paint_backdrop(
+                (doc, res, ov),
+                id,
+                at,
+                radius,
+                opacity,
+                base,
+                edges,
+                painter,
+                walk,
+            );
+        }
     }
     // The blend layer is outside even the effect layer: a layer's shadow blends
     // with it. A pass is drawn inside the one its first call pushed

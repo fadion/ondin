@@ -561,7 +561,8 @@ fn an_aligned_stroke_exports_as_a_clipped_double_width_stroke() {
 /// complement clip when it is even-odd.
 ///
 /// flip: `align_clip` taking the complement clip for a non-zero path → fails at
-/// "non-zero: a mask".
+/// "non-zero: a mask"; `emit_strokes` swapping the mask's two colours → fails at
+/// "the ring kept, the shape erased".
 #[test]
 fn an_outside_stroke_on_a_non_zero_path_is_masked_by_its_fill() {
     use ondin_core::{FillRule, IdSource, NodeKind, Operation, Resolved, Transaction};
@@ -599,6 +600,18 @@ fn an_outside_stroke_on_a_non_zero_path_is_masked_by_its_fill() {
         match rule {
             FillRule::NonZero => assert!(masked && !clipped, "non-zero: a mask:\n{out}"),
             FillRule::EvenOdd => assert!(clipped && !masked, "even-odd: a clip:\n{out}"),
+        }
+        if rule == FillRule::NonZero {
+            // The ring round the shape keeps the stroke and the shape erases it:
+            // inverted, the export draws an inside stroke.
+            let mask = &out[out.find("<mask").unwrap()..out.find("</mask>").unwrap()];
+            let ring = &mask[mask.find("<rect").unwrap()..];
+            let shape = &mask[mask.find("<path").unwrap()..];
+            assert!(
+                ring[..ring.find("/>").unwrap()].contains(r##"fill="#fff""##)
+                    && shape[..shape.find("/>").unwrap()].contains(r##"fill="#000""##),
+                "the ring kept, the shape erased:\n{mask}"
+            );
         }
         assert!(
             out.contains(r#"stroke-width="6""#),

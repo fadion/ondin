@@ -5,6 +5,11 @@ editor does with them. `baselines/<machine>.json` holds the last recorded figure
 git history is the record over time. Figures compare only on the same machine, and only between
 runs of the same fixtures version.
 
+A machine's name is the first 12 hex digits of the SHA-256 of `ondin-perf:` followed by the OS
+machine id (`MachineGuid` on Windows, `IOPlatformUUID` on macOS, `/etc/machine-id` on Linux).
+The id is random per install, so the name says nothing about the host, its user or its owner,
+and stays the same across clones and host renames. A reinstall gives a new name.
+
 ## Running
 
 ```bash
@@ -26,7 +31,7 @@ debug build.
 | `ONDIN_PERF_RECORD=1` | Write the results into the baseline, replacing those fixtures' entries. |
 | `ONDIN_PERF_ONLY=control,wide` | Run only these fixtures. |
 | `ONDIN_PERF_EXTRA=a.ondin;b.ondin` | Also time local documents, recorded as `local:<stem>`. Use the platform's path separator. For files that cannot be committed, such as imported kits. |
-| `ONDIN_PERF_MACHINE=name` | The baseline's name, in place of the host name. |
+| `ONDIN_PERF_MACHINE=name` | The baseline's name, in place of the hash. Committed, so pick one that names no one. |
 
 ## Fixtures
 

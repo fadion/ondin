@@ -31,5 +31,7 @@ pollster = "1.0.1"
 # Writes the 2×2 fixture the decode tests read back. The decoder under test is
 # `image`; encoding with a different crate keeps the fixture honest.
 png.workspace = true
-# The performance suite's baselines (`tests/perf_suite.rs`).
+# The performance suite's baselines (`tests/perf_suite.rs`); `sha2` names each
+# one after a hash of the OS machine id rather than the host name.
 serde_json.workspace = true
+sha2 = "0.11"

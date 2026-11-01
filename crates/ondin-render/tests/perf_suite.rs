@@ -16,6 +16,7 @@ use ondin_core::{
 use ondin_render::gpu::{Region, build_scene, copy_shifted};
 use ondin_render::{ImageStore, RenderOverrides, VelloGpuRenderer, Viewport};
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -487,16 +488,65 @@ fn repo_root() -> PathBuf {
         .expect("the repository")
 }
 
-/// This machine's name: `ONDIN_PERF_MACHINE`, or the host name.
+/// This machine's baseline name: `ONDIN_PERF_MACHINE`, or a hash of the OS machine
+/// id, so a committed baseline carries no host, user or company name. The id is
+/// random per install, so the hash cannot be guessed back; the prefix keeps it from
+/// matching another tool's hash of the same id.
 fn machine() -> String {
-    let raw = ["ONDIN_PERF_MACHINE", "COMPUTERNAME", "HOSTNAME"]
-        .iter()
-        .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
-        .unwrap_or_else(|| "unknown".into());
-    raw.to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
+    if let Some(name) = std::env::var("ONDIN_PERF_MACHINE")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        return name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+    }
+    let id = os_machine_id().expect("no OS machine id here; set ONDIN_PERF_MACHINE");
+    let digest = Sha256::digest(format!("ondin-perf:{id}"));
+    digest[..6].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The OS's random per-install id: `MachineGuid` on Windows, `IOPlatformUUID` on
+/// macOS, `/etc/machine-id` elsewhere.
+fn os_machine_id() -> Option<String> {
+    let run = |cmd: &str, args: &[&str]| {
+        std::process::Command::new(cmd)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let id = if cfg!(windows) {
+        // `    MachineGuid    REG_SZ    <guid>`
+        let out = run(
+            "reg",
+            &[
+                "query",
+                r"HKLM\SOFTWARE\Microsoft\Cryptography",
+                "/v",
+                "MachineGuid",
+            ],
+        )?;
+        let line = out
+            .lines()
+            .find(|l| l.trim_start().starts_with("MachineGuid"))?;
+        line.split_whitespace().last()?.to_string()
+    } else if cfg!(target_os = "macos") {
+        // `    "IOPlatformUUID" = "<uuid>"`
+        let out = run("ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])?;
+        let line = out.lines().find(|l| l.contains("\"IOPlatformUUID\""))?;
+        line.split('"').nth(3)?.to_string()
+    } else {
+        ["/etc/machine-id", "/var/lib/dbus/machine-id"]
+            .iter()
+            .find_map(|p| std::fs::read_to_string(p).ok())?
+            .trim()
+            .to_string()
+    };
+    Some(id).filter(|s| !s.is_empty())
 }
 
 fn baseline_path() -> PathBuf {

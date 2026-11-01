@@ -118,6 +118,11 @@ impl OndinApp {
             boxes.push(bounds(*id)?);
         }
         let arr = build::arrangement(&boxes)?;
+        // Two layers always read as evenly spaced; only side by side are they a run,
+        // not two corners of a grid whose bands lie over open canvas.
+        if ids.len() == 2 && arr.rows.len() > 1 && arr.cols.len() > 1 {
+            return None;
+        }
         Some(Run { ids, boxes, arr })
     }
 
@@ -147,11 +152,25 @@ impl OndinApp {
         }
         let run = self.loose_run()?;
         let world = self.to_world(screen, rect, ppp);
+        // Alt drags a copy, and a member too small on screen is all dot: both move.
+        let alt = self.egui_ctx.input(|i| i.modifiers.alt);
+        let ppw = self.points_per_world();
         for (i, b) in run.boxes.iter().enumerate() {
             let centre = self.to_screen(b.center(), rect, ppp);
-            if b.contains(world) && centre.distance(screen) <= DOT_PICK_PX {
+            let big = b.width().min(b.height()) * ppw >= crate::shape_handles::MIN_SIDE_PX;
+            if !alt && big && b.contains(world) && centre.distance(screen) <= DOT_PICK_PX {
                 return Some(Grab::Dot(i));
             }
+        }
+        // A loose gap is open canvas: a layer outside the run lying in it takes the
+        // press, as it would with no selection.
+        let doc = &self.session.doc;
+        let outside = self.pick_leaf(world).is_some_and(|hit| {
+            !std::iter::successors(Some(hit), |n| doc.get(*n).and_then(|n| n.parent()))
+                .any(|a| run.ids.contains(&a))
+        });
+        if outside {
+            return None;
         }
         run.bands()
             .into_iter()
@@ -519,7 +538,8 @@ mod tests {
         assert_eq!(app.session.doc.get(board).unwrap().children(), &before[..]);
     }
 
-    /// Uneven gaps, one layer, or a container's children offer no run.
+    /// Uneven gaps or one layer offer no run, and a press in an uneven gap is the
+    /// marquee's.
     #[test]
     fn uneven_gaps_or_one_layer_offer_no_handles() {
         let ctx = egui::Context::default();
@@ -537,5 +557,119 @@ mod tests {
             Point::new(230.0, 120.0),
         );
         assert_eq!(xs(&app, &cards), vec![40.0, 128.0, 232.0, 324.0]);
+    }
+
+    /// A press on an unselected layer lying in a loose gap picks and moves that
+    /// layer; the band yields to it.
+    /// flip: `loose_at` without its `outside` yield → fails at "the card under the
+    /// press moved".
+    #[test]
+    fn a_layer_in_a_loose_gap_takes_the_press() {
+        let ctx = egui::Context::default();
+        let (mut app, cards) = app_with_cards(&ctx, [16.0; 3]);
+        app.session.selection.set(vec![cards[0], cards[3]]);
+        frame(&ctx, &mut app, Vec::new());
+        assert!(
+            app.loose_run().is_some(),
+            "fixture: two cards in a row are a run"
+        );
+        // The second card's middle, inside the band between the outer two.
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(173.0, 80.0),
+            Point::new(193.0, 80.0),
+        );
+        let after = xs(&app, &cards);
+        assert!(
+            after[1] > 134.0,
+            "the card under the press moved: {after:?}"
+        );
+        assert_eq!(
+            [after[0], after[2], after[3]],
+            [40.0, 228.0, 322.0],
+            "the run did not"
+        );
+        assert_eq!(app.session.selection.ids(), [cards[1]]);
+    }
+
+    /// Zoomed out until the cards are small on screen, a press on a card's centre
+    /// moves the selection rather than reordering it.
+    /// flip: `loose_at` without its `big` test → fails at the positions.
+    #[test]
+    fn a_small_member_has_no_centre_dot() {
+        let ctx = egui::Context::default();
+        let (mut app, cards) = app_with_cards(&ctx, [16.0; 3]);
+        app.session.camera.zoom = 0.25;
+        frame(&ctx, &mut app, Vec::new());
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(79.0, 100.0),
+            Point::new(179.0, 100.0),
+        );
+        let moved: Vec<f64> = xs(&app, &cards)
+            .iter()
+            .zip([40.0, 134.0, 228.0, 322.0])
+            .map(|(x, was)| x - was)
+            .collect();
+        assert!(
+            moved[0] > 0.0 && moved.iter().all(|m| *m == moved[0]),
+            "{moved:?}"
+        );
+    }
+
+    /// A flex parent, a locked member, a turned member and two diagonal layers each
+    /// offer no run.
+    /// flip: `run_with` without its `resolved_display` refusal → fails at "flex".
+    #[test]
+    fn a_run_is_refused_where_its_handles_would_mislead() {
+        let ctx = egui::Context::default();
+        let refused = |edit: &dyn Fn(&OndinApp, &[NodeId]) -> Vec<Operation>, what: &str| {
+            let (mut app, cards) = app_with_cards(&ctx, [16.0; 3]);
+            assert!(app.loose_run().is_some(), "fixture for {what}");
+            let ops = edit(&app, &cards);
+            assert!(app.session.commit(Transaction(ops)));
+            assert!(app.loose_run().is_none(), "{what}");
+        };
+        refused(
+            &|app, cards| {
+                let board = app.session.doc.get(cards[0]).unwrap().parent().unwrap();
+                vec![Operation::SetDisplay {
+                    id: board,
+                    display: Some(ondin_core::container::Display::Flex(Default::default())),
+                }]
+            },
+            "flex",
+        );
+        refused(
+            &|_, cards| {
+                vec![Operation::SetLocked {
+                    id: cards[1],
+                    locked: true,
+                }]
+            },
+            "locked",
+        );
+        refused(
+            &|_, cards| {
+                vec![Operation::SetTransform {
+                    id: cards[2],
+                    transform: Affine::translate((228.0, 60.0)) * Affine::rotate(0.3),
+                }]
+            },
+            "turned",
+        );
+
+        let (mut app, cards) = app_with_cards(&ctx, [16.0; 3]);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: cards[3],
+                    transform: Affine::translate((400.0, 200.0)),
+                }]))
+        );
+        app.session.selection.set(vec![cards[0], cards[3]]);
+        assert!(app.loose_run().is_none(), "diagonal");
     }
 }

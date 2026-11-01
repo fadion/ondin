@@ -122,3 +122,25 @@ fn reordering_slides_the_others_over() {
     );
     assert_eq!(moves[5], Vec2::ZERO);
 }
+
+/// On near-even gaps, a card let go in its own slot moves nothing, and a swap
+/// keeps each slot's own gap, so whole units stay whole.
+/// flip: `reordered` re-packing at the mean gap → fails at "whole units".
+#[test]
+fn a_reorder_on_near_even_gaps_keeps_whole_units() {
+    let boxes = row([10.0, 10.5, 10.0]);
+    let arr = build::arrangement(&boxes).expect("near even reads as a row");
+    assert!(
+        build::reordered(&boxes, &arr, 1, 1)
+            .iter()
+            .all(|m| *m == Vec2::ZERO),
+        "its own slot"
+    );
+    // The first two cards sit on whole units; the mean gap is 10.17.
+    let moves = build::reordered(&boxes, &arr, 0, 1);
+    for (b, m) in boxes.iter().zip(&moves).take(2) {
+        let x = (*b + *m).x0;
+        assert_eq!(x, x.round(), "whole units: {x}");
+    }
+    assert_eq!(moves[2..], [Vec2::ZERO; 2], "the rest stay put");
+}

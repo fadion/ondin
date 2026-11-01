@@ -132,3 +132,70 @@ fn a_figure_eight_covers_both_lobes() {
     );
     assert!(!touches_loop(&res, &doc, square, &eight[..2], 0.1));
 }
+
+/// A horizontal line, whose box has no height, is lassoed across its middle; a
+/// group is not taken through a hidden child; a turned square whose box the loop
+/// enters but whose shape it misses is not taken.
+/// flip: `touches_within`'s `near` test through `intersect(..).area() > 0.0` →
+/// fails at "a flat line".
+#[test]
+fn flat_lines_hidden_children_and_turned_shapes() {
+    let (mut doc, _, _, group, inner) = fixture();
+    let mut ids = IdSource::new(0x1A56);
+    let page = doc.first_page();
+    let (flat, turned) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: flat,
+            parent: page,
+            index: 3,
+            kind: NodeKind::Line {
+                end: Point::new(100.0, 0.0),
+            },
+            transform: Some(Affine::translate((40.0, 300.0))),
+            name: None,
+        },
+        // A 100×100 square turned 45° about its corner at (600, 100): a diamond whose
+        // box runs x 529–671, y 100–241.
+        Operation::CreateNode {
+            id: turned,
+            parent: page,
+            index: 4,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 100.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(
+                Affine::translate((600.0, 100.0)) * Affine::rotate(std::f64::consts::FRAC_PI_4),
+            ),
+            name: None,
+        },
+        Operation::SetVisible {
+            id: inner,
+            visible: false,
+        },
+    ]))
+    .expect("the extras");
+    let res = Resolved::rebuild(&doc);
+    assert!(
+        touches_loop(&res, &doc, flat, &around((90.0, 300.0), 10.0), 0.1),
+        "a flat line"
+    );
+    assert!(
+        !touches_loop(&res, &doc, group, &around((410.0, 410.0), 20.0), 0.1),
+        "not through a hidden child"
+    );
+    // The box's top-left corner region, outside the diamond.
+    assert!(
+        !touches_loop(&res, &doc, turned, &around((540.0, 112.0), 6.0), 0.1),
+        "the turned shape, not its box"
+    );
+    assert!(touches_loop(
+        &res,
+        &doc,
+        turned,
+        &around((600.0, 170.0), 6.0),
+        0.1
+    ));
+}

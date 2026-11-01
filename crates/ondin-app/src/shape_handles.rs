@@ -29,8 +29,9 @@ const DOT_R: f32 = 3.5;
 const DOT_PICK_PX: f32 = 8.0;
 /// A corner dot's inset while its radius is 0, in screen points.
 const ZERO_INSET_PX: f64 = 12.0;
-/// The shorter side, on screen, below which the dots hide.
-const MIN_SIDE_PX: f64 = 48.0;
+/// The shorter side, on screen, below which the dots hide; the loose run's centre
+/// dots share it.
+pub(crate) const MIN_SIDE_PX: f64 = 48.0;
 /// Shift's angle step, in degrees.
 const SNAP_DEG: f64 = 15.0;
 

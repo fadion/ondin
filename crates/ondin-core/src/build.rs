@@ -6554,9 +6554,10 @@ pub fn respaced(arr: &Arrangement, axis: Axis, anchor: usize, gap: f64) -> Vec<V
 /// How far each of `boxes` (read as `arr`) moves for box `from` to take slot `to`
 /// of the reading order, the boxes between sliding over one slot.
 ///
-/// A row or a column is packed again from its first slot at its own gap, so
-/// boxes of different sizes keep the gap; each box keeps its place across the
-/// run. In a grid a box lands centred on where the slot's box was.
+/// A row or a column is packed again from its first slot, each slot keeping the
+/// gap it had after it, so boxes of different sizes keep the gaps and whole units
+/// stay whole; each box keeps its place across the run. In a grid a box lands
+/// centred on where the slot's box was. A box let go in its own slot moves nothing.
 pub fn reordered(boxes: &[kurbo::Rect], arr: &Arrangement, from: usize, to: usize) -> Vec<Vec2> {
     let slots = arr.reading_order();
     let mut order = slots.clone();
@@ -6566,6 +6567,9 @@ pub fn reordered(boxes: &[kurbo::Rect], arr: &Arrangement, from: usize, to: usiz
     order.remove(at);
     order.insert(to.min(order.len()), from);
     let mut moves = vec![Vec2::ZERO; boxes.len()];
+    if order == slots {
+        return moves;
+    }
     let line = match (arr.cols.len(), arr.rows.len()) {
         (_, 1) => Some(Axis::X),
         (1, _) => Some(Axis::Y),
@@ -6573,11 +6577,16 @@ pub fn reordered(boxes: &[kurbo::Rect], arr: &Arrangement, from: usize, to: usiz
     };
     match line {
         Some(axis) => {
-            let gap = arr.bands(axis).1.unwrap_or(0.0);
+            let gaps: Vec<f64> = slots
+                .windows(2)
+                .map(|w| {
+                    lead(&boxes[w[1]], axis) - lead(&boxes[w[0]], axis) - extent(&boxes[w[0]], axis)
+                })
+                .collect();
             let mut cursor = lead(&boxes[slots[0]], axis);
-            for i in order {
+            for (k, i) in order.into_iter().enumerate() {
                 moves[i] = along(axis, cursor - lead(&boxes[i], axis));
-                cursor += extent(&boxes[i], axis) + gap;
+                cursor += extent(&boxes[i], axis) + gaps.get(k).copied().unwrap_or(0.0);
             }
         }
         None => {

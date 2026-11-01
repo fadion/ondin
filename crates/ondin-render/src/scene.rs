@@ -16,7 +16,7 @@
 //!   holding a blended layer.
 
 use crate::renderer::{GhostNode, RenderOverrides, Viewport};
-use kurbo::{Affine, BezPath, Rect, Shape};
+use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape};
 use ondin_core::Brush;
 use ondin_core::text::{Glyph as TextGlyph, TextLayout};
 use ondin_core::{
@@ -559,8 +559,8 @@ fn ink_of(
     bounds.ink
 }
 
-/// Whether axis-aligned boxes snap to whole device pixels (see
-/// [`snapped_box_world`]).
+/// Whether axis-aligned boxes and centred strokes snap to whole device pixels
+/// (see [`snapped_box_world`] and [`snapped_stroke`]).
 const SNAP_BOXES_TO_DEVICE_PIXELS: bool = true;
 
 /// World → device pixels, the transform both painters apply on top of the world
@@ -631,6 +631,147 @@ fn snappable_box(kind: &NodeKind) -> Option<ondin_core::kurbo::Size> {
         NodeKind::Rect { size, .. } | NodeKind::Artboard { size, .. } => Some(*size),
         _ => None,
     }
+}
+
+/// Whether the centred strokes of node `id` of `kind` go through the
+/// [`snapped_stroke`] rounding: not for a box, whose whole transform snaps
+/// instead, nor type, nor a layer exempt from snapping
+/// (`RenderOverrides::unsnapped`). Not in outline mode either, which traces a
+/// stroke's centre line and would trace the snapped ink's rectangles instead.
+fn strokes_snap(kind: &NodeKind, ov: &RenderOverrides, id: NodeId) -> bool {
+    ov.outline().is_none()
+        && !ov.unsnapped(id)
+        && snappable_box(kind).is_none()
+        && !matches!(kind, NodeKind::Text { .. })
+}
+
+/// The ink of the centred stroke `s` along `path`, in local space, with every
+/// edge on a whole device pixel through `device`, to fill in the stroke's brush.
+/// `None` unless every segment is a horizontal or vertical line, `device` scales
+/// both axes alike, and the stroke is undashed with butt or square caps and,
+/// where the path turns, mitred joins.
+///
+/// Built as one rectangle per segment, reaching over a join by half the width and
+/// past an end by its cap, so a right-angle mitre comes out square. **Each edge
+/// rounds on its own, as a box edge does** ([`snapped_box_world`]): a stroke and a
+/// box ending at the same world edge end on the same pixel. Rounding a centre
+/// line and a width instead puts one edge a pixel off whenever the width rounds,
+/// leaving a sliver of stroke under a box that covered it.
+///
+/// A stroke under a pixel wide keeps its width, centred in the one row its edges
+/// round into, so a zoomed-out grid of hairlines stays as light; when both edges
+/// round to one pixel boundary it stays where it lies.
+fn snapped_stroke(path: &BezPath, device: Affine, s: &Stroke) -> Option<BezPath> {
+    use kurbo::{Cap, Join};
+    if !SNAP_BOXES_TO_DEVICE_PIXELS
+        || s.width.is_nan()
+        || s.width <= 0.0
+        || !s.dashes.is_empty()
+        || s.cap == Cap::Round
+    {
+        return None;
+    }
+    // Device pixels within which two coordinates count as one.
+    const SAME: f64 = 1e-3;
+    let [a, b, c, d, _, _] = device.as_coeffs();
+    let scale = a.abs();
+    if b.abs() > 1e-9 || c.abs() > 1e-9 || scale < 1e-9 || (d.abs() - scale).abs() > 1e-9 * scale {
+        return None;
+    }
+    let aligned = |p: Point, q: Point| (p.x - q.x).abs() < SAME || (p.y - q.y).abs() < SAME;
+    // Each subpath's corners on the device, and whether it closes.
+    let mut subpaths: Vec<(Vec<Point>, bool)> = Vec::new();
+    for el in (device * path.clone()).elements() {
+        match *el {
+            PathEl::MoveTo(p) => subpaths.push((vec![p], false)),
+            PathEl::LineTo(p) => {
+                let (pts, _) = subpaths.last_mut()?;
+                let last = *pts.last()?;
+                if !aligned(last, p) {
+                    return None;
+                }
+                if (p - last).hypot() >= SAME {
+                    pts.push(p);
+                }
+            }
+            PathEl::ClosePath => {
+                let (pts, closed) = subpaths.last_mut()?;
+                if !aligned(*pts.last()?, pts[0]) {
+                    return None;
+                }
+                if pts.len() > 1 && (*pts.last()? - pts[0]).hypot() < SAME {
+                    pts.pop();
+                }
+                *closed = true;
+            }
+            PathEl::QuadTo(..) | PathEl::CurveTo(..) => return None,
+        }
+    }
+    // A bevel or round join, or a mitre cut short of a right angle, does not
+    // square the corner a rectangle per segment gives.
+    let squared = s.join == Join::Miter && s.miter_limit >= std::f64::consts::SQRT_2;
+    if !squared
+        && subpaths
+            .iter()
+            .any(|(pts, closed)| *closed || pts.len() > 2)
+    {
+        return None;
+    }
+    let laid = s.width * scale;
+    let half = laid / 2.0;
+    let cap = if s.cap == Cap::Square { half } else { 0.0 };
+    // Across a segment: its two edges rounded. Under a pixel wide, its own width
+    // centred in the row they round to, so the row carries exactly its ink; where
+    // they round together, where it lies, as no rounding can tell which side a
+    // box over it ends on.
+    let across = |c: f64| {
+        let (near, far) = ((c - half).round(), (c + half).round());
+        if far <= near {
+            (c - half, c + half)
+        } else if laid < 1.0 {
+            let mid = (near + far) / 2.0;
+            (mid - half, mid + half)
+        } else {
+            (near, far)
+        }
+    };
+    // Along a segment: its ends rounded, at least one pixel apart.
+    let along = |lo: f64, hi: f64| {
+        let (lo, hi) = (lo.round(), hi.round());
+        (lo, hi.max(lo + 1.0))
+    };
+    let mut ink = BezPath::new();
+    for (pts, closed) in &subpaths {
+        let n = pts.len();
+        let segments = if *closed && n > 2 { n } else { n - 1 };
+        for i in 0..segments {
+            let (p, q) = (pts[i], pts[(i + 1) % n]);
+            let reach_p = if *closed || i > 0 { half } else { cap };
+            let reach_q = if *closed || i + 1 < segments {
+                half
+            } else {
+                cap
+            };
+            let span = |u: f64, v: f64| {
+                if u <= v {
+                    along(u - reach_p, v + reach_q)
+                } else {
+                    along(v - reach_q, u + reach_p)
+                }
+            };
+            let r = if (p.y - q.y).abs() < SAME {
+                let (x0, x1) = span(p.x, q.x);
+                let (y0, y1) = across((p.y + q.y) / 2.0);
+                Rect::new(x0, y0, x1, y1)
+            } else {
+                let (y0, y1) = span(p.y, q.y);
+                let (x0, x1) = across((p.x + q.x) / 2.0);
+                Rect::new(x0, y0, x1, y1)
+            };
+            ink.extend(r.path_elements(TOLERANCE));
+        }
+    }
+    Some(device.inverse() * ink)
 }
 
 /// How `brush` sits in the box `frame` gives: [`None`] for a solid, a gradient, or
@@ -903,6 +1044,9 @@ struct Painted<'a> {
     /// Device pixels per local unit when the walk runs at level of detail
     /// ([`stretch`]), `None` when every glyph is drawn.
     detail: Option<f64>,
+    /// The local-to-device transform when the node's centred strokes snap to
+    /// device pixels ([`strokes_snap`]), `None` when they are laid as stored.
+    stroke_device: Option<Affine>,
     /// `Filters` rows applied to the inks instead of the pixels
     /// ([`folded_filters`]), in order; `paint` is already through them, a text
     /// run's and a decoration's own colour are taken through them as drawn.
@@ -1100,6 +1244,7 @@ fn paint_node_pass<P: ScenePainter>(
             None => ondin_core::boolean_placeholder(doc, res, id),
         },
         detail: ov.level_of_detail().then(|| stretch(base * world)),
+        stroke_device: strokes_snap(kind, ov, id).then(|| base * world),
         filters: Vec::new(),
     };
 
@@ -1303,6 +1448,7 @@ fn paint_node_pass<P: ScenePainter>(
             &frame,
             ClipRule::NonZero,
             || frame.bounding_box(),
+            None,
         );
     }
     if outer_opacity {
@@ -1697,6 +1843,7 @@ fn paint_ghost<P: ScenePainter>(
             // Never for a ghost: the original underneath carries the mark.
             placeholder: None,
             detail: None,
+            stroke_device: strokes_snap(&ghost.kind, ov, ghost.id).then(|| base * world),
             filters: Vec::new(),
         },
         shape_world,
@@ -1773,6 +1920,7 @@ fn paint_ghost<P: ScenePainter>(
             &frame,
             ClipRule::NonZero,
             || frame.bounding_box(),
+            None,
         );
     }
     if outer_opacity {
@@ -2143,6 +2291,7 @@ fn paint_shape<P: ScenePainter>(
                     &outline,
                     ClipRule::NonZero,
                     || layout.bounds(),
+                    None,
                 );
             }
         }
@@ -2210,6 +2359,7 @@ fn paint_shape<P: ScenePainter>(
         &path,
         painted.rule,
         frame,
+        painted.stroke_device,
     );
 }
 
@@ -2226,7 +2376,8 @@ fn paint_shape<P: ScenePainter>(
 /// (`geometry::stroke_align_applies`, asked of the kind since a side path is
 /// open). `frame` is what an image brush is framed in: the shape's box, not the
 /// ink's, and for outlined type the text box. `rule` is how `shape` decides its
-/// interior, as its fill reads it.
+/// interior, as its fill reads it. `device`, when given, snaps each centred
+/// stroke's edges to device pixels ([`snapped_stroke`]).
 #[allow(clippy::too_many_arguments)]
 fn paint_strokes<P: ScenePainter>(
     doc: &Document,
@@ -2237,6 +2388,7 @@ fn paint_strokes<P: ScenePainter>(
     shape: &BezPath,
     rule: ClipRule,
     frame: impl Fn() -> Rect,
+    device: Option<Affine>,
 ) {
     let frame = &frame;
     let visible: Vec<&Stroke> = paint
@@ -2264,9 +2416,21 @@ fn paint_strokes<P: ScenePainter>(
         if align == StrokeAlign::Center {
             for s in run {
                 let framing = framing_of(doc, s.brush.drawn(), frame);
-                clipped(painter, world, framing, |p| {
-                    lay_sides(p, world, kind, s, shape, framing, false)
-                });
+                let snapped = device
+                    .filter(|_| {
+                        geometry::effective_sides(kind, s)
+                            .per_side(s.width)
+                            .is_none()
+                    })
+                    .and_then(|d| snapped_stroke(shape, d, s));
+                match snapped {
+                    Some(ink) => clipped(painter, world, framing, |p| {
+                        p.fill_path(world, &ink, s.brush.drawn(), framing, ClipRule::NonZero)
+                    }),
+                    None => clipped(painter, world, framing, |p| {
+                        lay_sides(p, world, kind, s, shape, framing, false)
+                    }),
+                }
             }
             continue;
         }

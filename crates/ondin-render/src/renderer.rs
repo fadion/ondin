@@ -360,8 +360,8 @@ impl RenderOverrides {
         self.detail
     }
 
-    /// Whether `id`'s box is exempt from device-pixel snapping
-    /// (`scene::snapped_box_world`).
+    /// Whether `id` is exempt from device-pixel snapping, of its box
+    /// (`scene::snapped_box_world`) and of its strokes (`scene::strokes_snap`).
     ///
     /// Exactly two things are, and together (§15 D272): the chrome ghost and the
     /// layer it is glued to. Snapping rounds two rectangles of different sizes

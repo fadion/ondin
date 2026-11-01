@@ -850,7 +850,9 @@ impl ScenePainter for StrokeRecorder {
     }
 }
 
-/// A lone rect (no artboard, so no clip layer of its own) with a 4-wide stroke.
+/// A lone rect (no artboard, so no clip layer of its own) with a 4-wide stroke;
+/// open, a diagonal line instead, which stays a stroke where a horizontal one
+/// would snap into filled rows (`scene::snapped_stroke`).
 fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
     let mut ids = IdSource::new(77);
     let root = ids.mint();
@@ -865,7 +867,7 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
         }
     } else {
         NodeKind::Line {
-            end: ondin_core::kurbo::Point::new(40.0, 0.0),
+            end: ondin_core::kurbo::Point::new(40.0, 30.0),
         }
     };
     doc.apply(&Transaction(vec![
@@ -1140,7 +1142,8 @@ fn a_hidden_paint_is_skipped_and_the_rest_keep_their_order() {
 }
 
 /// A line has no interior, so its fills are not drawn however many it has — but
-/// its strokes still all are.
+/// its strokes still all are. Diagonal, so its strokes reach the backend as
+/// strokes rather than snapped rows.
 #[test]
 fn a_line_stacks_its_strokes_and_ignores_its_fills() {
     let mut ids = IdSource::new(0xF00D);
@@ -1152,7 +1155,7 @@ fn a_line_stacks_its_strokes_and_ignores_its_fills() {
         parent: root,
         index: 0,
         kind: NodeKind::Line {
-            end: ondin_core::kurbo::Point::new(40.0, 0.0),
+            end: ondin_core::kurbo::Point::new(40.0, 30.0),
         },
         transform: None,
         name: None,

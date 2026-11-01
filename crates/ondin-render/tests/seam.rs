@@ -201,3 +201,180 @@ fn a_sub_pixel_shape_survives_snapping() {
         .count();
     assert!(ink > 0, "the bar rounded away to nothing at 25% zoom");
 }
+
+/// A white 800×300 frame holding a black 1-unit horizontal line, centred on
+/// `y = SPLIT - 0.5`, as a path, and, when `covered`, a white rect over it from
+/// the frame's top down to `y = SPLIT`, which ends exactly where the line does.
+fn line_under_a_box(covered: bool) -> (Document, Resolved) {
+    use ondin_core::kurbo::BezPath;
+    let mut ids = IdSource::new(21);
+    let root = ids.mint();
+    let mut d = Document::new(root);
+    let (ab, line, cover) = (ids.mint(), ids.mint(), ids.mint());
+    let mut path = BezPath::new();
+    path.move_to((0.0, SPLIT - 0.5));
+    path.line_to((800.0, SPLIT - 0.5));
+    let white = || {
+        keyed_by_position([Fill {
+            brush: Brush::Solid(Color::WHITE).into(),
+            visible: true,
+        }])
+    };
+    let mut ops = vec![
+        Operation::CreateNode {
+            id: ab,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(800.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: ab,
+            fills: white(),
+        },
+        Operation::CreateNode {
+            id: line,
+            parent: ab,
+            index: 0,
+            kind: NodeKind::Path {
+                path,
+                corner_radii: Vec::new(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetStrokes {
+            id: line,
+            strokes: keyed_by_position([ondin_core::Stroke::default()]),
+        },
+    ];
+    if covered {
+        ops.extend([
+            Operation::CreateNode {
+                id: cover,
+                parent: ab,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(800.0, SPLIT),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetFills {
+                id: cover,
+                fills: white(),
+            },
+        ]);
+    }
+    d.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&d);
+    (d, res)
+}
+
+/// The column at `x = 100` through `d`, with `y = SPLIT` sitting `phase` device
+/// pixels into a row: the red channel, row by row.
+fn column_at(d: &Document, res: &Resolved, zoom: f64, phase: f64) -> Vec<u8> {
+    let (w, h) = (200u32, 200u32);
+    let vh = h as f64 / zoom;
+    let y0 = SPLIT - (100.0 + phase) / zoom;
+    let vp = Viewport {
+        view: Rect::new(0.0, y0, w as f64 / zoom, y0 + vh),
+        pixel_size: (w, h),
+    };
+    let (rgba, _, _) =
+        VelloCpuRenderer::new().render_to_rgba(d, res, &vp, &ImageStore::new(), d.first_page());
+    (0..h as usize)
+        .map(|y| rgba[(y * w as usize + 100) * 4])
+        .collect()
+}
+
+/// A path's stroke ending where a box over it ends stays covered: the box's
+/// snapped edge and the stroke's edge round alike. Unsnapped, a quarter-pixel
+/// phase rounded the box up and left a sliver of the line under it reading 181.
+///
+/// flip: `scene::strokes_snap` answering false → fails at zoom 1, phase 0.25;
+/// `snapped_stroke` rounding the near edge and the width instead of both edges →
+/// fails at zoom 1.5, phase 0.4.
+#[test]
+fn a_stroke_ending_where_a_box_over_it_ends_stays_covered() {
+    let (d, res) = line_under_a_box(true);
+    for &(zoom, phase) in &[
+        (1.0, 0.25),
+        (1.0, 0.1),
+        (1.0, 0.4),
+        (1.33, 0.3),
+        // 1.5 px wide, its edges rounding to a 1 px row: a width rounded on its
+        // own (to 2) would reach past the box.
+        (1.5, 0.4),
+        (2.0, 0.25),
+        (3.0, 0.4),
+    ] {
+        let col = column_at(&d, &res, zoom, phase);
+        if let Some((y, &v)) = col.iter().enumerate().find(|&(_, &v)| v != 255) {
+            panic!("zoom {zoom} phase {phase}: row {y} reads {v} under a white box");
+        }
+    }
+    // The fixture draws a line where the box is absent, or the check is vacuous.
+    let (bare, bare_res) = line_under_a_box(false);
+    assert!(
+        column_at(&bare, &bare_res, 1.0, 0.25)
+            .iter()
+            .any(|&v| v < 128),
+        "the line is drawn when nothing covers it"
+    );
+}
+
+/// A one-unit line above a pixel wide comes out on whole rows: every row the
+/// column crosses is the line's full ink or none of it.
+///
+/// flip: `scene::strokes_snap` answering false → fails at zoom 1, phase 0.5.
+#[test]
+fn a_snapped_stroke_lands_on_whole_rows() {
+    let (d, res) = line_under_a_box(false);
+    for &(zoom, phase) in &[(1.0, 0.5), (1.33, 0.3), (2.5, 0.7)] {
+        let col = column_at(&d, &res, zoom, phase);
+        let partial: Vec<(usize, u8)> = col
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|&(_, v)| v != 0 && v != 255)
+            .collect();
+        assert!(
+            partial.is_empty(),
+            "zoom {zoom} phase {phase}: partial rows {partial:?}"
+        );
+        assert!(col.contains(&0), "zoom {zoom}: the line is drawn");
+    }
+}
+
+/// A line under a pixel wide keeps its ink when snapped: rounding its width up
+/// to a whole row would turn a zoomed-out grid of hairlines bold.
+///
+/// flip: `snapped_stroke`'s sub-pixel arm taking the whole row it rounds to →
+/// fails at zoom 0.3 with a whole row of ink. Both 0.5 phases round the line's
+/// edges together and keep it where it lies, so they do not see that arm.
+#[test]
+fn a_sub_pixel_stroke_keeps_its_ink() {
+    let (d, res) = line_under_a_box(false);
+    for &(zoom, phase) in &[(0.5, 0.3), (0.5, 0.0), (0.3, 0.6)] {
+        // Rows about the line only: at low zoom the window reaches past the
+        // frame, where nothing is drawn and the red channel reads 0.
+        let col = column_at(&d, &res, zoom, phase);
+        let ink: f64 = col[90..110]
+            .iter()
+            .map(|&v| f64::from(255 - v) / 255.0)
+            .sum();
+        assert!(
+            (ink - zoom).abs() < 0.03,
+            "zoom {zoom} phase {phase}: ink {ink}, the line's own is {zoom}"
+        );
+    }
+}

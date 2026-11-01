@@ -1424,7 +1424,7 @@ impl OndinApp {
             .show(&ctx, |ui| {
                 ui::menu_frame(MENU_PAD).show(ui, |ui| {
                     ui.set_width(ui::menu_inner_w(MENU_W, MENU_PAD));
-                    ui::menu_rows(ui);
+                    ui::popup_rows(ui);
 
                     if super::inspector::menu_action(
                         ui,

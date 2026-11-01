@@ -503,4 +503,79 @@ mod tests {
         assert!(rig.app.rail.flyout.is_none());
         assert_eq!(rig.app.tool, Tool::Select);
     }
+
+    /// One frame of the whole app, keymap included.
+    fn app_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1320.0, 820.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+    }
+
+    fn open_row(group: Group) -> Option<Flyout> {
+        Some(Flyout {
+            group,
+            at: egui::Rect::from_min_size(egui::pos2(8.0, 200.0), egui::vec2(32.0, 32.0)),
+            held: false,
+        })
+    }
+
+    /// Escape with a members row open closes the row and reaches nothing else:
+    /// the selection and the armed tool stay.
+    /// flip: removing the gate's `rail.flyout` arm in `ui` → fails at the selection
+    /// assertion.
+    #[test]
+    fn escape_on_the_row_leaves_the_selection_and_the_tool() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let id = crate::palette::tests::add_rect(&mut app);
+        app.session.selection.set_one(id);
+        app_frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            app.session.selection.ids(),
+            [id],
+            "the fixture keeps its selection"
+        );
+        let escape = || egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        app.rail.flyout = open_row(Group::Pen);
+        app_frame(&ctx, &mut app, vec![escape()]);
+        assert!(app.rail.flyout.is_none());
+        assert_eq!(app.session.selection.ids(), [id]);
+
+        app.choose_tool(Tool::Rect);
+        app.rail.flyout = open_row(Group::Frame);
+        app_frame(&ctx, &mut app, vec![escape()]);
+        assert!(app.rail.flyout.is_none());
+        assert_eq!(app.tool, Tool::Rect);
+    }
+
+    /// A members row open when focus mode hides the rail is closed when it returns.
+    /// flip: dropping the focus arm's `rail.flyout = None` in `ui` → fails at the
+    /// last assertion.
+    #[test]
+    fn hiding_the_rail_closes_its_row() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app_frame(&ctx, &mut app, Vec::new());
+        app.rail.flyout = open_row(Group::Frame);
+        app.focus = true;
+        app_frame(&ctx, &mut app, Vec::new());
+        app.focus = false;
+        app_frame(&ctx, &mut app, Vec::new());
+        assert!(app.rail.flyout.is_none());
+    }
 }

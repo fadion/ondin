@@ -1698,6 +1698,7 @@ impl eframe::App for OndinApp {
             self.stop_presenting(&ctx);
         }
         if self.presenting.is_some() {
+            self.rail.flyout = None;
             self.disk_results();
             self.autosave_tick(&ctx);
             self.recovery_tick(&ctx);
@@ -1750,6 +1751,9 @@ impl eframe::App for OndinApp {
             } else {
                 self.tabs.menu_nav = crate::menu::read_nav(&ctx);
             }
+        } else if self.rail.flyout.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // A rail slot's members row spends Escape on closing itself.
+            self.rail.flyout = None;
         } else if self.modal_is_up() {
             // A modal owns every key; `input::resolve` is no second guard, since a modal
             // of buttons does not make egui want the keyboard.
@@ -1820,8 +1824,12 @@ impl eframe::App for OndinApp {
             }
             if self.show_toolbar {
                 self.tool_rail(ui);
+            } else {
+                self.rail.flyout = None;
             }
         } else {
+            // A members row the rail is not here to draw closes rather than waits.
+            self.rail.flyout = None;
             // No strip, so no tab menu, nor its latch for the canvas to read.
             self.tabs.menu = None;
             self.tabs.menu_was_up = false;

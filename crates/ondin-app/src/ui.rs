@@ -388,7 +388,8 @@ pub fn dropdown_place(
 
 /// Where a submenu `size` big, padded `pad`, opens beside the menu row `row`: its
 /// first row level with the row, to the right — or the left when the right has
-/// no room — then clamped by [`menu_place`].
+/// no room — then clamped by [`menu_place`]. Short of room below, it shifts up
+/// only as far as it must, so it stays beside its row rather than flipping above.
 pub fn flyout_place(
     ctx: &egui::Context,
     row: egui::Rect,
@@ -402,7 +403,8 @@ pub fn flyout_place(
         true => row.left() - 4.0 - size.x,
         false => row.right() + 4.0,
     };
-    menu_place(ctx, egui::pos2(x, row.top() - lift), size)
+    let y = (row.top() - lift).min(screen.bottom() - size.y);
+    menu_place(ctx, egui::pos2(x, y), size)
 }
 
 /// The `▸` at the right of a menu row that opens a list beside it.
@@ -7279,6 +7281,30 @@ mod context_menu_chrome_tests {
             (100.3_f32 * 1.5).round() / 1.5,
             "away from an edge the rounding is the answer and nothing clamps"
         );
+    }
+
+    /// A submenu with no room below its row ends at the screen's bottom, its
+    /// height still beside the row.
+    /// flip: passing `row.top() - lift` to `menu_place` unclamped → fails at the
+    /// bottom assertion (694 against 820).
+    #[test]
+    fn a_submenu_short_of_room_shifts_up_beside_its_row() {
+        let ctx = ctx_at(1.0);
+        let row = egui::Rect::from_min_size(egui::pos2(100.0, 700.0), egui::vec2(200.0, 24.0));
+        let size = egui::vec2(180.0, 160.0);
+        let mut at = egui::Pos2::ZERO;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ui| at = flyout_place(ui.ctx(), row, size, 6.0),
+        );
+        assert_eq!(at.y + size.y, 820.0);
+        assert!(at.y <= row.top() && row.bottom() <= at.y + size.y);
     }
 }
 

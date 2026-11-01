@@ -1453,6 +1453,45 @@ fn shadow_passes(effects: &[ondin_core::Keyed<Effect>]) -> Option<Vec<FxPass>> {
     Some(passes)
 }
 
+/// Draw a layer's `passes` through `draw`, each shadow pass in its own mode,
+/// inside the layer's `blend_layer`. A layer that only isolates (Normal) has its
+/// shadow passes drawn outside it: a shadow blends with what lies under its
+/// layer, which an isolation group would hide. Under any other mode the layer's
+/// mode composites its shadows too.
+fn draw_passes<P: ScenePainter>(
+    painter: &mut P,
+    blend_layer: Option<BlendMode>,
+    passes: &[FxPass],
+    mut draw: impl FnMut(&mut P, &FxPass),
+) {
+    let shadows_outside = blend_layer == Some(BlendMode::Normal);
+    let mut open = false;
+    for p in passes {
+        let inside = !(p.shadows && shadows_outside);
+        match blend_layer {
+            Some(mode) if inside && !open => {
+                painter.push_blend_layer(mode);
+                open = true;
+            }
+            Some(_) if !inside && open => {
+                painter.pop_layer();
+                open = false;
+            }
+            _ => {}
+        }
+        if blends(p.blend) {
+            painter.push_blend_layer(p.blend);
+        }
+        draw(painter, p);
+        if blends(p.blend) {
+            painter.pop_layer();
+        }
+    }
+    if open {
+        painter.pop_layer();
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn paint_node<P: ScenePainter>(
     doc: &Document,
@@ -1704,23 +1743,18 @@ fn paint_node_pass<P: ScenePainter>(
         );
     }
     // The blend layer is outside even the effect layer: a layer's shadow blends
-    // with it. A pass is drawn inside the one its first call pushed.
+    // with it. A pass is drawn inside the one its first call pushed
+    // ([`draw_passes`]).
     let blend = over.and_then(|o| o.blend).unwrap_or(node.blend());
     let blend_layer = match pass {
         None if !bare => blend_layer(doc, res, ov, id, painted.kind, blend),
         _ => None,
     };
-    if let Some(mode) = blend_layer {
-        painter.push_blend_layer(mode);
-    }
     if pass.is_none()
         && effect_layer.is_some()
         && let Some(passes) = shadow_passes(stack)
     {
-        for p in &passes {
-            if blends(p.blend) {
-                painter.push_blend_layer(p.blend);
-            }
+        draw_passes(painter, blend_layer, &passes, |painter, p| {
             walk.in_shadow
                 .set(walk.in_shadow.get() + usize::from(p.shadows));
             paint_node_pass(
@@ -1738,14 +1772,11 @@ fn paint_node_pass<P: ScenePainter>(
             );
             walk.in_shadow
                 .set(walk.in_shadow.get() - usize::from(p.shadows));
-            if blends(p.blend) {
-                painter.pop_layer();
-            }
-        }
-        if blend_layer.is_some() {
-            painter.pop_layer();
-        }
+        });
         return;
+    }
+    if let Some(mode) = blend_layer {
+        painter.push_blend_layer(mode);
     }
     if let Some(ink) = effect_layer {
         match pass {
@@ -2388,17 +2419,11 @@ fn paint_ghost<P: ScenePainter>(
         let top_frame = top && matches!(ghost.kind, NodeKind::Artboard { .. });
         (top_frame && ghost.children.iter().any(ghost_blends)).then_some(BlendMode::Normal)
     };
-    if let Some(mode) = blend_layer {
-        painter.push_blend_layer(mode);
-    }
     if pass.is_none()
         && ghost_effects.is_some()
         && let Some(passes) = shadow_passes(&ghost.effects)
     {
-        for p in &passes {
-            if blends(p.blend) {
-                painter.push_blend_layer(p.blend);
-            }
+        draw_passes(painter, blend_layer, &passes, |painter, p| {
             paint_ghost(
                 doc,
                 ov,
@@ -2410,14 +2435,11 @@ fn paint_ghost<P: ScenePainter>(
                 painter,
                 Some(p),
             );
-            if blends(p.blend) {
-                painter.pop_layer();
-            }
-        }
-        if blend_layer.is_some() {
-            painter.pop_layer();
-        }
+        });
         return;
+    }
+    if let Some(mode) = blend_layer {
+        painter.push_blend_layer(mode);
     }
     if let Some(ink) = ghost_effects {
         match pass {

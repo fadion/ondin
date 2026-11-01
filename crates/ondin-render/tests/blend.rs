@@ -346,6 +346,32 @@ fn a_multiply_drop_shadow_deepens_the_ground() {
     assert!(near(pixel(&d.doc, 40), [242, 242, 245]), "the card on top");
 }
 
+/// A group set to Normal isolates its children, not its shadow: its Multiply
+/// drop shadow still deepens the frame under it.
+/// flip: `paint_node_pass` drawing the shadow passes inside the group's Normal
+/// layer → fails at "under a Normal group".
+#[test]
+fn a_normal_groups_multiply_shadow_deepens_the_ground() {
+    let mut d = frame(Some([63, 154, 107]));
+    let frame = d.frame;
+    let g = group(&mut d, frame);
+    rect(&mut d, g, 20.0, 60.0, [242, 242, 245]);
+    shadows(
+        &mut d.doc,
+        g,
+        vec![hard(false, 20.0, [200, 40, 40], BlendMode::Multiply)],
+    );
+    let got = pixel(&d.doc, 70);
+    assert!(
+        near(got, [49, 24, 17]),
+        "fixture: pass through: got {got:?}"
+    );
+    set(&mut d.doc, g, BlendMode::Normal);
+    let got = pixel(&d.doc, 70);
+    assert!(near(got, [49, 24, 17]), "under a Normal group: got {got:?}");
+    assert!(near(pixel(&d.doc, 40), [242, 242, 245]), "the card on top");
+}
+
 /// Two drop shadows stack as the one buffer stacks them, the later behind the
 /// earlier: the Multiply red, listed first, multiplies the Normal blue under it.
 /// flip: `shadow_passes` drawing drop shadows in list order → fails at "over

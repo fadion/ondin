@@ -541,7 +541,7 @@ pub struct OndinApp {
     pub(crate) collapsed: crate::panels::layers::Folds,
     /// The layer tree flattened into rows, cached between frames.
     pub(crate) layers_flat: crate::panels::layers::FlatTree,
-    /// The top bar's resource meter and the canvas frame clock it reads.
+    /// The top bar's resource meter.
     pub(crate) meter: crate::meter::Meter,
     /// The first of a possible two opacity digits, and when it was typed; `None`
     /// outside the 600 ms window ([`OndinApp::opacity_digit`]).
@@ -13016,8 +13016,8 @@ mod library_wiring_tests {
             .collect()
     }
 
-    /// The resource meter is off by default; switched on, its three readouts sit
-    /// left of undo.
+    /// The resource meter is off by default; switched on, its two readouts sit
+    /// left of undo, and there is no frame rate.
     /// flip: draw the meter whatever the preference → fails at "off by default".
     #[test]
     fn the_resource_meter_sits_left_of_undo_when_on() {
@@ -13037,12 +13037,13 @@ mod library_wiring_tests {
 
         app.prefs.resource_meter = true;
         let undo = glyph_x(&mut app, icon::ARROW_U_UP_LEFT).expect("undo");
-        let [cpu, memory, fps] = [icon::CPU, icon::MEMORY, icon::GAUGE]
-            .map(|g| glyph_x(&mut app, g).expect("a readout"));
+        let [cpu, memory] =
+            [icon::CPU, icon::MEMORY].map(|g| glyph_x(&mut app, g).expect("a readout"));
         assert!(
-            cpu < memory && memory < fps && fps < undo,
-            "CPU, memory, frame rate, then undo: {cpu} {memory} {fps} {undo}"
+            cpu < memory && memory < undo,
+            "CPU, memory, then undo: {cpu} {memory} {undo}"
         );
+        assert_eq!(glyph_x(&mut app, icon::GAUGE), None, "no frame rate");
     }
 
     /// The breadcrumb draws `Project / Document`, and just the document when

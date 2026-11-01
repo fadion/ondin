@@ -824,7 +824,7 @@ pub mod icon {
     /// *JPEG quality* — a dial, for the one export setting that is a trade rather
     /// than a fact (§7).
     pub const GAUGE: &str = "\u{e628}";
-    /// The resource meter's CPU readout; [`GAUGE`] is its frame rate.
+    /// The resource meter's CPU readout.
     pub const CPU: &str = "\u{e610}";
     /// The resource meter's memory readout.
     pub const MEMORY: &str = "\u{e9c4}";

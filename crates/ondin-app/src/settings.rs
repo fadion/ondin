@@ -202,7 +202,7 @@ impl OndinApp {
             theme_section(ui, &mut draft.theme);
             ui.add_space(ROW_GAP);
             if ui::switch_row(ui, "Show resource meter", draft.resource_meter, SWITCH_H)
-                .on_hover_text("CPU, memory and canvas frame rate in the top bar")
+                .on_hover_text("CPU and memory in the top bar")
                 .clicked()
             {
                 draft.resource_meter = !draft.resource_meter;

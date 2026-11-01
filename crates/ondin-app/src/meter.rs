@@ -1,23 +1,17 @@
 //! The top bar's resource meter (Settings › Appearance › *Show resource meter*):
-//! the app's share of every core, its memory, and how many canvas frames were
-//! drawn in the last second.
+//! the app's share of every core and its memory.
 //!
-//! CPU and memory are read from the OS once a second while the meter shows, through
-//! `windows-sys` and `libc` rather than a system-information crate. The frame count
-//! is kept whether or not it shows: one timestamp per frame that drew the page, so
-//! a frame that kept the canvas texture (a hover, a caret blink) is not counted.
+//! Both are read from the OS once a second while the meter shows, through
+//! `windows-sys` and `libc` rather than a system-information crate.
 
 use crate::theme::{self, icon};
 use eframe::egui;
-use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// How often CPU and memory are read, and the window frames are counted over.
+/// How often CPU and memory are read.
 const PERIOD: Duration = Duration::from_secs(1);
 /// A CPU share above this reads amber.
 const CPU_HOT: f32 = 80.0;
-/// A frame rate below this reads amber.
-const FPS_LOW: u32 = 30;
 
 /// The readouts' glyph size, value size, and the room between glyph and value and
 /// between two readouts.
@@ -26,12 +20,11 @@ const VALUE_PT: f32 = 11.5;
 const GLYPH_GAP: f32 = 5.0;
 const READOUT_GAP: f32 = 14.0;
 /// Each value's slot, wide enough for its longest figure so the bar never shifts
-/// as the numbers change: `100%`, `1023 MB`, `240`.
+/// as the numbers change: `100%`, `1023 MB`.
 const CPU_SLOT: f32 = 28.0;
 const MEMORY_SLOT: f32 = 46.0;
-const FPS_SLOT: f32 = 20.0;
 
-/// The readings and the frame clock.
+/// The readings.
 #[derive(Default)]
 pub(crate) struct Meter {
     /// When CPU and memory were last read; `None` while the meter is off.
@@ -42,40 +35,9 @@ pub(crate) struct Meter {
     cpu: Option<f32>,
     /// Bytes resident: the working set on Windows.
     memory: Option<u64>,
-    /// When each canvas frame of the last [`PERIOD`] was drawn.
-    frames: VecDeque<Instant>,
 }
 
 impl Meter {
-    /// Count a canvas frame drawn at `now`.
-    pub(crate) fn frame(&mut self, now: Instant) {
-        while self
-            .frames
-            .front()
-            .is_some_and(|t| now.duration_since(*t) >= PERIOD)
-        {
-            self.frames.pop_front();
-        }
-        self.frames.push_back(now);
-    }
-
-    /// How many frames the clock holds, for the canvas tests that pin what counts.
-    #[cfg(test)]
-    pub(crate) fn counted(&self) -> usize {
-        self.frames.len()
-    }
-
-    /// Canvas frames drawn in the [`PERIOD`] before `now`, or `None` under two: one
-    /// is a single change drawn, not a frame rate.
-    fn fps(&self, now: Instant) -> Option<u32> {
-        let n = self
-            .frames
-            .iter()
-            .filter(|t| now.duration_since(**t) < PERIOD)
-            .count() as u32;
-        (n >= 2).then_some(n)
-    }
-
     /// Read CPU and memory if a [`PERIOD`] has passed since the last reading.
     /// Returns how long until the next one is due.
     fn tick(&mut self, now: Instant) -> Duration {
@@ -103,37 +65,17 @@ impl Meter {
     /// Forget the readings, so a meter switched back on starts afresh rather than
     /// averaging over the time it was off.
     pub(crate) fn stop(&mut self) {
-        if self.read_at.is_some() {
-            *self = Self {
-                frames: std::mem::take(&mut self.frames),
-                ..Self::default()
-            };
-        }
+        *self = Self::default();
     }
 
-    /// The three readouts, for a `right_to_left` layout, so added frame rate first;
-    /// and the repaint that keeps them current.
+    /// The two readouts, for a `right_to_left` layout, so added memory first; and
+    /// the repaint that keeps them current.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
-        let now = Instant::now();
-        let next = self.tick(now);
+        let next = self.tick(Instant::now());
         ui.ctx().request_repaint_after(next);
         // The layout's own spacing is already between two readouts.
         let gap = READOUT_GAP - ui.spacing().item_spacing.x;
 
-        let fps = self.fps(now);
-        readout(
-            ui,
-            icon::GAUGE,
-            &fps.map_or_else(|| "—".to_string(), |n| n.to_string()),
-            FPS_SLOT,
-            fps.is_some_and(|n| n < FPS_LOW),
-            fps.is_none(),
-            &match fps {
-                Some(n) => format!("Canvas: {n} frames in the last second"),
-                None => "Canvas: nothing drawn in the last second".to_string(),
-            },
-        );
-        ui.add_space(gap);
         readout(
             ui,
             icon::MEMORY,
@@ -350,23 +292,6 @@ mod tests {
         assert_eq!(memory_label(412 * 1024 * 1024), "412 MB");
         assert_eq!(memory_label(1023 * 1024 * 1024), "1023 MB");
         assert_eq!(memory_label(2_576_980_378), "2.4 GB");
-    }
-
-    /// The frame rate counts the last second's frames, and reads nothing under two.
-    /// flip: `fps` without its two-frame floor → fails at "one frame is no rate".
-    #[test]
-    fn the_frame_rate_counts_the_last_second() {
-        let mut m = Meter::default();
-        let t0 = Instant::now();
-        m.frame(t0);
-        assert_eq!(m.fps(t0), None, "one frame is no rate");
-        for i in 1..60 {
-            m.frame(t0 + Duration::from_millis(i * 16));
-        }
-        let end = t0 + Duration::from_millis(59 * 16);
-        assert_eq!(m.fps(end), Some(60));
-        assert_eq!(m.fps(end + Duration::from_secs(2)), None, "at rest");
-        assert!(m.frames.len() <= 60, "the clock keeps one second");
     }
 
     /// The OS answers both readings here, and a second tick a period on yields a

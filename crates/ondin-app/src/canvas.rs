@@ -300,9 +300,6 @@ pub struct CanvasRenderer {
     /// (`ondin_render::scene::preview_ink`), never smaller: what a commit ending
     /// it has to redraw. `None` when it could not be measured.
     shown_ink: Option<Vec<KRect>>,
-    /// Whether the last [`Self::render`] drew the page rather than keeping the
-    /// texture: what the resource meter counts. Headless, a draw it would have made.
-    drew: bool,
     /// How many times the page has been drawn, for the tests that pin when it is
     /// not. Headless counts the draws it would have made.
     #[cfg(test)]
@@ -332,7 +329,6 @@ impl CanvasRenderer {
             shown: None,
             shown_preview: None,
             shown_ink: None,
-            drew: false,
             #[cfg(test)]
             draws: 0,
             #[cfg(test)]
@@ -353,17 +349,11 @@ impl CanvasRenderer {
             shown: None,
             shown_preview: None,
             shown_ink: None,
-            drew: false,
             draws: 0,
             patched: None,
             images: ondin_render::ImageStore::interactive(),
             sample: None,
         }
-    }
-
-    /// Whether the last [`Self::render`] drew the page — see the field.
-    pub(crate) fn drew(&self) -> bool {
-        self.drew
     }
 
     /// How many times the page has been drawn — see the field.
@@ -414,7 +404,6 @@ impl CanvasRenderer {
         backdrop: Color,
         page: NodeId,
     ) -> Option<egui::TextureId> {
-        self.drew = false;
         if pixel_size.0 == 0 || pixel_size.1 == 0 {
             return None;
         }
@@ -504,7 +493,6 @@ impl CanvasRenderer {
             self.shown = Some(key);
             self.shown_preview = Some(overrides.clone());
             self.shown_ink = ink_after(pan.is_some() || regions.is_some());
-            self.drew = true;
             return None;
         };
         gpu.ensure_target(pixel_size);
@@ -534,7 +522,6 @@ impl CanvasRenderer {
         self.shown = Some(key);
         self.shown_preview = Some(overrides.clone());
         self.shown_ink = ink_after(patched);
-        self.drew = true;
         gpu.target.as_ref().map(|t| t.id)
     }
 
@@ -8605,9 +8592,6 @@ impl OndinApp {
         let drawn = self.canvas.render(
             doc, res, overrides, stamps, ink, &camera, px, backdrop, page,
         );
-        if self.canvas.drew() {
-            self.meter.frame(std::time::Instant::now());
-        }
         if let Some(tex) = drawn {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(tex, rect, uv, egui::Color32::WHITE);
@@ -22513,23 +22497,6 @@ mod redraw_tests {
             change(&mut app);
             assert_eq!(idle_draws(&ctx, &mut app, 4), 1, "{what}");
         }
-    }
-
-    /// The resource meter counts the frames that drew the page, not every frame
-    /// egui ran.
-    ///
-    /// flip: `draw_canvas` ticking the meter whatever `CanvasRenderer::drew` says →
-    /// fails at "idle".
-    #[test]
-    fn the_meter_counts_only_frames_that_drew_the_page() {
-        let ctx = egui::Context::default();
-        let (mut app, _) = settled_app(&ctx);
-        let before = app.meter.counted();
-        assert_eq!(idle_draws(&ctx, &mut app, 5), 0, "fixture: settled");
-        assert_eq!(app.meter.counted(), before, "idle");
-        app.session.camera.zoom *= 2.0;
-        assert_eq!(idle_draws(&ctx, &mut app, 3), 1, "fixture: one draw");
-        assert_eq!(app.meter.counted(), before + 1, "a camera move");
     }
 
     /// A picture landing in the decode cache moves the store's generation, which

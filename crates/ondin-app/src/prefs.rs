@@ -195,8 +195,8 @@ pub struct Prefs {
     /// Off. Whether a tree reads better folded depends on the person's habits,
     /// not on the file, hence a preference.
     pub collapse_groups_on_open: bool,
-    /// Show the top bar's resource meter (`meter.rs`): the app's CPU share, its
-    /// memory and the canvas frame rate.
+    /// Show the top bar's resource meter (`meter.rs`): the app's CPU share and its
+    /// memory.
     ///
     /// Off: a diagnostic, and while on it wakes the app once a second.
     pub resource_meter: bool,

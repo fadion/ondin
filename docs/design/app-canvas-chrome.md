@@ -174,7 +174,7 @@ document opens, it is never saved or exported, and present mode's own branch nev
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
 
 **The resource meter** (`meter.rs`), left of undo behind a rule, while Settings' *Show resource meter*
-is on (off by default): CPU (`icon::CPU`), memory (`MEMORY`) and canvas frame rate (`GAUGE`), each
+is on (off by default): CPU (`icon::CPU`) and memory (`MEMORY`), each
 a 15pt glyph in `text::dim()` and an 11.5pt value in `text::muted()`, in a slot as wide as its longest
 figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact figure.
 
@@ -184,11 +184,9 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   in MB under a gigabyte and GB with one decimal from one. Both are read once a second while the meter
   shows, and that second is a `request_repaint_after`, the app being reactive. Switching the meter off
   forgets the readings.
-- The frame rate counts the frames in the last second that drew the page (`CanvasRenderer::drew`); a
-  frame that kept the canvas texture — a hover, a caret blink — is not one. Under two it reads a dash
-  in `text::faint()`: one is a single change drawn, not a rate. It is a trailing one-second count, so
-  it trails a slowdown by up to a second and averages a hitch away.
-- CPU above 80% and a frame rate below 30 turn that readout `color::warn()`; memory has no threshold.
+- CPU above 80% turns its readout `color::warn()`; memory has no threshold.
+- There is no frame-rate readout: the meter is for the user, and a canvas frame count served only the
+  performance work.
 
 - Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held
   while its own menu is open.

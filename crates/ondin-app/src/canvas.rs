@@ -1015,6 +1015,17 @@ fn ground_text(ground: Color, alpha: u8) -> egui::Color32 {
     }
 }
 
+/// A component set's resting outline on a page of `ground`, picked by the
+/// ground's luminance as [`ground_text`] is: a dark hairline on a light page, a
+/// light one on a dark page (over the dark theme's page, the card border's grey).
+fn set_outline(ground: Color) -> egui::Color32 {
+    if is_light_ground(ground) {
+        egui::Color32::from_black_alpha(48)
+    } else {
+        egui::Color32::from_white_alpha(33)
+    }
+}
+
 /// The stroke a freshly drawn pen path and line get, which the pen's preview
 /// shares, and the pencil's first path.
 pub(crate) const PEN_STROKE_COLOR: Color = Color::BLACK;
@@ -7866,9 +7877,11 @@ impl OndinApp {
             }
             let is_set = self.session.doc.get(id).is_some_and(|n| n.set().is_some());
             if is_set {
-                // A set's tab and resting hairline, neutral selected or not.
+                // A set's tab and resting hairline, neutral selected or not. The
+                // hairline lies on the page, so the page picks its ink.
                 if let Some(q) = self.selection_quad(id, rect, ppp) {
-                    let stroke = egui::Stroke::new(1.0, theme::color::card_border());
+                    let ink = set_outline(self.session.preview_ground());
+                    let stroke = egui::Stroke::new(1.0, ink);
                     for i in 0..4 {
                         painter.line_segment([q[i], q[(i + 1) % 4]], stroke);
                     }
@@ -16753,6 +16766,43 @@ mod frame_menu_door_tests {
             lightness(on_light) < 128,
             "dark on light grey: {on_light:?}"
         );
+    }
+
+    /// A component set's resting outline shows on the untouched page in both
+    /// themes.
+    /// flip: `draw_frame_labels` stroking the outline in `card_border()` → fails
+    /// at the light theme's page.
+    #[test]
+    fn a_sets_outline_shows_on_the_page_in_both_themes() {
+        use crate::theme::color::Theme;
+        let ctx = egui::Context::default();
+        let (app, _) = app_with_a_set(&ctx);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        for theme in [Theme::Dark, Theme::Light] {
+            crate::theme::apply(&ctx, theme);
+            let page = crate::ui::color_to_egui(app.session.preview_ground());
+            assert_eq!(page, color::canvas(), "{theme:?}: the untouched page");
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| app.draw_frame_labels(ui, ui.painter(), rect, 1.0),
+            );
+            let edges: Vec<_> = out
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::LineSegment { stroke, .. } => Some(stroke.color),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(edges.len(), 4, "{theme:?}: the set's four edges");
+            for ink in edges {
+                let c = crate::theme::contrast(ink, page);
+                assert!(c >= 1.4, "{theme:?}: the outline is {c:.2} on the page");
+            }
+        }
     }
 
     /// Only page frames and mains wear tags: a frame or an instance inside another

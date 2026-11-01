@@ -1244,6 +1244,8 @@ impl OndinApp {
         // Read before the font service: `Prefs::web_fonts` decides whether the
         // catalog thread is spawned at all.
         let prefs = crate::prefs::Prefs::load();
+        // The stored theme before the first pass, so the window opens in it.
+        crate::theme::follow(&cc.egui_ctx, prefs.theme);
         let mut app = Self::with(
             &cc.egui_ctx,
             CanvasRenderer::new(render_state),
@@ -1616,7 +1618,12 @@ impl eframe::App for OndinApp {
             (None, Some(l)) => l.theme,
             (None, None) => self.prefs.theme,
         };
-        theme::follow(&ctx, pref);
+        // The root `Ui` copied the style before this pass reached here, and every
+        // panel inherits it: restyle it too, or this frame's stock widgets keep
+        // the old theme.
+        if theme::follow(&ctx, pref) {
+            ui.set_style(ctx.global_style());
+        }
         // First: this frame's status writes join one another, not the last frame's.
         self.session.next_status_pass();
         self.session.forget_step_name();
@@ -8367,6 +8374,27 @@ impl OndinApp {
 mod tests {
     use super::save_label;
     use std::time::Duration;
+
+    /// The pass a theme changes on paints the root `Ui`, and with it every
+    /// panel's stock widgets, in the new theme.
+    /// flip: `ui()` dropping `ui.set_style(ctx.global_style())` → fails at
+    /// `dark_mode`.
+    #[test]
+    fn the_pass_a_theme_changes_on_paints_in_it() {
+        let ctx = egui::Context::default();
+        let mut app = super::OndinApp::headless(&ctx);
+        assert_eq!(
+            crate::theme::color::theme(),
+            crate::theme::color::Theme::Dark
+        );
+        app.prefs.theme = crate::prefs::ThemePref::Light;
+        let mut dark = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            eframe::App::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
+            dark = Some(ui.visuals().dark_mode);
+        });
+        assert_eq!(dark, Some(false), "the root ui is restyled light");
+    }
 
     // Save-pill label tests.
 

@@ -448,12 +448,18 @@ impl crate::app::OndinApp {
     }
 }
 
+/// The ink of the counter and the page chip: light in either theme, since their
+/// black pill is.
+fn pill_ink(alpha: f32) -> egui::Color32 {
+    crate::theme::color::on_scrim(crate::theme::text::strong).gamma_multiply(alpha)
+}
+
 /// The counter pill at the bottom of the screen.
 fn counter(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32) {
     let galley = painter.layout_no_wrap(
         text.to_string(),
         egui::FontId::proportional(12.0),
-        crate::theme::text::strong().gamma_multiply(alpha),
+        pill_ink(alpha),
     );
     let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);
     let pill = egui::Rect::from_center_size(
@@ -487,7 +493,7 @@ fn page_chip(painter: &egui::Painter, screen: egui::Rect, text: &str, alpha: f32
     let galley = painter.layout_no_wrap(
         text.to_string(),
         egui::FontId::proportional(12.0),
-        crate::theme::text::strong().gamma_multiply(alpha),
+        pill_ink(alpha),
     );
     let size = galley.size() + egui::vec2(COUNTER_PAD_X * 2.0, COUNTER_PAD_Y * 2.0);
     let chip = egui::Rect::from_min_size(

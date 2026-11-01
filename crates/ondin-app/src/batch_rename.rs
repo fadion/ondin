@@ -10,6 +10,7 @@
 //! time a setting changes, sending the rows back in parts as it goes.
 
 use crate::app::OndinApp;
+use crate::panels::layers::GlyphInk;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton, Prefix, Scrub};
 use eframe::egui;
@@ -122,7 +123,7 @@ struct Layer {
     under_selected: bool,
     bounds: Option<kurbo::Rect>,
     glyph: &'static str,
-    tint: egui::Color32,
+    tint: GlyphInk,
 }
 
 /// One page's layers, in the layers tree's order.
@@ -160,7 +161,7 @@ impl Snapshot {
                     let Some(node) = doc.get(id) else { continue };
                     let selected = chosen.contains(&id);
                     if id != page {
-                        let (glyph, tint) = crate::panels::layers::node_icon(node.kind());
+                        let (glyph, tint) = crate::panels::layers::node_glyph(node.kind());
                         layers.push(Layer {
                             id,
                             name: node.name().to_string(),
@@ -267,7 +268,7 @@ pub(crate) enum Row {
 pub(crate) struct LayerRow {
     pub(crate) id: NodeId,
     glyph: &'static str,
-    tint: egui::Color32,
+    tint: GlyphInk,
     pub(crate) old: String,
     /// The byte ranges of `old` Find matched.
     pub(crate) matched: Vec<Range<usize>>,
@@ -1756,7 +1757,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerRow) {
         egui::Align2::CENTER_CENTER,
         l.glyph,
         theme::icon_font(14.0),
-        fade(l.tint),
+        fade(l.tint.colour()),
     );
 
     let font = egui::FontId::proportional(12.0);
@@ -1916,6 +1917,36 @@ mod tests {
 
     fn planned(app: &OndinApp, b: &BatchRename) -> Plan {
         plan(&snapshot(app), &b.s)
+    }
+
+    /// A row's kind glyph takes the palette it is painted in, not the one the box
+    /// opened in.
+    /// flip: `Snapshot::take` keeping `node_icon`'s colour in `Layer::tint` → fails
+    /// at the glyph's ink.
+    #[test]
+    fn a_rows_glyph_follows_a_theme_change_while_open() {
+        let (ctx, mut app) = app();
+        let a = named(&mut app, "Rect a");
+        app.session.selection.set(vec![a]);
+        let bx = opened(&ctx, &mut app, "Rect", "Item");
+        let plan = planned(&app, &bx);
+        let Some(Row::Layer(row)) = plan.rows.iter().find(|r| matches!(r, Row::Layer(_))) else {
+            panic!("a layer row")
+        };
+        assert_ne!(row.new, New::Unchanged, "an undimmed row");
+        crate::theme::apply(&ctx, theme::color::Theme::Light);
+        let out = ctx.run_ui(Default::default(), |ui| layer_row(ui, row));
+        let ink = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == icon::SQUARE => {
+                    Some(t.galley.job.sections[0].format.color)
+                }
+                _ => None,
+            })
+            .expect("the row's glyph");
+        assert_eq!(ink, theme::text::muted(), "the light palette's muted ink");
     }
 
     fn new_names(app: &OndinApp, plan: &Plan) -> Vec<(String, String)> {

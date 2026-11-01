@@ -1610,7 +1610,7 @@ impl OndinApp {
                 p.rect_stroke(
                     rect,
                     radius,
-                    egui::Stroke::new(1.0, ui::SWATCH_HAIRLINE),
+                    egui::Stroke::new(1.0, ui::swatch_hairline()),
                     egui::StrokeKind::Inside,
                 );
                 // Ring the one already in use, compared as bytes: a recent colour

@@ -3501,7 +3501,7 @@ pub fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect, cell: f32) 
 }
 
 /// A colour chip painted straight onto `p`, in the Fill row's look ([`swatch`]):
-/// a rounded square with [`SWATCH_HAIRLINE`] round it, the checkerboard under a
+/// a rounded square with [`swatch_hairline`] round it, the checkerboard under a
 /// translucent colour only. For rows that draw their chip as paint; with no
 /// ground to mask against (they sit on a hover wash) the checkerboard's own cells
 /// are rounded at the corners instead.
@@ -3536,7 +3536,7 @@ pub fn paint_colour_chip(p: &egui::Painter, rect: egui::Rect, c: egui::Color32) 
     p.rect_stroke(
         rect,
         r,
-        egui::Stroke::new(1.0, SWATCH_HAIRLINE),
+        egui::Stroke::new(1.0, swatch_hairline()),
         egui::StrokeKind::Inside,
     );
 }
@@ -3672,15 +3672,17 @@ pub enum Swatch<'a> {
 /// The hairline every colour chip wears, drawn over its rounded boundary after
 /// the corners are masked. Always on, since a chip near the row's own ground is
 /// otherwise invisible and a threshold would pop as a colour is scrubbed.
-/// White, not the picker's black, which is invisible on a dark chip.
-///
-/// 76/255 is set by the black chip: grey 76 against `color::field()`'s 47. The
-/// picker's `stop_bar`, `sv_plane`, `hue_slider` and `alpha_slider` mask without
-/// it; their ground is `color::card()` under a bright ramp, which wants translucent
-/// black. Premultiplied for `const`; equals `Color32::from_white_alpha(76)`.
-pub const SWATCH_HAIRLINE: egui::Color32 = egui::Color32::from_rgba_premultiplied(76, 76, 76, 76);
+/// The far end from the theme's field: white at 76/255 in the dark theme, set by
+/// the black chip (grey 76 against `color::field()`'s 47), and black at the same
+/// alpha in the light one, set by the white chip.
+pub fn swatch_hairline() -> egui::Color32 {
+    theme::color::by_theme(
+        egui::Color32::from_white_alpha(76),
+        egui::Color32::from_black_alpha(76),
+    )
+}
 
-/// A small colour chip: checkerboard, the paint, and [`SWATCH_HAIRLINE`] over the
+/// A small colour chip: checkerboard, the paint, and [`swatch_hairline`] over the
 /// rounded boundary, sensed for clicks. `bg` is the ground the chip sits on,
 /// painted over the leftover corners ([`mask_corners`]); the wrong one shows
 /// four notches.
@@ -3718,7 +3720,7 @@ pub fn swatch(
     p.rect_stroke(
         rect,
         egui::CornerRadius::same(4),
-        egui::Stroke::new(1.0, SWATCH_HAIRLINE),
+        egui::Stroke::new(1.0, swatch_hairline()),
         egui::StrokeKind::Inside,
     );
     resp
@@ -5525,10 +5527,19 @@ mod dim_tests {
 mod swatch_hairline_tests {
     use super::*;
 
-    /// One swatch's frame, plus the rect it allocated.
+    /// One swatch's frame in the dark theme, plus the rect it allocated.
     fn draw(chip: egui::Color32) -> (egui::FullOutput, egui::Rect) {
+        draw_in(chip, crate::theme::color::Theme::Dark)
+    }
+
+    /// One swatch's frame in `theme`, plus the rect it allocated.
+    fn draw_in(
+        chip: egui::Color32,
+        theme: crate::theme::color::Theme,
+    ) -> (egui::FullOutput, egui::Rect) {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
+        crate::theme::apply(&ctx, theme);
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut rect = egui::Rect::NOTHING;
         let out = ctx.run_ui(Default::default(), |ui| {
@@ -5570,26 +5581,37 @@ mod swatch_hairline_tests {
             .unwrap()
     }
 
-    /// A chip the colour of its row (`2F2F2F` on `field()`, and black, which sets `MARGIN`) stays visible.
+    /// A chip the colour of its row stays visible in both themes: `2F2F2F` and
+    /// black (which sets `MARGIN`) on the dark field, white and `F1F1F2` on the
+    /// light one.
     ///
-    /// flip: `from_black_alpha(76)` for the hairline → fails the margin on the `2F2F2F` chip.
+    /// flip: `from_black_alpha(76)` for the dark hairline → fails the margin on the
+    /// `2F2F2F` chip; `from_white_alpha(76)` for the light one → fails on white.
     #[test]
     fn a_chip_the_colour_of_its_row_is_still_visible() {
+        use crate::theme::color::Theme;
         const MARGIN: i32 = 25;
-        for (name, chip) in [
+        for (theme, name, chip) in [
             (
+                Theme::Dark,
                 "the reported 2F2F2F",
                 egui::Color32::from_rgb(0x2F, 0x2F, 0x2F),
             ),
-            ("black", egui::Color32::BLACK),
+            (Theme::Dark, "black", egui::Color32::BLACK),
+            (Theme::Light, "white", egui::Color32::WHITE),
+            (
+                Theme::Light,
+                "the light field's F1F1F2",
+                egui::Color32::from_rgb(0xF1, 0xF1, 0xF2),
+            ),
         ] {
-            let (out, _) = draw(chip);
+            let (out, _) = draw_in(chip, theme);
             let (_, line) = hairline(&out);
             let edge = over(line.stroke.color, chip);
             assert!(
                 apart(edge, color::field()) >= MARGIN,
-                "{name}: the chip's edge composites to {edge:?}, only {} levels from the \
-                 row's own {:?} — the chip reads as a hole in the row",
+                "{theme:?}, {name}: the chip's edge composites to {edge:?}, only {} levels \
+                 from the row's own {:?} — the chip reads as a hole in the row",
                 apart(edge, color::field()),
                 color::field(),
             );

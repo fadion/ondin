@@ -273,13 +273,18 @@ pub mod color {
     /// same alpha. Linear, so a tier halved by `Ui::disable` still lands on
     /// [`super::text::disabled`].
     const LIGHT_INK_GAIN: f32 = 1.2;
+    /// The most a gained light ink reaches: short of opaque, so
+    /// [`super::text::strong`] stays a step under [`text`] rather than equal to it.
+    const LIGHT_INK_CAP: f32 = 230.0;
 
     /// Text at a given opacity over the ground. Used for the muted label tiers
     /// (38% / 45% / 62% / 88% in the dark theme).
     pub fn text_a(alpha: u8) -> Color32 {
         let alpha = match theme() {
             Theme::Dark => alpha,
-            Theme::Light => (alpha as f32 * LIGHT_INK_GAIN).round().min(255.0) as u8,
+            Theme::Light => (alpha as f32 * LIGHT_INK_GAIN)
+                .round()
+                .min(LIGHT_INK_CAP.max(alpha as f32)) as u8,
         };
         let [r, g, b, _] = text().to_array();
         let at = |c: u8| (c as u32 * alpha as u32 / 255) as u8;
@@ -299,6 +304,23 @@ pub mod color {
             Theme::Dark => dark,
             Theme::Light => light,
         }
+    }
+
+    /// `ink` as the dark theme paints it, for ink on a fixed black wash — present
+    /// mode's counter, a library card's chips. The wash stays dark in either
+    /// theme, so the ink on it must stay light.
+    pub fn on_scrim(ink: impl FnOnce() -> Color32) -> Color32 {
+        let was = THEME.replace(Theme::Dark);
+        let c = ink();
+        THEME.set(was);
+        c
+    }
+
+    /// The chrome's selection ink: [`SELECT`] in the dark theme, a deepened sky
+    /// blue in the light one, where the canvas hue on a pale row reads under 2:1.
+    /// For text and glyphs on a chrome ground; the canvas keeps [`SELECT`].
+    pub fn select_ink() -> Color32 {
+        by_theme(SELECT, Color32::from_rgb(24, 98, 168))
     }
 
     /// Hairline divider / faint border (text at ~9%).
@@ -1172,8 +1194,9 @@ pub fn apply(ctx: &egui::Context, theme: color::Theme) {
 
 /// Bring the chrome in line with `pref`, resolving *System* against the OS (dark
 /// when it does not say). Cheap when nothing changed, so it runs every frame —
-/// which is also how an OS switch under *System* is followed.
-pub fn follow(ctx: &egui::Context, pref: crate::prefs::ThemePref) {
+/// which is also how an OS switch under *System* is followed. True when it
+/// changed the theme: a `Ui` built earlier in the pass still holds the old style.
+pub fn follow(ctx: &egui::Context, pref: crate::prefs::ThemePref) -> bool {
     use crate::prefs::ThemePref;
     let want = match pref {
         ThemePref::Dark => color::Theme::Dark,
@@ -1183,9 +1206,11 @@ pub fn follow(ctx: &egui::Context, pref: crate::prefs::ThemePref) {
             _ => color::Theme::Dark,
         },
     };
-    if want != color::theme() {
+    let changed = want != color::theme();
+    if changed {
         apply(ctx, want);
     }
+    changed
 }
 
 fn install_style_into(style: &mut egui::Style) {
@@ -1293,6 +1318,43 @@ fn install_style_into(style: &mut egui::Style) {
     s.icon_width_inner = 10.0;
     s.menu_margin = egui::Margin::same(6);
     s.indent = 16.0;
+}
+
+/// WCAG contrast of the premultiplied `ink` composited over the opaque `ground`.
+#[cfg(test)]
+pub(crate) fn contrast(ink: egui::Color32, ground: egui::Color32) -> f32 {
+    let lum = |c: [f32; 3]| {
+        let lin = |v: f32| {
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+    };
+    let g = over(ink, ground);
+    let (x, y) = (
+        lum([
+            g[0] as f32 / 255.0,
+            g[1] as f32 / 255.0,
+            g[2] as f32 / 255.0,
+        ]),
+        lum([
+            ground[0] as f32 / 255.0,
+            ground[1] as f32 / 255.0,
+            ground[2] as f32 / 255.0,
+        ]),
+    );
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The premultiplied `top` composited over the opaque `ground`, opaque.
+#[cfg(test)]
+pub(crate) fn over(top: egui::Color32, ground: egui::Color32) -> egui::Color32 {
+    let a = top.a() as f32 / 255.0;
+    let c = |i: usize| (top[i] as f32 + ground[i] as f32 * (1.0 - a)).round() as u8;
+    egui::Color32::from_rgb(c(0), c(1), c(2))
 }
 
 #[cfg(test)]
@@ -1665,31 +1727,12 @@ mod tests {
         }
     }
 
-    /// WCAG contrast of `ink` composited over the opaque `ground`.
-    fn contrast(ink: egui::Color32, ground: egui::Color32) -> f32 {
-        let lum = |c: [f32; 3]| {
-            let lin = |v: f32| {
-                if v <= 0.04045 {
-                    v / 12.92
-                } else {
-                    ((v + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
-        };
-        let a = ink.a() as f32 / 255.0;
-        let over = |i: usize| (ink[i] as f32 + ground[i] as f32 * (1.0 - a)) / 255.0;
-        let (x, y) = (lum([over(0), over(1), over(2)]), {
-            let g = |i: usize| ground[i] as f32 / 255.0;
-            lum([g(0), g(1), g(2)])
-        });
-        (x.max(y) + 0.05) / (x.min(y) + 0.05)
-    }
-
     /// Every chrome ink stays legible on every chrome ground in both palettes:
     /// each tier keeps a floor the dark theme was tuned to, and the light
     /// palette has to meet the same floors.
-    /// flip: `text_a` without `LIGHT_INK_GAIN` → fails at `muted` over `bg`, Light.
+    /// flip: `text_a` without `LIGHT_INK_GAIN` → fails at `muted` over `bg`, Light;
+    /// `on_scrim` returning `ink()` → `strong` on a wash; `select_ink` as `SELECT`
+    /// → `select_ink/row`; no `LIGHT_INK_CAP` → "a step under text" (all Light).
     #[test]
     fn every_ink_reads_on_every_ground_in_both_themes() {
         let grounds = [
@@ -1751,6 +1794,36 @@ mod tests {
                 };
                 assert!(c >= floor, "{theme:?}: {name} is {c:.2}, under {floor}");
             }
+            // The chrome's selection ink on a selected layer row and on the
+            // library's ground.
+            let row = over(color::SELECT_ROW, color::panel());
+            for (name, ground) in [("select_ink/row", row), ("select_ink/bg", color::bg())] {
+                let c = contrast(color::select_ink(), ground);
+                assert!(c >= 4.5, "{theme:?}: {name} is {c:.2}, under 4.5");
+            }
+            // Ink on its fixed black wash, over the lightest and darkest artwork:
+            // present mode's pills (180), a library card's chips (150). A mark's
+            // hue on a wash over white is a short chip word, so its floor is low.
+            for (name, ink, wash, floor) in [
+                ("strong", color::on_scrim(text::strong), 180, 4.5),
+                ("kit", color::on_scrim(|| color::text_a(179)), 150, 3.0),
+                ("danger", color::on_scrim(color::danger), 150, 1.5),
+                ("warn", color::on_scrim(color::warn), 150, 1.5),
+            ] {
+                for art in [egui::Color32::WHITE, egui::Color32::BLACK] {
+                    let ground = over(egui::Color32::from_black_alpha(wash), art);
+                    let c = contrast(ink, ground);
+                    assert!(
+                        c >= floor,
+                        "{theme:?}: {name} on a {wash} wash over {art:?} is {c:.2}"
+                    );
+                }
+            }
+            assert_ne!(
+                text::strong(),
+                color::text(),
+                "{theme:?}: strong is a step under text"
+            );
         }
     }
 

@@ -1449,7 +1449,7 @@ impl OndinApp {
             egui::Align2::CENTER_CENTER,
             into.unwrap_or_else(|| "Drop to import".into()),
             egui::FontId::proportional(14.0),
-            theme::color::SELECT,
+            theme::color::select_ink(),
         );
     }
 
@@ -4652,7 +4652,7 @@ fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
 /// visible while scanning. Returns the rect it took, for laying the row out after it.
 fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> egui::Rect {
     let rect = align.anchor_size(at, mark_chip_size(ui, mark));
-    let color = mark.color();
+    let color = theme::color::on_scrim(|| mark.color());
     let p = ui.painter();
     // The black pass first: over arbitrary artwork a translucent tint alone could vanish.
     p.rect_filled(
@@ -4710,7 +4710,7 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
     const PAD: f32 = 7.0;
     const GAP: f32 = 5.0;
     const GLYPH: f32 = 11.0;
-    let ink = theme::color::text_a(179);
+    let ink = theme::color::on_scrim(|| theme::color::text_a(179));
     let word = ui
         .ctx()
         .fonts_mut(|f| f.layout_no_wrap("Kit".into(), egui::FontId::proportional(10.5), ink));
@@ -4719,7 +4719,7 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
     let p = ui.painter();
     let r = egui::CornerRadius::same(5);
     p.rect_filled(rect, r, egui::Color32::from_black_alpha(150));
-    p.rect_filled(rect, r, theme::color::text_a(20));
+    p.rect_filled(rect, r, theme::color::on_scrim(|| theme::color::text_a(20)));
     p.text(
         egui::pos2(rect.left() + PAD + GLYPH / 2.0, rect.center().y),
         egui::Align2::CENTER_CENTER,

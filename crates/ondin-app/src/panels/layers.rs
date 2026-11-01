@@ -239,7 +239,7 @@ pub struct LayerDrag {
     /// last frame, before the boundary's own range clamped it.
     pub level: usize,
     /// The container the drop would land in, as of last frame — the row that paints
-    /// its name and glyph in [`color::SELECT`].
+    /// its name and glyph in [`color::select_ink`].
     ///
     /// A frame behind by necessity: rows are painted before the walk works out the
     /// drop ([`OndinApp::drop_hint`]). Not merged into [`target`], which is cleared
@@ -512,21 +512,45 @@ fn subtract_base(doc: &ondin_core::Document, node: &ondin_core::Node) -> bool {
 
 /// The layers-tree icon (glyph + resting colour) for a node kind.
 pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
+    let (glyph, ink) = node_glyph(kind);
+    (glyph, ink.colour())
+}
+
+/// A kind glyph's resting ink as a role, read against the palette when painted,
+/// so a caller that keeps it across frames follows a theme change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GlyphInk {
+    Muted,
+    Accent,
+}
+
+impl GlyphInk {
+    pub(crate) fn colour(self) -> egui::Color32 {
+        match self {
+            Self::Muted => theme::text::muted(),
+            Self::Accent => color::accent_400(),
+        }
+    }
+}
+
+/// [`node_icon`] with the ink as its role.
+pub(crate) fn node_glyph(kind: &NodeKind) -> (&'static str, GlyphInk) {
+    use GlyphInk::{Accent, Muted};
     match kind {
-        NodeKind::Root => (icon::SELECTION, theme::text::muted()),
-        NodeKind::Artboard { .. } => (icon::FRAME, color::accent_400()),
-        NodeKind::Group => (icon::SELECTION, theme::text::muted()),
-        NodeKind::Rect { .. } => (icon::SQUARE, theme::text::muted()),
-        NodeKind::Ellipse { .. } => (icon::CIRCLE, theme::text::muted()),
-        NodeKind::Polygon { .. } => (icon::TRIANGLE, theme::text::muted()),
-        NodeKind::Star { .. } => (icon::STAR, theme::text::muted()),
-        NodeKind::Line { .. } => (icon::LINE_SEGMENT, theme::text::muted()),
-        NodeKind::Path { .. } => (icon::POLYGON, color::accent_400()),
-        NodeKind::Text { .. } => (icon::TEXT_T, theme::text::muted()),
-        NodeKind::Slice { .. } => (icon::KNIFE, theme::text::muted()),
+        NodeKind::Root => (icon::SELECTION, Muted),
+        NodeKind::Artboard { .. } => (icon::FRAME, Accent),
+        NodeKind::Group => (icon::SELECTION, Muted),
+        NodeKind::Rect { .. } => (icon::SQUARE, Muted),
+        NodeKind::Ellipse { .. } => (icon::CIRCLE, Muted),
+        NodeKind::Polygon { .. } => (icon::TRIANGLE, Muted),
+        NodeKind::Star { .. } => (icon::STAR, Muted),
+        NodeKind::Line { .. } => (icon::LINE_SEGMENT, Muted),
+        NodeKind::Path { .. } => (icon::POLYGON, Accent),
+        NodeKind::Text { .. } => (icon::TEXT_T, Muted),
+        NodeKind::Slice { .. } => (icon::KNIFE, Muted),
         // Accent, like `Path`, with the operation's own glyph: the name can be
         // renamed away, the icon cannot.
-        NodeKind::Boolean { op } => (op_glyph(*op), color::accent_400()),
+        NodeKind::Boolean { op } => (op_glyph(*op), Accent),
     }
 }
 
@@ -1867,16 +1891,16 @@ impl OndinApp {
         // now, §15 D331; a hidden group still takes children). The name takes
         // its glyph's ink: blue, or white beside a component's hexagon.
         let name_col = match (drop_host, selected, dimmed) {
-            (true, ..) => color::SELECT,
+            (true, ..) => color::select_ink(),
             (_, true, _) if hexagon.is_some() => color::text(),
-            (_, true, _) => color::SELECT,
+            (_, true, _) => color::select_ink(),
             (_, false, true) => theme::color::text_a(102),
             (_, false, false) => theme::text::muted(),
         };
         let glyph_col = match (drop_host, selected, dimmed) {
-            (true, ..) => color::SELECT,
+            (true, ..) => color::select_ink(),
             (_, true, _) if hexagon.is_some() => theme::text::strong(),
-            (_, true, _) => color::SELECT,
+            (_, true, _) => color::select_ink(),
             (_, false, true) => dim_to(glyph_col, 102),
             (_, false, false) => glyph_col,
         };
@@ -5034,9 +5058,9 @@ mod drop_indent_tests {
         // The gap under `c1`: depth 3 stays in the group, depth 2 lands in the frame.
         let under_c1 = egui::pos2(grab_x, rows[3].bottom() - 4.0);
 
-        /// Every galley the frame painted in `SELECT`, as `(text, y of its baseline)`.
-        /// The colour is read off the layout job's section, as `FullOutput::shapes`
-        /// is pre-tessellation.
+        /// Every galley the frame painted in `select_ink`, as `(text, y of its
+        /// baseline)`. The colour is read off the layout job's section, as
+        /// `FullOutput::shapes` is pre-tessellation.
         fn lit_text(full: &egui::FullOutput) -> Vec<(String, f32)> {
             full.shapes
                 .iter()
@@ -5046,7 +5070,7 @@ mod drop_indent_tests {
                             .job
                             .sections
                             .iter()
-                            .any(|s| s.format.color == color::SELECT) =>
+                            .any(|s| s.format.color == color::select_ink()) =>
                     {
                         Some((t.galley.text().to_string(), t.pos.y))
                     }

@@ -2128,6 +2128,71 @@ mod tests {
         assert_eq!(passes(&f.app, f.grey), Some(true));
     }
 
+    /// In private mode the fix card names its layer masked, as `crate::private`
+    /// does everywhere; its leak test lives here, beside the measured fixture a
+    /// card needs.
+    ///
+    /// flip: `contrast_fix_card` naming the layer by `Node::name` → fails at
+    /// "no name while private".
+    #[test]
+    fn the_fix_card_masks_its_layer_in_private_mode() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.toggle_contrast();
+        settle(&ctx, &mut f.app);
+        f.app.open_fix(f.grey, egui::pos2(400.0, 100.0));
+        let drawn = |app: &mut OndinApp| {
+            let mut texts = Vec::new();
+            for _ in 0..3 {
+                let mut frame = eframe::Frame::_new_kittest();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::pos2(0.0, 0.0),
+                        egui::vec2(1320.0, 820.0),
+                    )),
+                    ..Default::default()
+                };
+                let out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+                texts = out
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+            texts
+        };
+        // Folded panes and a masked inspector leave the card the one place the
+        // masked name can come from.
+        f.app.prefs.private = true;
+        let masked = {
+            crate::private::set(true);
+            let m = crate::private::layer(&f.app.session.doc, f.grey).into_owned();
+            crate::private::set(false);
+            m
+        };
+        let on = drawn(&mut f.app);
+        assert!(
+            f.app.contrast.as_ref().is_some_and(|c| c.fix.is_some()),
+            "the card is open"
+        );
+        assert!(
+            !on.iter().any(|t| t.contains("Caption")),
+            "no name while private: {on:?}"
+        );
+        assert!(
+            on.iter().any(|t| t.contains(&masked)),
+            "the card names it {masked}: {on:?}"
+        );
+        f.app.prefs.private = false;
+        assert!(
+            drawn(&mut f.app).iter().any(|t| t.contains("Caption")),
+            "the card names it with private mode off"
+        );
+    }
+
     /// The card's nearest colour makes the layer pass, as one undo step.
     #[test]
     fn the_nearest_fix_passes_in_one_step() {

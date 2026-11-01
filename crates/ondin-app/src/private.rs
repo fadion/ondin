@@ -392,19 +392,26 @@ mod leak {
             },
             |app| app.palette = None,
         ));
-        // A layer's menu names nothing until a flyout opens (no control), but
-        // it must not start to.
-        app.open_context_menu(
+        // A layer's menu names pages in its *Move to page* list, held open as
+        // a hover holds it.
+        found.extend(surface(
             c,
-            crate::menu::Target::Layer {
-                id: rect,
-                door: crate::menu::Door::Canvas,
+            &mut app,
+            "context menu, move to page",
+            |app, ctx| {
+                let target = crate::menu::Target::Layer {
+                    id: rect,
+                    door: crate::menu::Door::Canvas,
+                };
+                app.open_context_menu(ctx, target, None);
+                let menu = app.context_menu.as_mut().expect("the menu is open");
+                menu.flyout = Some(egui::Rect::from_min_size(
+                    egui::pos2(400.0, 300.0),
+                    egui::vec2(180.0, 24.0),
+                ));
             },
-            None,
-        );
-        assert!(app.context_menu.is_some(), "the menu is open");
-        found.extend(leaks(c, &mut app, "context menu"));
-        app.context_menu = None;
+            |app| app.context_menu = None,
+        ));
         // The variables browser, pressed to *In selection*, says whose variables
         // it lists. It stands beside the canvas, so one is laid out.
         let canvas = app.canvas_rect;
@@ -582,8 +589,9 @@ mod leak {
     }
 
     /// No kit surface names the kit, its components or the document using them:
-    /// an instance's card, the insert picker, *Kits used*, *Make local*, and on
-    /// the kit itself *Publish*. The picker's fixture kit is *Atlas*, holding
+    /// an instance's card, the insert picker, *Kits used*, *Make local*, the
+    /// update pill's popover, and on the kit itself *Publish*. The picker's
+    /// fixture kit is *Atlas*, holding
     /// *Badge* and a set in a frame *Forms*, used by *Landing*.
     ///
     /// flip: `kits_in` naming a kit by `display_name` → fails at the instance's
@@ -654,12 +662,41 @@ mod leak {
             &|app, _| app.making_local = Some(top),
             &|app| app.making_local = None,
         );
+        // The kit publishes again: the update pill's popover names the kit. Its
+        // components are a count until a row is expanded, which this leaves shut.
+        let kit_path = root.join("atlas.ondin");
+        let mut published = ondin_core::io::load(&std::fs::read(&kit_path).unwrap()).unwrap();
+        published
+            .apply(&Transaction(vec![Operation::SetOpacity {
+                id: badge,
+                opacity: 0.5,
+            }]))
+            .unwrap();
+        ondin_core::kit::publish(&mut published, None, 2).unwrap();
+        crate::library::store::write_document(&kit_path, &published).unwrap();
+        // A modification time on, so the shelf reads the file again.
+        std::fs::File::options()
+            .write(true)
+            .open(&kit_path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2))
+            .unwrap();
+        app.library.refresh();
+        one(
+            &mut app,
+            "kit update popover",
+            &|app, _| {
+                app.kit_shelf.settle();
+                app.open_menu = crate::app::TopMenu::KitUpdates;
+            },
+            &|app| app.open_menu = crate::app::TopMenu::None,
+        );
         // On the kit itself, with a change to publish.
         app.open_path(&root.join("atlas.ondin"));
         app.session
             .try_commit(Transaction(vec![Operation::SetOpacity {
                 id: badge,
-                opacity: 0.5,
+                opacity: 0.25,
             }]))
             .expect("a change to publish");
         one(&mut app, "publish", &|app, _| app.open_publish(), &|app| {
@@ -707,6 +744,30 @@ mod leak {
         found.extend(leaks(&ctx, &mut app, "project"));
         app.dash.list_view = !app.dash.list_view;
         found.extend(leaks(&ctx, &mut app, "project, other view"));
+        // The document's own cards name it.
+        let c = &ctx;
+        let file = path.clone();
+        found.extend(surface(
+            c,
+            &mut app,
+            "delete card",
+            |app, _| app.dash.deleting = Some(file.clone()),
+            |app| app.dash.deleting = None,
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "move card",
+            |app, _| app.dash.moving = Some(file.clone()),
+            |app| app.dash.moving = None,
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "missing-file card",
+            |app, _| app.dash.missing = Some(file.clone()),
+            |app| app.dash.missing = None,
+        ));
 
         app.session.adopt_document(doc, Some(path));
         app.view = View::Editor;

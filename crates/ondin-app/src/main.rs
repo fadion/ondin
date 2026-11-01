@@ -52,6 +52,9 @@
 //! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
 //! ```
 //!
+//! `ondin reader` is left out above: it is the app's own child, reading another
+//! tool's file off standard input (`reader`).
+//!
 //! `export` runs on `ondin-core` and the CPU renderer alone, so it works with no
 //! display or graphics driver. `serve`/`mcp-proxy` land at M6.
 //!
@@ -113,6 +116,7 @@ mod present;
 mod preview;
 mod private;
 mod rail;
+mod reader;
 mod render_cli;
 mod rulers;
 mod session;
@@ -787,6 +791,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // The app's own reading child: no hook, no instance count, no logging.
+    if args.first().map(String::as_str) == Some(reader::SUBCOMMAND) {
+        std::process::exit(reader::serve());
+    }
     // Velopack's hook, before anything else in a GUI launch. The installer and
     // updater re-run this binary with `--veloapp-*`; `run` services the flag and
     // ends the process, so it must precede `parse`, which would refuse the flag.

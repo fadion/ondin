@@ -168,7 +168,11 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   rather than loading the Image tool. Its report (*Imported logo.svg — 5 layers*) follows the
   pictures' in one status, and the drop selects both.
 - A PDF (its `%PDF-` header, `pdf_in::looks_like_pdf`) comes in by the same doors, the drop pill
-  saying *Import PDF* (`canvas::read_pdf`, placed by `place_pdf`). Each page becomes a
+  saying *Import PDF* (`canvas::read_pdf`, placed by `place_pdf`). `read_pdf` has `pdf_in::import`
+  (hayro) draw the pages as SVG in the reading child process (`reader::pdf`, `library.md`), so a
+  PDF that crashes hayro costs the import, not the app; `svg_in` reads the pages back on the worker.
+  A child that dies without answering is refused as a PDF that does not read is
+  (*brochure.pdf could not be read as PDF*). Each page becomes a
   white frame at the page's size — a frame even for one page, so the page keeps its paper and its
   edge — named *brochure*, or *brochure — page 2* of several, in a row `PDF_PAGE_GAP` apart on the
   page, centred where a paste would land: one step, the frames selected, *Imported brochure.pdf —

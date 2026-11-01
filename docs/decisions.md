@@ -132,6 +132,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Autosave is debounced**: writing on every op into a synced folder thrashes the sync client.
 - **Leaving a tab saves it**, as leaving for the library does, instead of an autosave tick running for tabs behind: a tab behind is clean unless it cannot be saved, and nothing is written behind the user's back while it waits.
 - **Undo history is kept per document in the library** (`.history/<document id>.json`), never beside the file, so it does not travel with a copy. It is read back only for byte-identical file contents written by the same version (`CARGO_PKG_VERSION`): a history replayed onto any other document would corrupt it. Two development builds of one version share the check; released versions never do.
+- **Another tool's file (Sketch, Penpot, a fetched Figma file) and a placed PDF are parsed in a child process** (`ondin reader`), the result crossing back as save-format bytes the app loads and so re-validates: a reader's stack overflow or failed allocation aborts its process, which no `catch_unwind` sees. Each reader keeps its own bounds; the child is the guard for what they miss. `.ondin` loads and SVG import stay in the app, bounded by their own depth limits. The child only parses (the app fetches, and keeps the Figma token) and has no memory cap.
 
 ## Workspace and build
 

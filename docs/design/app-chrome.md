@@ -71,7 +71,7 @@ How `ondin-app` draws its window and panels: the toolkit choice, the shared widg
 
 ```
 ondin-app/src/
-├─ main.rs          CLI: gui (default) | <file> | export | render | diff | check | merge | tokens | serve | mcp-proxy; Velopack hook; eframe bootstrap
+├─ main.rs          CLI: gui (default) | <file> | export | render | diff | check | merge | tokens | serve | mcp-proxy; `reader` (hidden, dispatched before the Velopack hook and the instance count); Velopack hook; eframe bootstrap
 ├─ file_type.rs     Windows: the .ondin file type, registered by Velopack's install/update hooks
 ├─ render_cli.rs    `ondin render`: a component per CSV row, every frame per mode
 ├─ bin/ondin-cli.rs console twin (ondin.com on Windows)
@@ -89,6 +89,7 @@ ondin-app/src/
 ├─ atomic.rs        write(): temp, sync_all, rename (every record the app keeps)
 ├─ job.rs           Job: one computation on a worker thread, picked up by the frame loop when it lands
 ├─ import.rs        files given by a drop or Place image: read on a worker, landed in their tab (app-image-editing.md)
+├─ reader.rs        another tool's file and a placed PDF parsed in a child process, `ondin reader` (library.md)
 ├─ library/         the library folder: store, project, scan, recovery, cover, cache; history.rs undo kept between sessions (library.md)
 ├─ kits/            kit chrome: the kit menu and tag, the library's kit index, the insert picker, publish and updates (kits.md)
 ├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback) + canvas interaction and overlays

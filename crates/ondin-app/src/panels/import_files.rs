@@ -597,7 +597,7 @@ impl ondin_core::svg_in::ImageSink for Pictures {
 
 /// Another tool's file read into a document, with what did not map, the font
 /// families its text asks for, and the name the file gives itself.
-type Read = (
+pub(crate) type Read = (
     ondin_core::Document,
     Vec<(Part, ReportRow)>,
     Vec<(String, usize)>,
@@ -623,7 +623,18 @@ fn penpot_one(bytes: &[u8]) -> Result<ondin_core::penpot_v1::Entries, String> {
     penpot_v1::unpack(&body).map_err(|e| unreadable(&e))
 }
 
+/// Another tool's file read in a child process (`crate::reader`), so a file that
+/// crashes its reader costs the import and not the app.
 fn read_foreign(kind: Kind, bytes: &[u8]) -> Result<Read, String> {
+    let request = match kind {
+        Kind::Penpot => crate::reader::Request::Penpot(bytes.to_vec()),
+        _ => crate::reader::Request::Sketch(bytes.to_vec()),
+    };
+    crate::reader::foreign(request).map_err(crate::reader::Failure::message)
+}
+
+/// [`read_foreign`]'s work, in the reading child.
+pub(crate) fn read_foreign_here(kind: Kind, bytes: &[u8]) -> Result<Read, String> {
     let mut archive: Box<dyn ondin_core::foreign::Archive> =
         if kind == Kind::Penpot && ondin_core::penpot_in::is_old_format(bytes) {
             Box::new(penpot_one(bytes)?)
@@ -804,13 +815,33 @@ fn read_figma(
     files: std::collections::BTreeMap<String, Vec<u8>>,
     bytes: u64,
 ) -> Result<Source, String> {
+    let (doc, report, families, name) =
+        crate::reader::foreign(crate::reader::Request::Figma(files))
+            .map_err(crate::reader::Failure::message)?;
+    let census = ondin_core::take::census(&doc);
+    Ok(Source {
+        name: name.unwrap_or_else(|| "Figma file".to_owned()),
+        census,
+        kind: Kind::Figma,
+        bytes,
+        report,
+        families,
+        missing_fonts: Vec::new(),
+        doc: Arc::new(doc),
+    })
+}
+
+/// [`read_figma`]'s work, in the reading child.
+pub(crate) fn read_figma_here(
+    files: std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<Read, String> {
     let actor = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(1, |d| d.as_nanos() as u64 | 1);
     let mut ids = ondin_core::IdSource::new(actor);
     let read = ondin_core::figma_in::read(&mut Fetched(files), &mut ids, &mut Pictures)
         .map_err(|e| format!("Could not be read: {e}"))?;
-    let report: Vec<(Part, ReportRow)> = read
+    let report = read
         .report
         .into_iter()
         .map(|u| {
@@ -822,21 +853,8 @@ fn read_figma(
             (u.part, row)
         })
         .collect();
-    let census = ondin_core::take::census(&read.doc);
-    Ok(Source {
-        name: if read.name.trim().is_empty() {
-            "Figma file".to_owned()
-        } else {
-            read.name
-        },
-        census,
-        kind: Kind::Figma,
-        bytes,
-        report,
-        families: read.families.into_iter().collect(),
-        missing_fonts: Vec::new(),
-        doc: Arc::new(read.doc),
-    })
+    let name = Some(read.name).filter(|n| !n.trim().is_empty());
+    Ok((read.doc, report, read.families.into_iter().collect(), name))
 }
 
 /// The name a document files under: its own, else its filename de-slugged as the

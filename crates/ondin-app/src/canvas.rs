@@ -1379,12 +1379,14 @@ pub(crate) fn read_pdf(
     name: &str,
     images: &mut Decoded,
 ) -> Result<PdfRead, SvgImport> {
-    use ondin_export::pdf_in::{PdfInError, import};
-    let pdf = match import(bytes) {
-        Ok(pdf) => pdf,
-        Err(PdfInError::Encrypted) => return Err(SvgImport::Locked),
-        Err(PdfInError::Unreadable) => return Err(SvgImport::Unreadable),
-        Err(PdfInError::TooLarge) => return Err(SvgImport::TooLarge),
+    use ondin_export::pdf_in::PdfInError;
+    // Drawn in a child process (`crate::reader`): a PDF that crashes hayro costs
+    // the import, not the app.
+    let pdf = match crate::reader::pdf(bytes) {
+        Ok(Ok(pdf)) => pdf,
+        Ok(Err(PdfInError::Encrypted)) => return Err(SvgImport::Locked),
+        Ok(Err(PdfInError::Unreadable)) | Err(_) => return Err(SvgImport::Unreadable),
+        Ok(Err(PdfInError::TooLarge)) => return Err(SvgImport::TooLarge),
     };
     let pages = pdf.pages;
     let mut read = PdfRead {

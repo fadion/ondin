@@ -5890,7 +5890,7 @@ impl OndinApp {
         let Some(paths) = rfd::FileDialog::new()
             .add_filter(
                 "Images",
-                &["png", "jpg", "jpeg", "webp", "gif", "svg", "pdf"],
+                &["png", "jpg", "jpeg", "webp", "gif", "svg", "pdf", "ai"],
             )
             .pick_files()
         else {

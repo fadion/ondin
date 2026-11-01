@@ -167,7 +167,9 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   page, centred where a paste would land: one step, the frames selected, *Imported brochure.pdf —
   340 layers on 12 pages*. Past `pdf_in::MAX_PAGES` the rest
   are left out and the report says so. A password-protected PDF is
-  refused by name.
+  refused by name. An Illustrator `.ai` saved with PDF compatibility is a PDF and comes in as one
+  (*Place image* lists the extension, the drop pill counts it); one without is refused with the
+  re-save that fixes it (`import::is_illustrator`).
 - `Ctrl+V` over a picture-only clipboard produces no egui event, so `input::normal_mode` also reads the
   key **release**; `Action::Paste` tries the picture before the in-app layer paste.
 

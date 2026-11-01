@@ -11,8 +11,6 @@ reads true.
 
 ## Now
 
-- **`.ai` files through the PDF import.** An Illustrator file saved with PDF compatibility is a PDF;
-  the import accepts the `pdf` extension only.
 - **A luminance mask mode** beside Shape and Alpha (`MaskMode`).
 - **Colour-blind simulation** as a switch in the contrast check mode.
 - **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every

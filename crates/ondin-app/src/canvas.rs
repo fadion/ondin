@@ -9612,14 +9612,15 @@ fn drop_label(files: usize, svgs: usize, pdfs: usize, replacing: Option<&str>) -
     }
 }
 
-/// Whether a file hovering over the window is PDF, by its name or MIME type.
+/// Whether a file hovering over the window is PDF, by its name or MIME type. An
+/// Illustrator `.ai` counts: the import reads it as the PDF it carries.
 fn hovers_pdf(file: &egui::HoveredFile) -> bool {
     file.mime == "application/pdf"
         || file
             .path
             .as_deref()
             .and_then(|p| p.extension())
-            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf") || e.eq_ignore_ascii_case("ai"))
 }
 
 /// Whether a file hovering over the window is SVG, by its name or its MIME type: the
@@ -12194,7 +12195,11 @@ mod drop_label_tests {
             ..Default::default()
         };
         assert!(hovers_svg(&svg) && !hovers_svg(&png));
-        assert!(hovers_pdf(&pdf) && !hovers_pdf(&svg) && !hovers_pdf(&png));
+        let ai = egui::HoveredFile {
+            path: Some("C:/art/Logo.ai".into()),
+            ..Default::default()
+        };
+        assert!(hovers_pdf(&pdf) && hovers_pdf(&ai) && !hovers_pdf(&svg) && !hovers_pdf(&png));
     }
 
     /// The pill `paint_drop_label` paints, as a screen rect.

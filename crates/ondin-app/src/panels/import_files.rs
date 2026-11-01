@@ -68,8 +68,8 @@ impl Kind {
             "sketch" => Self::Sketch,
             "penpot" => Self::Penpot,
             "fig" => Self::Fig,
-            "pdf" | "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff"
-            | "avif" => Self::Placed,
+            "pdf" | "ai" | "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif"
+            | "tiff" | "avif" => Self::Placed,
             _ => Self::Other,
         }
     }
@@ -3173,6 +3173,7 @@ mod tests {
         assert_eq!(Kind::of(Path::new("Site.sketch")), Kind::Sketch);
         assert_eq!(Kind::of(Path::new("Kit.penpot")), Kind::Penpot);
         assert_eq!(Kind::of(Path::new("poster.pdf")), Kind::Placed);
+        assert_eq!(Kind::of(Path::new("logo.ai")), Kind::Placed);
         assert_eq!(Kind::of(Path::new("logo.svg")), Kind::Placed);
         assert_eq!(Kind::of(Path::new("notes.txt")), Kind::Other);
     }

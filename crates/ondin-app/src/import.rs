@@ -131,6 +131,12 @@ fn read_one(file: Incoming, ids: &mut IdSource, parent: NodeId) -> Read {
                 images,
             }),
         )
+    } else if is_illustrator(&name) {
+        // An `.ai` saved with PDF compatibility took the arm above; the rest are
+        // Illustrator's private format, which only a re-save can open.
+        return Read::Refused(format!(
+            "{name} was saved without PDF compatibility: re-save it from Illustrator with Create PDF Compatible File"
+        ));
     } else {
         let ext = file.path.as_deref().and_then(crate::app::file_extension);
         return match crate::app::read_picture(bytes, ext, Some(name.clone())) {
@@ -147,6 +153,13 @@ fn read_one(file: Incoming, ids: &mut IdSource, parent: NodeId) -> Read {
             }
         })
     })
+}
+
+/// Whether a file is named as Illustrator's, `.ai`.
+fn is_illustrator(name: &str) -> bool {
+    std::path::Path::new(name)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("ai"))
 }
 
 impl OndinApp {
@@ -479,6 +492,31 @@ mod tests {
             };
             assert!(why.contains("Import files"), "{why}");
         }
+    }
+
+    /// An `.ai` is read as the PDF its bytes are; one without a PDF inside is
+    /// refused with the re-save that fixes it, not as a picture that failed.
+    ///
+    /// flip: `read_one` without its `is_illustrator` arm → fails at "re-save".
+    #[test]
+    fn an_illustrator_file_reads_as_its_pdf_or_asks_for_a_re_save() {
+        let mut ids = IdSource::new(1);
+        let parent = ids.mint();
+        let read = |bytes: &'static [u8], ids: &mut IdSource| {
+            let file = Incoming {
+                name: "Logo.AI".into(),
+                bytes: Some(Arc::from(bytes)),
+                path: None,
+            };
+            match read_one(file, ids, parent) {
+                Read::Refused(why) => why,
+                _ => panic!("neither fixture is a PDF that parses"),
+            }
+        };
+        let pdf = read(b"%PDF-1.4 not really", &mut ids);
+        assert_eq!(pdf, "Logo.AI could not be read as PDF", "took the PDF arm");
+        let ps = read(b"%!PS-Adobe-3.0\n%%Creator: Adobe Illustrator", &mut ids);
+        assert!(ps.contains("re-save"), "{ps}");
     }
 
     /// The nodes on the document's first page.

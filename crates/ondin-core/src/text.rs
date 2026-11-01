@@ -1864,8 +1864,12 @@ fn shape(parts: TextRef<'_>) -> Shaped {
     let runs = parts.spans.runs(parts.style, parts.content.len());
     let cased = cased_text(parts.content, &runs);
     let text: &str = cased.as_deref().unwrap_or(parts.content);
-    // Read once for the whole text, so every run's stack names the same fallbacks.
-    let subsets = crate::fallback_fonts::subsets_in(text, parts.style.locale.as_deref());
+    // Read once for the whole text, so every run's stack names the same fallbacks;
+    // Han by each run's own locale.
+    let subsets = crate::fallback_fonts::subsets_in_runs(
+        text,
+        runs.iter().map(|(r, s)| (r.clone(), s.locale.as_deref())),
+    );
 
     let mut layout = ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();

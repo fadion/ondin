@@ -174,6 +174,16 @@ pub fn subset_alias(family: &str, subset: Subset) -> String {
 /// Every subset `text`'s characters fall in, Han ideographs assigned by `locale`
 /// (a BCP 47 tag) and, without one, by the kana or hangul beside them.
 pub fn subsets_in(text: &str, locale: Option<&str>) -> BTreeSet<Subset> {
+    let (mut out, han) = scan(text);
+    if han {
+        out.insert(han_subset(locale, &out));
+    }
+    out
+}
+
+/// The subsets `text`'s characters other than Han fall in, and whether it holds
+/// Han, whose subset depends on a locale.
+fn scan(text: &str) -> (BTreeSet<Subset>, bool) {
     let mut out = BTreeSet::new();
     let mut han = false;
     // ASCII is the common case and in no subset past `latin`.
@@ -190,8 +200,24 @@ pub fn subsets_in(text: &str, locale: Option<&str>) -> BTreeSet<Subset> {
             None => {}
         }
     }
+    (out, han)
+}
+
+/// [`subsets_in`] for a text whose runs carry locales of their own: the Han
+/// subset is chosen per run, by the run's locale and the whole text's kana and
+/// hangul, so a `ja` span in a node with none draws Japanese forms.
+pub fn subsets_in_runs<'a>(
+    text: &str,
+    runs: impl IntoIterator<Item = (std::ops::Range<usize>, Option<&'a str>)>,
+) -> BTreeSet<Subset> {
+    let (mut out, han) = scan(text);
     if han {
-        out.insert(han_subset(locale, &out));
+        let others = out.clone();
+        for (range, locale) in runs {
+            if text.get(range).is_some_and(|piece| scan(piece).1) {
+                out.insert(han_subset(locale, &others));
+            }
+        }
     }
     out
 }
@@ -204,9 +230,19 @@ pub fn subsets_of(doc: &crate::Document) -> BTreeSet<Subset> {
     let mut stack: Vec<crate::NodeId> = doc.page_ids().collect();
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
-        if let crate::node::NodeKind::Text { content, style, .. } = node.kind() {
+        if let crate::node::NodeKind::Text {
+            content,
+            style,
+            spans,
+            ..
+        } = node.kind()
+        {
             let locale = style.locale.as_deref();
-            out.extend(subsets_in(content, locale));
+            let runs = spans.runs(style, content.len());
+            out.extend(subsets_in_runs(
+                content,
+                runs.iter().map(|(r, s)| (r.clone(), s.locale.as_deref())),
+            ));
             if let Some(var) = node.text_vars()[crate::variable::TEXT_CONTENT] {
                 for value in doc.variables().every_value(var) {
                     if let Some(s) = value.as_str() {
@@ -553,6 +589,47 @@ mod tests {
         assert_eq!(subsets_in("नमस्ते", None), set(&[Subset::Devanagari]));
         assert_eq!(subsets_in("สวัสดี", None), set(&[Subset::Thai]));
         assert_eq!(subsets_in("안녕", None), set(&[Subset::Korean]));
+    }
+
+    /// Han in a span tagged `ja` asks for Japanese though the node has no locale,
+    /// beside Simplified for Han outside it; the document's preload reads spans too.
+    ///
+    /// flip: `subsets_in_runs` choosing Han by the node's locale alone → fails at
+    /// "the span's".
+    #[test]
+    fn han_follows_a_spans_own_locale() {
+        assert_eq!(
+            subsets_in_runs("漢字漢", [(0..6, Some("ja")), (6..9, None)]),
+            set(&[Subset::ChineseSimplified, Subset::Japanese]),
+            "the span's, and the node's beside it"
+        );
+        let mut ids = crate::IdSource::new(7);
+        let root = ids.mint();
+        let mut doc = crate::Document::new(root);
+        let style = crate::TextStyle::default();
+        let mut spans = crate::node::CharSpans::default();
+        spans.set(0..6, crate::CharAttr::Locale(Some("ja".into())), &style);
+        doc.apply(&crate::Transaction(vec![crate::Operation::CreateNode {
+            id: ids.mint(),
+            parent: root,
+            index: 0,
+            kind: crate::NodeKind::Text {
+                content: "漢字".into(),
+                style: Box::new(style),
+                spans,
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: crate::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+        assert_eq!(subsets_of(&doc), set(&[Subset::Japanese]), "the preload");
     }
 
     #[test]

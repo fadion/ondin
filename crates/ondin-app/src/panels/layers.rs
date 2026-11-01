@@ -79,6 +79,24 @@ pub(crate) fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
+/// The tooltip a row with `mark` wears, `own` the units of its own overrides:
+/// every mark has its words, since it steps aside while the row is hovered. A
+/// parent whose children differ says how first.
+fn mark_tip(
+    mark: Option<RowMark>,
+    children: ondin_core::reset::ChildDrift,
+    own: usize,
+) -> Option<String> {
+    child_drift_tip(children).or_else(|| match mark? {
+        RowMark::Local => Some("A layer of this instance's own".to_string()),
+        RowMark::Override if own > 0 => Some(match own {
+            1 => "1 override of its main".to_string(),
+            n => format!("{n} overrides of its main"),
+        }),
+        RowMark::Override => Some("Something inside differs from its main".to_string()),
+    })
+}
+
 /// What a row's tooltip counts and its *Restore children* restores, by its fold:
 /// `folded`, the whole subtree; else `id`'s own children. Never a field.
 pub(crate) fn child_drift_scoped(
@@ -905,23 +923,36 @@ impl Folds {
         self.set.contains(id)
     }
 
+    // Each write restamps only when the set changed: a selection change unfolds
+    // every ancestor, and a stamp moved for nothing rebuilds the flattened tree.
     pub(crate) fn insert(&mut self, id: NodeId) -> bool {
-        self.touch();
-        self.set.insert(id)
+        let changed = self.set.insert(id);
+        if changed {
+            self.touch();
+        }
+        changed
     }
 
     pub(crate) fn remove(&mut self, id: &NodeId) -> bool {
-        self.touch();
-        self.set.remove(id)
+        let changed = self.set.remove(id);
+        if changed {
+            self.touch();
+        }
+        changed
     }
 
     pub(crate) fn extend(&mut self, ids: impl IntoIterator<Item = NodeId>) {
-        self.touch();
+        let before = self.set.len();
         self.set.extend(ids);
+        if self.set.len() != before {
+            self.touch();
+        }
     }
 
     pub(crate) fn clear(&mut self) {
-        self.touch();
+        if !self.set.is_empty() {
+            self.touch();
+        }
         self.set.clear();
     }
 
@@ -1225,8 +1256,11 @@ impl OndinApp {
             ui.ctx().request_repaint();
         }
         if self.prefs.tree_guides {
+            // Kept off the gutter beside the rows' tint, as the rows are.
+            let clip = ui.painter().clip_rect();
+            let band = egui::Rect::from_x_y_ranges(self.tree_band_x(clip), clip.y_range());
             paint_tree_guides(
-                ui.painter(),
+                &ui.painter().with_clip_rect(band.intersect(clip)),
                 &drawn,
                 ui.spacing().item_spacing.y,
                 ui.ctx().pixels_per_point(),
@@ -1712,21 +1746,24 @@ impl OndinApp {
             } else {
                 Default::default()
             };
+            let own: usize = ondin_core::reset::overrides(&self.session.doc, id)
+                .iter()
+                .map(|o| o.units)
+                .sum();
             let mark = if local {
                 Some(RowMark::Local)
             } else if has_children && !expanded && copy {
                 let d = self.drift_of(id);
                 (d.any() || d.local > 0).then_some(RowMark::Override)
             } else {
-                (children.any() || !ondin_core::reset::overrides(&self.session.doc, id).is_empty())
-                    .then_some(RowMark::Override)
+                (children.any() || own > 0).then_some(RowMark::Override)
             };
-            (mark, child_drift_tip(children))
+            (mark, mark_tip(mark, children, own))
         };
 
         let rect = row.rect;
         let resp = ui.interact(rect, row_id(id), egui::Sense::click_and_drag());
-        // The dot's words, on the row it sits on (§15 D1003 (9)).
+        // The mark's words, on the row it sits on.
         let resp = match &children_tip {
             Some(tip) => resp.on_hover_text(tip),
             None => resp,
@@ -1755,14 +1792,15 @@ impl OndinApp {
         // The part of the row in view, inset by the tree's padding: the row is as
         // wide as the widest name in view and scrolls sideways under it, while
         // the tint, the controls, the badge and the mark stay pinned to it.
-        let pad = f32::from(TREE_PAD_X);
-        let view = self.layers_view_x.map_or(rect.x_range(), |v| {
-            egui::Rangef::new(v.min + pad, v.max - pad)
-        });
         // The view itself, not its overlap with the row: scrolled to the end, the
         // row can stop a few points short of the view, and the controls with it.
-        let band = egui::Rect::from_x_y_ranges(view, rect.y_range());
-        let p = ui.painter();
+        let band = egui::Rect::from_x_y_ranges(self.tree_band_x(rect), rect.y_range());
+        // Scrolled sideways, nothing of the row draws in the gutter beside its tint.
+        let clip = ui.painter().clip_rect();
+        let clipped = ui.painter().with_clip_rect(
+            egui::Rect::from_x_y_ranges(band.x_range(), clip.y_range()).intersect(clip),
+        );
+        let p = &clipped;
         let r5 = egui::CornerRadius::same(5);
         if let Some(tint) = row_tint(being_dragged, selected, hovered) {
             p.rect_filled(band, r5, tint);
@@ -1926,7 +1964,8 @@ impl OndinApp {
                     badge_left: None,
                 });
             self.layers_tree_w = self.layers_tree_w.max(name_end - rect.left() + controls);
-            if name_end > name_right {
+            // From where the clip cuts, so no name ends in a hard cut.
+            if name_end > name_right - COVER_PAD {
                 let ground = row_ground(being_dragged, selected, hovered);
                 cover_row_end(p, band, name_right, ground);
             }
@@ -1987,7 +2026,7 @@ impl OndinApp {
         // The mark sits after the lock and eye at the row's very edge, and steps
         // aside while the row is hovered so the hover's controls stand alone; its
         // slot stays reserved, so the eye and lock do not move. The row's tooltip
-        // still says what the mark stood for.
+        // says what the mark stood for (`mark_tip`).
         if let Some(m) = mark.filter(|_| !hovered) {
             let at = egui::pos2(right - MARK_SLOT / 2.0 + 1.0, cy);
             match m {
@@ -2030,10 +2069,6 @@ impl OndinApp {
                 spring: None,
                 refused: None,
             });
-        }
-
-        if selected {
-            self.scroll_to_selected_row(ui, rect);
         }
 
         // Double-click renames in place. Counted by `ui::double_clicked`, so a
@@ -2358,12 +2393,22 @@ impl OndinApp {
             && ondin_core::component::can_hold(doc, parent, dragged)
     }
 
+    /// The x-range of the tree in view, inset by its padding: where a row's tint,
+    /// controls and drop hints sit, whatever the sideways scroll. `row` stands in
+    /// before the view is known.
+    fn tree_band_x(&self, row: egui::Rect) -> egui::Rangef {
+        let pad = f32::from(TREE_PAD_X);
+        self.layers_view_x.map_or(row.x_range(), |v| {
+            egui::Rangef::new(v.min + pad, v.max - pad)
+        })
+    }
+
     /// Read the pointer against the rows the walk just drew: work out where the drag
     /// would land, record it for the release, and draw the affordance that says so.
     ///
     /// One pass after the walk, because an indent-aware drop is a claim about the row
-    /// above a boundary and the row below it at once (§15 D67). The hint is drawn
-    /// only where the drop is legal.
+    /// above a boundary and the row below it at once. The hint is drawn only where
+    /// the drop is legal.
     fn drop_hint(&mut self, ui: &egui::Ui, rows: &[TreeRow]) {
         let Some(drag) = self.layer_drag.as_ref() else {
             return;
@@ -2417,10 +2462,14 @@ impl OndinApp {
         }
 
         let painter = ui.painter();
+        // Framing the row's tint, not its content, which runs as wide as the
+        // widest name.
+        let band =
+            |row: egui::Rect| egui::Rect::from_x_y_ranges(self.tree_band_x(row), row.y_range());
         match spot {
             DropSpot::Into(i) => {
                 painter.rect_stroke(
-                    rows[i].rect,
+                    band(rows[i].rect),
                     egui::CornerRadius::same(5),
                     egui::Stroke::new(1.0, color::SELECT),
                     egui::StrokeKind::Inside,
@@ -2436,12 +2485,13 @@ impl OndinApp {
                 let (y, width) = snap_across(y, DROP_LINE_PT, ui.ctx().pixels_per_point());
                 // Every row spans the panel, so any gives the two ends.
                 let rect = rows[boundary.min(rows.len() - 1)].rect;
+                let ends = band(rect);
                 // The line starts at the level's own indent: that is what says
                 // which depth an ambiguous drop takes.
                 painter.line_segment(
                     [
-                        egui::pos2(rect.left() + indent_of(depth), y),
-                        egui::pos2(rect.right(), y),
+                        egui::pos2((rect.left() + indent_of(depth)).max(ends.left()), y),
+                        egui::pos2(ends.right(), y),
                     ],
                     egui::Stroke::new(width, color::SELECT),
                 );
@@ -2476,7 +2526,9 @@ impl OndinApp {
             .into_iter()
             .filter(|id| self.session.doc.contains(*id))
             .collect();
-        moving.sort_by_key(|id| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
+        let rank: std::collections::HashMap<NodeId, usize> =
+            order.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+        moving.sort_by_key(|id| rank.get(id).copied().unwrap_or(usize::MAX));
         if moving.is_empty() {
             return;
         }
@@ -5508,6 +5560,65 @@ mod drag_start_sync_tests {
         assert!(offset > VIEW.height(), "scrolled to the last row: {offset}");
     }
 
+    /// Scrolled sideways past a long name, no row draws text in the gutter left of
+    /// the rows' tint.
+    /// flip: `layers_row` painting through `ui.painter()` unclipped → fails at the
+    /// gutter assertion.
+    #[test]
+    fn a_row_scrolled_sideways_keeps_out_of_the_gutter() {
+        let ctx = egui::Context::default();
+        let (mut app, ids) = app_with_rows(&ctx, 3);
+        let long = "A layer whose name runs well past the panel's right edge".to_string();
+        assert!(app.session.commit(Transaction(vec![Operation::SetName {
+            id: ids[1],
+            name: long,
+        }])));
+        app.layers_view_x = Some(egui::Rangef::new(0.0, 300.0));
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(VIEW),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("sideways")
+                        .scroll_offset(egui::vec2(40.0, 0.0))
+                        .show(ui, |ui| app.layers_tree(ui));
+                },
+            );
+            shapes = out.shapes;
+        }
+        let gutter = f32::from(TREE_PAD_X);
+        let texts: Vec<&egui::epaint::ClippedShape> = shapes
+            .iter()
+            .filter(|c| matches!(c.shape, egui::Shape::Text(_)))
+            .collect();
+        assert!(!texts.is_empty(), "the fixture: rows drew");
+        assert!(
+            texts.iter().all(|c| c.clip_rect.min.x >= gutter - 0.01),
+            "text clipped into the gutter: {:?}",
+            texts.iter().map(|c| c.clip_rect.min.x).collect::<Vec<_>>()
+        );
+    }
+
+    /// A selection made outside the panel with nothing folded leaves the fold
+    /// stamp alone, so the flattened tree is not rebuilt.
+    /// flip: `Folds::remove` restamping unconditionally → fails at "unmoved".
+    #[test]
+    fn a_selection_change_with_nothing_folded_keeps_the_tree() {
+        let ctx = egui::Context::default();
+        let (mut app, ids) = app_with_rows(&ctx, 40);
+        frame(&ctx, &mut app, Vec::new());
+        let stamp = app.collapsed.stamp;
+        app.session.selection.set_one(ids[5]);
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(app.collapsed.stamp, stamp, "unmoved");
+        app.collapsed.insert(ids[0]);
+        assert_ne!(app.collapsed.stamp, stamp, "a real fold moves it");
+    }
+
     /// A row being renamed keeps its field while it is out of view.
     /// flip: `layers_row`'s off-view test without the `renaming_layer` exception →
     /// fails at "the field is laid out".
@@ -6090,6 +6201,28 @@ mod row_mark_tests {
             1,
             "unhovered: the dot is back"
         );
+    }
+
+    /// Every mark has a tooltip: a local layer's, an override's count, a folded
+    /// row's drift, and a parent's child drift first.
+    /// flip: `mark_tip` answering only `child_drift_tip` → fails at "a local layer".
+    #[test]
+    fn every_row_mark_has_its_words() {
+        let none = ondin_core::reset::ChildDrift::default();
+        assert_eq!(
+            super::mark_tip(Some(super::RowMark::Local), none, 0).as_deref(),
+            Some("A layer of this instance's own"),
+            "a local layer"
+        );
+        assert_eq!(
+            super::mark_tip(Some(super::RowMark::Override), none, 2).as_deref(),
+            Some("2 overrides of its main")
+        );
+        assert_eq!(
+            super::mark_tip(Some(super::RowMark::Override), none, 0).as_deref(),
+            Some("Something inside differs from its main")
+        );
+        assert_eq!(super::mark_tip(None, none, 0), None);
     }
 
     /// A main's or an instance's row wears the hexagon, never its picture's

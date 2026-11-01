@@ -113,6 +113,8 @@ pub fn read(
         nodes: FxHashMap::default(),
         mains: FxHashSet::default(),
         instances: Vec::new(),
+        shows: FxHashMap::default(),
+        parts: FxHashMap::default(),
         style_names: file
             .get("styles")
             .and_then(Value::as_object)
@@ -171,10 +173,11 @@ pub fn read(
     })
 }
 
-/// An instance: its root's node and the component it shows, and each of its
-/// nodes with the Figma id of the node it copies.
+/// An instance: its root's node and Figma id, the component it shows, and each
+/// of its nodes with its own Figma id.
 struct Instance {
     root: NodeId,
+    fid: String,
     component: String,
     copies: Vec<(NodeId, String)>,
     /// A copy inside another instance: its root is linked as that instance's
@@ -201,6 +204,12 @@ struct Builder<'a> {
     nodes: FxHashMap<String, NodeId>,
     mains: FxHashSet<String>,
     instances: Vec<Instance>,
+    /// Every instance's Figma id → the component it shows, so a nested one
+    /// swapped to another component is told apart from the copy it sits in.
+    shows: FxHashMap<String, String>,
+    /// A filled open path's group → its fill and stroke, linked part to part
+    /// when the group is an instance's copy.
+    parts: FxHashMap<NodeId, [NodeId; 2]>,
     style_names: FxHashMap<String, String>,
     styles: FxHashMap<String, Made>,
     pictures: FxHashMap<String, Option<ImageId>>,
@@ -272,28 +281,39 @@ impl Builder<'_> {
             "LINE" => NodeKind::Line {
                 end: Point::new(size.width, 0.0),
             },
-            "VECTOR" | "STAR" | "REGULAR_POLYGON" => match geometry(n, "fillGeometry")
-                // Nothing to fill: an open path, or a closed one without fills,
-                // drawn from its network so its stroke stays a stroke.
-                .or_else(|| network(n))
-            {
-                Some(path) => NodeKind::Path {
-                    path,
-                    corner_radii: Vec::new(),
-                    corner_smoothing: 0.0,
-                },
-                None => match geometry(n, "strokeGeometry") {
-                    // Without a network, its stroke outlined, drawn as a shape.
-                    Some(path) => {
-                        self.count("Open paths", 1, "", "Drawn as their outlined strokes");
-                        return self.outlined(n, path, parent, index, world, parent_world);
+            "VECTOR" | "STAR" | "REGULAR_POLYGON" => {
+                let fill = geometry(n, "fillGeometry");
+                let outline = geometry(n, "strokeGeometry");
+                match (fill, &outline) {
+                    // A filled open path: Figma strokes only the drawn segments.
+                    (Some(fill), Some(o)) if is_open(&fill, o) => {
+                        return self.split(n, fill, outline, parent, index, world, parent_world);
                     }
-                    None => {
-                        self.count("Shapes without geometry", 1, "", "Left out");
-                        return;
-                    }
-                },
-            },
+                    (Some(path), _) => NodeKind::Path {
+                        path,
+                        corner_radii: Vec::new(),
+                        corner_smoothing: 0.0,
+                    },
+                    // Nothing to fill: drawn from its network when the file
+                    // carries one, so its stroke stays a stroke.
+                    (None, _) => match (network(n), outline) {
+                        (Some(path), _) => NodeKind::Path {
+                            path,
+                            corner_radii: Vec::new(),
+                            corner_smoothing: 0.0,
+                        },
+                        // Else its stroke outlined, drawn as a shape.
+                        (None, Some(path)) => {
+                            self.count("Open paths", 1, "", "Drawn as their outlined strokes");
+                            return self.outlined(n, path, parent, index, world, parent_world);
+                        }
+                        (None, None) => {
+                            self.count("Shapes without geometry", 1, "", "Left out");
+                            return;
+                        }
+                    },
+                }
+            }
             "TEXT" => self.text(n),
             "SLICE" => NodeKind::Slice { size },
             _ => {
@@ -329,12 +349,17 @@ impl Builder<'_> {
                 "",
                 "Each variant came in as its own component",
             ),
-            "INSTANCE" => self.instances.push(Instance {
-                root: id,
-                component: str_of(n, "componentId").to_owned(),
-                copies: Vec::new(),
-                nested: inst.is_some() && source_of(&fid).is_some(),
-            }),
+            "INSTANCE" => {
+                let component = str_of(n, "componentId").to_owned();
+                self.shows.insert(fid.clone(), component.clone());
+                self.instances.push(Instance {
+                    root: id,
+                    fid: fid.clone(),
+                    component,
+                    copies: Vec::new(),
+                    nested: inst.is_some() && source_of(&fid).is_some(),
+                });
+            }
             _ => {}
         }
         // A copy belongs to the innermost instance it sits in, which is this one
@@ -347,10 +372,10 @@ impl Builder<'_> {
         for (i, child) in arr(n, "children").iter().enumerate() {
             self.node(child, id, i, world, inst);
             let cid = str_of(child, "id");
-            if let (Some(at), Some(&made), Some(source)) =
-                (inst, self.nodes.get(cid), source_of(cid))
+            if let (Some(at), Some(&made)) = (inst, self.nodes.get(cid))
+                && source_of(cid).is_some()
             {
-                self.instances[at].copies.push((made, source));
+                self.instances[at].copies.push((made, cid.to_owned()));
             }
         }
     }
@@ -395,6 +420,92 @@ impl Builder<'_> {
                 effects: keyed_by_position(effects),
             });
         }
+    }
+
+    /// A filled open path as a group of two, so no stroke runs along the closing
+    /// edge Figma does not draw: its fill from `fillGeometry`, unstroked, and
+    /// above it its stroke — the network's centre line, stroked, when the file
+    /// carries one, else `outline` filled with the stroke paints.
+    #[allow(clippy::too_many_arguments)]
+    fn split(
+        &mut self,
+        n: &Value,
+        fill: BezPath,
+        outline: Option<BezPath>,
+        parent: NodeId,
+        index: usize,
+        world: Affine,
+        parent_world: Affine,
+    ) {
+        self.count(
+            "Filled open paths",
+            1,
+            "",
+            "Split into a fill and its stroke",
+        );
+        let size = size_of(n);
+        let path = |path| NodeKind::Path {
+            path,
+            corner_radii: Vec::new(),
+            corner_smoothing: 0.0,
+        };
+        let (id, f, s) = (self.ids.mint(), self.ids.mint(), self.ids.mint());
+        self.push(Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Group,
+            transform: Some(parent_world.inverse() * world),
+            name: Some(str_of(n, "name").to_owned()),
+        });
+        self.nodes.insert(str_of(n, "id").to_owned(), id);
+        self.flags(id, n, "GROUP");
+        self.push(Operation::CreateNode {
+            id: f,
+            parent: id,
+            index: 0,
+            kind: path(fill),
+            transform: Some(Affine::IDENTITY),
+            name: Some("Fill".to_owned()),
+        });
+        let only_fill = without(n, &["strokes", "effects"], &["stroke", "effect"]);
+        self.paint(f, &only_fill, "VECTOR", size);
+        let line = network(n);
+        let centred = line.is_some();
+        let Some(stroke) = line.or(outline) else {
+            return;
+        };
+        self.push(Operation::CreateNode {
+            id: s,
+            parent: id,
+            index: 1,
+            kind: path(stroke),
+            transform: Some(Affine::IDENTITY),
+            name: Some("Stroke".to_owned()),
+        });
+        if centred {
+            let only_stroke = without(
+                n,
+                &["fills", "fillGeometry", "effects"],
+                &["fill", "effect"],
+            );
+            self.paint(s, &only_stroke, "VECTOR", size);
+        } else {
+            let fills = self.paints(arr(n, "strokes"), size);
+            if !fills.is_empty() {
+                self.push(Operation::SetFills {
+                    id: s,
+                    fills: keyed_by_position(fills),
+                });
+            }
+        }
+        let only_effects = without(
+            n,
+            &["fills", "fillGeometry", "strokes"],
+            &["fill", "stroke"],
+        );
+        self.paint(id, &only_effects, "GROUP", size);
+        self.parts.insert(id, [f, s]);
     }
 
     /// Count what a node carries that has no counterpart.
@@ -655,11 +766,8 @@ impl Builder<'_> {
                 };
                 let mut brush = image_brush(image);
                 if let peniko::Brush::Image(b) = &mut brush {
-                    b.image.fit = match str_of(p, "scaleMode") {
-                        "FIT" => ImageFit::Fit,
-                        "TILE" => ImageFit::Tile,
-                        _ => ImageFit::Fill,
-                    };
+                    let framed = self.framing(p);
+                    (b.image.fit, b.image.crop, b.image.tile_scale) = framed;
                 }
                 Some(brush.into())
             }
@@ -667,6 +775,46 @@ impl Builder<'_> {
                 self.count("Video and emoji fills", 1, "", "Left out");
                 None
             }
+        }
+    }
+
+    /// How an image paint frames its picture: `FIT` and `FILL` as Ondin's, a
+    /// `TILE` at its `scalingFactor`, a `STRETCH` as the crop its
+    /// `imageTransform` shows (the node's unit square in the picture's). A
+    /// turned or skewed crop, or a turned picture, is drawn unturned, reported.
+    fn framing(&mut self, p: &Value) -> (ImageFit, crate::kurbo::Rect, f64) {
+        let whole = crate::image::whole_crop();
+        if num(p, "rotation") % 360.0 != 0.0 {
+            self.count("Turned pictures", 1, "", "Drawn unturned");
+        }
+        match str_of(p, "scaleMode") {
+            "FIT" => (ImageFit::Fit, whole, 1.0),
+            "TILE" => {
+                let s = num(p, "scalingFactor");
+                (ImageFit::Tile, whole, if s > 0.0 { s } else { 1.0 })
+            }
+            "STRETCH" => {
+                // Without a transform the whole picture is stretched onto the node.
+                let [r0, r1] = arr(p, "imageTransform") else {
+                    return (ImageFit::Crop, whole, 1.0);
+                };
+                let r = |row: &Value, i: usize| row.get(i).and_then(Value::as_f64);
+                let [a, b, c, d, e, f] =
+                    [r(r0, 0), r(r1, 0), r(r0, 1), r(r1, 1), r(r0, 2), r(r1, 2)]
+                        .map(|v| v.unwrap_or(f64::NAN));
+                let crop = crate::kurbo::Rect::new(e, f, e + a, f + d);
+                if b != 0.0 || c != 0.0 || !(a > 0.0 && d > 0.0) || !crop.is_finite() {
+                    self.count(
+                        "Turned or skewed picture crops",
+                        1,
+                        "",
+                        "Shown filling their shape",
+                    );
+                    return (ImageFit::Fill, whole, 1.0);
+                }
+                (ImageFit::Crop, crop, 1.0)
+            }
+            _ => (ImageFit::Fill, whole, 1.0),
         }
     }
 
@@ -801,13 +949,7 @@ impl Builder<'_> {
         let content = str_of(n, "characters").to_owned();
         let base = n.get("style").cloned().unwrap_or(Value::Null);
         let default = type_style(&base, &TextStyle::default());
-        let ink = arr(n, "fills").first().and_then(|f| {
-            (str_of(f, "type") == "SOLID").then(|| {
-                f.get("color")
-                    .map_or(Color::BLACK, colour)
-                    .multiply_alpha(f.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) as f32)
-            })
-        });
+        let ink = text_ink(arr(n, "fills"));
         let overrides: Vec<i64> = arr(n, "characterStyleOverrides")
             .iter()
             .filter_map(Value::as_i64)
@@ -845,9 +987,7 @@ impl Builder<'_> {
                 spans.set(range.clone(), attr, &default);
             }
             let run_ink = over
-                .and_then(|o| arr(o, "fills").first())
-                .and_then(|f| f.get("color"))
-                .map(colour)
+                .and_then(|o| text_ink(arr(o, "fills")))
                 .filter(|c| Some(*c) != ink);
             spans.set(range, CharAttr::Color(run_ink), &default);
         }
@@ -912,10 +1052,24 @@ impl Builder<'_> {
                 .nodes
                 .get(&inst.component)
                 .filter(|_| self.mains.contains(&inst.component));
+            // A nested instance showing another component than the copy it
+            // sits in is a swap: it keeps that copy's slot, and its nodes copy
+            // its own component's, named from its root.
+            let swapped = inst.nested
+                && source_of(&inst.fid)
+                    .and_then(|s| self.shows.get(&s))
+                    .is_some_and(|c| *c != inst.component);
             let copies: Option<Vec<(NodeId, NodeId)>> = inst
                 .copies
                 .iter()
-                .map(|(id, source)| self.nodes.get(source).map(|&s| (*id, s)))
+                .map(|(id, fid)| {
+                    let source = if swapped {
+                        source_within(fid, &inst.fid)
+                    } else {
+                        source_of(fid)
+                    };
+                    source.and_then(|s| self.nodes.get(&s)).map(|&s| (*id, s))
+                })
                 .collect();
             match (main, copies) {
                 (Some(&main), Some(copies)) => {
@@ -925,10 +1079,22 @@ impl Builder<'_> {
                             id: inst.root,
                             link: Some(main),
                         });
+                    } else if swapped {
+                        ops.push(Operation::SetSwap {
+                            id: inst.root,
+                            swap: Some(main),
+                        });
                     }
+                    // A split open path's parts are linked part to part.
+                    let parts = copies.iter().filter_map(|(id, s)| {
+                        Some(self.parts.get(id)?.iter().zip(self.parts.get(s)?.iter()))
+                    });
+                    let parts: Vec<(NodeId, NodeId)> =
+                        parts.flatten().map(|(a, b)| (*a, *b)).collect();
                     ops.extend(
                         copies
                             .into_iter()
+                            .chain(parts)
                             .map(|(id, s)| Operation::SetLink { id, link: Some(s) }),
                     );
                 }
@@ -988,6 +1154,49 @@ fn source_of(id: &str) -> Option<String> {
     })
 }
 
+/// `n` with the paint lists `keys` emptied and the styles naming `slots` (each
+/// either singular or plural) taken off, so `Builder::paint` writes the rest.
+fn without(n: &Value, keys: &[&str], slots: &[&str]) -> Value {
+    let mut out = n.clone();
+    for k in keys {
+        out[*k] = Value::Array(Vec::new());
+    }
+    if let Some(styles) = out.get_mut("styles").and_then(Value::as_object_mut) {
+        for s in slots {
+            styles.remove(*s);
+            styles.remove(&format!("{s}s"));
+        }
+    }
+    out
+}
+
+/// Whether a filled path is drawn open: a closed outline strokes into two
+/// contours (either side of the line), an open one into one, so its stroke
+/// has fewer than twice the fill's. A dashed open path splits into many and
+/// reads as closed; a closed path whose stroke swallows its inside reads as
+/// open, which draws the same.
+fn is_open(fill: &BezPath, outline: &BezPath) -> bool {
+    let contours = |p: &BezPath| {
+        p.elements()
+            .iter()
+            .filter(|e| matches!(e, crate::kurbo::PathEl::MoveTo(_)))
+            .count()
+    };
+    contours(outline) < 2 * contours(fill)
+}
+
+/// The node a copy `<root>;<rest>` inside the swapped instance `root` copies in
+/// the component that instance shows: `rest`, prefixed with `I` when it names a
+/// copy inside a nested instance there.
+fn source_within(id: &str, root: &str) -> Option<String> {
+    let rest = id.strip_prefix(root)?.strip_prefix(';')?;
+    Some(if rest.contains(';') {
+        format!("I{rest}")
+    } else {
+        rest.to_owned()
+    })
+}
+
 fn str_in<'a>(n: &'a Value, k: &str) -> Option<&'a Value> {
     arr(n, k).first()
 }
@@ -1024,21 +1233,31 @@ fn radii(n: &Value) -> RoundedRectRadii {
     RoundedRectRadii::from_single_radius(num(n, "cornerRadius").max(0.0))
 }
 
+/// An ellipse's `arcData` as its arc: a full turn (stored as an `f32` 2π, a
+/// hair past 360°) is the whole ellipse, a ring when it has an inner radius; an
+/// arc running backwards is the same arc read from its end.
 fn arc(n: &Value) -> EllipseArc {
     let Some(a) = n.get("arcData") else {
         return EllipseArc::default();
     };
     let (start, end) = (num(a, "startingAngle"), num(a, "endingAngle"));
-    let sweep = (end - start).to_degrees();
-    if sweep.abs() >= 359.999 && num(a, "innerRadius") == 0.0 {
+    let ratio = num(a, "innerRadius").clamp(0.0, 0.99);
+    let (from, sweep) = if end < start {
+        (end, (start - end).to_degrees())
+    } else {
+        (start, (end - start).to_degrees())
+    };
+    if sweep >= 359.999 && ratio == 0.0 {
         return EllipseArc::default();
     }
     EllipseArc {
-        start: start.to_degrees().rem_euclid(360.0),
-        sweep: sweep
-            .rem_euclid(360.0)
-            .max(if sweep > 0.0 { 0.0 } else { 360.0 }),
-        ratio: num(a, "innerRadius").clamp(0.0, 0.99),
+        start: from.to_degrees().rem_euclid(360.0),
+        sweep: if sweep >= 359.999 || sweep == 0.0 {
+            360.0
+        } else {
+            sweep
+        },
+        ratio,
     }
 }
 
@@ -1158,6 +1377,19 @@ fn gradient(p: &Value, kind: &str, size: Size, alpha: f32) -> crate::Brush {
         gradient: gradient.with_stops(stops.as_slice()),
         transform,
         opacity: alpha,
+    })
+}
+
+/// The colour a text or a run of it is drawn in: its first visible solid
+/// fill's, at the fill's opacity.
+fn text_ink(fills: &[Value]) -> Option<Color> {
+    let f = fills
+        .iter()
+        .find(|f| f.get("visible").and_then(Value::as_bool) != Some(false))?;
+    (str_of(f, "type") == "SOLID").then(|| {
+        f.get("color")
+            .map_or(Color::BLACK, colour)
+            .multiply_alpha(f.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) as f32)
     })
 }
 

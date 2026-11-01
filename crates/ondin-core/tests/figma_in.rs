@@ -207,9 +207,11 @@ fn a_mask_keeps_its_mask_type() {
     assert_eq!(mode("1:4"), MaskMode::Luminance);
 }
 
-/// A vector is its fill geometry; an open one is its network's centre line,
-/// stroked and unfilled, its segments chained however Figma lists them; without
-/// a network, its stroke geometry filled with the stroke's paint.
+/// A vector is its fill geometry; one with nothing to fill is its network's
+/// centre line, stroked and unfilled, its segments chained however Figma lists
+/// them, when the file carries a `vectorNetwork` (a Plugin API field the REST
+/// fetch is not documented to send); without one, its stroke geometry filled
+/// with the stroke's paint.
 #[test]
 fn vectors_come_from_their_geometry() {
     let closed = node(
@@ -273,6 +275,310 @@ fn vectors_come_from_their_geometry() {
     );
     let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
     assert_eq!(rows, ["Open paths"]);
+}
+
+/// A filled open "V" is split into its fill, unstroked, and above it its
+/// outlined stroke, so no stroke runs along the closing edge Figma does not
+/// draw; a closed triangle stays one stroked path. flip: always take the
+/// `fillGeometry` path in `node` → fails at the V's kind.
+#[test]
+fn a_filled_open_path_is_not_stroked_along_its_closing_edge() {
+    let stroked = |id: &str, stroke: &str| {
+        node(
+            id,
+            "VECTOR",
+            (0.0, 0.0, 10.0, 10.0),
+            json!({
+                "fills": [solid(rgb(1.0, 0.0, 0.0))],
+                "strokes": [solid(rgb(0.0, 0.0, 0.0))], "strokeWeight": 2,
+                "fillGeometry": [{ "path": "M0 0L5 10L10 0Z", "windingRule": "NONZERO" }],
+                "strokeGeometry": [{ "path": stroke }],
+            }),
+        )
+    };
+    // One contour around the drawn line; a closed outline strokes into two.
+    let v = stroked("V", "M-1 0L5 12L11 0L9 0L5 8L1 0Z");
+    let tri = stroked("T", "M-1 -1L5 11L11 -1Z M1 1L5 9L9 1Z");
+    let r = import(fetched(vec![v, tri], json!({}), &[]));
+    let doc = &r.doc;
+    let group = doc.get(one(doc, "V")).unwrap();
+    assert!(
+        matches!(group.kind(), NodeKind::Group),
+        "{:?}",
+        group.kind()
+    );
+    let (f, s) = (one(doc, "Fill"), one(doc, "Stroke"));
+    assert_eq!(group.children(), [f, s]);
+    let f = doc.get(f).unwrap();
+    assert!(f.paint().strokes.is_empty(), "the fill draws no stroke");
+    assert_eq!(
+        fill(doc, f.id()),
+        BrushSource::Literal(peniko::Brush::Solid(Color::new([1.0, 0.0, 0.0, 1.0])))
+    );
+    assert_eq!(
+        fill(doc, s),
+        BrushSource::Literal(peniko::Brush::Solid(Color::new([0.0, 0.0, 0.0, 1.0]))),
+        "the stroke, outlined"
+    );
+    let t = doc.get(one(doc, "T")).unwrap();
+    assert!(matches!(t.kind(), NodeKind::Path { .. }));
+    assert_eq!(t.paint().strokes.len(), 1);
+    let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+    assert_eq!(rows, ["Filled open paths"]);
+}
+
+/// An ellipse's arc: a full turn (Figma's `f32` 2π) is the whole ellipse, a
+/// ring when it has an inner radius; a quarter is 90°; an arc crossing 0° and
+/// one stored backwards keep their span. flip: wrap the sweep by
+/// `rem_euclid(360)` in `arc` → fails at the ring, a hair-wide wedge.
+#[test]
+fn an_arc_reads_its_sweep_and_ring() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let full = 6.2831854820251465;
+    let cases = [
+        ((0.0, full, 0.0), (0.0, 360.0, 0.0)),
+        ((0.0, full, 0.6), (0.0, 360.0, 0.6)),
+        ((0.0, FRAC_PI_2, 0.0), (0.0, 90.0, 0.0)),
+        ((-FRAC_PI_2, FRAC_PI_2, 0.5), (270.0, 180.0, 0.5)),
+        ((PI, FRAC_PI_2, 0.0), (90.0, 90.0, 0.0)),
+    ];
+    let ellipses = cases
+        .iter()
+        .enumerate()
+        .map(|(i, ((s, e, r), _))| {
+            node(
+                &format!("e{i}"),
+                "ELLIPSE",
+                (0.0, 0.0, 10.0, 10.0),
+                json!({ "arcData": { "startingAngle": s, "endingAngle": e, "innerRadius": r } }),
+            )
+        })
+        .collect();
+    let r = import(fetched(ellipses, json!({}), &[]));
+    for (i, (_, (start, sweep, ratio))) in cases.iter().enumerate() {
+        let NodeKind::Ellipse { arc, .. } =
+            r.doc.get(one(&r.doc, &format!("e{i}"))).unwrap().kind()
+        else {
+            panic!("an ellipse");
+        };
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            near(arc.start, *start) && near(arc.sweep, *sweep) && near(arc.ratio, *ratio),
+            "case {i}: {arc:?}"
+        );
+    }
+}
+
+/// Gradient handles are fractions of the box: a linear one runs between its
+/// first two, a radial one is the unit circle carried onto the ellipse whose
+/// axes end at the second and third. flip: scale the handles by the width on
+/// both axes in `gradient` → fails at the linear's end.
+#[test]
+fn gradient_handles_map_onto_the_box() {
+    let paint = |kind: &str, handles: Value| {
+        json!({ "type": kind, "gradientHandlePositions": handles, "gradientStops": [
+            { "position": 0, "color": rgb(0.0, 0.0, 0.0) },
+            { "position": 1, "color": rgb(1.0, 1.0, 1.0) },
+        ]})
+    };
+    let h = |x: f64, y: f64| json!({ "x": x, "y": y });
+    let linear = node(
+        "L",
+        "RECTANGLE",
+        (0.0, 0.0, 200.0, 100.0),
+        json!({ "fills": [paint("GRADIENT_LINEAR", json!([h(0.0, 0.5), h(1.0, 0.5), h(0.0, 1.0)]))] }),
+    );
+    let radial = node(
+        "R",
+        "RECTANGLE",
+        (0.0, 0.0, 200.0, 100.0),
+        json!({ "fills": [paint("GRADIENT_RADIAL", json!([h(0.5, 0.5), h(1.0, 0.5), h(0.5, 1.0)]))] }),
+    );
+    let r = import(fetched(vec![linear, radial], json!({}), &[]));
+    let gradient = |name: &str| match fill(&r.doc, one(&r.doc, name)) {
+        BrushSource::Literal(peniko::Brush::Gradient(g)) => g,
+        other => panic!("{other:?}"),
+    };
+    let g = gradient("L");
+    let peniko::GradientKind::Linear(line) = g.gradient.kind else {
+        panic!("linear");
+    };
+    assert_eq!(
+        (g.transform * line.start, g.transform * line.end),
+        (Point::new(0.0, 50.0), Point::new(200.0, 50.0))
+    );
+    let g = gradient("R");
+    assert!(matches!(g.gradient.kind, peniko::GradientKind::Radial(_)));
+    assert_eq!(g.transform * Point::new(0.0, 0.0), Point::new(100.0, 50.0));
+    assert_eq!(g.transform * Point::new(1.0, 0.0), Point::new(200.0, 50.0));
+    assert_eq!(g.transform * Point::new(0.0, 1.0), Point::new(100.0, 100.0));
+}
+
+/// A nested instance swapped to another component keeps its slot in the
+/// outer instance but shows its own component: its layers link to that
+/// component's, and an edit to the component it replaced does not reach it.
+/// flip: drop the swap test in `components` → fails at the swapped root.
+#[test]
+fn a_swapped_nested_instance_shows_its_own_component() {
+    let icon = |id: &str, child: &str, kind: &str| {
+        node(
+            id,
+            "COMPONENT",
+            (0.0, 0.0, 10.0, 10.0),
+            json!({ "children": [node(child, kind, (0.0, 0.0, 10.0, 10.0), json!({}))] }),
+        )
+    };
+    let button = node(
+        "4:1",
+        "COMPONENT",
+        (50.0, 0.0, 40.0, 20.0),
+        json!({ "children": [
+            node("4:3", "INSTANCE", (2.0, 2.0, 10.0, 10.0), json!({ "componentId": "3:1", "children": [
+                node("I4:3;3:2", "RECTANGLE", (0.0, 0.0, 10.0, 10.0), json!({})),
+            ]})),
+        ]}),
+    );
+    let swapped = node(
+        "5:1",
+        "INSTANCE",
+        (200.0, 0.0, 40.0, 20.0),
+        json!({ "componentId": "4:1", "children": [
+            node("I5:1;4:3", "INSTANCE", (2.0, 2.0, 10.0, 10.0), json!({ "componentId": "7:1", "children": [
+                node("I5:1;4:3;7:2", "ELLIPSE", (0.0, 0.0, 10.0, 10.0), json!({})),
+            ]})),
+        ]}),
+    );
+    let r = import(fetched(
+        vec![
+            icon("3:1", "3:2", "RECTANGLE"),
+            icon("7:1", "7:2", "ELLIPSE"),
+            button,
+            swapped,
+        ],
+        json!({}),
+        &[],
+    ));
+    let mut doc = r.doc;
+    let at = |doc: &Document, name: &str| doc.get(one(doc, name)).unwrap().clone();
+    let root = at(&doc, "I5:1;4:3");
+    assert_eq!(root.link(), Some(one(&doc, "4:3")), "keeps its slot");
+    assert_eq!(root.swap(), Some(one(&doc, "7:1")), "shows Icon B");
+    assert_eq!(
+        at(&doc, "I5:1;4:3;7:2").link(),
+        Some(one(&doc, "7:2")),
+        "its ellipse copies Icon B's"
+    );
+    assert_eq!(at(&doc, "5:1").link(), Some(one(&doc, "4:1")));
+    // A layer added to Icon A reaches Button's icon but not the swapped one.
+    let mut ids = IdSource::new(0xF2);
+    let added = ids.mint();
+    let mut tx = ondin_core::Transaction(vec![ondin_core::Operation::CreateNode {
+        id: added,
+        parent: one(&doc, "3:1"),
+        index: 1,
+        kind: NodeKind::Group,
+        transform: None,
+        name: Some("added".into()),
+    }]);
+    ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
+    doc.apply(&tx).expect("the edit applies");
+    assert_eq!(
+        at(&doc, "4:3").children().len(),
+        2,
+        "Icon A's instance takes it"
+    );
+    assert_eq!(
+        at(&doc, "I5:1;4:3").children(),
+        [one(&doc, "I5:1;4:3;7:2")],
+        "the swapped instance does not"
+    );
+}
+
+/// A text run's own fill keeps its opacity, and an invisible run fill is not
+/// drawn. flip: take the run's first fill's colour without its opacity in
+/// `text` → fails at the half-clear run.
+#[test]
+fn a_runs_fill_keeps_its_opacity() {
+    let red = |opacity: f64, visible: bool| {
+        json!({ "fills": [{ "type": "SOLID", "color": rgb(1.0, 0.0, 0.0),
+                            "opacity": opacity, "visible": visible }] })
+    };
+    let text = node(
+        "3:1",
+        "TEXT",
+        (0.0, 0.0, 200.0, 40.0),
+        json!({
+            "characters": "ab cd ef",
+            "fills": [solid(rgb(0.0, 0.0, 0.0))],
+            "style": { "fontFamily": "Inter", "fontSize": 16 },
+            "characterStyleOverrides": [0, 0, 0, 1, 1, 0, 2, 2],
+            "styleOverrideTable": { "1": red(0.5, true), "2": red(1.0, false) },
+        }),
+    );
+    let r = import(fetched(vec![text], json!({}), &[]));
+    let NodeKind::Text { spans, .. } = r.doc.get(one(&r.doc, "3:1")).unwrap().kind() else {
+        panic!("a text");
+    };
+    let colours: Vec<_> = spans
+        .as_slice()
+        .iter()
+        .filter_map(|s| match &s.attr {
+            ondin_core::CharAttr::Color(Some(c)) => Some((s.range(), c.to_rgba8().a)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        colours,
+        [(3..5, 128)],
+        "only the half-clear run is coloured"
+    );
+}
+
+/// An image paint's framing: a `STRETCH` with an `imageTransform` shows the
+/// crop that transform names, a `TILE` repeats at its `scalingFactor`, and a
+/// turned crop is drawn filling its shape and reported. flip: map `STRETCH`
+/// to `Fill` in `framing` → fails at the crop's fit.
+#[test]
+fn an_image_paints_crop_and_tile_scale_come_over() {
+    let png = b"\x89PNG\r\n\x1a\nrest".to_vec();
+    let rect = |id: &str, paint: Value| {
+        let mut p = json!({ "type": "IMAGE", "imageRef": "abc" });
+        if let (Some(p), Some(e)) = (p.as_object_mut(), paint.as_object()) {
+            p.extend(e.clone());
+        }
+        node(
+            id,
+            "RECTANGLE",
+            (0.0, 0.0, 10.0, 10.0),
+            json!({ "fills": [p] }),
+        )
+    };
+    let cropped = rect(
+        "C",
+        json!({ "scaleMode": "STRETCH", "imageTransform": [[0.5, 0, 0.25], [0, 0.5, 0.1]] }),
+    );
+    let tiled = rect("T", json!({ "scaleMode": "TILE", "scalingFactor": 0.25 }));
+    let turned = rect(
+        "R",
+        json!({ "scaleMode": "STRETCH", "imageTransform": [[0, 1, 0], [-1, 0, 1]] }),
+    );
+    let r = import(fetched(
+        vec![cropped, tiled, turned],
+        json!({}),
+        &[("abc", png)],
+    ));
+    let image = |name: &str| match fill(&r.doc, one(&r.doc, name)) {
+        BrushSource::Literal(peniko::Brush::Image(b)) => b.image,
+        other => panic!("{other:?}"),
+    };
+    let c = image("C");
+    assert_eq!(c.fit, ondin_core::ImageFit::Crop);
+    assert_eq!(c.crop, ondin_core::kurbo::Rect::new(0.25, 0.1, 0.75, 0.6));
+    let t = image("T");
+    assert_eq!((t.fit, t.tile_scale), (ondin_core::ImageFit::Tile, 0.25));
+    assert_eq!(image("R").fit, ondin_core::ImageFit::Fill);
+    let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+    assert_eq!(rows, ["Turned or skewed picture crops"]);
 }
 
 /// Export settings come over with their format, scale and suffix; a suffix that

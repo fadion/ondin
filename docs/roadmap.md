@@ -74,15 +74,6 @@ Nothing open.
   surface open (inspector, palette, menus, popovers, library), failing on any drawn text holding it.
   First the chrome, canvas labels, inspector, toasts and palette with that test; then the popovers,
   kits and library.
-- **Stand-ins for proprietary fonts.** An imported file often names a family no machine can fetch
-  (SF Pro, Helvetica, Calibri), which falls back to Inter and lands on the *Missing fonts* card. A
-  table of open stand-ins, metric-compatible where one exists (Arial and Helvetica → Arimo, Times →
-  Tinos, Courier → Cousine, Calibri → Carlito, Cambria → Caladea, so lines break where they did),
-  else the nearest look-alike (system UI faces → Inter, Georgia → Gelasio, Menlo and Consolas →
-  JetBrains Mono). The document keeps the original name and draws in the stand-in; the card still
-  lists the family as *drawn in Carlito*, since the export rule is that an approximation is reported,
-  and offers the stand-in first in *Replace with…*. Looked up in `FontService` before a family is
-  declared `Missing`.
 
 ## Gaps
 

@@ -1142,6 +1142,7 @@ impl OndinApp {
             None,
             |app, ui| {
                 for (name, layers) in &missing {
+                    let drawn_in = app.fonts.drawn_in(name);
                     // The count first, from the right, so a long name truncates
                     // into what it leaves rather than pushing it off the card.
                     ui.horizontal(|ui| {
@@ -1177,6 +1178,14 @@ impl OndinApp {
                             );
                         });
                     });
+                    // An approximation is said, not hidden: the layers keep the name.
+                    if let Some(stand_in) = &drawn_in {
+                        ui.label(
+                            egui::RichText::new(format!("Drawn in {stand_in}"))
+                                .size(11.0)
+                                .color(theme::text::faint()),
+                        );
+                    }
                     ui.scope(|ui| {
                         ui.spacing_mut().interact_size.y = ui::CONTROL_H;
                         ui.spacing_mut().button_padding.y = 0.0;
@@ -1190,7 +1199,9 @@ impl OndinApp {
                             .show_ui(ui, |ui| {
                                 ui::menu_rows(ui);
                                 ui.spacing_mut().item_spacing.y = 3.0;
-                                if let Some(to) = app.family_list(ui, "") {
+                                // Opens on the stand-in, the likeliest replacement.
+                                let current = drawn_in.as_deref().unwrap_or("");
+                                if let Some(to) = app.family_list(ui, current) {
                                     pick = Some((name.clone(), to));
                                 }
                             });

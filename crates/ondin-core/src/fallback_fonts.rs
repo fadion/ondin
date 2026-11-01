@@ -294,15 +294,223 @@ fn class_of(c: char) -> Option<Class> {
     }
 }
 
+/// Open families that draw a proprietary or system-only one in its place, by
+/// lowercase name, most faithful first.
+///
+/// Metric-compatible clones lead, every character as wide as the original's so
+/// lines break where they did. A clone that only ships as an installable package
+/// (Liberation, TeX Gyre, URW and the like) comes before the web one, so a machine
+/// that has it needs no download. Look-alikes of other widths come last. The web
+/// Caladea is a later cut whose widths differ from Cambria's (only the original
+/// release matches), so Cambria is drawn in a look-alike unless that is installed.
+pub static STAND_INS: &[(&str, &[&str])] = &[
+    // Metric-compatible.
+    ("arial", &["Liberation Sans", "Arimo"]),
+    (
+        "helvetica",
+        &["Liberation Sans", "Nimbus Sans", "TeX Gyre Heros", "Arimo"],
+    ),
+    (
+        "arial narrow",
+        &["Liberation Sans Narrow", "Nimbus Sans Narrow"],
+    ),
+    (
+        "helvetica narrow",
+        &["Liberation Sans Narrow", "Nimbus Sans Narrow"],
+    ),
+    (
+        "helvetica condensed",
+        &["Liberation Sans Narrow", "TeX Gyre Heros Cn"],
+    ),
+    ("times new roman", &["Liberation Serif", "Tinos"]),
+    (
+        "times",
+        &[
+            "Liberation Serif",
+            "Nimbus Roman",
+            "TeX Gyre Termes",
+            "Tinos",
+        ],
+    ),
+    (
+        "times roman",
+        &[
+            "Liberation Serif",
+            "Nimbus Roman",
+            "TeX Gyre Termes",
+            "Tinos",
+        ],
+    ),
+    (
+        "courier new",
+        &["Liberation Mono", "Cousine", "Courier Prime"],
+    ),
+    (
+        "courier",
+        &[
+            "Liberation Mono",
+            "Nimbus Mono PS",
+            "TeX Gyre Cursor",
+            "Cousine",
+        ],
+    ),
+    ("georgia", &["Gelasio"]),
+    ("calibri", &["Carlito"]),
+    ("comic sans ms", &["Comic Relief", "Comic Neue"]),
+    ("comic sans", &["Comic Relief", "Comic Neue"]),
+    ("segoe ui", &["Selawik", "Arimo"]),
+    ("tahoma", &["Wine Tahoma", "DejaVu Sans", "Arimo"]),
+    ("consolas", &["DMCA Sans Serif", "Inconsolata"]),
+    ("lucida console", &["DejaVu Sans Mono", "Cousine"]),
+    ("microsoft sans serif", &["Arimo"]),
+    ("ms sans serif", &["Arimo"]),
+    (
+        "century gothic",
+        &["URW Gothic", "TeX Gyre Adventor", "Jost"],
+    ),
+    (
+        "itc avant garde gothic",
+        &["URW Gothic", "TeX Gyre Adventor", "Jost"],
+    ),
+    ("avant garde", &["URW Gothic", "TeX Gyre Adventor", "Jost"]),
+    (
+        "avant garde gothic",
+        &["URW Gothic", "TeX Gyre Adventor", "Jost"],
+    ),
+    ("palatino", &["TeX Gyre Pagella", "P052", "Tinos"]),
+    ("palatino linotype", &["TeX Gyre Pagella", "P052", "Tinos"]),
+    ("book antiqua", &["TeX Gyre Pagella", "P052", "Tinos"]),
+    ("bookman", &["TeX Gyre Bonum", "URW Bookman", "Tinos"]),
+    ("itc bookman", &["TeX Gyre Bonum", "URW Bookman", "Tinos"]),
+    (
+        "bookman old style",
+        &["TeX Gyre Bonum", "URW Bookman", "Tinos"],
+    ),
+    (
+        "century schoolbook",
+        &["TeX Gyre Schola", "C059", "Old Standard TT"],
+    ),
+    (
+        "new century schoolbook",
+        &["TeX Gyre Schola", "C059", "Old Standard TT"],
+    ),
+    ("itc zapf chancery", &["TeX Gyre Chorus", "Z003"]),
+    ("zapf chancery", &["TeX Gyre Chorus", "Z003"]),
+    ("monotype corsiva", &["TeX Gyre Chorus", "Z003"]),
+    // Look-alikes: system faces. Cambria's is metric only in Caladea's first release.
+    ("cambria", &["Caladea"]),
+    ("sf pro", &["Inter"]),
+    ("sf pro text", &["Inter"]),
+    ("sf pro display", &["Inter"]),
+    ("san francisco", &["Inter"]),
+    ("helvetica neue", &["Inter"]),
+    ("sf mono", &["JetBrains Mono", "Source Code Pro"]),
+    ("menlo", &["DejaVu Sans Mono"]),
+    ("monaco", &["Cousine"]),
+    ("new york", &["Tinos"]),
+    ("verdana", &["DejaVu Sans", "Arimo"]),
+    ("lucida grande", &["DejaVu Sans", "Arimo"]),
+    ("lucida sans", &["DejaVu Sans", "Arimo"]),
+    ("lucida sans unicode", &["DejaVu Sans", "Arimo"]),
+    ("trebuchet ms", &["Arimo"]),
+    ("impact", &["Anton", "Oswald"]),
+    // Look-alikes: commercial sans.
+    ("proxima nova", &["Montserrat", "Figtree"]),
+    ("gotham", &["Montserrat"]),
+    ("gotham rounded", &["Nunito"]),
+    ("avenir", &["Nunito Sans"]),
+    ("avenir next", &["Nunito Sans"]),
+    ("futura", &["Jost", "League Spartan"]),
+    ("futura pt", &["Jost", "League Spartan"]),
+    ("circular", &["Plus Jakarta Sans", "Figtree", "DM Sans"]),
+    ("circular std", &["Plus Jakarta Sans", "Figtree", "DM Sans"]),
+    ("apercu", &["Hanken Grotesk"]),
+    ("din", &["Gidole", "Barlow"]),
+    ("ff din", &["Gidole", "Barlow"]),
+    ("din pro", &["Gidole", "Barlow"]),
+    ("din next", &["Gidole", "Barlow"]),
+    ("din 1451", &["Gidole", "Barlow"]),
+    ("brandon grotesque", &["Lato"]),
+    ("museo sans", &["Nunito Sans"]),
+    ("sofia pro", &["Montserrat"]),
+    ("frutiger", &["Hind"]),
+    ("corbel", &["Hind"]),
+    ("myriad", &["Source Sans 3", "PT Sans"]),
+    ("myriad pro", &["Source Sans 3", "PT Sans"]),
+    ("gill sans", &["Lato", "Cabin"]),
+    ("gill sans mt", &["Lato", "Cabin"]),
+    ("franklin gothic", &["Libre Franklin", "Public Sans"]),
+    ("itc franklin gothic", &["Libre Franklin", "Public Sans"]),
+    ("franklin gothic medium", &["Libre Franklin", "Public Sans"]),
+    ("alternate gothic", &["League Gothic", "Oswald"]),
+    ("franklin gothic condensed", &["League Gothic", "Oswald"]),
+    // Look-alikes: commercial serif and display.
+    ("garamond", &["EB Garamond", "Cormorant Garamond"]),
+    ("adobe garamond pro", &["EB Garamond", "Cormorant Garamond"]),
+    (
+        "garamond premier pro",
+        &["EB Garamond", "Cormorant Garamond"],
+    ),
+    ("itc garamond", &["EB Garamond", "Cormorant Garamond"]),
+    ("minion", &["Crimson Pro", "Crimson Text"]),
+    ("minion pro", &["Crimson Pro", "Crimson Text"]),
+    ("baskerville", &["Libre Baskerville"]),
+    ("itc new baskerville", &["Libre Baskerville"]),
+    ("baskerville old face", &["Libre Baskerville"]),
+    ("caslon", &["Libre Caslon Text"]),
+    ("adobe caslon pro", &["Libre Caslon Text"]),
+    ("big caslon", &["Libre Caslon Display"]),
+    ("bodoni", &["Libre Bodoni", "Bodoni Moda"]),
+    ("itc bodoni", &["Libre Bodoni", "Bodoni Moda"]),
+    ("bodoni 72", &["Libre Bodoni", "Bodoni Moda"]),
+    ("didot", &["GFS Didot", "Playfair Display"]),
+    ("hfj didot", &["GFS Didot", "Playfair Display"]),
+    ("linotype didot", &["GFS Didot", "Playfair Display"]),
+    ("trajan", &["Cinzel"]),
+    ("trajan pro", &["Cinzel"]),
+    ("optima", &["Marcellus"]),
+    ("rockwell", &["Rokkitt", "Arvo"]),
+    ("clarendon", &["Ultra"]),
+];
+
+/// Edition suffixes a file's family name often carries past the typeface's own,
+/// tried off the end when the whole name has no stand-in.
+const EDITIONS: &[&str] = &[" std", " pro", " mt", " lt", " com"];
+
+/// The open families that draw `family` in its place, most faithful first; empty
+/// for a family with none. Case-insensitive, quotes and edition suffixes
+/// ([`EDITIONS`]) ignored.
+pub fn stand_ins(family: &str) -> &'static [&'static str] {
+    let mut key = family
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim()
+        .to_lowercase();
+    loop {
+        if let Some((_, found)) = STAND_INS.iter().find(|(k, _)| *k == key) {
+            return found;
+        }
+        match EDITIONS.iter().find(|e| key.ends_with(**e)) {
+            Some(e) => key.truncate(key.len() - e.len()),
+            None => return &[],
+        }
+    }
+}
+
 /// The families a run set in `family` is shaped against, in order: the family,
-/// its subset faces for `subsets`, the bundled `default` (Inter), then the
-/// fallbacks of every subset Inter lacks, each with its own subset face. A name
-/// nothing registered is skipped by the shaper, so the stack can name every
-/// candidate and let whichever the app loaded answer.
+/// its subset faces for `subsets`, its [`stand_ins`] with theirs, the bundled
+/// `default` (Inter), then the fallbacks of every subset Inter lacks, each with
+/// its own subset face. A name nothing registered is skipped by the shaper, so the
+/// stack can name every candidate and let whichever the app loaded answer.
 pub fn font_stack(family: &str, subsets: &BTreeSet<Subset>, default: &str) -> Vec<String> {
     let mut out = vec![family.to_string()];
     out.extend(subsets.iter().map(|s| subset_alias(family, *s)));
-    if !family.eq_ignore_ascii_case(default) {
+    for stand_in in stand_ins(family) {
+        out.push((*stand_in).to_string());
+        out.extend(subsets.iter().map(|s| subset_alias(stand_in, *s)));
+    }
+    // Once: the family or a stand-in may already be it.
+    if !out.iter().any(|f| f.eq_ignore_ascii_case(default)) {
         out.push(default.to_string());
     }
     for subset in subsets.iter().filter(|s| !s.inter_covers()) {
@@ -393,6 +601,56 @@ mod tests {
             font_stack("Inter", &BTreeSet::new(), "Inter"),
             vec!["Inter"]
         );
+        assert_eq!(
+            font_stack("SF Pro", &BTreeSet::new(), "Inter"),
+            vec!["SF Pro", "Inter"]
+        );
+    }
+
+    /// A proprietary family's stand-ins follow it, ahead of Inter, each with its
+    /// subset faces.
+    #[test]
+    fn stand_ins_come_between_the_family_and_inter() {
+        let stack = font_stack("Calibri", &set(&[Subset::Cyrillic]), "Inter");
+        assert_eq!(
+            stack,
+            vec![
+                "Calibri".to_string(),
+                subset_alias("Calibri", Subset::Cyrillic),
+                "Carlito".to_string(),
+                subset_alias("Carlito", Subset::Cyrillic),
+                "Inter".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stand_in_is_found_without_case_quotes_or_an_edition_suffix() {
+        assert_eq!(stand_ins("Arial"), ["Liberation Sans", "Arimo"]);
+        assert_eq!(
+            stand_ins("  'TIMES NEW ROMAN' "),
+            ["Liberation Serif", "Tinos"]
+        );
+        assert_eq!(stand_ins("Helvetica Neue LT Pro"), ["Inter"]);
+        assert_eq!(stand_ins("Proxima Nova"), stand_ins("Proxima Nova Std"));
+        assert!(stand_ins("Roboto").is_empty());
+        // A suffix is only ever taken off the end.
+        assert!(stand_ins("Pro Sans").is_empty());
+    }
+
+    /// Every key is lowercase and listed once, and no family stands in for itself.
+    #[test]
+    fn the_stand_in_table_is_well_formed() {
+        let mut keys = BTreeSet::new();
+        for (key, found) in STAND_INS {
+            assert_eq!(*key, key.to_lowercase(), "{key}");
+            assert!(keys.insert(*key), "{key} listed twice");
+            assert!(!found.is_empty(), "{key}");
+            assert!(
+                !found.iter().any(|f| f.eq_ignore_ascii_case(key)),
+                "{key} stands in for itself"
+            );
+        }
     }
 
     /// Exactly the subsets Inter lacks name fallback families.

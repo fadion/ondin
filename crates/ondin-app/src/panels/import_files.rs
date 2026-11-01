@@ -603,12 +603,15 @@ fn adopt(
 ) {
     for (family, runs) in std::mem::take(&mut source.families) {
         if fonts.family_status(&family) == crate::fonts::FamilyStatus::Missing {
+            let drawn_in = fonts
+                .stand_in_for(&family)
+                .unwrap_or_else(|| "Inter".to_string());
             source.report.push((
                 Part::Layers,
                 ReportRow {
                     what: family,
                     count: counted(runs, "run", "runs"),
-                    how: "Not installed: drawn in Inter until it is".into(),
+                    how: format!("Not installed: drawn in {drawn_in} until it is"),
                 },
             ));
         }

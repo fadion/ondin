@@ -4151,6 +4151,41 @@ fn a_subset_face_draws_its_script_and_keeps_its_alias_on_a_worker() {
     assert!(uses_italic(&again), "on the worker");
 }
 
+/// Text set in a family nothing registered is drawn in its loaded stand-in rather
+/// than Inter. Inter's italic, registered as Carlito, stands in for Calibri.
+///
+/// flip: `font_stack` leaving out `stand_ins` → fails at "drawn in the stand-in".
+#[test]
+fn a_missing_family_is_drawn_in_its_loaded_stand_in() {
+    let italic = ondin_core::text::bundled_inter()[1];
+    assert!(ondin_core::text::register_fonts_as(
+        italic.to_vec(),
+        "Carlito"
+    ));
+    let mut ids = IdSource::new(0xF049);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let id = ids.mint();
+    let mut kind = text("Quarterly report", 40.0);
+    if let NodeKind::Text { style, .. } = &mut kind {
+        style.font_family = "Calibri".into();
+    }
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind,
+        transform: None,
+        name: None,
+    }]))
+    .unwrap();
+    let fonts = Resolved::rebuild(&doc).text_fonts();
+    assert!(
+        fonts.iter().all(|f| f.data.len() == italic.len()),
+        "drawn in the stand-in"
+    );
+}
+
 /// **Equal texts share one shaping; every text still gets exactly its own
 /// layout.** Labels repeated in a column (wrapped by the column's width) and
 /// free, beside labels that differ from them only in fields the shared cache

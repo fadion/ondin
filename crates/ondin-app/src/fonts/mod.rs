@@ -408,9 +408,10 @@ struct FamilyState {
     /// cannot deliver. A count rather than a flag: one failure is a verdict only
     /// alongside `faces` being empty.
     failed: usize,
-    /// For a subset's alias, the family it belongs to, lowercased — what a landed
-    /// face is also reported as ([`FontPoll::registered`]).
-    owner: Option<String>,
+    /// The families a landed face is also reported as, lowercased
+    /// ([`FontPoll::registered`]): for a subset's alias the family it belongs to, for
+    /// a stand-in the families it stands in for.
+    owners: Vec<String>,
     /// Loaded to draw a script other families lack ([`FontService::ensure_fallbacks`]).
     fallback: bool,
 }
@@ -497,6 +498,9 @@ pub struct FontService {
     catalog_done: bool,
     /// Whether [`Self::prefetch_popular`] has already run this session.
     prefetched: bool,
+    /// Whether both sources had landed as of the last [`Self::poll`], so the poll
+    /// on which they finish can say so.
+    settled: bool,
     msg_rx: Receiver<FontMsg>,
     /// Whether the web library is offered at all (`prefs::Prefs::web_fonts`,
     /// §15 D330).
@@ -628,6 +632,7 @@ impl FontService {
             catalog_live,
             catalog_done: false,
             prefetched: false,
+            settled: false,
             msg_rx,
             web_fonts,
             agent,
@@ -681,6 +686,7 @@ impl FontService {
             catalog_done: false,
             // Nothing to warm; keeps `poll` from trying.
             prefetched: true,
+            settled: false,
             msg_rx,
             // `true` is the right default for `set_web_fonts`'s own tests; with no
             // catalog it only decides whether web names would be listed.
@@ -801,6 +807,7 @@ impl FontService {
     pub fn ensure_loaded(&mut self, family: &str) {
         self.ensure(family, Want::Full, Lane::Urgent);
         self.ensure_subsets(family);
+        self.ensure_stand_in(family);
     }
 
     /// Note the subsets the open document's text falls in. A family loaded after
@@ -868,7 +875,11 @@ impl FontService {
         let Some(entry) = self.catalog.get(&family).cloned() else {
             return;
         };
-        let owner = family.to_lowercase();
+        // A stand-in's subset faces redraw what it stands in for, too.
+        let mut owners = vec![family.to_lowercase()];
+        if let Some(state) = self.state.get(&family) {
+            owners.extend(state.owners.iter().cloned());
+        }
         for subset in self.subsets.clone() {
             let offered = entry.subsets.iter().any(|s| s == subset.name());
             if !offered || entry.subset == subset.name() {
@@ -877,8 +888,48 @@ impl FontService {
             let alias = subset_alias(&family, subset);
             let specs = subset_faces(&entry, subset, &self.cache_dir);
             self.dispatch(&alias, specs, Want::Full, Lane::Urgent);
-            self.state.entry(alias).or_default().owner = Some(owner.clone());
+            self.state.entry(alias).or_default().owners = owners.clone();
         }
+    }
+
+    /// Load the first of `family`'s stand-ins (`fallback_fonts::stand_ins`) any
+    /// source lists, once no source can list `family` itself. Core's font stack
+    /// names the stand-ins after the family, so text set in it draws in the one
+    /// loaded; `family` stays `Missing` and the document keeps its name.
+    fn ensure_stand_in(&mut self, family: &str) {
+        let family = self.spelled(family);
+        let settled = self.system_rx.is_none() && self.catalog_done;
+        if !settled || self.families.binary_search(&family).is_ok() {
+            return;
+        }
+        let Some(stand_in) = self.stand_in_for(&family) else {
+            return;
+        };
+        // Before loading, so `ensure_subsets` hands the owners on to its subset faces.
+        let owner = family.to_lowercase();
+        let owners = &mut self.state.entry(stand_in.clone()).or_default().owners;
+        if !owners.contains(&owner) {
+            owners.push(owner);
+        }
+        self.ensure_loaded(&stand_in);
+    }
+
+    /// The stand-in a missing `family` is drawn in once it loads: the first of its
+    /// stand-ins any source lists, as the family list spells it.
+    pub fn stand_in_for(&self, family: &str) -> Option<String> {
+        ondin_core::fallback_fonts::stand_ins(family)
+            .iter()
+            .map(|c| self.spelled(c))
+            .find(|c| self.families.binary_search(c).is_ok())
+    }
+
+    /// The stand-in `family` is drawn in, when it is missing and one is loaded —
+    /// what the *Missing fonts* card says and offers first.
+    pub fn drawn_in(&self, family: &str) -> Option<String> {
+        ondin_core::fallback_fonts::stand_ins(family)
+            .iter()
+            .find(|s| ondin_core::text::is_family_available(s))
+            .map(|s| (*s).to_string())
     }
 
     /// Look at the machine's fonts again, so a family installed while the app was
@@ -1231,6 +1282,16 @@ impl FontService {
             self.prefetch_popular();
         }
 
+        // Both sources having landed is a list change too: only then can a family be
+        // called missing, and the app asks for the document's fonts again on it, which
+        // is when a missing family's stand-in loads. The catalog's last batch and its
+        // closing can fall on different polls.
+        let settled = self.system_rx.is_none() && self.catalog_done;
+        if settled && !self.settled {
+            out.families_changed = true;
+        }
+        self.settled = settled;
+
         while let Ok(msg) = self.msg_rx.try_recv() {
             match msg {
                 FontMsg::Face {
@@ -1256,7 +1317,7 @@ impl FontService {
                         out.fallback |= state.fallback;
                         // Duplicates are left alone: the consumer is a membership test.
                         out.registered.push(lower);
-                        out.registered.extend(state.owner.clone());
+                        out.registered.extend(state.owners.iter().cloned());
                     } else {
                         // Not a usable font: un-claim it so a later attempt is not
                         // skipped, and count it as a failure.
@@ -3192,6 +3253,189 @@ mod tests {
                 "the subset face draws {probe}"
             );
         }
+    }
+
+    /// Every stand-in is in the catalog as spelled, unless it only ships as a
+    /// package to install, which no catalog can answer for. A misspelling is never
+    /// loaded and the text stays in Inter.
+    // Network-gated: run with `cargo test -p ondin-app -- --ignored`.
+    #[test]
+    #[ignore = "requires network (Fontsource)"]
+    fn every_web_stand_in_is_spelled_the_way_the_catalog_spells_it() {
+        const INSTALLED_ONLY: &[&str] = &[
+            "Liberation Sans",
+            "Liberation Serif",
+            "Liberation Mono",
+            "Liberation Sans Narrow",
+            "Nimbus Sans",
+            "Nimbus Sans Narrow",
+            "Nimbus Roman",
+            "Nimbus Mono PS",
+            "TeX Gyre Heros",
+            "TeX Gyre Heros Cn",
+            "TeX Gyre Termes",
+            "TeX Gyre Cursor",
+            "TeX Gyre Adventor",
+            "TeX Gyre Pagella",
+            "TeX Gyre Bonum",
+            "TeX Gyre Schola",
+            "TeX Gyre Chorus",
+            "URW Gothic",
+            "URW Bookman",
+            "P052",
+            "C059",
+            "Z003",
+            "Wine Tahoma",
+            "DMCA Sans Serif",
+            "Selawik",
+            // Published, but not as a Google family, which is all the catalog keeps.
+            "DejaVu Sans",
+            "DejaVu Sans Mono",
+        ];
+        let agent = ureq::Agent::new_with_defaults();
+        let catalog = fetch_catalog(&agent).expect("the Fontsource catalog");
+        let known: BTreeSet<&str> = catalog.iter().map(|e| e.family.as_str()).collect();
+        let mut missing: Vec<&str> = ondin_core::fallback_fonts::STAND_INS
+            .iter()
+            .flat_map(|(_, found)| found.iter().copied())
+            .filter(|f| *f != "Inter" && !INSTALLED_ONLY.contains(f) && !known.contains(f))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        assert!(missing.is_empty(), "not in the catalog: {missing:?}");
+        // And the script fallbacks' Noto families.
+        let noto: Vec<&str> = Subset::ALL
+            .iter()
+            .filter_map(|s| s.fallbacks().first().copied())
+            .filter(|f| !known.contains(f))
+            .collect();
+        assert!(noto.is_empty(), "not in the catalog: {noto:?}");
+    }
+
+    /// A PDF draws a missing family in the stand-in the canvas drew it in, and says
+    /// so. Needs a face really named Carlito: the converter reads names from the file.
+    ///
+    /// flip: `pdf::select_font` skipping the stand-ins → fails at "drawn in Carlito".
+    // Network-gated: run with `cargo test -p ondin-app -- --ignored`.
+    #[test]
+    #[ignore = "requires network (jsDelivr)"]
+    fn a_pdf_draws_a_missing_family_in_its_stand_in() {
+        use ondin_core::{NodeKind, Operation, TextStyle, Transaction};
+        let bytes = download(
+            &agent(),
+            &format!("{FONTSOURCE_CDN}/carlito@latest/latin-400-normal.ttf"),
+        )
+        .expect("Carlito from the CDN");
+        assert_eq!(ondin_core::text::register_fonts(bytes), vec!["Carlito"]);
+        let mut ids = ondin_core::IdSource::new(0xCA11);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let id = ids.mint();
+        let kind = NodeKind::Text {
+            content: "Quarterly report".into(),
+            style: Box::new(TextStyle {
+                font_family: "Calibri".into(),
+                font_size: 24.0,
+                ..TextStyle::default()
+            }),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: ondin_core::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        }]))
+        .expect("a text layer");
+        let res = ondin_core::Resolved::rebuild(&doc);
+        let out = ondin_export::pdf::pdf_of(&doc, &res, &[id], ondin_core::ExportText::Live)
+            .expect("a pdf");
+        assert_eq!(
+            out.approximated,
+            vec!["Calibri, which is not available, drawn in Carlito".to_string()],
+            "drawn in Carlito"
+        );
+    }
+
+    /// A service whose catalog lists `families`, both sources landed.
+    fn settled_with(families: &[&str]) -> FontService {
+        let mut svc = FontService::inert();
+        for family in families {
+            svc.catalog.insert(family.to_string(), entry(family));
+        }
+        svc.rebuild_families();
+        svc.settle_for_test();
+        svc
+    }
+
+    /// A family no source lists loads its first listed stand-in, which reports its
+    /// faces as the missing family's; one that is listed, or not yet settled, does not.
+    ///
+    /// flip: `ensure_stand_in` not recording the owner → fails at "reported as Calibri".
+    #[test]
+    fn a_missing_family_loads_its_stand_in_and_reports_it_as_itself() {
+        let (tx, rx) = channel();
+        let mut svc = settled_with(&["Carlito"]);
+        svc.msg_rx = rx;
+        svc.ensure_loaded("Calibri");
+        assert_eq!(
+            svc.state["Carlito"].outstanding, 1,
+            "the stand-in is fetched"
+        );
+        assert_eq!(svc.family_status("Calibri"), FamilyStatus::Missing);
+
+        tx.send(FontMsg::Face {
+            family: "Carlito".into(),
+            key: "carlito-latin-400-normal.ttf".into(),
+            bytes: ondin_core::text::bundled_inter()[1].to_vec(),
+            alias: false,
+        })
+        .expect("the test owns the channel");
+        let poll = svc.poll();
+        assert!(
+            poll.touches(&["calibri".to_string()].into()),
+            "reported as Calibri"
+        );
+
+        let mut listed = settled_with(&["Carlito"]);
+        listed.list_for_test(&["Calibri"]);
+        listed.ensure_loaded("Calibri");
+        assert!(
+            !listed.state.contains_key("Carlito"),
+            "the real one is here"
+        );
+
+        let mut early = FontService::inert();
+        early.catalog.insert("Carlito".into(), entry("Carlito"));
+        early.rebuild_families();
+        early.ensure_loaded("Calibri");
+        assert!(
+            !early.state.contains_key("Carlito"),
+            "unsettled: Calibri may still be listed"
+        );
+    }
+
+    /// The poll on which both sources have landed reports a list change, once, so
+    /// the app asks for the document's fonts again and a missing family's stand-in
+    /// loads even when the catalog closed a poll after its last batch.
+    ///
+    /// flip: `poll` not reporting the settling → fails at "the settling poll".
+    #[test]
+    fn the_poll_that_settles_the_sources_reports_a_list_change_once() {
+        let mut svc = FontService::inert();
+        assert!(!svc.poll().families_changed, "the fixture: nothing landed");
+        svc.settle_for_test();
+        assert!(svc.poll().families_changed, "the settling poll");
+        assert!(!svc.poll().families_changed, "once");
     }
 
     /// A fallback waits for the system scan rather than downloading what may be

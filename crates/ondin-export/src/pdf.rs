@@ -131,8 +131,8 @@ fn pdf_framed(
         };
         let tree = usvg::Tree::from_str(&svg.svg, &opts).ok()?;
         drop(opts);
-        for family in missed.into_inner().unwrap_or_default() {
-            let note = format!("{family}, which is not available, drawn in {FALLBACK_FAMILY}");
+        for (family, drawn_in) in missed.into_inner().unwrap_or_default() {
+            let note = format!("{family}, which is not available, drawn in {drawn_in}");
             if !approximated.contains(&note) {
                 approximated.push(note);
             }
@@ -169,11 +169,13 @@ fn pdf_framed(
 /// Core's own fallback family, which a layout that missed its family drew in.
 const FALLBACK_FAMILY: &str = "Inter";
 
-/// usvg's face lookup, falling back to [`FALLBACK_FAMILY`] when no face of the
-/// named families is in the page's database, and noting the family in `missed`.
+/// usvg's face lookup, falling back as core's font stack does when no face of the
+/// named families is in the page's database — to a family's stand-in
+/// (`fallback_fonts::stand_ins`) when the layout used one, else to
+/// [`FALLBACK_FAMILY`] — and noting the family and what drew it in `missed`.
 /// usvg's own fallback asks for a serif the database never holds, and then skips
 /// the run, so the text would be absent from the page.
-fn select_font(missed: &std::sync::Mutex<Vec<String>>) -> usvg::FontSelectionFn<'_> {
+fn select_font(missed: &std::sync::Mutex<Vec<(String, String)>>) -> usvg::FontSelectionFn<'_> {
     let named = usvg::FontResolver::default_font_selector();
     Box::new(move |font, db| {
         let wanted = |name: &str| {
@@ -187,6 +189,37 @@ fn select_font(missed: &std::sync::Mutex<Vec<String>>) -> usvg::FontSelectionFn<
         {
             return named(font, db);
         }
+        // The face of `family` nearest the run's style and weight.
+        let italic = font.style() != usvg::FontStyle::Normal;
+        let closest = |family: &str| {
+            db.faces()
+                .filter(|face| {
+                    face.families
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case(family))
+                })
+                .min_by_key(|face| {
+                    let slanted = face.style != usvg::fontdb::Style::Normal;
+                    (slanted != italic, face.weight.0.abs_diff(font.weight()))
+                })
+                .map(|face| face.id)
+        };
+        let stand_in = font
+            .families()
+            .iter()
+            .filter_map(|f| match f {
+                usvg::FontFamily::Named(name) => Some(name.as_str()),
+                _ => None,
+            })
+            .flat_map(|name| ondin_core::fallback_fonts::stand_ins(name).iter())
+            .find_map(|s| closest(s).map(|id| (*s, id)));
+        let (drawn_in, id) = match stand_in {
+            Some((name, id)) => (name, Some(id)),
+            None => (
+                FALLBACK_FAMILY,
+                closest(FALLBACK_FAMILY).or_else(|| db.faces().next().map(|face| face.id)),
+            ),
+        };
         if let Ok(mut missed) = missed.lock() {
             let family = font
                 .families()
@@ -197,23 +230,12 @@ fn select_font(missed: &std::sync::Mutex<Vec<String>>) -> usvg::FontSelectionFn<
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            if !missed.contains(&family) {
-                missed.push(family);
+            let entry = (family, drawn_in.to_string());
+            if !missed.contains(&entry) {
+                missed.push(entry);
             }
         }
-        let italic = font.style() != usvg::FontStyle::Normal;
-        let fallback = db
-            .faces()
-            .filter(|face| {
-                face.families
-                    .iter()
-                    .any(|(name, _)| name.eq_ignore_ascii_case(FALLBACK_FAMILY))
-            })
-            .min_by_key(|face| {
-                let slanted = face.style != usvg::fontdb::Style::Normal;
-                (slanted != italic, face.weight.0.abs_diff(font.weight()))
-            });
-        fallback.or_else(|| db.faces().next()).map(|face| face.id)
+        id
     })
 }
 

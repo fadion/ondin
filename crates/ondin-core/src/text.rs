@@ -1877,6 +1877,15 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         if !families.contains(&default_family.as_str()) {
             families.push(default_family.as_str());
         }
+        // An unknown family with a stand-in loaded is drawn in the stand-in, so it
+        // takes the stand-in's axes rather than the fallback's.
+        for i in 0..families.len() {
+            for stand_in in crate::fallback_fonts::stand_ins(families[i]) {
+                if !families.contains(stand_in) {
+                    families.push(stand_in);
+                }
+            }
+        }
         // `known` is not `!axes.is_empty()`: empty axes mean either an unknown family
         // (which inherits the fallback's) or a known static face (which must not be
         // asked for a variation it lacks).
@@ -1891,11 +1900,20 @@ fn shape(parts: TextRef<'_>) -> Shaped {
             .iter()
             .find(|(f, _, _)| *f == default_family)
             .map_or(&[], |(_, a, _)| a.as_slice());
-        let axes_for = |family: &str| -> &[FontAxis] {
+        let known_axes = |family: &str| -> Option<&[FontAxis]> {
             match axes.iter().find(|(f, _, _)| f == family) {
-                Some((_, a, true)) => a.as_slice(),
-                _ => fallback_axes,
+                Some((_, a, true)) => Some(a.as_slice()),
+                _ => None,
             }
+        };
+        let axes_for = |family: &str| -> &[FontAxis] {
+            known_axes(family)
+                .or_else(|| {
+                    crate::fallback_fonts::stand_ins(family)
+                        .iter()
+                        .find_map(|s| known_axes(s))
+                })
+                .unwrap_or(fallback_axes)
         };
         let default_axes = axes_for(&parts.style.font_family);
 

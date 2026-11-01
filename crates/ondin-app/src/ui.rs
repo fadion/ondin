@@ -479,6 +479,17 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
 /// The tick keeps its 13pt column whether or not it shows, so labels stay in one
 /// line. Off is also a dimmer label (72%), so the state reads at a glance.
 pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool {
+    menu_check_response(ui, label, on, height).clicked()
+}
+
+/// [`menu_check`], answering the row's whole response, for a row that opens a
+/// submenu on hover.
+pub fn menu_check_response(
+    ui: &mut egui::Ui,
+    label: &str,
+    on: bool,
+    height: f32,
+) -> egui::Response {
     use menu_check_row::{GAP, PAD_X, TICK_W};
 
     let (rect, resp) = ui.allocate_exact_size(
@@ -510,7 +521,7 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
             theme::text::muted()
         },
     );
-    resp.clicked()
+    resp
 }
 
 /// [`menu_check`]'s row geometry, shared with [`menu_check_width`].

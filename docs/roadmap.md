@@ -196,6 +196,7 @@ Ideas worth weighing, not yet decided or scheduled.
 - **Justify-all** — blocked upstream in parley (`align_impl`, `pub(crate)` internals); trigger is a
   parley patch (§15 D825).
 - **A stored, user-placed transform origin for a multi-selection** — unparks when a user asks for it.
+- **A Tools menu** — *Check contrast* moves there from the View menu once more tools arrive.
 - UI toolkit revisit (gpui / Xilem), `architecture.md` §9.1.
 - MCP transport hardening (auth, TCP/remote).
 - `vello_hybrid` as a third backend if low-end GPUs demand it.

@@ -232,7 +232,7 @@ one is designated (§15 D113).
 | — | show messages | **unbound** (§15 D1025) |
 
 `ViewSwitch::accel` answers `None` for exactly the unbound rows (`LayoutGrid`, `Outline`, `History`,
-`StatusMessages`, `SnapBaselines`): no free convention to match, a menu one click away. They are listed
+`StatusMessages`, `SnapBaselines`): no free convention to match, and a menu row to reach instead. They are listed
 so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide the
 panels, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
 Guide lock is a workspace toggle on `OndinApp`, not a per-guide property (`architecture.md` §9.4).
@@ -585,8 +585,9 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
   grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, private
   mode, the marquee's shape (lasso) and the snap switches.
-  `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
-  drives stay in step while the chord is a second caller that never sees the row.
+  `ViewSwitch` also drives both dropdowns' rows, labelled by one `label()` but for the View menu's
+  short *Panels ▸* list, so a row and the state it drives stay in step while the chord is a second
+  caller that never sees the row. The lasso has no row: `Q` and the palette carry it.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,
   because they address the buffer. A chord that reaches the *document* is the one that wants an
   `Action`: all five text-styling chords are `Action::TextStyle`. The arrows are the seam.

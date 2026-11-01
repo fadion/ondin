@@ -301,11 +301,13 @@ pub enum Action {
     TextStyle(TextChord),
 }
 
-/// A workspace switch: something the View or Snap menu shows a tick against,
-/// and something `docs/shortcuts.md` §6 gives a chord.
+/// A workspace switch: something the View or Snap menu shows a tick against
+/// (all but [`Self::Lasso`], which `Q` and the palette carry), and something
+/// `docs/shortcuts.md` §6 gives a chord.
 ///
 /// One enum rather than a label per call site: a menu row renders its label
 /// *from* the variant and a chord names the variant directly, so neither drifts.
+/// The View menu's *Panels ▸* list alone shortens the label.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewSwitch {
     /// `Shift+R` — Figma's, and the one switch here that was already bound.
@@ -373,7 +375,8 @@ pub enum ViewSwitch {
 }
 
 impl ViewSwitch {
-    /// The menu row's text, the single source both menus label themselves from.
+    /// The menu row's text, which the menus label themselves from; the View menu's
+    /// *Panels ▸* list drops the panes' "Show".
     pub fn label(self) -> &'static str {
         match self {
             Self::Rulers => "Show rulers",
@@ -431,26 +434,27 @@ impl ViewSwitch {
         })
     }
 
-    /// The View menu's rows, in the order Illustrator's View menu reads them:
-    /// rulers, then the guides that are pulled out of them, then the grid — and
-    /// then the layout grid, adjacent so the two grid rows read against each other;
-    /// then the panes (layers, history, minimap, toolbar, messages); then the modes,
-    /// Outline before Focus and Private, then the marquee's shape.
-    pub const VIEW_MENU: [Self; 14] = [
+    /// The View menu's first group, what the canvas draws, in the order Illustrator's
+    /// View menu reads it: rulers, the guides pulled out of them, then the grid
+    /// beside the layout grid so the two read against each other.
+    pub const VIEW_CANVAS: [Self; 5] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
         Self::Grid,
         Self::LayoutGrid,
+    ];
+
+    /// The View menu's modes, which *Present mode* follows as a verb.
+    pub const VIEW_MODES: [Self; 3] = [Self::Outline, Self::Private, Self::Focus];
+
+    /// The panes behind the View menu's *Panels ▸* row.
+    pub const VIEW_PANELS: [Self; 5] = [
         Self::Layers,
         Self::History,
         Self::Minimap,
         Self::Toolbar,
         Self::StatusMessages,
-        Self::Outline,
-        Self::Focus,
-        Self::Private,
-        Self::Lasso,
     ];
 
     /// Every variant, for the tests that have to walk them.

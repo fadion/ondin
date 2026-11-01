@@ -49,8 +49,8 @@ marks the original that stays. Toggles live with the key.
 
 ## The minimap (`minimap.rs`)
 
-*View ▸ Show minimap* (`ViewSwitch::Minimap`, `Ctrl+Shift+M`, `prefs.view.minimap`, off by default).
-In the View menu and the palette, not the canvas menu: it is chrome-wide, like *Show layers*.
+*View ▸ Panels ▸ Minimap* (`ViewSwitch::Minimap`, *Show minimap* in the palette, `Ctrl+Shift+M`,
+`prefs.view.minimap`, off by default). Not on the canvas menu: it is chrome-wide, like the layers pane.
 
 - **The card.** An `egui::Area` at `Order::Middle`, pivoted at the canvas's bottom left, 12pt in
   (the status bar's margin): a `ui::menu_frame` 220pt wide with 6pt padding. The map's height
@@ -88,7 +88,7 @@ In the View menu and the palette, not the canvas menu: it is chrome-wide, like *
 ## The contrast check mode (`contrast.rs`)
 
 *View ▸ Check contrast* (`Action::CheckContrast`, `menu::Item::CheckContrast`, `Group::View`, no
-chord): a ticked row in the View menu, and a palette row reading *Stop checking contrast* while on.
+chord): the View menu's last row, ticked while on, and a palette row reading *Stop checking contrast* while on.
 It measures the shown text layers, and with *Non-text* small shapes, against what is drawn behind
 them with `ondin_export::contrast::check_with`, the measurement `ondin check contrast` runs
 (`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
@@ -194,12 +194,23 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - Rows are `ui::menu_check`, `ui::MENU_ITEM_H` (24) tall, in `ui::menu_frame`; width 160pt or the
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
-- **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
-  layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, then the modes: *Check
-  contrast* (ticked while on and never remembered), *Outline mode*, *Focus mode*, *Private mode*, then the marquee's
-  shape, *Lasso select* (`app-selection.md`), then *Present mode* — a verb,
-  not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
-  *Show minimap* follows *Show history* so the two rows about the layers pane stay together.
+- **View** (`OndinApp::view_and_snap_menus`) reads in four groups between separators, so each kind of
+  row is found in one place:
+  - what the canvas draws, `ViewSwitch::VIEW_CANVAS`: *Show rulers*, *Show guides*, *Lock guides*,
+    *Show grid*, *Show layout grid*;
+  - the modes, `ViewSwitch::VIEW_MODES`: *Outline mode*, *Private mode*, *Focus mode*, then *Present
+    mode* — a verb, not a switch: a check row that never ticks, which closes the menu and dispatches
+    `Action::Present`;
+  - *Panels ▸* (`PANELS_ROW`), whose flyout (`OndinApp::panels_flyout`, placed by
+    `ui::flyout_place`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
+    *Minimap*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about the layers pane
+    stay together;
+  - *Check contrast*, ticked while on and never remembered.
+
+  Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
+  flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips
+  the area `OndinApp::flyout_id` names. The marquee's *Lasso select* is on no menu: `Q`, the palette
+  and the cheatsheet carry it (`app-selection.md`).
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
@@ -209,7 +220,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   *Zoom in*, *Zoom out*, *Actual size*, *Zoom to fit*, *Fit selection*. `OndinApp::zoom_entry`
   holds the typed text while the field has focus, `None` otherwise.
 - View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
-  one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline mode*,
+  one place; the *Panels ▸* flyout alone drops the "Show" its labels need elsewhere. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Outline mode*,
   *Show history*, *Show messages*.
 - **Outline mode** draws the artwork as one-device-pixel hairlines of every path the walk would fill
   or stroke, with type in the same ink, in near-black or near-white by the page ground's luminance.
@@ -509,8 +520,8 @@ none of the rules below are its.
 For sharing a screen without showing what things are called: a client's or a company's name is often
 the first segment of a component's. It hides names, not content.
 
-- **Doors.** `ViewSwitch::Private` (*Private mode*, `Ctrl+Shift+N`): the View menu after *Focus mode*,
-  the palette and the cheatsheet; not the canvas menu. The library answers the chord too
+- **Doors.** `ViewSwitch::Private` (*Private mode*, `Ctrl+Shift+N`): the View menu's modes, between
+  *Outline mode* and *Focus mode*, the palette and the cheatsheet; not the canvas menu. The library answers the chord too
   (`dashboard_keys`). An accent *Private mode* pill (`private::pill`, the incognito glyph, hat and
   glasses) sits on both the editor's and the library's top bar while it is on; clicking it turns it
   off. It names the mode rather than reading "Private": the app is personal and offline-first, and a
@@ -558,8 +569,8 @@ with nothing of the editor around them and nothing to edit with. `OndinApp::pres
 runs (`pages` names each frame's page, index for index).
 
 - **Doors.** `Action::Present`: `Ctrl+Alt+Enter` in normal mode, `menu::Item::Present` (*Present mode*,
-  `PLAY`, `Group::View`) in the palette and the cheatsheet's File section, and the View menu's last
-  row. The palette row dims *"No frames to present"* on the same test `start_presenting` makes
+  `PLAY`, `Group::View`) in the palette and the cheatsheet's File section, and the last row of the View
+  menu's modes. The palette row dims *"No frames to present"* on the same test `start_presenting` makes
   (`presentable`: the current page's visible top-level frames with bounds).
 - **Starting** (`start_presenting`). The frames are every page's that is not a draft, in page
   order — and the current page's even when it is a draft, since presenting from it asked for it.
@@ -619,6 +630,9 @@ runs (`pages` names each frame's page, index for index).
   closes every other floating thing. `contrast_badges` runs after `canvas_ui` in the same
   panel; called before it, the canvas takes the badge's press
   (`a_click_on_a_failing_badge_opens_the_card`).
+- The *Panels ▸* flyout is its own `egui::Area`, so the dropdown's `contains_pointer` is false over
+  it; only `dropdown`'s `on_flyout` test keeps a click in it from closing the View menu.
+  `the_view_menu_s_panels_row_opens_the_panes_beside_it` pins it.
 - Deriving the escape clip from overrides makes resized children pop out of their frame.
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
   frame's input; `just_opened` is all that stops the opening press closing it.

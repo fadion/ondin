@@ -6654,6 +6654,9 @@ pub(crate) fn top_bar_frame() -> egui::Frame {
 /// Inner padding of every top-bar dropdown.
 const MENU_PAD: f32 = 5.0;
 
+/// The View menu's row that opens the panes beside it.
+const PANELS_ROW: &str = "Panels";
+
 /// The gap between every control in the top bar's right-hand cluster, including a mark
 /// and its own caret, so the gaps read equal. The rules get [`TOP_RULE_GAP`] on top. The
 /// library's bar uses it between Settings and the update pill.
@@ -6966,7 +6969,8 @@ impl OndinApp {
 
     /// A top-bar dropdown: the floating panel, closed by a click outside it or Escape.
     /// `width` is the painted width, border included ([`crate::ui::menu_inner_w`]
-    /// derives the inner one).
+    /// derives the inner one). A submenu `body` opens in an area with the id
+    /// [`Self::flyout_id`] counts as inside.
     pub(crate) fn dropdown(
         &mut self,
         ctx: &egui::Context,
@@ -6988,10 +6992,15 @@ impl OndinApp {
             })
             .response;
 
+        let on_flyout = ctx
+            .pointer_interact_pos()
+            .and_then(|p| ctx.layer_id_at(p))
+            .is_some_and(|l| l.id == Self::flyout_id(id));
         // The head toggles on its own click; counting it here would reopen it.
         if ctx.input(|i| i.pointer.any_click())
             && !menu.contains_pointer()
             && !head.contains_pointer()
+            && !on_flyout
         {
             self.open_menu = TopMenu::None;
         }
@@ -7000,9 +7009,18 @@ impl OndinApp {
         }
     }
 
+    /// The area id of the submenu a [`Self::dropdown`] named `id` opens beside a row.
+    fn flyout_id(id: &str) -> egui::Id {
+        egui::Id::new(id).with("flyout")
+    }
+
     /// The **View** and **Snap** dropdowns, each an icon and a caret over a column of
     /// checkable rows. Focus mode is not a peer of the other switches: it hides all
     /// chrome and leaves them untouched, so Escape (this menu being hidden) restores them.
+    ///
+    /// View reads in four groups: what the canvas draws, the modes (with *Present
+    /// mode* as a verb last), *Panels ▸* opening the panes beside it on hover, and
+    /// *Check contrast*.
     fn view_and_snap_menus(&mut self, ui: &mut egui::Ui) {
         const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
         const MENU_W: f32 = 160.0;
@@ -7026,7 +7044,14 @@ impl OndinApp {
             if head.clicked() {
                 self.toggle_menu(which);
             }
+            let id = match which {
+                TopMenu::View => "view-menu",
+                _ => "snap-menu",
+            };
+            // Where the open flyout's row is, kept across frames while it stays open.
+            let flyout_at = Self::flyout_id(id).with("row");
             if self.open_menu != which {
+                ctx.data_mut(|d| d.remove::<egui::Rect>(flyout_at));
                 continue;
             }
             // Left-aligned under the icon.
@@ -7036,68 +7061,119 @@ impl OndinApp {
             );
             // 160, or wider when a label needs it.
             let labels: Vec<&str> = match which {
-                TopMenu::View => ViewSwitch::VIEW_MENU
+                TopMenu::View => ViewSwitch::VIEW_CANVAS
                     .iter()
+                    .chain(&ViewSwitch::VIEW_MODES)
                     .map(|s| s.label())
                     .chain([
-                        crate::menu::Item::CheckContrast.spec().label,
                         crate::menu::Item::Present.spec().label,
+                        PANELS_ROW,
+                        crate::menu::Item::CheckContrast.spec().label,
                     ])
                     .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
             };
             let width = crate::ui::menu_check_width(&ctx, &labels, MENU_PAD, MENU_W);
-            self.dropdown(
-                &ctx,
-                match which {
-                    TopMenu::View => "view-menu",
-                    _ => "snap-menu",
-                },
-                anchor,
-                width,
-                &head,
-                |app, ui| {
-                    // From [`ViewSwitch`], which the chords resolve to.
-                    let rows: &[ViewSwitch] = match which {
-                        TopMenu::View => &ViewSwitch::VIEW_MENU,
-                        _ => &ViewSwitch::SNAP_MENU,
-                    };
-                    for sw in rows {
-                        // The contrast check heads the modes (Outline, Focus, then
-                        // Present): ticked while on, but view state rather than a
-                        // remembered switch.
-                        if *sw == ViewSwitch::Outline
-                            && crate::ui::menu_check(
-                                ui,
-                                crate::menu::Item::CheckContrast.spec().label,
-                                app.contrast.is_some(),
-                                ITEM_H,
-                            )
-                        {
-                            app.open_menu = TopMenu::None;
-                            app.toggle_contrast();
-                        }
-                        let on = app.view_switch(*sw);
-                        if crate::ui::menu_check(ui, sw.label(), on, ITEM_H) {
-                            app.set_view_switch(*sw, !on);
-                        }
+            self.dropdown(&ctx, id, anchor, width, &head, |app, ui| {
+                // From [`ViewSwitch`], which the chords resolve to.
+                let switch = |app: &mut Self, ui: &mut egui::Ui, sw: ViewSwitch, label: &str| {
+                    let on = app.view_switch(sw);
+                    let row = crate::ui::menu_check_response(ui, label, on, ITEM_H);
+                    if row.clicked() {
+                        app.set_view_switch(sw, !on);
                     }
-                    // A verb after the switches, in their column: no tick, ever.
-                    if which == TopMenu::View
-                        && crate::ui::menu_check(
-                            ui,
-                            crate::menu::Item::Present.spec().label,
-                            false,
-                            ITEM_H,
-                        )
-                    {
-                        app.open_menu = TopMenu::None;
-                        let ctx = ui.ctx().clone();
-                        app.dispatch(&ctx, crate::input::Action::Present);
+                    row
+                };
+                if which != TopMenu::View {
+                    for sw in ViewSwitch::SNAP_MENU {
+                        switch(app, ui, sw, sw.label());
                     }
-                },
-            );
+                    return;
+                }
+                let mut flyout = ui.ctx().data(|d| d.get_temp::<egui::Rect>(flyout_at));
+                // Any row but *Panels* hovered closes its flyout.
+                let mut elsewhere = false;
+                for sw in ViewSwitch::VIEW_CANVAS {
+                    elsewhere |= switch(app, ui, sw, sw.label()).hovered();
+                }
+                crate::ui::menu_sep(ui);
+                for sw in ViewSwitch::VIEW_MODES {
+                    elsewhere |= switch(app, ui, sw, sw.label()).hovered();
+                }
+                // A verb in the switches' column: no tick, ever.
+                let label = crate::menu::Item::Present.spec().label;
+                let present = crate::ui::menu_check_response(ui, label, false, ITEM_H);
+                elsewhere |= present.hovered();
+                if present.clicked() {
+                    app.open_menu = TopMenu::None;
+                    let ctx = ui.ctx().clone();
+                    app.dispatch(&ctx, crate::input::Action::Present);
+                }
+                crate::ui::menu_sep(ui);
+                let panels = crate::ui::menu_check_response(ui, PANELS_ROW, false, ITEM_H);
+                crate::ui::paint_submenu_caret(ui, panels.rect);
+                if panels.hovered() || panels.clicked() {
+                    flyout = Some(panels.rect);
+                }
+                crate::ui::menu_sep(ui);
+                // Ticked while on, but view state rather than a remembered switch.
+                let label = crate::menu::Item::CheckContrast.spec().label;
+                let contrast =
+                    crate::ui::menu_check_response(ui, label, app.contrast.is_some(), ITEM_H);
+                elsewhere |= contrast.hovered();
+                if contrast.clicked() {
+                    app.open_menu = TopMenu::None;
+                    app.toggle_contrast();
+                }
+                if elsewhere {
+                    flyout = None;
+                }
+                if let Some(row) = flyout {
+                    app.panels_flyout(ui.ctx(), Self::flyout_id(id), row);
+                }
+                ui.ctx().data_mut(|d| match flyout {
+                    Some(row) => {
+                        d.insert_temp(flyout_at, row);
+                    }
+                    None => d.remove::<egui::Rect>(flyout_at),
+                });
+            });
         }
+    }
+
+    /// The View menu's *Panels ▸* list beside `row`: a switch per pane, labelled
+    /// without the "Show" the palette and the cheatsheet need out of this context.
+    fn panels_flyout(&mut self, ctx: &egui::Context, id: egui::Id, row: egui::Rect) {
+        const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
+        let label = |sw: ViewSwitch| match sw {
+            ViewSwitch::Layers => "Layers",
+            ViewSwitch::History => "History",
+            ViewSwitch::Minimap => "Minimap",
+            ViewSwitch::Toolbar => "Toolbar",
+            ViewSwitch::StatusMessages => "Messages",
+            _ => sw.label(),
+        };
+        let labels: Vec<&str> = ViewSwitch::VIEW_PANELS.iter().map(|s| label(*s)).collect();
+        let w = crate::ui::menu_check_width(ctx, &labels, MENU_PAD, 120.0);
+        // Rows 1pt apart, inside the card's padding and border.
+        let n = labels.len() as f32;
+        let h = 2.0 * (crate::ui::MENU_BORDER + MENU_PAD) + n * ITEM_H + (n - 1.0);
+        let pos = crate::ui::flyout_place(ctx, row, egui::vec2(w, h), MENU_PAD);
+        egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(w, MENU_PAD));
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    for sw in ViewSwitch::VIEW_PANELS {
+                        let on = self.view_switch(sw);
+                        if crate::ui::menu_check(ui, label(sw), on, ITEM_H) {
+                            self.set_view_switch(sw, !on);
+                        }
+                    }
+                });
+            });
     }
 
     /// Whether a modal card is up: anything that paints an `egui::Modal` with a backdrop.
@@ -13353,10 +13429,15 @@ mod library_wiring_tests {
             .memory(|m| m.area_rect(egui::Id::new("view-menu")))
             .expect("the View menu's area");
         let inset = crate::app::MENU_PAD + crate::ui::MENU_BORDER + 8.0;
-        let rows = crate::input::ViewSwitch::VIEW_MENU
+        let rows = crate::input::ViewSwitch::VIEW_CANVAS
             .iter()
+            .chain(&crate::input::ViewSwitch::VIEW_MODES)
             .map(|s| s.label())
-            .chain([crate::menu::Item::Present.spec().label]);
+            .chain([
+                crate::menu::Item::Present.spec().label,
+                crate::app::PANELS_ROW,
+                crate::menu::Item::CheckContrast.spec().label,
+            ]);
         for row in rows {
             let end = shapes
                 .iter()
@@ -13373,6 +13454,86 @@ mod library_wiring_tests {
                 card.right()
             );
         }
+    }
+
+    /// The View menu's *Panels ▸* opens its list on hover, a click there toggles
+    /// the pane and leaves both open, and hovering another row closes the list.
+    ///
+    /// flip: `dropdown` without its `on_flyout` exemption → fails at "the menu
+    /// stays open".
+    #[test]
+    fn the_view_menu_s_panels_row_opens_the_panes_beside_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.open_menu = TopMenu::View;
+        let flyout = OndinApp::flyout_id("view-menu");
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.top_bar(ui)).shapes
+        };
+        let text_at = |shapes: &[egui::epaint::ClippedShape], label: &str| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+        };
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, Vec::new());
+        let shapes = frame(&mut app, Vec::new());
+        assert_eq!(text_at(&shapes, "Minimap"), None, "no list before a hover");
+
+        let panels = text_at(&shapes, crate::app::PANELS_ROW).expect("the Panels row");
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&mut app, vec![egui::Event::PointerMoved(panels)]);
+        }
+        let minimap = text_at(&shapes, "Minimap").expect("the list opens on hover");
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("view-menu")))
+            .expect("the View menu's area");
+        assert!(
+            !card.x_range().contains(minimap.x),
+            "beside the menu, not over it"
+        );
+
+        let before = app.show_minimap;
+        frame(&mut app, vec![egui::Event::PointerMoved(minimap)]);
+        frame(&mut app, vec![press(minimap, true)]);
+        frame(&mut app, vec![press(minimap, false)]);
+        assert_eq!(app.show_minimap, !before, "the click toggled the pane");
+        assert_eq!(app.open_menu, TopMenu::View, "the menu stays open");
+        let shapes = frame(&mut app, Vec::new());
+        assert!(
+            text_at(&shapes, "Minimap").is_some(),
+            "and so does the list"
+        );
+        assert!(ctx.memory(|m| m.area_rect(flyout)).is_some());
+
+        let grid = text_at(&shapes, crate::input::ViewSwitch::Grid.label()).expect("Show grid");
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&mut app, vec![egui::Event::PointerMoved(grid)]);
+        }
+        assert_eq!(
+            text_at(&shapes, "Minimap"),
+            None,
+            "another row closes the list"
+        );
     }
 
     /// The floating status bar shows a message for its hold, then nothing; the

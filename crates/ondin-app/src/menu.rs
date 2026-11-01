@@ -1516,7 +1516,7 @@ pub struct Context<'a> {
     pub state: LayerState,
     /// Whether the document holds any guide at all — what makes *Clear all guides* offered.
     pub any_guides: bool,
-    /// Each of the five View switches this menu can show, as it stands.
+    /// Each of the six View switches this menu can show, as it stands.
     pub view: ViewState,
     /// Whether focus mode is on — read by *Rename*, whose field focus mode
     /// hides. Not in [`ViewState`]: no context menu draws a
@@ -4024,11 +4024,10 @@ mod tests {
         assert!(rows.contains(&Item::ViewSwitch(ViewSwitch::GuideLock)));
     }
 
-    /// The canvas menu's View rows are the View menu's less the chrome-wide
-    /// switches §6.1 keeps out and the marquee's shape, which is a tool setting
-    /// rather than a view, all live in focus mode too. The expected set is
-    /// derived from `ViewSwitch::VIEW_MENU`, so a new switch either appears here
-    /// or fails here.
+    /// The canvas menu's View rows are the View menu's canvas and mode switches
+    /// less the chrome-wide modes §6.1 keeps out, all live in focus mode too. The
+    /// expected set is derived from `ViewSwitch::VIEW_CANVAS` and `VIEW_MODES`, so a
+    /// new switch either appears here or fails here.
     ///
     /// flip: dropping `LayoutGrid` from `view_rows` → fails at the set assertion;
     /// dimming *Show rulers* on `cx.focus` → fails at "and every one live".
@@ -4044,21 +4043,10 @@ mod tests {
                 })
                 .collect()
         };
-        let expected: Vec<ViewSwitch> = ViewSwitch::VIEW_MENU
+        let expected: Vec<ViewSwitch> = ViewSwitch::VIEW_CANVAS
             .into_iter()
-            .filter(|sw| {
-                !matches!(
-                    sw,
-                    ViewSwitch::Layers
-                        | ViewSwitch::History
-                        | ViewSwitch::Minimap
-                        | ViewSwitch::Toolbar
-                        | ViewSwitch::StatusMessages
-                        | ViewSwitch::Focus
-                        | ViewSwitch::Lasso
-                        | ViewSwitch::Private
-                )
-            })
+            .chain(ViewSwitch::VIEW_MODES)
+            .filter(|sw| !matches!(sw, ViewSwitch::Focus | ViewSwitch::Private))
             .collect();
 
         let cx = open(Target::Canvas, &[], &[]);
@@ -5303,21 +5291,28 @@ mod view_switch_registry_tests {
         );
     }
 
-    /// Every switch is on exactly one of `VIEW_MENU` and `SNAP_MENU`. Membership,
-    /// not cardinality: a length sum passes for two arrays that both hold `Grid`
-    /// and neither holds `Focus`.
+    /// Every switch but the lasso is on exactly one of the View menu's three groups
+    /// and `SNAP_MENU`; the lasso, a marquee setting, is on none and keeps `Q`.
+    /// Membership, not cardinality: a length sum passes for two arrays that both
+    /// hold `Grid` and neither holds `Focus`.
     ///
-    /// flip: dropping `Focus` from `VIEW_MENU` → fails naming "Focus mode" on 0 menus.
+    /// flip: dropping `Focus` from `VIEW_MODES` → fails naming "Focus mode" on 0 menus.
     #[test]
     fn every_view_switch_is_on_exactly_one_menu() {
         for sw in ViewSwitch::ALL {
-            let on = usize::from(ViewSwitch::VIEW_MENU.contains(&sw))
-                + usize::from(ViewSwitch::SNAP_MENU.contains(&sw));
+            let on = [
+                &ViewSwitch::VIEW_CANVAS[..],
+                &ViewSwitch::VIEW_MODES,
+                &ViewSwitch::VIEW_PANELS,
+                &ViewSwitch::SNAP_MENU,
+            ]
+            .iter()
+            .filter(|menu| menu.contains(&sw))
+            .count();
             assert_eq!(
                 on,
-                1,
-                "{} is on {on} of the two menus; a chord with no row is what \
-                 `ViewSwitch` exists to make impossible",
+                usize::from(sw != ViewSwitch::Lasso),
+                "{} is on {on} of the View menu's groups and the Snap menu",
                 sw.label()
             );
         }

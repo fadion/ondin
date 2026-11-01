@@ -82,3 +82,18 @@ pub fn extent(res: &Resolved, origins: &[NodeId]) -> Option<Rect> {
         .filter_map(|id| res.ink_bounds(*id))
         .reduce(|a: Rect, b| a.union(b))
 }
+
+/// `origins` without the slices among them, which are never drawn and so frame
+/// nothing, as a container lends none of a slice's box to its own.
+pub fn drawn_origins(doc: &ondin_core::Document, origins: &[NodeId]) -> Vec<NodeId> {
+    origins
+        .iter()
+        .copied()
+        .filter(|id| {
+            !matches!(
+                doc.get(*id).map(|n| n.kind()),
+                Some(ondin_core::NodeKind::Slice { .. })
+            )
+        })
+        .collect()
+}

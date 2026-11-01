@@ -137,3 +137,72 @@ fn a_slice_frames_an_svg_on_its_box() {
         "the layers under it are drawn: {svg}"
     );
 }
+
+/// A PDF of a slice is a page the slice's size.
+///
+/// flip: `plan::render`'s PDF arm framing on the slice's origins instead of its
+/// box → fails at the media box.
+#[test]
+fn a_slice_frames_a_pdf_on_its_box() {
+    let (doc, res, slice) = frame_with_a_slice();
+    let file = planned(
+        &doc,
+        &res,
+        slice,
+        ExportSpec::new(ExportFormat::Pdf, ExportScale::Times(1.0)),
+    );
+    let pdf = plan::render(&doc, &res, &file).expect("rendered");
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("/MediaBox[0 0 100 50]"), "the media box");
+}
+
+/// A slice loose on a page sizes none of the page's code export: the page is the
+/// rect's box, as its SVG and PNG are.
+///
+/// flip: `code::walk::page` framing on every origin, the slice's box included →
+/// fails at the page's size.
+#[test]
+fn a_loose_slice_sizes_no_code_export() {
+    let mut ids = IdSource::new(0x511D);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, slice) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 100.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: solid(RED),
+        },
+        Operation::CreateNode {
+            id: slice,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Slice {
+                size: Size::new(100.0, 100.0),
+            },
+            transform: Some(Affine::translate((500.0, 400.0))),
+            name: Some("Crop".into()),
+        },
+    ]))
+    .expect("the fixture");
+    let res = Resolved::rebuild(&doc);
+    let export = ondin_export::code::html::html_of(&doc, &res, &[rect, slice]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    let page = &css[css.find(".page").expect("the page's rule")..];
+    let page = &page[..page.find('}').unwrap()];
+    assert!(
+        page.contains("width: 100px") && page.contains("height: 100px"),
+        "the page's size: {page}"
+    );
+}

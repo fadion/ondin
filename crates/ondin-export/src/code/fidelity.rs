@@ -374,6 +374,8 @@ pub fn check_export(
     dir: &Path,
 ) -> Result<Fidelity, String> {
     write_page(export, dir)?;
+    // Framed as the page frames itself: a slice sizes nothing.
+    let origins = &crate::drawn_origins(doc, origins);
     let view = crate::extent(res, origins).ok_or("nothing to compare: the page has no ink")?;
     let cpu = crate::png::raster_of(doc, res, origins, &Default::default())
         .ok_or("nothing to compare: the page has no ink")?;

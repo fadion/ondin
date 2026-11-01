@@ -164,7 +164,8 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         }
         None => (doc, res),
     };
-    let view = crate::extent(res, origins).unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
+    let view = crate::extent(res, &crate::drawn_origins(doc, origins))
+        .unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
     let mut walk = Walk {
         doc,
         res,

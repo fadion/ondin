@@ -22830,12 +22830,14 @@ mod redraw_tests {
     }
 
     /// After each commit, undo and redo — a move, a recolour, a preview committed,
-    /// a delete and its undo and redo, a reparent across frames, a shadow, an
-    /// insert — the canvas patches rather than drawing whole, and every pixel the
-    /// edit changed lies inside the patch.
+    /// a delete and its undo and redo, a reparent across frames, a wrap into a new
+    /// group, a shadow, an insert — the canvas patches rather than drawing whole,
+    /// and every pixel the edit changed lies inside the patch.
     ///
     /// flip: `edit_damage` leaving out the ink `InkLog` recorded → fails at "a
-    /// delete"; leaving out the preview's ink → fails at "its commit, elsewhere".
+    /// delete"; leaving out the preview's ink → fails at "its commit, elsewhere";
+    /// `InkLog::record` measuring only the tops and the deleted → fails at "a wrap
+    /// into a new group".
     #[test]
     fn an_edit_redraws_only_where_it_changed_the_page() {
         let (mut session, [a, child, b, c]) = edit_fixture();
@@ -22862,7 +22864,8 @@ mod redraw_tests {
             visible: true,
             vars: Default::default(),
         }]);
-        let fresh = ondin_core::IdSource::new(0xF4E5).mint();
+        let mut minted = ondin_core::IdSource::new(0xF4E5);
+        let (fresh, wrap) = (minted.mint(), minted.mint());
         type Edit = Box<dyn Fn(&mut EditorSession)>;
         let commit = |tx: Vec<Operation>| -> Edit {
             Box::new(move |s| s.try_commit(Transaction(tx.clone())).expect("commits"))
@@ -22900,6 +22903,24 @@ mod redraw_tests {
                     new_parent: session.page,
                     index: 0,
                 }]),
+            ),
+            (
+                "a wrap into a new group, elsewhere",
+                commit(vec![
+                    Operation::CreateNode {
+                        id: wrap,
+                        parent: session.page,
+                        index: 0,
+                        kind: NodeKind::Group,
+                        transform: Some(Affine::translate((60.0, 40.0))),
+                        name: None,
+                    },
+                    Operation::Reparent {
+                        id: c,
+                        new_parent: wrap,
+                        index: 0,
+                    },
+                ]),
             ),
             (
                 "a shadow",

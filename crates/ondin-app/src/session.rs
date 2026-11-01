@@ -557,7 +557,7 @@ struct Inked {
     /// the change dirtied, as the document stands after it.
     tops: Vec<NodeId>,
     /// The world ink, before the change, of those layers and of every node it
-    /// deleted, on whichever page; `None` when some of that has no box.
+    /// dirtied or deleted, on whichever page; `None` when some of that has no box.
     was: Option<Vec<Rect>>,
 }
 
@@ -582,10 +582,17 @@ impl InkLog {
         let mut seen = std::collections::HashSet::new();
         let mut tops: Vec<NodeId> = Vec::new();
         let mut deleted: Vec<NodeId> = Vec::new();
+        // Every dirty node still here: its top is the one it has *now*, so a node
+        // wrapped into a new group would leave its old ink out of `tops`' boxes.
+        let mut kept: Vec<NodeId> = Vec::new();
         for &id in &dirty.0 {
             if !doc.contains(id) {
                 deleted.push(id);
                 continue;
+            }
+            // A root (a page, the vault) is no layer and has no ink.
+            if doc.get(id).and_then(|n| n.parent()).is_some() {
+                kept.push(id);
             }
             let mut at = id;
             while let Some(parent) = doc.get(at).and_then(|n| n.parent()) {
@@ -600,7 +607,7 @@ impl InkLog {
             }
         }
         let mut was: Option<Vec<Rect>> = Some(Vec::new());
-        for &id in tops.iter().chain(&deleted) {
+        for &id in tops.iter().chain(&deleted).chain(&kept) {
             // A node the old state never placed — new, or in the vault — drew nothing.
             if old.world_transform(id).is_none() {
                 continue;

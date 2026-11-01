@@ -320,7 +320,7 @@ mod leak {
             .collect()
     }
 
-    /// [`drawn`], each string with the rect it was drawn in.
+    /// `drawn`, each string with the rect it was drawn in.
     fn drawn_at(
         ctx: &egui::Context,
         app: &mut OndinApp,

@@ -990,6 +990,54 @@ fn pictures_match_the_canvas() {
     holds("pictures", &doc, &res);
 }
 
+/// A rounded clipping frame with children strokes its rounded outline, its
+/// stroke's overlay taking the frame's corners; an arc goes to inline SVG.
+///
+/// flip: the overlay stroke without `border-radius` → fails at "the overlay
+/// follows the corners".
+#[test]
+fn a_rounded_frame_and_an_arc_match_the_canvas() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 260.0, 120.0, "Board");
+    let card = d.frame(Some(f), 20.0, 20.0, 110.0, 80.0, "Card");
+    d.fill(card, solid(80, 160, 240, 255));
+    d.apply(vec![Operation::SetGeometry {
+        id: card,
+        geometry: ondin_core::GeometryPatch::CornerRadii(RoundedRectRadii::from_single_radius(
+            16.0,
+        )),
+    }]);
+    d.stroke(card, 4.0, StrokeAlign::Inside, StrokeSides::All);
+    let inner = d.rect(card, 30.0, 25.0, 50.0, 30.0, 0.0);
+    d.fill(inner, solid(250, 180, 30, 255));
+    let arc = d.add(
+        Some(f),
+        NodeKind::Ellipse {
+            size: Size::new(80.0, 80.0),
+            arc: ondin_core::EllipseArc {
+                start: 30.0,
+                sweep: 270.0,
+                ratio: 0.4,
+            },
+        },
+        Affine::translate((160.0, 20.0)),
+        "Ring",
+    );
+    d.fill(arc, solid(30, 30, 30, 255));
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    let overlay = css
+        .split('}')
+        .find(|r| r.contains("stroke {") || r.contains("stroke{"))
+        .expect("the overlay's rule");
+    assert!(
+        overlay.contains("border-radius: inherit"),
+        "the overlay follows the corners: {overlay}"
+    );
+    holds("rounded", &doc, &res);
+}
+
 /// A picture pinned by insets sits where layout puts it, not at its stored
 /// transform.
 ///

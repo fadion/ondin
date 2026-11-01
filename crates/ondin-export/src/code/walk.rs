@@ -1723,6 +1723,8 @@ impl Walk<'_> {
                     ("width", "100%"),
                     ("height", "100%"),
                     ("pointer-events", "none"),
+                    // The frame's corners, which the outline follows.
+                    ("border-radius", "inherit"),
                 ] {
                     e.set(p, v);
                 }

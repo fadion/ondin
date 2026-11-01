@@ -367,6 +367,30 @@ fn highlight_fill() -> egui::Color32 {
     color::accent_a(46)
 }
 
+/// A menu's rows that run their item, submenus opened in place: a submenu's head
+/// runs nothing, and a dim head dims its rows with its own reason. *Move to page*'s
+/// rows are left to the palette's own, which name the verb.
+fn runnable(groups: Vec<Vec<menu::Row>>) -> Vec<menu::Row> {
+    let mut out = Vec::new();
+    for row in groups.into_iter().flatten() {
+        if row.sub.is_empty() {
+            out.push(row);
+            continue;
+        }
+        for mut child in runnable(row.sub) {
+            if matches!(child.item, Item::MoveTo(_)) {
+                continue;
+            }
+            if !row.enabled && child.enabled {
+                child.enabled = false;
+                child.why = row.why;
+            }
+            out.push(child);
+        }
+    }
+    out
+}
+
 impl OndinApp {
     /// `Ctrl+K` / `Ctrl+/`: open the palette, or close it if open.
     pub(crate) fn toggle_palette(&mut self, _ctx: &egui::Context) {
@@ -469,7 +493,7 @@ impl OndinApp {
         let pointless = |item: Item| matches!(item, Item::AddPointHere | Item::MakeKeyLayer);
 
         let mut cx = self.menu_context(&pal.snapshot, &kinds);
-        for row in menu::build(&cx).into_iter().flatten() {
+        for row in runnable(menu::build(&cx)) {
             if !pointless(row.item) {
                 push(&mut out, Cmd::of(row, target, true));
             }
@@ -482,7 +506,7 @@ impl OndinApp {
         // The page's rows are the selection's too: Select all, Zoom to fit, Export all.
         cx.target = Target::Canvas;
         cx.state = menu::LayerState::default();
-        for row in menu::build(&cx).into_iter().flatten() {
+        for row in runnable(menu::build(&cx)) {
             if !pointless(row.item) {
                 push(&mut out, Cmd::of(row, target, false));
             }
@@ -543,6 +567,14 @@ impl OndinApp {
         }
         for item in [Item::ZoomIn, Item::ZoomOut, Item::ZoomReset] {
             push(&mut out, Cmd::verb(item, None));
+        }
+        // Off the menu, so the palette and the keymap are their doors.
+        for item in [
+            Item::ZoomSelection,
+            Item::Flip(build::Axis::X),
+            Item::Flip(build::Axis::Y),
+        ] {
+            push(&mut out, Cmd::verb(item, need_sel));
         }
         for axis in [build::Axis::X, build::Axis::Y] {
             for edge in [build::Edge::Min, build::Edge::Mid, build::Edge::Max] {
@@ -1492,7 +1524,7 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn q(s: &str) -> Vec<String> {
@@ -1725,6 +1757,49 @@ mod tests {
         assert!(
             find(Item::ExportCode(ondin_export::code::Target::React)).is_some_and(|c| c.enabled)
         );
+    }
+
+    /// The verbs the layer menu keeps in submenus are live commands with two
+    /// layers selected, and the submenu heads are not commands.
+    /// flip: `runnable` returning heads without walking `sub` → fails at the
+    /// *Union* assertion.
+    #[test]
+    fn a_submenus_verbs_are_commands_and_its_head_is_not() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let a = add_rect(&mut app);
+        let b = add_rect(&mut app);
+        app.session.selection.set(vec![a, b]);
+        app.toggle_palette(&ctx);
+        let pal = app.palette.take().expect("the palette opened");
+        let cmds = app.palette_commands(&pal);
+        let find = |item| cmds.iter().find(|c| c.item == item);
+        for item in [
+            Item::Boolean(ondin_core::BoolOp::Union),
+            Item::Restack(build::ZMove::Front),
+            Item::CopyAsSvg,
+            Item::Flip(build::Axis::X),
+            Item::ZoomSelection,
+        ] {
+            let cmd = find(item).unwrap_or_else(|| panic!("{item:?} is listed"));
+            assert!(
+                !cmd.absent && cmd.enabled,
+                "{item:?} is live: {:?}",
+                cmd.why
+            );
+        }
+        let replace = find(Item::PasteToReplace).expect("Paste to replace is listed");
+        assert!(!replace.absent);
+        assert_eq!(replace.why, Some("No layers have been copied"));
+        for head in [
+            Item::CopyPasteAs,
+            Item::Arrange,
+            Item::AlignMenu,
+            Item::BooleanMenu,
+        ] {
+            assert!(find(head).is_none(), "{head:?} is a submenu, not a command");
+        }
     }
 
     /// Open the palette through real frames and type `text` into it.

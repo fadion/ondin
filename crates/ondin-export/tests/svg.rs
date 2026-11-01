@@ -658,6 +658,94 @@ fn unequal_corners_are_exported_as_a_path_not_a_rounded_rect() {
     );
 }
 
+/// A pill — a radius over half the shorter side — exports as a pill: the radius
+/// is clamped as the outline clamps it, since SVG clamps `rx` and `ry` each to
+/// its own side and draws an ellipse. A clipping frame's clip and background
+/// follow, and an arc exports as the outline the canvas draws.
+///
+/// flip: `box_shape` writing the stored radius → fails at "the pill".
+#[test]
+fn a_pill_exports_as_a_pill_and_an_arc_as_its_outline() {
+    use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+    use ondin_core::{EllipseArc, IdSource, NodeKind};
+
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0x9111);
+    let (pill, frame, child, wedge) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+    let pill_kind = |w: f64, h: f64| NodeKind::Rect {
+        size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::from_single_radius(999.0),
+        corner_smoothing: 0.0,
+    };
+    let wedge_kind = NodeKind::Ellipse {
+        size: Size::new(60.0, 40.0),
+        arc: EllipseArc {
+            start: 30.0,
+            sweep: 270.0,
+            ratio: 0.4,
+        },
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: pill,
+                parent: f.artboard,
+                index: 0,
+                kind: pill_kind(120.0, 40.0),
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: frame,
+                parent: f.artboard,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(120.0, 40.0),
+                    corner_radii: RoundedRectRadii::from_single_radius(999.0),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((0.0, 60.0))),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: child,
+                parent: frame,
+                index: 0,
+                kind: pill_kind(10.0, 10.0),
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: wedge,
+                parent: f.artboard,
+                index: 0,
+                kind: wedge_kind.clone(),
+                transform: Some(Affine::translate((0.0, 120.0))),
+                name: None,
+            },
+        ]))
+        .unwrap();
+    f.res = Resolved::rebuild(&f.doc);
+    let out = svg(&f.doc, &f.res, f.doc.first_page(), None);
+    assert!(!out.contains(r#"rx="999""#), "the pill:\n{out}");
+    assert!(
+        out.contains(r#"width="120" height="40" rx="20""#),
+        "the pill at half its height:\n{out}"
+    );
+    let clip = out
+        .split("<clipPath")
+        .skip(1)
+        .map(|c| &c[..c.find("</clipPath>").unwrap()])
+        .find(|c| c.contains(r#"width="120" height="40""#))
+        .expect("the frame's clip");
+    assert!(clip.contains(r#"rx="20""#), "the frame's clip:\n{clip}");
+    assert!(
+        out.lines().any(|l| l.trim_start().starts_with("<path")
+            && l.contains(r#"transform="matrix(1 0 0 1 0 120)""#)),
+        "the arc as a path at its own position:\n{out}"
+    );
+}
+
 /// A node can hold several fills and several strokes, and the canvas paints all of
 /// them — so the export has to as well, or the file and the screen disagree about
 /// the artwork. One element per paint inside a group carrying the transform.

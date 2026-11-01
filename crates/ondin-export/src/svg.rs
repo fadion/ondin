@@ -1849,6 +1849,10 @@ fn box_shape(kind: &NodeKind) -> (&'static str, String) {
     };
     match geometry::uniform_radius(corner_radii).filter(|r| *r <= 0.0 || *corner_smoothing <= 0.0) {
         Some(r) => {
+            // Clamped to half the shorter side, as the outline is: SVG clamps
+            // `rx` and `ry` each to its own side, which turns a pill into an
+            // ellipse.
+            let r = r.min(size.width.min(size.height) * 0.5);
             let rx = if r > 0.0 {
                 format!(r#" rx="{}""#, fmt(r))
             } else {

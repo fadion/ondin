@@ -4790,10 +4790,11 @@ impl OndinApp {
         }
     }
 
-    /// Take back the blend menu's hover preview, if one is showing.
+    /// Take back the blend menu's hover preview, if one is showing — not a live
+    /// text session's, which previews under it.
     pub(crate) fn end_blend_preview(&mut self) {
         if self.blend_preview.take().is_some() {
-            self.session.clear_preview();
+            self.session.clear_gesture_preview();
         }
     }
 
@@ -23648,6 +23649,45 @@ mod blend_menu_tests {
             app.session.doc.get(rect).unwrap().blend(),
             BlendMode::Normal
         );
+    }
+
+    /// Taking the hover preview back leaves a live session's own preview drawn,
+    /// and focus mode, which hides the menu, takes the hover preview back.
+    /// flip: `end_blend_preview` calling `clear_preview` → fails at "the session's
+    /// preview stays".
+    #[test]
+    fn the_preview_goes_without_the_sessions_and_with_the_chrome() {
+        let ctx = egui::Context::default();
+        let (mut app, _, rect) = app(&ctx);
+        frame(&mut app, &ctx, Vec::new());
+        let out = frame(&mut app, &ctx, Vec::new());
+        app.session.set_session_preview(
+            &Transaction(vec![Operation::SetOpacity {
+                id: rect,
+                opacity: 0.5,
+            }]),
+            None,
+        );
+        let out = click(&mut app, &ctx, find(&out, "Normal"));
+        let multiply = find(&out, "Multiply");
+        hover(&mut app, &ctx, multiply);
+        assert_eq!(previewed(&app, rect), Some(BlendMode::Multiply), "fixture");
+        hover(&mut app, &ctx, egui::pos2(700.0, 1500.0));
+        assert_eq!(previewed(&app, rect), None, "off the rows");
+        let opacity = |app: &OndinApp| {
+            app.session
+                .render_inputs()
+                .2
+                .get(rect)
+                .and_then(|o| o.opacity)
+        };
+        assert_eq!(opacity(&app), Some(0.5), "the session's preview stays");
+
+        hover(&mut app, &ctx, multiply);
+        assert_eq!(previewed(&app, rect), Some(BlendMode::Multiply), "back on");
+        // This rig draws the inspector whatever the mode, so the switch is read alone.
+        app.set_view_switch(crate::input::ViewSwitch::Focus, true);
+        assert_eq!(previewed(&app, rect), None, "focus mode takes it back");
     }
 
     /// Pass through is offered only to a frame or a group, and a group's header

@@ -7305,8 +7305,10 @@ impl OndinApp {
             }
             ViewSwitch::Focus => {
                 self.focus = on;
-                // The menu goes with the chrome it lives in.
+                // The menu goes with the chrome it lives in, and so does the
+                // inspector's hover preview.
                 self.open_menu = TopMenu::None;
+                self.end_blend_preview();
                 self.session.info(if on {
                     "Focus mode — Escape to leave"
                 } else {

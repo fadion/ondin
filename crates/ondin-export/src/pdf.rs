@@ -117,11 +117,7 @@ fn pdf_framed(
             fontdb: Arc::new(fonts),
             font_resolver: usvg::FontResolver {
                 select_font: select_font(&missed),
-                // No glyph fallback: every run names the face that drew it, so a run
-                // fills its own characters. usvg shapes a line's whole text in its
-                // first run's face and, when a fallback face covers all of it,
-                // redraws the whole line in that face, under every run.
-                select_fallback: Box::new(|_, _, _| None),
+                select_fallback: same_family_fallback(),
             },
             // Only our own `data:` pictures are read. A linked picture's path names a
             // file, or an SMB share, that a received document chose.
@@ -170,6 +166,38 @@ fn pdf_framed(
 
 /// Core's own fallback family, which a layout that missed its family drew in.
 const FALLBACK_FAMILY: &str = "Inter";
+
+/// usvg's glyph fallback, kept to faces of the family the run's face gives
+/// itself: one family's subset files (Fontsource's `latin` and `latin-ext`) all
+/// name themselves alike, and a lookup by that name finds only one. Never another
+/// family's: every run names the face that drew it (`svg_linking`'s `faces`), and
+/// usvg redraws a whole line in a fallback face that covers all of it.
+fn same_family_fallback() -> usvg::FallbackSelectionFn<'static> {
+    Box::new(|c, exclude, db| {
+        let base = db.face(*exclude.first()?)?;
+        let kin = |face: &usvg::fontdb::FaceInfo| {
+            face.families.iter().any(|(name, _)| {
+                base.families
+                    .iter()
+                    .any(|(own, _)| own.eq_ignore_ascii_case(name))
+            })
+        };
+        let covers = |id| {
+            db.with_face_data(id, |data, index| {
+                ondin_core::text::face_covers(data, index, c)
+            }) == Some(true)
+        };
+        db.faces()
+            .filter(|face| !exclude.contains(&face.id) && kin(face) && covers(face.id))
+            .min_by_key(|face| {
+                (
+                    face.style != base.style,
+                    face.weight.0.abs_diff(base.weight.0),
+                )
+            })
+            .map(|face| face.id)
+    })
+}
 
 /// usvg's face lookup, falling back as core's font stack does when no face of the
 /// named families is in the page's database — to a family's stand-in
@@ -364,4 +392,58 @@ fn fonts_used(res: &Resolved, shown: &[NodeId]) -> Vec<FontData> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use usvg::fontdb::{Database, Language, Source};
+
+    /// The glyph fallback reaches a face of the run's own family that has the
+    /// character — one family's second subset file — and never another family's.
+    ///
+    /// flip: `same_family_fallback` answering `None` → fails at "the family's
+    /// other file". The wiring into `pdf_framed` is not pinned: an end-to-end check
+    /// needs two subset files of one family, which the repository does not carry.
+    #[test]
+    fn the_glyph_fallback_stays_within_the_family() {
+        let inter = include_bytes!("../../ondin-core/assets/fonts/Inter-Variable.ttf");
+        let emoji = include_bytes!("../../ondin-app/assets/fonts/NotoEmoji.ttf");
+        let mut db = Database::new();
+        db.load_font_source(Source::Binary(Arc::new(inter.to_vec())));
+        let base = db.faces().next().expect("Inter").id;
+        let mut other = Database::new();
+        other.load_font_source(Source::Binary(Arc::new(emoji.to_vec())));
+        let face = other.faces().next().expect("Noto Emoji").clone();
+        // Emoji filed under Inter's name stands for a subset file of the family.
+        let own = db.push_face_info(usvg::fontdb::FaceInfo {
+            families: vec![("Inter".into(), Language::English_UnitedStates)],
+            ..face.clone()
+        });
+        let foreign = db.push_face_info(face);
+        let mut db = Arc::new(db);
+        let fallback = same_family_fallback();
+        assert_eq!(
+            fallback('😀', &[base], &mut db),
+            Some(own),
+            "the family's other file"
+        );
+        assert_eq!(
+            fallback('😀', &[base, own], &mut db),
+            None,
+            "not another family's"
+        );
+        assert_eq!(
+            db.with_face_data(foreign, |data, index| {
+                ondin_core::text::face_covers(data, index, '😀')
+            }),
+            Some(true),
+            "fixture: the other family has the character"
+        );
+        assert_eq!(
+            fallback('A', &[own], &mut db),
+            Some(base),
+            "back the other way"
+        );
+    }
 }

@@ -2548,6 +2548,15 @@ pub struct ExportRun {
     pub face: Option<String>,
 }
 
+/// Whether face `index` of font file `data` maps `c` to a glyph of its own.
+pub fn face_covers(data: &[u8], index: u32, c: char) -> bool {
+    use skrifa::MetadataProvider as _;
+    skrifa::FontRef::from_index(data, index)
+        .ok()
+        .and_then(|face| face.charmap().map(c))
+        .is_some_and(|g| g != skrifa::GlyphId::NOTDEF)
+}
+
 /// The family a face's own `name` table gives it — the typographic family, else
 /// the family — which is the name a font database built from the file finds it by.
 fn file_family(font: &FontData) -> Option<String> {

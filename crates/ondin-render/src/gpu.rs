@@ -663,6 +663,26 @@ impl Region {
 /// snapped box moves by up to a pixel and antialiasing reaches past its edge.
 const REGION_CULL_MARGIN: f64 = 2.0;
 
+/// Give `scene` an invisible gradient before a vello renderer draws it, so the
+/// renderer's image atlas outlives a frame that holds no image, gradient or glyph.
+///
+/// vello 0.9 resolves such a frame as an atlas of zero size and swaps its
+/// atlas texture for a 1×1 one, while its image cache still marks every picture
+/// uploaded: the next frame recreates the atlas empty and draws them blank. A
+/// pan or patch region over plain shapes is such a frame. The gradient's two
+/// stops are a late-bound ramp, which keeps the resolve on its full path.
+fn hold_atlas(scene: &mut Scene) {
+    let ramp = ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0))
+        .with_stops([Color::TRANSPARENT, Color::TRANSPARENT]);
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        &ramp,
+        None,
+        &Rect::new(0.0, 0.0, 1.0, 1.0),
+    );
+}
+
 /// Which renderer's atlas an effect layer's slot was registered in — the page's,
 /// or the one belonging to a numbered pass.
 ///
@@ -910,6 +930,7 @@ impl VelloGpuRenderer {
                     batch.append(&jobs[i].scene, Some(to));
                     batch.pop_layer();
                 }
+                hold_atlas(&mut batch);
                 // **Transparent, not the page's ground**, or a rectangle of it would
                 // be baked into the shadow.
                 self.layers[pass].render_to_texture(
@@ -1010,7 +1031,7 @@ impl VelloGpuRenderer {
     ) -> Result<(), vello::Error> {
         let (scene, jobs, pinned) = walk_scene(doc, res, vp, overrides, images, page, &[vp.view]);
         self.pinned = pinned;
-        self.draw(device, queue, &scene, jobs, vp, target, base_color)
+        self.draw(device, queue, scene, jobs, vp, target, base_color)
     }
 
     /// Draw the frame [`Self::render`] would draw into `target`, but only what
@@ -1058,7 +1079,7 @@ impl VelloGpuRenderer {
         if pinned {
             return Ok(false);
         }
-        self.draw(device, queue, &scene, jobs, vp, target, base_color)?;
+        self.draw(device, queue, scene, jobs, vp, target, base_color)?;
         Ok(true)
     }
 
@@ -1069,12 +1090,13 @@ impl VelloGpuRenderer {
         &mut self,
         device: &Device,
         queue: &Queue,
-        scene: &Scene,
+        mut scene: Scene,
         jobs: Vec<EffectJob>,
         vp: &Viewport,
         target: &TextureView,
         base_color: Color,
     ) -> Result<(), vello::Error> {
+        hold_atlas(&mut scene);
         let size = vp.pixel_size;
         // The page's pixel count is the budget every effect pass is held to (`pack`).
         let budget = u64::from(vp.pixel_size.0) * u64::from(vp.pixel_size.1);
@@ -1089,7 +1111,7 @@ impl VelloGpuRenderer {
                     antialiasing_method: AaConfig::Area,
                 };
                 self.renderer
-                    .render_to_texture(device, queue, scene, target, &params)
+                    .render_to_texture(device, queue, &scene, target, &params)
             });
         // **Unregistered on the way out, whichever pass failed**, or the map entry
         // and its texture live as long as the renderer — and from the renderer that

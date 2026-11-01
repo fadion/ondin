@@ -721,3 +721,107 @@ fn the_exposed_regions_cover_what_the_shift_uncovered() {
         }
     }
 }
+
+/// A picture still draws after the renderer drew a frame with no picture,
+/// gradient or text in it — a pan's band over plain shapes.
+///
+/// flip: `gpu::hold_atlas` not called in `VelloGpuRenderer::draw` → fails at
+/// "after a plain region", where the picture comes back blank.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_picture_survives_a_frame_that_draws_none() {
+    use ondin_core::{ImageEntry, ImageFormat, ImageId, ImageSource, image_brush};
+    let _one = ADAPTER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else {
+        eprintln!("no adapter; skipping");
+        return;
+    };
+    let side = 8u32;
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, side, side);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let px: Vec<u8> = (0..side * side).flat_map(|_| [255u8, 0, 0, 255]).collect();
+        let mut w = enc.write_header().expect("png header");
+        w.write_image_data(&px).expect("png data");
+    }
+    let iid = ImageId("sha256:picture".into());
+    let mut images = ImageStore::new();
+    images
+        .insert(&iid, &png, ImageFormat::Png)
+        .expect("the fixture decodes");
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (pic, plain) = (ids.mint(), ids.mint());
+    let square = |id, index, x: f64| Operation::CreateNode {
+        id,
+        parent: root,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(30.0, 30.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(Affine::translate((x, 10.0))),
+        name: None,
+    };
+    doc.apply(&Transaction(vec![
+        Operation::AddImage {
+            id: iid.clone(),
+            entry: ImageEntry {
+                source: ImageSource::Embedded(png.clone().into()),
+                format: ImageFormat::Png,
+                width: side,
+                height: side,
+            },
+        },
+        square(pic, 0, 10.0),
+        Operation::SetFills {
+            id: pic,
+            fills: keyed_by_position([Fill {
+                brush: image_brush(iid).into(),
+                visible: true,
+            }]),
+        },
+        square(plain, 1, 200.0),
+        Operation::SetFills {
+            id: plain,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(90, 90, 90, 255)).into(),
+                visible: true,
+            }]),
+        },
+    ]))
+    .expect("the fixture applies");
+    let res = Resolved::rebuild(&doc);
+    let (page, size) = (doc.first_page(), (W, H));
+    let vp = viewport((0, 0), 1.0, size);
+    let ov = RenderOverrides::default();
+    let tex = target(&g, size);
+    let view = tex.create_view(&Default::default());
+    let draw = |g: &mut Gpu| {
+        g.renderer
+            .render(
+                &g.device, &g.queue, &doc, &res, &vp, &ov, &view, GROUND, &images, page,
+            )
+            .expect("render");
+        let px = read(g, &tex, size);
+        let i = ((25 * W + 25) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2]]
+    };
+    assert_eq!(draw(&mut g), [255, 0, 0], "the fixture draws its picture");
+    let band = [Region {
+        at: (190, 0),
+        size: (50, 50),
+    }];
+    let drawn = g
+        .renderer
+        .render_regions(
+            &g.device, &g.queue, &doc, &res, &vp, &ov, &view, &band, GROUND, &images, page,
+        )
+        .expect("regions");
+    assert!(drawn, "the plain band is drawn, not refused");
+    assert_eq!(draw(&mut g), [255, 0, 0], "after a plain region");
+}

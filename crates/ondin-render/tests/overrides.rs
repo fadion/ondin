@@ -38,6 +38,8 @@ enum Call {
     /// position in the call stream — what makes it right or wrong is which draws
     /// fall inside it, and those are the `Fill`s and `Text`s that follow.
     MaskPush,
+    /// A luminance mask's composite, told apart from an alpha one's.
+    LuminancePush,
     /// An effect layer, **with the box it asked for** (§5.3a, §15 D341).
     ///
     /// The bounds are the whole reason this variant exists rather than the walk's
@@ -103,6 +105,9 @@ impl ScenePainter for Recorder {
     }
     fn push_mask_layer(&mut self) {
         self.0.push(Call::MaskPush);
+    }
+    fn push_luminance_mask_layer(&mut self) {
+        self.0.push(Call::LuminancePush);
     }
     fn push_effect_layer(
         &mut self,
@@ -763,6 +768,54 @@ fn a_dropped_frame_previews_with_its_clip_and_its_contents() {
         pushes, 2,
         "the ghosted frame did not push a clip of its own"
     );
+}
+
+/// A dropped copy of a frame whose group is a luminance mask previews the mask
+/// by luminance, as committing draws it.
+///
+/// flip: `paint_ghost` composing every ink mask by alpha → fails at "a copy with
+/// a luminance mask".
+#[test]
+fn a_dropped_luminance_mask_previews_by_luminance() {
+    let f = fixture();
+    let mut doc = f.doc;
+    doc.apply(&Transaction(vec![
+        Operation::SetMask {
+            id: f.group,
+            mask: true,
+        },
+        Operation::SetMaskMode {
+            id: f.group,
+            mode: ondin_core::MaskMode::Luminance,
+        },
+    ]))
+    .unwrap();
+    let mut ids = IdSource::new(0xC2FF);
+    let template = doc.capture_subtree(f.artboard).expect("capture the frame");
+    let (nodes, new_root) = ondin_core::remap_subtree(&template, &mut ids).expect("remap");
+    let base = nodes
+        .iter()
+        .find(|n| n.id() == new_root)
+        .map(|n| n.transform())
+        .unwrap();
+    let index = doc.get(f.root).unwrap().children().len();
+    let tx = Transaction(vec![
+        Operation::InsertSubtree {
+            nodes,
+            parent: f.root,
+            index,
+        },
+        Operation::SetTransform {
+            id: new_root,
+            transform: Affine::translate((900.0, 0.0)) * base,
+        },
+    ]);
+    let res = Resolved::rebuild(&doc);
+    assert!(
+        record(&doc, &res, &RenderOverrides::default()).contains(&Call::LuminancePush),
+        "fixture: the frame draws a luminance mask"
+    );
+    assert_preview_matches_commit(&doc, &tx, "a copy with a luminance mask");
 }
 
 /// A subtree whose ids the document already holds is not a copy of anything —

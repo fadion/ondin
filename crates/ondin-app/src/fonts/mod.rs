@@ -276,7 +276,8 @@ struct FaceSpec {
     /// if the variable file cannot be decoded, the static cuts are tried.
     variable: bool,
     /// Whether the face is registered under the name of the family that asked for
-    /// it — a subset's alias (`fallback_fonts::subset_alias`) — rather than its own.
+    /// it rather than its own: every web face, under the catalog's name or a
+    /// subset's alias (`fallback_fonts::subset_alias`).
     alias: bool,
 }
 
@@ -1670,7 +1671,9 @@ fn system_faces(db: &fontdb::Database, family: &str, want: Want) -> Vec<FaceSpec
 fn web_faces(entry: &CatalogEntry, dir: &Path, want: Want) -> Vec<FaceSpec> {
     // A variable file is one download for every weight, and the axis rows and
     // variant list are read from its own `fvar` (§9.2 Font tab). Two files at most.
-    files_of(entry, &entry.subset, false, dir, want)
+    // Registered under the catalog's name, which is what documents and the picker
+    // say: a file can name itself otherwise (Nunito Sans's is "Nunito Sans 12pt").
+    files_of(entry, &entry.subset, true, dir, want)
 }
 
 /// The files of one of `entry`'s other subsets, registered under its alias.
@@ -2386,6 +2389,34 @@ mod tests {
         let full = web_faces(&entry, dir, Want::Full);
         assert_eq!(full[0].key, preview[0].key, "the same file leads both");
         assert_eq!(full.len(), 6, "3 weights x 2 styles");
+    }
+
+    /// A web family whose file names itself otherwise is drawable under the name
+    /// the catalog and the document give it. Inter's italic stands in for Nunito
+    /// Sans's file, which calls itself "Nunito Sans 12pt".
+    ///
+    /// flip: `web_faces` not asking for the catalog's name → fails at "under the
+    /// catalog's name".
+    #[test]
+    fn a_web_face_registers_under_the_catalogs_name() {
+        let (tx, rx) = channel();
+        let mut svc = settled_with(&["Nunito Sans"]);
+        svc.msg_rx = rx;
+        svc.ensure_loaded("Nunito Sans");
+        let job = svc.queue.pop().expect("the face is queued");
+        tx.send(FontMsg::Face {
+            family: job.family,
+            key: job.face.key,
+            bytes: ondin_core::text::bundled_inter()[1].to_vec(),
+            alias: job.face.alias,
+        })
+        .expect("the test owns the channel");
+        svc.poll();
+        assert_eq!(
+            svc.family_status("Nunito Sans"),
+            FamilyStatus::Ready,
+            "under the catalog's name"
+        );
     }
 
     /// The whole point of the variable path: one file instead of six, and the

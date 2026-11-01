@@ -784,7 +784,7 @@ fn snapped_box_world(world: Affine, base: Affine, size: ondin_core::kurbo::Size)
             return (scale, origin);
         }
         let (near, far) = (origin, origin + scale * extent);
-        let (rn, mut rf) = (near.round(), far.round());
+        let (rn, mut rf) = (snap_round(near), snap_round(far));
         if (rf - rn).abs() < 1.0 {
             rf = rn + (far - near).signum();
         }
@@ -800,6 +800,16 @@ fn snapped_box_world(world: Affine, base: Affine, size: ondin_core::kurbo::Size)
     }
     // Back into world space: the painters re-apply `base`.
     base.inverse() * Affine::new([sa, b, c, sd, se, sf])
+}
+
+/// `v` rounded to a whole device pixel, a tie always up. A tie is decided past
+/// the noise the view's origin leaves in a device coordinate, so a whole-pixel
+/// pan rounds every edge as a fresh frame there does; `f64::round` let that
+/// noise pick.
+fn snap_round(v: f64) -> f64 {
+    /// Far above the noise in a device coordinate, far below a visible distance.
+    const TIE: f64 = 1e-7;
+    (v + 0.5 + TIE).floor()
 }
 
 /// The local box of a kind whose geometry *is* an axis-aligned box, so it can snap.
@@ -920,7 +930,7 @@ fn snapped_stroke(
             if span.1 <= along.0 || span.0 >= along.1 {
                 continue;
             }
-            for e in sides.into_iter().filter(|e| e.round() == at) {
+            for e in sides.into_iter().filter(|e| snap_round(*e) == at) {
                 let before = if c + half <= e + SAME {
                     true
                 } else if c - half >= e - SAME {
@@ -941,7 +951,7 @@ fn snapped_stroke(
     // they round together, against that boundary on the side [`side`] gives, as a
     // box edge there rounds to it too.
     let across = |c: f64, along: (f64, f64), horizontal: bool| {
-        let (near, far) = ((c - half).round(), (c + half).round());
+        let (near, far) = (snap_round(c - half), snap_round(c + half));
         if far <= near {
             match side(c, along, horizontal, near) {
                 Some(true) => (near - laid, near),
@@ -957,7 +967,7 @@ fn snapped_stroke(
     };
     // Along a segment: its ends rounded, at least one pixel apart.
     let along = |lo: f64, hi: f64| {
-        let (lo, hi) = (lo.round(), hi.round());
+        let (lo, hi) = (snap_round(lo), snap_round(hi));
         (lo, hi.max(lo + 1.0))
     };
     let mut ink = BezPath::new();

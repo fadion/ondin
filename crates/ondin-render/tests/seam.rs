@@ -645,6 +645,96 @@ fn a_snapped_stroke_is_one_whole_pixel_rect_per_segment() {
     );
 }
 
+/// The app's camera: the view's corner moved so the world's origin lands on a
+/// whole device pixel (`Camera::viewport`).
+fn camera(center: (f64, f64), zoom: f64, px: (u32, u32)) -> Viewport {
+    let (w, h) = (f64::from(px.0) / zoom, f64::from(px.1) / zoom);
+    let corner = |c: f64, span: f64| ((c - span / 2.0) * zoom).round() / zoom;
+    let (x0, y0) = (corner(center.0, w), corner(center.1, h));
+    Viewport {
+        view: Rect::new(x0, y0, x0 + w, y0 + h),
+        pixel_size: px,
+    }
+}
+
+/// A whole-pixel pan moves every snapped edge by exactly the pan, so the frame
+/// kept and moved is the frame drawn fresh: at 1/1.44 every edge here falls on a
+/// rounding tie, which the view's origin must not decide.
+///
+/// flip: `snapped_box_world` rounding a tie with `f64::round` → fails at the
+/// edge comparison.
+#[test]
+fn a_whole_pixel_pan_moves_every_snapped_edge_by_the_pan() {
+    let mut ids = IdSource::new(51);
+    let root = ids.mint();
+    let mut d = Document::new(root);
+    let mut ops = Vec::new();
+    for k in -12i32..12 {
+        let id = ids.mint();
+        ops.push(Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(36.0, 36.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            // Every edge on a multiple of 18, which is 12.5 device pixels.
+            transform: Some(Affine::translate((
+                f64::from(k) * 54.0,
+                f64::from(k.rem_euclid(4)) * 54.0 - 90.0,
+            ))),
+            name: None,
+        });
+        ops.push(Operation::SetFills {
+            id,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::BLACK).into(),
+                visible: true,
+            }]),
+        });
+    }
+    d.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&d);
+    let (zoom, px) = (1.0 / 1.44, (400u32, 300u32));
+    let render = |vp: &Viewport| {
+        VelloCpuRenderer::new()
+            .render_to_rgba(&d, &res, vp, &ImageStore::new(), d.first_page())
+            .0
+    };
+    let mut checked = 0;
+    for (start, pan) in [
+        ((3.3, 7.9), (-12i32, -9i32)),
+        ((-41.7, 12.2), (7, 13)),
+        ((88.8, -5.5), (-31, 4)),
+    ] {
+        let a = render(&camera(start, zoom, px));
+        let moved = (
+            start.0 - f64::from(pan.0) / zoom,
+            start.1 - f64::from(pan.1) / zoom,
+        );
+        let b = render(&camera(moved, zoom, px));
+        for y in 0..px.1 as i32 {
+            for x in 0..px.0 as i32 {
+                let (bx, by) = (x + pan.0, y + pan.1);
+                if bx < 0 || by < 0 || bx >= px.0 as i32 || by >= px.1 as i32 {
+                    continue;
+                }
+                let i = ((y * px.0 as i32 + x) * 4) as usize;
+                let j = ((by * px.0 as i32 + bx) * 4) as usize;
+                assert_eq!(
+                    a[i..i + 4],
+                    b[j..j + 4],
+                    "from {start:?} by {pan:?}: ({x}, {y}) kept is not ({bx}, {by}) fresh"
+                );
+                checked += usize::from(a[i + 3] > 0);
+            }
+        }
+    }
+    assert!(checked > 0, "fixture: the rects are in view");
+}
+
 /// A line under a pixel wide starting where a box above it ends keeps its ink
 /// when both its edges round to the box's edge: it is laid on its own side.
 ///

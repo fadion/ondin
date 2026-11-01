@@ -1182,12 +1182,12 @@ fn type_style(s: &Value, base: &TextStyle) -> TextStyle {
         _ => None,
     };
     let decoration = str_of(s, "textDecoration");
-    TextStyle {
+    crate::foreign::canonical_style(TextStyle {
         font_family: s
             .get("fontFamily")
             .and_then(Value::as_str)
             .map_or_else(|| base.font_family.clone(), str::to_owned),
-        font_size: f("fontSize").unwrap_or(base.font_size).max(1.0),
+        font_size: f("fontSize").unwrap_or(base.font_size),
         weight: f("fontWeight").map_or(base.weight, |w| w as u16),
         italic: s
             .get("italic")
@@ -1213,7 +1213,7 @@ fn type_style(s: &Value, base: &TextStyle) -> TextStyle {
             _ => base.case,
         },
         ..base.clone()
-    }
+    })
 }
 
 /// A blend mode other than the default, or `None` for the default.

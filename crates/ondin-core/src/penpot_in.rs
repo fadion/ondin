@@ -839,7 +839,7 @@ impl Builder<'_> {
                 text.push_str(s);
                 let mut style = leaf_style(leaf);
                 if style.line_height.is_none() {
-                    style.line_height = line_height(paragraph);
+                    style.set(CharAttr::LineHeight(line_height(paragraph)));
                 }
                 *self.families.entry(style.font_family.clone()).or_default() += 1;
                 let colour = arr(leaf, "fills").first().and_then(|f| {
@@ -1248,9 +1248,9 @@ fn leaf_style(v: &Value) -> TextStyle {
     };
     let weight = num_kv(v, "fontWeight", "font-weight", 400.0) as u16;
     let decoration = get(v, "textDecoration", "text-decoration");
-    TextStyle {
+    crate::foreign::canonical_style(TextStyle {
         font_family: family,
-        font_size: num_kv(v, "fontSize", "font-size", 14.0).max(1.0),
+        font_size: num_kv(v, "fontSize", "font-size", 14.0),
         weight: weight.clamp(1, 1000),
         italic: get(v, "fontStyle", "font-style") == "italic",
         letter_spacing: Length::Px(num_kv(v, "letterSpacing", "letter-spacing", 0.0)),
@@ -1264,7 +1264,7 @@ fn leaf_style(v: &Value) -> TextStyle {
             _ => TextCase::Original,
         },
         ..TextStyle::default()
-    }
+    })
 }
 
 /// An asset's name with its group path, as Ondin's slash groups.

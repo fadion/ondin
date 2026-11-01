@@ -5,6 +5,7 @@
 use crate::image::ImageFormat;
 use crate::node::Fill;
 use crate::peniko::{self, Color};
+use crate::typography::{CharAttrKind, TextStyle};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -156,6 +157,17 @@ pub(crate) fn solid(c: Color) -> Fill {
         brush: peniko::Brush::Solid(c).into(),
         visible: true,
     }
+}
+
+/// `style` with every attribute put through [`TextStyle::set`], so a default
+/// read from a file holds the canonical lengths and the size range a span over
+/// it holds, and equals that span where the file meant the same value.
+pub(crate) fn canonical_style(style: TextStyle) -> TextStyle {
+    let mut out = style.clone();
+    for kind in CharAttrKind::ALL {
+        out.set(style.get(kind));
+    }
+    out
 }
 
 pub(crate) fn num(v: &Value, k: &str) -> f64 {

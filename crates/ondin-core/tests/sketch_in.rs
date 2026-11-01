@@ -543,6 +543,154 @@ fn a_masks_fill_is_drawn_under_what_it_clips() {
     );
 }
 
+/// An alpha mask (`clippingMaskMode` 1) masks by its paint's alpha and gets no
+/// copy of its paint above it, since its paint is the mask. flip: skip the
+/// `SetMaskMode` in `create` → fails at the mode.
+#[test]
+fn an_alpha_mask_keeps_its_mode_and_draws_no_paint() {
+    let mut mask = rectangle(
+        "K",
+        0.0,
+        0.0,
+        json!({ "fills": [fill(color(1.0, 1.0, 1.0))] }),
+    );
+    mask["hasClippingMask"] = json!(true);
+    mask["clippingMaskMode"] = json!(1);
+    mask["name"] = json!("Mask");
+    let group = json!({
+        "_class": "group", "do_objectID": "G", "name": "Fade",
+        "frame": frame(0.0, 0.0, 40.0, 20.0), "layers": [mask, rectangle("R", 0.0, 0.0, json!({}))],
+    });
+    let r = import(sketch(&[("P", "Page", json!([group]))], json!({}), &[]));
+    let mask = r.doc.get(one(&r.doc, "Mask")).unwrap();
+    assert!(mask.mask());
+    assert_eq!(mask.mask_mode(), ondin_core::node::MaskMode::Alpha);
+    assert!(r.report.is_empty(), "{:?}", r.report);
+}
+
+/// A kerning Sketch writes as a widened float lands in the text's default as
+/// the canonical length a span holds, so no span repeats it over the whole
+/// text and the text stays bound to its shared style. flip: build the default
+/// literally in `text_style`, without `canonical_style` → fails at the spans.
+#[test]
+fn a_widened_kerning_is_the_default_not_a_span() {
+    let mut r0 = run(0, 5, "Inter-Regular", 14.0, color(0.0, 0.0, 0.0));
+    r0["attributes"]["kerning"] = json!(0.23999999463558197);
+    let mut label = text("T", "Hello", json!([r0.clone()]), 0);
+    label["sharedStyleID"] = json!("TS");
+    let styles = json!({ "layerTextStyles": { "objects": [{
+        "do_objectID": "TS", "name": "Body",
+        "value": { "textStyle": { "encodedAttributes": r0["attributes"] } },
+    }]}});
+    let r = import(sketch(&[("P", "Page", json!([label]))], styles, &[]));
+    let node = r.doc.get(one(&r.doc, "Label")).unwrap();
+    let NodeKind::Text { style, spans, .. } = node.kind() else {
+        panic!("a text");
+    };
+    assert_eq!(style.letter_spacing, ondin_core::Length::Px(0.24));
+    assert!(spans.as_slice().is_empty(), "{:?}", spans.as_slice());
+    assert!(node.styles().text.is_some(), "bound to its shared style");
+}
+
+/// Two symbols holding each other's instances are left as empty groups and
+/// reported, and the read returns. flip: place every pending at once in
+/// `place_instances`, waiting or not → the read fails at `import`, its commit
+/// refusing a master copied into itself.
+#[test]
+fn symbols_that_hold_each_other_are_left_empty() {
+    let master = |id: &str, holds: &str| {
+        json!({
+            "_class": "symbolMaster", "do_objectID": format!("M{id}"), "name": id,
+            "symbolID": id, "frame": frame(0.0, 0.0, 10.0, 10.0),
+            "layers": [{ "_class": "symbolInstance", "do_objectID": format!("I{id}"),
+                         "name": format!("{holds} in {id}"), "symbolID": holds,
+                         "frame": frame(0.0, 0.0, 10.0, 10.0) }],
+        })
+    };
+    let top = json!({ "_class": "symbolInstance", "do_objectID": "T", "name": "Top",
+                      "symbolID": "A", "frame": frame(50.0, 0.0, 10.0, 10.0) });
+    let r = import(sketch(
+        &[(
+            "P",
+            "Page",
+            json!([master("A", "B"), master("B", "A"), top]),
+        )],
+        json!({}),
+        &[],
+    ));
+    let rows: Vec<(&str, &str)> = r
+        .report
+        .iter()
+        .map(|u| (u.what, u.count.as_str()))
+        .collect();
+    assert_eq!(rows, [("Symbols that contain themselves", "3 instances")]);
+    for name in ["B in A", "A in B", "Top"] {
+        let g = r.doc.get(one(&r.doc, name)).unwrap();
+        assert!(matches!(g.kind(), NodeKind::Group) && g.children().is_empty());
+    }
+}
+
+/// An override reaching through a nested instance (`ID2/TC_stringValue`) lands
+/// on the copy under that instance's copy in the outer instance, not on its
+/// sibling's, the nested master's own text or another copy. flip: take only the
+/// path's last step in `copy_at` → fails at `Top`, the first sibling changed.
+#[test]
+fn an_override_through_a_nested_instance_lands_on_its_copy() {
+    let label = |id: &str| {
+        text(
+            id,
+            "Deep",
+            json!([run(0, 4, "Inter-Regular", 12.0, color(0.0, 0.0, 0.0))]),
+            0,
+        )
+    };
+    let c = json!({
+        "_class": "symbolMaster", "do_objectID": "MC", "name": "C", "symbolID": "C",
+        "frame": frame(0.0, 0.0, 50.0, 20.0), "layers": [label("TC")],
+    });
+    let d = json!({
+        "_class": "symbolMaster", "do_objectID": "MD", "name": "D", "symbolID": "D",
+        "frame": frame(100.0, 0.0, 50.0, 20.0),
+        "layers": [{ "_class": "symbolInstance", "do_objectID": "ID1", "name": "Inner 1",
+                     "symbolID": "C", "frame": frame(0.0, 0.0, 50.0, 20.0) },
+                   { "_class": "symbolInstance", "do_objectID": "ID2", "name": "Inner 2",
+                     "symbolID": "C", "frame": frame(0.0, 30.0, 50.0, 20.0) }],
+    });
+    let top = json!({ "_class": "symbolInstance", "do_objectID": "TOP", "name": "Top",
+                      "symbolID": "D", "frame": frame(300.0, 0.0, 50.0, 20.0),
+                      "overrideValues": [{ "overrideName": "ID2/TC_stringValue", "value": "changed" }] });
+    let other = json!({ "_class": "symbolInstance", "do_objectID": "OTHER", "name": "Other",
+                        "symbolID": "C", "frame": frame(400.0, 0.0, 50.0, 20.0) });
+    let r = import(sketch(
+        &[("P", "Page", json!([c, d, top, other]))],
+        json!({}),
+        &[],
+    ));
+    let doc = &r.doc;
+    let page = doc.first_page();
+    let words = |id: NodeId| match doc.get(id).unwrap().kind() {
+        NodeKind::Text { content, .. } => content.clone(),
+        _ => panic!("a text"),
+    };
+    let under = |name: &str| -> Vec<String> {
+        let root = one(doc, name);
+        ondin_core::build::subtree_nodes(doc, &[root])
+            .into_iter()
+            .filter(|&n| matches!(doc.get(n).unwrap().kind(), NodeKind::Text { .. }))
+            .map(words)
+            .collect()
+    };
+    assert_eq!(under("Top"), ["Deep", "changed"]);
+    assert_eq!(under("C"), ["Deep"], "the master's own text");
+    assert_eq!(
+        under("D"),
+        ["Deep", "Deep"],
+        "the nested copies in D's master"
+    );
+    assert_eq!(under("Other"), ["Deep"]);
+    assert_eq!(named(doc, page, "Label").len(), 6);
+}
+
 /// A swatch is a colour variable a fill naming it is bound to; a shared style is
 /// an Ondin style its users are bound to while they match it.
 #[test]

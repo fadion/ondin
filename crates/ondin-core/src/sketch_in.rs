@@ -148,6 +148,15 @@ pub fn read(
     })
 }
 
+/// How many nodes the document may reach through placed symbols. Each instance
+/// copies its master whole, nested instances included, so masters holding two
+/// instances of the one before double per level: a few KB of JSON would ask for
+/// billions of nodes. Placing costs more than linearly in the document's size:
+/// a quarter million nodes of doubling symbols take about a minute in a release
+/// build and a million take minutes, so the budget is the quarter million. A
+/// test build's is small enough to reach.
+const MAX_NODES: usize = if cfg!(test) { 4_000 } else { 250_000 };
+
 /// The entry at `name` parsed, `None` when there is none.
 fn json(archive: &mut dyn Archive, name: &str) -> Result<Option<Value>, SketchError> {
     archive
@@ -401,10 +410,11 @@ impl Builder<'_> {
                 if let Some(size) = master_box {
                     self.pin(str_of(layer, "do_objectID"), layer, size);
                 }
-                // Sketch draws a mask's own paint under what it clips; Ondin's
-                // mask paints nothing, so a copy just above it carries the
-                // paint, clipped to the same outline.
-                if b(layer, "hasClippingMask") && paints(layer) {
+                // Sketch draws an outline mask's own paint under what it clips;
+                // Ondin's mask paints nothing, so a copy just above it carries
+                // the paint, clipped to the same outline. An alpha mask's paint
+                // is the mask itself.
+                if b(layer, "hasClippingMask") && paints(layer) && !alpha_mask(layer) {
                     let mut ink = layer.clone();
                     ink["hasClippingMask"] = false.into();
                     ink["do_objectID"] = format!("{}/paint", str_of(layer, "do_objectID")).into();
@@ -700,6 +710,12 @@ impl Builder<'_> {
         }
         if b(layer, "hasClippingMask") {
             self.push(Operation::SetMask { id, mask: true });
+            if alpha_mask(layer) {
+                self.push(Operation::SetMaskMode {
+                    id,
+                    mode: crate::node::MaskMode::Alpha,
+                });
+            }
         }
         self.exports(id, layer);
     }
@@ -1125,9 +1141,9 @@ impl Builder<'_> {
             .and_then(Value::as_f64)
             .filter(|h| *h > 0.0);
         let decoration = |k: &str| (num(attrs, k) as i64 != 0).then(Decoration::default);
-        TextStyle {
+        crate::foreign::canonical_style(TextStyle {
             font_family: family,
-            font_size: font.map_or(12.0, |f| num(f, "size")).max(1.0),
+            font_size: font.map_or(12.0, |f| num(f, "size")),
             weight,
             italic,
             letter_spacing: Length::Px(num(attrs, "kerning")),
@@ -1135,7 +1151,7 @@ impl Builder<'_> {
             underline: decoration("underlineStyle"),
             strikethrough: decoration("strikethroughStyle"),
             ..TextStyle::default()
-        }
+        })
     }
 
     /// Replace each placeholder with an instance of its master, a master holding
@@ -1158,6 +1174,7 @@ impl Builder<'_> {
             if ready.is_empty() {
                 break;
             }
+            let ready = self.within_budget(ready);
             self.place(ready)?;
         }
         let left = self.pending.len();
@@ -1170,6 +1187,42 @@ impl Builder<'_> {
             );
         }
         Ok(())
+    }
+
+    /// The instances of `ready` whose copies keep the document within
+    /// [`MAX_NODES`]; the rest are counted and stay empty groups.
+    fn within_budget(&mut self, ready: Vec<Pending>) -> Vec<Pending> {
+        let mut total = self.doc.len();
+        let mut sizes: FxHashMap<String, usize> = FxHashMap::default();
+        let mut kept = Vec::with_capacity(ready.len());
+        let mut over = 0;
+        for p in ready {
+            let size = match (sizes.get(&p.symbol), self.masters.get(&p.symbol)) {
+                (Some(&n), _) => n,
+                (None, Some(&main)) => {
+                    let n = crate::build::subtree_nodes(&self.doc, &[main]).len();
+                    sizes.insert(p.symbol.clone(), n);
+                    n
+                }
+                // Counted as missing when it is placed.
+                (None, None) => 0,
+            };
+            if total.saturating_add(size) > MAX_NODES {
+                over += 1;
+            } else {
+                total += size;
+                kept.push(p);
+            }
+        }
+        if over > 0 {
+            self.count(
+                "Symbols too large to place",
+                over,
+                "instances",
+                "Left as empty groups",
+            );
+        }
+        kept
     }
 
     /// Replace each of `ready`'s placeholders with a copy of its master, none of
@@ -1739,6 +1792,12 @@ fn paints(layer: &Value) -> bool {
     })
 }
 
+/// Whether a mask layer masks by its paint's alpha (`clippingMaskMode` 1)
+/// rather than by its outline.
+fn alpha_mask(layer: &Value) -> bool {
+    num(layer, "clippingMaskMode") as i64 == 1
+}
+
 fn str_in<'a>(v: &'a Value, path: &[&str]) -> &'a str {
     str_in_value(v, path).and_then(Value::as_str).unwrap_or("")
 }
@@ -1751,4 +1810,81 @@ fn arr_in<'a>(v: &'a Value, path: &[&str]) -> &'a [Value] {
     str_in_value(v, path)
         .and_then(Value::as_array)
         .map_or(&[], Vec::as_slice)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    struct Files(BTreeMap<String, Vec<u8>>);
+
+    impl Archive for Files {
+        fn entry(&mut self, name: &str) -> Option<Vec<u8>> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    struct NoPictures;
+
+    impl ImageSink for NoPictures {
+        fn place(
+            &mut self,
+            _: Vec<u8>,
+            _: crate::image::ImageFormat,
+        ) -> Option<(ImageId, crate::image::ImageEntry)> {
+            None
+        }
+    }
+
+    /// Masters each holding two instances of the one before double per level;
+    /// past [`MAX_NODES`] the rest stay empty groups and are reported, and the
+    /// read returns. flip: return `ready` unchanged from `within_budget` → the
+    /// read runs on towards 2²⁴ copies.
+    #[test]
+    fn symbols_that_double_stop_at_the_node_budget() {
+        let n = 24;
+        let frame = json!({ "_class": "rect", "x": 0, "y": 0, "width": 10, "height": 10 });
+        let mut layers = vec![json!({
+            "_class": "symbolMaster", "do_objectID": "M0", "name": "S0", "symbolID": "S0",
+            "frame": frame,
+            "layers": [{ "_class": "oval", "do_objectID": "O", "name": "Dot", "frame": frame,
+                         "isClosed": true, "points": [] }],
+        })];
+        for k in 1..=n {
+            let inst = |i: usize| {
+                json!({ "_class": "symbolInstance", "do_objectID": format!("I{k}-{i}"),
+                        "name": "i", "symbolID": format!("S{}", k - 1), "frame": frame })
+            };
+            layers.push(json!({
+                "_class": "symbolMaster", "do_objectID": format!("M{k}"),
+                "name": format!("S{k}"), "symbolID": format!("S{k}"), "frame": frame,
+                "layers": [inst(0), inst(1)],
+            }));
+        }
+        layers.push(
+            json!({ "_class": "symbolInstance", "do_objectID": "TOP", "name": "Top",
+                            "symbolID": format!("S{n}"), "frame": frame }),
+        );
+        let page =
+            json!({ "_class": "page", "do_objectID": "P", "name": "Page", "layers": layers });
+        let document = json!({ "_class": "document", "pages": [{ "_ref": "pages/P" }] });
+        let mut files = Files(BTreeMap::from([
+            (
+                "document.json".to_owned(),
+                document.to_string().into_bytes(),
+            ),
+            ("pages/P.json".to_owned(), page.to_string().into_bytes()),
+        ]));
+        let started = std::time::Instant::now();
+        let r = read(&mut files, &mut IdSource::new(3), &mut NoPictures).expect("the file reads");
+        let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+        assert!(rows.contains(&"Symbols too large to place"), "{rows:?}");
+        assert!(r.doc.len() <= MAX_NODES, "{}", r.doc.len());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "{:?}",
+            started.elapsed()
+        );
+    }
 }

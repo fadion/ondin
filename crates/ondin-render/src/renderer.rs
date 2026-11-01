@@ -239,6 +239,17 @@ impl RenderOverrides {
             .copied()
     }
 
+    /// The nodes this preview patches, reorders or hangs a ghost off — the roots
+    /// of what it changes, without the descendants a move carries along.
+    pub fn patched(&self) -> impl Iterator<Item = NodeId> + '_ {
+        let ghosts = self.ghosts.iter().chain(self.chrome.iter().map(|(_, g)| g));
+        self.nodes
+            .keys()
+            .chain(self.order.keys())
+            .chain(ghosts.map(|g| &g.parent))
+            .copied()
+    }
+
     /// `parent`'s children in the order this preview gives them, where it
     /// reorders them — `None` for the committed order.
     pub fn children_of(&self, parent: NodeId) -> Option<&[NodeId]> {

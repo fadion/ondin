@@ -331,6 +331,8 @@ struct Walk<'a> {
     in_shadow: std::cell::Cell<usize>,
     /// Set while the walk repaints a backdrop, which it stops short of.
     backdrop: Option<Backdrop>,
+    /// What the preview patches and its ancestors ([`Walk::grown`]).
+    grown: std::cell::OnceCell<rustc_hash::FxHashSet<NodeId>>,
 }
 
 /// A container the walk is inside: the world transform it was painted under,
@@ -360,7 +362,29 @@ impl<'a> Walk<'a> {
             open: Default::default(),
             in_shadow: Default::default(),
             backdrop: None,
+            grown: Default::default(),
         }
+    }
+
+    /// Whether the preview patches `id` or something under it, whose cached ink
+    /// may then be too small: a level-of-detail walk does not skip it as
+    /// sub-pixel.
+    fn grown(&self, doc: &Document, ov: &RenderOverrides, id: NodeId) -> bool {
+        self.grown
+            .get_or_init(|| {
+                let mut out = rustc_hash::FxHashSet::default();
+                for patched in ov.patched() {
+                    let mut at = Some(patched);
+                    while let Some(p) = at {
+                        if !out.insert(p) {
+                            break;
+                        }
+                        at = doc.get(p).and_then(|n| n.parent());
+                    }
+                }
+                out
+            })
+            .contains(&id)
     }
 
     /// Whether a backdrop's repaint has reached its layer, after which nothing
@@ -1608,7 +1632,7 @@ fn paint_node_pass<P: ScenePainter>(
         && ov.ghosts_of(id).next().is_none()
         && let Some(bounds) = res.ink_bounds(id)
         && (!view.iter().any(|v| intersects(bounds, *v))
-            || (ov.level_of_detail() && sub_pixel(bounds, base)))
+            || (ov.level_of_detail() && sub_pixel(bounds, base) && !walk.grown(doc, ov, id)))
     {
         return;
     }
@@ -2337,6 +2361,7 @@ fn paint_backdrop<P: ScenePainter>(
             bare: root.map(|o| o.id),
             reached: std::cell::Cell::new(false),
         }),
+        grown: Default::default(),
     };
     let cull = [world];
     match root {

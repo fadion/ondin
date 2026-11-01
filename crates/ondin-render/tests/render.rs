@@ -1571,6 +1571,61 @@ fn a_greeked_run_of_stroked_type_strokes_no_outline() {
     );
 }
 
+/// A level-of-detail walk draws a sub-pixel group whose child a preview grows:
+/// the group's cached ink is the committed size.
+///
+/// flip: the sub-pixel cull leaving out `Walk::grown` → fails at "the grown
+/// child".
+#[test]
+fn level_of_detail_draws_a_group_a_preview_grows() {
+    let mut ids = IdSource::new(0x10D);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (group, child) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: group,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: child,
+            parent: group,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: child,
+            fills: keyed_by_position([fill(1, true)]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let grow = Transaction(vec![Operation::SetGeometry {
+        id: child,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(400.0, 400.0)),
+    }]);
+    let mut ov = RenderOverrides::from_transaction(&doc, &res, &grow).expect("a preview");
+    ov.set_level_of_detail(true);
+    // 4 units at 0.05 px a unit is 0.2 px; 400 is 20 px.
+    let vp = Viewport {
+        view: Rect::new(0.0, 0.0, 2000.0, 2000.0),
+        pixel_size: (100, 100),
+    };
+    let mut r = RecordingPainter::default();
+    scene::build(&doc, &res, &vp, &ov, doc.first_page(), &mut r);
+    assert_eq!(r.fills.len(), 1, "the grown child");
+}
+
 /// A greeked bar is filled lighter than its ink: glyphs that small cover less of
 /// the line than a solid bar does, which at full alpha reads as bold type.
 ///

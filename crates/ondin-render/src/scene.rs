@@ -2124,9 +2124,9 @@ fn effect_bounds(
 ) -> Option<Rect> {
     let base = match painted.kind {
         NodeKind::Group | NodeKind::Root => res.inner_ink(id)?,
-        // Includes the stroke expansion; declines a `Boolean`, which falls back
-        // to the cache.
-        _ => ondin_core::geometry::world_bounds_of_parts(
+        // Everything the node draws, a stroke's mitres and a text's descenders
+        // included; declines a `Boolean`, which falls back to the cache.
+        _ => ondin_core::geometry::world_ink_of_parts(
             painted.kind,
             &painted.paint,
             world,
@@ -2277,7 +2277,7 @@ fn paint_backdrop<P: ScenePainter>(
 /// The world box a ghost's own ink covers: [`effect_bounds`]'s answer for a node
 /// `Resolved` has never seen. A container is its children's boxes grown by their
 /// stacks, a boolean uses `GhostNode::path`, anything else is
-/// [`ondin_core::geometry::world_bounds_of_parts`]. Hidden or masking children
+/// [`ondin_core::geometry::world_ink_of_parts`]. Hidden or masking children
 /// contribute nothing.
 fn ghost_ink(ghost: &GhostNode, world: Affine) -> Option<Rect> {
     match &ghost.kind {
@@ -2295,17 +2295,12 @@ fn ghost_ink(ghost: &GhostNode, world: Affine) -> Option<Rect> {
                 ))
             })
             .reduce(|a, b| a.union(b)),
-        NodeKind::Boolean { .. } => ghost
-            .path
-            .as_ref()
-            .filter(|p| !p.elements().is_empty())
-            .map(|p| (world * p.clone()).bounding_box()),
-        kind => ondin_core::geometry::world_bounds_of_parts(
-            kind,
-            &ghost.paint,
-            world,
-            ghost.text.as_ref(),
-        ),
+        NodeKind::Boolean { .. } => ghost.path.as_ref().and_then(|p| {
+            ondin_core::geometry::world_ink_of_path(p, &ghost.paint, &ghost.kind, world)
+        }),
+        kind => {
+            ondin_core::geometry::world_ink_of_parts(kind, &ghost.paint, world, ghost.text.as_ref())
+        }
     }
 }
 

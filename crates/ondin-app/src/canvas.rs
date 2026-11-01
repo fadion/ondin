@@ -22921,13 +22921,16 @@ mod redraw_tests {
 
     /// After each commit, undo and redo — a move, a recolour, a preview committed,
     /// a delete and its undo and redo, a reparent across frames, a wrap into a new
-    /// group, a shadow, an insert — the canvas patches rather than drawing whole,
-    /// and every pixel the edit changed lies inside the patch.
+    /// group, a shadow, an insert, deleting a trimmed text and a mitred star, a
+    /// page's mode — the canvas patches rather than drawing whole, and every pixel
+    /// the edit changed lies inside the patch.
     ///
     /// flip: `edit_damage` leaving out the ink `InkLog` recorded → fails at "a
     /// delete"; leaving out the preview's ink → fails at "its commit, elsewhere";
     /// `InkLog::record` measuring only the tops and the deleted → fails at "a wrap
-    /// into a new group".
+    /// into a new group"; `world_ink_of_parts` returning `world_bounds_of_parts` →
+    /// fails at "a delete of the trimmed text"; `SetMode` dirtying only its node →
+    /// fails at "a page's mode".
     #[test]
     fn an_edit_redraws_only_where_it_changed_the_page() {
         let (mut session, [a, child, b, c]) = edit_fixture();
@@ -22938,6 +22941,63 @@ mod redraw_tests {
         };
         let px = (720, 520);
         let vp = camera.viewport(px);
+        let mut minted = ondin_core::IdSource::new(0xF4E5);
+        let (fresh, wrap, words, star) =
+            (minted.mint(), minted.mint(), minted.mint(), minted.mint());
+        let (light, dark, tint) = (minted.mint_mode(), minted.mint_mode(), minted.mint_var());
+        // Ink that reaches past its box, placed before the first draw: new text
+        // is shaped, which draws whole.
+        let placed = vec![
+            Operation::CreateNode {
+                id: words,
+                parent: session.page,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "gypsy jumpy".into(),
+                    style: Box::new(ondin_core::TextStyle {
+                        font_size: 40.0,
+                        ..Default::default()
+                    }),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: ondin_core::BlockStyle {
+                        trim: ondin_core::BoxTrim::CapToBaseline,
+                        ..Default::default()
+                    },
+                    sizing: ondin_core::TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: Some(Affine::translate((30.0, 190.0))),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: star,
+                parent: session.page,
+                index: 0,
+                kind: NodeKind::Star {
+                    size: Size::new(70.0, 70.0),
+                    points: 5,
+                    inner_ratio: 0.38,
+                    corner_radius: 0.0,
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::translate((350.0, 170.0))),
+                name: None,
+            },
+            Operation::SetStrokes {
+                id: star,
+                strokes: ondin_core::keyed_by_position([ondin_core::Stroke {
+                    width: 10.0,
+                    ..Default::default()
+                }]),
+            },
+        ];
+        session
+            .try_commit(Transaction(placed))
+            .expect("the fixture");
         draw(&mut canvas, &session, &camera, px);
         let moved = |id, x, y| Operation::SetTransform {
             id,
@@ -22954,8 +23014,6 @@ mod redraw_tests {
             visible: true,
             vars: Default::default(),
         }]);
-        let mut minted = ondin_core::IdSource::new(0xF4E5);
-        let (fresh, wrap) = (minted.mint(), minted.mint());
         type Edit = Box<dyn Fn(&mut EditorSession)>;
         let commit = |tx: Vec<Operation>| -> Edit {
             Box::new(move |s| s.try_commit(Transaction(tx.clone())).expect("commits"))
@@ -23042,6 +23100,77 @@ mod redraw_tests {
                         }]),
                     },
                 ]),
+            ),
+            (
+                "a delete of the trimmed text",
+                commit(vec![Operation::DeleteNode { id: words }]),
+            ),
+            (
+                "a delete of the mitred star",
+                commit(vec![Operation::DeleteNode { id: star }]),
+            ),
+            (
+                "a two-mode colour on a layer",
+                commit(vec![
+                    Operation::AddMode {
+                        mode: ondin_core::Mode {
+                            id: light,
+                            name: "Light".into(),
+                        },
+                        index: 0,
+                        cells: vec![],
+                    },
+                    Operation::AddMode {
+                        mode: ondin_core::Mode {
+                            id: dark,
+                            name: "Dark".into(),
+                        },
+                        index: 1,
+                        cells: vec![],
+                    },
+                    Operation::AddVariable {
+                        var: ondin_core::Variable {
+                            id: tint,
+                            name: "tint".into(),
+                            kind: ondin_core::VarKind::Color,
+                            cells: [
+                                (
+                                    light,
+                                    ondin_core::Cell::Color(Color::from_rgba8(0, 120, 0, 255)),
+                                ),
+                                (
+                                    dark,
+                                    ondin_core::Cell::Color(Color::from_rgba8(250, 0, 200, 255)),
+                                ),
+                            ]
+                            .into(),
+                            origin: None,
+                            forked: None,
+                            description: String::new(),
+                        },
+                    },
+                    Operation::SetFills {
+                        id: fresh,
+                        fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                            brush: ondin_core::BrushSource::Bound {
+                                var: tint,
+                                alpha: 1.0,
+                            },
+                            visible: true,
+                        }]),
+                    },
+                ]),
+            ),
+            (
+                "a page's mode",
+                commit(vec![Operation::SetMode {
+                    id: session.page,
+                    mode: Some(dark),
+                }]),
+            ),
+            (
+                "its undo, the page's mode",
+                Box::new(|s| assert!(s.undo(), "undone")),
             ),
         ];
         for (what, edit) in edits {

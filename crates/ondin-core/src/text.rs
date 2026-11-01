@@ -832,11 +832,16 @@ pub struct TextLayout {
     /// The glyphs are already bent ([`Glyph::rot`]); this is for geometry that must
     /// follow the curve, i.e. [`DecorationInk`], built at the render boundary (§6.3).
     pub warp: Option<PathWarp>,
+    /// Everything the layout draws — glyph outlines and decoration bands — in
+    /// local space, or `None` when it draws nothing. A turned glyph is measured by
+    /// its turned box, so it errs large. Unlike [`Self::bounds`] it holds the
+    /// descenders under a trimmed box and glyphs taller than their line.
+    pub ink: Option<Rect>,
 }
 
 impl TextLayout {
-    /// The node's box in its own local space — the rect every bounds, hit-test
-    /// and export consumer reads.
+    /// The node's box in its own local space — the rect every bounds and hit-test
+    /// consumer reads. What is drawn can reach past it ([`Self::ink`]).
     pub fn bounds(&self) -> Rect {
         Rect::from_origin_size(self.origin.to_point(), self.size)
     }
@@ -2935,12 +2940,60 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
         decoration_sizes,
         baselines,
         warp: None,
+        ink: None,
     };
     // Last, and after `skip_ink` on purpose: the pipeline stays flat until here (see [`bend`]).
     if let Some(warp) = warp_for(parts, shaped) {
         bend(&mut out, warp);
     }
+    // After the bend, which moves and turns every glyph.
+    out.ink = layout_ink(&out);
     out
+}
+
+/// [`TextLayout::ink`]. Each distinct glyph is outlined once per run and its box
+/// is placed, turned with the glyph, at every use.
+fn layout_ink(layout: &TextLayout) -> Option<Rect> {
+    let mut ink: Option<Rect> = None;
+    let mut add = |r: Rect| ink = Some(ink.map_or(r, |i| i.union(r)));
+    for run in &layout.runs {
+        let Some(face) = RunFace::of(run) else {
+            continue;
+        };
+        let mut memo: rustc_hash::FxHashMap<u32, Option<Rect>> = Default::default();
+        for g in &run.glyphs {
+            let Some(b) = *memo.entry(g.id).or_insert_with(|| face.outline_box(g.id)) else {
+                continue;
+            };
+            let (x, y) = (f64::from(g.x), f64::from(g.y));
+            if g.rot == 0.0 {
+                add(b + Vec2::new(x, y));
+            } else {
+                let turn =
+                    kurbo::Affine::translate((x, y)) * kurbo::Affine::rotate(f64::from(g.rot));
+                add(turn.transform_rect_bbox(b));
+            }
+        }
+    }
+    for d in &layout.decorations {
+        // A wavy band swings one thickness either side of its own (the
+        // renderer's `wave`); the other styles stay inside it.
+        let swing = match d.style {
+            LineStyle::Wavy => d.band.height(),
+            _ => 0.0,
+        };
+        let band = d.band.inflate(0.0, swing);
+        match &layout.warp {
+            None => add(band),
+            Some(w) => {
+                let bent = w.warp(&band.to_path(0.1));
+                if bent.elements().len() > 1 {
+                    add(bent.bounding_box());
+                }
+            }
+        }
+    }
+    ink
 }
 
 /// How far a justified paragraph's last line moves; it is translated, not re-spaced.
@@ -3155,6 +3208,14 @@ impl<'a> RunFace<'a> {
         if open && !matches!(out.elements().last(), Some(PathEl::ClosePath)) {
             out.close_path();
         }
+    }
+
+    /// Glyph `id`'s outline box with its origin at zero, or `None` for a glyph
+    /// that draws nothing (a space).
+    fn outline_box(&self, id: u32) -> Option<Rect> {
+        let mut path = BezPath::new();
+        self.draw(id, 0.0, 0.0, 0.0, &mut path);
+        (!path.is_empty()).then(|| path.bounding_box())
     }
 }
 

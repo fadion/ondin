@@ -825,3 +825,156 @@ fn a_picture_survives_a_frame_that_draws_none() {
     assert!(drawn, "the plain band is drawn, not refused");
     assert_eq!(draw(&mut g), [255, 0, 0], "after a plain region");
 }
+
+/// `regions` drawn alone by `render_regions` against the full frame there: the
+/// largest channel difference, how many pixels differ, and how many of the full
+/// frame's pixels there are not the ground.
+fn regions_against_full(
+    g: &mut Gpu,
+    doc: &Document,
+    res: &Resolved,
+    vp: &Viewport,
+    regions: &[Region],
+) -> (u8, usize, usize) {
+    let size = vp.pixel_size;
+    let patched = target(g, size);
+    let drawn = g
+        .renderer
+        .render_regions(
+            &g.device,
+            &g.queue,
+            doc,
+            res,
+            vp,
+            &RenderOverrides::default(),
+            &patched.create_view(&Default::default()),
+            regions,
+            GROUND,
+            &ImageStore::default(),
+            doc.first_page(),
+        )
+        .expect("render regions");
+    assert!(drawn, "the regions are drawn, not refused");
+    let reference = target(g, size);
+    full(g, doc, res, vp, &reference);
+    let (now, want) = (read(g, &patched, size), read(g, &reference, size));
+    let inside = |x: u32, y: u32| {
+        regions.iter().any(|r| {
+            (r.at.0..r.at.0 + r.size.0).contains(&x) && (r.at.1..r.at.1 + r.size.1).contains(&y)
+        })
+    };
+    let (worst, count) = diff(&now, &want, inside);
+    let ground = GROUND.to_rgba8().to_u8_array();
+    let inked = want
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| inside(*i as u32 % W, *i as u32 / W) && **p != ground)
+        .count();
+    (worst, count, inked)
+}
+
+/// Ink past a layer's box — a trimmed text's descenders, a mitred star's top
+/// point — is drawn in a region that misses the box but not the ink.
+///
+/// flip: `world_ink_of_parts` returning `world_bounds_of_parts` → fails at
+/// "descenders".
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn ink_past_a_box_is_drawn_in_a_region_beside_it() {
+    let _one = ADAPTER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else {
+        eprintln!("no adapter; skipping");
+        return;
+    };
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (words, star) = (ids.mint(), ids.mint());
+    let white = keyed_by_position([Fill {
+        brush: Brush::Solid(Color::WHITE).into(),
+        visible: true,
+    }]);
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: words,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "gypsy".into(),
+                style: Box::new(ondin_core::TextStyle {
+                    font_size: 40.0,
+                    ..Default::default()
+                }),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: ondin_core::BlockStyle {
+                    trim: ondin_core::BoxTrim::CapToBaseline,
+                    ..Default::default()
+                },
+                sizing: ondin_core::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: Some(Affine::translate((20.0, 20.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: words,
+            fills: white.clone(),
+        },
+        Operation::CreateNode {
+            id: star,
+            parent: root,
+            index: 1,
+            kind: NodeKind::Star {
+                size: Size::new(100.0, 100.0),
+                points: 5,
+                inner_ratio: 0.38,
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((180.0, 100.0))),
+            name: None,
+        },
+        Operation::SetStrokes {
+            id: star,
+            strokes: keyed_by_position([Stroke {
+                brush: Color::WHITE.into(),
+                width: 12.0,
+                ..Stroke::default()
+            }]),
+        },
+    ]))
+    .expect("the fixture applies");
+    let res = Resolved::rebuild(&doc);
+    let vp = viewport((0, 0), 1.0, (W, H));
+    let text_box = res.world_bounds(words).expect("a box");
+    let star_box = res.world_bounds(star).expect("a box");
+    for (what, region) in [
+        (
+            "descenders",
+            Region {
+                at: (0, text_box.y1.ceil() as u32 + 3),
+                size: (W / 2, 20),
+            },
+        ),
+        (
+            "the star's point",
+            Region {
+                at: (W / 2, star_box.y0.floor() as u32 - 23),
+                size: (W / 2, 20),
+            },
+        ),
+    ] {
+        let (worst, count, inked) = regions_against_full(&mut g, &doc, &res, &vp, &[region]);
+        assert!(inked > 0, "fixture: {what} reach into the region");
+        assert!(
+            worst <= AA_DRIFT,
+            "{what}: {count} pixels are off the full frame, by up to {worst}"
+        );
+    }
+}

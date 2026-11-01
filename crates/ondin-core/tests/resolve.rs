@@ -1123,6 +1123,119 @@ fn stroke_expansion_follows_alignment() {
     );
 }
 
+/// Ink bounds hold what is drawn past the editing box: a mitred star's points, an
+/// arc wedge's acute corners, and a trimmed text's descenders — in both the
+/// rebuild and the incremental update.
+///
+/// flip: `world_ink_of_parts` returning `world_bounds_of_parts` → fails at "star".
+#[test]
+fn ink_bounds_hold_mitre_points_and_descenders() {
+    use ondin_core::kurbo::{Join, Shape, Stroke as KStroke, stroke};
+    use ondin_core::{EllipseArc, Stroke, geometry};
+
+    let mut ids = IdSource::new(0x1A4B);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (star, wedge, words) = (ids.mint(), ids.mint(), ids.mint());
+    let star_kind = NodeKind::Star {
+        size: Size::new(100.0, 100.0),
+        points: 5,
+        inner_ratio: 0.38,
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
+    };
+    let wedge_kind = NodeKind::Ellipse {
+        size: Size::new(200.0, 20.0),
+        arc: EllipseArc {
+            start: 30.0,
+            sweep: 120.0,
+            ratio: 0.0,
+        },
+    };
+    let mut trimmed = text("gypsy", 40.0);
+    if let NodeKind::Text { block, .. } = &mut trimmed {
+        block.trim = ondin_core::BoxTrim::CapToBaseline;
+    }
+    create(&mut doc, star, root, 0, star_kind.clone(), Affine::IDENTITY);
+    create(
+        &mut doc,
+        wedge,
+        root,
+        1,
+        wedge_kind.clone(),
+        Affine::translate((300.0, 0.0)),
+    );
+    create(
+        &mut doc,
+        words,
+        root,
+        2,
+        trimmed,
+        Affine::translate((0.0, 300.0)),
+    );
+    let mut res = Resolved::rebuild(&doc);
+
+    let stroked = |limit: f64| Stroke {
+        width: 10.0,
+        miter_limit: limit,
+        ..Stroke::default()
+    };
+    let dirty = doc
+        .apply(&Transaction(vec![
+            Operation::SetStrokes {
+                id: star,
+                strokes: keyed_by_position([stroked(4.0)]),
+            },
+            Operation::SetStrokes {
+                id: wedge,
+                strokes: keyed_by_position([stroked(10.0)]),
+            },
+        ]))
+        .unwrap()
+        .dirty;
+    res.update(&doc, &dirty);
+    let rebuilt = Resolved::rebuild(&doc);
+
+    let drawn = |kind: &NodeKind, limit: f64, at: Affine| {
+        let path = geometry::local_path(kind).unwrap();
+        let style = KStroke::new(10.0)
+            .with_join(Join::Miter)
+            .with_miter_limit(limit);
+        at.transform_rect_bbox(stroke(path, &style, &Default::default(), 1e-3).bounding_box())
+    };
+    let holds = |outer: Rect, inner: Rect| {
+        outer.x0 <= inner.x0 + 1e-6
+            && outer.y0 <= inner.y0 + 1e-6
+            && outer.x1 >= inner.x1 - 1e-6
+            && outer.y1 >= inner.y1 - 1e-6
+    };
+    for res in [&res, &rebuilt] {
+        let ink = res.ink_bounds(star).unwrap();
+        let points = drawn(&star_kind, 4.0, Affine::IDENTITY);
+        assert!(holds(ink, points), "star: {ink:?} must hold {points:?}");
+        assert!(
+            ink.y0 < -15.0,
+            "the fixture's top point reaches past the box"
+        );
+        let ink = res.ink_bounds(wedge).unwrap();
+        let corners = drawn(&wedge_kind, 10.0, Affine::translate((300.0, 0.0)));
+        assert!(holds(ink, corners), "wedge: {ink:?} must hold {corners:?}");
+
+        let layout = res.text_layout(words).unwrap();
+        let baseline = 300.0 + f64::from(layout.runs[0].glyphs[0].y);
+        let ink = res.ink_bounds(words).unwrap();
+        let bounds = res.world_bounds(words).unwrap();
+        assert!(
+            bounds.y1 <= baseline + 1e-6,
+            "the fixture's box is trimmed to the baseline"
+        );
+        assert!(
+            ink.y1 > baseline + 40.0 * 0.15,
+            "descenders: ink {ink:?} ends near the baseline {baseline}"
+        );
+    }
+}
+
 /// Alignment needs a closed outline to mean anything. Lines and open paths get
 /// centred strokes, and the renderer, the SVG writer and the inspector all ask
 /// this one function so they cannot disagree about which shapes qualify.

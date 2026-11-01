@@ -5,10 +5,10 @@
 //! Containment tests also run in local space (the caller maps the world point
 //! through the inverse world transform first).
 
-use crate::node::{Node, NodeKind, Paint, Pivot, Side, Stroke, StrokeSides};
+use crate::node::{Node, NodeKind, Paint, Pivot, Side, Stroke, StrokeAlign, StrokeSides};
 use crate::text::TextLayout;
 use kurbo::{
-    Affine, Arc, BezPath, Cap, CubicBez, Ellipse, Line, ParamCurve, ParamCurveArclen,
+    Affine, Arc, BezPath, Cap, CubicBez, Ellipse, Join, Line, ParamCurve, ParamCurveArclen,
     ParamCurveDeriv, ParamCurveNearest, PathEl, PathSeg, Point, QuadBez, Rect, RoundedRect,
     RoundedRectRadii, Shape, Size, Vec2,
 };
@@ -1320,8 +1320,179 @@ pub fn stroke_expansion(kind: &NodeKind, paint: &Paint) -> f64 {
         .filter(|s| s.visible)
         // The widest side, not the nominal width; see [`StrokeSides::max_width`]
         // for why generous is the safe direction.
-        .map(|s| effective_sides(kind, s).max_width(s.width) * s.align.outward_fraction())
+        .map(|s| effective_sides(kind, s).max_width(s.width) * outward_fraction(kind, s))
         .fold(0.0, f64::max)
+}
+
+/// The share of `stroke`'s width drawn outside `kind`'s outline: its alignment's,
+/// except on an outline with no inside, which is stroked centred
+/// ([`stroke_align_applies`]).
+fn outward_fraction(kind: &NodeKind, stroke: &Stroke) -> f64 {
+    match stroke.align {
+        StrokeAlign::Center => 0.5,
+        _ if !stroke_align_applies(kind) => 0.5,
+        align => align.outward_fraction(),
+    }
+}
+
+/// How far a text's stroke reaches past its glyph outlines, whose corners are not
+/// known here: a whole mitre where the join is one.
+fn glyph_stroke_reach(kind: &NodeKind, paint: &Paint) -> f64 {
+    paint
+        .strokes
+        .iter()
+        .filter(|s| s.visible)
+        .map(|s| {
+            let reach = s.width * outward_fraction(kind, s);
+            match s.join {
+                Join::Miter => reach * s.miter_limit.max(1.0),
+                _ => reach,
+            }
+        })
+        .fold(0.0, f64::max)
+}
+
+/// A box in `path`'s space holding what a visible stroke draws past
+/// [`stroke_expansion`]'s square: mitre points and square caps. `None` when nothing
+/// reaches past it.
+fn stroke_points(kind: &NodeKind, paint: &Paint, path: &BezPath) -> Option<Rect> {
+    let mut out: Option<Rect> = None;
+    let mut add = |p: Point| {
+        let r = Rect::from_points(p, p);
+        out = Some(out.map_or(r, |o| o.union(r)));
+    };
+    for s in paint.strokes.iter().filter(|s| s.visible) {
+        let reach = effective_sides(kind, s).max_width(s.width) * outward_fraction(kind, s);
+        let mitred = s.join == Join::Miter && stroke_join_applies(kind);
+        let square = s.cap == Cap::Square;
+        if reach <= 0.0 || !(mitred || square) {
+            continue;
+        }
+        // A dash may end anywhere along the outline, so a square cap can stand at
+        // any point, turned any way: half a diagonal past the outline.
+        if square && !s.dashes.is_empty() {
+            let grow = reach * std::f64::consts::SQRT_2;
+            let b = path.bounding_box().inflate(grow, grow);
+            add(b.origin());
+            add(Point::new(b.x1, b.y1));
+        }
+        for (segs, closed) in segment_runs(path) {
+            let (Some(first), Some(last)) = (segs.first(), segs.last()) else {
+                continue;
+            };
+            if mitred {
+                let pairs = segs.windows(2).map(|w| (w[0], w[1]));
+                let closing = closed.then_some((*last, *first));
+                for (a, b) in pairs.chain(closing) {
+                    if let Some(tip) = mitre_tip(a, b, reach, s.miter_limit) {
+                        add(tip);
+                    }
+                }
+            }
+            if square && !closed {
+                for (at, along) in [
+                    (first.start(), -start_tangent(*first)),
+                    (last.end(), end_tangent(*last)),
+                ] {
+                    let Some(t) = unit(along) else {
+                        continue;
+                    };
+                    let (t, n) = (t * reach, Vec2::new(-t.y, t.x) * reach);
+                    add(at + t + n);
+                    add(at + t - n);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Where the mitre between segments `a` and `b` reaches, `reach` out from the
+/// outline, or `None` when the corner is smooth or the limit bevels it. The test
+/// is kurbo's and SVG's: mitre while `1 / sin(θ/2) ≤ limit`, `θ` the angle
+/// between the two sides.
+fn mitre_tip(a: PathSeg, b: PathSeg, reach: f64, limit: f64) -> Option<Point> {
+    let t_in = unit(end_tangent(a))?;
+    let t_out = unit(start_tangent(b))?;
+    let half_sin = ((1.0 + t_in.dot(t_out)) / 2.0_f64).max(0.0).sqrt();
+    let ratio = 1.0 / half_sin;
+    if !ratio.is_finite() || ratio > limit {
+        return None;
+    }
+    let outer = unit(t_in - t_out)?;
+    Some(a.end() + outer * reach * ratio)
+}
+
+/// A segment's direction where it starts, skipping coincident control points.
+fn start_tangent(seg: PathSeg) -> Vec2 {
+    let p0 = seg.start();
+    let rest: &[Point] = match seg {
+        PathSeg::Line(l) => &[l.p1],
+        PathSeg::Quad(q) => &[q.p1, q.p2],
+        PathSeg::Cubic(c) => &[c.p1, c.p2, c.p3],
+    };
+    rest.iter()
+        .map(|p| *p - p0)
+        .find(|v| v.hypot2() > 0.0)
+        .unwrap_or(Vec2::ZERO)
+}
+
+/// [`start_tangent`] at the segment's end.
+fn end_tangent(seg: PathSeg) -> Vec2 {
+    start_tangent(seg.reverse()) * -1.0
+}
+
+/// `v` scaled to length one, or `None` for a zero or non-finite vector.
+fn unit(v: Vec2) -> Option<Vec2> {
+    let len = v.hypot();
+    (len > 0.0 && len.is_finite()).then(|| v / len)
+}
+
+/// `path`'s subpaths as their non-degenerate segments, each with whether it closes.
+/// A closing side is a segment like the others.
+fn segment_runs(path: &BezPath) -> Vec<(Vec<PathSeg>, bool)> {
+    let mut out: Vec<(Vec<PathSeg>, bool)> = Vec::new();
+    let (mut start, mut at) = (Point::ZERO, Point::ZERO);
+    let mut segs: Vec<PathSeg> = Vec::new();
+    let push = |segs: &mut Vec<PathSeg>, seg: PathSeg| {
+        if start_tangent(seg) != Vec2::ZERO {
+            segs.push(seg);
+        }
+    };
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) => {
+                if !segs.is_empty() {
+                    out.push((std::mem::take(&mut segs), false));
+                }
+                (start, at) = (p, p);
+            }
+            PathEl::LineTo(p) => {
+                push(&mut segs, PathSeg::Line(kurbo::Line::new(at, p)));
+                at = p;
+            }
+            PathEl::QuadTo(c, p) => {
+                push(&mut segs, PathSeg::Quad(kurbo::QuadBez::new(at, c, p)));
+                at = p;
+            }
+            PathEl::CurveTo(c0, c1, p) => {
+                push(
+                    &mut segs,
+                    PathSeg::Cubic(kurbo::CubicBez::new(at, c0, c1, p)),
+                );
+                at = p;
+            }
+            PathEl::ClosePath => {
+                push(&mut segs, PathSeg::Line(kurbo::Line::new(at, start)));
+                out.push((std::mem::take(&mut segs), true));
+                at = start;
+            }
+        }
+    }
+    if !segs.is_empty() {
+        out.push((segs, false));
+    }
+    out
 }
 
 /// World-space, stroke-expanded bounds of a non-container node, from loose parts
@@ -1383,6 +1554,62 @@ pub fn world_bounds_of_path(
     let expansion = stroke_expansion(kind, paint);
     let local = path.bounding_box();
     measurable(transform_rect(world, local.inflate(expansion, expansion)))
+}
+
+/// World box of everything a non-container node draws: [`world_bounds_of_parts`]
+/// grown by what that box leaves out — a text's glyphs past its trimmed box, and a
+/// stroke's mitre points and square caps. What [`crate::Resolved::ink_bounds`]
+/// starts a leaf from; the editing box stays the tighter one.
+pub fn world_ink_of_parts(
+    kind: &NodeKind,
+    paint: &Paint,
+    world: Affine,
+    text: Option<&TextLayout>,
+) -> Option<Rect> {
+    let local = local_bounds(kind, text)?;
+    let expansion = stroke_expansion(kind, paint);
+    let mut ink = local.inflate(expansion, expansion);
+    match kind {
+        NodeKind::Text { .. } => {
+            if let Some(glyphs) = text.and_then(|t| t.ink) {
+                let reach = glyph_stroke_reach(kind, paint);
+                ink = ink.union(glyphs.inflate(reach, reach));
+            }
+        }
+        // Square corners and straight sides: the grown box already holds every
+        // mitre and cap.
+        NodeKind::Rect { .. } | NodeKind::Artboard { .. } => {}
+        _ if paint
+            .strokes
+            .iter()
+            .any(|s| s.visible && (s.join == Join::Miter || s.cap == Cap::Square)) =>
+        {
+            if let Some(points) = local_path(kind).and_then(|p| stroke_points(kind, paint, &p)) {
+                ink = ink.union(points);
+            }
+        }
+        _ => {}
+    }
+    measurable(transform_rect(world, ink))
+}
+
+/// [`world_ink_of_parts`] for a node whose outline is derived
+/// ([`world_bounds_of_path`]).
+pub fn world_ink_of_path(
+    path: &BezPath,
+    paint: &Paint,
+    kind: &NodeKind,
+    world: Affine,
+) -> Option<Rect> {
+    if path.is_empty() {
+        return None;
+    }
+    let expansion = stroke_expansion(kind, paint);
+    let mut ink = path.bounding_box().inflate(expansion, expansion);
+    if let Some(points) = stroke_points(kind, paint, path) {
+        ink = ink.union(points);
+    }
+    measurable(transform_rect(world, ink))
 }
 
 /// Axis-aligned bounding box of `rect` after `affine`.

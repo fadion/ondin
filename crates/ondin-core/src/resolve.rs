@@ -1289,7 +1289,24 @@ impl Resolved {
             NodeKind::Artboard { .. } if !node.clip() => {
                 union_of(bounds, self.children_ink(doc, node))
             }
-            _ => bounds,
+            NodeKind::Artboard { .. } => bounds,
+            // As drawn: glyphs past a trimmed box, mitre points past the stroke's
+            // square. A failed boolean's placeholder is its box.
+            NodeKind::Boolean { .. } => match self.boolean.get(&id) {
+                Some(path) => geometry::world_ink_of_path(
+                    path,
+                    &doc.resolved_paint(id, node.paint()),
+                    kind_in(&self.used, node),
+                    world,
+                ),
+                None => bounds,
+            },
+            _ => geometry::world_ink_of_parts(
+                kind_in(&self.used, node),
+                &doc.resolved_paint(id, node.paint()),
+                world,
+                self.text.get(&id).map(Arc::as_ref),
+            ),
         };
         match ink {
             Some(b) => {
@@ -1509,7 +1526,14 @@ fn resolve_subtree(
         NodeKind::Group | NodeKind::Root => child_ink_union,
         // A frame that does not clip lends its container its children's ink.
         NodeKind::Artboard { .. } if !node.clip() => union_of(bounds, child_ink_union),
-        _ => bounds,
+        NodeKind::Artboard { .. } => bounds,
+        // As drawn: glyphs past a trimmed box, mitre points past the stroke's square.
+        _ => geometry::world_ink_of_parts(
+            kind,
+            &doc.resolved_paint(id, node.paint()),
+            w,
+            c.text.get(&id).map(Arc::as_ref),
+        ),
     };
     if let Some(b) = inner {
         c.inner_ink.insert(id, b);

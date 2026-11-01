@@ -1441,6 +1441,18 @@ impl Document {
                 let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
                 let old = std::mem::replace(&mut node.mode, *mode);
                 dirty.0.insert(*id);
+                // Every bound layer under it now reads another column. A page has no
+                // top-level layer above it to carry the change, so name them.
+                let mut stack = vec![*id];
+                while let Some(at) = stack.pop() {
+                    let Some(n) = self.nodes.get(&at) else {
+                        continue;
+                    };
+                    if n.reads_variables() {
+                        dirty.0.insert(at);
+                    }
+                    stack.extend(n.children().iter().copied());
+                }
                 Ok(Operation::SetMode { id: *id, mode: old })
             }
             Operation::SetCornerVars { id, vars } => {

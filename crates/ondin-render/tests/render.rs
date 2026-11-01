@@ -1522,7 +1522,32 @@ fn a_greeked_bar_is_lighter_than_its_ink() {
 /// Effect layers the walk pushes for a text node in `fills` and `strokes`
 /// carrying one `Filters` row of `brightness`.
 fn filter_layers(fills: Vec<Fill>, strokes: Vec<ondin_core::Stroke>, brightness: f64) -> usize {
+    filter_layers_underlined(fills, strokes, brightness, false)
+}
+
+/// [`filter_layers`], the type underlined in no colour of its own when asked.
+fn filter_layers_underlined(
+    fills: Vec<Fill>,
+    strokes: Vec<ondin_core::Stroke>,
+    brightness: f64,
+    underlined: bool,
+) -> usize {
     let (mut doc, _res, t) = painted_text(fills, strokes);
+    if underlined {
+        let NodeKind::Text { style, .. } = doc.get(t).unwrap().kind() else {
+            unreachable!("the fixture is type")
+        };
+        let style = ondin_core::TextStyle {
+            underline: Some(ondin_core::Decoration::default()),
+            ..(**style).clone()
+        };
+        doc.apply(&Transaction(vec![Operation::SetTextStyle {
+            id: t,
+            style,
+            spans: None,
+        }]))
+        .unwrap();
+    }
     doc.apply(&Transaction(vec![Operation::SetEffects {
         id: t,
         effects: keyed_by_position([Effect::new(EffectKind::Filters(Filters {
@@ -1545,7 +1570,7 @@ fn filter_layers(fills: Vec<Fill>, strokes: Vec<ondin_core::Stroke>, brightness:
         doc.first_page(),
         &mut r,
     );
-    assert!(r.text_glyphs > 0, "the type is drawn");
+    assert!(r.text_glyphs > 0 || r.strokes > 0, "the type is drawn");
     r.layers.len()
 }
 
@@ -1571,6 +1596,25 @@ fn filters_fold_into_solid_inks_unless_a_clamp_meets_a_mix() {
         filter_layers(vec![fill(200, true)], vec![], 2.0),
         0,
         "one colour"
+    );
+}
+
+/// Outlined type underlined in no colour of its own draws the underline black,
+/// a second colour, so a clamping filter buffers it.
+///
+/// flip: `inks_of` adding black only for type with no ink → fails at
+/// "an outline and a black underline".
+#[test]
+fn an_underline_drawn_black_counts_as_an_ink() {
+    assert_eq!(
+        filter_layers_underlined(vec![], vec![stroke(200, true)], 2.0, false),
+        0,
+        "fixture: the outline alone folds"
+    );
+    assert_eq!(
+        filter_layers_underlined(vec![], vec![stroke(200, true)], 2.0, true),
+        1,
+        "an outline and a black underline"
     );
 }
 

@@ -2117,7 +2117,13 @@ fn inks_of(painted: &Painted<'_>) -> Option<Vec<ondin_core::peniko::Color>> {
         .chain(strokes.map(|s| solid(s.brush.drawn())))
         .collect::<Option<_>>()?;
     if let NodeKind::Text { .. } = painted.kind {
-        if inks.is_empty() {
+        // Black where `paint_shape` falls back to it: type with no ink at all, and
+        // a decoration with no colour of its own on type with no fill.
+        let no_fill = !painted.paint.fills.iter().any(|f| f.visible);
+        let bare_decoration = painted
+            .text
+            .is_some_and(|l| l.decorations.iter().any(|d| d.color.is_none()));
+        if inks.is_empty() || (no_fill && bare_decoration) {
             inks.push(ondin_core::peniko::Color::BLACK);
         }
         if let Some(layout) = painted.text {

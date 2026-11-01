@@ -921,7 +921,7 @@ impl OndinApp {
                             // floor the menu ran most of the way across the
                             // canvas — the ⋯ menu's case (§15 D993).
                             ui.set_width(CHIP_MENU_W);
-                            ui::menu_rows(ui);
+                            ui::popup_rows(ui);
                             let (resp, renamed) = committed_field(
                                 ui,
                                 field,
@@ -2300,7 +2300,7 @@ impl OndinApp {
             .align(egui::RectAlign::BOTTOM_END)
             .gap(ui::MENU_GAP)
             .show(|ui| {
-                ui::menu_rows(ui);
+                ui::popup_rows(ui);
                 // **A width, not a minimum** (§15 D996), and **fitted to the widest
                 // row** as the ⋯ reset menu is (§15 D993): `menu_row`'s 8pt insets,
                 // its 24pt glyph column, the label at 11.5 and what it binds at

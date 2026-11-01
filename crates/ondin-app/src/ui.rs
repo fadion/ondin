@@ -1614,13 +1614,35 @@ pub fn combo_chevron_ink() -> egui::Color32 {
     theme::text::dim()
 }
 
-/// Set up a dropdown's menu rows, inside a `ComboBox::show_ui` closure.
+/// Set up a dropdown's menu rows, inside a `ComboBox::show_ui` closure, and hold
+/// the list [`DROPDOWN_GAP`] off its field.
+///
+/// `ComboBox` opens its list with `Popup::menu`'s zero gap and has no hook for
+/// one, so the gap is a translation of the popup's layer, which moves its hit
+/// tests with its ink: down when it opened below the field, up when above.
+/// A menu that already sets its own `.gap` uses [`popup_rows`] instead.
+pub fn menu_rows(ui: &mut egui::Ui) {
+    popup_rows(ui);
+    let layer = ui.layer_id();
+    let above =
+        egui::AreaState::load(ui.ctx(), layer.id).is_some_and(|s| s.pivot.y() == egui::Align::Max);
+    let dy = if above { -DROPDOWN_GAP } else { DROPDOWN_GAP };
+    ui.ctx().set_transform_layer(
+        layer,
+        egui::emath::TSTransform::from_translation(egui::vec2(0.0, dy)),
+    );
+}
+
+/// The air between a dropdown's field and its open list.
+pub const DROPDOWN_GAP: f32 = 2.0;
+
+/// [`menu_rows`]' row setup alone, for a popup that sets its own `.gap`.
 ///
 /// egui 0.35 sizes a `Button`'s margin as `button_padding − bg_stroke.width` and
 /// puts the stroke back on a hovered row, so rows would shift on hover. Zeroing
 /// `bg_stroke` on all four states makes both branches identical; the fill is the
 /// hover cue. [`MENU_ROW_H`] is the height floor.
-pub fn menu_rows(ui: &mut egui::Ui) {
+pub fn popup_rows(ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size.y = MENU_ROW_H;
     let w = &mut ui.visuals_mut().widgets;
     for state in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
@@ -6448,6 +6470,63 @@ mod combo_chevron_tests {
         assert!(
             shapes(false).iter().any(is_triangle),
             "…and without the icon it is, which is what this test is about"
+        );
+    }
+
+    /// An open dropdown's list sits `DROPDOWN_GAP` off its field, below it near the
+    /// top of the screen and above it near the bottom.
+    /// flip: `menu_rows` without the layer translation → fails at "below".
+    #[test]
+    fn a_dropdown_list_opens_a_gap_off_its_field() {
+        /// The field's rect and the list's on screen, with the field at `y`.
+        fn open_at(y: f32) -> (egui::Rect, egui::Rect) {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let input = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            };
+            let (mut field, mut layer) = (egui::Rect::NOTHING, None);
+            for frame in 0..6 {
+                let _ = ctx.run_ui(input(), |ui| {
+                    ui.add_space(y);
+                    let r = egui::ComboBox::from_id_salt("probe")
+                        .selected_text("Value")
+                        .show_ui(ui, |ui| {
+                            menu_rows(ui);
+                            for i in 0..8 {
+                                ui.label(format!("Row {i}"));
+                            }
+                            layer = Some(ui.layer_id());
+                        });
+                    field = r.response.rect;
+                    if frame == 0 {
+                        egui::Popup::open_id(ui.ctx(), r.response.id.with("popup"));
+                    }
+                });
+            }
+            let layer = layer.expect("the list was shown");
+            let rect = ctx
+                .memory(|m| m.area_rect(layer.id))
+                .expect("the list has an area");
+            let to_global = ctx.layer_transform_to_global(layer).unwrap_or_default();
+            (field, to_global * rect)
+        }
+
+        let (field, list) = open_at(40.0);
+        assert_eq!(
+            list.top() - field.bottom(),
+            DROPDOWN_GAP,
+            "below: {list:?} under {field:?}"
+        );
+        let (field, list) = open_at(560.0);
+        assert_eq!(
+            field.top() - list.bottom(),
+            DROPDOWN_GAP,
+            "above: {list:?} over {field:?}"
         );
     }
 

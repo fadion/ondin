@@ -841,7 +841,7 @@ impl OndinApp {
         let resp = resp.on_hover_text("Gradient kind");
         let mut picked = None;
         egui::Popup::menu(&resp).gap(ui::MENU_GAP).show(|ui| {
-            ui::menu_rows(ui);
+            ui::popup_rows(ui);
             ui.set_width(MENU_W);
             for k in PaintKind::GRADIENTS {
                 let row = ui::MenuRow::new("", k.label()).checked(k == kind);
@@ -1450,7 +1450,7 @@ impl OndinApp {
         let hsv = self.hsv_of(current);
         let mut picked = None;
         egui::Popup::menu(&resp).gap(ui::MENU_GAP).show(|ui| {
-            ui::menu_rows(ui);
+            ui::popup_rows(ui);
             ui.set_width(MENU_W);
             for f in Format::ALL {
                 let preview = f.preview(current, hsv);

@@ -1562,7 +1562,7 @@ fn reset_row(
                 .align(egui::RectAlign::BOTTOM_END)
                 .gap(ui::MENU_GAP)
                 .show(|ui| {
-                    ui::menu_rows(ui);
+                    ui::popup_rows(ui);
                     // **As wide as its longest row, not as the screen**: `menu_row`
                     // takes the available width, which in a popup's `Area` is the
                     // whole screen.

@@ -4735,7 +4735,7 @@ impl OndinApp {
                 .align(egui::RectAlign::BOTTOM_END)
                 .gap(ui::MENU_GAP)
                 .show(|ui| {
-                    ui::menu_rows(ui);
+                    ui::popup_rows(ui);
                     ui.set_width(BLEND_MENU_W);
                     for mode in BlendMode::ALL {
                         let offered = mode != BlendMode::PassThrough || containers;
@@ -21131,9 +21131,9 @@ mod paint_write_tests {
         assert_eq!(
             popup_rows(&mut app),
             vec![
-                ("Centre".to_string(), egui::pos2(15.0, 38.5)),
-                ("Inside".to_string(), egui::pos2(15.0, 66.5)),
-                ("Outside".to_string(), egui::pos2(15.0, 94.5)),
+                ("Centre".to_string(), egui::pos2(15.0, 40.5)),
+                ("Inside".to_string(), egui::pos2(15.0, 68.5)),
+                ("Outside".to_string(), egui::pos2(15.0, 96.5)),
             ],
             "three real answers, no Mixed, at the mixed row's own coordinates"
         );

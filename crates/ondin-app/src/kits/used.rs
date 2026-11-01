@@ -164,7 +164,7 @@ impl OndinApp {
                             .align(egui::RectAlign::BOTTOM_END)
                             .gap(crate::ui::MENU_GAP)
                             .show(|ui| {
-                                crate::ui::menu_rows(ui);
+                                crate::ui::popup_rows(ui);
                                 const H: f32 = crate::ui::MENU_ROW_H;
                                 if let Some(k) = library.iter().find(|k| k.id == u.kit)
                                     && crate::ui::menu_item(

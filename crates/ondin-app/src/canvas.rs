@@ -8917,6 +8917,20 @@ impl OndinApp {
                     egui::Stroke::new(SNAP_RING_STROKE_PX, color::SELECT),
                 );
             }
+
+            // The segment's angle and length beside the pointer.
+            if let Some(p) = resp.hover_pos().or_else(|| resp.interact_pointer_pos())
+                && let Some((from, to)) = pen_segment(pen, closing.or(pointer))
+                && (to - from).hypot() >= 0.5
+            {
+                crate::spacing::paint_label(
+                    painter,
+                    p,
+                    &segment_readout(from, to),
+                    None,
+                    color::BADGE,
+                );
+            }
             ui.ctx().request_repaint();
         } else if self.drag.is_none()
             && !self.gesture_cancelled
@@ -9918,6 +9932,26 @@ fn origin_pivot(kind: &NodeKind, box_: KRect, x_pct: f64, y_pct: f64) -> Option<
 /// a selected and a drawn shape, so the number does not twitch on release.
 fn size_label(box_: KRect) -> String {
     format!("{} × {}", box_.width().round(), box_.height().round())
+}
+
+/// The segment the pen's readout quotes, in world space: from the last anchor to
+/// `next`, where a press would land, or, while an anchor is being shaped, the one
+/// that placed it. `None` before there is a segment.
+fn pen_segment(pen: &PenState, next: Option<Point>) -> Option<(Point, Point)> {
+    match (pen.shaping, pen.anchors.as_slice()) {
+        (true, [.., from, to]) => Some((from.at, to.at)),
+        (false, [.., last]) => next.map(|to| (last.at, to)),
+        _ => None,
+    }
+}
+
+/// `"45° · 120"`: a segment's angle as a Line's Rotation field shows it (world
+/// start to end, clockwise from the right, as y grows down) and its length.
+fn segment_readout(from: Point, to: Point) -> String {
+    let d = to - from;
+    // `+ 0.0` turns a rounded `-0` into `0`.
+    let deg = d.y.atan2(d.x).to_degrees().round() + 0.0;
+    format!("{deg:.0}° · {:.0}", d.hypot())
 }
 
 /// Paint the size pill under `oriented`, laid out in `frame`.
@@ -12271,6 +12305,58 @@ mod drop_label_tests {
             at.to_vec2().abs().max_elem() < 0.01,
             "the window's own corner mapped to {at:?} rather than the origin"
         );
+    }
+}
+
+#[cfg(test)]
+mod pen_readout_tests {
+    use super::*;
+
+    /// A pen with corner anchors at `points`, shaping the last or not.
+    fn pen(points: &[(f64, f64)], shaping: bool) -> PenState {
+        PenState {
+            parent: ondin_core::IdSource::new(1).mint(),
+            parent_world: Affine::IDENTITY,
+            anchors: points
+                .iter()
+                .map(|&(x, y)| PenAnchor::corner(Point::new(x, y)))
+                .collect(),
+            shaping,
+            editing: None,
+        }
+    }
+
+    /// The readout quotes the pending segment while hovering, and the placed one
+    /// while its anchor is shaped, never the pending one then.
+    ///
+    /// flip: `pen_segment` ignoring `shaping` → fails at "the placed segment".
+    #[test]
+    fn the_pen_quotes_the_pending_segment_or_the_one_being_shaped() {
+        let next = Some(Point::new(50.0, 50.0));
+        assert_eq!(
+            pen_segment(&pen(&[(0.0, 0.0), (10.0, 0.0)], false), next),
+            Some((Point::new(10.0, 0.0), Point::new(50.0, 50.0)))
+        );
+        assert_eq!(
+            pen_segment(&pen(&[(0.0, 0.0), (10.0, 0.0)], true), next),
+            Some((Point::new(0.0, 0.0), Point::new(10.0, 0.0))),
+            "the placed segment"
+        );
+        assert_eq!(pen_segment(&pen(&[(0.0, 0.0)], true), next), None);
+        assert_eq!(pen_segment(&pen(&[(0.0, 0.0)], false), None), None);
+    }
+
+    /// Angle as a Line's Rotation field reads it, clockwise as y grows down, with
+    /// no `-0°`; length rounded to whole units.
+    ///
+    /// flip: `segment_readout` without its `+ 0.0` → fails at the last assertion.
+    #[test]
+    fn a_segment_reads_as_its_angle_and_length() {
+        let o = Point::ZERO;
+        assert_eq!(segment_readout(o, Point::new(30.0, 40.0)), "53° · 50");
+        assert_eq!(segment_readout(o, Point::new(10.0, -10.0)), "-45° · 14");
+        assert_eq!(segment_readout(o, Point::new(-10.0, 0.0)), "180° · 10");
+        assert_eq!(segment_readout(o, Point::new(10.0, -0.001)), "0° · 10");
     }
 }
 

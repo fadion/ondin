@@ -107,7 +107,6 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 
 ### Small
 
-- **Segment length and angle** readout while drawing with the pen.
 - **Spiral and arc tools.**
 
 ## Later · Components and layout

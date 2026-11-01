@@ -13,6 +13,10 @@ Drawing paths with the pen and the pencil, resuming them, editing their points w
 - The rubber band is drawn from `tools::pen_outline` (the commit's function), in the commit's ink
   (`PEN_STROKE_COLOR`/`PEN_STROKE_WIDTH`, black, 2 units). Anchors and handles are chrome in the
   selection colour.
+- **A readout beside the pointer** quotes a segment as *angle · length* (`canvas::segment_readout`;
+  the angle as a Line's Rotation field shows it, world start to end): the pending segment to where a
+  press would land, or, while a handle is dragged out, the segment that placed that anchor
+  (`canvas::pen_segment`). It is the gradient handles' label (`spacing::paint_label`).
 - **Backspace removes the last anchor mid-draw** (`canvas::pen_backspace`), cancelling the path when
   the first goes; intercepted in `app::dispatch` as `Action::Delete if self.pen.is_some()` (keyboard
   actions dispatch before `pen_input`). Undo cannot help — nothing is committed yet.

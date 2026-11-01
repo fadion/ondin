@@ -1,8 +1,9 @@
-# Canvas chrome, the top bar's menus, the command palette, batch rename, the cheatsheet, focus and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the top bar's View/Snap menus and Settings button,
-the command palette, the batch rename box, the shortcut cheatsheet, focus mode and present mode.
+the command palette, the batch rename box, the shortcut cheatsheet, focus mode, private mode and
+present mode.
 Part of §9.4.
 
 ## 9.4 Gesture chrome
@@ -195,7 +196,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show
   layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, then the modes: *Check
-  contrast* (ticked while on and never remembered), *Outline mode*, *Focus mode*, then the marquee's
+  contrast* (ticked while on and never remembered), *Outline mode*, *Focus mode*, *Private mode*, then the marquee's
   shape, *Lasso select* (`app-selection.md`), then *Present mode* — a verb,
   not a switch: a check row that never ticks, which closes the menu and dispatches `Action::Present`.
   *Show minimap* follows *Show history* so the two rows about the layers pane stay together.
@@ -225,7 +226,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
   *Show history*, *Show minimap*, *Lasso select*, outline view and focus mode; a launch never opens in focus mode
-  or outline view.
+  or outline view. Private mode is a preference of its own (`Prefs::private`), below.
 
 ### Settings
 
@@ -503,6 +504,50 @@ none of the rules below are its.
 - **Every flag `modal_is_up` reads must be a card drawn whenever it is set**, or an undrawn card holds
   every key.
 
+## Private mode (`private.rs`)
+
+For sharing a screen without showing what things are called: a client's or a company's name is often
+the first segment of a component's. It hides names, not content.
+
+- **Doors.** `ViewSwitch::Private` (*Private mode*, `Ctrl+Shift+N`): the View menu after *Focus mode*,
+  the palette and the cheatsheet; not the canvas menu. The library answers the chord too
+  (`dashboard_keys`). An accent *Private* pill (`private::pill`, eye-slash glyph) sits on both the
+  editor's and the library's top bar while it is on; clicking it turns it off.
+- **A preference, not a workspace switch** (`Prefs::private`), so a restart in the middle of a shared
+  screen comes back masked. `OndinApp::set_private` writes and saves it, sets the switch at once and,
+  turning on, drops whatever shows a real name for editing: the inline layer rename, the inspector's
+  name buffer, batch rename, a page rename, layer search, the library's document rename and project
+  edit.
+- **The switch is a thread-local** (`private::on`/`set`), copied from the preference once a frame at
+  the top of `OndinApp::ui`, so any view can mask without a handle on the app.
+- **Masked as kind and place.** `private::layer` gives "‹Kind› ‹n›", n the layer's place among its
+  siblings of that word ("Component" for a main, "Instance" for a linked copy, else
+  `NodeKind::default_name`); `page` gives "Page ‹n›" by page order; `document` and `project` give
+  "Document ‹n›" and "Project ‹n›" by place in the list drawn beside them (the tab strip, the
+  library's entries or project list). So one document can carry different numbers on different
+  surfaces. `OndinApp::shown_page_name`, `shown_title`, `shown_project_name` and
+  `Library::shown_project`/`shown_entry` are the drawn names; `page_name` stays the real one for
+  comparing, renaming and file names. Kit names are document names (`kits::index::kits_in`,
+  `binding::kit_label`, `kit_heading`).
+- **What is masked:** layer, frame, component, page, document and project names, everywhere one is
+  drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
+  minimap, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
+  kit dialogs and the whole library screen. **What stays:** text, images, colours, style, variable
+  and variant property names. Masked, not removed: a frame label still selects its frame, rows still
+  navigate.
+- **Pages and Layers fold as an overlay** (`pages_folded || private`, `layers_folded || private`),
+  the fold preferences left as they were; a click on a folded head says *Leave private mode to see the
+  names*. The History section is hidden, its steps carrying layer names.
+- **Doors that need the real name decline** with a toast: rename (`rename_selection`, and the
+  inspector's layer and page name header, drawn masked), batch rename, page rename, the library's
+  document rename and *Edit project* (*Leave private mode to rename*), and *Import files* (*Leave
+  private mode to import*). Searches over names find nothing and say *Leave private mode to search
+  names*: the palette's layer search, the kit picker's and the library's, whose remembered searches
+  are hidden too.
+- **Known limits.** The OS save dialog an export opens prefills a file name made from the layer's or
+  document's name; the export folder path in a toast is shown as is; a toast written before private
+  mode was turned on keeps its text until it fades.
+
 ## Present mode (`present.rs`)
 
 The document's top-level frames shown one at a time, page by page, fitted to a fullscreen window,
@@ -579,3 +624,12 @@ runs (`pages` names each frame's page, index for index).
 - The `return` after `present_ui` is what makes present mode view-only: without it the editor runs
   below and `Delete` deletes the selection nobody can see. `present_mode_steps_frames_and_edits_nothing`
   pins it.
+- A new place that draws a name must take it from `crate::private` (or a `shown_*` helper), never
+  `.name()` or `page_name`, which stay the real name for comparing, renaming and files. The guard is
+  `private::leak`: a document whose every layer, page, component and file name carries a sentinel,
+  whole frames drawn with each surface open, failing on any drawn string or viewport command holding
+  it, with a control that the names are drawn when it is off
+  (`no_surface_draws_a_name_in_private_mode`, `the_library_draws_no_name_in_private_mode`). It covers
+  only the surfaces it opens; a popover or dialog it does not open is unguarded.
+- `set_private` must not write `layers_folded` or `pages_folded`: the fold is an overlay so leaving
+  restores the panes as they were. `the_chord_turns_it_on_and_the_pill_says_so` pins it.

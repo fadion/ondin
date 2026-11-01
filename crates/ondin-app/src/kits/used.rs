@@ -85,7 +85,7 @@ impl OndinApp {
                                 .entry_at(&k.path)
                                 .and_then(|e| e.meta.project.as_deref())
                                 .and_then(|p| self.library.projects.get(p))
-                                .map(|p| format!("Library / {}", p.name));
+                                .map(|p| format!("Library / {}", self.library.shown_project(p)));
                             project.unwrap_or_else(|| "Library".into())
                         }
                         None => "Not in your library folder".into(),
@@ -94,7 +94,10 @@ impl OndinApp {
                         kit: o.kit.clone(),
                         name: found
                             .map(|k| k.name.clone())
-                            .or_else(|| o.name.clone())
+                            .or_else(|| {
+                                let name = o.name.as_deref()?;
+                                Some(crate::private::document(name, 0).into_owned())
+                            })
                             .unwrap_or_else(|| "Kit".into()),
                         location,
                         instances,
@@ -115,7 +118,7 @@ impl OndinApp {
             return;
         }
         let used = self.kits_used();
-        let title = format!("Kits used in {}", self.session.document_title());
+        let title = format!("Kits used in {}", self.shown_title());
         let library = kits_in(&self.library, self.session.doc.meta().id.as_deref());
         let mut act: Option<Act> = None;
         let modal = crate::settings::card("kits-used", ctx, |ui| {

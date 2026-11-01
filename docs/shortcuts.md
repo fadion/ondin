@@ -224,6 +224,7 @@ one is designated (§15 D113).
 | — | snap to baselines | **unbound** (§15 D355) |
 | `Ctrl+Alt+;` | lock guides | ✅ Illustrator |
 | `Ctrl+\` | focus mode (hide the panels) | ✅ Figma's show/hide-UI |
+| `Ctrl+Shift+N` | private mode | ✅ **invented** — a browser's private-window chord (Chrome's incognito); `Ctrl+N` is new document, kept apart by Shift. The library answers it too |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | — | show history | **unbound**: a list few people keep open |
 | `Ctrl+Shift+M` | minimap | ✅ `cmd_only && shift`; `Ctrl+Alt+M` stays the mask chord. `ctrl_shift_m_toggles_the_minimap` |
@@ -308,7 +309,7 @@ draws the box.
 | `F2` · `Ctrl+R` | **rename the selection** | ✅ (§15 D383). The ⋮'s *Rename*, pre-filled from `Entry::display_name` (stem minus a sync conflict suffix). Refused in the trash. The two keys sit on opposite sides of the `modifiers.is_none()` gate, so the verb is one function, `start_rename` |
 | `Ctrl+D` | **duplicate the selection** | ✅ (§15 D383), the ⋮'s *Duplicate*: one chord, one verb, two nouns (§4). Refused in the trash |
 
-`Ctrl+N` works here too and is §8's row, not a second one.
+`Ctrl+N` and `Ctrl+Shift+N` work here too and are §8's and §6's rows, not second ones.
 
 ⚠️ **None of these goes through `input::resolve`, and none can**: `OndinApp::ui` returns before it
 while the library is up, so `dashboard_keys` reads the context. Its guard (`library_keys_are_free`)
@@ -582,8 +583,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, the
-  marquee's shape (lasso) and the snap switches.
+  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, private
+  mode, the marquee's shape (lasso) and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows through one `label()`, so a row and the state it
   drives stay in step while the chord is a second caller that never sees the row.
 - **Not `Action`s**: the clipboard trio and `Ctrl+A` in a text session, and `Tab` nesting a list,

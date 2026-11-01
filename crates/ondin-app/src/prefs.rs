@@ -230,6 +230,9 @@ pub struct Prefs {
     /// Whether the layers pane's Layers section is folded to its header, hiding
     /// every layer name.
     pub layers_folded: bool,
+    /// Private mode (`crate::private`): every drawn name masked. A preference, so
+    /// a restart in the middle of a shared screen does not come back revealing.
+    pub private: bool,
     /// How tall the Pages section's list was dragged to, in points; `None` fits
     /// up to six rows.
     pub pages_height: Option<f32>,
@@ -379,6 +382,7 @@ impl Default for Prefs {
             layers_width: crate::panels::layers::DEFAULT_W,
             pages_folded: false,
             layers_folded: false,
+            private: false,
             pages_height: None,
             history_folded: false,
             history_height: None,

@@ -209,7 +209,9 @@ pub(crate) fn summary(doc: &Document, update: &Update) -> Summary {
             && let Some(o) = n.origin()
         {
             let i = part(&mut kits, &o.kit);
-            kits[i].components.push(n.name().to_string());
+            kits[i]
+                .components
+                .push(crate::private::layer(doc, *m).into_owned());
         }
     }
     for v in &update.vars_changed {

@@ -113,6 +113,20 @@ pub struct Library {
 }
 
 impl Library {
+    /// `p`'s name as drawn, masked in private mode by its place in the project
+    /// list (`crate::private::project`).
+    pub fn shown_project(&self, p: &Project) -> String {
+        let place = self.projects.projects.iter().position(|q| q.id == p.id);
+        crate::private::project(&p.name, place.unwrap_or(0)).into_owned()
+    }
+
+    /// `e`'s name as drawn, masked in private mode by its place among the
+    /// library's documents (`crate::private::document`).
+    pub fn shown_entry(&self, e: &Entry) -> String {
+        let place = self.entries.iter().position(|f| f.path == e.path);
+        crate::private::document(&e.display_name(), place.unwrap_or(0)).into_owned()
+    }
+
     /// Open the library at `root` and scan it.
     pub fn open(root: PathBuf) -> Self {
         Self::open_with_index(root, LocalIndex::load())

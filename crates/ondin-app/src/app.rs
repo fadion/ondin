@@ -1562,6 +1562,8 @@ impl eframe::App for OndinApp {
     /// The frame body: everything the app draws and decides, once per pass.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Before anything draws a name.
+        crate::private::set(self.prefs.private);
         // Before anything paints: an open Settings modal, on either screen, previews
         // its own pick.
         let pref = match (&self.settings, &self.library_settings) {
@@ -2241,6 +2243,11 @@ impl OndinApp {
     /// by `layers::layer_rename_field`). The panel is shown if hidden; with several
     /// layers selected it opens the batch rename box instead.
     fn rename_selection(&mut self, ctx: &egui::Context) {
+        // A rename shows the name it starts from.
+        if crate::private::on() {
+            self.session.info(crate::private::DECLINE_RENAME);
+            return;
+        }
         // Two or more: the chord falls through to the verb that fits them.
         if self.session.selection.ids().len() > 1 {
             self.open_batch_rename(ctx, None);
@@ -3119,12 +3126,7 @@ impl OndinApp {
                         });
                         if self.session.commit(tx) {
                             self.session.selection.set_one(frame);
-                            let name = self
-                                .session
-                                .doc
-                                .get(frame)
-                                .map(|n| n.name().to_string())
-                                .unwrap_or_default();
+                            let name = crate::private::layer(&self.session.doc, frame).into_owned();
                             self.session.info(format!(
                                 "Created “{name}” — {wrapped} layer{} wrapped in a frame · Ctrl+Z to undo",
                                 if wrapped == 1 { "" } else { "s" }
@@ -3365,12 +3367,7 @@ impl OndinApp {
                 self.name_step_as(crate::menu::Item::CombineAsVariants);
                 if self.session.commit(tx) {
                     self.session.selection.set_one(set);
-                    let name = self
-                        .session
-                        .doc
-                        .get(set)
-                        .map(|n| n.name().to_string())
-                        .unwrap_or_default();
+                    let name = crate::private::layer(&self.session.doc, set).into_owned();
                     self.session.info(format!(
                         "Combined {} main{} into set “{name}” · Ctrl+Z to undo",
                         mains.len(),
@@ -5015,8 +5012,10 @@ impl OndinApp {
             })
             .count();
         ops.extend(relinks);
+        // For the message, so as drawn.
         let name = match ids.as_slice() {
-            [one] => self.session.doc.get(*one).map(|n| n.name().to_string()),
+            [one] => (self.session.doc.get(*one).is_some())
+                .then(|| crate::private::layer(&self.session.doc, *one).into_owned()),
             _ => None,
         };
         // Every link into what goes, read before the commit, so a cut can give them back.
@@ -5337,13 +5336,14 @@ impl OndinApp {
                 decision = Some(RecoverChoice::Later);
             }
             ui.add_space(8.0);
+            let name = crate::private::document(&pending.name, 0);
             // No time clause for an unreadable stamp: `0` or `now` would both mislead.
             ui.label(
                 egui::RichText::new(match pending.written {
                     Some(written) => format!(
                         "“{}” has changes from {} that were never saved — Ondin \
                          closed before they reached the file.",
-                        pending.name,
+                        name,
                         crate::library::clock::relative_label(crate::library::clock::since(
                             written
                         ))
@@ -5352,7 +5352,7 @@ impl OndinApp {
                     None => format!(
                         "“{}” has changes that were never saved — Ondin closed \
                          before they reached the file.",
-                        pending.name
+                        name
                     ),
                 })
                 .size(12.0)
@@ -5772,7 +5772,7 @@ impl OndinApp {
             .collect();
         // A scratch session no tab holds has only its own name to give.
         let scratch = (window && self.tabs.active.is_none() && self.session.is_dirty())
-            .then(|| self.session.document_title());
+            .then(|| self.shown_title());
         let mut decision: Option<CloseChoice> = None;
         // The title's ✕ is *Cancel*: a reflex must not land in the destructive arm.
         let modal = crate::settings::card("confirm-close", ctx, |ui| {
@@ -6797,6 +6797,9 @@ impl OndinApp {
                     self.kit_update_pill(ui);
                     // In a kit opened by *Go to main*, the way back.
                     self.kit_back_link(ui);
+                    if crate::private::pill(ui) {
+                        self.set_private(false);
+                    }
 
                     // Right cluster, reading the resource meter (when on) · undo/redo ·
                     // View · Snap · zoom · Settings;
@@ -7164,6 +7167,7 @@ impl OndinApp {
             ViewSwitch::SnapGrid => self.snap_grid,
             ViewSwitch::SnapBaselines => self.snap_baselines,
             ViewSwitch::Lasso => self.lasso,
+            ViewSwitch::Private => self.prefs.private,
         }
     }
 
@@ -7219,9 +7223,37 @@ impl OndinApp {
                 });
                 return;
             }
+            ViewSwitch::Private => {
+                self.set_private(on);
+                return;
+            }
         }
         self.session
             .info(format!("{} {}", sw.label(), if on { "on" } else { "off" }));
+    }
+
+    /// Turn private mode (`crate::private`) on or off: *View ▸ Private mode*,
+    /// `Ctrl+Shift+N`, the palette, and the top bar's pill that turns it off.
+    /// Saved at once, so a restart in the middle of a shared screen comes back
+    /// masked. Turning it on closes whatever is showing a real name to edit.
+    pub(crate) fn set_private(&mut self, on: bool) {
+        self.prefs.private = on;
+        self.prefs.save();
+        crate::private::set(on);
+        if on {
+            self.name_edit = None;
+            self.batch_rename = None;
+            self.renaming_layer = None;
+            self.layer_filter = None;
+            self.cancel_page_rename();
+            self.rename_entry = None;
+            self.dash.edit_project = None;
+        }
+        self.session.info(if on {
+            "Private mode — names are hidden"
+        } else {
+            "Left private mode"
+        });
     }
 
     /// Lock or unlock the guides — *View ▸ Lock guides* and `Ctrl+Alt+;`. Locking drops
@@ -7243,7 +7275,7 @@ impl OndinApp {
     /// opens the library on that project; it is allocated at its measured width, since a
     /// `ui.label` reports no hover or click.
     fn document_crumb(&mut self, ui: &mut egui::Ui) {
-        let title = self.session.document_title();
+        let title = self.shown_title();
         // From the document's own meta, not the library entry, which an unsaved or
         // just-moved document lacks or has stale.
         let project = self
@@ -7254,7 +7286,10 @@ impl OndinApp {
             .clone()
             .and_then(|id| self.library.projects.get(&id).cloned());
 
-        if let Some(project) = project {
+        if let Some(mut project) = project {
+            if let Some(shown) = self.shown_project_name(&project.id) {
+                project.name = shown;
+            }
             let font = egui::FontId::proportional(13.0);
             let width = ui
                 .ctx()
@@ -7569,7 +7604,9 @@ impl OndinApp {
                 ui.set_min_width(ui.available_width());
                 // History docks at the foot before anything else is laid out, and the
                 // sections above take the room it leaves, drawing nothing below it.
-                let rest = match self.show_history {
+                // Private mode hides it with the names its steps carry.
+                let private = crate::private::on();
+                let rest = match self.show_history && !private {
                     true => self.history_section(ui),
                     false => ui.max_rect(),
                 };
@@ -7578,8 +7615,9 @@ impl OndinApp {
                     // Pages first: the tree below is the current page's.
                     self.pages_section(ui);
                     // Folded, the pane keeps its width and shows no layer names, for
-                    // a screen shared with people who should not read them.
-                    let folded = self.prefs.layers_folded;
+                    // a screen shared with people who should not read them. Private
+                    // mode folds it over the preference, which it leaves as it was.
+                    let folded = self.prefs.layers_folded || private;
                     egui::Frame::NONE
                         .inner_margin(egui::Margin {
                             left: crate::panels::layers::PAD_X,
@@ -7594,8 +7632,12 @@ impl OndinApp {
                             let searching = self.layer_filter.is_some();
                             ui.horizontal(|ui| {
                                 if crate::ui::fold_head(ui, "Layers", !folded).0.clicked() {
-                                    self.prefs.layers_folded = !folded;
-                                    self.prefs.save();
+                                    if private {
+                                        self.session.info(crate::private::DECLINE_LIST);
+                                    } else {
+                                        self.prefs.layers_folded = !folded;
+                                        self.prefs.save();
+                                    }
                                 }
                                 if folded {
                                     return;

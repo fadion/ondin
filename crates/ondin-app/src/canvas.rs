@@ -7542,7 +7542,8 @@ impl OndinApp {
         // A tag off the canvas is not laid out. It sits within three lines above
         // the corner and runs right from it, no wider than `reach`: the name plus
         // room for a mode, a count or a main's name, at a generous advance a glyph.
-        let reach = (node.name().chars().count() + 80) as f32 * PT * 1.5;
+        let shown = crate::private::layer(&self.session.doc, id);
+        let reach = (shown.chars().count() + 80) as f32 * PT * 1.5;
         if corner.x > rect.right()
             || corner.x + reach < rect.left()
             || corner.y < rect.top()
@@ -7578,7 +7579,7 @@ impl OndinApp {
         };
         if is_set {
             glyph(&mut job, icon::SQUARES_FOUR, egui::Color32::PLACEHOLDER);
-            words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+            words(&mut job, &shown, 4.0, egui::Color32::PLACEHOLDER);
             mode_word(&mut job, theme::text::dim());
             if let Some(clash) = crate::panels::clash_text(doc, id) {
                 job.append(
@@ -7602,7 +7603,7 @@ impl OndinApp {
                 glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
             }
             glyph(&mut job, icon::HEXAGON, egui::Color32::TRANSPARENT);
-            words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+            words(&mut job, &shown, 4.0, egui::Color32::PLACEHOLDER);
             mode_word(&mut job, color::COMPONENT_INK_DIM);
             if self.session.selection.contains(id) {
                 let n = self.instances_of(id).len();
@@ -7623,19 +7624,24 @@ impl OndinApp {
             if entered {
                 words(
                     &mut job,
-                    &format!("Editing {}", node.name()),
+                    &format!("Editing {shown}"),
                     4.0,
                     egui::Color32::PLACEHOLDER,
                 );
                 words(&mut job, "· Esc to exit", 4.0, color::COMPONENT_DIM);
             } else {
-                words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+                words(&mut job, &shown, 4.0, egui::Color32::PLACEHOLDER);
                 mode_word(&mut job, color::COMPONENT_DIM);
-                let main_name = ondin_core::component::main_of(doc, id)
+                let main = ondin_core::component::main_of(doc, id);
+                let main_name = main
                     .and_then(|m| doc.get(m))
                     .map(|m| m.name().to_string())
                     .unwrap_or_default();
-                if !main_name.is_empty() && main_name != node.name() {
+                if let Some(main) = main
+                    && !main_name.is_empty()
+                    && main_name != node.name()
+                {
+                    let main_name = crate::private::layer(doc, main);
                     words(&mut job, &main_name, 6.0, color::COMPONENT_DIM);
                 }
             }
@@ -7645,7 +7651,7 @@ impl OndinApp {
             }
             words(
                 &mut job,
-                node.name(),
+                &shown,
                 if clashing { 4.0 } else { 0.0 },
                 egui::Color32::PLACEHOLDER,
             );
@@ -9400,9 +9406,8 @@ impl OndinApp {
                 );
             }
         }
-        let name = replacing
-            .and_then(|(id, _)| self.session.doc.get(id))
-            .map(|n| n.name().to_string());
+        let name =
+            replacing.map(|(id, _)| crate::private::layer(&self.session.doc, id).into_owned());
         paint_drop_label(
             painter,
             inner,

@@ -507,7 +507,8 @@ impl ViewState {
             | ViewSwitch::SnapGuides
             | ViewSwitch::SnapGrid
             | ViewSwitch::SnapBaselines
-            | ViewSwitch::Lasso => None,
+            | ViewSwitch::Lasso
+            | ViewSwitch::Private => None,
         }
     }
 }
@@ -960,7 +961,8 @@ impl Item {
                     | ViewSwitch::SnapShapes
                     | ViewSwitch::SnapGuides
                     | ViewSwitch::SnapGrid
-                    | ViewSwitch::SnapBaselines => icon::SLIDERS_HORIZONTAL,
+                    | ViewSwitch::SnapBaselines
+                    | ViewSwitch::Private => icon::SLIDERS_HORIZONTAL,
                 },
                 sw.accel(),
                 Group::View,
@@ -2138,9 +2140,11 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         // the field. Never dimmed by the lock: a name is not the layer's artwork.
         Row::new(Item::Rename)
             .dim_if(!one, "Pick one layer to rename it")
-            .dim_if(cx.focus, "Leave focus mode to rename"),
-        // Always live: the box is not in a panel, and takes any selection.
-        Row::new(Item::BatchRename),
+            .dim_if(cx.focus, "Leave focus mode to rename")
+            .dim_if(crate::private::on(), crate::private::DECLINE_RENAME),
+        // Live but in private mode: the box is not in a panel, and takes any
+        // selection, but it shows every name.
+        Row::new(Item::BatchRename).dim_if(crate::private::on(), crate::private::DECLINE_RENAME),
     ]);
 
     // --- navigate ---------------------------------------------------------
@@ -2650,7 +2654,7 @@ impl OndinApp {
                 .doc
                 .page_ids()
                 .filter(|p| *p != self.session.page)
-                .map(|p| (p, self.page_name(p)))
+                .map(|p| (p, self.shown_page_name(p)))
                 .collect();
             let w = MENU_W;
             // `height` for one group of these rows, 1pt apart.
@@ -2817,8 +2821,8 @@ impl OndinApp {
                 .session
                 .selection
                 .single()
-                .and_then(|id| self.session.doc.get(id))
-                .map(|n| n.name().to_string())
+                .filter(|id| self.session.doc.get(*id).is_some())
+                .map(|id| crate::private::layer(&self.session.doc, id).into_owned())
                 .unwrap_or_default(),
             kit: self
                 .session
@@ -4052,6 +4056,7 @@ mod tests {
                         | ViewSwitch::StatusMessages
                         | ViewSwitch::Focus
                         | ViewSwitch::Lasso
+                        | ViewSwitch::Private
                 )
             })
             .collect();

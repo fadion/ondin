@@ -308,8 +308,8 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Outline mode ✓ | — | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
-switches less *Show layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, *Focus mode*
-and *Lasso select*. Every View
+switches less *Show layers*, *Show history*, *Show minimap*, *Show toolbar*, *Show messages*, *Focus mode*,
+*Private mode* and *Lasso select*. Every View
 row is live in focus mode, which hides none of what they switch.
 
 ### 6.2 Layers panel background
@@ -434,7 +434,7 @@ project dropdown, and the caret's list.
 - **The four image fit modes** — image editing's card owns them.
 - **Text on path** — the Text tool's gesture; the menu has only the way out (*Detach from path*).
 - **Type controls in a text session** — the Type card is beside it.
-- **Show layers, Show history, Show minimap, Show toolbar, Focus mode, Show messages** on the canvas menu —
+- **Show layers, Show history, Show minimap, Show toolbar, Focus mode, Private mode, Show messages** on the canvas menu —
   chrome-wide switches, one click away in the View menu.
 - **Lasso select** on the canvas menu — the marquee's shape is a tool setting, not a view; `Q` and the
   View menu carry it.

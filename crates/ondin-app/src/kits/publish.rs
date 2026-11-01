@@ -178,7 +178,7 @@ impl OndinApp {
             return;
         };
         let mark = self.shared_kit().cloned().unwrap_or_default();
-        let name = self.session.document_title();
+        let name = self.shown_title();
         let first = mark.version == 0;
         let doc = &self.session.doc;
         let before = doc.published().map(|p| p.document().clone());
@@ -325,7 +325,11 @@ impl OndinApp {
         // Mains on draft pages a published main uses go too, and are named.
         let carried: Vec<String> = ondin_core::kit::carried_from_drafts(&self.session.doc)
             .into_iter()
-            .filter_map(|id| self.session.doc.get(id).map(|n| n.name().to_string()))
+            .filter_map(|id| {
+                let doc = &self.session.doc;
+                doc.get(id)
+                    .map(|_| crate::private::layer(doc, id).into_owned())
+            })
             .collect();
         let Some(version) = ondin_core::kit::publish(
             &mut self.session.doc,
@@ -339,7 +343,7 @@ impl OndinApp {
         if !self.save_file(false) {
             return;
         }
-        let name = self.session.document_title();
+        let name = self.shown_title();
         let drafts = match carried.as_slice() {
             [] => String::new(),
             [one] => format!(" · {one} from a draft page, which a component uses"),
@@ -455,7 +459,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
     p.text(
         egui::pos2(rect.left() + 22.0, y),
         egui::Align2::LEFT_CENTER,
-        n.name(),
+        crate::private::layer(doc, id),
         egui::FontId::proportional(12.0),
         color::text(),
     );

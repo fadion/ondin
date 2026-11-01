@@ -738,6 +738,24 @@ pub(super) fn popup_rule(ui: &mut egui::Ui) {
 }
 
 use super::op_glyph;
+/// A name drawn in place of its field while private mode masks it
+/// (`crate::private`): the masked text, sensing a click so the caller can say
+/// why it does not edit.
+fn masked_name(ui: &mut egui::Ui, text: &str, width: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(width, ui.spacing().interact_size.y),
+        egui::Sense::click(),
+    );
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(13.0),
+        color::text(),
+    );
+    resp
+}
+
 /// The kind glyph on an identity card, centred in its cell. Every icon is drawn
 /// centred in its em box, so the card does not step as the subject changes.
 fn identity_glyph(ui: &mut egui::Ui, glyph: &'static str, colour: egui::Color32) {
@@ -795,31 +813,38 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
                 identity_glyph(ui, icon::FILE, color::accent_300());
-                // Buffered, committed once on defocus, as a layer's name is.
-                let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
-                let mut name = match &self.name_edit {
-                    Some((_, buf)) if editing => buf.clone(),
-                    _ => name0.clone(),
-                };
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut name)
-                        .frame(egui::Frame::NONE)
-                        .desired_width(140.0)
-                        .font(egui::FontId::proportional(13.0)),
-                );
-                // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() commits the typed name once.
-                if resp.gained_focus() || resp.changed() {
-                    self.name_edit = Some((id, name.clone()));
-                }
-                if resp.lost_focus()
-                    && let Some((nid, val)) = self.name_edit.take()
-                    && nid == id
-                    && ui::defocus_commits(&resp)
-                {
-                    let name = val.trim().to_string();
-                    if !name.is_empty() && name != name0 {
-                        self.session.name_step("Rename page", icon::PENCIL_SIMPLE);
-                        self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
+                if crate::private::on() {
+                    let shown = self.shown_page_name(id);
+                    if masked_name(ui, &shown, 140.0).clicked() {
+                        self.session.info(crate::private::DECLINE_RENAME);
+                    }
+                } else {
+                    // Buffered, committed once on defocus, as a layer's name is.
+                    let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
+                    let mut name = match &self.name_edit {
+                        Some((_, buf)) if editing => buf.clone(),
+                        _ => name0.clone(),
+                    };
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .frame(egui::Frame::NONE)
+                            .desired_width(140.0)
+                            .font(egui::FontId::proportional(13.0)),
+                    );
+                    // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() commits the typed name once.
+                    if resp.gained_focus() || resp.changed() {
+                        self.name_edit = Some((id, name.clone()));
+                    }
+                    if resp.lost_focus()
+                        && let Some((nid, val)) = self.name_edit.take()
+                        && nid == id
+                        && ui::defocus_commits(&resp)
+                    {
+                        let name = val.trim().to_string();
+                        if !name.is_empty() && name != name0 {
+                            self.session.name_step("Rename page", icon::PENCIL_SIMPLE);
+                            self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
+                        }
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1700,32 +1725,39 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 9.0;
                 identity_glyph(ui, glyph, color::accent_300());
-                // Name — buffered, committed once on defocus.
-                let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
-                let mut name = match &self.name_edit {
-                    Some((_, buf)) if editing => buf.clone(),
-                    _ => name0.to_string(),
-                };
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut name)
-                        .frame(egui::Frame::NONE)
-                        .desired_width(140.0)
-                        .font(egui::FontId::proportional(13.0)),
-                );
-                // The I-beam is kept: the frameless field has no other cue.
-                if resp.gained_focus() || resp.changed() {
-                    self.name_edit = Some((id, name.clone()));
-                }
-                // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
-                if resp.lost_focus()
-                    && let Some((nid, val)) = self.name_edit.take()
-                    && nid == id
-                    && ui::defocus_commits(&resp)
-                {
-                    let name = val.trim().to_string();
-                    if !name.is_empty() && name != name0 {
-                        self.session.name_step("Rename", icon::PENCIL_SIMPLE);
-                        self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
+                if crate::private::on() {
+                    let shown = crate::private::layer(&self.session.doc, id).into_owned();
+                    if masked_name(ui, &shown, 140.0).clicked() {
+                        self.session.info(crate::private::DECLINE_RENAME);
+                    }
+                } else {
+                    // Name — buffered, committed once on defocus.
+                    let editing = matches!(&self.name_edit, Some((nid, _)) if *nid == id);
+                    let mut name = match &self.name_edit {
+                        Some((_, buf)) if editing => buf.clone(),
+                        _ => name0.to_string(),
+                    };
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .frame(egui::Frame::NONE)
+                            .desired_width(140.0)
+                            .font(egui::FontId::proportional(13.0)),
+                    );
+                    // The I-beam is kept: the frameless field has no other cue.
+                    if resp.gained_focus() || resp.changed() {
+                        self.name_edit = Some((id, name.clone()));
+                    }
+                    // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
+                    if resp.lost_focus()
+                        && let Some((nid, val)) = self.name_edit.take()
+                        && nid == id
+                        && ui::defocus_commits(&resp)
+                    {
+                        let name = val.trim().to_string();
+                        if !name.is_empty() && name != name0 {
+                            self.session.name_step("Rename", icon::PENCIL_SIMPLE);
+                            self.commit_edit(Transaction(vec![Operation::SetName { id, name }]));
+                        }
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

@@ -80,7 +80,7 @@ impl OndinApp {
         }
         let versions = self.document_versions();
         let filed = self.in_library();
-        let title = format!("Version history of {}", self.session.document_title());
+        let title = format!("Version history of {}", self.shown_title());
         let mut close = false;
         let mut restore: Option<PathBuf> = None;
         let modal = crate::settings::card("version-history", ctx, |ui| {

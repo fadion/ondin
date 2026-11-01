@@ -660,13 +660,18 @@ impl OndinApp {
                             published: p.clone(),
                             top,
                         },
-                        name: n.name().to_string(),
+                        name: crate::private::layer(src, top).into_owned(),
                         set: n.set().is_some(),
                         kit: Some((k.name.clone(), used)),
                         tile: self.kit_shelf.tile(ctx, &k.id, top),
                         aliases: aliases(src, top),
                     };
-                    let group = p.group(top).unwrap_or(&k.name).to_string();
+                    // A group is named for the frame it was published from, a
+                    // layer's name: masked, the kit's own heading stands for it.
+                    let group = match crate::private::on() {
+                        true => k.name.clone(),
+                        false => p.group(top).unwrap_or(&k.name).to_string(),
+                    };
                     push_grouped(&mut shown.groups, group, item);
                 }
             }
@@ -710,7 +715,7 @@ impl OndinApp {
                 String::new(),
                 Item {
                     source: Source::Local(*c),
-                    name: n.name().to_string(),
+                    name: crate::private::layer(doc, *c).into_owned(),
                     set: n.set().is_some(),
                     kit: None,
                     tile: None,
@@ -722,7 +727,8 @@ impl OndinApp {
         // say, being exactly what lost it (`Origin::name`).
         let name = copies
             .iter()
-            .find_map(|c| doc.get(*c)?.origin()?.name.clone())
+            .find_map(|c| doc.get(*c)?.origin()?.name.as_deref())
+            .map(|n| crate::private::document(n, 0).into_owned())
             .unwrap_or_else(|| "Kit not found".into());
         Shown {
             id: id.to_string(),
@@ -753,7 +759,7 @@ impl OndinApp {
             if !doc.is_page(id) && (n.set().is_some() || n.component()) {
                 out.push(Item {
                     source: Source::Local(id),
-                    name: n.name().to_string(),
+                    name: crate::private::layer(doc, id).into_owned(),
                     set: n.set().is_some(),
                     kit: Some(("This document".into(), true)),
                     tile: None,
@@ -969,9 +975,17 @@ fn build_placement(
                     let src = published.document();
                     format!(
                         "{} in {} uses this kit's {}, so it cannot be placed here",
-                        src.get(*top).map_or("That component", |n| n.name()),
-                        published.name().unwrap_or("its kit"),
-                        doc.get(own).map_or("component", |n| n.name()),
+                        match src.get(*top) {
+                            Some(_) => crate::private::layer(src, *top),
+                            None => "That component".into(),
+                        },
+                        published
+                            .name()
+                            .map_or("its kit".into(), |n| crate::private::document(n, 0)),
+                        match doc.get(own) {
+                            Some(_) => crate::private::layer(doc, own),
+                            None => "component".into(),
+                        },
                     )
                 }
                 other => format!("That component could not be placed ({other:?})"),
@@ -1330,6 +1344,10 @@ fn push_grouped(groups: &mut Vec<(String, Vec<Item>)>, group: String, item: Item
 /// equals, ranked — a name that starts with the query, then one that holds it,
 /// then a match through a set's variants.
 fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
+    // A search over names finds nothing while they are masked.
+    if crate::private::on() {
+        return Vec::new();
+    }
     let mut scored: Vec<(u8, Item)> = Vec::new();
     let items = local.iter().chain(
         shown
@@ -1716,9 +1734,12 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
     }
     if items.is_empty() {
         ui.label(
-            egui::RichText::new("No components match")
-                .size(11.0)
-                .color(theme::text::faint()),
+            egui::RichText::new(match crate::private::on() {
+                true => crate::private::DECLINE_SEARCH,
+                false => "No components match",
+            })
+            .size(11.0)
+            .color(theme::text::faint()),
         );
     }
 }

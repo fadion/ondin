@@ -99,6 +99,7 @@ impl OndinApp {
         let Some((path, name)) = self.kit_return.clone() else {
             return;
         };
+        let name = crate::private::document(&name, 0);
         // Hand-painted so the text can light under the pointer: the cursor stays
         // the arrow, so the ink is the only hover cue.
         let galley = ui.painter().layout_no_wrap(
@@ -176,7 +177,10 @@ impl OndinApp {
             return;
         };
         let doc = &self.session.doc;
-        let Some(name) = doc.get(top).map(|n| n.name().to_string()) else {
+        let Some(name) = doc
+            .get(top)
+            .map(|_| crate::private::layer(doc, top).into_owned())
+        else {
             self.making_local = None;
             return;
         };
@@ -273,7 +277,10 @@ impl OndinApp {
         let doc = &self.session.doc;
         let names: Vec<String> = tops
             .iter()
-            .filter_map(|t| doc.get(*t).map(|n| n.name().to_string()))
+            .filter_map(|t| {
+                doc.get(*t)
+                    .map(|_| crate::private::layer(doc, *t).into_owned())
+            })
             .collect();
         let mut text = match names.as_slice() {
             [one] => format!("{one} is now a local main, at the top right of the canvas"),

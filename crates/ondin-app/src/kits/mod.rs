@@ -176,7 +176,7 @@ impl OndinApp {
         if !self.save_file(false) {
             return;
         }
-        let name = self.session.document_title();
+        let name = self.shown_title();
         self.session.info(format!(
             "{name} is a kit — nothing is shared until you publish it"
         ));
@@ -196,13 +196,24 @@ impl OndinApp {
             },
             KitError::Circular(own) => format!(
                 "The pasted component uses this kit's {}, so it cannot be pasted here",
-                doc.get(*own).map_or("component", |n| n.name())
+                match doc.get(*own) {
+                    Some(_) => crate::private::layer(doc, *own),
+                    None => "component".into(),
+                }
             ),
             // The kit's modes held here at another version than the copy's
             // (§15 D1064, `tokens::plan`).
             KitError::Modes(kit) => {
-                match doc.variables().kits().get(kit).and_then(|k| k.name.clone()) {
-                    Some(name) => format!("Accept {name}'s update first, then paste again"),
+                match doc
+                    .variables()
+                    .kits()
+                    .get(kit)
+                    .and_then(|k| k.name.as_deref())
+                {
+                    Some(name) => format!(
+                        "Accept {}'s update first, then paste again",
+                        crate::private::document(name, 0)
+                    ),
                     None => "Accept the kit's update first, then paste again".to_string(),
                 }
             }
@@ -232,7 +243,7 @@ impl OndinApp {
         if !self.save_file(false) {
             return;
         }
-        let name = self.session.document_title();
+        let name = self.shown_title();
         self.session.info(format!(
             "{name} is no longer shared — documents using it keep their copies"
         ));
@@ -263,8 +274,10 @@ impl OndinApp {
             return;
         };
         if let Err(e) = crate::library::store::set_kit(&self.library.root, &entry, sharing) {
-            self.session
-                .fail(format!("Could not change {}: {e}", entry.display_name()));
+            self.session.fail(format!(
+                "Could not change {}: {e}",
+                self.library.shown_entry(&entry)
+            ));
             return;
         }
         self.library.refresh();
@@ -281,7 +294,7 @@ impl OndinApp {
                 session.doc.set_meta(meta);
             }
         }
-        let name = entry.display_name();
+        let name = self.library.shown_entry(&entry);
         self.session.info(if sharing {
             format!("{name} is a kit — nothing is shared until you publish it")
         } else {
@@ -314,12 +327,15 @@ impl OndinApp {
                 .meta()
                 .kit
                 .as_ref()
-                .map(|k| (self.session.document_title(), k.version))
+                .map(|k| (self.shown_title(), k.version))
         } else {
             target
                 .as_deref()
                 .and_then(|p| self.library.entry_at(p))
-                .and_then(|e| e.meta.kit.as_ref().map(|k| (e.display_name(), k.version)))
+                .and_then(|e| {
+                    let name = self.library.shown_entry(e);
+                    e.meta.kit.as_ref().map(|k| (name, k.version))
+                })
         };
         let Some((name, version)) = found else {
             self.unsharing_kit = None;

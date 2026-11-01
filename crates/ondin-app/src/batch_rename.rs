@@ -873,6 +873,11 @@ impl OndinApp {
     /// when there is one and on the page when not; `search` is the layers tree's
     /// filter, which opens it on the page finding what the tree shows.
     pub(crate) fn open_batch_rename(&mut self, ctx: &egui::Context, search: Option<String>) {
+        // Its rows show every name before and after.
+        if crate::private::on() {
+            self.session.info(crate::private::DECLINE_RENAME);
+            return;
+        }
         self.palette = None;
         self.context_menu = None;
         self.open_menu = crate::app::TopMenu::None;

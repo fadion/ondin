@@ -690,6 +690,9 @@ impl OndinApp {
                             // A dot with the message on hover: a width-bound message
                             // would fade out on narrow windows.
                             crate::app::status_dot(ui, self.session.status());
+                            if crate::private::pill(ui) && !self.dash.menu_was_up {
+                                self.set_private(false);
+                            }
                         })
                         .response
                         .rect;
@@ -838,9 +841,22 @@ impl OndinApp {
         step: i32,
         act: &mut Option<Act>,
     ) -> Option<egui::Rect> {
-        let query = self.dash.search.clone().unwrap_or_default();
+        // A search over names finds nothing while they are masked, and the
+        // searches remembered from before may name what is hidden.
+        let private = crate::private::on();
+        let query = match private {
+            true => String::new(),
+            false => self.dash.search.clone().unwrap_or_default(),
+        };
+        let typed = self
+            .dash
+            .search
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty());
         let needle = query.trim().to_lowercase();
-        let recents: Vec<String> = if needle.is_empty() {
+        let recents: Vec<String> = if private {
+            Vec::new()
+        } else if needle.is_empty() {
             self.library.local.recent_searches.clone()
         } else {
             Vec::new()
@@ -875,12 +891,16 @@ impl OndinApp {
             found
         };
         let rows = recents.len() + projects.len() + files.len();
-        if rows == 0 && !needle.is_empty() {
+        if rows == 0 && (!needle.is_empty() || (private && typed)) {
             return Some(Self::search_panel(ui, anchor, 46.0, |ui, rect| {
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "No matches",
+                    if private {
+                        crate::private::DECLINE_SEARCH
+                    } else {
+                        "No matches"
+                    },
                     egui::FontId::proportional(11.5),
                     theme::text::dim(),
                 );
@@ -985,7 +1005,7 @@ impl OndinApp {
                     i,
                     icon::FILES,
                     theme::text::dim(),
-                    &e.display_name(),
+                    &self.library.shown_entry(e),
                     "File",
                 ) {
                     chosen = Some(Act::Open(e.path.clone()));
@@ -1254,6 +1274,7 @@ impl OndinApp {
         selected: bool,
     ) -> ProjectRowHit {
         let archived = matches!(kind, ProjectRowKind::Archived);
+        let shown = self.library.shown_project(p);
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), NAV_H),
             egui::Sense::click(),
@@ -1300,7 +1321,7 @@ impl OndinApp {
         painter.text(
             egui::pos2(rect.left() + 34.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
-            &p.name,
+            &shown,
             egui::FontId::proportional(12.5),
             fg,
         );
@@ -1418,7 +1439,7 @@ impl OndinApp {
                 .projects
                 // `destination`, as the card files: an archived project files as none.
                 .destination(id)
-                .map(|p| format!("Drop to import into {}", p.name)),
+                .map(|p| format!("Drop to import into {}", self.library.shown_project(p))),
             _ => None,
         };
         p.text(
@@ -1540,7 +1561,12 @@ impl OndinApp {
                         .clicked()
                         && !self.dash.menu_was_up
                     {
-                        self.dash.edit_project = Some(EditProject::of(&p));
+                        // Its name field shows the real name.
+                        if crate::private::on() {
+                            self.session.info(crate::private::DECLINE_RENAME);
+                        } else {
+                            self.dash.edit_project = Some(EditProject::of(&p));
+                        }
                     }
                 }
                 // A segmented track, not two icon buttons: one of grid and list is always on.
@@ -1606,7 +1632,7 @@ impl OndinApp {
             .filter
             .as_ref()
             .and_then(|id| self.library.projects.projects.iter().find(|p| &p.id == id))
-            .map(|p| (p.name.clone(), swatch(&p.color)));
+            .map(|p| (self.library.shown_project(p), swatch(&p.color)));
         if self.dash.filter.is_some() && current.is_none() {
             self.dash.filter = None;
         }
@@ -1669,12 +1695,10 @@ impl OndinApp {
     fn project_filter_menu(&mut self, ui: &mut egui::Ui, anchor: egui::Rect) {
         let mut rows: Vec<(Option<String>, String, egui::Color32)> =
             vec![(None, ALL_PROJECTS.to_owned(), theme::text::dim())];
-        rows.extend(
-            self.library
-                .projects
-                .active()
-                .map(|p| (Some(p.id.clone()), p.name.clone(), swatch(&p.color))),
-        );
+        rows.extend(self.library.projects.active().map(|p| {
+            let name = self.library.shown_project(p);
+            (Some(p.id.clone()), name, swatch(&p.color))
+        }));
 
         let w = FILTER_MENU_W;
         let current = self.dash.filter.clone();
@@ -1751,7 +1775,10 @@ impl OndinApp {
                         .project_touched(id)
                         .map(|t| clock::relative_label(clock::since(t)).to_lowercase())
                         .unwrap_or_else(|| "never".into());
-                    (p.name.clone(), format!("{{n}} files · updated {touched}"))
+                    (
+                        self.library.shown_project(p),
+                        format!("{{n}} files · updated {touched}"),
+                    )
                 }
                 None => ("Project".into(), "{n} files".into()),
             },
@@ -1841,6 +1868,7 @@ impl OndinApp {
         count: usize,
         touched: &str,
     ) -> bool {
+        let shown = self.library.shown_project(p);
         let (rect, resp) =
             ui.allocate_exact_size(egui::vec2(w, PROJECT_CARD_H), egui::Sense::click());
         let lit = resp.hovered();
@@ -1879,7 +1907,7 @@ impl OndinApp {
         painter.text(
             egui::pos2(rect.left() + PROJECT_PAD + DOT + 7.0, name_y),
             egui::Align2::LEFT_CENTER,
-            elide(ui, &p.name, 12.5, w - PROJECT_PAD * 2.0 - DOT - 7.0),
+            elide(ui, &shown, 12.5, w - PROJECT_PAD * 2.0 - DOT - 7.0),
             egui::FontId::proportional(12.5),
             theme::text::strong(),
         );
@@ -1951,7 +1979,7 @@ impl OndinApp {
                 .library
                 .projects
                 .destination(id)
-                .map(|p| p.name.clone()),
+                .map(|p| self.library.shown_project(p)),
             _ => None,
         }
     }
@@ -2177,7 +2205,7 @@ impl OndinApp {
             ui.painter().text(
                 egui::pos2(rect.left() + 12.0, thumb.bottom() + 15.0),
                 egui::Align2::LEFT_CENTER,
-                elide(ui, &entry.display_name(), 12.5, w - 46.0),
+                elide(ui, &self.library.shown_entry(entry), 12.5, w - 46.0),
                 egui::FontId::proportional(12.5),
                 theme::text::strong(),
             );
@@ -2346,6 +2374,16 @@ impl OndinApp {
         // The editor's chord, read here because `input::resolve` is not.
         if crate::input::cheatsheet_chord(ctx) {
             self.open_cheatsheet(crate::cheatsheet::Opened::Library);
+            return;
+        }
+        // Private mode, as in the editor: a shared screen often starts here.
+        if ctx.input(|i| {
+            i.modifiers.command
+                && i.modifiers.shift
+                && !i.modifiers.alt
+                && i.key_pressed(egui::Key::N)
+        }) {
+            self.set_private(!self.prefs.private);
             return;
         }
         let (arrow, enter, delete, escape, rename, new_file, duplicate, rename_chord, plain, chord) =
@@ -2553,10 +2591,10 @@ impl OndinApp {
         let project = self
             .library
             .project_of(entry)
-            .map(|p| p.name.clone())
+            .map(|p| self.library.shown_project(p))
             .unwrap_or_else(|| "—".into());
         let cells = [
-            entry.display_name(),
+            self.library.shown_entry(entry),
             project,
             clock::relative_label(clock::since(entry.modified)),
             entry
@@ -2920,6 +2958,10 @@ impl OndinApp {
                         Err(e) => self.session.fail(format!("Restore failed: {e}")),
                     }
                 }
+            }
+            // The field opens on the real name.
+            Act::StartRename(..) if crate::private::on() => {
+                self.session.info(crate::private::DECLINE_RENAME);
             }
             Act::StartRename(path, name) => self.rename_entry = Some((path, name, false)),
             Act::CommitRename => self.commit_rename(),
@@ -3575,13 +3617,14 @@ impl OndinApp {
             return;
         };
         let count = self.library.file_count(&id);
+        let shown = self.library.shown_project(&project);
         // `active`, for `move_modal`'s reason: an archived project is not a destination.
         let others: Vec<(String, String, String)> = self
             .library
             .projects
             .active()
             .filter(|p| p.id != id)
-            .map(|p| (p.id.clone(), p.name.clone(), p.color.clone()))
+            .map(|p| (p.id.clone(), self.library.shown_project(p), p.color.clone()))
             .collect();
         let mut cancel = false;
         let mut confirm = false;
@@ -3593,7 +3636,7 @@ impl OndinApp {
             }
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new(format!("“{}” can't be brought back.", project.name))
+                egui::RichText::new(format!("“{shown}” can't be brought back."))
                     .size(12.0)
                     .color(theme::text::muted()),
             );
@@ -3685,7 +3728,7 @@ impl OndinApp {
         let name = self
             .library
             .entry_at(&path)
-            .map(|e| e.display_name())
+            .map(|e| self.library.shown_entry(e))
             .unwrap_or_default();
         // Archived projects are not destinations, except the one this document is
         // already in, or the sheet would show it as unfiled.
@@ -3696,6 +3739,10 @@ impl OndinApp {
             && home.archived
         {
             projects.push(home.clone());
+        }
+        // Copies, read only for their rows: named as drawn.
+        for p in &mut projects {
+            p.name = self.library.shown_project(p);
         }
         let mut chosen: Option<Option<String>> = None;
         let mut cancel = false;
@@ -4181,11 +4228,12 @@ impl OndinApp {
         let name = self
             .library
             .entry_at(&path)
-            .map(|e| e.display_name())
+            .map(|e| self.library.shown_entry(e))
             .or_else(|| {
                 path.file_stem()
                     .and_then(|s| s.to_str())
                     .map(|stem| crate::library::scan::display_name(&Default::default(), stem))
+                    .map(|name| crate::private::document(&name, 0).into_owned())
             })
             .unwrap_or_else(|| "this file".into());
         let mut decision: Option<bool> = None;
@@ -4239,7 +4287,7 @@ impl OndinApp {
         let name = self
             .library
             .entry_at(path)
-            .map(|e| e.display_name())
+            .map(|e| self.library.shown_entry(e))
             .unwrap_or_else(|| "This document".into());
         let mut done = false;
         let modal = settings::card("missing-file", ctx, |ui| {

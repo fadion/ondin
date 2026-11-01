@@ -74,7 +74,8 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
         .filter(|(_, e)| e.meta.kit.as_ref().is_some_and(|k| k.is_shared()))
         .map(|(id, e)| KitEntry {
             id: id.to_string(),
-            name: e.display_name(),
+            // As drawn: every reader of a kit's name shows it.
+            name: lib.shown_entry(e),
             path: e.path.clone(),
             modified: e.modified,
             version: e.meta.kit.as_ref().map_or(0, |k| k.version),
@@ -142,7 +143,10 @@ pub(crate) fn kit_heading(
     let found = library.iter().find(|k| k.id == origin.kit);
     let name = found
         .map(|k| k.name.clone())
-        .or_else(|| origin.name.clone())
+        .or_else(|| {
+            let name = origin.name.as_deref()?;
+            Some(crate::private::document(name, 0).into_owned())
+        })
         .unwrap_or_else(|| "Kit".into());
     let status = match found {
         Some(_) => format!("v{}", origin.version),

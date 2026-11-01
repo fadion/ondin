@@ -41,7 +41,7 @@ const PAGE: usize = 8;
 
 /// The open palette.
 pub(crate) struct Palette {
-    query: String,
+    pub(crate) query: String,
     /// `Tab`'s scope: layers only, shown as a chip in the field.
     layers_only: bool,
     /// An index into this frame's selectable entries, top to bottom.
@@ -341,7 +341,7 @@ const TEXT_CHORDS: [TextChord; 13] = [
     TextChord::Align(ondin_core::TextAlign::Justify),
 ];
 
-const SWITCHES: [ViewSwitch; 17] = [
+const SWITCHES: [ViewSwitch; 18] = [
     ViewSwitch::Rulers,
     ViewSwitch::Guides,
     ViewSwitch::GuideLock,
@@ -359,6 +359,7 @@ const SWITCHES: [ViewSwitch; 17] = [
     ViewSwitch::SnapGrid,
     ViewSwitch::SnapBaselines,
     ViewSwitch::Lasso,
+    ViewSwitch::Private,
 ];
 
 /// The highlighted row's ground: the accent at 18%.
@@ -527,7 +528,7 @@ impl OndinApp {
             ),
         );
         for page in doc.page_ids() {
-            let name = self.page_name(page);
+            let name = self.shown_page_name(page);
             let mut go = Cmd::verb(
                 Item::GoToPage(page),
                 (page == self.session.page).then_some("This is the current page"),
@@ -683,6 +684,11 @@ impl OndinApp {
     fn palette_layers(&self, needle: &str, cap: usize) -> (Vec<LayerHit>, usize) {
         let doc = &self.session.doc;
         let root = self.session.page;
+        // A search over names finds nothing while they are masked: a hit would
+        // say what the hidden name holds.
+        if crate::private::on() {
+            return (Vec::new(), 0);
+        }
         let ids: Vec<NodeId> = crate::panels::layers::name_hits(doc, root, needle)
             .into_iter()
             .filter(|id| *id != root)
@@ -825,15 +831,10 @@ impl OndinApp {
             Target::TextSession => "Editing text".into(),
             Target::Points => "Points on the path".into(),
             Target::Guide(_) => "A guide".into(),
-            Target::Page(p) => self.page_name(p),
+            Target::Page(p) => self.shown_page_name(p),
             Target::Canvas | Target::PanelBackground => "Nothing selected".into(),
             Target::Layer { id, .. } => {
-                let name = self
-                    .session
-                    .doc
-                    .get(id)
-                    .map(|n| n.name().to_string())
-                    .unwrap_or_default();
+                let name = crate::private::layer(&self.session.doc, id).into_owned();
                 match self.session.selection.ids().len() {
                     0 | 1 => name,
                     2 => format!("{name} and 1 more"),
@@ -1402,6 +1403,7 @@ fn no_match(ui: &mut egui::Ui, pal: &Palette) {
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::empty());
     let q = pal.query.trim();
     let text = match (pal.layers_only, q.is_empty()) {
+        (true, _) if crate::private::on() => crate::private::DECLINE_SEARCH.to_string(),
         (true, true) => "This document has no layers".to_string(),
         (true, false) => format!("No layer matches “{q}”"),
         (false, _) => format!("No command or layer matches “{q}”"),

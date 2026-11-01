@@ -532,7 +532,10 @@ impl OndinApp {
             }
             // §15 D1036 (2): a kit built on this one.
             Err(ondin_core::kit::KitError::Circular(own)) => {
-                let own = self.session.doc.get(own).map_or("component", |n| n.name());
+                let own = match self.session.doc.get(own) {
+                    Some(_) => crate::private::layer(&self.session.doc, own),
+                    None => "component".into(),
+                };
                 self.session.fail(format!(
                     "This update uses this kit's own {own}, so it cannot be taken here"
                 ));
@@ -553,12 +556,12 @@ impl OndinApp {
             .removed
             .iter()
             .filter_map(|m| {
-                let n = doc.get(*m)?;
+                doc.get(*m)?;
                 let here = ondin_core::component::instances_of(doc, *m)
                     .into_iter()
                     .filter(|i| !doc.in_vault(*i))
                     .count();
-                (here > 0).then(|| (n.name().to_string(), here))
+                (here > 0).then(|| (crate::private::layer(doc, *m).into_owned(), here))
             })
             .collect();
         let mut tx = update.tx;
@@ -622,11 +625,11 @@ impl OndinApp {
         if let Some(t) = tokens(update.vars_removed.len(), update.styles_removed.len()) {
             toast = format!("{toast} · {t} the kit removed detached, values kept");
         }
-        if let Some(first) = update.made_local.first().and_then(|m| doc.get(*m)) {
+        if let Some(&first) = update.made_local.first().filter(|m| doc.get(**m).is_some()) {
             toast = match update.made_local.len() {
                 1 => format!(
                     "{toast} · {} is now a local main, at the top right of the canvas",
-                    first.name()
+                    crate::private::layer(doc, first)
                 ),
                 n => format!(
                     "{toast} · {n} removed components are now local mains, at the top right"

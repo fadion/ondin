@@ -1320,7 +1320,10 @@ impl OndinApp {
         // children (§15 D180).
         let label = match (subjects.len(), self.session.doc.get(subjects[0])) {
             // The layer's name, so the button is worth reading before pressing.
-            (1, Some(n)) => format!("Export {}", n.name()),
+            (1, Some(n)) => format!(
+                "Export {}",
+                crate::private::layer(&self.session.doc, n.id())
+            ),
             (n, _) => format!("Export {n} layers"),
         };
         let mut go = false;
@@ -1761,6 +1764,8 @@ impl OndinApp {
         let live: Vec<&RunningExport> = self.exports.iter().filter(|e| !e.cancelled()).collect();
         match live.as_slice() {
             [] => None,
+            // The label is a file name, made from a layer's.
+            [_] if crate::private::on() => Some("Exporting 1 export…".into()),
             [one] => Some(format!("Exporting {}…", one.label)),
             many => Some(format!("Exporting {} exports…", many.len())),
         }
@@ -1846,7 +1851,7 @@ impl OndinApp {
         let whose = match &asker {
             Some(path) if self.session.path.as_ref() != Some(path) => path
                 .file_stem()
-                .map(|s| format!("{}: ", s.to_string_lossy()))
+                .map(|s| format!("{}: ", crate::private::document(&s.to_string_lossy(), 0)))
                 .unwrap_or_default(),
             _ => String::new(),
         };
@@ -1867,7 +1872,10 @@ impl OndinApp {
         // One file by its name, so a report is never mistaken for another export's.
         let head = match (head, to_folder, replaced) {
             (Some(head), ..) => head,
-            (None, false, _) | (None, true, 0) if written == 1 && name.is_some() => {
+            // A file is named after its layer, which private mode masks.
+            (None, false, _) | (None, true, 0)
+                if written == 1 && name.is_some() && !crate::private::on() =>
+            {
                 format!("Exported {}", name.unwrap_or_default())
             }
             (None, false, _) | (None, true, 0) => export_count(written),

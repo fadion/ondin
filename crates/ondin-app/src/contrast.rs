@@ -244,7 +244,10 @@ impl OndinApp {
     pub(crate) fn contrast_target(&self) -> (Vec<NodeId>, Option<String>) {
         let doc = &self.session.doc;
         let page = self.session.page;
-        let name = |id: NodeId| doc.get(id).map(|n| n.name().to_string());
+        let name = |id: NodeId| {
+            doc.get(id)
+                .map(|_| crate::private::layer(doc, id).into_owned())
+        };
         let sel = self.session.selection.ids();
         if let Some(&first) = sel.first() {
             let top = top_level(doc, page, first);
@@ -706,7 +709,12 @@ impl OndinApp {
         let at =
             c.at.and_then(|a| fails.iter().position(|f| *f == a))
                 .map(|i| i + 1);
-        let scope_name = c.scope_name.clone();
+        // A one-layer scope is named as drawn now, so private mode turned on
+        // during a check masks it.
+        let scope_name = match c.scope.as_slice() {
+            [one] => Some(crate::private::layer(&self.session.doc, *one).into_owned()),
+            _ => c.scope_name.clone(),
+        };
         // What the chip's click would check: `contrast_target`'s first question.
         let selected = !self.session.selection.ids().is_empty();
         // Below the top ruler, which is drawn over the canvas's top edge.
@@ -949,7 +957,7 @@ impl OndinApp {
         let Some(card) = &c.fix else { return };
         let doc = &self.session.doc;
         let id = card.id;
-        let name = doc.get(id).map_or("", |n| n.name()).to_string();
+        let name = crate::private::layer(doc, id).into_owned();
         let f = card.finding.clone();
         let (nearest_notes, var_notes) = (card.nearest_notes.clone(), card.var_notes.clone());
         let (nearest, vars, opening) = (card.nearest, card.vars.clone(), card.opening);

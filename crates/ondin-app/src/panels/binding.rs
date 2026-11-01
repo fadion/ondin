@@ -525,11 +525,13 @@ pub(crate) fn matches<'a>(
 
 /// What a kit is called where its variables are listed (§15 D1065): its name as
 /// it arrived, else *Kit* — the id alone names nothing a person recognises.
+/// Masked in private mode, as every drawn document name is.
 pub(crate) fn kit_label(table: &ondin_core::Variables, kit: &str) -> String {
     table
         .kits()
         .get(kit)
-        .and_then(|k| k.name.clone())
+        .and_then(|k| k.name.as_deref())
+        .map(|n| crate::private::document(n, 0).into_owned())
         .unwrap_or_else(|| "Kit".to_string())
 }
 
@@ -537,8 +539,14 @@ pub(crate) fn kit_label(table: &ondin_core::Variables, kit: &str) -> String {
 /// name its modes arrived with, else the one a vault main of it carries
 /// (`kit::Origin::name`), else *Kit* (§15 D1065).
 pub(crate) fn kit_name(doc: &ondin_core::Document, kit: &str) -> String {
-    if let Some(n) = doc.variables().kits().get(kit).and_then(|k| k.name.clone()) {
-        return n;
+    let shown = |n: &str| crate::private::document(n, 0).into_owned();
+    if let Some(n) = doc
+        .variables()
+        .kits()
+        .get(kit)
+        .and_then(|k| k.name.as_deref())
+    {
+        return shown(n);
     }
     doc.vault()
         .and_then(|v| doc.get(v))
@@ -546,7 +554,8 @@ pub(crate) fn kit_name(doc: &ondin_core::Document, kit: &str) -> String {
         .flat_map(|v| v.children().iter())
         .filter_map(|c| doc.get(*c).and_then(|n| n.origin()))
         .find(|o| o.kit == kit)
-        .and_then(|o| o.name.clone())
+        .and_then(|o| o.name.as_deref())
+        .map(shown)
         .unwrap_or_else(|| "Kit".to_string())
 }
 

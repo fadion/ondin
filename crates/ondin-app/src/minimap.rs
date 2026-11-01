@@ -476,7 +476,10 @@ impl OndinApp {
             .rev()
             .filter(|id| self.shown_visible(*id))
             .find(|id| self.minimap_box_of(*id).is_some_and(|b| b.contains(world)))
-            .and_then(|id| doc.get(id).map(|n| n.name().to_string()))
+            .and_then(|id| {
+                doc.get(id)
+                    .map(|_| crate::private::layer(doc, id).into_owned())
+            })
     }
 }
 

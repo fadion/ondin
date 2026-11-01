@@ -481,11 +481,8 @@ impl OndinApp {
     fn component_face(&mut self) -> Option<Face> {
         let ids = ondin_core::build::outermost(&self.session.doc, self.session.selection.ids());
         let doc = &self.session.doc;
-        let name = |id: NodeId| {
-            doc.get(id)
-                .map(|n| n.name().to_string())
-                .unwrap_or_default()
-        };
+        // As drawn: every name this face carries is shown.
+        let name = |id: NodeId| crate::private::layer(doc, id).into_owned();
         let main_of = |root: NodeId| component::main_of(doc, root);
         if let [one] = ids.as_slice() {
             let node = doc.get(*one)?;
@@ -503,7 +500,7 @@ impl OndinApp {
                     });
                 }
                 return Some(Face::Main {
-                    name: node.name().to_string(),
+                    name: name(*one),
                     instances,
                 });
             }
@@ -648,12 +645,7 @@ impl OndinApp {
                         set_name,
                         instances,
                     } => {
-                        let name = app
-                            .session
-                            .doc
-                            .get(*main)
-                            .map(|n| n.name().to_string())
-                            .unwrap_or_default();
+                        let name = crate::private::layer(&app.session.doc, *main).into_owned();
                         let link = Some((*set, set_name.as_str()));
                         heading(ui, true, "Variant in", link, None, "", &mut act);
                         if name_and_count(ui, &name, Some(*instances)).clicked {

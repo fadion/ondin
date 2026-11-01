@@ -425,7 +425,7 @@ impl crate::app::OndinApp {
         // name in the corner, fading as the counter does. No title slide is made.
         let page_alpha = counter_alpha(since_page);
         if page_place.1 > 1 && page_alpha > 0.0 {
-            let name = self.page_name(page);
+            let name = self.shown_page_name(page);
             page_chip(
                 &painter,
                 rect,
@@ -436,12 +436,7 @@ impl crate::app::OndinApp {
         }
         let alpha = counter_alpha(since);
         if alpha > 0.0 {
-            let name = self
-                .session
-                .doc
-                .get(frame)
-                .map(|n| n.name().to_string())
-                .unwrap_or_default();
+            let name = crate::private::layer(&self.session.doc, frame);
             counter(
                 &painter,
                 rect,

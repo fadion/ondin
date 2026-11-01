@@ -904,6 +904,11 @@ impl OndinApp {
         if !self.library_writable() {
             return;
         }
+        // The card names what it reads and asks what to call it.
+        if crate::private::on() {
+            self.session.info("Leave private mode to import");
+            return;
+        }
         let mut card = ImportCard::new(self.nav_project().map(|p| p.id));
         // The keychain can block (a locked macOS keychain asks), so off the frame.
         card.token_job = Some(Job::spawn(

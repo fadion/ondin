@@ -162,6 +162,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D750** Focus mode hides the panels but keeps the rulers, guides and layout grids: they are editing aids, not app chrome.
 - **Focus mode and present mode are separate modes**: focus mode is for editing with the chrome hidden; present mode is view-only.
 - **Present mode is its own branch of `OndinApp::ui`**, which reads only its own keys and returns, not a flag the overlays and commands check.
+- **Private mode hides names, not content, and is a saved preference**: every drawn layer, page, document and project name is masked as its kind and place while the work itself stays on screen, and a restart in the middle of a shared screen comes back masked.
 - **A contrast fix passes in every mode or is not offered.** A raw colour is the same in all modes, so the nearest colour must pass every mode's worst backdrop and only variables passing in every mode are listed; when no lightness at the hue passes everywhere, only variables are offered.
 - **Renaming is two verbs**: *Rename* (`Ctrl+R`, `F2`) is the layers tree's field for one layer, *Batch rename…* (`Ctrl+Shift+R`) a box for many. With two or more layers selected `Ctrl+R` opens the box rather than refusing, the verb that fits them.
 - **D749** The dashboard's default page is set only in Settings.

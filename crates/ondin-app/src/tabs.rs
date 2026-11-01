@@ -261,7 +261,16 @@ impl OndinApp {
         self.tabs.list.iter().map(|t| self.tab_info(t)).collect()
     }
 
+    /// `tab` as drawn, its document and project names masked in private mode
+    /// (the document by its place in the strip).
     fn tab_info(&self, tab: &Tab) -> TabInfo {
+        let mut info = self.tab_info_named(tab);
+        let place = self.tabs.list.iter().position(|t| t.id == tab.id);
+        info.name = crate::private::document(&info.name, place.unwrap_or(0)).into_owned();
+        info
+    }
+
+    fn tab_info_named(&self, tab: &Tab) -> TabInfo {
         let of_session = |s: &EditorSession| {
             let meta = s.doc.meta();
             TabInfo {
@@ -306,8 +315,26 @@ impl OndinApp {
     }
 
     fn project_name(&self, id: Option<&str>) -> Option<String> {
-        id.and_then(|id| self.library.projects.get(id))
-            .map(|p| p.name.clone())
+        id.and_then(|id| self.shown_project_name(id))
+    }
+
+    /// Project `id`'s name as drawn, masked in private mode by its place in the
+    /// library's list; `None` for a project the library does not hold.
+    pub(crate) fn shown_project_name(&self, id: &str) -> Option<String> {
+        let p = self.library.projects.get(id)?;
+        Some(self.library.shown_project(p))
+    }
+
+    /// The front document's title as drawn, masked in private mode by the front
+    /// tab's place in the strip.
+    pub(crate) fn shown_title(&self) -> String {
+        let title = self.session.document_title();
+        let place = self
+            .tabs
+            .active
+            .and_then(|a| self.tabs.list.iter().position(|t| t.id == a))
+            .unwrap_or(0);
+        crate::private::document(&title, place).into_owned()
     }
 
     /// The tabs with unsaved work, in strip order.

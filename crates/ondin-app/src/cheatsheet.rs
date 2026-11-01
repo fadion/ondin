@@ -170,6 +170,7 @@ fn sections(lead: Lead) -> Vec<Section> {
         ViewSwitch::Minimap,
         ViewSwitch::Toolbar,
         ViewSwitch::Focus,
+        ViewSwitch::Private,
         ViewSwitch::SnapShapes,
         ViewSwitch::SnapGuides,
         ViewSwitch::SnapGrid,

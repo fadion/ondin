@@ -968,7 +968,10 @@ impl EditorSession {
         if !layers.is_empty() {
             self.selection.set(layers);
         }
-        self.doc.get(page).map(|n| n.name().to_string())
+        // For the toast, so as drawn.
+        self.doc
+            .get(page)
+            .map(|_| crate::private::page(&self.doc, page).into_owned())
     }
 
     /// The shaped text layout including any live edit.

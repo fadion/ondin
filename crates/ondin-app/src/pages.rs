@@ -91,6 +91,12 @@ impl OndinApp {
             .map_or_else(String::new, |n| n.name().to_string())
     }
 
+    /// A page's name as drawn, masked in private mode (`crate::private::page`).
+    /// [`Self::page_name`] is the name itself, for comparing, renaming and files.
+    pub(crate) fn shown_page_name(&self, page: NodeId) -> String {
+        crate::private::page(&self.session.doc, page).into_owned()
+    }
+
     /// Make `page` current — every door's one path. A live text edit is finished
     /// first, since it belongs to the page being left.
     pub(crate) fn go_to_page(&mut self, page: NodeId) {
@@ -285,6 +291,10 @@ impl OndinApp {
 
     /// Open `page`'s row for renaming.
     pub(crate) fn start_page_rename(&mut self, page: NodeId) {
+        if crate::private::on() {
+            self.session.info(crate::private::DECLINE_RENAME);
+            return;
+        }
         self.pages.renaming = Some(Renaming {
             page,
             text: self.page_name(page),
@@ -294,10 +304,19 @@ impl OndinApp {
         self.pages_unfold();
     }
 
+    /// Drop a page rename in progress, its typing with it.
+    pub(crate) fn cancel_page_rename(&mut self) {
+        self.pages.renaming = None;
+    }
+
     /// Open the row of `page`, made by the last commit, for renaming into that
     /// commit's undo step. A list dragged tall enough for every row grows by
     /// the new one rather than hiding it.
     fn start_new_page_rename(&mut self, page: NodeId) {
+        // Masked, the new page keeps the name it was given, with no word.
+        if crate::private::on() {
+            return;
+        }
         let rows = self.session.doc.pages().len() as f32 * ROW_H;
         if let Some(h) = self.prefs.pages_height
             && h >= rows - ROW_H - 0.5
@@ -432,7 +451,7 @@ impl OndinApp {
             self.pages.deleting = None;
             return;
         };
-        let name = self.page_name(page);
+        let name = self.shown_page_name(page);
         let body = format!(
             "“{name}” and its {} go with it. Ctrl+Z brings them back.",
             match layers {
@@ -491,6 +510,8 @@ impl OndinApp {
             return;
         }
         let name = self.page_name(page);
+        // Read now: the page is gone by the time the toast is written.
+        let shown = self.shown_page_name(page);
         let layers: Vec<NodeId> = doc
             .get(page)
             .map(|n| n.children().to_vec())
@@ -525,6 +546,7 @@ impl OndinApp {
             if leaving {
                 self.go_to_page(above);
             }
+            let name = shown;
             self.session.info(match detached {
                 0 => format!("Deleted page “{name}” · Ctrl+Z to undo"),
                 1 => format!("Deleted page “{name}” — 1 instance detached · Ctrl+Z to undo"),
@@ -546,7 +568,7 @@ impl OndinApp {
                 draft: !draft,
             }]))
         {
-            let name = self.page_name(page);
+            let name = self.shown_page_name(page);
             self.session.info(match draft {
                 true => format!("“{name}” is no longer a draft"),
                 false => {
@@ -579,7 +601,7 @@ impl OndinApp {
             }
         }
         let n = ids.len();
-        let name = self.page_name(page);
+        let name = self.shown_page_name(page);
         self.name_step_as(crate::menu::Item::MoveToPage);
         if self.session.commit(Transaction(ops)) {
             self.session.selection.clear();
@@ -600,7 +622,9 @@ impl OndinApp {
 
     /// The Pages section: header, the rows, and the divider above *Layers*.
     pub(crate) fn pages_section(&mut self, ui: &mut egui::Ui) {
-        let folded = self.prefs.pages_folded;
+        // Private mode folds it over the preference, which it leaves as it was.
+        let private = crate::private::on();
+        let folded = self.prefs.pages_folded || private;
         egui::Frame::NONE
             .inner_margin(egui::Margin {
                 left: crate::panels::layers::PAD_X,
@@ -613,8 +637,12 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     let (head, baseline) = fold_head(ui, "Pages", !folded);
                     if head.clicked() {
-                        self.prefs.pages_folded = !folded;
-                        self.prefs.save();
+                        if private {
+                            self.session.info(crate::private::DECLINE_LIST);
+                        } else {
+                            self.prefs.pages_folded = !folded;
+                            self.prefs.save();
+                        }
                     }
                     if folded {
                         // On the eyebrow's baseline, which centring the two would miss.
@@ -622,7 +650,7 @@ impl OndinApp {
                         // Clear of the `+` and its gap.
                         let room = ui.available_width() - 20.0 - 2.0 * ui.spacing().item_spacing.x;
                         let mut job = egui::text::LayoutJob::simple_singleline(
-                            self.page_name(self.session.page),
+                            self.shown_page_name(self.session.page),
                             egui::FontId::proportional(12.0),
                             theme::text::muted(),
                         );
@@ -768,7 +796,7 @@ impl OndinApp {
                 _ => theme::text::muted(),
             };
             if !renaming {
-                let name = self.page_name(*page);
+                let name = self.shown_page_name(*page);
                 p.text(
                     egui::pos2(rect.left() + NAME_X, cy),
                     egui::Align2::LEFT_CENTER,

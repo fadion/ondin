@@ -532,9 +532,7 @@ fn swap_list(
     preferred: &[NodeId],
     search: &str,
 ) -> Vec<SwapOption> {
-    let name_of = |d: &ondin_core::Document, id: NodeId| {
-        d.get(id).map(|n| n.name().to_string()).unwrap_or_default()
-    };
+    let name_of = |d: &ondin_core::Document, id: NodeId| crate::private::layer(d, id).into_owned();
     // A swap property's preferred mains lead, in their own order and once.
     let first = swap::preferred(doc, copy, preferred, search);
     let lead: Vec<SwapOption> = first
@@ -824,7 +822,7 @@ impl OndinApp {
         let doc = &self.session.doc;
         let Some(s) = doc.get(set) else { return };
         let Some(vs) = s.set().cloned() else { return };
-        let name = s.name().to_string();
+        let name = crate::private::layer(doc, set).into_owned();
         let variants = variant::variants(doc, set);
         let instances: usize = variants.iter().map(|v| self.instances_of(*v).len()).sum();
         let clash = clash_text(doc, set);
@@ -1313,11 +1311,7 @@ impl OndinApp {
                 .iter()
                 .map(|r| variant::shown_nested(doc, *r))
                 .collect();
-            let name_of = |id: NodeId| {
-                doc.get(id)
-                    .map(|n| n.name().to_string())
-                    .unwrap_or_default()
-            };
+            let name_of = |id: NodeId| crate::private::layer(doc, id).into_owned();
             per_root[0]
                 .iter()
                 .filter_map(|g| {
@@ -1424,7 +1418,9 @@ impl OndinApp {
                                 && variant::counterparts(doc, outer, p).contains(&root)
                         })
                         .map(|p| {
-                            let on = doc.get(outer).map(|o| o.name().to_string());
+                            let on = doc
+                                .get(outer)
+                                .map(|_| crate::private::layer(doc, outer).into_owned());
                             (p.name.clone(), on)
                         })
                 }),
@@ -1463,10 +1459,7 @@ impl OndinApp {
         }
         let on = variant::slot_is_shown(doc, root);
         let names = shown_names(doc, root);
-        let owner_name = doc
-            .get(owner)
-            .map(|o| o.name().to_string())
-            .unwrap_or_default();
+        let owner_name = crate::private::layer(doc, owner).into_owned();
         let caption = match names.len() {
             0 => "Nothing to show yet: its main has no properties".to_string(),
             1 => format!("{} appears on every {owner_name}", names[0]),
@@ -1510,11 +1503,7 @@ impl OndinApp {
         // committed in turn, its own undo step — the two touch different fields,
         // but for a text row's ↺ and its own field, where the ↺ wins (below).
         let mut out: Vec<Transaction> = Vec::new();
-        let name_of = |id: NodeId| {
-            doc.get(id)
-                .map(|n| n.name().to_string())
-                .unwrap_or_default()
-        };
+        let name_of = |id: NodeId| crate::private::layer(doc, id).into_owned();
         // The library's kits, for the swap pickers' headings: which kit a
         // vendored main is from, and whether the library can still find it.
         let kits = crate::kits::index::kits_in(&self.library, doc.meta().id.as_deref());
@@ -1681,7 +1670,7 @@ impl OndinApp {
                                 format!(
                                     "No {} variant in {}",
                                     variant::derived_name(&want),
-                                    doc.get(set).map(|s| s.name()).unwrap_or("")
+                                    crate::private::layer(doc, set)
                                 )
                             }),
                         }
@@ -2096,7 +2085,10 @@ impl OndinApp {
             }
             // §15 D1036 (2): a kit built on this one.
             Err(ondin_core::kit::KitError::Circular(own)) => {
-                let own = self.session.doc.get(own).map_or("component", |n| n.name());
+                let own = match self.session.doc.get(own) {
+                    Some(_) => crate::private::layer(&self.session.doc, own),
+                    None => "component".into(),
+                };
                 self.session.fail(format!(
                     "That component uses this kit's {own}, so it cannot be swapped in here"
                 ));
@@ -2180,7 +2172,7 @@ impl OndinApp {
                     .any(|p| p.kind == PropKind::Swap && p.bound.contains(s))
             })
             .map(|s| {
-                let name = doc.get(s).map(|n| n.name().to_string()).unwrap_or_default();
+                let name = crate::private::layer(doc, s).into_owned();
                 (s, name)
             })
             .collect();
@@ -2245,10 +2237,7 @@ impl OndinApp {
                                 .font(theme::icon_font(14.0))
                                 .color(theme::text::muted()),
                         );
-                        let name = doc
-                            .get(*slot)
-                            .map(|n| n.name().to_string())
-                            .unwrap_or_default();
+                        let name = crate::private::layer(doc, *slot).into_owned();
                         let name_resp = ui
                             .add(
                                 egui::Label::new(
@@ -2674,7 +2663,7 @@ fn property_row(
         .map(|n| {
             format!(
                 "{} · {}",
-                n.name(),
+                crate::private::layer(doc, n.id()),
                 match p.kind {
                     PropKind::Boolean => "visibility",
                     PropKind::Text => "content",
@@ -2767,7 +2756,10 @@ fn preferred_rows(
             );
             // A main since deleted keeps its place, named as gone.
             let (name, ink) = match doc.get(*m).filter(|n| n.component()) {
-                Some(n) => (n.name().to_string(), theme::text::strong()),
+                Some(n) => (
+                    crate::private::layer(doc, n.id()).into_owned(),
+                    theme::text::strong(),
+                ),
                 None => ("Deleted main".to_string(), theme::text::dim()),
             };
             let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
@@ -2793,7 +2785,7 @@ fn preferred_rows(
             .into_iter()
             .filter(|m| !p.preferred.contains(m))
             .map(|m| {
-                let name = doc.get(m).map(|n| n.name().to_string()).unwrap_or_default();
+                let name = crate::private::layer(doc, m).into_owned();
                 (SwapTarget::Here(m), name, None)
             })
             .collect()
@@ -2889,10 +2881,7 @@ fn say(doc: &ondin_core::Document, v: &Option<PropValue>) -> String {
         Some(PropValue::Boolean(true)) => "On".into(),
         Some(PropValue::Boolean(false)) => "Off".into(),
         Some(PropValue::Text(t)) => t.clone(),
-        Some(PropValue::Swap(m)) => doc
-            .get(*m)
-            .map(|n| n.name().to_string())
-            .unwrap_or_default(),
+        Some(PropValue::Swap(m)) => crate::private::layer(doc, *m).into_owned(),
         None => String::new(),
     }
 }

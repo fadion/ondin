@@ -393,10 +393,7 @@ impl OndinApp {
                 [] => "Nothing selected".to_string(),
                 _ => {
                     let who = match ids {
-                        [one] => doc
-                            .get(*one)
-                            .map(|n| n.name().to_string())
-                            .unwrap_or_default(),
+                        [one] => crate::private::layer(doc, *one).into_owned(),
                         many => format!("{} layers", many.len()),
                     };
                     match n {
@@ -3175,7 +3172,7 @@ impl OndinApp {
                 let name = table.mode(m).map(|m| m.name.clone()).unwrap_or_default();
                 let from = match from.and_then(|f| doc.get(f)) {
                     Some(f) if doc.is_page(f.id()) => "· from page".into(),
-                    Some(f) => format!("· from {}", f.name()),
+                    Some(f) => format!("· from {}", crate::private::layer(doc, f.id())),
                     None => "· default".into(),
                 };
                 (name, Some(from), false)

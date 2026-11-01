@@ -111,6 +111,7 @@ mod pencil;
 mod prefs;
 mod present;
 mod preview;
+mod private;
 mod render_cli;
 mod rulers;
 mod session;

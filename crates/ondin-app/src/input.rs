@@ -366,6 +366,10 @@ pub enum ViewSwitch {
     /// `Q` — the marquee draws a loop instead of a box, for Select and the Node
     /// tool alike (`crate::lasso`). Q is free: no tool uses it.
     Lasso,
+    /// `Ctrl+Shift+N`, a browser's private window — every drawn name masked
+    /// (`crate::private`). A preference, not a workspace switch, so it survives a
+    /// restart.
+    Private,
 }
 
 impl ViewSwitch {
@@ -389,6 +393,7 @@ impl ViewSwitch {
             Self::SnapGrid => "Snap to grid",
             Self::SnapBaselines => "Snap to baselines",
             Self::Lasso => "Lasso select",
+            Self::Private => "Private mode",
         }
     }
 
@@ -415,6 +420,7 @@ impl ViewSwitch {
             Self::SnapGuides => "Ctrl+Shift+;",
             Self::SnapGrid => "Ctrl+Shift+'",
             Self::Lasso => "Q",
+            Self::Private => "Ctrl+Shift+N",
             Self::LayoutGrid
             | Self::Outline
             | Self::History
@@ -429,8 +435,8 @@ impl ViewSwitch {
     /// rulers, then the guides that are pulled out of them, then the grid — and
     /// then the layout grid, adjacent so the two grid rows read against each other;
     /// then the panes (layers, history, minimap, toolbar, messages); then the modes,
-    /// Outline before Focus, then the marquee's shape.
-    pub const VIEW_MENU: [Self; 13] = [
+    /// Outline before Focus and Private, then the marquee's shape.
+    pub const VIEW_MENU: [Self; 14] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -443,6 +449,7 @@ impl ViewSwitch {
         Self::StatusMessages,
         Self::Outline,
         Self::Focus,
+        Self::Private,
         Self::Lasso,
     ];
 
@@ -456,7 +463,7 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -474,6 +481,7 @@ impl ViewSwitch {
         Self::SnapGrid,
         Self::SnapBaselines,
         Self::Lasso,
+        Self::Private,
     ];
 
     /// The Snap menu's rows.
@@ -1163,6 +1171,12 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             Action::ToggleView(ViewSwitch::Minimap),
             &mut out,
         );
+        // Private mode: a browser's private window. Clear of `Ctrl+N` by Shift.
+        on(
+            cmd_only && m.shift && i.key_pressed(egui::Key::N),
+            Action::ToggleView(ViewSwitch::Private),
+            &mut out,
+        );
 
         // --- path direction ---
         //
@@ -1493,8 +1507,9 @@ mod tests {
         );
     }
 
-    /// `Ctrl+N` and `Ctrl+W` resolve, `Ctrl+Shift+` of each stays unspent, and
-    /// `Alt+W` (align top) is not shadowed by `Ctrl+Alt+W`.
+    /// `Ctrl+N` and `Ctrl+W` resolve, `Ctrl+Shift+N` is private mode and
+    /// `Ctrl+Shift+W` unspent, and `Alt+W` (align top) is not shadowed by
+    /// `Ctrl+Alt+W`.
     ///
     /// flip: `W`'s `cmd_only` → bare `cmd` → fails at "Ctrl+Alt+W belongs to
     /// neither row" (the `Alt+W` assertion stays green).
@@ -1519,11 +1534,16 @@ mod tests {
             actions(Mode::Normal, vec![key(egui::Key::W, cmd)], cmd),
             vec![Action::CloseDocument]
         );
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::N, shift)], shift),
+            vec![Action::ToggleView(ViewSwitch::Private)],
+            "Ctrl+Shift+N is private mode, not a second new document"
+        );
+        assert!(
+            actions(Mode::Normal, vec![key(egui::Key::W, shift)], shift).is_empty(),
+            "Ctrl+Shift+W is unspent and stays unspent"
+        );
         for k in [egui::Key::N, egui::Key::W] {
-            assert!(
-                actions(Mode::Normal, vec![key(k, shift)], shift).is_empty(),
-                "Ctrl+Shift+{k:?} is unspent and stays unspent"
-            );
             assert!(
                 actions(Mode::TextInsert, vec![key(k, cmd)], cmd).is_empty(),
                 "and a live text session owns the keyboard — {k:?}"

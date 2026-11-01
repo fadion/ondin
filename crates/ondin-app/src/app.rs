@@ -943,6 +943,40 @@ pub(crate) fn system_clipboard_text() -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// What a *Copy as* door draws for a selection.
+pub(crate) enum CopySubject {
+    Nothing,
+    /// A lone slice: its world box and the page's top-level layers, as it exports.
+    Region(Rect, Vec<NodeId>),
+    /// The layers, in document order, any slice among them left out: it draws nothing.
+    Layers(Vec<NodeId>),
+}
+
+/// The [`CopySubject`] of the selection `ids`.
+pub(crate) fn copy_subject(
+    doc: &ondin_core::Document,
+    res: &ondin_core::Resolved,
+    ids: &[NodeId],
+) -> CopySubject {
+    let ids = build::in_document_order(doc, ids);
+    if let [one] = ids.as_slice()
+        && let Some((view, origins)) = ondin_export::plan::slice_region(doc, res, *one)
+    {
+        return CopySubject::Region(view, origins);
+    }
+    let layers: Vec<NodeId> = ids
+        .into_iter()
+        .filter(|id| {
+            !doc.get(*id)
+                .is_some_and(|n| matches!(n.kind(), NodeKind::Slice { .. }))
+        })
+        .collect();
+    match layers.is_empty() {
+        true => CopySubject::Nothing,
+        false => CopySubject::Layers(layers),
+    }
+}
+
 /// Every `arboard` handle this crate opens is opened under this lock: two threads
 /// opening the Windows clipboard at once corrupt the heap.
 ///
@@ -4194,17 +4228,28 @@ impl OndinApp {
     /// (`Selection::ids` is pick order). No [`Self::clipboard_stamp`]: `owns_the_clipboard`
     /// must answer no afterwards.
     pub(crate) fn copy_as_svg(&mut self, ctx: &egui::Context) {
-        let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
-        if ids.is_empty() {
-            return;
-        }
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
         // The reported form: the status line is the only place to say the markup is not
         // quite the document.
-        let out =
-            ondin_export::svg::svg_of_reported(&self.session.doc, &self.session.resolved, &ids);
+        let (out, n) = match copy_subject(doc, res, self.session.selection.ids()) {
+            CopySubject::Nothing => return,
+            CopySubject::Region(view, origins) => (
+                ondin_export::svg::svg_region(
+                    doc,
+                    res,
+                    &origins,
+                    view,
+                    ondin_core::ExportText::Live,
+                ),
+                1,
+            ),
+            CopySubject::Layers(ids) => (
+                ondin_export::svg::svg_of_reported(doc, res, &ids),
+                ids.len(),
+            ),
+        };
         let note = crate::panels::fidelity_clauses(&out.approximated, &out.round_trip);
         ctx.copy_text(out.svg);
-        let n = ids.len();
         self.session.info(match note {
             None => format!("Copied {n} layer(s) as SVG"),
             Some(note) => format!("Copied {n} layer(s) as SVG — {note}"),
@@ -4215,10 +4260,16 @@ impl OndinApp {
     /// naming it: a leaf's declarations, a container's rules for its subtree
     /// (`ondin_export::code::css_of`).
     pub(crate) fn copy_as_css(&mut self, ctx: &egui::Context) {
-        let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
-        if ids.is_empty() {
-            return;
-        }
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let ids = match copy_subject(doc, res, self.session.selection.ids()) {
+            CopySubject::Nothing => return,
+            CopySubject::Region(..) => {
+                self.session
+                    .info("A slice has no CSS: it is a region, not a layer");
+                return;
+            }
+            CopySubject::Layers(ids) => ids,
+        };
         let css = ondin_export::code::css_of(&self.session.doc, &self.session.resolved, &ids);
         ctx.copy_text(css);
         self.session
@@ -4234,10 +4285,16 @@ impl OndinApp {
     /// bytes would paste as noise. Ordered as in [`Self::copy_as_svg`]. No
     /// `clipboard_stamp`: it would make `owns_the_clipboard` answer yes for a flat picture.
     pub(crate) fn copy_as_png(&mut self, scale: u8) {
-        let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
-        if ids.is_empty() {
-            return;
-        }
+        let subject = copy_subject(
+            &self.session.doc,
+            &self.session.resolved,
+            self.session.selection.ids(),
+        );
+        let n = match &subject {
+            CopySubject::Nothing => return,
+            CopySubject::Region(..) => 1,
+            CopySubject::Layers(ids) => ids.len(),
+        };
         // `arboard` directly, since egui's clipboard is text-only; refused on a headless app.
         if !clipboard_is_reachable() {
             self.session
@@ -4245,9 +4302,8 @@ impl OndinApp {
             return;
         }
         let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
-        let n = ids.len();
         let job = crate::job::Job::spawn("ondin-copy-png", &self.egui_ctx, move || {
-            Self::png_for_the_clipboard(&doc, &resolved, &ids, scale)
+            Self::png_for_the_clipboard(&doc, &resolved, &subject, scale)
         });
         self.png_copy = Some((job, n));
         self.session.info("Copying as PNG…");
@@ -4304,14 +4360,20 @@ impl OndinApp {
     fn png_for_the_clipboard(
         doc: &ondin_core::Document,
         res: &ondin_core::Resolved,
-        ids: &[ondin_core::NodeId],
+        subject: &CopySubject,
         scale: u8,
     ) -> Option<ondin_export::png::Raster> {
         let opts = ondin_export::png::RasterOpts {
             scale: f64::from(scale.max(1)),
             ..Default::default()
         };
-        ondin_export::png::raster_of(doc, res, ids, &opts)
+        match subject {
+            CopySubject::Nothing => None,
+            CopySubject::Region(view, origins) => Some(ondin_export::png::raster_region(
+                doc, res, origins, *view, &opts,
+            )),
+            CopySubject::Layers(ids) => ondin_export::png::raster_of(doc, res, ids, &opts),
+        }
     }
 
     /// The layer *Copy properties* would lift an appearance off: the key layer, else a
@@ -9514,7 +9576,7 @@ mod image_edit_lock_tests {
 
 #[cfg(test)]
 mod copy_as_png_tests {
-    use super::OndinApp;
+    use super::{CopySubject, OndinApp, copy_subject};
     use ondin_core::kurbo::{Affine, Size};
     use ondin_core::peniko::Color;
     use ondin_core::{Brush, Document, Fill, IdSource, NodeKind, Operation, Resolved, Transaction};
@@ -9621,8 +9683,9 @@ mod copy_as_png_tests {
             "the fixture is not the rect this test thinks it is"
         );
 
-        let raster = OndinApp::png_for_the_clipboard(&doc, &res, &[rect], 1)
-            .expect("a rect with bounds rasterizes");
+        let raster =
+            OndinApp::png_for_the_clipboard(&doc, &res, &CopySubject::Layers(vec![rect]), 1)
+                .expect("a rect with bounds rasterizes");
 
         assert_eq!(
             (raster.width, raster.height),
@@ -9642,9 +9705,49 @@ mod copy_as_png_tests {
     #[test]
     fn the_2x_row_copies_twice_the_pixels() {
         let (doc, res, rect) = one_rect();
-        let raster = OndinApp::png_for_the_clipboard(&doc, &res, &[rect], 2)
-            .expect("a rect with bounds rasterizes");
+        let raster =
+            OndinApp::png_for_the_clipboard(&doc, &res, &CopySubject::Layers(vec![rect]), 2)
+                .expect("a rect with bounds rasterizes");
         assert_eq!((raster.width, raster.height), (200, 120));
+    }
+
+    /// A lone slice copies the region it exports, drawn through by the page's
+    /// layers, and a slice among layers is left out of their picture.
+    /// flip: `copy_subject` without its slice arm → fails at "a region".
+    #[test]
+    fn a_slice_copies_its_region() {
+        let (mut doc, _, rect) = one_rect();
+        let slice = ondin_core::IdSource::new(0x511C).mint();
+        let page = doc.page_of(rect).expect("a page");
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: slice,
+            parent: page,
+            index: 1,
+            kind: NodeKind::Slice {
+                size: ondin_core::kurbo::Size::new(20.0, 20.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a slice");
+        let res = Resolved::rebuild(&doc);
+        let at = res.world_bounds(rect).expect("the rect's box").origin();
+        doc.apply(&Transaction(vec![Operation::SetTransform {
+            id: slice,
+            transform: ondin_core::kurbo::Affine::translate(at.to_vec2()),
+        }]))
+        .expect("over the rect");
+        let res = Resolved::rebuild(&doc);
+
+        let subject = copy_subject(&doc, &res, &[slice]);
+        assert!(matches!(subject, CopySubject::Region(..)), "a region");
+        let raster = OndinApp::png_for_the_clipboard(&doc, &res, &subject, 1).expect("a picture");
+        assert_eq!((raster.width, raster.height), (20, 20));
+        assert!(raster.rgba.chunks(4).any(|p| p[3] > 0), "the rect under it");
+        assert!(
+            matches!(copy_subject(&doc, &res, &[slice, rect]), CopySubject::Layers(ids) if ids == [rect]),
+            "left out among layers"
+        );
     }
 
     /// An empty selection has no extent, and the row says so instead of putting a
@@ -9652,7 +9755,10 @@ mod copy_as_png_tests {
     #[test]
     fn nothing_selected_is_no_picture_rather_than_an_empty_one() {
         let (doc, res, _) = one_rect();
-        assert!(OndinApp::png_for_the_clipboard(&doc, &res, &[], 1).is_none());
+        assert!(
+            OndinApp::png_for_the_clipboard(&doc, &res, &CopySubject::Layers(Vec::new()), 1)
+                .is_none()
+        );
     }
 }
 

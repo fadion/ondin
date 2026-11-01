@@ -128,11 +128,15 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   (`app::rgba_to_png`), decodes pictures (`app::read_picture`) and builds SVG and PDF layers
   (`canvas::read_svg`, `canvas::read_pdf`) under a stand-in parent the landing replaces, minting ids
   from an `IdSource` of its own (`session::random_actor`); the session's `IdSource` stays the
-  frame's. Meanwhile the status says *Importing logo.svg…*, *Importing 3 files…*, *Pasting image…*
+  frame's. It registers the document's faces (`Resolved::text_fonts`) first, since a worker's text
+  engine holds only Inter and an SVG's text naming a family the document uses would read as
+  substituted. Meanwhile the status says *Importing logo.svg…*, *Importing 3 files…*, *Pasting image…*
   or *Pasting SVG…*.
-- **`poll_imports` lands it** (editor frame, beside `poll_simplify`), oldest first, held while a drag
-  or a pen run is live, whose end would write back a document from before the import, and while a
-  modal is up, which may be asking about the document as it stands. It lands only in the tab in
+- **`poll_imports` lands it** (editor frame, beside `poll_simplify`) in the order asked: one still
+  reading holds every later one for its tab, so a quick second paste never lands under a slow first.
+  It is held while a gesture is live (`gesture_live`: a drag, a pen run or a pencil stroke, whose end
+  would write back a document from before the import or lose its stroke to the landing's tool
+  change), and while a modal is up, which may be asking about the document as it stands. It lands only in the tab in
   front when it started (`Tabs::active`), and only while that tab is in front: a tab behind is never
   written to (`library.md`). An import whose tab has closed is dropped without a word, as is one
   started on the scratch session no tab shows, once a tab is active. `land_import` adopts the decoded pixels into the decode cache, then places as the door does,
@@ -140,8 +144,11 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   point, *Place image*'s by arming the Image tool; SVG and PDF through `place_svg` / `place_pdf`
   (`place_vectors`). A pasted picture lands through `land_pasted_image`, a pasted SVG through
   `place_svg` (*Pasted SVG — 5 layers*), and markup that sniffed as SVG but will not read as a text
-  layer (`paste_text`), the paste's last arm; *Replace image* through `replace_image_with`, nothing
-  when its layer or slot has gone.
+  layer (`paste_text`), the paste's last arm; *Replace image* through `replace_image_with`, only
+  while its slot still holds the brush it held when asked (`Door::Replace::was`): a slot edited,
+  emptied or deleted meanwhile is left alone and the status says the picture was not placed.
+  `place_svg` measures the import laid out alone, on a scratch page standing in for the parent, so a
+  landing never clones the document.
 - Lands at the pointer, cascaded 24 units per file; at the viewport centre with no pointer over the
   canvas. **One transaction per drop** — placements built via `canvas::image_tx` against a document
   advanced per picture (index, free name, embedded-blob check); every picture made is selected.

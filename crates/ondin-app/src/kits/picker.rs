@@ -872,7 +872,10 @@ impl OndinApp {
             .unwrap_or(self.session.page);
         let doc = self.session.doc.clone();
         let built = source.clone();
+        // The placement is centred on a box laid out on the worker, in these faces.
+        let fonts = self.session.resolved.text_fonts();
         let job = crate::job::Job::spawn("ondin-kit-place", &self.egui_ctx, move || {
+            ondin_core::text::register_font_data(&fonts);
             let mut ids = ondin_core::IdSource::new(crate::session::random_actor());
             build_placement(&doc, &mut ids, &built, parent, centre)
         });
@@ -890,7 +893,7 @@ impl OndinApp {
     /// pen run is live, whose end would write back a document from before it,
     /// and while a modal is up.
     fn poll_kit_place(&mut self) {
-        if !self.drag.is_none() || self.pen.is_some() || self.modal_is_up() {
+        if self.gesture_live() || self.modal_is_up() {
             return;
         }
         let Some(pl) = &self.kit_placing else { return };

@@ -6104,8 +6104,9 @@ impl OndinApp {
 
     /// Commit layers [`read_svg`] built as one undo step, under the parent
     /// [`Self::paste_placement`] picks for `at` and centred where it puts it, and
-    /// select them. Placed by applying to a clone, reading the bounds and correcting
-    /// the root's transform. The status is the caller's to write.
+    /// select them. Placed by laying the import out alone, on a scratch page that
+    /// stands in for the parent, and correcting the root's transform by its bounds'
+    /// centre. The status is the caller's to write.
     pub(crate) fn place_svg(
         &mut self,
         mut out: ondin_core::svg_in::Import,
@@ -6113,6 +6114,23 @@ impl OndinApp {
     ) -> SvgImport {
         let (centre, parent, parent_world) = self.paste_placement(at);
         let index = self.child_count(parent);
+
+        // The import alone, not a copy of the whole document: its box in the
+        // parent's space is the same, and a large document is not cloned per file.
+        let mut probe = ondin_core::Document::new(ondin_core::IdSource::new(1).mint());
+        let page = probe.first_page();
+        let mut alone = out.tx.clone();
+        if let Some(Operation::CreateNode {
+            parent: under,
+            index: at_index,
+            ..
+        }) = root_op(&mut alone, out.root)
+        {
+            (*under, *at_index) = (page, 0);
+        }
+        if probe.apply(&alone).is_err() {
+            return SvgImport::Unreadable;
+        }
         if let Some(Operation::CreateNode {
             parent: under,
             index: at_index,
@@ -6121,14 +6139,9 @@ impl OndinApp {
         {
             (*under, *at_index) = (parent, index);
         }
-
-        let mut probe = self.session.doc.clone();
-        if probe.apply(&out.tx).is_err() {
-            return SvgImport::Unreadable;
-        }
         if let Some(bounds) = ondin_core::Resolved::rebuild(&probe).world_bounds(out.root) {
             let inv = parent_world.inverse();
-            let delta = (inv * centre) - (inv * bounds.center());
+            let delta = (inv * centre) - bounds.center();
             if let Some(Operation::CreateNode { transform, .. }) = root_op(&mut out.tx, out.root) {
                 *transform = Some(Affine::translate(delta) * transform.unwrap_or(Affine::IDENTITY));
             }

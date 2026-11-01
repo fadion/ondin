@@ -24,7 +24,7 @@ pub(crate) struct Incoming {
 }
 
 /// Which door the files came through, which decides how they land.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum Door {
     /// Dropped at `at` (world), `alone` when the drop was one file, which a picture
     /// needs to replace the fill under it.
@@ -34,11 +34,13 @@ pub(crate) enum Door {
     Place,
     /// Pasted, at *Paste here*'s point or, with `None`, aimed by the selection.
     Paste { at: Option<Point> },
-    /// Picked in *Replace image*, for the picture in `slot` of `id`.
+    /// Picked in *Replace image*, for the picture in `slot` of `id`, which held
+    /// `was` when asked: a slot changed meanwhile is not written to.
     Replace {
         id: NodeId,
         slot: PaintSlot,
         keep_framing: bool,
+        was: Option<Box<ondin_core::Brush>>,
     },
 }
 
@@ -190,6 +192,7 @@ impl OndinApp {
             id,
             slot,
             keep_framing,
+            was: self.slot_brush(id, slot).map(Box::new),
         };
         self.start_reading(ctx, format!("Importing {name}…"), door, move |_, _| {
             // An unreadable file and a non-picture share one message.
@@ -249,6 +252,13 @@ impl OndinApp {
         });
     }
 
+    /// Whether a drag, a pen run or a pencil stroke is live: each writes back a
+    /// document from before a landing when it ends, or loses its stroke to the tool
+    /// change a landing makes, so work that lands waits for it.
+    pub(crate) fn gesture_live(&self) -> bool {
+        !self.drag.is_none() || self.pen.is_some() || self.pencil.is_some()
+    }
+
     /// Run `work` on a worker for the tab in front, the status saying `said`
     /// meanwhile. Layers it builds hang under the stand-in parent it is given, minted
     /// from its own `IdSource`; the landing replaces the parent.
@@ -262,7 +272,13 @@ impl OndinApp {
         self.session.info(said);
         let mut ids = IdSource::new(crate::session::random_actor());
         let parent = ids.mint();
-        let job = Job::spawn("ondin-import", ctx, move || work(&mut ids, parent));
+        // A worker's engine holds only Inter: an SVG naming the document's
+        // families reads them as available only once they are registered there.
+        let fonts = self.session.resolved.text_fonts();
+        let job = Job::spawn("ondin-import", ctx, move || {
+            ondin_core::text::register_font_data(&fonts);
+            work(&mut ids, parent)
+        });
         self.imports.push(Import {
             tab: self.tabs.active,
             door,
@@ -272,15 +288,10 @@ impl OndinApp {
     }
 
     /// Land every import read for the tab in front, oldest first; drop those whose
-    /// tab has closed. Held while a drag or a pen run is live, which would write
-    /// back a document from before the import when it ends, and while a modal is
-    /// up, which may be asking about the document as it stands.
+    /// tab has closed. Held while a gesture is live ([`Self::gesture_live`]) and
+    /// while a modal is up, which may be asking about the document as it stands.
     pub(crate) fn poll_imports(&mut self) {
-        if self.imports.is_empty()
-            || !self.drag.is_none()
-            || self.pen.is_some()
-            || self.modal_is_up()
-        {
+        if self.imports.is_empty() || self.gesture_live() || self.modal_is_up() {
             return;
         }
         for import in &mut self.imports {
@@ -314,9 +325,17 @@ impl OndinApp {
             None => tabs.active.is_none(),
         });
         let active = self.tabs.active;
+        // In the order asked: one still reading holds those asked after it.
+        let mut held = false;
         let (ready, waiting) = std::mem::take(&mut self.imports)
             .into_iter()
-            .partition(|i| i.read.is_some() && i.tab == active);
+            .partition(|i| {
+                if i.tab != active {
+                    return false;
+                }
+                held |= i.read.is_none();
+                !held
+            });
         self.imports = waiting;
         for import in ready {
             if let Some(read) = import.read {
@@ -404,9 +423,17 @@ impl OndinApp {
                 id,
                 slot,
                 keep_framing,
+                was,
             } => {
                 if let Some(image) = pictures.first() {
-                    self.replace_image_with(id, slot, keep_framing, image);
+                    if was.is_some() && self.slot_brush(id, slot).map(Box::new) == was {
+                        self.replace_image_with(id, slot, keep_framing, image);
+                    } else {
+                        self.session.fail(format!(
+                            "{} was not placed: the fill it was replacing changed while it read",
+                            image.label()
+                        ));
+                    }
                 }
             }
         }
@@ -528,6 +555,153 @@ mod tests {
             .collect()
     }
 
+    /// An SVG pasted with a turned frame selected lands inside it, centred on the
+    /// frame's centre: its box measured alone stands in the frame's own space.
+    /// flip: `place_svg` mapping the scratch bounds' centre through the parent's
+    /// inverse as well → fails at the centre assertion.
+    #[test]
+    fn a_pasted_svg_centres_in_a_turned_frame() {
+        use ondin_core::kurbo::{Affine, Size};
+        use ondin_core::{Operation, Transaction};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let page = app.session.doc.first_page();
+        let frame = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: frame,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(400.0, 200.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((300.0, 100.0)) * Affine::rotate(0.5)),
+            name: None,
+        }])));
+        app.session.selection.set_one(frame);
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><rect x="5" y="5" width="40" height="20" fill="red"/></svg>"#;
+        app.start_paste_svg(&ctx, svg.to_string(), None);
+        app.settle_imports();
+        let root = app.session.selection.single().expect("the import selected");
+        assert_eq!(
+            app.session.doc.get(root).and_then(|n| n.parent()),
+            Some(frame)
+        );
+        let res = &app.session.resolved;
+        let (got, want) = (
+            res.world_bounds(root).unwrap().center(),
+            res.world_bounds(frame).unwrap().center(),
+        );
+        assert!((got - want).hypot() < 1e-6, "{got:?} vs {want:?}");
+    }
+
+    /// Imports land in the order they were asked, whichever finished reading first:
+    /// a quick second one waits for a slow first.
+    /// flip: `land_ready` partitioning on `read.is_some()` alone → fails at "the
+    /// second waits".
+    #[test]
+    fn imports_land_in_the_order_asked() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let slow = Job::spawn("test-import", &ctx, move || {
+            let _ = wait.recv();
+            vec![Read::Text("first".into())]
+        });
+        let tab = app.tabs.active;
+        app.imports.push(Import {
+            tab,
+            door: Door::Paste { at: None },
+            job: Some(slow),
+            read: None,
+        });
+        app.imports.push(Import {
+            tab,
+            door: Door::Paste { at: None },
+            job: Some(Job::done(vec![Read::Text("second".into())])),
+            read: None,
+        });
+        let landed = |app: &OndinApp, s: &str| {
+            page_nodes(app)
+                .iter()
+                .any(|n| matches!(n.kind(), NodeKind::Text { content, .. } if content == s))
+        };
+        app.poll_imports();
+        assert!(!landed(&app, "second"), "the second waits");
+        go.send(()).unwrap();
+        app.settle_imports();
+        assert!(landed(&app, "first") && landed(&app, "second"));
+        // Document order, bottom first.
+        let order: Vec<String> = page_nodes(&app)
+            .iter()
+            .filter_map(|n| match n.kind() {
+                NodeKind::Text { content, .. } if content != "Ondin" => Some(content.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["first", "second"], "the first below");
+    }
+
+    /// A pasted SVG's text in a family the document uses lands in that family, read
+    /// on a worker whose engine was given the document's faces.
+    /// flip: `start_reading` without `register_font_data` → fails at the family.
+    #[test]
+    fn a_pasted_svgs_text_keeps_the_documents_family() {
+        use ondin_core::{Operation, Transaction};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        assert!(ondin_core::text::register_fonts_as(
+            ondin_core::text::bundled_inter()[0].to_vec(),
+            "Probe Sans"
+        ));
+        let page = app.session.doc.first_page();
+        let id = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent: page,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "Probe".into(),
+                style: Box::new(ondin_core::TextStyle {
+                    font_family: "Probe Sans".into(),
+                    font_size: 20.0,
+                    ..Default::default()
+                }),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: ondin_core::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }])));
+        assert!(
+            !app.session.resolved.text_fonts().is_empty(),
+            "fixture: a face drew"
+        );
+
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><text x="0" y="30" font-family="Probe Sans" font-size="20">Pasted</text></svg>"#;
+        app.start_paste_svg(&ctx, svg.to_string(), None);
+        app.settle_imports();
+        let pasted = page_nodes(&app)
+            .into_iter()
+            .find_map(|n| match n.kind() {
+                NodeKind::Text { content, style, .. } if content == "Pasted" => {
+                    Some(style.font_family.clone())
+                }
+                _ => None,
+            })
+            .expect("the text came in");
+        assert_eq!(pasted, "Probe Sans");
+        let status = &app.session.status().text;
+        assert!(!status.contains("substituted"), "{status}");
+    }
+
     /// Pasted SVG markup is read off the frame and lands as layers; markup that
     /// sniffs as SVG but will not read lands as the text layer the paste's last arm
     /// would have made.
@@ -603,9 +777,11 @@ mod tests {
     }
 
     /// *Replace image* reads its file off the frame and gives it to the slot; a file
-    /// that is not a picture is refused by name and leaves the fill alone.
+    /// that is not a picture is refused by name and leaves the fill alone, and so
+    /// does a picture whose fill changed while it read.
     ///
-    /// flip: `land_import`'s `Door::Replace` arm doing nothing → fails at "replaced".
+    /// flip: `land_import`'s `Door::Replace` arm doing nothing → fails at "replaced";
+    /// the arm without its `was` check → fails at "the changed fill stands".
     #[test]
     fn replace_image_reads_its_file_off_the_frame() {
         use ondin_core::kurbo::{Affine, Size};
@@ -659,6 +835,24 @@ mod tests {
         app.settle_imports();
         assert_eq!(app.session.status().text, "Could not read: notes.txt");
         assert!(!is_image(&app), "the fill stands");
+
+        // The fill edited while the file reads: the picture goes nowhere, and says so.
+        app.start_replace_image(&ctx, png.clone(), shape, slot, true);
+        let green = Fill {
+            brush: Brush::Solid(Color::from_rgba8(0, 255, 0, 255)).into(),
+            visible: true,
+        };
+        assert!(app.session.commit(Transaction(vec![Operation::SetFills {
+            id: shape,
+            fills: keyed_by_position([green]),
+        }])));
+        app.settle_imports();
+        assert!(!is_image(&app), "the changed fill stands");
+        assert!(
+            app.session.status().text.contains("was not placed"),
+            "{}",
+            app.session.status().text
+        );
 
         let before = app.session.revision();
         app.start_replace_image(&ctx, png, shape, slot, true);

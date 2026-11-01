@@ -383,6 +383,25 @@ mod tests {
         (app, frame)
     }
 
+    /// An import read while a stroke is in flight waits for the stroke, which
+    /// would otherwise lose its trail to the landing's tool change.
+    /// flip: `gesture_live` without its pencil term → fails at "the import waits".
+    #[test]
+    fn an_import_waits_for_a_stroke_in_flight() {
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_a_frame(&ctx);
+        app.pencil_press(Point::new(50.0, 50.0));
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+        app.start_paste_svg(&ctx, svg.to_string(), None);
+        app.settle_imports();
+        assert!(app.pencil.is_some(), "the stroke kept");
+        assert_eq!(app.tool, Tool::Pencil);
+        assert!(!app.imports.is_empty(), "the import waits");
+        app.pencil = None;
+        app.poll_imports();
+        assert!(app.imports.is_empty(), "and lands after");
+    }
+
     /// Press at the first point, drag through the rest, release.
     fn draw(app: &mut OndinApp, trail: &[Point], shift: impl Fn(usize) -> bool) {
         app.pencil_press(trail[0]);

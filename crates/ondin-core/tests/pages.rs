@@ -207,6 +207,74 @@ fn a_layer_moved_between_pages_lands_in_that_pages_index() {
     );
 }
 
+/// With pages big enough that an update patches the spatial index entry by
+/// entry, a layer moved to another page and back, a page added after the last
+/// rebuild with a frame on it, and that page removed, leave every page's index
+/// as a rebuild has it. flip: take the old entry out of the tree of the node's
+/// current page in `Resolved::reindex` → fails at "moved to the second page".
+#[test]
+fn an_entry_by_entry_index_update_follows_layers_across_pages() {
+    let (mut doc, mut ids, [first, second, a, b]) = two_pages();
+    // Forty frames a page, so a move's batch is under a quarter of the index.
+    let mut ops = Vec::new();
+    for page in [first, second] {
+        for i in 0..40 {
+            let f = ids.mint();
+            ops.push(create(f, page, frame()));
+            ops.push(Operation::SetTransform {
+                id: f,
+                transform: Affine::translate((200.0 * f64::from(i), 300.0)),
+            });
+        }
+    }
+    let shape = ids.mint();
+    ops.push(create(shape, a, rect()));
+    doc.apply(&Transaction(ops)).unwrap();
+    let mut res = Resolved::rebuild(&doc);
+    let plane = ondin_core::kurbo::Rect::new(-1e9, -1e9, 1e9, 1e9);
+    let query = |res: &Resolved, page| {
+        let mut v = ondin_core::nodes_in_view(res, page, plane);
+        v.sort();
+        v
+    };
+    let same = |res: &Resolved, doc: &Document, step: &str| {
+        let fresh = Resolved::rebuild(doc);
+        for page in doc.page_ids() {
+            assert_eq!(query(res, page), query(&fresh, page), "{step}: {page:?}");
+        }
+    };
+    for (to, step) in [(b, "moved to the second page"), (a, "moved back")] {
+        let out = doc
+            .apply(&Transaction(vec![Operation::Reparent {
+                id: shape,
+                new_parent: to,
+                index: 0,
+            }]))
+            .unwrap();
+        res.update(&doc, &out.dirty);
+        same(&res, &doc, step);
+    }
+    let (third, f3) = (ids.mint(), ids.mint());
+    let out = doc
+        .apply(&Transaction(vec![
+            add_page(third, 2, "Third"),
+            create(f3, third, frame()),
+        ]))
+        .unwrap();
+    res.update(&doc, &out.dirty);
+    same(&res, &doc, "a page added");
+    assert_eq!(query(&res, third), [f3], "fixture: indexed on the new page");
+    let out = doc
+        .apply(&Transaction(vec![
+            Operation::DeleteNode { id: f3 },
+            Operation::RemovePage { id: third },
+        ]))
+        .unwrap();
+    res.update(&doc, &out.dirty);
+    same(&res, &doc, "the page removed");
+    assert!(query(&res, third).is_empty());
+}
+
 /// A page's mode is the last step a frame's mode inherits from before the
 /// document's default; a frame's own still wins. A page may not set a kit's mode.
 #[test]

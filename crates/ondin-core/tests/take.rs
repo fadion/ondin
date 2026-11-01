@@ -244,6 +244,50 @@ fn a_page_left_out_takes_its_pictures_along() {
     assert_eq!(ids, ["hero"]);
 }
 
+/// A page left out with a main whose instance sits on a kept page leaves that
+/// instance as plain layers still drawing the main's paint, and the result
+/// loads. Dropping the `relink_for_delete` call in `page_removal` does not fail
+/// this: the commit's `propagate::owed` detaches the instance too, so the call
+/// is a second defence.
+#[test]
+fn a_page_left_out_with_a_main_detaches_its_instances_elsewhere() {
+    let mut f = fixture();
+    let mut ids = IdSource::new(0x7B);
+    let [m2, m2a, i2, i2a] = [(); 4].map(|_| ids.mint());
+    let ops = vec![
+        frame(m2, f.archive, 1),
+        rect(m2a, m2),
+        fills(&mut ids, m2a, Brush::Solid(BLUE).into()),
+        Operation::SetComponent {
+            id: m2,
+            component: true,
+        },
+        frame(i2, f.flows, 3),
+        rect(i2a, i2),
+        fills(&mut ids, i2a, Brush::Solid(BLUE).into()),
+        Operation::SetLink {
+            id: i2,
+            link: Some(m2),
+        },
+        Operation::SetLink {
+            id: i2a,
+            link: Some(m2a),
+        },
+    ];
+    commit(&mut f.doc, &mut ids, ops);
+    let keep = Keep {
+        pages: vec![f.flows],
+        ..Keep::all(&f.doc)
+    };
+    take(&mut f.doc, &keep).expect("the trim goes through");
+    assert!(f.doc.get(m2).is_none());
+    assert_eq!(f.doc.get(i2).unwrap().link(), None);
+    assert_eq!(f.doc.get(i2a).unwrap().link(), None);
+    assert_eq!(fill(&f.doc, i2a), BrushSource::Literal(Brush::Solid(BLUE)));
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    ondin_core::io::load(&bytes).expect("the trimmed document loads");
+}
+
 /// Without components, the instance is plain layers still showing the main's
 /// picture, and the main is a plain frame.
 #[test]

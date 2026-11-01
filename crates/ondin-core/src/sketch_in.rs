@@ -1838,7 +1838,7 @@ mod tests {
     }
 
     /// Masters each holding two instances of the one before double per level;
-    /// past [`MAX_NODES`] the rest stay empty groups and are reported, and the
+    /// past `MAX_NODES` the rest stay empty groups and are reported, and the
     /// read returns. flip: return `ready` unchanged from `within_budget` → the
     /// read runs on towards 2²⁴ copies.
     #[test]

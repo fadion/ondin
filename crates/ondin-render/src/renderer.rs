@@ -281,6 +281,23 @@ impl RenderOverrides {
         self.nodes.get(&id)
     }
 
+    /// Whether this preview gives any layer a mode or a shadow that blends, or
+    /// adds a ghost that does — what `Resolved::blends_within` cannot know.
+    pub fn blends(&self) -> bool {
+        let patched = self.nodes.values().any(|o| {
+            o.blend.is_some_and(crate::scene::blends)
+                || o.effects
+                    .as_deref()
+                    .is_some_and(crate::scene::shadows_blend)
+        });
+        patched
+            || self
+                .ghosts
+                .iter()
+                .chain(self.chrome.iter().map(|(_, g)| g))
+                .any(|g| crate::scene::ghost_blends(&g.node))
+    }
+
     /// Whether `id` sits in a subtree the gesture is moving, so its cached
     /// world bounds cannot be trusted for culling.
     pub fn moved(&self, id: NodeId) -> bool {

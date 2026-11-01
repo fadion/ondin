@@ -1707,7 +1707,7 @@ fn paint_node_pass<P: ScenePainter>(
     // with it. A pass is drawn inside the one its first call pushed.
     let blend = over.and_then(|o| o.blend).unwrap_or(node.blend());
     let blend_layer = match pass {
-        None if !bare => blend_layer(doc, ov, id, painted.kind, blend),
+        None if !bare => blend_layer(doc, res, ov, id, painted.kind, blend),
         _ => None,
     };
     if let Some(mode) = blend_layer {
@@ -1913,11 +1913,14 @@ fn paint_node_pass<P: ScenePainter>(
 /// The mode of the layer `id` composites through, or `None` when it draws
 /// straight into its parent's.
 ///
-/// A top-level frame holding a blended layer is isolated too, so what is inside
-/// blends with the frame's content and never the canvas ground: the frame then
-/// looks the same on the canvas as exported alone.
+/// A page holding anything that blends is isolated, so it blends with the page's
+/// artwork and never the canvas ground, which every export lays after drawing. A
+/// top-level frame holding a blended layer is isolated too, so what is inside
+/// blends with the frame's content alone: the frame then looks the same on the
+/// canvas as exported alone.
 fn blend_layer(
     doc: &Document,
+    res: &Resolved,
     ov: &RenderOverrides,
     id: NodeId,
     kind: &NodeKind,
@@ -1926,36 +1929,45 @@ fn blend_layer(
     if blend.isolates(kind) {
         return Some(blend);
     }
+    let parent = doc.get(id).and_then(|n| n.parent());
+    let page = matches!(kind, NodeKind::Root) && parent.is_none();
     let top_frame = matches!(kind, NodeKind::Artboard { .. })
-        && doc
-            .get(id)
-            .and_then(|n| n.parent())
+        && parent
             .and_then(|p| doc.get(p))
             .is_some_and(|p| matches!(p.kind(), NodeKind::Root));
-    (top_frame && holds_blend(doc, ov, id)).then_some(BlendMode::Normal)
+    ((page || top_frame) && holds_blend(doc, res, ov, id)).then_some(BlendMode::Normal)
 }
 
 /// Whether a layer under `id`, ghosts included, blends with what is beneath it.
-fn holds_blend(doc: &Document, ov: &RenderOverrides, id: NodeId) -> bool {
+///
+/// Answered from `Resolved`'s cache, and as yes whenever the preview blends
+/// anything anywhere: an isolation group around artwork that does not blend
+/// changes no pixel, so too many costs only a layer.
+fn holds_blend(doc: &Document, res: &Resolved, ov: &RenderOverrides, id: NodeId) -> bool {
     let Some(node) = doc.get(id) else {
         return false;
     };
-    ov.ghosts_of(id).any(|g| ghost_blends(&g.node))
+    ov.blends()
         || ov
             .children_of(id)
             .unwrap_or(node.children())
             .iter()
-            .any(|c| {
-                let Some(child) = doc.get(*c) else {
-                    return false;
-                };
-                let mode = ov.get(*c).and_then(|o| o.blend).unwrap_or(child.blend());
-                blends(mode) || holds_blend(doc, ov, *c)
-            })
+            .any(|c| res.blends_within(*c))
 }
 
-fn ghost_blends(g: &GhostNode) -> bool {
-    blends(g.blend) || g.children.iter().any(ghost_blends)
+/// Whether `g`, or a ghost under it, blends: its mode or a shadow's.
+pub(crate) fn ghost_blends(g: &GhostNode) -> bool {
+    blends(g.blend) || shadows_blend(&g.effects) || g.children.iter().any(ghost_blends)
+}
+
+/// Whether a visible shadow in `effects` blends.
+pub(crate) fn shadows_blend(effects: &[ondin_core::Keyed<Effect>]) -> bool {
+    effects.iter().any(|e| match &e.kind {
+        ondin_core::EffectKind::DropShadow(s) | ondin_core::EffectKind::InnerShadow(s) => {
+            e.visible && s.blends()
+        }
+        _ => false,
+    })
 }
 
 /// The backends' mix for `mode`; both draw all sixteen. Pass through never
@@ -1983,7 +1995,7 @@ pub(crate) fn mix(mode: BlendMode) -> ondin_core::peniko::Mix {
 }
 
 /// Whether `mode` mixes with what is beneath rather than covering it.
-fn blends(mode: BlendMode) -> bool {
+pub(crate) fn blends(mode: BlendMode) -> bool {
     !matches!(mode, BlendMode::Normal | BlendMode::PassThrough)
 }
 

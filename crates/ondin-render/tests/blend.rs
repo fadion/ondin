@@ -215,11 +215,11 @@ fn blends(doc: &Document) -> Vec<BlendMode> {
     p.modes
 }
 
-/// An unclipped top-level frame is isolated only once it holds a blended layer,
-/// so the layer blends with the frame's content and never the canvas ground; a
-/// nested frame passes through as a group does.
+/// The page and an unclipped top-level frame are isolated only once they hold a
+/// blended layer, so the layer blends with the frame's content and never the
+/// canvas ground; a nested frame passes through as a group does.
 /// flip: dropping `holds_blend` from `blend_layer` → fails at the first
-/// `[Normal, Multiply]`.
+/// `[Normal, Normal, Multiply]`.
 #[test]
 fn a_top_level_frame_isolates_what_blends_inside_it() {
     let mut d = frame(None);
@@ -256,8 +256,44 @@ fn a_top_level_frame_isolates_what_blends_inside_it() {
     set(&mut d.doc, r, BlendMode::Multiply);
     assert_eq!(
         blends(&d.doc),
-        [BlendMode::Normal, BlendMode::Multiply],
-        "the top-level frame isolates; the nested one passes through"
+        [BlendMode::Normal, BlendMode::Normal, BlendMode::Multiply],
+        "the page and the top-level frame isolate; the nested one passes through"
+    );
+}
+
+/// A blending shadow counts as a blend: the page and the top-level frame isolate
+/// a child whose only blend is its Multiply drop shadow, and a loose blended
+/// layer is isolated by the page alone.
+/// flip: `blends_itself` not reading shadows → fails at "a blending shadow".
+#[test]
+fn a_blending_shadow_isolates_the_page_and_its_top_level_frame() {
+    let mut d = frame(None);
+    let frame = d.frame;
+    d.doc
+        .apply(&Transaction(vec![Operation::SetClip {
+            id: frame,
+            clip: false,
+        }]))
+        .unwrap();
+    let card = rect(&mut d, frame, 20.0, 60.0, [242, 242, 245]);
+    shadows(
+        &mut d.doc,
+        card,
+        vec![hard(false, 20.0, [200, 40, 40], BlendMode::Multiply)],
+    );
+    assert_eq!(
+        blends(&d.doc),
+        [BlendMode::Normal, BlendMode::Normal, BlendMode::Multiply],
+        "a blending shadow: the page, the frame, then the shadow's pass"
+    );
+    let page = d.doc.first_page();
+    let loose = rect(&mut d, page, 70.0, 90.0, [240, 160, 80]);
+    set(&mut d.doc, loose, BlendMode::Difference);
+    shadows(&mut d.doc, card, Vec::new());
+    assert_eq!(
+        blends(&d.doc),
+        [BlendMode::Normal, BlendMode::Difference],
+        "a loose blended layer: the page alone"
     );
 }
 

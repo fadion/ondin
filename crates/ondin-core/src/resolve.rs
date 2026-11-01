@@ -594,6 +594,10 @@ pub struct Resolved {
     /// during a preview). Only the `Group`/`Root` arm of `scene::effect_bounds`
     /// reads it.
     inner_ink: FxHashMap<NodeId, Rect>,
+    /// Every node whose subtree, the node included, holds a layer or a shadow that
+    /// blends ([`Self::blends_within`]). Kept as the ink is, children first, so the
+    /// walk's isolation question costs a lookup per child.
+    blending: FxHashSet<NodeId>,
     /// Shaped layout per `Text` node, invalidated through the `DirtySet`. Shared
     /// between the nodes of one pass whose texts are equal ([`Shaper`]).
     text: FxHashMap<NodeId, Arc<TextLayout>>,
@@ -653,6 +657,7 @@ impl Resolved {
         let mut world_bounds = FxHashMap::default();
         let mut ink_bounds = FxHashMap::default();
         let mut inner_ink = FxHashMap::default();
+        let mut blending = FxHashSet::default();
         let mut text = FxHashMap::default();
         let mut outline = FxHashMap::default();
         let mut shaper = shaper.into_inner();
@@ -667,6 +672,7 @@ impl Resolved {
                     world_bounds: &mut world_bounds,
                     ink_bounds: &mut ink_bounds,
                     inner_ink: &mut inner_ink,
+                    blending: &mut blending,
                     text: &mut text,
                     outline: &mut outline,
                     shaper: &mut shaper,
@@ -680,6 +686,7 @@ impl Resolved {
             world_bounds,
             ink_bounds,
             inner_ink,
+            blending,
             text,
             outline,
             boolean: FxHashMap::default(),
@@ -720,6 +727,7 @@ impl Resolved {
             self.world_bounds.remove(id);
             self.ink_bounds.remove(id);
             self.inner_ink.remove(id);
+            self.blending.remove(id);
             self.text.remove(id);
             self.outline.remove(id);
             self.boolean.remove(id);
@@ -776,8 +784,7 @@ impl Resolved {
             memo.remove(id);
         }
         // Except a bound text's: its content and family are its string variables' in
-        // the mode in force, which a frame's `SetMode` or a reparent changes without
-        // dirtying it. Few texts are bound, so their entries go on every update.
+        // the mode in force, which a reparent changes without dirtying it. Few texts are bound, so their entries go on every update.
         memo.retain(|id, _| {
             doc.get(*id)
                 .is_none_or(|n| n.text_vars().iter().all(Option::is_none))
@@ -1334,6 +1341,22 @@ impl Resolved {
                 self.ink_bounds.remove(&id);
             }
         }
+        // Children before parents, as the ink: each child's answer is fresh.
+        let blends =
+            blends_itself(node) || node.children().iter().any(|c| self.blending.contains(c));
+        if blends {
+            self.blending.insert(id);
+        } else {
+            self.blending.remove(&id);
+        }
+    }
+
+    /// Whether `id`'s subtree, `id` included, holds a layer whose mode blends or a
+    /// visible shadow that does — what decides whether a container isolates what
+    /// it holds (`scene::blend_layer`). Hidden layers count too: too many is only
+    /// an isolation group that changes nothing.
+    pub fn blends_within(&self, id: NodeId) -> bool {
+        self.blending.contains(&id)
     }
 
     /// The union of `node`'s children's ink, each clipped by the mask governing
@@ -1425,6 +1448,7 @@ struct Caches<'a> {
     world_bounds: &'a mut FxHashMap<NodeId, Rect>,
     ink_bounds: &'a mut FxHashMap<NodeId, Rect>,
     inner_ink: &'a mut FxHashMap<NodeId, Rect>,
+    blending: &'a mut FxHashSet<NodeId>,
     text: &'a mut FxHashMap<NodeId, Arc<TextLayout>>,
     outline: &'a mut FxHashMap<NodeId, BezPath>,
     shaper: &'a mut Shaper,
@@ -1550,7 +1574,24 @@ fn resolve_subtree(
     if let Some(b) = ink {
         c.ink_bounds.insert(id, b);
     }
+    if blends_itself(node) || node.children().iter().any(|ch| c.blending.contains(ch)) {
+        c.blending.insert(id);
+    }
     (bounds, ink)
+}
+
+/// Whether `node` blends with what lies under it: its own mode, or a visible
+/// shadow's ([`Resolved::blends_within`]).
+fn blends_itself(node: &crate::Node) -> bool {
+    !matches!(
+        node.blend(),
+        crate::BlendMode::Normal | crate::BlendMode::PassThrough
+    ) || node.effects().iter().any(|e| match &e.kind {
+        crate::EffectKind::DropShadow(s) | crate::EffectKind::InnerShadow(s) => {
+            e.visible && s.blends()
+        }
+        _ => false,
+    })
 }
 
 /// The page `id` is on, as `Document::page_of` answers it, with every node

@@ -305,8 +305,8 @@ impl ScenePainter for Blends {
     fn pop_layer(&mut self) {}
 }
 
-/// The two walks wrap the same layers in a blend, in the same order: an
-/// isolated group, two blended rects, and the top-level frame holding them.
+/// The two walks wrap the same layers in a blend, in the same order: the page,
+/// an isolated group, two blended rects, and the top-level frame holding them.
 /// flip: dropping `holds_blend` from `svg::blend_style` → fails at the
 /// comparison, the frame's `isolation:isolate` only in the scene.
 #[test]
@@ -349,6 +349,6 @@ fn the_two_walks_blend_the_same_layers() {
             rest[..rest.find('"').unwrap()].to_owned()
         })
         .collect();
-    assert_eq!(scene.0.len(), 4, "fixture: {:?}", scene.0);
+    assert_eq!(scene.0.len(), 5, "fixture: {:?}", scene.0);
     assert_eq!(scene.0, svg);
 }

@@ -2440,18 +2440,26 @@ pub(crate) fn blend_decl(
             mode => ("mix-blend-mode", mode.css()),
         });
     }
+    let page = matches!(node.kind(), NodeKind::Root) && node.parent().is_none();
     let top_frame = matches!(node.kind(), NodeKind::Artboard { .. })
         && node
             .parent()
             .and_then(|p| doc.get(p))
             .is_some_and(|p| matches!(p.kind(), NodeKind::Root));
-    (top_frame && holds_blend(doc, node)).then_some(("isolation", "isolate"))
+    ((page || top_frame) && holds_blend(doc, node)).then_some(("isolation", "isolate"))
 }
 
-/// Whether a layer under `node` blends with what is beneath it.
-fn holds_blend(doc: &Document, node: &ondin_core::Node) -> bool {
+/// Whether a layer under `node` blends with what is beneath it — its mode or a
+/// visible shadow's, as `Resolved::blends_within` reads it for the canvas.
+pub(crate) fn holds_blend(doc: &Document, node: &ondin_core::Node) -> bool {
     node.children().iter().filter_map(|c| doc.get(*c)).any(|c| {
-        !matches!(c.blend(), BlendMode::Normal | BlendMode::PassThrough) || holds_blend(doc, c)
+        let shadow = c.effects().iter().any(|e| match &e.kind {
+            EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => e.visible && s.blends(),
+            _ => false,
+        });
+        !matches!(c.blend(), BlendMode::Normal | BlendMode::PassThrough)
+            || shadow
+            || holds_blend(doc, c)
     })
 }
 

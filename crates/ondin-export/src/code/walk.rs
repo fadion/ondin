@@ -188,6 +188,11 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
     root.set("position", "relative");
     root.set("width", px(view.width()));
     root.set("height", px(view.height()));
+    // What blends mixes with the page's own layers and never the document behind
+    // it, as on the canvas and in every other export.
+    if origins.iter().any(|id| res.blends_within(*id)) {
+        root.set("isolation", "isolate");
+    }
     let offset = Affine::translate(-view.origin().to_vec2());
     for id in origins {
         let Some(node) = doc.get(*id) else { continue };

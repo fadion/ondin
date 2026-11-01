@@ -2016,3 +2016,59 @@ fn a_glass_over_the_bare_canvas_shows_the_ground() {
         );
     }
 }
+
+/// A blended layer loose on the page mixes with the page's artwork, never the
+/// canvas's ground: over nothing it draws its own colour, as every export does.
+///
+/// flip: `blend_layer` not isolating the page → fails at "Multiply".
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_loose_blended_layer_does_not_mix_with_the_ground() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    for mode in [
+        ondin_core::BlendMode::Multiply,
+        ondin_core::BlendMode::Difference,
+    ] {
+        let (mut doc, _) = document(Vec::new(), 1.0);
+        let square = doc.get(doc.first_page()).unwrap().children()[0];
+        doc.apply(&Transaction(vec![
+            Operation::SetFills {
+                id: square,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(240, 160, 80, 255)).into(),
+                    visible: true,
+                }]),
+            },
+            Operation::SetBlend {
+                id: square,
+                blend: mode,
+            },
+        ]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        let ground = Color::from_rgba8(30, 30, 30, 255);
+        let canvas = render_gpu_on(
+            &mut g,
+            &doc,
+            &res,
+            &ImageStore::default(),
+            &viewport(),
+            ground,
+        );
+        let export = render_cpu(&doc, &res);
+        let (got, want) = (at(&canvas, 50, 50), at(&export, 50, 50));
+        assert_eq!(
+            (want.0, want.1, want.2),
+            (240, 160, 80),
+            "fixture: the export"
+        );
+        assert!(
+            [(got.0, want.0), (got.1, want.1), (got.2, want.2)]
+                .iter()
+                .all(|(a, b)| a.abs_diff(*b) <= 2),
+            "{mode:?}: the canvas {got:?} against the export {want:?}"
+        );
+    }
+}

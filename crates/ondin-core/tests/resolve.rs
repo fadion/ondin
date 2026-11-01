@@ -492,7 +492,14 @@ fn run_random_session_with(seed: u64, layout: bool, grid: bool) {
                     // Two of them, so the union-not-sum rule is exercised where
                     // the two passes could disagree about it.
                     _ => vec![
-                        Effect::new(EffectKind::InnerShadow(Shadow::default())),
+                        // Blending half the time, which `blends_within` reads.
+                        Effect::new(EffectKind::InnerShadow(Shadow {
+                            blend: match rng.next_range(2) {
+                                0 => ondin_core::BlendMode::Multiply,
+                                _ => ondin_core::BlendMode::Normal,
+                            },
+                            ..Shadow::default()
+                        })),
                         Effect {
                             kind: EffectKind::DropShadow(Shadow {
                                 blur: rng.next_range(24) as f64,
@@ -618,6 +625,11 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
             live.ink_bounds(id),
             fresh.ink_bounds(id),
             "ink bounds mismatch for {id:?} (seed {seed})"
+        );
+        assert_eq!(
+            live.blends_within(id),
+            fresh.blends_within(id),
+            "blend mismatch for {id:?} (seed {seed})"
         );
         assert_eq!(
             live.text_layout(id),

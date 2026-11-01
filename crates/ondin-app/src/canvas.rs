@@ -6799,10 +6799,11 @@ impl OndinApp {
         self.mode == Mode::Normal && self.drag.is_none() && !self.chrome_hidden()
     }
 
-    /// Outline the layers the hovered History row's step touched, in the canvas
-    /// hover's stroke; the selection keeps its own frame.
-    fn draw_history_hover(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
-        for &id in &self.history_pane.hover {
+    /// Outline the layer under the pointer in the Layers panel and those the
+    /// hovered History row's step touched, in the canvas hover's stroke; the
+    /// selection keeps its own frame.
+    fn draw_panel_hover(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
+        for &id in self.layers_hover.iter().chain(&self.history_pane.hover) {
             let stroke = egui::Stroke::new(3.0, chrome_hue(&self.session.doc, id));
             self.stroke_outlines(painter, id, rect, ppp, stroke, self.outline_view(stroke));
         }
@@ -8624,7 +8625,7 @@ impl OndinApp {
 
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
         self.draw_slices(ui, painter, rect, ppp, resp);
-        self.draw_history_hover(painter, rect, ppp);
+        self.draw_panel_hover(painter, rect, ppp);
 
         self.draw_frame_drop_outline(ui, painter, rect, ppp, resp);
         self.draw_flex_landing(ui, painter, rect, ppp, resp);

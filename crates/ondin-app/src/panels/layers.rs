@@ -1813,6 +1813,10 @@ impl OndinApp {
         let icon_x = left + icon_offset(depth, caret_room);
         row.selected = selected;
         row.hovered = hovered;
+        // Not during a row drag: the drop line is the answer then.
+        if hovered && !selected && self.layer_drag.is_none() {
+            self.layers_hover = Some(id);
+        }
         // A locked or hidden layer is drawn at 40% throughout, glyph and name,
         // and so is a slice, which never shows.
         let dimmed = locked || !visible || is_slice;
@@ -5052,6 +5056,39 @@ mod drop_indent_tests {
             at_root.is_empty(),
             "a drop at the top level lights no container: {at_root:?}"
         );
+    }
+
+    /// A resting pointer on a row names that layer for the canvas's hover outline,
+    /// and a selected row names nothing, as the canvas's own hover skips the
+    /// selection.
+    /// flip: `layers_row` without its `!selected` test → fails at "selected".
+    #[test]
+    fn hovering_a_row_outlines_its_layer_on_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let rows = open_rows(&mut f, &ctx);
+        let hover = |f: &mut Fixture, p: egui::Pos2| {
+            let input = |events| egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 600.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input(vec![egui::Event::PointerMoved(p)]), |ui| {
+                f.app.layers_tree(ui)
+            });
+            for _ in 0..3 {
+                f.app.layers_hover = None;
+                let _ = ctx.run_ui(input(vec![]), |ui| f.app.layers_tree(ui));
+            }
+            f.app.layers_hover
+        };
+        assert_eq!(hover(&mut f, rows[1].center()), Some(f.group));
+        assert_eq!(hover(&mut f, rows[3].center()), Some(f.c1));
+        f.app.session.selection.set(vec![f.c1]);
+        assert_eq!(hover(&mut f, rows[3].center()), None, "selected");
     }
 }
 

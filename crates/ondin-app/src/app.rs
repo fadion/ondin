@@ -541,6 +541,9 @@ pub struct OndinApp {
     pub(crate) collapsed: crate::panels::layers::Folds,
     /// The layer tree flattened into rows, cached between frames.
     pub(crate) layers_flat: crate::panels::layers::FlatTree,
+    /// The unselected layer whose Layers row the pointer is on; the canvas outlines
+    /// it as its own hover would. Cleared at each frame's start.
+    pub(crate) layers_hover: Option<NodeId>,
     /// The top bar's resource meter.
     pub(crate) meter: crate::meter::Meter,
     /// The first of a possible two opacity digits, and when it was typed; `None`
@@ -1351,6 +1354,7 @@ impl OndinApp {
             points: PointSet::default(),
             collapsed: Default::default(),
             layers_flat: Default::default(),
+            layers_hover: None,
             meter: Default::default(),
             opacity_entry: None,
             renaming_layer: None,
@@ -1569,6 +1573,7 @@ impl eframe::App for OndinApp {
         self.session.next_status_pass();
         self.session.forget_step_name();
         self.history_pane.hover.clear();
+        self.layers_hover = None;
         self.remember_view_switches();
         self.remember_tabs();
 

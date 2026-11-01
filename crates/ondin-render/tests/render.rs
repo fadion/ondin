@@ -456,6 +456,69 @@ fn level_of_detail_draws_a_layer_plain_when_its_effects_reach_under_a_pixel() {
     assert_eq!(effect_layers_at(vec![shadow(4.0)], 300), 1, "drawn with it");
 }
 
+/// A child out of view whose group's shadow lands in view is drawn: the group's
+/// children are culled against the view grown back by the group's escape.
+///
+/// flip: `paint_node_pass` culling the children against the bare view → fails
+/// at "the child casting into view".
+#[test]
+fn a_child_whose_groups_shadow_lands_in_view_is_drawn() {
+    let mut ids = IdSource::new(3);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (group, child) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: group,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: child,
+            parent: group,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((10.0, 20.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: child,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetEffects {
+            id: group,
+            effects: keyed_by_position([shadow(50.0)]),
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    // The child spans y 20..40 and its shadow 70..90; the view starts at 45.
+    let vp = Viewport {
+        view: Rect::new(0.0, 45.0, 100.0, 100.0),
+        pixel_size: (100, 55),
+    };
+    let mut painter = RecordingPainter::default();
+    scene::build(
+        &doc,
+        &res,
+        &vp,
+        &RenderOverrides::default(),
+        doc.first_page(),
+        &mut painter,
+    );
+    assert_eq!(painter.fills.len(), 1, "the child casting into view");
+}
+
 /// "Clip content", off. The frame stops pushing a clip layer — and stops being
 /// a culling boundary with it, because its own bounds no longer say anything
 /// about where its children can paint. A child outside the frame but inside the

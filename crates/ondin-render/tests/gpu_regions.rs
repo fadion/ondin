@@ -978,3 +978,75 @@ fn ink_past_a_box_is_drawn_in_a_region_beside_it() {
         );
     }
 }
+
+/// A child of a shadowed group, clear of a region its shadow falls in, still
+/// casts that shadow there.
+///
+/// flip: `paint_node_pass` culling the children against the bare view → fails
+/// at "the child's shadow".
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_groups_shadow_is_drawn_in_a_region_clear_of_its_child() {
+    let _one = ADAPTER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut g) = gpu() else {
+        eprintln!("no adapter; skipping");
+        return;
+    };
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (group, child) = (ids.mint(), ids.mint());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: group,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: child,
+            parent: group,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 20.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::translate((20.0, 20.0))),
+            name: None,
+        },
+        Operation::SetFills {
+            id: child,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::WHITE).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetEffects {
+            id: group,
+            effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
+                offset: Vec2::new(0.0, 50.0),
+                blur: 0.0,
+                spread: 0.0,
+                color: Color::from_rgba8(255, 200, 0, 255),
+                blend: ondin_core::BlendMode::Normal,
+            }))]),
+        },
+    ]))
+    .expect("the fixture applies");
+    let res = Resolved::rebuild(&doc);
+    let vp = viewport((0, 0), 1.0, (W, H));
+    // The child spans y 20..40 and its shadow 70..90.
+    let region = Region {
+        at: (0, 60),
+        size: (W / 2, 40),
+    };
+    let (worst, count, inked) = regions_against_full(&mut g, &doc, &res, &vp, &[region]);
+    assert!(inked > 0, "fixture: the shadow lands in the region");
+    assert!(
+        worst <= AA_DRIFT,
+        "the child's shadow: {count} pixels are off the full frame, by up to {worst}"
+    );
+}

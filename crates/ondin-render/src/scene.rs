@@ -1662,6 +1662,20 @@ fn paint_node_pass<P: ScenePainter>(
     let effect_layer = (!bare && crate::effects::any_ink(effects))
         .then(|| effect_bounds(res, id, &painted, world, stack))
         .flatten();
+    // The layer's effects carry a child's ink past the child's own box, so the
+    // children are culled against the view grown back by the stack's escape.
+    let child_view: std::borrow::Cow<'_, [Rect]> = match effect_layer {
+        Some(_) => {
+            let e = ondin_core::effect::stack_escape(stack);
+            let back = kurbo::Insets::new(e.x1, e.y1, e.x0, e.y0);
+            let grown = view
+                .iter()
+                .map(|v| ondin_core::effect::escaped(*v, back, world));
+            std::borrow::Cow::Owned(grown.collect())
+        }
+        None => std::borrow::Cow::Borrowed(view),
+    };
+    let view: &[Rect] = &child_view;
     // Behind everything the layer draws, its own shadows and blend included: what
     // a background blur shows is what was there before the layer.
     if pass.is_none()

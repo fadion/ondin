@@ -1336,7 +1336,19 @@ impl FontService {
                     state.failed += 1;
                     let want = state.wanted;
                     let lane = state.lane;
+                    // A fallback none of whose files arrived is chosen again on the next
+                    // `ensure_fallbacks`, or one dropped connection would leave its script
+                    // as empty boxes for the session. A file that arrived unreadable is a
+                    // verdict on it, and asking again would fetch it again.
+                    let abandon = reason == FaceFailure::Fetch
+                        && state.fallback
+                        && state.faces.is_empty()
+                        && state.outstanding == 0;
                     self.claimed.remove(&key);
+                    if abandon {
+                        self.fallbacks
+                            .retain(|s, f| *f != family && subset_alias(f, *s) != family);
+                    }
                     if variable {
                         // The variable file is the preferred form: a family whose file
                         // the decoder cannot read still has static cuts on the CDN.
@@ -3436,6 +3448,47 @@ mod tests {
         svc.settle_for_test();
         assert!(svc.poll().families_changed, "the settling poll");
         assert!(!svc.poll().families_changed, "once");
+    }
+
+    /// A fallback none of whose files could be fetched is chosen again on the next
+    /// call, while one whose files arrived unreadable is not asked for twice.
+    ///
+    /// flip: the `Failed` arm not forgetting the choice → fails at "chosen again".
+    #[test]
+    fn a_fallback_that_could_not_be_fetched_is_tried_again() {
+        let fail = |reason| {
+            let (tx, rx) = channel();
+            let mut svc = FontService::inert();
+            svc.msg_rx = rx;
+            svc.settle_for_test();
+            svc.catalog
+                .insert("Noto Sans JP".into(), noto("Noto Sans JP", &["japanese"]));
+            svc.set_document_subsets([Subset::Japanese].into());
+            svc.ensure_fallbacks();
+            let alias = subset_alias("Noto Sans JP", Subset::Japanese);
+            assert_eq!(
+                svc.state[&alias].outstanding, 2,
+                "the fixture: two files out"
+            );
+            for weight in [400, 700] {
+                tx.send(FontMsg::Failed {
+                    family: alias.clone(),
+                    key: format!("noto-sans-jp-japanese-{weight}-normal.ttf"),
+                    variable: false,
+                    reason,
+                })
+                .expect("the test owns the channel");
+            }
+            svc.poll();
+            svc.ensure_fallbacks();
+            svc.state[&alias].outstanding
+        };
+        assert_eq!(fail(FaceFailure::Fetch), 2, "chosen again");
+        assert_eq!(
+            fail(FaceFailure::Decode),
+            0,
+            "an unreadable file is not refetched"
+        );
     }
 
     /// A fallback waits for the system scan rather than downloading what may be

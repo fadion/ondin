@@ -197,6 +197,111 @@ fn slice_selection_fits_rounds_out_and_sits_above_the_topmost() {
     );
 }
 
+/// Inside a turned group, the slice goes to the nearest unturned ancestor, so its
+/// box is the selection's rounded-out box and not the box of a turned box.
+/// flip: dropping `!square(parent)` from `slice_selection`'s climb → fails at
+/// "the selection's box".
+#[test]
+fn slice_selection_in_a_turned_group_cuts_the_selections_box() {
+    let (mut doc, page, group, rect, _) = fixture();
+    doc.apply(&Transaction(vec![Operation::SetTransform {
+        id: group,
+        transform: Affine::translate((300.0, 300.0)) * Affine::rotate(std::f64::consts::FRAC_PI_4),
+    }]))
+    .expect("turn the group");
+    let res = Resolved::rebuild(&doc);
+    let b = res.world_bounds(rect).expect("the rect's box");
+    let want = Rect::new(b.x0.floor(), b.y0.floor(), b.x1.ceil(), b.y1.ceil());
+
+    let new = IdSource::new(0x0714).mint();
+    let tx = build::slice_selection(&doc, &res, &[rect], new).expect("a slice");
+    doc.apply(&tx).expect("apply");
+    let res = Resolved::rebuild(&doc);
+    assert_eq!(res.world_bounds(new), Some(want), "the selection's box");
+    assert_eq!(doc.get(new).unwrap().parent(), Some(page));
+    assert_eq!(
+        doc.get(page).unwrap().children(),
+        [group, new],
+        "above the group"
+    );
+}
+
+/// A boolean's operands are sliced beside the boolean, never as a third operand,
+/// and a slice is refused as an operand by Union and by Flatten.
+/// flip: removing the boolean half of `slice_selection`'s climb → fails at the
+/// parent assertion.
+#[test]
+fn a_slice_is_never_a_boolean_operand() {
+    let mut ids = IdSource::new(0x0B00);
+    let page = ids.mint();
+    let mut doc = Document::new(page);
+    let (a, b, slice) = (ids.mint(), ids.mint(), ids.mint());
+    let square = |id, at: f64, index| Operation::CreateNode {
+        id,
+        parent: page,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(40.0, 40.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(Affine::translate((at, at))),
+        name: None,
+    };
+    doc.apply(&Transaction(vec![
+        square(a, 0.0, 0),
+        square(b, 20.0, 1),
+        Operation::CreateNode {
+            id: slice,
+            parent: page,
+            index: 2,
+            kind: NodeKind::Slice {
+                size: Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: None,
+        },
+    ]))
+    .expect("two rects and a slice");
+    let res = Resolved::rebuild(&doc);
+    for refused in [
+        build::boolean(
+            &doc,
+            &res,
+            &mut ids,
+            &[slice, a],
+            ondin_core::BoolOp::Union,
+            None,
+        )
+        .map(|_| ()),
+        build::flatten(&doc, &res, &mut ids, &[slice, a]).map(|_| ()),
+    ] {
+        assert!(
+            matches!(refused, Err(ondin_core::OpError::WrongKindForOp)),
+            "{refused:?}"
+        );
+    }
+
+    let (tx, union) = build::boolean(
+        &doc,
+        &res,
+        &mut ids,
+        &[a, b],
+        ondin_core::BoolOp::Union,
+        None,
+    )
+    .expect("a union");
+    doc.apply(&tx).expect("apply");
+    let res = Resolved::rebuild(&doc);
+    let new = ids.mint();
+    let tx = build::slice_selection(&doc, &res, &[a, b], new).expect("a slice");
+    doc.apply(&tx).expect("apply");
+    assert_eq!(doc.get(new).unwrap().parent(), Some(page));
+    let children = doc.get(page).unwrap().children();
+    let at = children.iter().position(|c| *c == union).unwrap();
+    assert_eq!(children[at + 1], new, "just above the union");
+}
+
 /// A slice saves and loads as it was.
 #[test]
 fn a_slice_survives_a_save() {

@@ -230,6 +230,8 @@ one transaction. There is no "mask group" flag; it is derived from the children 
   the node world bounds so it stays in the R-tree. Committed-only: during a gesture
   `RenderOverrides::boolean_path` always has an entry.
 - Text cannot be an operand; a mask can be text (`Resolved::mask_path` takes glyph outlines).
+  Nor can a slice, which has no outline and would lend the result its empty paint: `boolean` and
+  Flatten refuse it, and the layers panel will not drop one into a boolean.
 
 Performance: re-running the whole boolean per operand edit and per preview build is cheap enough with
 the balanced fold; per-operand caching is not to be built. Pixel tests live in

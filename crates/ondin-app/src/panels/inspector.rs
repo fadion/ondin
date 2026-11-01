@@ -1852,7 +1852,8 @@ impl OndinApp {
             NodeKind::Artboard { .. } => true,
             _ => return,
         };
-        let enabled = ondin_core::build::can_convert_container(doc, id);
+        let refusal = ondin_core::build::convert_container_refusal(doc, id);
+        let enabled = refusal.is_none();
         let fit = ondin_core::build::fit_frame(doc, &self.session.resolved, id);
         let unfit = match fit {
             Some(_) => "",
@@ -1899,7 +1900,7 @@ impl OndinApp {
                         }
                     })
                     .response
-                    .on_disabled_hover_text("A component keeps its kind: its copies link to it");
+                    .on_disabled_hover_text(refusal.unwrap_or_default());
             });
             // The Appearance card's square, a field's ground; `Disabled` only draws,
             // so the click is ignored here.
@@ -2499,7 +2500,9 @@ impl OndinApp {
         )
         .map(|_| ids)
         .map_err(|e| match e {
-            ondin_core::OpError::WrongKindForOp => "Text and artboards cannot be boolean operands",
+            ondin_core::OpError::WrongKindForOp => {
+                "Text, frames and slices cannot be boolean operands"
+            }
             ondin_core::OpError::InvalidParent => {
                 "A boolean and its operands have to be in the same group"
             }
@@ -13371,7 +13374,7 @@ mod mask_card_tests {
         );
         assert_eq!(
             refusal(&mut app, vec![a, text]),
-            Some("Text and artboards cannot be boolean operands"),
+            Some("Text, frames and slices cannot be boolean operands"),
             "a shape and a text layer: two ARE selected, so the count sentence was \
              a lie about a selection anyone can make"
         );
@@ -13404,7 +13407,7 @@ mod mask_card_tests {
         };
         assert_eq!(
             flatten(&mut app, vec![a, text]),
-            "Text and artboards cannot be boolean operands"
+            "Text, frames and slices cannot be boolean operands"
         );
         assert_eq!(
             flatten(&mut app, vec![a]),

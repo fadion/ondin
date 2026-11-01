@@ -183,3 +183,49 @@ fn css_keywords_round_trip() {
     }
     assert_eq!(BlendMode::from_css("plus-lighter"), None);
 }
+
+/// A copied blend lands relative to the copied layer's default: a frame's
+/// isolating Normal isolates the group it is pasted on, and a rectangle's Normal
+/// leaves that group passing through.
+/// flip: `paste_properties` mapping every Normal to Pass through → fails at "the
+/// frame's Normal isolates".
+#[test]
+fn a_pasted_blend_lands_relative_to_the_copied_layers_default() {
+    let mut f = fixture();
+    let mut ids = IdSource::new(99);
+    let rect = build::properties_of(&f.doc, f.rect).expect("a rect's properties");
+    f.doc
+        .apply(&build::paste_properties(
+            &f.doc,
+            &[f.group],
+            &rect,
+            &mut ids,
+        ))
+        .unwrap();
+    assert_eq!(
+        blend(&f.doc, f.group),
+        BlendMode::PassThrough,
+        "a leaf's Normal"
+    );
+
+    f.doc
+        .apply(&Transaction(vec![Operation::SetBlend {
+            id: f.frame,
+            blend: BlendMode::Normal,
+        }]))
+        .unwrap();
+    let frame = build::properties_of(&f.doc, f.frame).expect("a frame's properties");
+    f.doc
+        .apply(&build::paste_properties(
+            &f.doc,
+            &[f.group],
+            &frame,
+            &mut ids,
+        ))
+        .unwrap();
+    assert_eq!(
+        blend(&f.doc, f.group),
+        BlendMode::Normal,
+        "the frame's Normal isolates"
+    );
+}

@@ -327,7 +327,8 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
 - **Slice selection** (the layer menu's Structure group, and the palette) cuts a slice fitted to the
   selection instead of dragging one (`OndinApp::slice_selection` → `build::slice_selection`): the
   selection's world bounds rounded out to whole units, just above the topmost selected layer in their
-  nearest common container, a lone layer's name, one PNG 1× spec, selected afterwards. It dims, and
+  nearest common container that is neither a boolean (it would be an operand) nor turned or skewed
+  (its box would be the box of a turned box), a lone layer's name, one PNG 1× spec, selected afterwards. It dims, and
   does nothing, on a selection of slices only.
 
 ### The eyedropper (`eyedropper.rs`)

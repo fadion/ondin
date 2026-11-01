@@ -705,12 +705,11 @@ pub fn frame(
 /// in keeping their ids and where they are drawn, and the emptied original goes.
 /// Returns the transaction and the new container's id.
 ///
-/// A group becomes a frame sized to its children's union, with no background and
-/// no clip, as [`frame`] makes one, so nothing visible changes. A frame becomes a
-/// group with its own fills and strokes moved onto a rectangle under its children,
+/// A group becomes a frame of its own box, with no background and no clip, as
+/// [`frame`] makes one, so nothing visible changes. A frame becomes a group with
+/// its fills on a rectangle under its children and its strokes on one over them,
 /// so its look survives; its clip and layout go, the children kept where they were
-/// laid. A main, an instance and a component set are refused: their links are to
-/// this node.
+/// laid. What [`convert_container_refusal`] names is refused.
 pub fn convert_container(
     doc: &Document,
     res: &Resolved,
@@ -745,14 +744,7 @@ pub fn convert_container(
         if !doc.frame_may_sit_under(parent) {
             return Err(OpError::ArtboardPlacement);
         }
-        let union = children
-            .iter()
-            .filter_map(|c| {
-                let b = crate::local_box(doc, res, *c)?;
-                Some(crate::geometry::transform_rect(res.used_local(doc, *c)?, b))
-            })
-            .reduce(|a, b| a.union(b))
-            .ok_or(OpError::EmptyGeometry)?;
+        let union = crate::local_box(doc, res, id).ok_or(OpError::EmptyGeometry)?;
         let origin = union.origin().to_vec2();
         let kind = NodeKind::Artboard {
             size: kurbo::Size::new(union.width().max(1.0), union.height().max(1.0)),
@@ -782,32 +774,59 @@ pub fn convert_container(
             clip: false,
         });
     }
-    // The frame's own paint, on a rectangle under the children.
-    let backing = (!to_frame
-        && (!node.paint().fills.is_empty() || !node.paint().strokes.is_empty()))
-    .then(|| ids.mint());
-    if let (
-        Some(rect),
-        NodeKind::Artboard {
+    // The frame's own paint on rectangles of its size: its fills under the
+    // children and its strokes over them, the order a frame paints in.
+    let paint = node.paint();
+    let styles = node.styles();
+    let backing = (!to_frame && !paint.fills.is_empty()).then(|| ids.mint());
+    let border = (!to_frame && !paint.strokes.is_empty()).then(|| ids.mint());
+    // One of those rectangles, with the frame's size, corners and their bindings.
+    let paint_rect = |ops: &mut Vec<Operation>, at: NodeId, index: usize, name: &str| {
+        let NodeKind::Artboard {
             size,
             corner_radii,
             corner_smoothing,
-        },
-    ) = (backing, res.used_kind(doc, id).unwrap_or(node.kind()))
-    {
+        } = res.used_kind(doc, id).unwrap_or(node.kind())
+        else {
+            return;
+        };
         ops.push(Operation::CreateNode {
-            id: rect,
+            id: at,
             parent: new,
-            index: 0,
+            index,
             kind: NodeKind::Rect {
                 size: *size,
                 corner_radii: *corner_radii,
                 corner_smoothing: *corner_smoothing,
             },
             transform: None,
-            name: Some("Background".to_owned()),
+            name: Some(name.to_owned()),
         });
-        ops.extend(carried_paint(node, rect));
+        if node.corner_vars() != crate::variable::CornerVars::default() {
+            ops.push(Operation::SetCornerVars {
+                id: at,
+                vars: node.corner_vars(),
+            });
+        }
+        if node.size_vars() != crate::variable::SizeVars::default() {
+            ops.push(Operation::SetSizeVars {
+                id: at,
+                vars: node.size_vars(),
+            });
+        }
+    };
+    if let Some(rect) = backing {
+        paint_rect(&mut ops, rect, 0, "Background");
+        ops.push(Operation::SetFills {
+            id: rect,
+            fills: paint.fills.clone(),
+        });
+        if styles.fills.is_some() {
+            ops.push(Operation::SetFillStyle {
+                id: rect,
+                style: styles.fills,
+            });
+        }
     }
     let base = usize::from(backing.is_some());
     for (i, child) in children.iter().enumerate() {
@@ -825,14 +844,58 @@ pub fn convert_container(
         });
         ops.extend(baked_size(doc, res, *child));
     }
+    if let Some(rect) = border {
+        paint_rect(&mut ops, rect, base + children.len(), "Border");
+        ops.push(Operation::SetStrokes {
+            id: rect,
+            strokes: paint.strokes.clone(),
+        });
+        if styles.strokes.is_some() {
+            ops.push(Operation::SetStrokeStyle {
+                id: rect,
+                style: styles.strokes,
+            });
+        }
+    }
+    ops.extend(carried_settings(node, new, to_frame));
+    ops.push(Operation::DeleteNode { id });
+    Ok((Transaction(ops), new))
+}
+
+/// The layer settings [`convert_container`] carries from `node` onto its
+/// replacement `new`: each one the new kind holds and `node` set. A frame's layout
+/// stays behind on the way to a group, whose children it has already placed.
+fn carried_settings(node: &crate::Node, new: NodeId, to_frame: bool) -> Vec<Operation> {
+    let mut ops = Vec::new();
+    let new_kind = if to_frame {
+        NodeKind::Artboard {
+            size: kurbo::Size::ZERO,
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        }
+    } else {
+        NodeKind::Group
+    };
     if !node.visible() {
         ops.push(Operation::SetVisible {
             id: new,
             visible: false,
         });
     }
+    if let Some(var) = node.visible_var() {
+        ops.push(Operation::SetVisibleVar {
+            id: new,
+            var: Some(var),
+        });
+    }
     if node.locked() {
         ops.push(Operation::SetLocked {
+            id: new,
+            locked: true,
+        });
+    }
+    if node.proportions_locked() {
+        ops.push(Operation::SetProportionsLocked {
             id: new,
             locked: true,
         });
@@ -843,19 +906,79 @@ pub fn convert_container(
             opacity: node.opacity(),
         });
     }
-    if !matches!(
-        node.blend(),
-        crate::BlendMode::Normal | crate::BlendMode::PassThrough
-    ) {
+    if let Some(var) = node.opacity_var() {
+        ops.push(Operation::SetOpacityVar {
+            id: new,
+            var: Some(var),
+        });
+    }
+    // Normal on a container isolates it, so only the new kind's default is left out.
+    if node.blend() != crate::BlendMode::default_for(&new_kind) {
         ops.push(Operation::SetBlend {
             id: new,
             blend: node.blend(),
+        });
+    }
+    if node.pivot().is_some() {
+        ops.push(Operation::SetPivot {
+            id: new,
+            pivot: node.pivot(),
+        });
+    }
+    if *node.item() != Default::default() {
+        ops.push(Operation::SetLayoutItem {
+            id: new,
+            item: *node.item(),
+        });
+    }
+    if *node.insets() != Default::default() {
+        ops.push(Operation::SetInsets {
+            id: new,
+            insets: *node.insets(),
+        });
+    }
+    if to_frame && node.display().is_some() {
+        ops.push(Operation::SetDisplay {
+            id: new,
+            display: node.display().cloned(),
+        });
+        if node.spacing_vars() != crate::variable::SpacingVars::default() {
+            ops.push(Operation::SetSpacingVars {
+                id: new,
+                vars: node.spacing_vars(),
+            });
+        }
+        if node.styles().layout.is_some() {
+            ops.push(Operation::SetLayoutStyle {
+                id: new,
+                style: node.styles().layout,
+            });
+        }
+    }
+    // The mode is read on any container above a binding, so a group keeps the
+    // colours the frame chose.
+    if node.mode().is_some() {
+        ops.push(Operation::SetMode {
+            id: new,
+            mode: node.mode(),
+        });
+    }
+    if !node.grids().is_empty() {
+        ops.push(Operation::SetLayoutGrids {
+            id: new,
+            grids: node.grids().to_vec(),
         });
     }
     if !node.effects().is_empty() {
         ops.push(Operation::SetEffects {
             id: new,
             effects: node.effects().to_vec(),
+        });
+    }
+    if node.styles().effects.is_some() {
+        ops.push(Operation::SetEffectsStyle {
+            id: new,
+            style: node.styles().effects,
         });
     }
     if !node.exports().is_empty() {
@@ -869,36 +992,62 @@ pub fn convert_container(
             id: new,
             mask: true,
         });
+        if node.mask_mode() != Default::default() {
+            ops.push(Operation::SetMaskMode {
+                id: new,
+                mode: node.mask_mode(),
+            });
+        }
     }
-    ops.push(Operation::DeleteNode { id });
-    Ok((Transaction(ops), new))
+    ops
 }
 
-/// Whether [`convert_container`] would take `id`: a group with layers in it or a
-/// frame, neither a component set nor a main, in a main or in an instance, whose
-/// copies would lose the node they link to.
+/// Whether [`convert_container`] would take `id`.
 pub fn can_convert_container(doc: &Document, id: NodeId) -> bool {
-    let Some(n) = doc.get(id) else {
-        return false;
-    };
-    let kind_ok = match n.kind() {
-        NodeKind::Group => !n.children().is_empty(),
-        NodeKind::Artboard { .. } => true,
-        _ => false,
-    };
-    let mut in_main = false;
+    convert_container_refusal(doc, id).is_none()
+}
+
+/// Why [`convert_container`] would refuse `id`, or `None` when it would take it:
+/// a group with layers in it or a frame with layers or paint, neither a component
+/// set nor a main, in a main or in an instance, whose copies would lose the node
+/// they link to. A group becomes a frame only where a frame may sit, and not when
+/// it is a mask.
+pub fn convert_container_refusal(doc: &Document, id: NodeId) -> Option<&'static str> {
+    let n = doc.get(id)?;
+    match n.kind() {
+        NodeKind::Group if n.children().is_empty() => return Some("Nothing inside to frame"),
+        NodeKind::Group if n.mask() => return Some("A mask cannot be a frame"),
+        NodeKind::Group if !n.parent().is_some_and(|p| doc.frame_may_sit_under(p)) => {
+            return Some("A frame cannot sit inside a boolean or a mask");
+        }
+        NodeKind::Artboard { .. }
+            if n.children().is_empty()
+                && n.paint().fills.is_empty()
+                && n.paint().strokes.is_empty() =>
+        {
+            return Some("Nothing inside to group");
+        }
+        NodeKind::Group | NodeKind::Artboard { .. } => {}
+        _ => return Some("Only a group or a frame converts"),
+    }
     let mut at = Some(id);
     while let Some(a) = at.and_then(|a| doc.get(a)) {
-        in_main |= a.component();
+        if a.component() {
+            return Some("A component keeps its kind: its copies link to it");
+        }
         at = a.parent();
     }
-    kind_ok && !in_main && n.set().is_none() && crate::component::instance_root(doc, id).is_none()
+    if n.set().is_some() || crate::component::instance_root(doc, id).is_some() {
+        return Some("A component keeps its kind: its copies link to it");
+    }
+    None
 }
 
 /// Resize the frame `id` to its children's union, keeping each child where it is
 /// drawn: the frame moves to the union's corner and takes its size, and every
 /// child moves back by that corner, as [`frame`] places a new one. A pinned child's
-/// insets follow at commit (`keep_insets`). A slice lends no bounds.
+/// insets follow at commit (`keep_insets`). A slice lends no bounds, and a masked
+/// run counts only as far as its mask shows it.
 ///
 /// `None` for anything but a frame without a layout (one with a layout sizes
 /// itself, through `fit-content`), a frame with nothing to measure, and a frame
@@ -911,15 +1060,7 @@ pub fn fit_frame(doc: &Document, res: &Resolved, id: NodeId) -> Option<Transacti
     {
         return None;
     }
-    let union = node
-        .children()
-        .iter()
-        .filter(|c| crate::resolve::lends_bounds(doc, **c))
-        .filter_map(|c| {
-            let b = crate::local_box(doc, res, *c)?;
-            Some(crate::geometry::transform_rect(res.used_local(doc, *c)?, b))
-        })
-        .reduce(|a, b| a.union(b))?;
+    let union = crate::query::children_box(doc, res, node)?;
     let size = kurbo::Size::new(union.width().max(1.0), union.height().max(1.0));
     let NodeKind::Artboard { size: now, .. } = res.used_kind(doc, id).unwrap_or(node.kind()) else {
         return None;
@@ -1124,7 +1265,8 @@ pub fn flex_from_placement(doc: &Document, res: &Resolved, id: NodeId) -> Option
 ///
 /// - Two members minimum: a boolean of one shape is that shape.
 /// - Text is refused: it has no outline, and converting silently ([`outline_text`])
-///   would take a one-way door for the user.
+///   would take a one-way door for the user. A slice has none either, and would
+///   lend the result its empty paint.
 /// - The result inherits the bottom member's paint, since a fresh container has no
 ///   fills and would draw nothing.
 ///
@@ -1149,7 +1291,10 @@ pub fn boolean(
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
         if matches!(
             node.kind(),
-            NodeKind::Artboard { .. } | NodeKind::Root | NodeKind::Text { .. }
+            NodeKind::Artboard { .. }
+                | NodeKind::Root
+                | NodeKind::Text { .. }
+                | NodeKind::Slice { .. }
         ) {
             return Err(OpError::WrongKindForOp);
         }
@@ -2662,7 +2807,10 @@ fn flatten_union(
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
         if matches!(
             node.kind(),
-            NodeKind::Artboard { .. } | NodeKind::Root | NodeKind::Text { .. }
+            NodeKind::Artboard { .. }
+                | NodeKind::Root
+                | NodeKind::Text { .. }
+                | NodeKind::Slice { .. }
         ) {
             return Err(OpError::WrongKindForOp);
         }
@@ -3055,8 +3203,16 @@ pub fn slice_selection(
     let mut parent = above(ids[0])
         .into_iter()
         .find(|a| ids.iter().all(|i| above(*i).contains(a)))?;
-    // A slice under a boolean would be one of its operands.
-    while matches!(doc.get(parent)?.kind(), NodeKind::Boolean { .. }) {
+    // A slice under a boolean would be one of its operands, and one under a turned
+    // or skewed container would export the box of its turned box.
+    let square = |p: NodeId| {
+        let [_, b, c, ..] = res
+            .world_transform(p)
+            .unwrap_or(Affine::IDENTITY)
+            .as_coeffs();
+        b.abs() < 1e-9 && c.abs() < 1e-9
+    };
+    while matches!(doc.get(parent)?.kind(), NodeKind::Boolean { .. }) || !square(parent) {
         parent = doc.get(parent)?.parent()?;
     }
     let siblings = doc.get(parent)?.children();
@@ -5564,10 +5720,10 @@ pub struct Properties {
     pub opacity: f32,
     /// The variable it is bound to, landed by the paste's rule as a paint's is.
     pub opacity_var: Option<crate::VarId>,
-    /// The blend mode, landing on the outermost targets as opacity does. Normal
-    /// lands as each target's default, so a group pasted onto keeps passing
-    /// through.
-    pub blend: crate::BlendMode,
+    /// The blend mode, landing on the outermost targets as opacity does; `None` when
+    /// it was the copied layer's default, which lands as each target's own, so a
+    /// leaf's Normal leaves a group passing through and a group's Normal isolates.
+    pub blend: Option<crate::BlendMode>,
     /// What a bound paint needs to land in another document: the name and kind of
     /// every variable bound, and each paint as it drew at the copy. The clipboard
     /// outlives a document switch, so a paste cannot ask the copying document.
@@ -5649,7 +5805,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
         effects,
         opacity: doc.drawn_opacity(id),
         opacity_var: node.opacity_var(),
-        blend: node.blend(),
+        blend: Some(node.blend()).filter(|b| *b != crate::BlendMode::default_for(node.kind())),
         carried,
     })
 }
@@ -5745,11 +5901,18 @@ pub fn paste_properties(
         }
         None => ops.extend(set_opacity_all(doc, ids, props.opacity).0),
     }
-    let blend = match props.blend {
-        crate::BlendMode::Normal => crate::BlendMode::PassThrough,
-        other => other,
-    };
-    ops.extend(set_blend_all(doc, ids, blend).0);
+    match props.blend {
+        Some(blend) => ops.extend(set_blend_all(doc, ids, blend).0),
+        None => {
+            for id in outermost(doc, ids) {
+                let Some(node) = doc.get(id) else { continue };
+                let blend = crate::BlendMode::default_for(node.kind());
+                if node.blend() != blend {
+                    ops.push(Operation::SetBlend { id, blend });
+                }
+            }
+        }
+    }
     Transaction(ops)
 }
 

@@ -243,6 +243,12 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     if let Some(path) = res.boolean_path(id) {
         return (!path.is_empty()).then(|| path.bounding_box());
     }
+    children_box(doc, res, node)
+}
+
+/// The union of `node`'s children's boxes in its own space, each masked run cut
+/// to its mask and slices left out: the box a container without a layout draws.
+pub(crate) fn children_box(doc: &Document, res: &Resolved, node: &crate::Node) -> Option<Rect> {
     // Masked the same way `Resolved`'s world box is, or handles and snap would
     // disagree about where a masked container ends.
     let mut mask_box: Option<Rect> = None;

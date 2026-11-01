@@ -456,6 +456,7 @@ fn a_group_and_a_frame_convert_into_each_other_in_place() {
 fn a_component_is_not_converted() {
     let mut f = Fixture::new();
     let inner = f.add(f.artboard, artboard(), (0.0, 0.0));
+    f.add(inner, rect(10.0, 10.0), (0.0, 0.0));
     assert!(build::can_convert_container(&f.doc, inner), "the control");
     f.commit(Transaction(vec![Operation::SetComponent {
         id: f.artboard,
@@ -465,6 +466,230 @@ fn a_component_is_not_converted() {
     assert!(
         !build::can_convert_container(&f.doc, inner),
         "inside a main"
+    );
+}
+
+/// A frame's strokes come back over its children and its fills under them, the
+/// order a frame paints in, so an edge-to-edge child cannot cover the stroke.
+/// flip: creating the *Border* rectangle at index 0 in `convert_container` →
+/// fails at the bottom rectangle's paint assertion.
+#[test]
+fn a_frame_turned_group_keeps_its_stroke_over_its_children() {
+    let mut f = Fixture::new();
+    let card = f.add(f.artboard, artboard(), (0.0, 0.0));
+    let header = f.add(card, rect(800.0, 40.0), (0.0, 0.0));
+    let red = ondin_core::Fill {
+        brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgb8(255, 0, 0))
+            .into(),
+        visible: true,
+    };
+    f.commit(Transaction(vec![
+        Operation::SetFills {
+            id: card,
+            fills: keyed_by_position([red]),
+        },
+        Operation::SetStrokes {
+            id: card,
+            strokes: keyed_by_position([ondin_core::Stroke {
+                width: 2.0,
+                ..Default::default()
+            }]),
+        },
+    ]));
+    let (tx, g) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, card).unwrap();
+    f.commit(tx);
+    let kids = f.children_of(g);
+    assert_eq!(kids.len(), 3, "background, header, border: {kids:?}");
+    let paint = |id: NodeId| f.doc.get(id).unwrap().paint().clone();
+    assert!(!paint(kids[0]).fills.is_empty() && paint(kids[0]).strokes.is_empty());
+    assert_eq!(kids[1], header);
+    assert!(
+        paint(kids[2]).fills.is_empty() && !paint(kids[2]).strokes.is_empty(),
+        "the stroke over the header"
+    );
+}
+
+/// The settings both kinds hold survive the conversion: a laid-out child's own
+/// alignment keeps it where its row put it, and a container's Normal keeps it
+/// isolating.
+/// flip: dropping the `SetLayoutItem` carry in `carried_settings` → fails at "the
+/// item stays where its row put it".
+#[test]
+fn a_conversion_carries_the_layout_item_and_an_isolating_normal() {
+    use ondin_core::container::{AlignItems, Display, Flex, LayoutItem};
+    let mut f = Fixture::new();
+    let row = f.add(f.artboard, artboard(), (0.0, 0.0));
+    let inner = f.add(row, artboard(), (0.0, 0.0));
+    f.add(inner, rect(60.0, 60.0), (0.0, 0.0));
+    f.commit(Transaction(vec![
+        Operation::SetGeometry {
+            id: inner,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(60.0, 60.0)),
+        },
+        Operation::SetDisplay {
+            id: row,
+            display: Some(Display::Flex(Flex {
+                align_items: AlignItems::Start,
+                ..Default::default()
+            })),
+        },
+        Operation::SetLayoutItem {
+            id: inner,
+            item: LayoutItem {
+                align_self: Some(AlignItems::End),
+                ..Default::default()
+            },
+        },
+        Operation::SetBlend {
+            id: inner,
+            blend: ondin_core::BlendMode::Normal,
+        },
+    ]));
+    let before = f.resolved().world_bounds(inner).unwrap();
+    assert!(
+        before.y0 > 30.0,
+        "the fixture: aligned to the end, {before:?}"
+    );
+
+    let (tx, g) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, inner).unwrap();
+    f.commit(tx);
+    let after = f.resolved().world_bounds(g).unwrap();
+    approx(
+        after.origin(),
+        before.origin(),
+        "the item stays where its row put it",
+    );
+    let group = f.doc.get(g).unwrap();
+    assert_eq!(
+        group.blend(),
+        ondin_core::BlendMode::Normal,
+        "still isolating"
+    );
+
+    let (tx, back) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, g).unwrap();
+    f.commit(tx);
+    assert_eq!(
+        f.doc.get(back).unwrap().blend(),
+        ondin_core::BlendMode::Normal,
+        "and back"
+    );
+    assert_eq!(
+        f.doc.get(back).unwrap().item().align_self,
+        Some(AlignItems::End)
+    );
+}
+
+/// What the conversion would refuse, the predicate refuses first: an empty frame
+/// with no paint, a mask group, a group inside a boolean or a mask.
+/// flip: dropping the mask arm from `convert_container_refusal` → fails at "a
+/// mask group".
+#[test]
+fn the_conversion_predicate_refuses_what_the_conversion_cannot_do() {
+    let mut f = Fixture::new();
+    let empty = f.add(f.artboard, artboard(), (0.0, 0.0));
+    assert_eq!(
+        build::convert_container_refusal(&f.doc, empty),
+        Some("Nothing inside to group"),
+        "an empty, unpainted frame"
+    );
+    f.add(empty, rect(10.0, 10.0), (0.0, 0.0));
+    assert_eq!(
+        build::convert_container_refusal(&f.doc, empty),
+        None,
+        "the control"
+    );
+
+    let m = f.add(f.artboard, NodeKind::Group, (0.0, 0.0));
+    f.add(m, rect(10.0, 10.0), (0.0, 0.0));
+    f.commit(Transaction(vec![Operation::SetMask { id: m, mask: true }]));
+    assert!(!build::can_convert_container(&f.doc, m), "a mask group");
+
+    let outer = f.add(f.artboard, NodeKind::Group, (0.0, 0.0));
+    let operand = f.add(outer, NodeKind::Group, (0.0, 0.0));
+    f.add(operand, rect(10.0, 10.0), (0.0, 0.0));
+    f.commit(Transaction(vec![Operation::SetMask {
+        id: outer,
+        mask: true,
+    }]));
+    assert!(
+        !build::can_convert_container(&f.doc, operand),
+        "a group inside a mask"
+    );
+    assert!(
+        build::convert_container(&f.doc, &f.resolved(), &mut f.ids, operand).is_err(),
+        "which the conversion refuses too"
+    );
+}
+
+/// A group holding a mask becomes a frame of the mask's size, not the picture's
+/// under it.
+/// flip: folding the raw union of the children in `convert_container` → fails at
+/// the size assertion.
+#[test]
+fn a_masked_group_becomes_a_frame_of_its_masked_box() {
+    let mut f = Fixture::new();
+    let mask = f.add(f.artboard, ellipse(100.0, 100.0), (0.0, 0.0));
+    let photo = f.add(f.artboard, rect(1000.0, 800.0), (-300.0, -200.0));
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[mask, photo]).unwrap();
+    f.commit(tx);
+    f.commit(Transaction(vec![Operation::SetMask {
+        id: mask,
+        mask: true,
+    }]));
+    let (tx, fr) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, g).unwrap();
+    f.commit(tx);
+    assert!(
+        matches!(f.doc.get(fr).unwrap().kind(),
+            NodeKind::Artboard { size, .. } if *size == Size::new(100.0, 100.0)),
+        "{:?}",
+        f.doc.get(fr).unwrap().kind()
+    );
+}
+
+/// A turned and flipped container converts and fits with every child left where
+/// it is drawn: the frame takes `local * translate(corner)`, not the reverse.
+/// flip: `Affine::translate(origin) * local` in `fit_frame` → fails at "a stayed
+/// put through the fit".
+#[test]
+fn a_turned_and_flipped_container_converts_and_fits_in_place() {
+    let mut f = Fixture::new();
+    let inner = f.add(f.artboard, artboard(), (0.0, 0.0));
+    f.commit(Transaction(vec![Operation::SetTransform {
+        id: inner,
+        transform: Affine::translate((120.0, 90.0))
+            * Affine::rotate(0.5)
+            * Affine::scale_non_uniform(-1.0, 2.0),
+    }]));
+    let a = f.add(inner, rect(30.0, 30.0), (10.0, 20.0));
+    let b = f.add(inner, rect(20.0, 10.0), (100.0, 60.0));
+    f.commit(Transaction(vec![Operation::SetTransform {
+        id: b,
+        transform: Affine::translate((100.0, 60.0)) * Affine::rotate(0.3),
+    }]));
+    let before = [f.world_origin(a), f.world_origin(b)];
+    let near = |p: Point, q: Point, what: &str| {
+        assert!((p - q).hypot() < 1e-9, "{what}: {p:?} vs {q:?}");
+    };
+
+    let tx = build::fit_frame(&f.doc, &f.resolved(), inner).expect("it fits");
+    f.commit(tx);
+    near(f.world_origin(a), before[0], "a stayed put through the fit");
+    near(f.world_origin(b), before[1], "b stayed put through the fit");
+
+    let (tx, g) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, inner).unwrap();
+    f.commit(tx);
+    near(f.world_origin(a), before[0], "a stayed put as a group");
+    let (tx, _) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, g).unwrap();
+    f.commit(tx);
+    near(
+        f.world_origin(a),
+        before[0],
+        "a stayed put as a frame again",
+    );
+    near(
+        f.world_origin(b),
+        before[1],
+        "b stayed put as a frame again",
     );
 }
 

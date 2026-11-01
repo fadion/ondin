@@ -2351,6 +2351,9 @@ impl OndinApp {
         // component half (`component::can_hold`) what neither sees (§15 D1003 (5)).
         // The canvas asks the same predicate.
         build::can_parent(parent_node.kind(), node.kind())
+            // A slice has no outline to be an operand with.
+            && !(matches!(parent_node.kind(), NodeKind::Boolean { .. })
+                && matches!(node.kind(), NodeKind::Slice { .. }))
             && (doc.frame_may_sit_under(parent) || !doc.holds_a_frame(dragged))
             && ondin_core::component::can_hold(doc, parent, dragged)
     }

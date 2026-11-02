@@ -2052,13 +2052,25 @@ fn write_element(
     }
 }
 
+/// The family name the PDF's font database files a font file under besides its
+/// own (`pdf::pdf_framed`), so a run naming it finds the very file that drew it.
+pub(crate) fn face_alias((blob, index): ondin_core::text::FaceFile) -> String {
+    format!("ondin-face-{blob}-{index}")
+}
+
 /// One line's runs as `<tspan>`s. Naming faces ([`Defs::faces`]), a run is cut
-/// wherever its face changes; otherwise neighbouring runs of one style are one
-/// `<tspan>`, so a face change alone writes nothing.
+/// wherever its face or file changes and names its file's [`face_alias`] ahead
+/// of its family; otherwise neighbouring runs of one style are one `<tspan>`, so
+/// a face change alone writes nothing.
 fn tspans(runs: &[ondin_core::text::ExportRun], faces: bool) -> String {
-    let mut merged: Vec<(String, &ondin_core::TextStyle, Option<&str>)> = Vec::new();
+    type Face<'a> = (Option<&'a str>, Option<ondin_core::text::FaceFile>);
+    let mut merged: Vec<(String, &ondin_core::TextStyle, Face)> = Vec::new();
     for run in runs {
-        let face = run.face.as_deref().filter(|_| faces);
+        let face = if faces {
+            (run.face.as_deref(), run.file)
+        } else {
+            (None, None)
+        };
         match merged.last_mut() {
             Some((text, style, f)) if **style == run.style && *f == face => {
                 text.push_str(&run.text);
@@ -2067,11 +2079,11 @@ fn tspans(runs: &[ondin_core::text::ExportRun], faces: bool) -> String {
         }
     }
     let mut out = String::new();
-    for (text, style, face) in merged {
+    for (text, style, (face, file)) in merged {
         let _ = write!(
             out,
             "<tspan{attrs}>{text}</tspan>",
-            attrs = run_attrs(style, face),
+            attrs = run_attrs(style, face, file),
             text = escape_xml(&text),
         );
     }
@@ -2079,14 +2091,24 @@ fn tspans(runs: &[ondin_core::text::ExportRun], faces: bool) -> String {
 }
 
 /// Everything one run's style contributes to its `<tspan>`: face, spacing and
-/// decorations, the family named `face` when one is given ([`Defs::faces`]).
+/// decorations, the family named `face` when one is given ([`Defs::faces`]),
+/// after `file`'s [`face_alias`] when one is given.
 /// `agreed` resolves an underline disagreeing with a strikethrough on the same run.
-fn run_attrs(style: &ondin_core::TextStyle, face: Option<&str>) -> String {
+fn run_attrs(
+    style: &ondin_core::TextStyle,
+    face: Option<&str>,
+    file: Option<ondin_core::text::FaceFile>,
+) -> String {
     let mut out = String::new();
+    let family = face.unwrap_or(&style.font_family);
+    let family = match file {
+        Some(file) => format!("{}, {family}", face_alias(file)),
+        None => family.to_owned(),
+    };
     let _ = write!(
         out,
         r#" font-family="{family}" font-size="{size}" font-weight="{weight}""#,
-        family = escape_xml(face.unwrap_or(&style.font_family)),
+        family = escape_xml(&family),
         size = fmt(style.font_size),
         weight = style.weight,
     );

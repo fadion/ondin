@@ -107,28 +107,8 @@ fn pdf_framed(
             }
         }
 
-        let mut fonts = usvg::fontdb::Database::new();
-        for font in fonts_used(res, &shown) {
-            fonts.load_font_source(usvg::fontdb::Source::Binary(Arc::new(font.data)));
-        }
         let missed = std::sync::Mutex::new(Vec::new());
-        let opts = usvg::Options {
-            font_family: FALLBACK_FAMILY.to_string(),
-            fontdb: Arc::new(fonts),
-            font_resolver: usvg::FontResolver {
-                select_font: select_font(&missed),
-                select_fallback: same_family_fallback(),
-            },
-            // Only our own `data:` pictures are read. A linked picture's path names a
-            // file, or an SMB share, that a received document chose.
-            image_href_resolver: usvg::ImageHrefResolver {
-                resolve_string: Box::new(|_, _| None),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let tree = usvg::Tree::from_str(&svg.svg, &opts).ok()?;
-        drop(opts);
+        let tree = page_tree(&svg.svg, fonts_used(res, &shown), &missed)?;
         for (family, drawn_in) in missed.into_inner().unwrap_or_default() {
             let note = format!("{family}, which is not available, drawn in {drawn_in}");
             if !approximated.contains(&note) {
@@ -164,14 +144,55 @@ fn pdf_framed(
     Some(Export { pdf, approximated })
 }
 
+/// One page's SVG read back against exactly `fonts`, each face filed under its
+/// file's `svg::face_alias` ahead of its own names: a run names that alias, so
+/// it is shaped in the file that drew it on the canvas. One family's subset files
+/// all give themselves its name, and usvg's glyph fallback, which a lookup by
+/// that name would lean on, stops at the first character none of them has.
+fn page_tree(
+    svg: &str,
+    fonts: Vec<FontData>,
+    missed: &std::sync::Mutex<Vec<(String, String)>>,
+) -> Option<usvg::Tree> {
+    let mut db = usvg::fontdb::Database::new();
+    for font in fonts {
+        let blob = font.data.id();
+        for id in db.load_font_source(usvg::fontdb::Source::Binary(Arc::new(font.data))) {
+            let Some(mut face) = db.face(id).cloned() else {
+                continue;
+            };
+            db.remove_face(id);
+            let alias = crate::svg::face_alias((blob, face.index));
+            face.families
+                .insert(0, (alias, usvg::fontdb::Language::English_UnitedStates));
+            db.push_face_info(face);
+        }
+    }
+    let opts = usvg::Options {
+        font_family: FALLBACK_FAMILY.to_string(),
+        fontdb: Arc::new(db),
+        font_resolver: usvg::FontResolver {
+            select_font: select_font(missed),
+            select_fallback: same_family_fallback(),
+        },
+        // Only our own `data:` pictures are read. A linked picture's path names a
+        // file, or an SMB share, that a received document chose.
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_string: Box::new(|_, _| None),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    usvg::Tree::from_str(svg, &opts).ok()
+}
+
 /// Core's own fallback family, which a layout that missed its family drew in.
 const FALLBACK_FAMILY: &str = "Inter";
 
 /// usvg's glyph fallback, kept to faces of the family the run's face gives
-/// itself: one family's subset files (Fontsource's `latin` and `latin-ext`) all
-/// name themselves alike, and a lookup by that name finds only one. Never another
-/// family's: every run names the face that drew it (`svg_linking`'s `faces`), and
-/// usvg redraws a whole line in a fallback face that covers all of it.
+/// itself, for a run that names no file ([`page_tree`]). Never another family's:
+/// every run names the face that drew it (`svg_linking`'s `faces`), and usvg
+/// redraws a whole line in a fallback face that covers all of it.
 fn same_family_fallback() -> usvg::FallbackSelectionFn<'static> {
     Box::new(|c, exclude, db| {
         let base = db.face(*exclude.first()?)?;
@@ -431,8 +452,7 @@ mod tests {
     /// character — one family's second subset file — and never another family's.
     ///
     /// flip: `same_family_fallback` answering `None` → fails at "the family's
-    /// other file". The wiring into `pdf_framed` is not pinned: an end-to-end check
-    /// needs two subset files of one family, which the repository does not carry.
+    /// other file".
     #[test]
     fn the_glyph_fallback_stays_within_the_family() {
         let inter = include_bytes!("../../ondin-core/assets/fonts/Inter-Variable.ttf");

@@ -354,6 +354,111 @@ fn a_missing_family_is_drawn_in_inter_and_noted() {
     );
 }
 
+/// `font` with its family name records (name ids 1 and 16) shortened to `name`,
+/// which must be no longer than each: two files then give themselves one family,
+/// as one family's subset files do.
+fn renamed(mut font: Vec<u8>, name: &str) -> Vec<u8> {
+    let u16_at = |b: &[u8], at: usize| usize::from(u16::from_be_bytes([b[at], b[at + 1]]));
+    let tables = u16_at(&font, 4);
+    let table = (0..tables)
+        .map(|i| 12 + 16 * i)
+        .find(|&rec| &font[rec..rec + 4] == b"name")
+        .map(|rec| u32::from_be_bytes(font[rec + 8..rec + 12].try_into().expect("4 bytes")))
+        .expect("a name table") as usize;
+    let (count, strings) = (u16_at(&font, table + 2), table + u16_at(&font, table + 4));
+    for rec in (0..count).map(|i| table + 6 + 12 * i) {
+        let (platform, id) = (u16_at(&font, rec), u16_at(&font, rec + 6));
+        if id != 1 && id != 16 {
+            continue;
+        }
+        let bytes: Vec<u8> = if platform == 1 {
+            name.bytes().collect()
+        } else {
+            name.encode_utf16().flat_map(u16::to_be_bytes).collect()
+        };
+        let (len, at) = (u16_at(&font, rec + 8), strings + u16_at(&font, rec + 10));
+        assert!(bytes.len() <= len, "the new name fits the record");
+        font[at..at + bytes.len()].copy_from_slice(&bytes);
+        font[rec + 8..rec + 10].copy_from_slice(&(bytes.len() as u16).to_be_bytes());
+    }
+    font
+}
+
+/// A family split over two files that both give themselves its name draws each
+/// character from the file the canvas drew it from, though a run in another
+/// family comes first on the line with a character neither file has.
+///
+/// flip: `run_attrs` naming no `face_alias` → fails at "both files": usvg's glyph
+/// fallback stops at the icon, so one file's character is `.notdef` and that
+/// file is never embedded.
+#[test]
+fn each_subset_file_draws_what_it_drew_on_the_canvas() {
+    use ondin_core::fallback_fonts::{Subset, subset_alias};
+    use ondin_core::text::{face_covers, register_fonts_as};
+    use ondin_core::{CharAttr, CharSpans};
+    let latin_ext = include_bytes!("../../ondin-core/assets/fonts/Inter-Variable.ttf").to_vec();
+    let emoji = include_bytes!("../../ondin-app/assets/fonts/NotoEmoji.ttf").to_vec();
+    let icons = include_bytes!("../../ondin-app/assets/fonts/OndinIcons.ttf").to_vec();
+    // The family's own file holds the emoji; its `latin-ext` file holds `Ł`.
+    let emoji = renamed(emoji, "Inter");
+    let icon = (0xE000..=0xF8FF)
+        .filter_map(char::from_u32)
+        .find(|&c| {
+            face_covers(&icons, 0, c)
+                && !face_covers(&latin_ext, 0, c)
+                && !face_covers(&emoji, 0, c)
+        })
+        .expect("an icon only the icon font has");
+    assert!(face_covers(&emoji, 0, '😀') && !face_covers(&emoji, 0, 'Ł'));
+    assert!(register_fonts_as(emoji, "Twin Pdf"));
+    assert!(register_fonts_as(
+        latin_ext,
+        &subset_alias("Twin Pdf", Subset::LatinExt)
+    ));
+    assert!(register_fonts_as(icons, "Icons Pdf"));
+
+    let mut f = common::fixture();
+    let defaults = TextStyle {
+        font_family: "Twin Pdf".into(),
+        ..inter(400)
+    };
+    let content = format!("{icon}😀Ł");
+    let mut spans = CharSpans::default();
+    spans.set(
+        0..icon.len_utf8(),
+        CharAttr::Family("Icons Pdf".into()),
+        &defaults,
+    );
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetTextStyle {
+                id: f.text,
+                spans: None,
+                style: defaults,
+            },
+            Operation::SetText {
+                id: f.text,
+                content,
+                spans: Default::default(),
+                para_spans: Default::default(),
+            },
+            Operation::SetTextSpans { id: f.text, spans },
+        ]))
+        .expect("an icon, then the split family");
+    f.res = Resolved::rebuild(&f.doc);
+    let out = pdf_of(&f.doc, &f.res, &[f.artboard], ExportText::Live).expect("a pdf");
+    let text = String::from_utf8_lossy(&out.pdf);
+    let embedded = |name: &str| text.contains(&format!("+{name}"));
+    assert!(embedded("OndinIcons"), "fixture: the icon is drawn\n{text}");
+    assert!(
+        embedded("NotoEmoji") && embedded("Inter"),
+        "both files: {:?}",
+        text.match_indices("/BaseFont/")
+            .map(|(at, _)| &text[at..(at + 40).min(text.len())])
+            .collect::<Vec<_>>()
+    );
+}
+
 /// A subject with nothing to draw is no PDF, as it is no SVG or PNG.
 ///
 /// flip: `pdf_pages` without its `extent` check → a blank 100×100 page.

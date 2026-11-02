@@ -2555,7 +2555,14 @@ pub struct ExportRun {
     /// is not `style`'s family: a script fallback, a stand-in, or Inter for a family
     /// nothing has. A run is cut wherever this changes.
     pub face: Option<String>,
+    /// The file and face that drew them, `None` for text no glyph run covers. A
+    /// run is cut wherever this changes too: one family's subset files all give
+    /// themselves the family's name, so only the file tells them apart.
+    pub file: Option<FaceFile>,
 }
+
+/// A font file by its blob's id, and the face's index within it.
+pub type FaceFile = (u64, u32);
 
 /// Whether face `index` of font file `data` maps `c` to a glyph of its own.
 pub fn face_covers(data: &[u8], index: u32, c: char) -> bool {
@@ -2625,6 +2632,7 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
                     text,
                     style,
                     face: None,
+                    file: None,
                 }],
             });
         }
@@ -2652,8 +2660,8 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
         }
         let span = line.text_range();
         // The line's glyph runs in text order, each with the family its face names
-        // itself: where a run's characters change face, the run is cut.
-        let mut drawn: Vec<(Range<usize>, Option<String>)> = line
+        // itself and its file: where a run's characters change face, the run is cut.
+        let mut drawn: Vec<(Range<usize>, Option<String>, Option<FaceFile>)> = line
             .items()
             .filter_map(|item| match item {
                 PositionedLayoutItem::GlyphRun(g) => {
@@ -2662,19 +2670,23 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
                         .entry(font.data.id())
                         .or_insert_with(|| file_family(font))
                         .clone();
-                    Some((g.run().text_range(), name))
+                    Some((
+                        g.run().text_range(),
+                        name,
+                        Some((font.data.id(), font.index)),
+                    ))
                 }
                 _ => None,
             })
             .collect();
-        drawn.sort_by_key(|(r, _)| r.start);
+        drawn.sort_by_key(|(r, ..)| r.start);
         let mut runs: Vec<ExportRun> = Vec::new();
         for (range, style) in &spans {
             let piece = range.start.max(span.start)..range.end.min(span.end);
             if piece.start >= piece.end {
                 continue;
             }
-            for (cut, face) in faces_over(&piece, &drawn, &style.font_family) {
+            for (cut, face, file) in faces_over(&piece, &drawn, &style.font_family) {
                 // Guarded rather than indexed: a non-char-edge boundary would panic.
                 let Some(slice) = text.get(cut) else {
                     continue;
@@ -2683,6 +2695,7 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
                     text: slice.to_owned(),
                     style: style.clone(),
                     face,
+                    file,
                 });
             }
         }
@@ -2712,47 +2725,50 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
             text: "…".into(),
             style,
             face: None,
+            file: None,
         });
     }
     lines
 }
 
 /// `piece` cut where the face drawing it changes, by the line's glyph runs
-/// (`drawn`, in text order, each with its face's own family), each cut with that
-/// family when it is not `family`. Text no glyph run covers keeps `family`;
-/// neighbouring cuts of one face are one.
+/// (`drawn`, in text order, each with its face's own family and its file), each
+/// cut with that family when it is not `family`, and with its file. Text no glyph
+/// run covers keeps `family` and no file; neighbouring cuts of one file are one.
 fn faces_over(
     piece: &Range<usize>,
-    drawn: &[(Range<usize>, Option<String>)],
+    drawn: &[(Range<usize>, Option<String>, Option<FaceFile>)],
     family: &str,
-) -> Vec<(Range<usize>, Option<String>)> {
+) -> Vec<(Range<usize>, Option<String>, Option<FaceFile>)> {
     let other = |name: &Option<String>| {
         name.as_ref()
             .filter(|n| !n.eq_ignore_ascii_case(family))
             .cloned()
     };
-    let mut out: Vec<(Range<usize>, Option<String>)> = Vec::new();
-    let mut push = |cut: Range<usize>, face: Option<String>| {
+    let mut out: Vec<(Range<usize>, Option<String>, Option<FaceFile>)> = Vec::new();
+    let mut push = |cut: Range<usize>, face: Option<String>, file: Option<FaceFile>| {
         if cut.start >= cut.end {
             return;
         }
         match out.last_mut() {
-            Some((last, f)) if *f == face && last.end == cut.start => last.end = cut.end,
-            _ => out.push((cut, face)),
+            Some((last, f, k)) if *f == face && *k == file && last.end == cut.start => {
+                last.end = cut.end;
+            }
+            _ => out.push((cut, face, file)),
         }
     };
     let mut at = piece.start;
-    for (range, name) in drawn {
+    for (range, name, file) in drawn {
         let start = range.start.max(at);
         let end = range.end.min(piece.end);
         if start >= end {
             continue;
         }
-        push(at..start, None);
-        push(start..end, other(name));
+        push(at..start, None, None);
+        push(start..end, other(name), *file);
         at = end;
     }
-    push(at..piece.end, None);
+    push(at..piece.end, None, None);
     out
 }
 
@@ -4660,28 +4676,41 @@ mod tests {
         );
     }
 
-    /// A piece is cut where the glyph runs change face, a cut of the family's own
-    /// face names none, neighbouring cuts of one face join, and text no glyph run
-    /// covers keeps the family.
+    /// A piece is cut where the glyph runs change file, a cut of the family's own
+    /// face names none, neighbouring cuts of one file join, two files of one name
+    /// stay apart, and text no glyph run covers keeps the family and no file.
     ///
-    /// flip: `faces_over` not joining neighbours → fails at the joined pair.
+    /// flip: `faces_over` not joining neighbours → fails at the joined pair;
+    /// joining across files → fails at "two files of one name".
     #[test]
     fn faces_over_cuts_where_the_face_changes() {
         let named = |s: &str| Some(s.to_string());
+        let (inter, jp, inter_ext) = (Some((1, 0)), Some((2, 0)), Some((3, 0)));
         let drawn = vec![
-            (0..6, named("Inter")),
-            (6..9, named("Noto Sans JP")),
-            (9..12, named("Noto Sans JP")),
-            (12..14, named("inter")),
+            (0..6, named("Inter"), inter),
+            (6..9, named("Noto Sans JP"), jp),
+            (9..12, named("Noto Sans JP"), jp),
+            (12..14, named("inter"), inter),
         ];
         assert_eq!(
             faces_over(&(0..16), &drawn, "Inter"),
-            vec![(0..6, None), (6..12, named("Noto Sans JP")), (12..16, None),]
+            vec![
+                (0..6, None, inter),
+                (6..12, named("Noto Sans JP"), jp),
+                (12..14, None, inter),
+                (14..16, None, None),
+            ]
         );
         // Clipped to the piece.
         assert_eq!(
             faces_over(&(7..10), &drawn, "Inter"),
-            vec![(7..10, named("Noto Sans JP"))]
+            vec![(7..10, named("Noto Sans JP"), jp)]
+        );
+        let subsets = vec![(0..3, None, inter), (3..5, None, inter_ext)];
+        assert_eq!(
+            faces_over(&(0..5), &subsets, "Inter"),
+            vec![(0..3, None, inter), (3..5, None, inter_ext)],
+            "two files of one name"
         );
     }
 

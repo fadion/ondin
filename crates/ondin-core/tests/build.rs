@@ -579,6 +579,38 @@ fn a_conversion_carries_the_layout_item_and_an_isolating_normal() {
     );
 }
 
+/// A set pivot is drawn at the same point after a conversion each way: a group's
+/// is a point in its own space, which the new frame's origin moves, and a
+/// frame's is a fraction of a box the group does not have. flip: copy the old
+/// pivot unchanged in `convert_container` → fails at "group to frame".
+#[test]
+fn a_conversion_keeps_a_set_pivot_where_it_is_drawn() {
+    use ondin_core::Pivot;
+    use ondin_core::query::pivot_world;
+    let mut f = Fixture::new();
+    let g = f.add(f.artboard, NodeKind::Group, (0.0, 0.0));
+    f.add(g, rect(20.0, 20.0), (40.0, 30.0));
+    f.commit(Transaction(vec![Operation::SetPivot {
+        id: g,
+        pivot: Some(Pivot::Local(Point::new(45.0, 35.0))),
+    }]));
+    let before = pivot_world(&f.doc, &f.resolved(), g).unwrap();
+    let (tx, frame) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, g).unwrap();
+    f.commit(tx);
+    approx(
+        pivot_world(&f.doc, &f.resolved(), frame).unwrap(),
+        before,
+        "group to frame",
+    );
+    let (tx, back) = build::convert_container(&f.doc, &f.resolved(), &mut f.ids, frame).unwrap();
+    f.commit(tx);
+    approx(
+        pivot_world(&f.doc, &f.resolved(), back).unwrap(),
+        before,
+        "frame to group",
+    );
+}
+
 /// What the conversion would refuse, the predicate refuses first: an empty frame
 /// with no paint, a mask group, a group inside a boolean or a mask.
 /// flip: dropping the mask arm from `convert_container_refusal` → fails at "a
@@ -618,6 +650,30 @@ fn the_conversion_predicate_refuses_what_the_conversion_cannot_do() {
     assert!(
         build::convert_container(&f.doc, &f.resolved(), &mut f.ids, operand).is_err(),
         "which the conversion refuses too"
+    );
+
+    // Only a frame may set a mode, so a frame setting one stays a frame.
+    let night = f.ids.mint_mode();
+    let moded = f.add(f.artboard, artboard(), (0.0, 0.0));
+    f.add(moded, rect(10.0, 10.0), (0.0, 0.0));
+    f.commit(Transaction(vec![
+        Operation::AddMode {
+            mode: ondin_core::Mode {
+                id: night,
+                name: "Night".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::SetMode {
+            id: moded,
+            mode: Some(night),
+        },
+    ]));
+    assert_eq!(
+        build::convert_container_refusal(&f.doc, moded),
+        Some("A group cannot set a variable mode"),
+        "a frame setting a mode"
     );
 }
 

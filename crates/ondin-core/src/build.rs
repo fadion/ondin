@@ -759,6 +759,16 @@ pub fn convert_container(
     } else {
         (NodeKind::Group, local, Affine::IDENTITY)
     };
+    // A set pivot stays where it is drawn: a point in the old box, moved into the
+    // new container's space and expressed as the new kind keeps one.
+    let pivot = node.pivot().and_then(|old| {
+        let at = shift * crate::geometry::pivot_point(Some(old), crate::local_box(doc, res, id)?);
+        let size = match &kind {
+            NodeKind::Artboard { size, .. } => *size,
+            _ => kurbo::Size::ZERO,
+        };
+        Some(crate::geometry::pivot_for(&kind, size.to_rect(), at))
+    });
     ops.push(Operation::CreateNode {
         id: new,
         parent,
@@ -858,6 +868,9 @@ pub fn convert_container(
         }
     }
     ops.extend(carried_settings(node, new, to_frame));
+    if pivot.is_some() {
+        ops.push(Operation::SetPivot { id: new, pivot });
+    }
     ops.push(Operation::DeleteNode { id });
     Ok((Transaction(ops), new))
 }
@@ -919,12 +932,6 @@ fn carried_settings(node: &crate::Node, new: NodeId, to_frame: bool) -> Vec<Oper
             blend: node.blend(),
         });
     }
-    if node.pivot().is_some() {
-        ops.push(Operation::SetPivot {
-            id: new,
-            pivot: node.pivot(),
-        });
-    }
     if *node.item() != Default::default() {
         ops.push(Operation::SetLayoutItem {
             id: new,
@@ -954,14 +961,6 @@ fn carried_settings(node: &crate::Node, new: NodeId, to_frame: bool) -> Vec<Oper
                 style: node.styles().layout,
             });
         }
-    }
-    // The mode is read on any container above a binding, so a group keeps the
-    // colours the frame chose.
-    if node.mode().is_some() {
-        ops.push(Operation::SetMode {
-            id: new,
-            mode: node.mode(),
-        });
     }
     if !node.grids().is_empty() {
         ops.push(Operation::SetLayoutGrids {
@@ -1011,7 +1010,7 @@ pub fn can_convert_container(doc: &Document, id: NodeId) -> bool {
 /// a group with layers in it or a frame with layers or paint, neither a component
 /// set nor a main, in a main or in an instance, whose copies would lose the node
 /// they link to. A group becomes a frame only where a frame may sit, and not when
-/// it is a mask.
+/// it is a mask; a frame becomes a group only when it sets no variable mode.
 pub fn convert_container_refusal(doc: &Document, id: NodeId) -> Option<&'static str> {
     let n = doc.get(id)?;
     match n.kind() {
@@ -1026,6 +1025,10 @@ pub fn convert_container_refusal(doc: &Document, id: NodeId) -> Option<&'static 
                 && n.paint().strokes.is_empty() =>
         {
             return Some("Nothing inside to group");
+        }
+        // Only a frame sets a mode, and dropping it would recolour what it holds.
+        NodeKind::Artboard { .. } if n.mode().is_some() => {
+            return Some("A group cannot set a variable mode");
         }
         NodeKind::Group | NodeKind::Artboard { .. } => {}
         _ => return Some("Only a group or a frame converts"),

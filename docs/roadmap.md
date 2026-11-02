@@ -12,8 +12,10 @@ reads true.
 ## Now
 
 - **Find and replace** in text across the page or the document. The layers search matches names only.
-- **Component documentation.** A description and a link on a main, shown in the insert picker; and
-  preferred values on a swap property, offered first in its picker.
+- **Component documentation.** The description and preferred swap values are built. Left: a link on
+  a main (`http`/`https` only, opened in the browser on a click, nothing fetched), shown on its
+  instances' card; and the description and link in the insert picker, as a hover card beside it and
+  a second line on search results, with search reading descriptions below name matches.
 - **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
   the dictionary, untagged text falls back to the system's input languages. The OS checker
   (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.

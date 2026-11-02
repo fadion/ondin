@@ -51,11 +51,11 @@ matched by id, so a renamed or moved layer is one change.
   (`Resolved::world_bounds`); *moved or resized* is both boxes present and differing by
   `diff::EPSILON`. Variables, modes, styles, guides and publish state go under *Not on the canvas*,
   their status read from which side has a value.
-- **The bar** (`compare_bar`), centred over the canvas's top (14pt down, below the rulers when
-  they show; 38 tall, card fill, radius 8, the find box's shadow): the git-diff glyph, *Comparing
-  ‹name› · ‹when› with now* (an unnamed version: its time; two versions: *with ‹name› · ‹when›*),
-  the segments *Then · Now · Swipe*,
-  previous and next arrows round *i of n* (*n changes* before one is current), and *Done*.
+- **The bar** (`compare_bar`) sits where the contrast checker's and the vision bar's do, on their
+  frame: centred on the canvas, 12pt below its top (and below the rulers when they show). It holds
+  the git-diff glyph, *Comparing ‹name› · ‹when› with now* (an unnamed version: its time; two
+  versions: *with ‹name› · ‹when›*), a `ui::segmented` *Then · Now · Swipe*, previous and next
+  arrows round *i of n* (*n changes* before one is current), and an × that leaves.
 - **Keys.** `Enter` / `Shift+Enter` step, `\` with no modifiers toggles Then and Now, both read by
   the bar while no modal, palette or text field has the keyboard. `Escape` leaves: a rung of
   `OndinApp::escape` just below the find box.
@@ -73,7 +73,9 @@ matched by id, so a renamed or moved layer is one change.
   | Changed | solid ochre (`CHANGED`) outline, *~ name*, *· n* when it stands for several layers |
   | Moved or resized | the changed mark, plus a dashed orange ghost at the old box and a line between |
 
-  The current mark is ringed white at 2pt and tinted, and drawn last. A click picks the smallest
+  A tag is no wider than its mark (48pt at least), a longer name cut with an ellipsis, so it never
+  runs over the frames beside it. The current mark is ringed white at 2pt and tinted, and drawn
+  last. A click picks the smallest
   mark under the pointer. While comparing, each Pages row carries an ochre badge counting its
   changed layers.
 - **A compared page the open document lacks** (`Compare::elsewhere`) is listed in the Pages

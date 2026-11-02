@@ -19,7 +19,6 @@ use crate::canvas::CanvasRenderer;
 use crate::input::Action;
 use crate::session::InkLog;
 use crate::theme::{self, color, icon};
-use crate::ui::FieldButton;
 use eframe::egui;
 use ondin_core::diff::{self, Change, Status};
 use ondin_core::kurbo::Rect;
@@ -30,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// What a refused edit says while a compare is open.
-pub(crate) const READ_ONLY: &str = "Comparing with a version — Done leaves it, to edit";
+pub(crate) const READ_ONLY: &str = "Comparing with a version — close it, or Escape, to edit";
 
 /// The marks' hues and the ink on their tags. Told apart by more than hue: added
 /// is solid with `+`, removed dashed with `−`, changed solid with `~`.
@@ -41,11 +40,10 @@ const ADDED_INK: egui::Color32 = egui::Color32::from_rgb(0x0b, 0x12, 0x20);
 const REMOVED_INK: egui::Color32 = egui::Color32::from_rgb(0x1d, 0x12, 0x06);
 pub(crate) const CHANGED_INK: egui::Color32 = egui::Color32::from_rgb(0x17, 0x14, 0x0a);
 
-/// The bar's height and its gap from the canvas's top.
-const BAR_H: f32 = 38.0;
-const BAR_TOP: f32 = 14.0;
 /// How far outside a layer's box its mark is drawn, in screen points.
 const MARK_OUTSET: f32 = 3.0;
+/// The narrowest a mark's tag is cut to, over a layer narrower than it.
+const TAG_MIN_W: f32 = 48.0;
 /// How near the Swipe handle a press must land to drag it.
 const HANDLE_REACH: f32 = 12.0;
 /// The changes card's row inset and the indent of a row's value lines.
@@ -648,51 +646,31 @@ impl OndinApp {
             });
         }
 
-        let right = if self.focus {
-            self.canvas_rect.right()
+        // Where the contrast checker's and the vision bar's sit: below the top
+        // ruler, centred on the canvas.
+        let ruler = if self.rulers_on() {
+            crate::rulers::THICKNESS
         } else {
-            Self::inspector_column(ctx.content_rect()).left()
+            0.0
         };
-        let left = self.canvas_rect.left();
-        let top = self.canvas_rect.top()
-            + if self.rulers_on() {
-                crate::rulers::THICKNESS
-            } else {
-                0.0
-            };
-        let anchor = egui::pos2((left + right) / 2.0, top + BAR_TOP);
+        let anchor = self.canvas_rect.center_top() + egui::vec2(0.0, 12.0 + ruler);
         let private = crate::private::on();
         let Some(c) = self.session.compare.as_mut() else {
             return;
         };
         egui::Area::new(egui::Id::new("compare-bar"))
             .order(egui::Order::Foreground)
+            .fade_in(false)
             .pivot(egui::Align2::CENTER_TOP)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(color::card())
-                    .corner_radius(8)
-                    .stroke(egui::Stroke::new(1.0, color::text_a(16)))
-                    .shadow(egui::Shadow {
-                        offset: [0, 10],
-                        blur: 24,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(82),
-                    })
-                    .inner_margin(egui::Margin {
-                        left: 12,
-                        right: 6,
-                        top: 0,
-                        bottom: 0,
-                    })
-                    .show(ui, |ui| {
-                        ui.set_height(BAR_H);
-                        ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing.x = 10.0;
-                            bar(ui, c, private, &mut act);
-                        });
+                crate::contrast::bar_frame().show(ui, |ui| {
+                    ui.set_height(crate::contrast::BAR_H - 2.0);
+                    ui.horizontal_centered(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        bar(ui, c, private, &mut act);
                     });
+                });
             });
 
         match act {
@@ -975,7 +953,7 @@ enum Act {
     Done,
 }
 
-/// The bar's contents: what is compared, the three sides, the steps, Done.
+/// The bar's contents: what is compared, the three sides, the steps, close.
 fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     ui.label(theme::icon_text(icon::GIT_DIFF, 15.0, color::accent_400()));
     let mut job = egui::text::LayoutJob::default();
@@ -1012,29 +990,34 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     }
     ui.label(job);
 
-    crate::batch_rename::well(ui, |ui| {
-        for (side, label, tip) in [
-            (Side::Then, "Then", "The version"),
-            (
-                Side::Now,
-                "Now",
-                "The document as it is — \\ toggles the two",
-            ),
-            (
-                Side::Swipe,
-                "Swipe",
-                "The version left of a handle, now right of it",
-            ),
-        ] {
-            let on = c.side == side;
-            if crate::batch_rename::segment(ui, label, "", on, 24.0)
-                .on_hover_text(tip)
-                .clicked()
-            {
-                *act = Some(Act::Side(side));
-            }
-        }
-    });
+    const SIDES: [(Side, &str, &str); 3] = [
+        (Side::Then, "Then", "The version"),
+        (
+            Side::Now,
+            "Now",
+            "The document as it is — \\ toggles the two",
+        ),
+        (
+            Side::Swipe,
+            "Swipe",
+            "The version left of a handle, now right of it",
+        ),
+    ];
+    let lit = SIDES.iter().position(|(s, ..)| *s == c.side).unwrap_or(1);
+    ui.add_space(5.0);
+    if let Some(i) = crate::ui::segmented_tipped(
+        ui,
+        130.0,
+        20.0,
+        SIDES.len(),
+        lit,
+        |_| true,
+        |i| SIDES[i].2,
+        |p, i, rect, on| crate::ui::segment_label(p, rect, SIDES[i].1, on),
+    ) {
+        *act = Some(Act::Side(SIDES[i].0));
+    }
+    ui.add_space(5.0);
 
     let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, 18.0), egui::Sense::hover());
     ui.painter().rect_filled(sep, 0.0, color::text_a(26));
@@ -1051,19 +1034,43 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
         Some(i) => format!("{} of {n}", i + 1),
         None => plural(n, "change"),
     };
-    ui.label(
-        egui::RichText::new(count)
-            .size(11.0)
-            .color(theme::text::muted()),
+    // As wide as two-digit counts need, so stepping never moves the arrows;
+    // a longer count widens the bar.
+    let font = egui::FontId::proportional(11.0);
+    let p = ui.painter();
+    let galley = p.layout_no_wrap(count, font.clone(), theme::text::muted());
+    let w = ["99 changes", "99 of 99"]
+        .into_iter()
+        .map(|s| {
+            p.layout_no_wrap(s.into(), font.clone(), theme::text::muted())
+                .size()
+                .x
+        })
+        .fold(galley.size().x, f32::max)
+        .ceil();
+    ui.add_space(2.0);
+    let (cell, _) = ui.allocate_exact_size(egui::vec2(w, galley.size().y), egui::Sense::hover());
+    ui.painter().galley(
+        cell.center() - galley.size() / 2.0,
+        galley,
+        theme::text::muted(),
     );
-    if crate::ui::icon_button(ui, icon::ARROW_DOWN, 26.0, 14.0, false, n > 0)
-        .on_hover_text("Next change · Enter")
-        .clicked()
+    ui.add_space(2.0);
+    // The down arrow's ink sits a point high in its em box.
+    if crate::ui::icon_button_nudged(
+        ui,
+        icon::ARROW_DOWN,
+        egui::vec2(26.0, 26.0),
+        14.0,
+        n > 0,
+        egui::vec2(0.0, 1.0),
+    )
+    .on_hover_text("Next change · Enter")
+    .clicked()
     {
         *act = Some(Act::Step(1));
     }
-    ui.add_space(6.0);
-    if crate::settings::text_button(ui, "Done", FieldButton::Off)
+    if crate::ui::icon_button(ui, icon::X, 24.0, 13.0, false, true)
         .on_hover_text("Leave the compare · Escape")
         .clicked()
     {
@@ -1446,10 +1453,7 @@ fn row_ui(
         }
         y += line_h + 3.0;
     }
-    (
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand),
-        toggled,
-    )
+    (resp, toggled)
 }
 
 /// A change no page holds: its status tag and what, the values under it.
@@ -1503,7 +1507,9 @@ fn off_canvas_row(ui: &mut egui::Ui, c: &Change, private: bool) {
 }
 
 /// A row's mark: its outline, solid or dashed, and a tag above its top-left
-/// corner naming it; the current one ringed in white and tinted.
+/// corner naming it, no wider than the mark (cut short with an ellipsis, so a
+/// long name never runs over its neighbours); the current one ringed in white
+/// and tinted.
 fn paint_mark(painter: &egui::Painter, row: &Row, name: &str, at: egui::Rect, current: bool) {
     let (hue, ink, sign) = look(row.status);
     if current {
@@ -1528,7 +1534,17 @@ fn paint_mark(painter: &egui::Painter, row: &Row, name: &str, at: egui::Rect, cu
     if row.layers > 1 {
         label.push_str(&format!(" · {}", row.layers));
     }
-    let galley = painter.layout_no_wrap(label, egui::FontId::proportional(10.0), ink);
+    // A floor keeps the sign and a few letters over a layer narrower than them.
+    let max_w = (at.width() + 2.0).max(TAG_MIN_W) - 10.0;
+    let mut job =
+        egui::text::LayoutJob::simple_singleline(label, egui::FontId::proportional(10.0), ink);
+    job.wrap = egui::text::TextWrapping {
+        max_width: max_w,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = painter.layout_job(job);
     let size = egui::vec2(galley.size().x + 10.0, 16.0);
     let tag = egui::Rect::from_min_size(egui::pos2(at.left() - 1.0, at.top() - 19.0), size);
     painter.rect_filled(tag, 3.0, hue);

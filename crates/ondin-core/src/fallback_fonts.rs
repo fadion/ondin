@@ -243,6 +243,8 @@ pub fn subsets_of(doc: &crate::Document) -> BTreeSet<Subset> {
                 content,
                 runs.iter().map(|(r, s)| (r.clone(), s.locale.as_deref())),
             ));
+            // Binding the content clears the spans, so a bound value has the
+            // node's locale only.
             if let Some(var) = node.text_vars()[crate::variable::TEXT_CONTENT] {
                 for value in doc.variables().every_value(var) {
                     if let Some(s) = value.as_str() {
@@ -256,8 +258,15 @@ pub fn subsets_of(doc: &crate::Document) -> BTreeSet<Subset> {
     out
 }
 
-/// Which CJK subset Han ideographs are drawn from.
-fn han_subset(locale: Option<&str>, others: &BTreeSet<Subset>) -> Subset {
+/// The subsets `text`'s characters other than Han fall in: what [`han_subset`]
+/// reads beside a run's locale.
+pub fn scripts_in(text: &str) -> BTreeSet<Subset> {
+    scan(text).0
+}
+
+/// Which CJK subset Han ideographs in a run tagged `locale` are drawn from, in a
+/// text whose other characters fall in `others` ([`scripts_in`]).
+pub fn han_subset(locale: Option<&str>, others: &BTreeSet<Subset>) -> Subset {
     let tag = locale.unwrap_or("").to_ascii_lowercase();
     let lang = tag.split(['-', '_']).next().unwrap_or("");
     match lang {
@@ -538,7 +547,21 @@ pub fn stand_ins(family: &str) -> &'static [&'static str] {
 /// `default` (Inter), then the fallbacks of every subset Inter lacks, each with
 /// its own subset face. A name nothing registered is skipped by the shaper, so the
 /// stack can name every candidate and let whichever the app loaded answer.
-pub fn font_stack(family: &str, subsets: &BTreeSet<Subset>, default: &str) -> Vec<String> {
+///
+/// `han` is the subset the run's own Han is drawn from ([`han_subset`]): it
+/// leads the CJK subsets, since the shaper takes the first family that has a
+/// character and every CJK face has the ideographs.
+pub fn font_stack(
+    family: &str,
+    subsets: &BTreeSet<Subset>,
+    han: Option<Subset>,
+    default: &str,
+) -> Vec<String> {
+    let own = han.filter(|h| subsets.contains(h));
+    let subsets: Vec<Subset> = own
+        .into_iter()
+        .chain(subsets.iter().copied().filter(|s| Some(*s) != own))
+        .collect();
     let mut out = vec![family.to_string()];
     out.extend(subsets.iter().map(|s| subset_alias(family, *s)));
     for stand_in in stand_ins(family) {
@@ -656,6 +679,7 @@ mod tests {
         let stack = font_stack(
             "Roboto",
             &set(&[Subset::Cyrillic, Subset::Japanese]),
+            None,
             "Inter",
         );
         assert_eq!(stack[0], "Roboto");
@@ -672,14 +696,52 @@ mod tests {
         );
     }
 
+    /// Each run's stack leads its CJK fallbacks with its own Han subset: untagged
+    /// Han beside a `ja` span keeps Chinese forms, a `zh-Hant` span beside untagged
+    /// Han takes Traditional ones.
+    ///
+    /// flip: `font_stack` ignoring `han` → fails at "a zh-Hant span". Its wiring
+    /// through `text::push_style` is not pinned: seeing which face drew a run needs
+    /// a CJK font, which the repository does not carry.
+    #[test]
+    fn a_runs_own_han_leads_its_stack() {
+        let all = set(&[
+            Subset::Japanese,
+            Subset::ChineseSimplified,
+            Subset::ChineseTraditional,
+        ]);
+        let first_cjk = |han: Subset| {
+            font_stack("Inter", &all, Some(han), "Inter")
+                .into_iter()
+                .find(|f| f.starts_with("Noto Sans"))
+                .expect("a CJK fallback")
+        };
+        let scripts = scripts_in("漢字漢字");
+        assert_eq!(
+            first_cjk(han_subset(Some("zh-Hant"), &scripts)),
+            "Noto Sans TC",
+            "a zh-Hant span"
+        );
+        assert_eq!(
+            first_cjk(han_subset(None, &scripts)),
+            "Noto Sans SC",
+            "untagged Han beside a ja span"
+        );
+        assert_eq!(
+            first_cjk(han_subset(Some("ja"), &scripts)),
+            "Noto Sans JP",
+            "the ja span"
+        );
+    }
+
     #[test]
     fn inter_is_named_once() {
         assert_eq!(
-            font_stack("Inter", &BTreeSet::new(), "Inter"),
+            font_stack("Inter", &BTreeSet::new(), None, "Inter"),
             vec!["Inter"]
         );
         assert_eq!(
-            font_stack("SF Pro", &BTreeSet::new(), "Inter"),
+            font_stack("SF Pro", &BTreeSet::new(), None, "Inter"),
             vec!["SF Pro", "Inter"]
         );
     }
@@ -688,7 +750,7 @@ mod tests {
     /// subset faces.
     #[test]
     fn stand_ins_come_between_the_family_and_inter() {
-        let stack = font_stack("Calibri", &set(&[Subset::Cyrillic]), "Inter");
+        let stack = font_stack("Calibri", &set(&[Subset::Cyrillic]), None, "Inter");
         assert_eq!(
             stack,
             vec![

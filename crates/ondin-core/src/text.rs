@@ -1657,10 +1657,12 @@ fn axis_settings(style: &TextStyle, axes: &[FontAxis]) -> Vec<FontVariation> {
 const ITALIC_SLANT: f64 = 14.0;
 
 /// What every run of one text falls back to after its own family: the bundled
-/// family, then the fallbacks of the scripts in the text (`font_stack`).
+/// family, then the fallbacks of the scripts in the text (`font_stack`), its Han
+/// by each run's locale beside the text's other `scripts`.
 struct Fallback<'a> {
     family: &'a str,
     subsets: &'a BTreeSet<Subset>,
+    scripts: &'a BTreeSet<Subset>,
 }
 
 /// Push one style's properties onto the builder — as defaults when `range` is
@@ -1676,7 +1678,13 @@ fn push_style(
 ) {
     let mut props: Vec<StyleProperty<'_, RunIndex>> = Vec::with_capacity(20);
     // Requested family first, bundled Inter, then whatever draws the scripts both lack.
-    let stack = font_stack(&style.font_family, fallback.subsets, fallback.family);
+    let han = crate::fallback_fonts::han_subset(style.locale.as_deref(), fallback.scripts);
+    let stack = font_stack(
+        &style.font_family,
+        fallback.subsets,
+        Some(han),
+        fallback.family,
+    );
     props.push(StyleProperty::FontFamily(FontFamily::List(Cow::Owned(
         stack.iter().map(|f| FontFamilyName::named(f)).collect(),
     ))));
@@ -1870,11 +1878,12 @@ fn shape(parts: TextRef<'_>) -> Shaped {
     let cased = cased_text(parts.content, &runs);
     let text: &str = cased.as_deref().unwrap_or(parts.content);
     // Read once for the whole text, so every run's stack names the same fallbacks;
-    // Han by each run's own locale.
+    // Han by each run's own locale, which also leads its stack's CJK subsets.
     let subsets = crate::fallback_fonts::subsets_in_runs(
         text,
         runs.iter().map(|(r, s)| (r.clone(), s.locale.as_deref())),
     );
+    let scripts = crate::fallback_fonts::scripts_in(text);
 
     let mut layout = ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
@@ -1937,6 +1946,7 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         let fallback = Fallback {
             family: &default_family,
             subsets: &subsets,
+            scripts: &scripts,
         };
         push_style(
             &mut builder,

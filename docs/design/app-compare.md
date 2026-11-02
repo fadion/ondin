@@ -56,8 +56,9 @@ matched by id, so a renamed or moved layer is one change.
 - **The bar** (`compare_bar`) sits where the contrast checker's and the vision bar's do, on their
   frame: centred on the canvas, 12pt below its top (and below the rulers when they show). It holds
   the git-diff glyph, *Comparing ‹name› · ‹when› with now* (an unnamed version: its time; two
-  versions: *with ‹name› · ‹when›*), a `ui::segmented` *Then · Now · Swipe*, previous and next
-  arrows round *i of n* (*n changes* before one is current), and an × that leaves.
+  versions: *with ‹name› · ‹when›*), a `ui::segmented` *Then · Now · Swipe*, then the contrast
+  checker's steps: *n changes*, *i / n* once one is current (in a cell as wide as *n / n*), the
+  previous and next carets, and an × that leaves.
 - **Keys.** `Enter` / `Shift+Enter` step, `\` with no modifiers toggles Then and Now, both read by
   the bar while no modal, palette or text field has the keyboard. `Escape` leaves: a rung of
   `OndinApp::escape` just below the find box.

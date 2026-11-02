@@ -1021,54 +1021,44 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     }
     ui.add_space(5.0);
 
-    let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, 18.0), egui::Sense::hover());
-    ui.painter().rect_filled(sep, 0.0, color::text_a(26));
+    crate::contrast::separator(ui);
 
+    // The contrast checker's count, position and steps.
     let n = c.rows.len();
+    ui.label(
+        egui::RichText::new(plural(n, "change"))
+            .size(12.0)
+            .color(color::text()),
+    );
+    // Room for the widest position, so stepping never moves the arrows.
+    let at_w = ui
+        .painter()
+        .layout_no_wrap(
+            format!("{n} / {n}"),
+            egui::FontId::proportional(12.0),
+            theme::text::dim(),
+        )
+        .size()
+        .x;
+    crate::contrast::cell(ui, at_w.ceil() + 2.0, |ui| {
+        if let Some(i) = c.current {
+            ui.label(
+                egui::RichText::new(format!("{} / {n}", i + 1))
+                    .size(12.0)
+                    .color(theme::text::dim()),
+            );
+        }
+    });
     ui.spacing_mut().item_spacing.x = 2.0;
-    if crate::ui::icon_button(ui, icon::ARROW_UP, 26.0, 14.0, false, n > 0)
+    if crate::ui::icon_button(ui, icon::CARET_LEFT, 24.0, 13.0, false, n > 0)
         .on_hover_text("Previous change · Shift+Enter")
         .clicked()
     {
         *act = Some(Act::Step(-1));
     }
-    let count = match c.current {
-        Some(i) => format!("{} of {n}", i + 1),
-        None => plural(n, "change"),
-    };
-    // As wide as two-digit counts need, so stepping never moves the arrows;
-    // a longer count widens the bar.
-    let font = egui::FontId::proportional(11.0);
-    let p = ui.painter();
-    let galley = p.layout_no_wrap(count, font.clone(), theme::text::muted());
-    let w = ["99 changes", "99 of 99"]
-        .into_iter()
-        .map(|s| {
-            p.layout_no_wrap(s.into(), font.clone(), theme::text::muted())
-                .size()
-                .x
-        })
-        .fold(galley.size().x, f32::max)
-        .ceil();
-    ui.add_space(2.0);
-    let (cell, _) = ui.allocate_exact_size(egui::vec2(w, galley.size().y), egui::Sense::hover());
-    ui.painter().galley(
-        cell.center() - galley.size() / 2.0,
-        galley,
-        theme::text::muted(),
-    );
-    ui.add_space(2.0);
-    // The down arrow's ink sits a point high in its em box.
-    if crate::ui::icon_button_nudged(
-        ui,
-        icon::ARROW_DOWN,
-        egui::vec2(26.0, 26.0),
-        14.0,
-        n > 0,
-        egui::vec2(0.0, 1.0),
-    )
-    .on_hover_text("Next change · Enter")
-    .clicked()
+    if crate::ui::icon_button(ui, icon::CARET_RIGHT, 24.0, 13.0, false, n > 0)
+        .on_hover_text("Next change · Enter")
+        .clicked()
     {
         *act = Some(Act::Step(1));
     }

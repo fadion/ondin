@@ -1620,7 +1620,7 @@ pub(crate) fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool 
 }
 
 /// A left-aligned cell of fixed width in the bar's row.
-fn cell(ui: &mut egui::Ui, w: f32, add: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn cell(ui: &mut egui::Ui, w: f32, add: impl FnOnce(&mut egui::Ui)) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, BAR_H - 2.0), egui::Sense::hover());
     let mut child = ui.new_child(
         egui::UiBuilder::new()

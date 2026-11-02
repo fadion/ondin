@@ -35,8 +35,9 @@ pub const MAX_MEAN_ERROR: f64 = 1.5;
 /// pixel from the other's.
 pub const MAX_MISPLACED_INK: f64 = 0.1;
 
-/// How far, in pixels, the page's type ink may lie from the canvas's and still
-/// be read as type ([`misplaced_ink`]).
+/// How far, in pixels, the page's ink may lie from the canvas's type and still
+/// be read as type whatever its colour ([`misplaced_ink`]); past it only ink in
+/// the type's own colour is.
 pub const INK_REACH: usize = 3;
 
 /// The most a text layer's solid ink may differ in colour between the images,
@@ -462,27 +463,7 @@ pub fn ink_colour_error(a: &Image, b: &Image, region: (u32, u32, u32, u32)) -> f
         return 0.0;
     };
     let (ia, ib) = r.inks(a, b);
-    let solid = |img: &Image, ink: &Ink| -> Option<[f64; 3]> {
-        let far = ink
-            .distance
-            .iter()
-            .zip(&ink.mask)
-            .filter(|(_, m)| **m)
-            .map(|(d, _)| *d)
-            .fold(0.0, f64::max);
-        let (mut sum, mut n) = ([0.0; 3], 0.0);
-        for (i, d) in ink.distance.iter().enumerate() {
-            if ink.mask[i] && *d >= far * 0.75 {
-                let p = r.px(img, i % r.w, i / r.w);
-                for c in 0..3 {
-                    sum[c] += p[c];
-                }
-                n += 1.0;
-            }
-        }
-        (n > 0.0).then(|| sum.map(|v| v / n))
-    };
-    match (solid(a, &ia), solid(b, &ib)) {
+    match (r.solid(a, &ia), r.solid(b, &ib)) {
         (Some(ca), Some(cb)) => (0..3).map(|c| (ca[c] - cb[c]).abs()).fold(0.0, f64::max),
         _ => 0.0,
     }
@@ -527,24 +508,56 @@ impl Region {
     }
 
     /// The type ink of the canvas's image `a` and the page's `b`. The page's
-    /// counts only within [`INK_REACH`] of the canvas's: a line set off by a
-    /// pixel or two is misplaced type, a layer drifting under the box's empty
-    /// part is that layer's.
+    /// counts within [`INK_REACH`] of the canvas's, and past it only in the
+    /// canvas type's solid colour: a line set off by a pixel or two, or type the
+    /// page draws where the canvas has none (a line `max_lines` would have cut),
+    /// is the text's, while a layer of another colour drifting under the box's
+    /// empty part is that layer's.
     fn inks(&self, a: &Image, b: &Image) -> (Ink, Ink) {
         let (ia, mut ib) = (self.ink(a), self.ink(b));
+        let colour = self.solid(a, &ia);
         let r = INK_REACH;
         for y in 0..self.h {
             for x in 0..self.w {
                 let i = y * self.w + x;
                 if ib.mask[i] {
-                    ib.mask[i] = (y.saturating_sub(r)..(y + r + 1).min(self.h)).any(|yy| {
+                    let near = (y.saturating_sub(r)..(y + r + 1).min(self.h)).any(|yy| {
                         (x.saturating_sub(r)..(x + r + 1).min(self.w))
                             .any(|xx| ia.mask[yy * self.w + xx])
                     });
+                    let typeset = colour.is_some_and(|c| {
+                        let p = self.px(b, x, y);
+                        (0..3).all(|k| (p[k] - c[k]).abs() <= MAX_INK_COLOUR_ERROR)
+                    });
+                    ib.mask[i] = near || typeset;
                 }
             }
         }
         (ia, ib)
+    }
+
+    /// The mean colour of `ink`'s solid pixels in `img` — those at least three
+    /// quarters as far from the type's ground as its farthest — or `None` when it
+    /// has no ink.
+    fn solid(&self, img: &Image, ink: &Ink) -> Option<[f64; 3]> {
+        let far = ink
+            .distance
+            .iter()
+            .zip(&ink.mask)
+            .filter(|(_, m)| **m)
+            .map(|(d, _)| *d)
+            .fold(0.0, f64::max);
+        let (mut sum, mut n) = ([0.0; 3], 0.0);
+        for (i, d) in ink.distance.iter().enumerate() {
+            if ink.mask[i] && *d >= far * 0.75 {
+                let p = self.px(img, i % self.w, i / self.w);
+                for c in 0..3 {
+                    sum[c] += p[c];
+                }
+                n += 1.0;
+            }
+        }
+        (n > 0.0).then(|| sum.map(|v| v / n))
     }
 
     /// Ink is what differs from the region's commonest colour by more than a
@@ -964,6 +977,38 @@ mod tests {
         assert_eq!(
             found.drifted.iter().map(|d| d.id).collect::<Vec<_>>(),
             [card],
+            "{found:?}"
+        );
+    }
+
+    /// Type the page draws where the canvas has none — a line `max_lines` would
+    /// have cut — is the text's, not the card's under it.
+    ///
+    /// flip: `Region::inks` dropping all page ink past `INK_REACH` → fails at the
+    /// ids, the card named.
+    #[test]
+    fn type_the_page_adds_is_the_texts() {
+        let (doc, res, origins, [_, text]) = type_page("Hi");
+        let (cpu, view) = raster(&doc, &res, &origins);
+        let mut page = Image {
+            rgba: cpu.rgba.clone(),
+            width: cpu.width,
+            height: cpu.height,
+        };
+        // The first line's pixels again, 100 px lower.
+        for y in 10..40 {
+            for x in 10..80 {
+                let from = ((y * page.width + x) * 4) as usize;
+                let to = (((y + 100) * page.width + x) * 4) as usize;
+                let p: [u8; 4] = cpu.rgba[from..from + 4].try_into().unwrap();
+                page.rgba[to..to + 4].copy_from_slice(&p);
+            }
+        }
+        let found = compare_page(&doc, &res, &origins, view, &cpu, &page);
+        assert!(!found.holds(), "fixture: the page differs");
+        assert_eq!(
+            found.drifted.iter().map(|d| d.id).collect::<Vec<_>>(),
+            [text],
             "{found:?}"
         );
     }

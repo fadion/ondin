@@ -170,6 +170,91 @@ fn a_shading_past_the_pixel_budget_is_left_out() {
     );
 }
 
+/// A 100-point page stroking an "H" of Helvetica one point high with a
+/// function-based shading, the line `width` points wide.
+fn stroked_glyph(width: u32) -> Vec<u8> {
+    pdf(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F 8 0 R >> /Pattern << /P0 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
+        stream("", &format!("/Pattern CS /P0 SCN {width} w BT /F 1 Tf 1 Tr 50 50 Td (H) Tj ET")),
+        b"<< /PatternType 2 /Shading 6 0 R >>".to_vec(),
+        b"<< /ShadingType 1 /ColorSpace /DeviceGray /Function 7 0 R >>".to_vec(),
+        stream(
+            "/FunctionType 4 /Domain [0 1 0 1] /Range [0 1]",
+            "{ pop pop 0.5 }",
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ])
+}
+
+/// A stroked glyph's line widens its box in the page's units, not the
+/// outline's 1,000 an em: a line wide enough to take its shading past the
+/// pixel budget leaves the page out, a thin one is drawn. flip: inflate the
+/// outline's box before placing it in `Cost::draw_glyph_run` → fails at
+/// `TooLarge`, the wide stroke read.
+#[test]
+fn a_stroked_glyph_is_budgeted_at_its_lines_width() {
+    let thin = import(stroked_glyph(10)).expect("reads");
+    assert_eq!((thin.pages.len(), thin.too_large), (1, 0));
+    assert!(thin.pages[0].svg.contains("<image"), "fixture: rasterised");
+    // A box about 8,200 points square: 67 megapixels, past the 64.
+    assert_eq!(
+        import(stroked_glyph(4_100)).err(),
+        Some(PdfInError::TooLarge),
+        "its only page left out"
+    );
+}
+
+/// A PDF of one page per side in `sides`, each drawing a picture that declares
+/// itself `side` pixels square and holds one byte, so the budget reads its
+/// declared size and drawing it costs nothing.
+fn pictured(sides: &[u32]) -> Vec<u8> {
+    let n = sides.len();
+    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 3 + 3 * i)).collect();
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).into_bytes(),
+    ];
+    for (i, side) in sides.iter().enumerate() {
+        let at = 3 + 3 * i;
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im {} 0 R >> >> /Contents {} 0 R >>",
+            at + 2, at + 1
+        ).into_bytes());
+        objects.push(stream("", "q 100 0 0 100 0 0 cm /Im Do Q"));
+        objects.push(stream(
+            &format!("/Type /XObject /Subtype /Image /Width {side} /Height {side} /ColorSpace /DeviceGray /BitsPerComponent 8"),
+            "0",
+        ));
+    }
+    pdf(&objects)
+}
+
+/// A page whose picture declares more pixels than the page budget is left out;
+/// a small one is read. flip: add nothing in `Cost::draw_image` → fails at
+/// `TooLarge`.
+#[test]
+fn a_picture_past_the_pixel_budget_is_left_out() {
+    let small = import(pictured(&[100])).expect("reads");
+    assert_eq!((small.pages.len(), small.too_large), (1, 0));
+    assert_eq!(
+        import(pictured(&[20_000])).err(),
+        Some(PdfInError::TooLarge),
+        "400 megapixels, past the page's 256"
+    );
+}
+
+/// Pages each within the page budget are read until together they pass the
+/// document's, four pages' worth; the rest are left out and counted. flip:
+/// drop the document sums from the filter in `import` → fails at the counts.
+#[test]
+fn pages_past_the_document_budget_are_left_out() {
+    // 225 megapixels a page: four fit in the document's 1,024, a fifth does not.
+    let got = import(pictured(&[15_000; 5])).expect("reads");
+    assert_eq!((got.pages.len(), got.too_large), (4, 1));
+}
+
 /// A page whose content fills with tiling patterns nested `depth` deep, the
 /// innermost filling a 300-point square with a function-based shading.
 fn nested_tiles(depth: usize) -> Vec<u8> {

@@ -545,7 +545,8 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   page · All pages*, and right of it the switches *Aa*, *ab* (whole words) and *.\**: the scope opens
   on *Selection* when something is selected, else *This page*, and *Selection* is disabled with
   nothing selected. Last, *Include text inside instances*. The fields, the scope
-  (`batch_rename::scope_segments`), switches and tick box are Batch rename's.
+  (`batch_rename::scope_segments`) and the tick box are Batch rename's; the switches are
+  `ui::segmented_toggles`, the segmented track with each cell lit on its own.
 - **The list**, grouped under page headings with their counts. A row has the kind glyph (text, an
   outlined hexagon inside an instance, a filled accent hexagon in a main), the text around the match
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when

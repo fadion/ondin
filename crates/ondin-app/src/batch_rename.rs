@@ -1206,19 +1206,6 @@ pub(crate) fn scope_segments(
     )
 }
 
-/// A rounded well holding segments `h` tall.
-pub(crate) fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::NONE
-        .fill(color::field())
-        .corner_radius(5)
-        .inner_margin(2)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.horizontal(add).inner
-        })
-        .inner
-}
-
 fn scope_row(ui: &mut egui::Ui, s: &mut Settings, selected: usize) {
     const SCOPES: [Scope; 3] = [Scope::Selection, Scope::Page, Scope::Document];
     row(ui, "In", ROW_H, |ui| {

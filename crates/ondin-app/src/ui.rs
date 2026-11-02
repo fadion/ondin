@@ -3203,34 +3203,14 @@ pub fn segmented_marked(
     mark: Option<FieldMark<'_>>,
     paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
 ) -> (Option<usize>, bool) {
-    const PAD: f32 = 2.0;
-    const GAP: f32 = 2.0;
-    let (track, _) =
-        ui.allocate_exact_size(egui::vec2(width, cell_h + PAD * 2.0), egui::Sense::empty());
-    let r5 = egui::CornerRadius::same(5);
-    let p = ui.painter();
-    p.rect_filled(track, r5, theme::color::text_a(13));
-    // Translucent rather than the solid `field_border()`: the track sits on several grounds.
-    p.rect_stroke(
-        track,
-        r5,
-        egui::Stroke::new(SEGMENT_BORDER, theme::color::text_a(20)),
-        egui::StrokeKind::Inside,
-    );
-
-    // The hairline comes out of the cells: a 28pt control is `1 + 2 + 22 + 2 + 1`.
-    let inner = track.shrink(PAD + SEGMENT_BORDER);
-    let cell_w = (inner.width() - GAP * (n.saturating_sub(1)) as f32) / n.max(1) as f32;
+    let (track, cell) = segment_track(ui, width, cell_h, n);
     let mut clicked = None;
     let mut reset = false;
     if mark.is_some() && selected >= n {
         override_dot(ui.painter(), track.right_top() + egui::vec2(-5.0, 5.0));
     }
     for i in 0..n {
-        let rect = egui::Rect::from_min_size(
-            egui::pos2(inner.min.x + i as f32 * (cell_w + GAP), inner.min.y),
-            egui::vec2(cell_w, inner.height()),
-        );
+        let rect = cell(i);
         let live = enabled(i);
         // A disabled cell senses hover only: `Sense::click()` is `FOCUSABLE`, a tab
         // stop that would swallow Return and Space.
@@ -3244,13 +3224,7 @@ pub fn segmented_marked(
             },
         );
         let on = i == selected;
-        if on {
-            ui.painter()
-                .rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(33));
-        } else if live && resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(18));
-        }
+        segment_ground(ui.painter(), rect, on, live && resp.hovered());
         match mark {
             Some(m) if on => {
                 if resp.hovered() {
@@ -3277,6 +3251,81 @@ pub fn segmented_marked(
         }
     }
     (clicked, reset)
+}
+
+/// [`segmented`]'s track and cells as independent switches: cell `i` is lit while
+/// `on(i)`, any number at once (Find's *Aa · ab · .\**). Returns the clicked index,
+/// for the caller to flip.
+pub fn segmented_toggles(
+    ui: &mut egui::Ui,
+    width: f32,
+    cell_h: f32,
+    n: usize,
+    on: impl Fn(usize) -> bool,
+    tip: impl Fn(usize) -> &'static str,
+    paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
+) -> Option<usize> {
+    let (track, cell) = segment_track(ui, width, cell_h, n);
+    let mut clicked = None;
+    for i in 0..n {
+        let rect = cell(i);
+        let resp = ui.interact(
+            rect,
+            ui.id()
+                .with(("seg", i, n, track.min.x as i32, track.min.y as i32)),
+            egui::Sense::click(),
+        );
+        let lit = on(i);
+        segment_ground(ui.painter(), rect, lit, resp.hovered());
+        paint(ui.painter(), i, rect, lit);
+        if resp.on_hover_text(tip(i)).clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
+}
+
+/// A segmented track `width` wide around cells `cell_h` tall: allocates and paints
+/// it, and returns it with the rect of each of its `n` cells.
+fn segment_track(
+    ui: &mut egui::Ui,
+    width: f32,
+    cell_h: f32,
+    n: usize,
+) -> (egui::Rect, impl Fn(usize) -> egui::Rect + use<>) {
+    const PAD: f32 = 2.0;
+    const GAP: f32 = 2.0;
+    let (track, _) =
+        ui.allocate_exact_size(egui::vec2(width, cell_h + PAD * 2.0), egui::Sense::empty());
+    let r5 = egui::CornerRadius::same(5);
+    let p = ui.painter();
+    p.rect_filled(track, r5, theme::color::text_a(13));
+    // Translucent rather than the solid `field_border()`: the track sits on several grounds.
+    p.rect_stroke(
+        track,
+        r5,
+        egui::Stroke::new(SEGMENT_BORDER, theme::color::text_a(20)),
+        egui::StrokeKind::Inside,
+    );
+    // The hairline comes out of the cells: a 28pt control is `1 + 2 + 22 + 2 + 1`.
+    let inner = track.shrink(PAD + SEGMENT_BORDER);
+    let cell_w = (inner.width() - GAP * (n.saturating_sub(1)) as f32) / n.max(1) as f32;
+    let cell = move |i: usize| {
+        egui::Rect::from_min_size(
+            egui::pos2(inner.min.x + i as f32 * (cell_w + GAP), inner.min.y),
+            egui::vec2(cell_w, inner.height()),
+        )
+    };
+    (track, cell)
+}
+
+/// A segmented cell's ground: raised when `on`, tinted under the pointer.
+fn segment_ground(painter: &egui::Painter, rect: egui::Rect, on: bool, hovered: bool) {
+    if on {
+        painter.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(33));
+    } else if hovered {
+        painter.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(18));
+    }
 }
 
 /// A centred icon glyph for a [`segmented`] cell — the icon twin of

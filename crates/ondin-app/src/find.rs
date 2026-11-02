@@ -8,7 +8,7 @@
 //! the zoom kept — and never selects it.
 
 use crate::app::OndinApp;
-use crate::batch_rename::{field_ground, field_toggle, scope_segments, tick_box, toggles, well};
+use crate::batch_rename::{field_ground, field_toggle, scope_segments, tick_box, toggles};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -35,8 +35,9 @@ const CARET_W: f32 = 20.0;
 const GAP_X: f32 = 6.0;
 /// The indent under the caret, so the second rows line up with Find.
 const INDENT: f32 = CARET_W + GAP_X;
-/// The switches' well: three toggles 2 apart, and its 2-point inset.
-const SWITCHES_W: f32 = 24.0 * 3.0 + 2.0 * 2.0 + 2.0 * 2.0;
+/// The switches' track: three 24-point cells 2 apart, inside its 2-point pad and
+/// 1-point hairline.
+const SWITCHES_W: f32 = 24.0 * 3.0 + 2.0 * 2.0 + 3.0 * 2.0;
 /// The ids of the two fields, which the keys ask about.
 const FIND_ID: &str = "find-box-find";
 const WITH_ID: &str = "find-box-with";
@@ -716,12 +717,24 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             f.scope = SCOPES[i];
         }
         ui.add_space((ui.available_width() - SWITCHES_W).max(GAP_X));
-        well(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            field_toggle(ui, "Aa", "Match case", &mut f.match_case, false);
-            field_toggle(ui, "ab", "Whole words", &mut f.whole_words, false);
-            field_toggle(ui, ".*", "Regular expression", &mut f.pattern, true);
-        });
+        const SWITCHES: [(&str, &str); 3] = [
+            ("Aa", "Match case"),
+            ("ab", "Whole words"),
+            (".*", "Regular expression"),
+        ];
+        let state = [f.match_case, f.whole_words, f.pattern];
+        if let Some(i) = ui::segmented_toggles(
+            ui,
+            SWITCHES_W,
+            22.0,
+            SWITCHES.len(),
+            |i| state[i],
+            |i| SWITCHES[i].1,
+            |p, i, rect, on| ui::segment_label(p, rect, SWITCHES[i].0, on),
+        ) {
+            let flip = [&mut f.match_case, &mut f.whole_words, &mut f.pattern];
+            *flip[i] = !*flip[i];
+        }
     });
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;

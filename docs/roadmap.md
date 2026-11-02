@@ -11,16 +11,17 @@ reads true.
 
 ## Now
 
-- **Colour-blind simulation** as a switch in the contrast check mode.
+- **Colour-blind simulation.** *View ▸ Simulate colour blindness*, beside *Check contrast*: the same
+  style of bar, with a menu of protanopia, deuteranopia, tritanopia and achromatopsia. It recolours
+  one frame (the whole canvas on a page with no frame) and never the edit chrome. Starting it ends
+  the contrast check and the other way round, so the bars never stack. It is not a switch in the
+  contrast check: WCAG contrast is luminance, which the simulations barely move.
 - **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every
   `Ctrl+S` pins one. An optional label, editable in the version card, and a *Save named version…*
   palette command that pins and asks for one.
 - **Pixel preview.** The canvas rasterized at 1x and enlarged with hard pixel edges, so the
   anti-aliasing a viewer gets is visible. The pixel grid (`grid.rs`) shows where pixels fall over
   artwork drawn at device resolution, so a half-pixel edge looks sharp; the preview shows it blur.
-- **The code fidelity check in the app.** `ondin check code` reports what the HTML export draws
-  differently (`code::fidelity`); the export dialog could run it when a browser is found and list
-  the drifted layers beside the approximated ones. React and Vue pages need a bundler to be checked.
 - **Find and replace** in text across the page or the document. The layers search matches names only.
 - **Component documentation.** A description and a link on a main, shown in the insert picker; and
   preferred values on a swap property, offered first in its picker.
@@ -64,8 +65,9 @@ reads true.
 - **Pattern fills.** A layer or component tiled as a fill, with spacing, scale and offset. Today only
   an image fill tiles (`app-image-editing.md`, framing modes).
 - **An editable way out.** Sketch, Penpot and Figma files come in (`library.md`, *Import files*);
-  nothing editable goes back, only SVG and PDF. A `.penpot` export is the candidate: an open format,
-  and `penpot_in` already maps it, so the writer is the reader's mapping in reverse.
+  nothing editable goes back, only SVG and PDF. *Export as Penpot file…* and *Export as Sketch file…*,
+  palette rows writing the whole document through a save dialog, and `ondin export --penpot` /
+  `--sketch`. Each writer is its reader's mapping (`penpot_in`, `sketch_in`) in reverse.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 
 ## Illustrations

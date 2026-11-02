@@ -1257,6 +1257,70 @@ fn ink_bounds_hold_mitre_points_and_descenders() {
     }
 }
 
+/// A per-side or dashed square-capped stroke on a rect with small rounded
+/// corners ends on a corner's arc, where its cap stands turned past the grown
+/// box: the ink holds it.
+///
+/// flip: `world_ink_of_parts`'s rect arm adding nothing → fails at "per-side".
+#[test]
+fn ink_bounds_hold_a_turned_square_cap_on_a_rect_corner() {
+    use ondin_core::kurbo::{BezPath, Cap, Join, Shape, Stroke as KStroke, stroke};
+    use ondin_core::{Paint, Side, Stroke, StrokeSides, geometry};
+
+    let kind = NodeKind::Rect {
+        size: Size::new(100.0, 100.0),
+        corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(2.0),
+        corner_smoothing: 0.0,
+    };
+    let paint = |sides, dashes: Vec<f64>| Paint {
+        fills: Vec::new(),
+        strokes: keyed_by_position([Stroke {
+            width: 10.0,
+            cap: Cap::Square,
+            join: Join::Miter,
+            sides,
+            dashes,
+            ..Stroke::default()
+        }]),
+    };
+    let style = KStroke::new(10.0)
+        .with_caps(Cap::Square)
+        .with_join(Join::Miter);
+    let drawn =
+        |path: &BezPath| stroke(path.iter(), &style, &Default::default(), 1e-3).bounding_box();
+    let holds = |outer: Rect, inner: Rect| {
+        outer.x0 <= inner.x0 + 1e-6
+            && outer.y0 <= inner.y0 + 1e-6
+            && outer.x1 >= inner.x1 - 1e-6
+            && outer.y1 >= inner.y1 - 1e-6
+    };
+    let sides = StrokeSides::Custom {
+        top: 10.0,
+        right: 10.0,
+        bottom: 0.0,
+        left: 0.0,
+    };
+    let laid = drawn(&geometry::side_path(&kind, Side::Top).unwrap())
+        .union(drawn(&geometry::side_path(&kind, Side::Right).unwrap()));
+    let grown = Rect::new(0.0, 0.0, 100.0, 100.0).inflate(5.0, 5.0);
+    assert!(
+        !holds(grown, laid),
+        "fixture: a cap escapes the grown box, {laid:?}"
+    );
+    let ink =
+        geometry::world_ink_of_parts(&kind, &paint(sides, Vec::new()), Affine::IDENTITY, None)
+            .unwrap();
+    assert!(holds(ink, laid), "per-side: {ink:?} must hold {laid:?}");
+    let dashed = geometry::world_ink_of_parts(
+        &kind,
+        &paint(StrokeSides::All, vec![7.0, 3.0]),
+        Affine::IDENTITY,
+        None,
+    )
+    .unwrap();
+    assert!(holds(dashed, laid), "dashed: {dashed:?} must reach as far");
+}
+
 /// Alignment needs a closed outline to mean anything. Lines and open paths get
 /// centred strokes, and the renderer, the SVG writer and the inspector all ask
 /// this one function so they cannot disagree about which shapes qualify.
@@ -1292,6 +1356,40 @@ fn stroke_alignment_only_applies_to_closed_shapes() {
         corner_radii: Vec::new(),
         corner_smoothing: 0.0,
     }));
+}
+
+/// A line is stroked centred whatever its alignment, so an Inside or Outside
+/// stroke reaches half its width: its world box and, through
+/// `stroke_expansion`, its hit tolerance.
+///
+/// flip: `outward_fraction` answering the alignment's own share on an open
+/// outline → fails at "Inside".
+#[test]
+fn an_open_outline_reaches_half_its_stroke_whatever_the_alignment() {
+    use ondin_core::{Paint, Stroke, StrokeAlign, geometry};
+
+    let line = NodeKind::Line {
+        end: Point::new(100.0, 0.0),
+    };
+    for (align, name) in [
+        (StrokeAlign::Inside, "Inside"),
+        (StrokeAlign::Outside, "Outside"),
+        (StrokeAlign::Center, "Center"),
+    ] {
+        let paint = Paint {
+            fills: Vec::new(),
+            strokes: keyed_by_position([Stroke {
+                width: 10.0,
+                align,
+                ..Stroke::default()
+            }]),
+        };
+        // `contains_local`'s tolerance is this reach plus the slop.
+        assert_eq!(geometry::stroke_expansion(&line, &paint), 5.0, "{name}");
+        let bounds =
+            geometry::world_bounds_of_parts(&line, &paint, Affine::IDENTITY, None).unwrap();
+        assert_eq!(bounds.y0, -5.0, "{name}: the box");
+    }
 }
 
 // --- transform origin -------------------------------------------------------

@@ -71,8 +71,9 @@ use ondin_core::{NodeId, Resolved};
 /// **`ink_bounds`, not `world_bounds`** (§5.3a). An export is a picture of what
 /// the layer *draws*, and a drop shadow is drawn outside the layer's own box — so
 /// framing from the editing box crops the shadow off at the layer's edge, which
-/// is the whole reason those are two questions. The two are equal for any layer
-/// with no effect beneath it, so this changed no existing file.
+/// is the whole reason those are two questions. The two are equal wherever
+/// nothing draws past the box; a mitre point, a square cap, a glyph past a
+/// trimmed text box or an effect does, and the export frames it whole.
 ///
 /// It is the selection outline and the inspector's W/H that want the other one,
 /// and neither comes through here.

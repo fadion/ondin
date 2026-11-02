@@ -1308,6 +1308,8 @@ pub fn pivot_placed_at(kind: &NodeKind, local: Rect, at: Point) -> Option<Pivot>
 /// expand bounds, and as the hit-test tolerance for open shapes.
 ///
 /// Alignment-aware: an inside stroke adds nothing, an outside one its full width.
+/// On an outline with no inside (a line, an open path) every stroke is drawn
+/// centred, so each alignment reaches half its width — box, hit tolerance and all.
 ///
 /// **Takes the kind** so it reads [`effective_sides`] rather than the stored
 /// `sides`: on a kind with no nameable sides, `Custom { 0, 0, 0, 0 }` would report
@@ -1577,8 +1579,21 @@ pub fn world_ink_of_parts(
             }
         }
         // Square corners and straight sides: the grown box already holds every
-        // mitre and cap.
-        NodeKind::Rect { .. } | NodeKind::Artboard { .. } => {}
+        // mitre, and a closed solid stroke has no caps. A per-side or dashed one
+        // ends on the outline, a corner's arc among it, where a square cap stands
+        // turned: half its diagonal past its centre line.
+        NodeKind::Rect { .. } | NodeKind::Artboard { .. } => {
+            for s in paint.strokes.iter().filter(|s| {
+                s.visible
+                    && s.cap == Cap::Square
+                    && (!s.dashes.is_empty() || effective_sides(kind, s) != StrokeSides::All)
+            }) {
+                let w = effective_sides(kind, s).max_width(s.width);
+                let grow =
+                    (outward_fraction(kind, s) - 0.5) * w + w / 2.0 * std::f64::consts::SQRT_2;
+                ink = ink.union(local.inflate(grow, grow));
+            }
+        }
         _ if paint
             .strokes
             .iter()

@@ -184,8 +184,9 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   (`K32GetProcessMemoryInfo`) and its resident size elsewhere (`/proc/self/statm`, `proc_pidinfo`),
   in MB under a gigabyte and GB with one decimal from one. Both are read once a second while the meter
   shows, and that second is a `request_repaint_after`, the app being reactive. Switching the meter off
-  forgets the readings, and a meter not drawn for over two seconds (the library, present mode)
-  starts its CPU share afresh rather than averaging the time away.
+  forgets the readings, and a meter that missed an egui pass (the library, present mode) starts its
+  CPU share afresh rather than averaging the time away. Told by the pass number, not the clock: a
+  frame that takes seconds is drawn in the next pass, and its share is the one worth showing.
 - CPU above 80% turns its readout `color::warn()`; memory has no threshold.
 - There is no frame-rate readout: the meter is for the user, and a canvas frame count served only the
   performance work.

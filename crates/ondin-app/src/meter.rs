@@ -35,12 +35,25 @@ pub(crate) struct Meter {
     cpu: Option<f32>,
     /// Bytes resident: the working set on Windows.
     memory: Option<u64>,
+    /// The egui pass the meter was last drawn in.
+    drawn_in: Option<u64>,
 }
 
 impl Meter {
-    /// Read CPU and memory if a [`PERIOD`] has passed since the last reading.
-    /// Returns how long until the next one is due.
-    fn tick(&mut self, now: Instant) -> Duration {
+    /// Read CPU and memory if a [`PERIOD`] has passed since the last reading,
+    /// drawn in egui pass `pass`. Returns how long until the next one is due.
+    fn tick(&mut self, now: Instant, pass: u64) -> Duration {
+        // A pass without the meter is one that did not draw it (the library,
+        // present mode): a share over that gap would average the absence, so
+        // the reading starts afresh, as after `stop`. Told by the pass and not
+        // the clock, since a long frame is when the share matters most.
+        let skipped = self.drawn_in.is_some_and(|was| pass > was + 1);
+        self.drawn_in = Some(pass);
+        if skipped {
+            self.read_at = None;
+            self.cpu_time = None;
+            self.cpu = None;
+        }
         if let Some(left) = self
             .read_at
             .and_then(|at| PERIOD.checked_sub(now.duration_since(at)))
@@ -49,19 +62,12 @@ impl Meter {
             return left;
         }
         let cpu_time = process_cpu_time();
-        // Two periods without a tick is a meter that was not drawn (the library,
-        // present mode): a share over that gap would average the absence, so the
-        // reading starts afresh, as after `stop`.
-        let fresh = self
-            .read_at
-            .is_some_and(|at| now.duration_since(at) > 2 * PERIOD);
         self.cpu = match (self.read_at, self.cpu_time, cpu_time) {
-            (Some(at), Some(was), Some(is)) if !fresh => Some(cpu_share(
+            (Some(at), Some(was), Some(is)) => Some(cpu_share(
                 is.saturating_sub(was),
                 now.duration_since(at),
                 cores(),
             )),
-            _ if fresh => None,
             _ => self.cpu,
         };
         self.read_at = Some(now);
@@ -79,7 +85,8 @@ impl Meter {
     /// The two readouts, for a `right_to_left` layout, so added memory first; and
     /// the repaint that keeps them current.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
-        let next = self.tick(Instant::now());
+        let pass = ui.ctx().cumulative_pass_nr();
+        let next = self.tick(Instant::now(), pass);
         ui.ctx().request_repaint_after(next);
         // The layout's own spacing is already between two readouts.
         let gap = READOUT_GAP - ui.spacing().item_spacing.x;
@@ -308,28 +315,40 @@ mod tests {
     fn the_platform_reports_cpu_and_memory() {
         let mut m = Meter::default();
         let t0 = Instant::now();
-        m.tick(t0);
+        m.tick(t0, 1);
         assert!(m.memory.is_some_and(|b| b > 0), "memory: {:?}", m.memory);
         assert!(m.cpu.is_none(), "one reading is no share");
-        assert_eq!(m.tick(t0), PERIOD, "not due again at once");
-        m.tick(t0 + PERIOD);
+        assert_eq!(m.tick(t0, 2), PERIOD, "not due again at once");
+        m.tick(t0 + PERIOD, 3);
         assert!(m.cpu.is_some(), "a share after a period");
     }
 
-    /// A meter not drawn for a while starts afresh rather than showing the
+    /// A meter not drawn for some passes starts afresh rather than showing the
     /// average over the time it was hidden, and reads a share a period later.
-    /// flip: `tick` without its `fresh` arm → fails at "afresh".
+    /// flip: `tick` without its `skipped` reset → fails at "afresh".
     #[test]
     fn a_meter_back_from_hiding_starts_afresh() {
         let mut m = Meter::default();
         let t0 = Instant::now();
-        m.tick(t0);
-        m.tick(t0 + PERIOD);
+        m.tick(t0, 1);
+        m.tick(t0 + PERIOD, 2);
         assert!(m.cpu.is_some(), "the fixture has a share");
         let back = t0 + 10 * PERIOD;
-        m.tick(back);
+        m.tick(back, 40);
         assert!(m.cpu.is_none(), "afresh");
-        m.tick(back + PERIOD);
+        m.tick(back + PERIOD, 41);
         assert!(m.cpu.is_some(), "and a share a period on");
+    }
+
+    /// One frame that takes long, drawn in the next pass, keeps its share.
+    /// flip: `tick` telling an absence by the clock gap → fails at "kept".
+    #[test]
+    fn a_long_frame_keeps_its_share() {
+        let mut m = Meter::default();
+        let t0 = Instant::now();
+        m.tick(t0, 1);
+        m.tick(t0 + PERIOD, 2);
+        m.tick(t0 + 6 * PERIOD, 3);
+        assert!(m.cpu.is_some(), "kept");
     }
 }

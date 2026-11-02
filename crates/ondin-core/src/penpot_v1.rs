@@ -51,10 +51,16 @@ impl Entries {
 /// Unpack `body`, the inflated stream after the header, into the entries
 /// Penpot's zip export would hold.
 pub fn unpack(body: &[u8]) -> Result<Entries, String> {
+    unpack_within(body, MAX_VALUES)
+}
+
+/// [`unpack`], with the whole stream producing at most `budget` values.
+fn unpack_within(body: &[u8], budget: usize) -> Result<Entries, String> {
     let mut sections: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut objects: Vec<(String, String, Vec<u8>)> = Vec::new();
     let mut label = String::new();
     let mut object = String::new();
+    let mut left = budget;
     let mut at = 0;
     while at < body.len() {
         let mark = body[at];
@@ -71,7 +77,9 @@ pub fn unpack(body: &[u8]) -> Result<Entries, String> {
                     .get(at..at.saturating_add(n))
                     .ok_or("an object cut short")?;
                 at += n;
-                let v = to_json(&Fressian::new(bytes).read()?);
+                let mut reader = Fressian::within(bytes, left);
+                let v = to_json(&reader.read()?);
+                left = reader.left;
                 if mark == 4 {
                     label = v.as_str().unwrap_or_default().to_owned();
                 } else {
@@ -268,11 +276,16 @@ fn camel(s: &str) -> String {
 /// each level is a stack frame here and again in `to_json`.
 const MAX_DEPTH: usize = 128;
 
-/// How many values one object may produce, a cached value counted at its full
-/// size each time it is used: a few bytes of nested cache references otherwise
-/// double the value per level. Ten million sits far above a real file's data
-/// (a few hundred values per shape) and well inside memory.
-const MAX_VALUES: usize = 10_000_000;
+/// How many values the whole stream may produce, a cached value counted at its
+/// full size each time it is used and a string or byte run at one per
+/// [`BYTES_PER_VALUE`] bytes: a few bytes of nested cache references otherwise
+/// double the value per level, and every object's data is kept to the end.
+/// Twenty million sits far above a real file's data (a few hundred values per
+/// shape) and well inside memory.
+const MAX_VALUES: usize = 20_000_000;
+
+/// How many bytes of a cached string or byte run weigh as one value.
+const BYTES_PER_VALUE: usize = 32;
 
 /// A Fressian reader over one object's bytes, with Penpot's and Clojure's
 /// handlers for the tagged structs it writes.
@@ -283,28 +296,35 @@ struct Fressian<'a> {
     structs: Vec<(String, usize)>,
     /// How many `read`s are under way.
     depth: usize,
-    /// How many values have been produced, toward [`MAX_VALUES`].
-    made: usize,
+    /// How many more values the stream may produce.
+    left: usize,
 }
 
 impl<'a> Fressian<'a> {
+    #[cfg(test)]
     fn new(buf: &'a [u8]) -> Self {
+        Self::within(buf, MAX_VALUES)
+    }
+
+    /// A reader over one object that may produce `left` values, what the
+    /// objects before it in the stream left of the budget.
+    fn within(buf: &'a [u8], left: usize) -> Self {
         Fressian {
             buf,
             at: 0,
             priority: Vec::new(),
             structs: Vec::new(),
             depth: 0,
-            made: 0,
+            left,
         }
     }
 
-    /// Count `n` values made, refusing past [`MAX_VALUES`].
+    /// Count `n` values made, refusing once the budget is spent.
     fn made(&mut self, n: usize) -> Result<(), String> {
-        self.made = self.made.saturating_add(n);
-        if self.made > MAX_VALUES {
-            return Err("an object too large to read".into());
-        }
+        self.left = self
+            .left
+            .checked_sub(n)
+            .ok_or("an object too large to read")?;
         Ok(())
     }
 
@@ -387,8 +407,8 @@ impl<'a> Fressian<'a> {
         Ok(((hi - centre) << (8 * n)) | low)
     }
 
-    /// One value, refused once it nests past [`MAX_DEPTH`] or the object has
-    /// made [`MAX_VALUES`].
+    /// One value, refused once it nests past [`MAX_DEPTH`] or the stream has
+    /// spent its budget of values.
     fn read(&mut self) -> Result<F, String> {
         if self.depth >= MAX_DEPTH {
             return Err("an object nested too deeply".into());
@@ -583,6 +603,8 @@ fn extent(f: &F) -> (usize, usize) {
     let (n, d) = match f {
         F::List(l) => inner(&mut l.iter()),
         F::Map(m) => inner(&mut m.iter().flat_map(|(k, v)| [k, v])),
+        F::Str(s) | F::Keyword(s) | F::Uuid(s) => (1 + s.len() / BYTES_PER_VALUE, 0),
+        F::Bytes(b) => (1 + b.len() / BYTES_PER_VALUE, 0),
         _ => (1, 0),
     };
     (n, d + 1)
@@ -815,6 +837,40 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// The value budget runs across the whole stream, not afresh per object:
+    /// objects that each fit are refused once together they pass it. flip:
+    /// start each object's reader at the full budget in `unpack_within` →
+    /// fails at `expect_err`.
+    #[test]
+    fn the_value_budget_spans_every_object() {
+        let mut obj = W::default();
+        obj.list(10);
+        for _ in 0..10 {
+            obj.int(1);
+        }
+        let mut body = Vec::new();
+        section(&mut body, Some("v1/files"), &obj);
+        unpack_within(&body, 20).expect("one object fits");
+        section(&mut body, None, &obj);
+        let err = unpack_within(&body, 20).err().expect("refused");
+        assert!(err.contains("too large"), "{err}");
+    }
+
+    /// A cached string weighs by its length each time it is used, so a long
+    /// string referenced over and over is refused rather than copied. flip:
+    /// count a `Str` as one in `extent` → fails at `expect_err`.
+    #[test]
+    fn a_long_cached_string_weighs_by_its_length() {
+        let mut w = W::default();
+        // A cached string of 1920 bytes, its length packed in two bytes.
+        w.0.extend([0xee, 0xcd, 0xe3, 0x57, 0x80]);
+        w.0.extend([b'x'; 1920]);
+        w.0.extend([0x80; 10]);
+        w.0.push(0xfd);
+        let err = Fressian::within(&w.0, 500).read().expect_err("refused");
+        assert!(err.contains("too large"), "{err}");
     }
 
     struct Placed;

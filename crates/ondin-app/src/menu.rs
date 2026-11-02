@@ -421,6 +421,8 @@ pub enum Item {
     Present,
     /// `Action::CheckContrast`: the contrast check mode, on or off.
     CheckContrast,
+    /// `Action::SimulateColourBlindness`: the colour-vision simulation, on or off.
+    SimulateColourBlindness,
     Tool(Tool),
     PlaceImage,
     ZoomIn,
@@ -1285,6 +1287,9 @@ impl Item {
                 Group::View,
             ),
             Item::CheckContrast => s("Check contrast", icon::CIRCLE_HALF, None, Group::View),
+            Item::SimulateColourBlindness => {
+                s("Simulate colour blindness", icon::EYE, None, Group::View)
+            }
         }
     }
 
@@ -1330,6 +1335,16 @@ impl Item {
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
             Item::CheckContrast => &["accessibility", "a11y", "wcag", "apca", "legibility"],
+            Item::SimulateColourBlindness => &[
+                "accessibility",
+                "a11y",
+                "color blind",
+                "colour vision",
+                "daltonism",
+                "protanopia",
+                "deuteranopia",
+                "tritanopia",
+            ],
             Item::BatchRename => &["find", "replace", "number", "bulk"],
             Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
             Item::MoveTo(_) => &["page", "send"],
@@ -1413,6 +1428,7 @@ impl Item {
             Item::Cheatsheet => Action::Cheatsheet,
             Item::Present => Action::Present,
             Item::CheckContrast => Action::CheckContrast,
+            Item::SimulateColourBlindness => Action::SimulateColourBlindness,
             Item::ViewSwitch(sw) => Action::ToggleView(sw),
             Item::ZoomFit => Action::ZoomFit,
             Item::ZoomSelection => Action::ZoomSelection,
@@ -3455,6 +3471,7 @@ impl OndinApp {
             | Item::ExportEditable(_)
             | Item::Present
             | Item::CheckContrast
+            | Item::SimulateColourBlindness
             | Item::Tool(_)
             | Item::PlaceImage
             | Item::ZoomIn

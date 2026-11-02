@@ -366,6 +366,9 @@ pub struct Prefs {
     pub recent_colours: Vec<[f32; 3]>,
     /// The contrast check's level and switches.
     pub contrast: ContrastPrefs,
+    /// The colour-vision simulation's deficiency as last chosen
+    /// (`crate::vision`), by `Deficiency::key`; the mode itself is never stored.
+    pub vision: String,
     /// The batch rename box's last Find, template and numbering.
     pub batch_rename: BatchRenamePrefs,
 }
@@ -422,6 +425,7 @@ impl Default for Prefs {
             colour_format: "hex".into(),
             recent_colours: Vec::new(),
             contrast: ContrastPrefs::default(),
+            vision: ondin_render::vision::Deficiency::default().key().into(),
             batch_rename: BatchRenamePrefs::default(),
         }
     }

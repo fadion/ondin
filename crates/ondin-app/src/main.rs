@@ -135,6 +135,7 @@ mod ui;
 mod update;
 mod versions;
 mod view;
+mod vision;
 
 use ondin_core::{ExportScale, ExportText};
 

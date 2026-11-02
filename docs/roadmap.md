@@ -11,11 +11,6 @@ reads true.
 
 ## Now
 
-- **Colour-blind simulation.** *View ▸ Simulate colour blindness*, beside *Check contrast*: the same
-  style of bar, with a menu of protanopia, deuteranopia, tritanopia and achromatopsia. It recolours
-  one frame (the whole canvas on a page with no frame) and never the edit chrome. Starting it ends
-  the contrast check and the other way round, so the bars never stack. It is not a switch in the
-  contrast check: WCAG contrast is luminance, which the simulations barely move.
 - **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every
   `Ctrl+S` pins one. An optional label, editable in the version card, and a *Save named version…*
   palette command that pins and asks for one.

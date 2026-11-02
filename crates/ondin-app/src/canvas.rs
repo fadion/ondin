@@ -123,6 +123,11 @@ struct Gpu {
     pinned: bool,
     /// The eyedropper's copy of the pixels round its hotspot, in flight.
     readback: Option<Readback>,
+    /// What the colour-vision simulation shows: `target` seen through it, so the
+    /// texture panning and patching keep and the eyedropper reads stays true.
+    seen: Option<CanvasTexture>,
+    /// The simulation's compute pass, built on first use.
+    vision: Option<ondin_render::vision::VisionPass>,
 }
 
 /// How many device pixels the eyedropper's loupe shows on a side; odd, so one
@@ -325,6 +330,8 @@ impl CanvasRenderer {
                 spare: None,
                 pinned: false,
                 readback: None,
+                seen: None,
+                vision: None,
             }),
             shown: None,
             shown_preview: None,
@@ -528,6 +535,47 @@ impl CanvasRenderer {
         gpu.target.as_ref().map(|t| t.id)
     }
 
+    /// The texture to show for what [`Self::render`] just drew: itself, or with
+    /// `vision` a copy seen through its deficiency inside its device region
+    /// (`OndinApp::vision_region`). Run every frame the mode is on: one pass over
+    /// the canvas, and `target` itself is never touched. Headless, the drawn
+    /// texture as it is.
+    pub(crate) fn seen_through(
+        &mut self,
+        drawn: egui::TextureId,
+        vision: Option<(ondin_render::vision::Deficiency, [u32; 4])>,
+    ) -> egui::TextureId {
+        let (Some((deficiency, region)), Some(gpu)) = (vision, self.gpu.as_mut()) else {
+            return drawn;
+        };
+        let Some(size) = gpu.target.as_ref().map(|t| t.size) else {
+            return drawn;
+        };
+        if gpu.seen.as_ref().is_none_or(|s| s.size != size) {
+            if let Some(old) = gpu.seen.take() {
+                gpu.render_state.renderer.write().free_texture(&old.id);
+            }
+            gpu.seen = Some(gpu.texture(size));
+        }
+        let rs = &gpu.render_state;
+        let pass = gpu
+            .vision
+            .get_or_insert_with(|| ondin_render::vision::VisionPass::new(&rs.device));
+        let (Some(target), Some(seen)) = (gpu.target.as_ref(), gpu.seen.as_ref()) else {
+            return drawn;
+        };
+        pass.run(
+            &rs.device,
+            &rs.queue,
+            &target.view,
+            &seen.view,
+            size,
+            deficiency,
+            region,
+        );
+        seen.id
+    }
+
     /// The eyedropper's latest sample, whatever it was read against.
     pub(crate) fn sample(&self) -> Option<&Sample> {
         self.sample.as_ref()
@@ -693,7 +741,7 @@ impl Gpu {
         if self.target.as_ref().is_some_and(|c| c.size == pixel_size) {
             return;
         }
-        for old in [self.target.take(), self.spare.take()]
+        for old in [self.target.take(), self.spare.take(), self.seen.take()]
             .into_iter()
             .flatten()
         {
@@ -8652,12 +8700,13 @@ impl OndinApp {
             self.session.drawn(),
             self.session.shaped(),
         );
+        let vision = self.vision_region();
         let (doc, res, overrides) = self.session.render_inputs();
         let ink = self.session.ink();
         let drawn = self.canvas.render(
             doc, res, overrides, stamps, ink, &camera, px, backdrop, page,
         );
-        if let Some(tex) = drawn {
+        if let Some(tex) = drawn.map(|t| self.canvas.seen_through(t, vision)) {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(tex, rect, uv, egui::Color32::WHITE);
         }

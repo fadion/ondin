@@ -1,7 +1,7 @@
 # Canvas chrome, the top bar's menus, the command palette, batch rename, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the minimap, the contrast check mode, the top bar's View/Snap menus and Settings button,
+pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap menus and Settings button,
 the command palette, the batch rename box, the shortcut cheatsheet, focus mode, private mode and
 present mode.
 Part of §9.4.
@@ -88,11 +88,13 @@ marks the original that stays. Toggles live with the key.
 ## The contrast check mode (`contrast.rs`)
 
 *View ▸ Check contrast* (`Action::CheckContrast`, `menu::Item::CheckContrast`, `Group::View`, no
-chord): the View menu's last row, ticked while on, and a palette row reading *Stop checking contrast* while on.
+chord): in the View menu's last group, ticked while on, and a palette row reading *Stop checking contrast* while on.
 It measures the shown text layers, and with *Non-text* small shapes, against what is drawn behind
 them with `ondin_export::contrast::check_with`, the measurement `ondin check contrast` runs
 (`export.md`). `OndinApp::contrast` is view state: `reset_transient_state` turns it off whenever a
 document opens, it is never saved or exported, and present mode's own branch never draws it.
+Starting it ends the colour-blind simulation, and starting that ends it, so the two bars never
+stack.
 
 - **Scope: one frame at most** (`contrast_target`), since measuring renders every layer's box
   three or four times and a page of several frames can take minutes. The selection when the mode starts, cut to
@@ -170,6 +172,38 @@ document opens, it is never saved or exported, and present mode's own branch nev
   strokes the measured ink came from are replaced or bound: a white box with a failing border is
   fixed on its border.
 
+## The colour-blind simulation (`vision.rs`)
+
+*View ▸ Simulate colour blindness* (`Action::SimulateColourBlindness`,
+`menu::Item::SimulateColourBlindness`, `Group::View`, no chord): the View menu's last row, after
+*Check contrast*, ticked while on, and a palette row reading *Stop simulating colour blindness*
+while on. One frame of the canvas is shown as someone with a colour-vision deficiency sees it
+(`ondin_render::vision`, `render.md`). `OndinApp::vision` is view state, as the contrast check is:
+off when a document opens (`reset_transient_state`), never saved or exported, never drawn in
+present mode. It is not a switch inside the contrast check: WCAG contrast is luminance, which the
+simulations barely move.
+
+- **Scope: one frame** (`vision_target`): the top-level frame of the first selected layer, else
+  `OndinApp::frame_in_view`, the frame-in-view rule `contrast_target` uses; a page with no frame
+  is simulated whole. Fixed for the mode's life, like the check's: a click on the bar's scope chip
+  re-targets, and switching pages, or the frame going away (deleted or undone), re-targets to the
+  frame in view.
+- **The bar**, in the contrast bar's style and place (`contrast::{bar_frame, separator,
+  scope_chip, BAR_H}`): eye glyph, the frame's scope chip (named through `private::layer`) or
+  *Whole canvas*, the deficiency head, then × to end the mode.
+- **The deficiency menu**, from the head: Protanopia, Deuteranopia, Tritanopia, Achromatopsia,
+  each as *Label · gloss* (*Deuteranopia · Green-blind*). The choice is a preference,
+  `prefs.vision` (`Deficiency::key`; deuteranopia by default), written on the spot. Escape or a
+  click away closes the menu, Escape before it reaches the canvas (`vision_owns_escape`).
+- **Drawing** (`CanvasRenderer::seen_through`). Every frame the mode is on, the pass writes the
+  canvas texture (`target`) into a second texture, `seen`, simulated inside the frame's device box
+  (`vision_region`: its world bounds mapped to device pixels, rounded out and clamped to the
+  canvas) and copied outside it, and egui is handed `seen`. `target` is never written, so pans
+  and patches keep working from true pixels and the eyedropper reads true colours. The edit
+  chrome is painted after the canvas texture and is never simulated. The region is the frame's
+  axis-aligned box, so a rounded or turned frame's corners take in a little of what lies outside
+  it.
+
 ## The top bar's right cluster
 
 Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (magnet + caret).
@@ -207,7 +241,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
     `ui::flyout_place`) holds `ViewSwitch::VIEW_PANELS` labelled short: *Layers*, *History*,
     *Minimap*, *Toolbar*, *Messages*. *Minimap* follows *History* so the two about the layers pane
     stay together;
-  - *Check contrast*, ticked while on and never remembered.
+  - *Check contrast* and *Simulate colour blindness*, each ticked while on and never remembered.
 
   Hovering or clicking *Panels* opens the flyout; hovering any other row closes it. A click in the
   flyout toggles its pane and leaves both open: `OndinApp::dropdown`'s click-outside close skips
@@ -274,7 +308,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
   close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
-  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, tools, place image, zoom, align,
+  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate colour blindness*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -555,7 +589,7 @@ the first segment of a component's. It hides names, not content.
   `binding::kit_label`, `kit_heading`).
 - **What is masked:** layer, frame, component, page, document and project names, everywhere one is
   drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
-  minimap, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
+  colour-blind simulation's bar, the minimap, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
   kit dialogs and the whole library screen. **What stays:** text, images, colours, style, variable
   and variant property names. Masked, not removed: a frame label still selects its frame, rows still
   navigate.
@@ -650,6 +684,10 @@ runs (`pages` names each frame's page, index for index).
   closes every other floating thing. `contrast_badges` runs after `canvas_ui` in the same
   panel; called before it, the canvas takes the badge's press
   (`a_click_on_a_failing_badge_opens_the_card`).
+- `seen_through` writes the simulation into its own `seen` texture, never into `target`. Simulating
+  in place would save a texture and corrupt the next pan or patch, which copy kept pixels out of
+  `target`, and the eyedropper, which reads it. No test pins it: headless, `seen_through` hands
+  back the drawn texture.
 - The *Panels ▸* flyout is its own `egui::Area`, so the dropdown's `contains_pointer` is false over
   it; only `dropdown`'s `on_flyout` test keeps a click in it from closing the View menu.
   `the_view_menu_s_panels_row_opens_the_panes_beside_it` pins it.
@@ -670,7 +708,7 @@ runs (`pages` names each frame's page, index for index).
   opens the editor with a layer, an instance, a main with a swap property and a variant set
   selected, the swap property's picker open, the palette empty and typed, a layer's
   menu with its *Move to page* list open, the variables browser, the Export card, the contrast check,
-  version history, the recovery and close cards and present mode;
+  the colour-blind simulation, version history, the recovery and close cards and present mode;
   `no_kit_surface_draws_a_name_in_private_mode` an instance's kit card, the insert picker, *Kits
   used*, *Make local*, the kit update popover (shut: its components are a count until a row opens)
   and *Publish*; `the_library_draws_no_name_in_private_mode` the library with its delete, move and

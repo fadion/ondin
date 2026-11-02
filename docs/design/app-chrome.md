@@ -92,7 +92,7 @@ ondin-app/src/
 ├─ reader.rs        another tool's file and a placed PDF parsed in a child process, `ondin reader` (library.md)
 ├─ library/         the library folder: store, project, scan, recovery, cover, cache; history.rs undo kept between sessions (library.md)
 ├─ kits/            kit chrome: the kit menu and tag, the library's kit index, the insert picker, publish and updates (kits.md)
-├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback) + canvas interaction and overlays
+├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback, the simulation's `seen` texture) + canvas interaction and overlays
 ├─ cursor.rs        canvas cursor bitmaps
 ├─ eyedropper.rs    the eyedropper: arming, the frozen window, the pending pick, the write, the loupe (§9.4)
 ├─ gradient.rs      the edited gradient's canvas handles: marks, press, click, right-click, drag, drawing (§9.4)
@@ -108,6 +108,7 @@ ondin-app/src/
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ batch_rename.rs  the batch rename box: picks, orders and numbers the layers, previews, commits (app-canvas-chrome.md)
 ├─ contrast.rs      contrast check mode: badges, the fix card, the bar; measured on a worker (app-canvas-chrome.md)
+├─ vision.rs        colour-blind simulation mode: the target frame, its device region, the bar and deficiency menu (app-canvas-chrome.md)
 ├─ spacing.rs       spacing handles: a flex or grid container's gaps and padding dragged on the canvas
 ├─ loose_spacing.rs spacing handles on a loose selection in a row, column or grid: gaps dragged, layers reordered (layout.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)

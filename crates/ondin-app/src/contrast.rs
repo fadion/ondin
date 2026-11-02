@@ -221,12 +221,13 @@ impl crate::prefs::ContrastPrefs {
 
 impl OndinApp {
     /// *View ▸ Check contrast*: start the mode over the selection, or the page when
-    /// nothing is selected, or end it.
+    /// nothing is selected, ending a colour-vision simulation; or end it.
     pub(crate) fn toggle_contrast(&mut self) {
         if self.contrast.is_some() {
             self.end_contrast();
             return;
         }
+        self.vision = None;
         let (scope, scope_name) = self.contrast_target();
         self.contrast = Some(Contrast::new(
             self.session.page,
@@ -262,6 +263,17 @@ impl OndinApp {
             };
             return (scope, label);
         }
+        match self.frame_in_view() {
+            Some(id) => (vec![id], name(id)),
+            None => (Vec::new(), None),
+        }
+    }
+
+    /// The page's top-level frame filling most of the view, else its first in
+    /// reading order; `None` on a page with no frame.
+    pub(crate) fn frame_in_view(&self) -> Option<NodeId> {
+        let doc = &self.session.doc;
+        let page = self.session.page;
         let res = &self.session.resolved;
         let frames: Vec<(NodeId, Rect)> = doc
             .get(page)
@@ -282,7 +294,7 @@ impl OndinApp {
                 0.0
             }
         };
-        let pick = frames
+        frames
             .iter()
             .map(|(id, b)| (*id, in_view(*b)))
             .filter(|(_, a)| *a > 0.0)
@@ -292,11 +304,7 @@ impl OndinApp {
                 crate::present::reading_order(frames.clone())
                     .first()
                     .copied()
-            });
-        match pick {
-            Some(id) => (vec![id], name(id)),
-            None => (Vec::new(), None),
-        }
+            })
     }
 
     /// Take an Enter for the open fix card before the keymap reads it, unless the
@@ -1122,7 +1130,7 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 }
 
 /// The page's top-level layer at or above `id`.
-fn top_level(doc: &Document, page: NodeId, id: NodeId) -> NodeId {
+pub(crate) fn top_level(doc: &Document, page: NodeId, id: NodeId) -> NodeId {
     let mut at = id;
     while let Some(p) = doc.get(at).and_then(|n| n.parent()) {
         if p == page {
@@ -1547,9 +1555,9 @@ fn paint_badge(
     painter.galley(text_at, galley, ink);
 }
 
-const BAR_H: f32 = 34.0;
+pub(crate) const BAR_H: f32 = 34.0;
 
-fn bar_frame() -> egui::Frame {
+pub(crate) fn bar_frame() -> egui::Frame {
     crate::ui::menu_frame(0.0)
         .corner_radius(egui::CornerRadius::same(8))
         .inner_margin(egui::Margin {
@@ -1562,7 +1570,7 @@ fn bar_frame() -> egui::Frame {
 
 /// A hairline between the bar's groups, with 3 points of its own on each side
 /// beyond the row's spacing.
-fn separator(ui: &mut egui::Ui) {
+pub(crate) fn separator(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(7.0, 16.0), egui::Sense::hover());
     let line = egui::Rect::from_center_size(r.center(), egui::vec2(1.0, 16.0));
     ui.painter().rect_filled(line, 0.0, color::text_a(30));
@@ -1571,7 +1579,7 @@ fn separator(ui: &mut egui::Ui) {
 /// The bar's scope chip: a pill naming what is checked, clear of the bar's edges.
 /// A click checks again, on the selection when there is one (`selected`), else on
 /// the frame in view, and the tooltip says which; answers whether it was clicked.
-fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
+pub(crate) fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
     const H: f32 = 20.0;
     const PAD: f32 = 8.0;
     const GAP: f32 = 5.0;

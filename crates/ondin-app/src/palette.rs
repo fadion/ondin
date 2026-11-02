@@ -689,6 +689,11 @@ impl OndinApp {
             contrast.label = "Stop checking contrast".into();
         }
         push(&mut out, contrast);
+        let mut vision = Cmd::verb(Item::SimulateColourBlindness, None);
+        if self.vision.is_some() {
+            vision.label = "Stop simulating colour blindness".into();
+        }
+        push(&mut out, vision);
         push(&mut out, Cmd::verb(Item::BatchRename, None));
         // The cards the inspector drew last frame, then the ones it can draw for
         // another selection.

@@ -14,6 +14,7 @@ ondin-render/src/
 ├─ effects.rs      # the effect passes, read by both backends (§6.4)
 ├─ fx_gpu.rs       # the same passes as compute shaders (fx.wgsl) for the GPU backend
 ├─ images.rs       # the decode cache: encoded bytes to peniko::ImageData, once per image
+├─ vision.rs       # colour-vision simulation: Deficiency, the CPU spec, VisionPass (vision.wgsl)
 └─ color.rs        # the ONLY color conversion point
 ```
 
@@ -148,6 +149,7 @@ Every setter looks in the ghost forest *before* the node map (a transaction that
 - **Image fills**: `scene::framing_of` resolves one `Framing` per draw, reading intrinsic size from the document's image table (not the decode cache), so a picture mid-decode frames at its final size. vello takes the transform per call as `brush_transform` (so framing is computed in local space); `vello_cpu`'s paint transform is context state, so `apply_paint` sets it on every call (the framing for an image, `brush_to_backend`'s second answer otherwise), else an image's framing would transform the next shape's gradient. The extend belongs to the fit and is applied at the boundary (`color::apply_framing`, `color::framed_sampler`), never written to the model. Pixels come from `ImageStore::pixels`; `color::framed_transform` composes the framing over the buffer's own grid and neither backend may set a brush transform without it. `scene::clipped` wraps the single draw a letterboxing `Fit` asks for. `paint_strokes` takes its frame as an explicit `Rect`.
 - **A missing picture is a drawing**: `scene::fill_or_placeholder` is the one place a fill becomes ink (shape fills and artboard backgrounds); where `has_image` says no pixels it calls `scene::paint_missing` (`ondin_core::missing_placeholder` ground, then a layer clipped to the shape's own path with the cross and rim). Strokes and text with a missing picture draw nothing, as a `return`; the CPU backend must also return (it once drew text in the previous node's colour because `vello_cpu` paint is context state).
 - **Colour (`color.rs`)** is the single conversion point from document colours (sRGB straight alpha) to each backend's contract, verified by a pixel test.
+- **Colour-vision simulation (`vision.rs`)** is a view of a rendered canvas, never of the document. `Deficiency` (Protanopia, Deuteranopia — the default —, Tritanopia, Achromatopsia) gives a 3×3 matrix in linear light: Machado, Oliveira and Fernandes (2009) at full severity for the three dichromacies, Rec. 709 luminance for achromatopsia; every row sums to one, so greys stay grey. `simulate_rgba8` is the specification: straight-alpha sRGB in, decode, matrix, clamp, encode, alpha passed through. `VisionPass` runs it as a compute shader (`vision.wgsl`) from one `Rgba8Unorm` texture into another, inside a device region and copying everything outside; it is built once, since building compiles the shader. `tests/vision.rs` holds the pass to the specification within one level (on-device, `#[ignore]`). The app's use is in `app-canvas-chrome.md`.
 
 ## Traps
 

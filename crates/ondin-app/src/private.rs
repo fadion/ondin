@@ -605,6 +605,14 @@ mod leak {
             |app, _| app.toggle_contrast(),
             |app| app.contrast = None,
         ));
+        // So does the colour-vision simulation's.
+        found.extend(surface(
+            c,
+            &mut app,
+            "colour-vision simulation",
+            |app, _| app.toggle_vision(),
+            |app| app.vision = None,
+        ));
         found.extend(surface(
             c,
             &mut app,

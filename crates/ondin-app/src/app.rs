@@ -892,6 +892,9 @@ pub struct OndinApp {
     /// *View ▸ Check contrast*, while it is on (`contrast.rs`). View state: a
     /// document opens with it off.
     pub(crate) contrast: Option<crate::contrast::Contrast>,
+    /// *View ▸ Simulate colour blindness*, while it is on (`vision.rs`). View
+    /// state, as the contrast check is.
+    pub(crate) vision: Option<crate::vision::Vision>,
     /// The batch rename box, while it is open (`batch_rename.rs`).
     pub(crate) batch_rename: Option<crate::batch_rename::BatchRename>,
     pub(crate) show_toolbar: bool,
@@ -1497,6 +1500,7 @@ impl OndinApp {
             show_minimap: view.minimap,
             minimap: Default::default(),
             contrast: None,
+            vision: None,
             batch_rename: None,
             show_toolbar: view.toolbar,
             show_status: view.status,
@@ -1912,6 +1916,7 @@ impl eframe::App for OndinApp {
             self.cancel_exports();
         }
         self.contrast_chrome(&ctx);
+        self.vision_chrome(&ctx);
 
         self.watch_kits(&ctx);
         self.poll_simplify();
@@ -2121,6 +2126,7 @@ impl OndinApp {
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::Present => self.start_presenting(ctx),
             Action::CheckContrast => self.toggle_contrast(),
+            Action::SimulateColourBlindness => self.toggle_vision(),
             Action::ExportCode(target) => self.export_code(target),
             Action::ExportEditable(format) => self.export_editable(format),
             Action::PlaceImage => self.place_image_action(),
@@ -5810,8 +5816,9 @@ impl OndinApp {
         // Fields holding the old document's ids are cleared by hand; one this list misses
         // dangles rather than collides (`NodeId` carries a random per-session actor).
         self.alt_clone = None;
-        // A document opens with the contrast check off.
+        // A document opens with the contrast check and the simulation off.
         self.contrast = None;
+        self.vision = None;
         self.pen = None;
         self.pencil = None;
         self.pencil_last = None;
@@ -7193,6 +7200,7 @@ impl OndinApp {
                         crate::menu::Item::Present.spec().label,
                         PANELS_ROW,
                         crate::menu::Item::CheckContrast.spec().label,
+                        crate::menu::Item::SimulateColourBlindness.spec().label,
                     ])
                     .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
@@ -7248,6 +7256,14 @@ impl OndinApp {
                 if contrast.clicked() {
                     app.open_menu = TopMenu::None;
                     app.toggle_contrast();
+                }
+                let label = crate::menu::Item::SimulateColourBlindness.spec().label;
+                let vision =
+                    crate::ui::menu_check_response(ui, label, app.vision.is_some(), ITEM_H);
+                elsewhere |= vision.hovered();
+                if vision.clicked() {
+                    app.open_menu = TopMenu::None;
+                    app.toggle_vision();
                 }
                 if elsewhere {
                     flyout = None;
@@ -8138,6 +8154,7 @@ impl OndinApp {
             || self.export_menu
             || self.export_row_open.is_some()
             || self.contrast.as_ref().is_some_and(|c| c.owns_escape())
+            || self.vision_owns_escape()
     }
 
     /// The inspector: a column of individually floating panels over the right of the

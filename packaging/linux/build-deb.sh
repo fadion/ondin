@@ -86,6 +86,13 @@ License: OFL-1.1
  egui's built-in Noto Emoji font is licensed under the SIL Open Font License
  1.1; the full text is in /usr/share/doc/ondin/NotoEmoji-OFL-1.1.txt.
 
+Files: usr/share/doc/ondin/NotoEmoji-current-OFL-1.1.txt
+Copyright: 2013 Google LLC
+License: OFL-1.1
+ The current Noto Emoji font, embedded for the UI's emoji, is licensed under
+ the SIL Open Font License 1.1; the full text is in
+ /usr/share/doc/ondin/NotoEmoji-current-OFL-1.1.txt.
+
 Files: usr/share/doc/ondin/emoji-icon-font-LICENSE.txt
 Copyright: 2014 John Slegers
 License: MIT

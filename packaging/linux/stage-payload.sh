@@ -33,7 +33,7 @@ ICON="${REPO}/icons/icon.png"
 # which). Named one by one so each is checked to exist below, the same as every
 # other file here; the check after the loop is what stops this list going stale
 # when a new one is added to licenses/.
-LICENSE_FILES="Hack-LICENSE.txt NotoEmoji-OFL-1.1.txt Ubuntu-Font-Licence-1.0.txt emoji-icon-font-LICENSE.txt"
+LICENSE_FILES="Hack-LICENSE.txt NotoEmoji-OFL-1.1.txt NotoEmoji-current-OFL-1.1.txt Ubuntu-Font-Licence-1.0.txt emoji-icon-font-LICENSE.txt"
 
 required=("$BINARY" \
     "${HERE}/${APP_ID}.desktop" \

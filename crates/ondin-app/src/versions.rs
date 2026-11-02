@@ -13,8 +13,8 @@ use crate::theme::{self, color, icon};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
-/// The card's width, *Kits used…*'s.
-const CARD_W: f32 = 420.0;
+/// The card's width.
+const CARD_W: f32 = 504.0;
 /// How tall the list grows before it scrolls.
 const LIST_MAX_H: f32 = 360.0;
 
@@ -45,14 +45,19 @@ pub(crate) fn stamp_of(path: &Path) -> Option<u64> {
 /// elsewhere; the caller tells Escape apart.
 fn name_field(ui: &mut egui::Ui, n: &mut Naming) -> bool {
     let id = egui::Id::new(("version-name", &n.path));
-    let resp = ui.add_sized(
-        egui::vec2(ui.available_width(), 22.0),
-        egui::TextEdit::singleline(&mut n.text)
-            .id(id)
-            .hint_text("Name this version")
-            .char_limit(store::LABEL_MAX)
-            .font(egui::FontId::proportional(12.5)),
-    );
+    let size = egui::vec2(ui.available_width(), crate::settings::FIELD_H);
+    let resp = crate::ui::field_row(ui, size, |ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut n.text)
+                .id(id)
+                .hint_text(egui::RichText::new("Name this version").size(12.5))
+                .char_limit(store::LABEL_MAX)
+                // The row is the frame.
+                .frame(egui::Frame::NONE)
+                .desired_width(f32::INFINITY)
+                .font(egui::FontId::proportional(12.5)),
+        )
+    });
     // Once, through the latch: requesting focus every frame would re-take the caret
     // on the frame that surrendered it, and `lost_focus` would never be true.
     if !n.focused {
@@ -187,10 +192,19 @@ impl OndinApp {
             egui::ScrollArea::vertical()
                 .max_height(LIST_MAX_H)
                 .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
+                    // A fixed row height, so the name field standing in for the two
+                    // lines moves nothing.
+                    let line =
+                        |pt: f32| ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(pt)));
+                    let row_h = (line(12.5) + 1.0 + line(11.0)).max(crate::settings::FIELD_H);
                     for (place, v) in versions.iter().enumerate() {
                         let editing = naming.as_ref().filter(|n| n.path == v.path).is_some();
-                        ui.horizontal(|ui| {
+                        let row = egui::vec2(ui.available_width(), row_h);
+                        let layout = egui::Layout::left_to_right(egui::Align::Center);
+                        ui.allocate_ui_with_layout(row, layout, |ui| {
+                            ui.set_min_height(row_h);
                             ui.label(theme::icon_text(
                                 icon::CLOCK_COUNTER_CLOCKWISE,
                                 14.0,
@@ -478,6 +492,18 @@ mod tests {
         app: &mut OndinApp,
         events: Vec<egui::Event>,
     ) -> Vec<String> {
+        card_texts(ctx, app, events)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    /// `card_frame` with where each string was drawn.
+    fn card_texts(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Pos2)> {
         let time = ctx.input(|i| i.time) + 0.1;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -492,10 +518,49 @@ mod tests {
             .shapes
             .iter()
             .filter_map(|s| match &s.shape {
-                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                egui::Shape::Text(t) => Some((t.galley.text().to_string(), t.pos)),
                 _ => None,
             })
             .collect()
+    }
+
+    /// Opening a row's name field moves no row: every *Restore* sits where it sat.
+    ///
+    /// flip: the row sized by its content rather than `row_h` → fails at "no row
+    /// moves".
+    #[test]
+    fn opening_a_name_field_moves_no_row() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "steady");
+        assert!(app.save_file(true), "fixture: one pin");
+        assert!(app.save_file(true), "fixture: two pins");
+        let versions = app.document_versions();
+        assert_eq!(versions.len(), 2, "fixture: two rows");
+        app.versions_open = true;
+        let restores = |drawn: Vec<(String, egui::Pos2)>| -> Vec<f32> {
+            drawn
+                .into_iter()
+                .filter(|(t, _)| t == "Restore")
+                .map(|(_, p)| p.y)
+                .collect()
+        };
+        for _ in 0..4 {
+            card_texts(&ctx, &mut app, Vec::new());
+        }
+        let before = restores(card_texts(&ctx, &mut app, Vec::new()));
+        app.version_naming = Some(Naming {
+            path: versions[0].path.clone(),
+            text: String::new(),
+            focused: false,
+        });
+        for _ in 0..4 {
+            card_texts(&ctx, &mut app, Vec::new());
+        }
+        let after = restores(card_texts(&ctx, &mut app, Vec::new()));
+        assert!(app.version_naming.is_some(), "fixture: the field is open");
+        assert_eq!(before.len(), 2, "fixture: both rows drawn");
+        assert_eq!(before, after, "no row moves");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn key(key: egui::Key) -> egui::Event {

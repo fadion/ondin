@@ -2253,33 +2253,38 @@ impl OndinApp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EditableFormat {
     Penpot,
+    Sketch,
 }
 
 impl EditableFormat {
-    pub(crate) const ALL: [EditableFormat; 1] = [EditableFormat::Penpot];
+    pub(crate) const ALL: [EditableFormat; 2] = [EditableFormat::Penpot, EditableFormat::Sketch];
 
     /// The palette row.
     pub(crate) fn label(self) -> &'static str {
         match self {
             EditableFormat::Penpot => "Export as Penpot file…",
+            EditableFormat::Sketch => "Export as Sketch file…",
         }
     }
 
     pub(crate) fn aliases(self) -> &'static [&'static str] {
         match self {
             EditableFormat::Penpot => &["penpot", "editable", "save as"],
+            EditableFormat::Sketch => &["sketch", "lunacy", "editable", "save as"],
         }
     }
 
     fn name(self) -> &'static str {
         match self {
             EditableFormat::Penpot => "Penpot",
+            EditableFormat::Sketch => "Sketch",
         }
     }
 
     fn extension(self) -> &'static str {
         match self {
             EditableFormat::Penpot => "penpot",
+            EditableFormat::Sketch => "sketch",
         }
     }
 
@@ -2293,6 +2298,9 @@ impl EditableFormat {
         match self {
             EditableFormat::Penpot => {
                 ondin_export::penpot::export(doc, resolved, name).map(|e| (e.bytes, e.approximated))
+            }
+            EditableFormat::Sketch => {
+                ondin_export::sketch::export(doc, resolved, name).map(|e| (e.bytes, e.approximated))
             }
         }
     }

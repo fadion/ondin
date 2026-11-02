@@ -14,6 +14,8 @@
 //! `ONDIN_UPDATE_GOLDENS=1 cargo test -p ondin-export --test goldens`, then read
 //! what moved before committing it.
 
+mod rich;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -860,4 +862,42 @@ fn every_kind_converts_to_a_stable_pdf() {
             "{text:?} PDF bytes differ between two exports"
         );
     }
+}
+
+/// Every kind goes out as a Penpot file and a Sketch file whose readers take it
+/// back whole: no layer left out as unknown or unreadable, every page there.
+#[test]
+fn every_kind_goes_out_to_penpot_and_sketch_and_back() {
+    use rich::{Pictures, Zip};
+    let (doc, res) = golden_document();
+    let pages = doc.page_ids().count();
+    let lost = ["Layers of an unknown kind", "Paths that could not be read"];
+
+    let penpot = ondin_export::penpot::export(&doc, &res, "Golden").unwrap();
+    let back = ondin_core::penpot_in::read(
+        &mut Zip::of(penpot.bytes),
+        &mut IdSource::new(0x51),
+        &mut Pictures,
+    )
+    .expect("Penpot's reader takes it");
+    assert_eq!(back.doc.page_ids().count(), pages);
+    assert!(
+        back.report.iter().all(|r| !lost.contains(&r.what)),
+        "{:?}",
+        back.report.iter().map(|r| r.what).collect::<Vec<_>>()
+    );
+
+    let sketch = ondin_export::sketch::export(&doc, &res, "Golden").unwrap();
+    let back = ondin_core::sketch_in::read(
+        &mut Zip::of(sketch.bytes),
+        &mut IdSource::new(0x52),
+        &mut Pictures,
+    )
+    .expect("Sketch's reader takes it");
+    assert_eq!(back.doc.page_ids().count(), pages);
+    assert!(
+        back.report.iter().all(|r| !lost.contains(&r.what)),
+        "{:?}",
+        back.report.iter().map(|r| r.what).collect::<Vec<_>>()
+    );
 }

@@ -5,7 +5,8 @@
 //!
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
-//! ondin export <file> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot] [-o out]
+//! ondin export <file> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot|--sketch]
+//!            [-o out]
 //!            [--outlines] [--frames] [--scale <n> | --width <px> | --height <px>]
 //!            [--page <name|n>]
 //!                                render a page with no GPU and no window, by
@@ -17,7 +18,8 @@
 //!                                --html writes a zip of HTML and CSS,
 //!                                --react and --vue a zip of components;
 //!                                --json describes every page;
-//!                                --penpot writes every page as a Penpot file
+//!                                --penpot and --sketch write every page as a
+//!                                Penpot or Sketch file
 //! ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders]
 //!            [--page <name|n>] [-o dir]
 //!                                run the document's own export settings (§7) on
@@ -230,6 +232,8 @@ enum ExportFormat {
     Vue,
     /// The whole document as a `.penpot` file.
     Penpot,
+    /// The whole document as a `.sketch` file.
+    Sketch,
 }
 
 impl ExportFormat {
@@ -241,12 +245,16 @@ impl ExportFormat {
             ExportFormat::Json => "json",
             ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => "zip",
             ExportFormat::Penpot => "penpot",
+            ExportFormat::Sketch => "sketch",
         }
     }
 
     /// Whether the format writes every page, so `--page` has nothing to choose.
     fn whole_document(self) -> bool {
-        matches!(self, ExportFormat::Json | ExportFormat::Penpot)
+        matches!(
+            self,
+            ExportFormat::Json | ExportFormat::Penpot | ExportFormat::Sketch
+        )
     }
 }
 
@@ -603,7 +611,7 @@ fn parse_tokens(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot] \
+    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot|--sketch] \
          [--outlines] [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --pdf --frames [--outlines] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] \
@@ -629,6 +637,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--react" => format = Some(ExportFormat::React),
             "--vue" => format = Some(ExportFormat::Vue),
             "--penpot" => format = Some(ExportFormat::Penpot),
+            "--sketch" => format = Some(ExportFormat::Sketch),
             "--all" => all = true,
             "--folders" => folders = true,
             "--outlines" => outlines = true,
@@ -1149,16 +1158,21 @@ fn run_export(
             serde_json::to_vec_pretty(&snap)
                 .map_err(|e| format!("cannot serialize snapshot: {e}"))?
         }
-        ExportFormat::Penpot => {
+        ExportFormat::Penpot | ExportFormat::Sketch => {
             let name = std::path::Path::new(file)
                 .file_stem()
                 .map_or_else(|| "Ondin".into(), |s| s.to_string_lossy().into_owned());
-            let export = ondin_export::penpot::export(&doc, &res, &name)
-                .map_err(|e| format!("cannot write the zip: {e}"))?;
-            if !export.approximated.is_empty() {
-                eprintln!("drawn differently: {}", export.approximated.join(", "));
+            let (bytes, approximated) = match format {
+                ExportFormat::Sketch => ondin_export::sketch::export(&doc, &res, &name)
+                    .map(|e| (e.bytes, e.approximated)),
+                _ => ondin_export::penpot::export(&doc, &res, &name)
+                    .map(|e| (e.bytes, e.approximated)),
             }
-            export.bytes
+            .map_err(|e| format!("cannot write the zip: {e}"))?;
+            if !approximated.is_empty() {
+                eprintln!("drawn differently: {}", approximated.join(", "));
+            }
+            bytes
         }
         ExportFormat::Png => {
             // Frame the whole page at `scale` device pixels per world unit. The
@@ -1955,6 +1969,7 @@ mod tests {
             ("--react", ExportFormat::React),
             ("--vue", ExportFormat::Vue),
             ("--penpot", ExportFormat::Penpot),
+            ("--sketch", ExportFormat::Sketch),
         ] {
             assert_eq!(
                 export(&["a.ondin", flag]).unwrap(),
@@ -1973,7 +1988,7 @@ mod tests {
     /// A format that writes every page refuses `--page`, naming itself.
     #[test]
     fn a_whole_document_format_takes_no_page() {
-        for flag in ["--json", "--penpot"] {
+        for flag in ["--json", "--penpot", "--sketch"] {
             let err = export(&["a.ondin", flag, "--page", "2"]).unwrap_err();
             assert!(
                 err.starts_with(&format!("{flag} writes every page")),

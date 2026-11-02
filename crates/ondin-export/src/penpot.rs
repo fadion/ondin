@@ -20,6 +20,7 @@
 //! Ids are UUIDs derived from the node ids, so the same document writes the same
 //! file; Penpot gives everything fresh ids when it imports.
 
+use crate::stable_id::uuid;
 use ondin_core::container::{AlignContent, AlignItems, Dimension, Display, JustifyContent};
 use ondin_core::kurbo::{Affine, Point, Rect, Shape, Size, Vec2};
 use ondin_core::peniko::{Color, Extend, GradientKind};
@@ -1566,7 +1567,7 @@ fn variant_id(weight: u16, italic: bool) -> String {
 
 /// The unit circle placed by `e` as Penpot describes an ellipse: its centre, the
 /// end of one axis, and the other axis's length as a multiple of that one.
-fn ellipse_axes(e: Affine) -> Option<(Point, Point, f64)> {
+pub(crate) fn ellipse_axes(e: Affine) -> Option<(Point, Point, f64)> {
     let [a, b, c, d, ..] = e.as_coeffs();
     // The axes are the eigenvectors of A·Aᵀ, their lengths the square roots of
     // its eigenvalues.
@@ -1588,34 +1589,4 @@ fn ellipse_axes(e: Affine) -> Option<(Point, Point, f64)> {
     }
     let centre = e * Point::ZERO;
     Some((centre, centre + axis / len * major, minor / major))
-}
-
-/// A UUID derived from `parts`, stable across runs: two FNV-1a passes, marked
-/// as version 8.
-fn uuid(parts: &[&str]) -> String {
-    let hash = |seed: u64| {
-        let mut h = seed;
-        for (i, part) in parts.iter().enumerate() {
-            if i > 0 {
-                h ^= 0x1f;
-                h = h.wrapping_mul(0x0100_0000_01b3);
-            }
-            for byte in part.bytes() {
-                h ^= u64::from(byte);
-                h = h.wrapping_mul(0x0100_0000_01b3);
-            }
-        }
-        h
-    };
-    let (hi, lo) = (hash(0xcbf2_9ce4_8422_2325), hash(0x8422_2325_cbf2_9ce4));
-    let hi = (hi & !0xf000) | 0x8000;
-    let lo = (lo & !0xc000_0000_0000_0000) | 0x8000_0000_0000_0000;
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        hi >> 32,
-        (hi >> 16) & 0xffff,
-        hi & 0xffff,
-        lo >> 48,
-        lo & 0xffff_ffff_ffff
-    )
 }

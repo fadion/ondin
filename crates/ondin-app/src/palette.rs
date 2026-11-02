@@ -1768,29 +1768,31 @@ pub(crate) mod tests {
         );
     }
 
-    /// *Export as Penpot file…* is a row with nothing selected, since it writes
-    /// the whole document, and it runs that export.
+    /// *Export as Penpot file…* and *Export as Sketch file…* are rows with
+    /// nothing selected, since they write the whole document, and each runs its
+    /// export.
     #[test]
     fn exporting_as_another_tools_file_needs_no_selection() {
+        use crate::panels::EditableFormat;
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
         app.toggle_palette(&ctx);
         let pal = app.palette.take().expect("the palette opened");
         let cmds = app.palette_commands(&pal);
-        let item = Item::ExportEditable(crate::panels::EditableFormat::Penpot);
-        let row = cmds
-            .iter()
-            .find(|c| c.item == item)
-            .expect("the Penpot row");
-        assert!(row.enabled);
-        assert_eq!(row.label, "Export as Penpot file…");
-        assert_eq!(
-            item.action(),
-            Some(crate::input::Action::ExportEditable(
-                crate::panels::EditableFormat::Penpot
-            ))
-        );
+        for (format, label) in [
+            (EditableFormat::Penpot, "Export as Penpot file…"),
+            (EditableFormat::Sketch, "Export as Sketch file…"),
+        ] {
+            let item = Item::ExportEditable(format);
+            let row = cmds.iter().find(|c| c.item == item).expect(label);
+            assert!(row.enabled);
+            assert_eq!(row.label, label);
+            assert_eq!(
+                item.action(),
+                Some(crate::input::Action::ExportEditable(format))
+            );
+        }
     }
 
     /// The verbs the layer menu keeps in submenus are live commands with two

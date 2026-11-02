@@ -47,7 +47,9 @@ pub mod pdf_in;
 pub mod penpot;
 pub mod plan;
 pub mod png;
+pub mod sketch;
 pub mod snapshot;
+mod stable_id;
 pub mod svg;
 pub mod webp;
 

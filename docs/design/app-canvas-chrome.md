@@ -328,9 +328,9 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   clicking its panel row does; the panel opens its parents and `reveal_selection` brings it into
   view without changing zoom. Shift+Enter or Shift-click adds it to the selection.
 - **Verbs with no other door.** *Export as HTML… / React… / Vue…*, one row per `code::Target`, dim
-  with nothing selected, aliases *code*, *html*, *react*, *vue*, *zip*. *Export as Penpot file…*,
-  one row per `EditableFormat`, never dim since it writes the whole document, aliases *penpot*,
-  *editable*, *save as*. *Show ‹card›*: the cards the
+  with nothing selected, aliases *code*, *html*, *react*, *vue*, *zip*. *Export as Penpot file…*
+  and *Export as Sketch file…*, one row per `EditableFormat`, never dim since each writes the
+  whole document, aliases *penpot* or *sketch* and *lunacy*, and *editable*, *save as*. *Show ‹card›*: the cards the
   inspector drew last frame (`cards_shown`) are live; cards drawn earlier this session but not now
   (`cards_seen`) are dim, *Not shown for this selection*; in focus mode all are dim. Running one
   sets `reveal_card`, and `panel_full` opens that card, scrolls it to the top and focuses its first

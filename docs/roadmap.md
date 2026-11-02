@@ -64,9 +64,6 @@ reads true.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 - **Pattern fills.** A layer or component tiled as a fill, with spacing, scale and offset. Today only
   an image fill tiles (`app-image-editing.md`, framing modes).
-- **An editable way out to Sketch.** *Export as Sketch file…*, a palette row writing the whole
-  document through a save dialog as *Export as Penpot file…* does (`export.md`), and
-  `ondin export --sketch`. The writer is `sketch_in`'s mapping in reverse.
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 
 ## Illustrations

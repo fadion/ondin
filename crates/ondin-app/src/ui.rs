@@ -433,6 +433,18 @@ pub(crate) const HEAD_LEAD: f32 = HEAD_PAD + 2.0;
 /// one rect, lit like an [`icon_button`] and held lit while `open`. Hand-painted:
 /// a `ui.label` wins the hit test over the rect that contains it.
 pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) -> egui::Response {
+    menu_head_min(ui, lead, 0.0, gap, open)
+}
+
+/// [`menu_head`] whose mark takes at least `min_lead` points, set against the caret,
+/// so a readout that changes length moves nothing beside it.
+pub fn menu_head_min(
+    ui: &mut egui::Ui,
+    lead: egui::RichText,
+    min_lead: f32,
+    gap: f32,
+    open: bool,
+) -> egui::Response {
     let lay = |ui: &egui::Ui, text: egui::RichText| {
         egui::WidgetText::from(text).into_galley(
             ui,
@@ -442,16 +454,14 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
         )
     };
     let lead = lay(ui, lead);
+    let lead_w = lead.size().x.max(min_lead);
     let caret = lay(
         ui,
         theme::icon_text(icon::CARET_DOWN, 12.0, theme::text::dim()),
     );
 
     let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(
-            HEAD_LEAD + lead.size().x + gap + caret.size().x + HEAD_PAD,
-            HEAD_H,
-        ),
+        egui::vec2(HEAD_LEAD + lead_w + gap + caret.size().x + HEAD_PAD, HEAD_H),
         egui::Sense::click(),
     );
     // Centred rather than baseline-aligned: different sizes and fonts.
@@ -471,8 +481,8 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
         }
     };
     let ink = rect.left() + HEAD_LEAD;
-    ink_of(&lead, at(&lead, ink));
-    ink_of(&caret, at(&caret, ink + lead.size().x + gap));
+    ink_of(&lead, at(&lead, ink + lead_w - lead.size().x));
+    ink_of(&caret, at(&caret, ink + lead_w + gap));
     resp
 }
 

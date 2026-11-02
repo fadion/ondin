@@ -7012,12 +7012,25 @@ impl OndinApp {
 
         let ctx = ui.ctx().clone();
         let zoom = (self.session.camera.zoom * 100.0).round() as i32;
+        // A four-digit readout's width, so a zoom change up to 9999% moves nothing
+        // else in the bar; five digits would leave a gap at the zooms in daily use.
+        // The font's digits differ by a hair, so every digit is measured.
+        let widest = ui.fonts_mut(|f| {
+            ('0'..='9')
+                .map(|d| {
+                    let text = format!("{}%", d.to_string().repeat(4));
+                    let font = egui::FontId::proportional(11.5);
+                    f.layout_no_wrap(text, font, theme::text::muted()).size().x
+                })
+                .fold(0.0, f32::max)
+        });
         // Readout and caret `TOP_GAP` apart, like the View and Snap heads.
-        let head = crate::ui::menu_head(
+        let head = crate::ui::menu_head_min(
             ui,
             egui::RichText::new(format!("{zoom}%"))
                 .size(11.5)
                 .color(theme::text::muted()),
+            widest,
             TOP_GAP,
             self.open_menu == TopMenu::Zoom,
         )
@@ -8474,6 +8487,34 @@ impl OndinApp {
 mod tests {
     use super::save_label;
     use std::time::Duration;
+
+    /// The zoom readout takes the same width at every zoom up to 9999%, so the bar
+    /// beside it stays put.
+    /// flip: `zoom_control` calling `menu_head` without the four-digit width →
+    /// fails at "the same width".
+    #[test]
+    fn the_zoom_readout_takes_one_width_up_to_four_digits() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = super::OndinApp::headless(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut widths = Vec::new();
+        for zoom in [crate::view::MIN_ZOOM, 1.0, 99.99] {
+            app.session.camera.set_zoom(zoom);
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                ui.horizontal(|ui| {
+                    let start = ui.cursor().left();
+                    app.zoom_control(ui);
+                    widths.push(ui.cursor().left() - start);
+                });
+            });
+        }
+        assert!(widths[0] > 0.0, "fixture: the head was drawn");
+        assert!(
+            widths.iter().all(|w| (w - widths[0]).abs() < 1e-3),
+            "the same width: {widths:?}"
+        );
+    }
 
     /// The pass a theme changes on paints the root `Ui`, and with it every
     /// panel's stock widgets, in the new theme.

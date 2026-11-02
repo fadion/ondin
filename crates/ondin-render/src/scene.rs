@@ -273,10 +273,17 @@ fn walk<P: ScenePainter>(
     painter: &mut P,
 ) {
     let base = device_base(vp);
-    // Against the view, not `cull`: a hairline's side is voted on by the boxes
-    // along its whole span, which run past a patch or a pan's band.
-    let view = [vp.view];
-    let edges = Edges::of(doc, res, overrides, origins, &view, base);
+    // A hairline's side is voted on by the boxes along its whole span, which run
+    // past a patch, a pan's band and the view itself. So the boxes are gathered
+    // from the view's two strips, endless along: a voter has an edge on the
+    // hairline's row or column, which a drawn hairline has in the view, and a pan
+    // along the line then never changes the vote.
+    let (v, m) = (vp.view, 2.0 / stretch(base).max(f64::MIN_POSITIVE));
+    let strips = [
+        Rect::new(f64::NEG_INFINITY, v.y0 - m, f64::INFINITY, v.y1 + m),
+        Rect::new(v.x0 - m, f64::NEG_INFINITY, v.x1 + m, f64::INFINITY),
+    ];
+    let edges = Edges::of(doc, res, overrides, origins, &strips, base);
     let walk = Walk::new(origins);
     if let Some(ink) = overrides.outline() {
         let mut outline = OutlinePainter {
@@ -329,6 +336,9 @@ struct Walk<'a> {
     /// How many shadow passes ([`shadow_passes`]) the walk is inside: a repaint
     /// draws those whole, since the shadow lies behind everything in the layer.
     in_shadow: std::cell::Cell<usize>,
+    /// How many ink masks the walk is drawing the ink of: everything under one
+    /// lands in its mask layer, where a backdrop would become mask.
+    in_mask: std::cell::Cell<usize>,
     /// Set while the walk repaints a backdrop, which it stops short of.
     backdrop: Option<Backdrop>,
     /// What the preview patches and its ancestors ([`Walk::grown`]).
@@ -361,6 +371,7 @@ impl<'a> Walk<'a> {
             origins,
             open: Default::default(),
             in_shadow: Default::default(),
+            in_mask: Default::default(),
             backdrop: None,
             grown: Default::default(),
         }
@@ -673,7 +684,16 @@ pub fn spread_through_backdrops(
     let glass: Vec<(Rect, f64)> = candidates
         .into_iter()
         .filter_map(|id| {
-            let node = doc.get(id).filter(|n| !n.mask())?;
+            // A mask and all under one draw no backdrop (`paint_node_pass`).
+            let mut up = Some(id);
+            while let Some(at) = up {
+                let n = doc.get(at)?;
+                if n.mask() {
+                    return None;
+                }
+                up = n.parent();
+            }
+            let node = doc.get(id)?;
             let stack = overrides
                 .get(id)
                 .and_then(|o| o.effects.as_deref())
@@ -1129,9 +1149,10 @@ impl<'a> Edges<'a> {
 }
 
 /// Push the device box of every snapping box under `id` that the walk would draw
-/// inside `s.cull` — the whole view, so a walk culled to a patch votes as the full
-/// frame does. A box under a device pixel in either axis is skipped: the collapse
-/// floor moves its far edge off the rounding rule.
+/// inside `s.cull` — the view's two endless strips, so a walk culled to a patch, or
+/// panned along a line, votes as the full frame does. A box under a device pixel
+/// in either axis is skipped: the collapse floor moves its far edge off the
+/// rounding rule.
 fn gather_boxes(s: &EdgeSource<'_>, id: NodeId, out: &mut Vec<Rect>) {
     let Some(node) = s.doc.get(id) else { return };
     if matches!(node.kind(), NodeKind::Slice { .. })
@@ -1802,10 +1823,12 @@ fn paint_node_pass<P: ScenePainter>(
     let view: &[Rect] = &child_view;
     // Behind everything the layer draws, its own shadows and blend included: what
     // a background blur shows is what was there before the layer. A mask's ink
-    // is drawn into its mask layer, where a backdrop would become mask.
+    // is drawn into its mask layer, where a backdrop would become mask, and so
+    // is all of a mask group's.
     if pass.is_none()
         && !bare
         && !node.mask()
+        && walk.in_mask.get() == 0
         && walk.backdrop.is_none()
         && opacity > 0.0
         && let Some(radius) = ondin_core::effect::backdrop_radius(stack)
@@ -1898,7 +1921,9 @@ fn paint_node_pass<P: ScenePainter>(
     let end_run = |painter: &mut P, mask: &mut MaskRun| {
         if let Some((id, luminance)) = mask.ink_to_composite() {
             push_ink_mask(painter, luminance);
+            walk.in_mask.set(walk.in_mask.get() + 1);
             paint_node(doc, res, ov, id, world, view, base, edges, painter, walk);
+            walk.in_mask.set(walk.in_mask.get() - 1);
             painter.pop_layer();
         }
         mask.close(painter);
@@ -2405,6 +2430,7 @@ fn paint_backdrop<P: ScenePainter>(
             origins: walk.origins,
             open: Default::default(),
             in_shadow: Default::default(),
+            in_mask: Default::default(),
             backdrop: Some(Backdrop {
                 upto: id,
                 bare: root.map(|o| o.id),
@@ -2507,7 +2533,9 @@ fn paint_backdrop<P: ScenePainter>(
 
 /// The device box of the clipping frame nearest the glass the walk is at, when
 /// it is axis-aligned on the device: what [`paint_backdrop`] reads the backdrop
-/// within. `None` with no clipping frame above it, or a turned one.
+/// within. `None` with no clipping frame above it, or a turned one. A rounded
+/// frame's box still holds its corners, where the read takes what lies outside
+/// the frame: a mirror about an arc is no affine map.
 fn clip_box(
     doc: &Document,
     res: &Resolved,

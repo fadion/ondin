@@ -484,11 +484,12 @@ impl ondin_render::scene::ScenePainter for Fills {
 }
 
 /// A hairline whose edges both round onto a box's edge is laid on the same row
-/// by a walk culled to a strip clear of the box as by the full walk: the side
-/// vote reads the boxes along the line's whole span.
+/// by a walk culled to a strip clear of the box, and by a view panned off the
+/// box, as by the full walk: the side vote reads the boxes along the line's
+/// whole span.
 ///
 /// flip: `walk` building `Edges` from its cull instead of the view → fails at
-/// "the strip".
+/// "the strip"; from the view instead of its strips → fails at "panned".
 #[test]
 fn a_hairline_lies_on_one_row_whatever_the_walk_is_culled_to() {
     let mut ids = IdSource::new(31);
@@ -551,6 +552,24 @@ fn a_hairline_lies_on_one_row_whatever_the_walk_is_culled_to() {
         laid(Some(Rect::new(80.0, 0.0, 90.0, 20.0))),
         full,
         "the strip"
+    );
+    // Panned so the box lies off the view while the line runs on into it.
+    let vp = Viewport {
+        view: Rect::new(60.0, 0.0, 260.0, 100.0),
+        pixel_size: (200, 100),
+    };
+    let mut panned = Fills::default();
+    let ov = ondin_render::RenderOverrides::default();
+    ondin_render::scene::build(&d, &res, &vp, &ov, d.first_page(), &mut panned);
+    let moved = panned
+        .boxes()
+        .into_iter()
+        .find(|r| r.width() > 30.0)
+        .expect("the line");
+    assert_eq!(
+        (moved.y0, moved.y1),
+        (full.y0, full.y1),
+        "panned: the box off the view still votes"
     );
 }
 

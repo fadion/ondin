@@ -504,6 +504,52 @@ fn a_blur_on_a_mask_leaves_it_masking() {
     assert_eq!(render(true), plain, "masked at half");
 }
 
+/// A background blur on a layer inside a group that is an alpha mask leaves
+/// the mask masking: nothing under a mask pours a backdrop into its layer.
+///
+/// flip: `paint_node_pass`'s backdrop guard without `in_mask` → fails at
+/// "masked at half".
+#[test]
+fn a_blur_inside_a_mask_group_leaves_it_masking() {
+    let render = |blurred: bool| {
+        let mut p = Page::new();
+        let root = p.root;
+        p.rect(root, (0.0, 0.0, 100.0, 100.0), Some(Color::WHITE));
+        let g = p.group(root);
+        let mask = p.group(g);
+        let inner = p.rect(
+            mask,
+            (20.0, 20.0, 60.0, 60.0),
+            Some(Color::from_rgba8(0, 0, 0, 128)),
+        );
+        p.apply(vec![
+            Operation::SetMask {
+                id: mask,
+                mask: true,
+            },
+            Operation::SetMaskMode {
+                id: mask,
+                mode: ondin_core::MaskMode::Alpha,
+            },
+        ]);
+        p.rect(
+            g,
+            (0.0, 0.0, 100.0, 100.0),
+            Some(Color::from_rgba8(255, 0, 0, 255)),
+        );
+        if blurred {
+            p.effects(inner, vec![BLUR]);
+        }
+        at(&p.render(), 50, 50)
+    };
+    let plain = render(false);
+    assert!(
+        plain[1].abs_diff(127) <= 2,
+        "fixture: masked at half without a blur, {plain:?}"
+    );
+    assert_eq!(render(true), plain, "masked at half");
+}
+
 /// A group's glass is its children's outlines, not its box: the gap between two
 /// cards stays sharp. Type's glass is its glyphs: an O's counter stays sharp.
 ///

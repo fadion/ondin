@@ -31,9 +31,9 @@ const TOP_GAP: f32 = 56.0;
 const LABEL_W: f32 = 72.0;
 const GAP: f32 = 10.0;
 const PAD: f32 = 14.0;
-const FIELD_H: f32 = 30.0;
-/// The numbering controls, as tall as the Settings modal's fields.
-const NUM_H: f32 = 28.0;
+/// The fields and the numbering controls, as tall as every other control.
+const FIELD_H: f32 = ui::CONTROL_H;
+const NUM_H: f32 = ui::CONTROL_H;
 const ROW_H: f32 = 26.0;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 8.0;
@@ -1144,52 +1144,66 @@ fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui
     .inner
 }
 
-/// A segment of a segmented control: lit when `on`, with an optional count after
-/// its word.
-pub(crate) fn segment(
+/// The *Selection · This page · All pages* scope, shared by batch rename and Find:
+/// a [`ui::segmented`] with `lit` lit, *Selection* followed by how many layers are
+/// selected and unavailable while none is. Returns the clicked index.
+pub(crate) fn scope_segments(
     ui: &mut egui::Ui,
-    text: &str,
-    sub: &str,
-    on: bool,
-    h: f32,
-) -> egui::Response {
-    let font = egui::FontId::proportional(11.5);
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color::text()));
-    let sub_g = (!sub.is_empty()).then(|| {
-        ui.fonts_mut(|f| f.layout_no_wrap(sub.to_string(), font.clone(), theme::text::dim()))
-    });
-    let w = galley.size().x + sub_g.as_ref().map_or(0.0, |g| g.size().x + 5.0) + 18.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
-    let p = ui.painter();
-    if on {
-        p.rect_filled(rect, 4.0, color::text_a(36));
-    } else if resp.hovered() {
-        p.rect_filled(rect, 4.0, color::text_a(15));
-    }
-    let ink = if on {
-        color::text()
-    } else {
-        theme::text::muted()
+    lit: usize,
+    selected: usize,
+    cell_h: f32,
+) -> Option<usize> {
+    const LABELS: [&str; 3] = ["Selection", "This page", "All pages"];
+    // The air either side of the widest label, and between *Selection* and its count.
+    const CELL_PAD: f32 = 9.0;
+    const COUNT_GAP: f32 = 4.0;
+    let font = egui::FontId::proportional(ui::SEGMENT_LABEL_PT);
+    let count = (selected > 0).then(|| selected.to_string());
+    let width_of = |text: &str| {
+        ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color::text()))
+            .size()
+            .x
     };
-    let x = rect.left() + 9.0;
-    p.text(
-        egui::pos2(x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        text,
-        font,
-        ink,
-    );
-    if let Some(g) = sub_g {
-        p.galley(
-            egui::pos2(
-                x + galley.size().x + 5.0,
-                rect.center().y - g.size().y / 2.0,
-            ),
-            g,
-            theme::text::dim(),
-        );
-    }
-    resp
+    let count_w = count.as_deref().map_or(0.0, |n| width_of(n) + COUNT_GAP);
+    let cell_w = LABELS
+        .iter()
+        .enumerate()
+        .map(|(i, l)| width_of(l) + if i == 0 { count_w } else { 0.0 })
+        .fold(0.0, f32::max)
+        + CELL_PAD * 2.0;
+    // The track's own 2-point pad and 1-point hairline each side, and the 2-point gaps.
+    let width = (cell_w * 3.0 + 2.0 * 2.0 + 3.0 * 2.0).ceil();
+    ui::segmented_tipped(
+        ui,
+        width,
+        cell_h,
+        LABELS.len(),
+        lit,
+        |i| i != 0 || selected > 0,
+        |i| match i {
+            0 if selected == 0 => "Nothing is selected",
+            _ => "",
+        },
+        |p, i, rect, on| match (i, &count) {
+            (0, None) => ui::segment_label_disabled(p, rect, LABELS[0]),
+            (0, Some(n)) => {
+                let ink = if on {
+                    color::text()
+                } else {
+                    theme::text::dim()
+                };
+                let word = p.layout_no_wrap(LABELS[0].into(), font.clone(), ink);
+                let num = p.layout_no_wrap(n.clone(), font.clone(), theme::text::faint());
+                let w = word.size().x + COUNT_GAP + num.size().x;
+                let x = rect.center().x - w / 2.0;
+                let y = |g: &egui::Galley| rect.center().y - g.size().y / 2.0;
+                let num_at = egui::pos2(x + word.size().x + COUNT_GAP, y(&num));
+                p.galley(egui::pos2(x, y(&word)), word, ink);
+                p.galley(num_at, num, theme::text::faint());
+            }
+            _ => ui::segment_label(p, rect, LABELS[i], on),
+        },
+    )
 }
 
 /// A rounded well holding segments `h` tall.
@@ -1206,33 +1220,14 @@ pub(crate) fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -
 }
 
 fn scope_row(ui: &mut egui::Ui, s: &mut Settings, selected: usize) {
+    const SCOPES: [Scope; 3] = [Scope::Selection, Scope::Page, Scope::Document];
     row(ui, "In", ROW_H, |ui| {
-        well(ui, |ui| {
-            let n = match selected {
-                0 => String::new(),
-                n => n.to_string(),
-            };
-            for (scope, label, sub) in [
-                (Scope::Selection, "Selection", n.as_str()),
-                (Scope::Page, "This page", ""),
-                (Scope::Document, "All pages", ""),
-            ] {
-                let live = scope != Scope::Selection || selected > 0;
-                let resp = ui
-                    .add_enabled_ui(live, |ui| {
-                        segment(ui, label, sub, s.scope == scope, ROW_H - 4.0)
-                    })
-                    .inner;
-                let resp = if live {
-                    resp
-                } else {
-                    resp.on_disabled_hover_text("Nothing is selected")
-                };
-                if resp.clicked() && s.scope != scope {
-                    s.set_scope(scope);
-                }
-            }
-        });
+        let lit = SCOPES.iter().position(|x| *x == s.scope).unwrap_or(1);
+        if let Some(i) = scope_segments(ui, lit, selected, ROW_H - 4.0)
+            && s.scope != SCOPES[i]
+        {
+            s.set_scope(SCOPES[i]);
+        }
     });
 }
 
@@ -1267,7 +1262,7 @@ pub(crate) fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
     let ring = if focused {
         egui::Stroke::new(1.0, color::accent_400())
     } else {
-        egui::Stroke::new(1.0, color::text_a(18))
+        egui::Stroke::new(1.0, color::field_border())
     };
     p.rect_stroke(rect, 5.0, ring, egui::StrokeKind::Inside);
 }

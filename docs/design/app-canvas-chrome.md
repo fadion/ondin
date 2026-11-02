@@ -434,7 +434,9 @@ worded for the scope that plan was made for (`Plan::scope`).
   and renames nothing (with the order list open, Escape and the click close the list first, and
   Enter does nothing). It counts in `modal_is_up`, so editor
   chords are off, and is drawn outside the `!focus` guard, so it works in focus mode.
-- **Scope**, the *In* row: *Selection · This page · All pages*. It opens on *Selection* when
+- **Scope**, the *In* row: *Selection · This page · All pages*, a `ui::segmented` of equal cells
+  (`scope_segments`, which Find shares) with the selection's count after *Selection*. The box's
+  fields are `ui::CONTROL_H` tall, as every field is. It opens on *Selection* when
   something is selected, else on *This page*. *Selection* is the selection at open, and is disabled
   with nothing selected. One selected layer with children opens with *Include layers inside*
   ticked. The Layers header button, with text in the tree's search, opens on *This page* with Find
@@ -542,8 +544,8 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   rename's, then *Replace* and an accent *All* as field-row buttons. Then the scope *Selection · This
   page · All pages*, and right of it the switches *Aa*, *ab* (whole words) and *.\**: the scope opens
   on *Selection* when something is selected, else *This page*, and *Selection* is disabled with
-  nothing selected. Last, *Include text inside instances*. The fields, segments, switches and tick
-  box are Batch rename's.
+  nothing selected. Last, *Include text inside instances*. The fields, the scope
+  (`batch_rename::scope_segments`), switches and tick box are Batch rename's.
 - **The list**, grouped under page headings with their counts. A row has the kind glyph (text, an
   outlined hexagon inside an instance, a filled accent hexagon in a main), the text around the match
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when

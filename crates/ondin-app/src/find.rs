@@ -8,7 +8,7 @@
 //! the zoom kept — and never selects it.
 
 use crate::app::OndinApp;
-use crate::batch_rename::{field_ground, field_toggle, segment, tick_box, toggles, well};
+use crate::batch_rename::{field_ground, field_toggle, scope_segments, tick_box, toggles, well};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -24,7 +24,7 @@ const W: f32 = 380.0;
 const PAD: f32 = 12.0;
 /// Its gap from the canvas's top and right edges (or the inspector's left).
 const MARGIN: f32 = 16.0;
-const FIELD_H: f32 = 30.0;
+const FIELD_H: f32 = ui::CONTROL_H;
 const ROW_H: f32 = 28.0;
 /// The list scrolls past this many rows.
 const ROWS_SHOWN: f32 = 10.0;
@@ -706,32 +706,15 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(INDENT);
-        well(ui, |ui| {
-            let n = match selected {
-                0 => String::new(),
-                n => n.to_string(),
-            };
-            for (scope, label, sub) in [
-                (In::Selection, "Selection", n.as_str()),
-                (In::Page, "This page", ""),
-                (In::All, "All pages", ""),
-            ] {
-                let live = scope != In::Selection || selected > 0;
-                let on = f.scope == scope && live
-                    || (f.scope == In::Selection && !live && scope == In::Page);
-                let resp = ui
-                    .add_enabled_ui(live, |ui| segment(ui, label, sub, on, 22.0))
-                    .inner;
-                let resp = if live {
-                    resp
-                } else {
-                    resp.on_disabled_hover_text("Nothing is selected")
-                };
-                if resp.clicked() {
-                    f.scope = scope;
-                }
-            }
-        });
+        const SCOPES: [In; 3] = [In::Selection, In::Page, In::All];
+        // A Selection scope with nothing selected looks at the page, and says so.
+        let lit = match f.scope {
+            In::Selection if selected == 0 => 1,
+            scope => SCOPES.iter().position(|x| *x == scope).unwrap_or(1),
+        };
+        if let Some(i) = scope_segments(ui, lit, selected, 22.0) {
+            f.scope = SCOPES[i];
+        }
         ui.add_space((ui.available_width() - SWITCHES_W).max(GAP_X));
         well(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;

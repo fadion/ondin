@@ -21,7 +21,8 @@ matched by id, so a renamed or moved layer is one change.
   the status line asking for a second) and the card stays, a second Shift+click on the same row
   dropping the pick and closing the card dropping it too. The rows being compared are tinted when
   the card is opened again. *Compare with version…*
-  (`Action::CompareVersion`, `menu::Item::CompareVersion`, the Document menu and the palette; the
+  (`Action::CompareVersion`, `menu::Item::CompareVersion`, a palette command only, since the
+  Document menu's *Version history…* opens the same card; the
   palette row disabled outside the library with the version card's sentence) opens the card with
   the compare buttons lit (`OndinApp::versions_compare`). A document unchanged since the version
   opens no compare and says *Nothing has changed since this version* (two the same: *These

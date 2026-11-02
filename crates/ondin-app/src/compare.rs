@@ -68,8 +68,10 @@ pub(crate) enum Side {
 #[derive(Debug)]
 pub(crate) struct Group {
     pub(crate) name: String,
-    /// The page in the open document, `None` for a removed page or the kit vault.
+    /// The page, in either document; `None` for the kit vault.
     pub(crate) page: Option<NodeId>,
+    /// Only the version has it, so its heading is dimmed.
+    pub(crate) removed: bool,
     /// How many layers changed on it.
     pub(crate) layers: usize,
 }
@@ -80,8 +82,8 @@ pub(crate) struct Row {
     pub(crate) id: NodeId,
     /// Its page's index in [`Compare::groups`].
     pub(crate) group: usize,
-    /// The page of the open document it is drawn on; `None` when the canvas
-    /// cannot show it.
+    /// The page it is drawn on, in the document holding it; `None` when the
+    /// canvas cannot show it.
     pub(crate) page: Option<NodeId>,
     pub(crate) status: Status,
     /// A page's own change (its name, its background), which has no mark.
@@ -169,7 +171,7 @@ pub(crate) struct Compare {
     /// When it was pinned, beside a name.
     pub(crate) when: Option<String>,
     pub(crate) then: Document,
-    then_res: Resolved,
+    pub(crate) then_res: Resolved,
     /// The stamps the version's canvas keys its texture on; the version never
     /// changes, so one serves for good.
     stamp: u64,
@@ -192,6 +194,13 @@ pub(crate) struct Compare {
     /// The page the compare opened on and its selection, given back when it closes
     /// there; the document cannot change meanwhile, so it still holds.
     selection: (NodeId, crate::session::Selection),
+    /// The pages the open document lacks, each with its status, listed dimmed in
+    /// the Pages section so the canvas can show them.
+    pub(crate) elsewhere: Vec<(NodeId, Status)>,
+    /// One of them while the canvas shows it, and the camera of the open
+    /// document's page, given back on leaving it. `EditorSession::page` stays a
+    /// page of the open document all the while.
+    pub(crate) away: Option<(NodeId, crate::view::Camera)>,
 }
 
 impl Compare {
@@ -221,10 +230,11 @@ pub(crate) fn rows(
             continue;
         };
         let group = groups.len();
-        let shown = now.is_page(page_id).then_some(page_id);
+        let shown = (now.is_page(page_id) || then.is_page(page_id)).then_some(page_id);
         groups.push(Group {
             name: page.name.clone(),
             page: shown,
+            removed: page.status == Status::Removed,
             layers: 0,
         });
         if page.status != Status::Changed || !page.changes.is_empty() {
@@ -269,10 +279,9 @@ pub(crate) fn rows(
                 continue;
             }
             let page_of = match layer.status {
-                Status::Removed => then.page_of(id),
-                _ => now.page_of(id),
-            }
-            .filter(|p| now.is_page(*p));
+                Status::Removed => then.page_of(id).filter(|p| then.is_page(*p)),
+                _ => now.page_of(id).filter(|p| now.is_page(*p)),
+            };
             let above = &layer.trail[..layer.trail.len().saturating_sub(1)];
             row_of.insert(id, rows.len());
             rows.push(Row {
@@ -296,6 +305,16 @@ pub(crate) fn rows(
         }
     }
     (groups, rows, d.document)
+}
+
+/// The pages of `then` that `now` lacks, in `then`'s order, each removed.
+fn elsewhere(then: &Document, now: &Document) -> Vec<(NodeId, Status)> {
+    then.pages()
+        .iter()
+        .map(|p| p.id)
+        .filter(|p| !now.is_page(*p))
+        .map(|p| (p, Status::Removed))
+        .collect()
 }
 
 /// `id`'s ancestors, nearest first, in the document that holds it — the open one
@@ -341,7 +360,7 @@ pub(crate) fn admits(action: &Action) -> bool {
 }
 
 /// A status's hue, the ink on its tag, and its sign.
-fn look(status: Status) -> (egui::Color32, egui::Color32, &'static str) {
+pub(crate) fn look(status: Status) -> (egui::Color32, egui::Color32, &'static str) {
     match status {
         Status::Added => (ADDED, ADDED_INK, "+"),
         Status::Removed => (REMOVED, REMOVED_INK, "−"),
@@ -388,6 +407,7 @@ impl OndinApp {
             std::mem::take(&mut self.session.selection),
         );
         let stamp = crate::session::next_revision();
+        let elsewhere = elsewhere(&then, &self.session.doc);
         self.session.compare = Some(Box::new(Compare {
             version: version.to_path_buf(),
             title,
@@ -407,14 +427,53 @@ impl OndinApp {
             dragging_split: false,
             reveal: None,
             selection,
+            elsewhere,
+            away: None,
         }));
     }
 
     pub(crate) fn leave_compare(&mut self) {
+        self.come_back();
         if let Some(c) = self.session.compare.take()
             && c.selection.0 == self.session.page
         {
             self.session.selection = c.selection.1;
+        }
+    }
+
+    /// The page the canvas shows: while comparing, possibly one the open document
+    /// lacks ([`Compare::away`]); else the current page.
+    pub(crate) fn compare_page(&self) -> NodeId {
+        self.session
+            .compare
+            .as_ref()
+            .and_then(|c| c.away)
+            .map_or(self.session.page, |(page, _)| page)
+    }
+
+    /// Show `page`, which only the version has: the open document's camera parked,
+    /// the page fitted, and Then drawn where Now has nothing to show.
+    pub(crate) fn go_away(&mut self, page: NodeId) {
+        let camera = self.session.camera;
+        let Some(c) = self.session.compare.as_mut() else {
+            return;
+        };
+        if !c.then.is_page(page) || c.away.is_some_and(|(p, _)| p == page) {
+            return;
+        }
+        let left = c.away.map_or(camera, |(_, left)| left);
+        c.away = Some((page, left));
+        if c.side == Side::Now {
+            c.side = Side::Then;
+        }
+        self.session.camera = crate::view::Camera::default();
+        self.zoom_to(self.document_bounds());
+    }
+
+    /// Back from a page only the version has, to the open document's camera.
+    pub(crate) fn come_back(&mut self) {
+        if let Some((_, camera)) = self.session.compare.as_mut().and_then(|c| c.away.take()) {
+            self.session.camera = camera;
         }
     }
 
@@ -446,21 +505,24 @@ impl OndinApp {
         };
         c.current = Some(i);
         c.reveal = Some(i);
-        if let Some(page) = page {
-            self.go_to_page(page);
+        match page {
+            Some(page) if self.session.doc.is_page(page) => self.go_to_page(page),
+            Some(page) => self.go_away(page),
+            None => {}
         }
     }
 
     /// Reveal a stepped-to row once its page is showing: after the canvas, so a
     /// first visit's framing is not drawn over it.
     fn reveal_change(&mut self) {
+        let shown = self.compare_page();
         let Some(c) = self.session.compare.as_mut() else {
             return;
         };
         let Some(row) = c.reveal.and_then(|i| c.rows.get(i)) else {
             return;
         };
-        if row.page.is_some_and(|p| p != self.session.page) {
+        if row.page.is_some_and(|p| p != shown) {
             return;
         }
         let bounds = match (row.shown_at(), row.moved().then_some(row.then).flatten()) {
@@ -680,7 +742,7 @@ impl OndinApp {
 
     /// A row's mark on screen: its box, outset; `None` off this page.
     fn mark_rect(&self, row: &Row, rect: egui::Rect, ppp: f32) -> Option<egui::Rect> {
-        if row.is_page || row.page != Some(self.session.page) {
+        if row.is_page || row.page != Some(self.compare_page()) {
             return None;
         }
         let b = row.shown_at()?;
@@ -718,6 +780,18 @@ impl OndinApp {
             .compare
             .as_ref()
             .map_or(rect.center().x, |c| rect.left() + rect.width() * c.split);
+        let page = self.compare_page();
+        let away = page != self.session.page;
+        if away && side != Side::Then {
+            // The open document has no such page: Now is the ground, empty.
+            let clip = match side {
+                Side::Swipe => egui::Rect::from_min_max(egui::pos2(split_x, rect.min.y), rect.max),
+                _ => rect,
+            }
+            .intersect(painter.clip_rect());
+            let ground = crate::ui::color_to_egui(crate::session::theme_canvas());
+            painter.rect_filled(clip, 0.0, ground);
+        }
         if side != Side::Now {
             if self.then_canvas.is_none() {
                 self.then_canvas = self.canvas.another();
@@ -727,7 +801,7 @@ impl OndinApp {
                 _ => rect,
             }
             .intersect(painter.clip_rect());
-            let (camera, px, page) = (self.session.camera, self.canvas_px, self.session.page);
+            let (camera, px) = (self.session.camera, self.canvas_px);
             if let Some(c) = self.session.compare.as_ref() {
                 let then = painter.with_clip_rect(clip);
                 if c.then.is_page(page) {
@@ -757,7 +831,10 @@ impl OndinApp {
                 }
             }
         }
-        self.draw_frame_labels(ui, painter, rect, ppp);
+        // The labels are the open document's, of its current page.
+        if !away {
+            self.draw_frame_labels(ui, painter, rect, ppp);
+        }
 
         let Some(c) = self.session.compare.as_ref() else {
             return;
@@ -963,11 +1040,12 @@ fn card_list(ui: &mut egui::Ui, c: &Compare, doc: &Document, act: &mut Option<Ac
             .filter(|i| c.rows[*i].group == g)
             .collect();
         let name = match (private, group.page) {
-            (true, Some(page)) => crate::private::page(doc, page).into_owned(),
+            (true, Some(page)) if doc.is_page(page) => crate::private::page(doc, page).into_owned(),
+            (true, Some(page)) => crate::private::page(&c.then, page).into_owned(),
             (true, None) => "Page".into(),
             (false, _) => group.name.clone(),
         };
-        heading(ui, icon::FILE, &name, rows.len(), group.page.is_none());
+        heading(ui, icon::FILE, &name, rows.len(), group.removed);
         for i in rows {
             let row = &c.rows[i];
             let name = match private {
@@ -1629,6 +1707,66 @@ mod tests {
         assert!(
             matches!(&open[at + 1], Line::Value(c, i) if *i == FOLDED_INDENT && !c.what.contains(" · ")),
             "its value under it, named by itself"
+        );
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// A page deleted since the version is listed apart; stepping to it shows it
+    /// from the version, fitted, with the open document's page still current, and
+    /// going back to that page gives its camera back.
+    ///
+    /// flip: `show_change` sending a page the open document lacks to `go_to_page`
+    /// → fails at "the deleted page is shown".
+    #[test]
+    fn a_page_only_the_version_has_is_shown_from_it() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "away");
+        let [archive, note] = [(); 2].map(|_| f.app.session.ids.mint());
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::AddPage {
+                id: archive,
+                index: 2,
+                name: "Archive".into(),
+                ground: None,
+                draft: false,
+                mode: None,
+            },
+            boxed(note, archive, "Note", (-3000.0, 800.0), false),
+        ])));
+        std::fs::write(
+            &f.version,
+            ondin_core::io::save(&f.app.session.doc).unwrap(),
+        )
+        .unwrap();
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::DeleteNode { id: note },
+            Operation::RemovePage { id: archive },
+        ])));
+        for _ in 0..2 {
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        let camera = f.app.session.camera;
+        let c = open(&mut f);
+        assert_eq!(c.elsewhere, vec![(archive, Status::Removed)]);
+        f.app.step_compare(1);
+        whole_frame(&ctx, &mut f.app, Vec::new());
+        assert_eq!(f.app.compare_page(), archive, "the deleted page is shown");
+        assert_eq!(
+            f.app.session.page, f.first,
+            "the open document's page stays"
+        );
+        let c = f.app.session.compare.as_deref().unwrap();
+        assert_eq!(c.side, Side::Then, "from the version");
+        let view = f.app.session.camera.viewport(f.app.canvas_px).view;
+        assert!(
+            view.contains(ondin_core::kurbo::Point::new(-2980.0, 820.0)),
+            "fitted: {view:?}"
+        );
+        f.app.go_to_page(f.first);
+        assert_eq!(f.app.compare_page(), f.first);
+        assert_eq!(
+            f.app.session.camera.center, camera.center,
+            "its camera back"
         );
         let _ = std::fs::remove_file(&f.version);
     }

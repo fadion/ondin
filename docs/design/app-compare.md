@@ -31,7 +31,9 @@ matched by id, so a renamed or moved layer is one change.
     changes card replaces the inspector, and `draw_canvas` draws `paint_compare` (the version,
     then the frame labels over it, then the marks) and none of the editing chrome.
 - **Rows** (`compare::rows`), from `diff::diff(then, now)`, grouped by page in the diff's order
-  (removed pages last). A page's own change, or an added or removed page, is a row with no mark.
+  (removed pages last). A page's own change, or an added or removed page, is a row with no mark;
+  a row's page is the page holding it in whichever document has it (the version, for a removed
+  layer), `None` only in the kit vault.
   **The topmost listed layer is marked**: a listed layer under one that already has a row folds
   into it. Under a changed row it is kept in the row's `folded`, with its own changes, and counted
   in the row's `layers`; under an added or removed row nothing is added, since its `inside` count
@@ -46,7 +48,8 @@ matched by id, so a renamed or moved layer is one change.
 - **Keys.** `Enter` / `Shift+Enter` step, `\` with no modifiers toggles Then and Now, both read by
   the bar while no modal, palette or text field has the keyboard. `Escape` leaves: a rung of
   `OndinApp::escape` just below the find box.
-- **Stepping** (`step_compare`) goes round the ends. `show_change` switches page when it must;
+- **Stepping** (`step_compare`) goes round the ends. `show_change` switches page when it must, or
+  shows a page only the version has;
   `reveal_change` then pans the change, and a moved layer's old box with it, into view with the
   zoom kept (`OndinApp::reveal`). It runs from the bar, after the canvas, so a first visit's framing
   does not override it.
@@ -62,6 +65,15 @@ matched by id, so a renamed or moved layer is one change.
   The current mark is ringed white at 2pt and tinted, and drawn last. A click picks the smallest
   mark under the pointer. While comparing, each Pages row carries an ochre badge counting its
   changed layers.
+- **A page only the version has** (`Compare::elsewhere`) is listed in the Pages section after the
+  document's pages: its name faint, a 16pt removed tag at the row's end. A click on it, or stepping
+  to a row on it, shows it (`OndinApp::go_away`): `Compare::away` holds the page and parks the
+  camera of the current page, which `EditorSession::page` stays all the while, so nothing outside
+  the compare ever sees a page the document lacks. The page is fitted (`document_bounds` answers
+  for it), Now switches to Then, and Now's side draws the theme's canvas ground with no frame
+  labels. `go_to_page` comes back first, the parked camera with it, and so does leaving; the
+  library's last view records the parked camera, never the away one. `OndinApp::compare_page` is
+  the page the canvas shows, for the marks, the reveal and the Pages check.
 - **Then and Swipe** draw the version through a second `CanvasRenderer` (`CanvasRenderer::another`:
   the same device, its own texture and decode cache, so switching sides redraws neither) with the
   session's camera and page. The version never changes, so its stamps are one fresh
@@ -69,7 +81,7 @@ matched by id, so a renamed or moved layer is one change.
   Swipe clips the version left of a draggable handle (a 2pt accent line, a 24×36 accent grip with
   a left-right arrow), with *THEN* and *NOW* pills in the bottom corners.
 - **The card** (`compare_card`): *CHANGES* and *n layers · n pages · n more*; per page a heading
-  (file glyph, name, row count, dimmed when the page is not in the open document); each row a
+  (file glyph, name, row count, dimmed for a removed page); each row a
   16pt status tag, the dim trail then the name (*· n inside* for an added or removed layer with
   contents), up to four value lines *what before → after* (before struck), then *and n more
   changes*; a folded layer's changes are among them as *Child · what* (*Child added* / *removed*).

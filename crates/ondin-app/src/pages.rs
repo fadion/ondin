@@ -93,14 +93,24 @@ impl OndinApp {
 
     /// A page's name as drawn, masked in private mode (`crate::private::page`).
     /// [`Self::page_name`] is the name itself, for comparing, renaming and files.
+    /// While comparing, a page only the version has is named from the version.
     pub(crate) fn shown_page_name(&self, page: NodeId) -> String {
-        crate::private::page(&self.session.doc, page).into_owned()
+        let doc = match &self.session.compare {
+            Some(c) if !self.session.doc.is_page(page) => &c.then,
+            _ => &self.session.doc,
+        };
+        crate::private::page(doc, page).into_owned()
     }
 
     /// Make `page` current — every door's one path. A live text edit is finished
     /// first, since it belongs to the page being left.
     pub(crate) fn go_to_page(&mut self, page: NodeId) {
-        if page == self.session.page || !self.session.doc.is_page(page) {
+        if !self.session.doc.is_page(page) {
+            return;
+        }
+        // Off a page only a compared version has, even back to the current one.
+        self.come_back();
+        if page == self.session.page {
             return;
         }
         self.finish_text_first();
@@ -171,7 +181,11 @@ impl OndinApp {
             return;
         };
         let page = self.session.page.to_wire();
-        let camera = self.session.camera;
+        // Not the camera of a page only a compared version has.
+        let camera = match self.session.compare.as_ref().and_then(|c| c.away) {
+            Some((_, parked)) => parked,
+            None => self.session.camera,
+        };
         let local = &mut self.library.local;
         local.last_page.insert(id.clone(), page.clone());
         local.last_view.insert(
@@ -621,6 +635,17 @@ impl OndinApp {
         }
     }
 
+    /// How many rows the Pages section lists: the document's pages, and while
+    /// comparing the pages only the version has.
+    fn listed_pages(&self) -> usize {
+        let elsewhere = self
+            .session
+            .compare
+            .as_ref()
+            .map_or(0, |c| c.elsewhere.len());
+        self.session.doc.pages().len() + elsewhere
+    }
+
     /// The Pages section: header, the rows, and the divider above *Layers*.
     pub(crate) fn pages_section(&mut self, ui: &mut egui::Ui) {
         // Private mode folds it over the preference, which it leaves as it was.
@@ -651,7 +676,7 @@ impl OndinApp {
                         // Clear of the `+` and its gap.
                         let room = ui.available_width() - 20.0 - 2.0 * ui.spacing().item_spacing.x;
                         let mut job = egui::text::LayoutJob::simple_singleline(
-                            self.shown_page_name(self.session.page),
+                            self.shown_page_name(self.compare_page()),
                             egui::FontId::proportional(12.0),
                             theme::text::muted(),
                         );
@@ -681,7 +706,7 @@ impl OndinApp {
                 });
             });
         if !folded {
-            let fit = self.session.doc.pages().len().min(FIT_ROWS) as f32 * ROW_H;
+            let fit = self.listed_pages().min(FIT_ROWS) as f32 * ROW_H;
             let height = self.prefs.pages_height.unwrap_or(fit).max(MIN_LIST_H);
             // The gap under the last row scrolls with the rows, so a list cut short runs
             // to the divider, which is then the line it is cut on.
@@ -724,9 +749,9 @@ impl OndinApp {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }
         if resp.dragged() {
-            let fit = self.session.doc.pages().len().min(FIT_ROWS) as f32 * ROW_H;
+            let fit = self.listed_pages().min(FIT_ROWS) as f32 * ROW_H;
             let now = self.prefs.pages_height.unwrap_or(fit);
-            let all = self.session.doc.pages().len() as f32 * ROW_H;
+            let all = self.listed_pages() as f32 * ROW_H;
             self.prefs.pages_height =
                 Some((now + resp.drag_delta().y).clamp(MIN_LIST_H, all.max(MIN_LIST_H)));
         }
@@ -748,13 +773,14 @@ impl OndinApp {
         let pointer = ui.ctx().pointer_interact_pos();
         let released = ui.input(|i| i.pointer.any_released());
         let mut rects = Vec::with_capacity(pages.len());
+        let shown = self.compare_page();
         for (page, draft) in &pages {
             let (rect, resp) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), ROW_H),
                 egui::Sense::click_and_drag(),
             );
             rects.push(rect);
-            let current = *page == self.session.page;
+            let current = *page == shown;
             let renaming = self
                 .pages
                 .renaming
@@ -869,6 +895,62 @@ impl OndinApp {
             }
         }
         self.page_drag_ui(ui, &pages, &rects);
+        self.elsewhere_rows(ui, shown);
+    }
+
+    /// While comparing, a row per page only the version has, after the document's:
+    /// dimmed, with its status tag; a click shows it (`OndinApp::go_away`).
+    fn elsewhere_rows(&mut self, ui: &mut egui::Ui, shown: NodeId) {
+        let Some(elsewhere) = self.session.compare.as_ref().map(|c| c.elsewhere.clone()) else {
+            return;
+        };
+        for (page, status) in elsewhere {
+            let (rect, resp) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), ROW_H),
+                egui::Sense::click(),
+            );
+            let p = ui.painter();
+            let current = page == shown;
+            if current {
+                p.rect_filled(rect, 5.0, theme::color::text_a(20));
+            } else if resp.hovered() {
+                p.rect_filled(rect, 5.0, theme::color::text_a(12));
+            }
+            let cy = rect.center().y;
+            if current {
+                p.text(
+                    egui::pos2(rect.left() + CHECK_X, cy),
+                    egui::Align2::CENTER_CENTER,
+                    icon::CHECK,
+                    theme::icon_font(13.0),
+                    color::accent(),
+                );
+            }
+            p.text(
+                egui::pos2(rect.left() + NAME_X, cy),
+                egui::Align2::LEFT_CENTER,
+                self.shown_page_name(page),
+                egui::FontId::proportional(12.5),
+                theme::text::faint(),
+            );
+            let (hue, ink, sign) = crate::compare::look(status);
+            let tag = egui::Rect::from_min_size(
+                egui::pos2(rect.right() - 6.0 - 16.0, cy - 8.0),
+                egui::vec2(16.0, 16.0),
+            );
+            p.rect_filled(tag, 3.0, hue);
+            p.text(
+                tag.center(),
+                egui::Align2::CENTER_CENTER,
+                sign,
+                egui::FontId::proportional(11.0),
+                ink,
+            );
+            let resp = resp.on_hover_text("Only in the version");
+            if resp.clicked() {
+                self.go_away(page);
+            }
+        }
     }
 
     /// A page row in flight: the slot it would drop into, drawn as the layer

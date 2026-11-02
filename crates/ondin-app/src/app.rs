@@ -3748,6 +3748,10 @@ impl OndinApp {
 
     /// Everything on the current page — what `Action::ZoomFit` fits.
     pub(crate) fn document_bounds(&self) -> Option<Rect> {
+        // While a compare shows a page only the version has, that page's.
+        if let Some((page, _)) = self.session.compare.as_ref().and_then(|c| c.away) {
+            return self.session.compare.as_ref()?.then_res.world_bounds(page);
+        }
         self.session.preview_world_bounds(self.session.page)
     }
 

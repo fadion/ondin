@@ -1404,6 +1404,7 @@ impl RenderOverrides {
             | Operation::SetVariant { .. }
             | Operation::SetProperties { .. }
             | Operation::SetDescription { .. }
+            | Operation::SetDocLink { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }

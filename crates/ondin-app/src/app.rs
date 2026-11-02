@@ -489,6 +489,8 @@ pub struct OndinApp {
     pub(crate) name_edit: Option<(NodeId, String)>,
     /// In-progress description edit on a component card; commits once, on defocus.
     pub(crate) desc_edit: Option<(NodeId, String)>,
+    /// In-progress link edit on a component card, kept past a refused commit.
+    pub(crate) link_edit: Option<crate::panels::LinkEdit>,
     /// System and web fonts, loaded into core on demand.
     pub(crate) fonts: FontService,
     /// The background update check and the staged update it offers a restart for.
@@ -1391,6 +1393,7 @@ impl OndinApp {
             clipboard_stamp: None,
             name_edit: None,
             desc_edit: None,
+            link_edit: None,
             fonts,
             updater: Default::default(),
             previews: crate::fonts::FontPreviews::default(),
@@ -5840,6 +5843,7 @@ impl OndinApp {
         self.mode = Mode::Normal;
         self.name_edit = None;
         self.desc_edit = None;
+        self.link_edit = None;
         self.collapsed.clear();
         self.layer_filter = None;
         self.layer_drag = None;

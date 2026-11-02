@@ -237,6 +237,7 @@ impl OndinApp {
         self.points.clear();
         self.name_edit = None;
         self.desc_edit = None;
+        self.link_edit = None;
         self.renaming_layer = None;
         self.layer_drag = None;
         self.layers_range_anchor = None;

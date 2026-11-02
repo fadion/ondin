@@ -494,6 +494,15 @@ Inspector:
   committed trimmed on defocus). A single instance's card shows its main's description dim under the
   main's name — the variant's own, else its set's (`component::description_note`); it is never an
   override. A row of the swap picker hovers its main's description (`SwapTarget::description`).
+- **Link**: under the description on the same three cards, `component::link_field` — the host while
+  unfocused, the whole address while focused, committed through `web_link` on `Enter` or defocus as
+  one undo step (*Link*). A refused address stays in the field, ringed in the error colour with the
+  reason under it, and is not stored; `Escape` drops it. A variant without its own link hints its
+  set's host. An open button (arrow-square-out) opens the link shown, the main's own else its set's
+  (`component::doc_link_of`). A single instance's card puts a book button (`icon::BOOK_OPEN`, tooltip
+  *Open documentation: ‹host›*) at the end of the name line when its main or set has a link, and no
+  book otherwise. **`component::open_doc_link` is the only door to the browser** (egui's `OpenUrl`)
+  and re-checks `web_link`, so only an `http`/`https` address leaves the app; nothing is fetched.
 - A face's instance count is on its name's line and is the *Select all*
   (`component::name_line(ui, glyph, name, instances)`; at zero plain `text::dim()` and dead).
 - Resets: *Reset all*, and a ⋯ overflow with *Reset fields N*, *Restore removed children N*, *Reset
@@ -548,11 +557,19 @@ variant* is the verb that takes the next free combination; an instance's name is
   is none. Written by `SetDescription { of: Described::Node(id), text }`, the one op a style's and a
   variable's description share (§5.3f). An instance reads its main's through the link, so a copy never
   holds one; a duplicated main keeps its own (`remap_subtree` copies it).
-- Ops `SetVariantSet`, `SetVariant`, `SetProperties`, `SetDescription`, each inverting to the old value;
-  no ink, no-ops in `absorb`, skipped by `propagate::mode`, never written by `reset::state_ops` —
-  **never followed or overridden**. `description` and `Property::preferred` are new in v9.
+- `Node::doc_link: String` (`doc_link()`) — where a main's or set's documentation lives; empty is
+  none. Held to `ondin_core::web_link`'s form, `http`/`https` only: `SetDocLink { id, url }` refuses
+  any other url (`OpError::BadDocLink`), and the loader drops one rather than refusing the file.
+  Copied and cleared as `description` is. `web_link` trims, puts `https://` before a bare host,
+  lower-cases the scheme and refuses another scheme (`LinkRefusal::NotWeb`) or a missing host or a
+  space or control character (`Malformed`); a colon followed by a digit is a port, so `localhost:8080`
+  is a bare host. `link_host` is the host a card shows.
+- Ops `SetVariantSet`, `SetVariant`, `SetProperties`, `SetDescription`, `SetDocLink`, each inverting to
+  the old value; no ink, no-ops in `absorb`, `overwrites` none, skipped by `propagate::mode`, never
+  written by `reset::state_ops` — **never followed or overridden**. `description` and
+  `Property::preferred` are new in v9, `doc_link` in v13.
 - `Node::make_copy_of` is the one place a node becomes a linked copy (linked; swap, flag, values,
-  properties and description cleared); every door that makes an instance node goes through it.
+  properties, description and link cleared); every door that makes an instance node goes through it.
 
 **`variant::check`** (as `LinkRule::Variant`):
 
@@ -800,3 +817,7 @@ never raw fields) on every instance of the main.
   host or sibling slot masks removed children.
 - **A deleted main is lost from nothing**: don't count its children as lost in `propagate_structure`,
   or every instance is emptied.
+- **A documentation link is checked three times**: `SetDocLink` refuses, the loader drops, and
+  `open_doc_link` re-checks before the browser. Each looks redundant; `InsertSubtree` does not look at
+  `doc_link`, so the last check is what keeps a non-web address that arrives another way from being
+  opened. `a_doc_link_is_a_web_address_kept_on_its_main` pins the first two; nothing pins the third.

@@ -122,6 +122,10 @@ pub struct Node {
     /// What this main or set is for, in the user's words; empty is none. A copy
     /// never keeps it: an instance reads its main's.
     pub(crate) description: String,
+    /// Where this main's or set's documentation lives: an `http`/`https` address
+    /// in [`web_link`]'s form, empty for none. A copy never keeps it, as with
+    /// [`Self::description`].
+    pub(crate) doc_link: String,
     /// Where this node was **vendored from**, when part of a kit main in the
     /// document's vault (§5.3e). A copy never keeps it (`remap_subtree`); only
     /// the kit verbs write one (`crate::kit::check`).
@@ -176,10 +180,15 @@ impl Node {
         self.variant.clear();
         self.props.clear();
         self.description.clear();
+        self.doc_link.clear();
     }
     /// What this main or set is for, in the user's words; empty is none.
     pub fn description(&self) -> &str {
         &self.description
+    }
+    /// This main's or set's documentation address; empty is none.
+    pub fn doc_link(&self) -> &str {
+        &self.doc_link
     }
     /// The variant properties, if this frame is a component set.
     pub fn set(&self) -> Option<&crate::variant::VariantSet> {
@@ -387,6 +396,67 @@ impl Node {
     pub fn item(&self) -> &crate::container::LayoutItem {
         &self.item
     }
+}
+
+/// Why a typed address was refused as a [`Node::doc_link`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkRefusal {
+    /// A scheme other than `http` or `https`: a file, `mailto` or script address.
+    NotWeb,
+    /// No host after the scheme, or a space or control character inside.
+    Malformed,
+}
+
+impl std::fmt::Display for LinkRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NotWeb => "Only web links: http or https.",
+            Self::Malformed => "Not a web address.",
+        })
+    }
+}
+
+/// A typed documentation address in the form [`Node::doc_link`] stores: trimmed,
+/// `https://` put in front of a bare host, the scheme lower-cased. Empty stays
+/// empty, meaning none. A scheme is a prefix like `mailto:` whose colon is not
+/// followed by a port number, so `localhost:8080/x` is a bare host.
+pub fn web_link(typed: &str) -> Result<String, LinkRefusal> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Ok(String::new());
+    }
+    if typed.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(LinkRefusal::Malformed);
+    }
+    let scheme = typed.split_once(':').filter(|(s, rest)| {
+        let mut chars = s.chars();
+        chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            && !rest.starts_with(|c: char| c.is_ascii_digit())
+    });
+    let (scheme, after) = match scheme {
+        Some((s, rest)) => {
+            let s = s.to_ascii_lowercase();
+            if s != "http" && s != "https" {
+                return Err(LinkRefusal::NotWeb);
+            }
+            (s, rest.strip_prefix("//").ok_or(LinkRefusal::Malformed)?)
+        }
+        None => ("https".to_string(), typed),
+    };
+    if after.is_empty() || after.starts_with(['/', '?', '#']) {
+        return Err(LinkRefusal::Malformed);
+    }
+    Ok(format!("{scheme}://{after}"))
+}
+
+/// The host of a stored [`Node::doc_link`], what a card shows when the field is
+/// not being edited: the address without its scheme, path, query or fragment.
+pub fn link_host(link: &str) -> &str {
+    let rest = link.split_once("://").map_or(link, |(_, r)| r);
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let host = &rest[..end];
+    host.rsplit_once('@').map_or(host, |(_, h)| h)
 }
 
 /// How a [`Node::mask`] decides what survives of the layers it masks.

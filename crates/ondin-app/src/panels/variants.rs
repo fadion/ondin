@@ -441,7 +441,7 @@ fn swap_picker(
                                     matches!(target, SwapTarget::Here(id) if current == Some(id));
                                 let mut row = ui.add(egui::Button::selectable(on, name));
                                 let about = target.description(doc);
-                                if !about.is_empty() {
+                                if !about.is_empty() && !crate::private::on() {
                                     row = row.on_hover_text(about);
                                 }
                                 if row.clicked() {
@@ -854,6 +854,7 @@ impl OndinApp {
             select_all = true;
         }
         self.description_field(ui, set);
+        self.link_field(ui, set);
         let doc = &self.session.doc;
         if let Some(text) = &clash {
             note(ui, icon::WARNING, text);

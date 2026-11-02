@@ -633,6 +633,7 @@ impl OndinApp {
                         }
                         if let Some(id) = app.session.selection.single() {
                             app.description_field(ui, id);
+                            app.link_field(ui, id);
                         }
                         main_tail(ui, &mut act);
                     }
@@ -647,11 +648,12 @@ impl OndinApp {
                     } => {
                         let name = crate::private::layer(&app.session.doc, *main).into_owned();
                         let link = Some((*set, set_name.as_str()));
-                        heading(ui, true, "Variant in", link, None, "", &mut act);
+                        heading(ui, true, "Variant in", link, None, "", "", &mut act);
                         if name_and_count(ui, &name, Some(*instances)).clicked {
                             act = Some(Act::SelectAllInstances);
                         }
                         app.description_field(ui, *main);
+                        app.link_field(ui, *main);
                         app.variant_rows(ui, *main);
                         main_tail(ui, &mut act);
                     }
@@ -666,7 +668,8 @@ impl OndinApp {
                         let link = Some((*main, main_name.as_str()));
                         // One line, the main's name alone; the outline hexagon says
                         // it is an instance.
-                        heading(ui, false, "", link, None, &summary, &mut act);
+                        let docs = doc_link_of(&app.session.doc, *main).to_string();
+                        heading(ui, false, "", link, None, &summary, &docs, &mut act);
                         description_note(&app.session.doc, *main, ui);
                         // A kit instance names where its main lives.
                         let kit = app.kit_line(*main);
@@ -702,6 +705,7 @@ impl OndinApp {
                                     Some((*m, n)),
                                     None,
                                     &summary,
+                                    "",
                                     &mut act,
                                 );
                                 if let Some(roots) = shared {
@@ -713,7 +717,7 @@ impl OndinApp {
                             // overflow of counted resets.
                             None => {
                                 let title = format!("Instances of {mains} components");
-                                heading(ui, false, "", None, Some(&title), &summary, &mut act);
+                                heading(ui, false, "", None, Some(&title), &summary, "", &mut act);
                                 reset_row(ui, *drift, *props, false, None, &mut act);
                             }
                         }
@@ -741,22 +745,30 @@ impl OndinApp {
         else {
             return;
         };
+        // Private mode masks a description as it does a name: hidden, not typed.
+        let private = crate::private::on();
         let mut text = match &self.desc_edit {
             Some((d, buf)) if *d == id => buf.clone(),
+            _ if private => String::new(),
             _ => saved.clone(),
+        };
+        let hint = match private {
+            true => "Description hidden in private mode",
+            false => "Add a description",
         };
         ui.add_space(DESC_GAP);
         let resp = ui::field_frame()
             .inner_margin(egui::Margin::symmetric(ui::FIELD_PAD_X as i8, 5))
             .show(ui, |ui| {
-                ui.add(
+                ui.add_enabled(
+                    !private,
                     egui::TextEdit::multiline(&mut text)
                         .id(ui.id().with(("description", id)))
                         .frame(egui::Frame::NONE)
                         .desired_rows(1)
                         .desired_width(f32::INFINITY)
                         .font(egui::FontId::proportional(DESC_PT))
-                        .hint_text(egui::RichText::new("Add a description").size(DESC_PT)),
+                        .hint_text(egui::RichText::new(hint).size(DESC_PT)),
                 )
             })
             .inner;
@@ -777,6 +789,124 @@ impl OndinApp {
                     text,
                 }]));
             }
+        }
+    }
+
+    /// A main's or a set's documentation link, one line under its description:
+    /// the host while unfocused, the whole address while typed in, committed on
+    /// `Enter` or defocus. An address `web_link` refuses stays in the field, ringed,
+    /// with the reason under it, until it is fixed or `Escape` restores the stored
+    /// one. A variant without a link of its own hints its set's.
+    pub(super) fn link_field(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        let doc = &self.session.doc;
+        let Some(saved) = doc.get(id).map(|n| n.doc_link().to_string()) else {
+            return;
+        };
+        let inherited = doc_link_of(doc, id).to_string();
+        let edit = self.link_edit.as_ref().filter(|e| e.id == id);
+        let refused = edit.and_then(|e| e.refused);
+        let private = crate::private::on();
+        let field_id = ui.id().with(("doc-link", id));
+        let focused = ui.ctx().memory(|m| m.has_focus(field_id));
+        let mut text = match edit {
+            Some(e) => e.text.clone(),
+            None if focused => saved.clone(),
+            None => ondin_core::link_host(&saved).to_string(),
+        };
+        let hint = match (private, saved.is_empty() && !inherited.is_empty()) {
+            (true, _) => "Link hidden in private mode".to_string(),
+            (false, true) => ondin_core::link_host(&inherited).to_string(),
+            (false, false) => "Add a link".to_string(),
+        };
+        if private {
+            text.clear();
+        }
+        ui.add_space(DESC_GAP);
+        let ring = refused.map(|_| theme::color::error());
+        let mut opened = false;
+        let resp = ui::field_frame()
+            .inner_margin(egui::Margin::symmetric(ui::FIELD_PAD_X as i8, 0))
+            .stroke(ring.map_or(egui::Stroke::NONE, |c| egui::Stroke::new(1.0, c)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_min_height(LINK_H);
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.label(
+                        egui::RichText::new(icon::LINK_SIMPLE)
+                            .font(theme::icon_font(13.0))
+                            .color(theme::text::dim()),
+                    );
+                    let open = !inherited.is_empty() && edit.is_none() && !focused;
+                    let room = ui.available_width() - if open { LINK_H } else { 0.0 };
+                    let resp = ui.add_enabled(
+                        !private,
+                        egui::TextEdit::singleline(&mut text)
+                            .id(field_id)
+                            .frame(egui::Frame::NONE)
+                            .desired_width(room.max(12.0))
+                            .font(egui::FontId::proportional(DESC_PT))
+                            .text_color_opt(ring)
+                            .hint_text(egui::RichText::new(hint).size(DESC_PT)),
+                    );
+                    if open
+                        && ui::icon_button(ui, icon::ARROW_SQUARE_OUT, LINK_H, 13.0, false, true)
+                            .on_hover_text("Open in browser")
+                            .clicked()
+                    {
+                        opened = true;
+                    }
+                    resp
+                })
+                .inner
+            })
+            .inner;
+        if opened {
+            open_doc_link(ui.ctx(), &inherited);
+        }
+        if resp.gained_focus() && edit.is_none() {
+            // The host was drawn this frame; the whole address from the next.
+            self.link_edit = Some(LinkEdit {
+                id,
+                text: saved.clone(),
+                refused: None,
+            });
+        } else if resp.changed() {
+            self.link_edit = Some(LinkEdit {
+                id,
+                text: text.clone(),
+                refused: None,
+            });
+        }
+        if resp.lost_focus() {
+            if !ui::defocus_commits(&resp) {
+                self.link_edit = None;
+            } else if let Some(e) = self.link_edit.take().filter(|e| e.id == id) {
+                match ondin_core::web_link(&e.text) {
+                    Ok(url) if url == saved => {}
+                    Ok(url) => {
+                        self.session.name_step("Link", icon::LINK_SIMPLE);
+                        self.commit_edit(Transaction(vec![Operation::SetDocLink { id, url }]));
+                    }
+                    Err(why) => {
+                        self.link_edit = Some(LinkEdit {
+                            refused: Some(why),
+                            ..e
+                        })
+                    }
+                }
+            }
+        }
+        if let Some(why) = self
+            .link_edit
+            .as_ref()
+            .filter(|e| e.id == id)
+            .and_then(|e| e.refused)
+        {
+            ui.label(
+                egui::RichText::new(why.to_string())
+                    .size(11.0)
+                    .color(theme::color::error()),
+            );
         }
     }
 
@@ -1181,8 +1311,10 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetStyleName { .. }
         | O::SetStyleOrigin { .. }
         | O::SetStyleValue { .. }
-        // A main's description is the main's, never an instance's override.
-        | O::SetDescription { .. } => None,
+        // A main's description and link are the main's, never an instance's
+        // override.
+        | O::SetDescription { .. }
+        | O::SetDocLink { .. } => None,
     }
 }
 
@@ -1372,8 +1504,10 @@ fn plural(n: usize, what: &str) -> String {
 /// The face of an instance card — or a variant's, with `main` — the hexagon
 /// (outline for an instance, filled for a `main`), an optional small caption over
 /// the main's name as a link (or over a plain `title`), and the grey drift
-/// summary on the right. One line when `caption` is empty; several instances
-/// keep their count as the caption, and a variant its set.
+/// summary on the right, after it the book that opens `docs` when there is one.
+/// One line when `caption` is empty; several instances keep their count as the
+/// caption, and a variant its set.
+#[allow(clippy::too_many_arguments)]
 fn heading(
     ui: &mut egui::Ui,
     main: bool,
@@ -1381,11 +1515,13 @@ fn heading(
     link: Option<(NodeId, &str)>,
     title: Option<&str>,
     summary: &str,
+    docs: &str,
     act: &mut Option<Act>,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         let slot = glyph_slot(ui);
+        let book_w = if docs.is_empty() { 0.0 } else { LINK_H + 9.0 };
         // **The name is cut to the room the row leaves it**: a plain label in a
         // horizontal row never wraps, and egui grows the parent to its widest row,
         // so a long name pushes every card below off the screen. The whole name in
@@ -1410,7 +1546,7 @@ fn heading(
             .size()
             .x
             + 4.0;
-        let room = (ui.available_width() - summary_w).max(24.0);
+        let room = (ui.available_width() - summary_w - book_w).max(24.0);
         let block = ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
             if !caption.is_empty() {
@@ -1491,13 +1627,29 @@ fn heading(
             }
         });
         paint_hexagon(ui, main, slot, block.response.rect);
-        if !summary.is_empty() {
+        if !summary.is_empty() || !docs.is_empty() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(summary)
-                        .size(11.0)
-                        .color(theme::text::dim()),
-                );
+                // The book at the line's end, its tooltip the link's host.
+                if !docs.is_empty() {
+                    let tip = if crate::private::on() {
+                        "Open documentation".to_string()
+                    } else {
+                        format!("Open documentation: {}", ondin_core::link_host(docs))
+                    };
+                    if ui::icon_button(ui, icon::BOOK_OPEN, LINK_H, 14.0, false, true)
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        open_doc_link(ui.ctx(), docs);
+                    }
+                }
+                if !summary.is_empty() {
+                    ui.label(
+                        egui::RichText::new(summary)
+                            .size(11.0)
+                            .color(theme::text::dim()),
+                    );
+                }
             });
         }
     });
@@ -1745,10 +1897,46 @@ const NAME_PT: f32 = 13.0;
 /// A description's text size, and the air above it on a card.
 const DESC_PT: f32 = 11.5;
 const DESC_GAP: f32 = 2.0;
+/// A link field's height, and its open button's side.
+const LINK_H: f32 = 22.0;
+
+/// An in-progress edit of a main's link field (`OndinApp::link_field`); `refused`
+/// is set once a commit was turned down, and keeps the typed text on show.
+#[derive(Clone, Debug)]
+pub(crate) struct LinkEdit {
+    pub id: NodeId,
+    pub text: String,
+    pub refused: Option<ondin_core::LinkRefusal>,
+}
+
+/// The documentation link a main shows: its own, else its set's; empty when
+/// neither has one.
+pub(crate) fn doc_link_of(doc: &ondin_core::Document, main: NodeId) -> &str {
+    let own = doc.get(main).map(|n| n.doc_link()).unwrap_or_default();
+    if !own.is_empty() {
+        return own;
+    }
+    ondin_core::variant::set_of(doc, main)
+        .and_then(|s| doc.get(s))
+        .map(|s| s.doc_link())
+        .unwrap_or_default()
+}
+
+/// Hand a stored link to the system browser. Checked again here so that only an
+/// `http`/`https` address ever leaves the app, whatever a file carried.
+pub(crate) fn open_doc_link(ctx: &egui::Context, url: &str) {
+    if ondin_core::web_link(url).is_ok_and(|u| u == url) && !url.is_empty() {
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    }
+}
 
 /// An instance's main's description, read-only and dim under its face: the
-/// variant's own, else its set's. Nothing when neither has one.
+/// variant's own, else its set's. Nothing when neither has one, or in private
+/// mode, which masks descriptions as it does names.
 fn description_note(doc: &ondin_core::Document, main: NodeId, ui: &mut egui::Ui) {
+    if crate::private::on() {
+        return;
+    }
     let own = doc.get(main).map(|n| n.description()).unwrap_or_default();
     let text = if own.is_empty() {
         ondin_core::variant::set_of(doc, main)
@@ -2274,6 +2462,91 @@ mod tests {
         f.app.session.selection.set_one(f.i);
         let out = settle(&mut f.app, &ctx);
         assert!(has(&out, "The primary action"), "the instance reads it");
+    }
+
+    /// **A main's link is typed on its card and opened from its instance's.** A
+    /// `file:` address is refused with its reason and never stored; `Escape`
+    /// drops it; a bare host is stored as `https://…` and shown as its host; the
+    /// instance's name line then carries the book.
+    ///
+    /// flip: `link_field` committing without `web_link` → fails at the reason line
+    /// (core's `apply` still refuses the op, so "never stored" holds either way).
+    #[test]
+    fn a_mains_link_is_typed_on_its_card_and_shown_on_its_instances() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set_one(f.m);
+        let field = |out: &egui::FullOutput, s: &str| {
+            texts(out)
+                .into_iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s}: {:?}", texts(out)))
+                .1
+                .center()
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let type_in = |app: &mut OndinApp, at: egui::Pos2, typed: &str| {
+            click(app, &ctx, at);
+            frame(app, &ctx, vec![egui::Event::Text(typed.into())]);
+            frame(app, &ctx, vec![key(egui::Key::Enter)]);
+            settle(app, &ctx)
+        };
+        let out = settle(&mut f.app, &ctx);
+        let out = type_in(&mut f.app, field(&out, "Add a link"), "file:///C:/b.pdf");
+        assert_eq!(
+            f.app.session.doc.get(f.m).unwrap().doc_link(),
+            "",
+            "never stored"
+        );
+        field(&out, "Only web links: http or https.");
+        field(&out, "file:///C:/b.pdf");
+
+        click(&mut f.app, &ctx, field(&out, "file:///C:/b.pdf"));
+        frame(&mut f.app, &ctx, vec![key(egui::Key::Escape)]);
+        let out = settle(&mut f.app, &ctx);
+        assert!(f.app.link_edit.is_none(), "Escape dropped the refused text");
+        let out = type_in(&mut f.app, field(&out, "Add a link"), "design.kestrel.app");
+        assert_eq!(
+            f.app.session.doc.get(f.m).unwrap().doc_link(),
+            "https://design.kestrel.app"
+        );
+        field(&out, "design.kestrel.app");
+
+        f.app.session.selection.set_one(f.i);
+        let out = settle(&mut f.app, &ctx);
+        field(&out, icon::BOOK_OPEN);
+
+        // Private mode masks the link and the description as it does names.
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetDescription {
+                    of: ondin_core::Described::Node(f.m),
+                    text: "The primary action".into(),
+                }]))
+        );
+        crate::private::set(true);
+        f.app.session.selection.set_one(f.m);
+        let out = settle(&mut f.app, &ctx);
+        f.app.session.selection.set_one(f.i);
+        let inst = settle(&mut f.app, &ctx);
+        crate::private::set(false);
+        let drawn = |out: &egui::FullOutput, s: &str| texts(out).iter().any(|(t, _)| t == s);
+        assert!(
+            drawn(&out, "Link hidden in private mode"),
+            "{:?}",
+            texts(&out)
+        );
+        for s in ["design.kestrel.app", "The primary action"] {
+            assert!(!drawn(&out, s) && !drawn(&inst, s), "{s} masked");
+        }
     }
 
     /// Every text the frame painted with its fallback colour — what a galley

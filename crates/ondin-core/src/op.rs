@@ -273,6 +273,13 @@ pub enum Operation {
         of: Described,
         text: String,
     },
+    /// A main's or a set's documentation address, never drawn and never opened
+    /// by the document. Refused unless already in [`crate::web_link`]'s form;
+    /// empty is none.
+    SetDocLink {
+        id: NodeId,
+        url: String,
+    },
     /// The ground behind and around a page's frames (`crate::page`). A solid
     /// colour, not a `Brush`: nothing lies behind it for a gradient or an alpha
     /// to act on. `None` clears the page's own colour, so it is drawn on the
@@ -639,8 +646,9 @@ impl Operation {
             | Operation::SetStyleValue { .. }
             | Operation::SetStyleOrigin { .. }
             // A description is text beside the thing, never a field a copy
-            // follows or an edit merges on.
-            | Operation::SetDescription { .. } => None,
+            // follows or an edit merges on; so is a link.
+            | Operation::SetDescription { .. }
+            | Operation::SetDocLink { .. } => None,
         }
     }
 
@@ -818,6 +826,7 @@ impl Operation {
             | Operation::SetStyleValue { .. }
             | Operation::SetStyleOrigin { .. }
             | Operation::SetDescription { .. }
+            | Operation::SetDocLink { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
             | Operation::SetEffectsStyle { .. }
@@ -963,6 +972,7 @@ impl Operation {
                     .get(*id)
                     .is_some_and(|v| v.description == *text),
             },
+            Operation::SetDocLink { id, url } => node(id).is_some_and(|n| n.doc_link == *url),
             Operation::SetFillStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().fills == *style)
             }
@@ -1436,6 +1446,9 @@ pub enum OpError {
     BlurTooLarge,
     #[error("operation not valid for this node kind")]
     WrongKindForOp,
+    /// A documentation link not in [`crate::web_link`]'s form.
+    #[error("a documentation link must be an http or https address")]
+    BadDocLink,
     /// A frame asked to sit somewhere only a shape may go. Frames nest inside
     /// frames and groups (§5.3, §15 D870) but not off a shape or inside a boolean
     /// or a mask (§15 D876). Also the answer to turning a group that holds a
@@ -1688,8 +1701,12 @@ mod changes_ink_tests {
                 of: Described::Node(id),
                 text: "d".into(),
             },
+            Operation::SetDocLink {
+                id,
+                url: "https://d".into(),
+            },
         ];
-        assert_eq!(invisible.len(), 38, "the whole false arm");
+        assert_eq!(invisible.len(), 39, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

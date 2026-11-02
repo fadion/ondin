@@ -777,7 +777,7 @@ impl<'d> Differ<'d> {
             Value::String(s) if key == "data" => format!("{} bytes of data", s.len() / 4 * 3),
             Value::String(s) => match self.names.get(s) {
                 Some(name) if key != "id" => name.clone(),
-                _ if matches!(key, "content" | "name" | "description") => quoted(s),
+                _ if matches!(key, "content" | "name" | "description" | "doc_link") => quoted(s),
                 _ => s.replace('_', " "),
             },
             _ if is_color(v) => hex(v),

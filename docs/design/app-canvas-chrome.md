@@ -609,8 +609,12 @@ the first segment of a component's. It hides names, not content.
 - **What is masked:** layer, frame, component, page, document, project and version names, everywhere one is
   drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
   colour-blind simulation's bar, the minimap, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
-  kit dialogs and the whole library screen. **What stays:** text, images, colours, style, variable
-  and variant property names. Masked, not removed: a frame label still selects its frame, rows still
+  kit dialogs and the whole library screen. A main's or set's description and documentation link
+  are masked with the names: the description field is disabled and empty (*Description hidden in
+  private mode*), the link field reads *Link hidden in private mode*, an instance shows no description
+  note and its book's tooltip drops the host, the swap picker hovers no description, and the insert
+  picker's hover card shows only the masked name and the variant count. **What stays:** text, images,
+  colours, style, variable and variant property names. Masked, not removed: a frame label still selects its frame, rows still
   navigate.
 - **Pages and Layers fold as an overlay** (`pages_folded || private`, `layers_folded || private`),
   the fold preferences left as they were; a click on a folded head says *Leave private mode to see the

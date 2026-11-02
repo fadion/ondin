@@ -118,9 +118,9 @@ pub use layout::{
 pub use meta::DocumentMeta;
 pub use naming::{copy_name, free_name, is_boolean_label, numbered};
 pub use node::{
-    BlendMode, BoolOp, DashStyle, EllipseArc, Fill, FillRule, MIN_MITER_DEGREES, MaskMode, Node,
-    NodeKind, Paint, Pivot, Side, Stroke, StrokeAlign, StrokeSides, TextRef, TextSizing,
-    miter_degrees_of_ratio, miter_ratio_of_degrees,
+    BlendMode, BoolOp, DashStyle, EllipseArc, Fill, FillRule, LinkRefusal, MIN_MITER_DEGREES,
+    MaskMode, Node, NodeKind, Paint, Pivot, Side, Stroke, StrokeAlign, StrokeSides, TextRef,
+    TextSizing, link_host, miter_degrees_of_ratio, miter_ratio_of_degrees, web_link,
 };
 pub use op::{ApplyOutcome, Described, DirtySet, GeometryPatch, OpError, Operation, Transaction};
 pub use query::{

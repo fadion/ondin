@@ -6,7 +6,7 @@ The native `.ondin` file format (JSON, versioned DTO), its integrity checks, the
 
 ### Format and the two readers
 
-- Native format is JSON, currently **v12** (`io::CURRENT_SCHEMA_VERSION`). `schema.rs` defines a versioned DTO decoupled from the in-memory types.
+- Native format is JSON, currently **v13** (`io::CURRENT_SCHEMA_VERSION`). `schema.rs` defines a versioned DTO decoupled from the in-memory types.
 - `io::clip` writes a copied subtree for the system clipboard through the same `NodeDto` and `ImageDto` a file uses (`from_node`/`into_node`, `from_entry`/`into_entry` are lifted out of `DocumentDto` for this), so every normalization applies to a pasted layer too. Refuse a second projection beside `NodeDto`: a field added to one and not the other compiles, saves and loads.
 - The clipboard deliberately does **not** share the migration ladder. `io::clip::read` compares `schema_version` for equality and refuses anything else: a file is an archive and must open in a build written years later; a clipboard is a handoff between two processes running now. Do not route `clip` through `migrate.rs`.
 - `io::clip::read` carries envelope checks of its own (§15 D833–D836, D852):
@@ -105,6 +105,7 @@ A bump **is** required when a field's meaning changes or its default would silen
 | v9 to v10 | Pages (§5.5) | `migrate_9_to_10`: `pages: [{id, ground, draft?}]` replaces `root` and the top-level `canvas_background`. The old root becomes the one page, its ground the old `canvas_background` or, absent, the default the file was drawn on; a guide with no `owner` ran the whole canvas, so it names that page (`GuideDto::owner` is required from v10); a root still named `Root` becomes `Page 1`. `draft` is skipped when false. The published document is reshaped the same way. A file with no `root` is left for the parse to refuse. |
 | v10 to v11 | The `Slice` kind (§5.3) | `migrate_10_to_11`: number only, published document moving with it. A v10 reader refuses the file by its version rather than failing on a kind it does not know. Saved as `{"Slice": {"size"}}`. The shape keys share v11 unbumped, each skipped at its default: a frame's `corner_radii` and `corner_smoothing`, an ellipse's `arc`, and `corner_smoothing` on a polygon, star and path, `NodeDto::blend` and `Shadow::blend`. A v10 reader would otherwise draw a whole ellipse, square corners and every layer and shadow Normal. |
 | v11 to v12 | A page's ground becomes optional (§5.5) | `migrate_11_to_12`: a page's `ground` equal to `DEFAULT_CANVAS_BACKGROUND` (compared as a parsed colour) is removed, since an untouched v11 page stored exactly the default; any other colour stays. `ground` is skipped when absent; the published document moves with it. |
+| v12 to v13 | A main's or set's documentation link (§5.3d) | `migrate_12_to_13`: number only, published document moving with it; v12 had shipped, so the key could not join it, and a v12 reader would drop the link. `NodeDto::doc_link` is skipped when empty; on load a link not in `web_link`'s form is dropped, not refused. |
 
 ## 5.11a The library block
 

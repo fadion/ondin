@@ -973,6 +973,103 @@ fn a_description_stays_on_what_it_describes() {
     assert_eq!(f.doc, before);
 }
 
+/// **A main's documentation link is its own and only ever a web address**: an op
+/// not in `web_link`'s form is refused, the link is undone by its inverse, saved
+/// only when set, dropped on load when a file carries a bad one, and never copied
+/// onto a new instance.
+///
+/// flip: `make_copy_of` keeping `doc_link` → fails at "a new instance".
+#[test]
+fn a_doc_link_is_a_web_address_kept_on_its_main() {
+    let mut f = fixture();
+    let main = f.small;
+    let plain = String::from_utf8(io::save(&f.doc).unwrap()).unwrap();
+    assert!(!plain.contains("doc_link"), "absent when unset");
+    for bad in [
+        "file:///C:/b.pdf",
+        "javascript:alert(1)",
+        "design.kestrel.app",
+    ] {
+        let err = f.doc.apply(&Transaction(vec![Operation::SetDocLink {
+            id: main,
+            url: bad.into(),
+        }]));
+        assert!(matches!(err, Err(OpError::BadDocLink)), "{bad} refused");
+    }
+    let before = f.doc.clone();
+    let out = f
+        .doc
+        .apply(&Transaction(vec![Operation::SetDocLink {
+            id: main,
+            url: "https://design.kestrel.app/buttons".into(),
+        }]))
+        .unwrap();
+    assert_eq!(
+        f.doc.get(main).unwrap().doc_link(),
+        "https://design.kestrel.app/buttons"
+    );
+    assert_eq!(f.doc.get(f.i).unwrap().doc_link(), "", "not propagated");
+
+    let saved = String::from_utf8(io::save(&f.doc).unwrap()).unwrap();
+    let loaded = io::load(saved.as_bytes()).unwrap();
+    assert_eq!(
+        loaded.get(main).unwrap().doc_link(),
+        "https://design.kestrel.app/buttons"
+    );
+    let tampered = saved.replace("https://design.kestrel.app/buttons", "file:///etc/passwd");
+    assert_ne!(tampered, saved, "the fixture reached the file");
+    let loaded = io::load(tampered.as_bytes()).unwrap();
+    assert_eq!(loaded.get(main).unwrap().doc_link(), "", "dropped on load");
+
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(main).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(f.doc.get(made[0]).unwrap().doc_link(), "", "a new instance");
+
+    f.doc.apply(&out.inverse).unwrap();
+    f.doc
+        .apply(&Transaction(vec![Operation::DeleteNode { id: made[0] }]))
+        .unwrap();
+    assert_eq!(f.doc.get(main).unwrap().doc_link(), "");
+    assert_eq!(f.doc.get(main), before.get(main));
+}
+
+/// `web_link` puts `https://` before a bare host, keeps a port as a host's, and
+/// refuses every other scheme; `link_host` is what a card shows of the result.
+#[test]
+fn a_typed_link_is_made_a_web_address_or_refused() {
+    use ondin_core::{LinkRefusal, link_host, web_link};
+    let ok = |typed: &str| web_link(typed).unwrap();
+    assert_eq!(ok(""), "");
+    assert_eq!(ok("  design.kestrel.app "), "https://design.kestrel.app");
+    assert_eq!(ok("HTTP://x.dev/a?b#c"), "http://x.dev/a?b#c");
+    assert_eq!(ok("localhost:8080/docs"), "https://localhost:8080/docs");
+    for typed in [
+        "file:///C:/b.pdf",
+        "mailto:a@b.c",
+        "javascript:alert(1)",
+        r"C:\docs",
+    ] {
+        assert_eq!(web_link(typed), Err(LinkRefusal::NotWeb), "{typed}");
+    }
+    for typed in ["https:", "https://", "http:/x.dev", "a b.dev", "https:///x"] {
+        assert_eq!(web_link(typed), Err(LinkRefusal::Malformed), "{typed}");
+    }
+    assert_eq!(
+        link_host("https://design.kestrel.app/buttons#primary"),
+        "design.kestrel.app"
+    );
+    assert_eq!(link_host("https://me@x.dev:8080?q"), "x.dev:8080");
+}
+
 /// *Combine as variants*: one property, each main's name a value, names kept.
 #[test]
 fn combining_mains_makes_a_set_of_their_names() {

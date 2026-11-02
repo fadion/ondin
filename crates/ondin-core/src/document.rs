@@ -166,6 +166,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         variant: Vec::new(),
         props: Vec::new(),
         description: String::new(),
+        doc_link: String::new(),
         origin: None,
         mode: None,
         corner_vars: Default::default(),
@@ -1551,6 +1552,15 @@ impl Document {
                 let old = std::mem::replace(slot, text.clone());
                 Ok(Operation::SetDescription { of: *of, text: old })
             }
+            // Nothing is dirtied either: a link is never drawn.
+            Operation::SetDocLink { id, url } => {
+                if crate::node::web_link(url).ok().as_ref() != Some(url) {
+                    return Err(OpError::BadDocLink);
+                }
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.doc_link, url.clone());
+                Ok(Operation::SetDocLink { id: *id, url: old })
+            }
             Operation::SetStyleValue { id, value } => {
                 if !crate::style::survives_save(value) {
                     return Err(OpError::NonFinite);
@@ -1862,6 +1872,7 @@ impl Document {
             variant: Vec::new(),
             props: Vec::new(),
             description: String::new(),
+            doc_link: String::new(),
             origin: None,
             mode: None,
             corner_vars: Default::default(),
@@ -3361,6 +3372,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
                 })
                 .collect(),
             description: n.description.clone(),
+            doc_link: n.doc_link.clone(),
             // **Never carried** (§15 D1012): a copy of a vendored node does not live
             // in the vault, and `kit::check` refuses an origin outside it. The kit
             // verbs write the origin after minting their copies here.
@@ -3614,6 +3626,7 @@ mod tests {
             variant: Vec::new(),
             props: Vec::new(),
             description: String::new(),
+            doc_link: String::new(),
             origin: None,
             mode: None,
             corner_vars: Default::default(),

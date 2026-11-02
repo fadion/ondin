@@ -40,6 +40,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             9 => migrate_9_to_10(&mut value),
             10 => migrate_10_to_11(&mut value),
             11 => migrate_11_to_12(&mut value),
+            12 => migrate_12_to_13(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -367,5 +368,19 @@ fn unground_defaults(doc: &mut Value) {
         if default {
             page.remove("ground");
         }
+    }
+}
+
+/// v12 → v13: a main's documentation link. A number and nothing else: a v12 file
+/// holds none. The bump is for the older build, which would drop the link. The
+/// published document's number moves too, as in `migrate_6_to_7`.
+fn migrate_12_to_13(value: &mut Value) {
+    value["schema_version"] = Value::from(13u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(13u32);
     }
 }

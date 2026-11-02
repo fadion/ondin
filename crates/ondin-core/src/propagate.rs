@@ -149,8 +149,9 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetStyleValue { .. }
         | Operation::SetStyleOrigin { .. }
         // A main's description is the main's; an instance reads it through its
-        // link.
-        | Operation::SetDescription { .. } => Mode::Skip,
+        // link, and so is its documentation address.
+        | Operation::SetDescription { .. }
+        | Operation::SetDocLink { .. } => Mode::Skip,
     }
 }
 

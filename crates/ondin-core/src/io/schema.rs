@@ -296,6 +296,10 @@ pub(crate) struct NodeDto {
     /// A main's or a set's description, absent when it has none. New in v9.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// A main's or a set's documentation address, absent when it has none. New
+    /// in v13. One not in `web_link`'s form is dropped on load, never refused.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc_link: String,
     /// Where a vault node was vendored from (§15 D1012), absent on every node
     /// outside the vault — which `crate::kit::check` holds on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -419,6 +423,7 @@ impl NodeDto {
             variant: n.variant().to_vec(),
             props: n.props().to_vec(),
             description: n.description().to_string(),
+            doc_link: n.doc_link().to_string(),
             origin: n.origin().map(|o| OriginDto {
                 kit: o.kit.clone(),
                 node: o.node.to_wire(),
@@ -518,6 +523,10 @@ impl NodeDto {
             // function of the list, so the same bytes give one document.
             props: crate::item::rekey_repeats(self.props),
             description: self.description,
+            doc_link: crate::node::web_link(&self.doc_link)
+                .ok()
+                .filter(|l| *l == self.doc_link)
+                .unwrap_or_default(),
             origin: self
                 .origin
                 .map(|o| -> Result<_, IoError> {

@@ -809,6 +809,8 @@ pub mod icon {
     pub const ARROW_UP_RIGHT: &str = "\u{e092}";
     /// A variant clash's *Select it* — go to the other layer.
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
+    /// A main's documentation link, opened in the browser.
+    pub const BOOK_OPEN: &str = "\u{e0e6}";
     /// *Select all instances*.
     pub const SELECTION_ALL: &str = "\u{e746}";
     /// A variant clash — two variants on one combination (§15 D982): a
@@ -975,6 +977,7 @@ pub mod icon {
         ("squircle", SQUIRCLE),
         ("square-dots", SQUARE_DOTS),
         ("incognito", INCOGNITO),
+        ("book-open", BOOK_OPEN),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),
         ("arrow-up", ARROW_UP),
         ("arrow-down", ARROW_DOWN),

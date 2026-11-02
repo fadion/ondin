@@ -38,6 +38,15 @@ const GAP_X: f32 = 8.0;
 const GAP_Y: f32 = 10.0;
 /// A list row's height — a kit header, a search result.
 const ROW_H: f32 = 28.0;
+/// A result row with its description's first sentence under the name.
+const ROW_H2: f32 = 42.0;
+/// How long the pointer rests on a tile or a result before its card shows.
+const CARD_DELAY: f64 = 0.5;
+/// The hover card's width, and its gap from the panel's edge.
+const CARD_W: f32 = 260.0;
+const CARD_GAP: f32 = 8.0;
+/// How many lines of a description the card shows before cutting it.
+const CARD_LINES: usize = 6;
 /// How many results a search shows.
 const MAX_RESULTS: usize = 40;
 
@@ -60,6 +69,9 @@ pub(crate) struct Picker {
     ghost: Option<Ghost>,
     /// The panel's rect as last drawn: over it, a drag shows the tile.
     panel: Option<egui::Rect>,
+    /// What the pointer rests on and since when (`ctx` time): the hover card
+    /// shows once it has rested [`CARD_DELAY`].
+    resting: Option<(Key, f64)>,
 }
 
 impl Picker {
@@ -312,6 +324,39 @@ struct Item {
     tile: Option<egui::TextureHandle>,
     /// Every name a search matches it by: its own, and a set's variants'.
     aliases: Vec<String>,
+    /// Its description, which search reads under the names, and its
+    /// documentation link — what the hover card shows.
+    about: String,
+    docs: String,
+    /// A set's variant count, 0 for a lone main.
+    variants: usize,
+}
+
+impl Item {
+    /// An item for `top` read in `doc` (this document, or a kit's published one).
+    fn new(doc: &Document, top: NodeId, source: Source, kit: Option<(String, bool)>) -> Self {
+        let n = doc.get(top);
+        let set = n.is_some_and(|n| n.set().is_some());
+        Item {
+            source,
+            name: crate::private::layer(doc, top).into_owned(),
+            set,
+            kit,
+            tile: None,
+            aliases: aliases(doc, top),
+            about: n.map(|n| n.description().to_string()).unwrap_or_default(),
+            docs: crate::panels::doc_link_of(doc, top).to_string(),
+            variants: match set {
+                true => ondin_core::variant::variants(doc, top).len(),
+                false => 0,
+            },
+        }
+    }
+
+    /// Whether it has anything for a hover card to say beyond its name.
+    fn has_card(&self) -> bool {
+        !self.about.is_empty() || !self.docs.is_empty()
+    }
 }
 
 /// What a frame of the picker asked for.
@@ -323,6 +368,8 @@ enum Act {
     /// A tile let go at this screen point — placed there when it is over the
     /// canvas and not over the panel itself.
     Drop(Source, egui::Pos2),
+    /// An `Alt`+click: the item's documentation link, to the browser.
+    OpenDocs(String),
 }
 
 /// One kit as the picker lists it.
@@ -425,6 +472,7 @@ impl OndinApp {
         let mut act: Option<Act> = None;
         // The item a tile or a result is being dragged from this frame.
         let mut dragging: Option<Item> = None;
+        let mut hovered: Option<(Item, egui::Rect)> = None;
         let query = picker.query.trim().to_lowercase();
         let results: Vec<Item> = if query.is_empty() {
             Vec::new()
@@ -499,6 +547,7 @@ impl OndinApp {
                             dragging: &mut dragging,
                             busy: busy.as_ref(),
                             cancelled,
+                            hovered: &mut hovered,
                         };
                         egui::ScrollArea::vertical()
                             .max_height(list)
@@ -540,6 +589,27 @@ impl OndinApp {
                 }
                 None => p.ghost = None,
             }
+            // The hover card, once the pointer has rested; never during a drag.
+            let now = ctx.input(|i| i.time);
+            match hovered.as_ref().filter(|_| dragging.is_none()) {
+                Some((item, rect)) => {
+                    let key = key_of(&item.source);
+                    let since = match &p.resting {
+                        Some((k, t)) if *k == key => *t,
+                        _ => {
+                            p.resting = Some((key, now));
+                            now
+                        }
+                    };
+                    let left = CARD_DELAY - (now - since);
+                    if left > 0.0 {
+                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+                    } else if item.has_card() {
+                        hover_card(ctx, item, panel, *rect);
+                    }
+                }
+                None => p.resting = None,
+            }
         }
 
         match act {
@@ -556,6 +626,7 @@ impl OndinApp {
                     self.ask_place(source, Some(at));
                 }
             }
+            Some(Act::OpenDocs(url)) => crate::panels::open_doc_link(ctx, &url),
             Some(Act::OpenLibrary) => {
                 self.kit_picker = None;
                 self.go_to_dashboard();
@@ -652,19 +723,18 @@ impl OndinApp {
                 };
                 for top in p.tops().to_vec() {
                     let src = p.document();
-                    let Some(n) = src.get(top) else { continue };
+                    if src.get(top).is_none() {
+                        continue;
+                    }
+                    let source = Source::Kit {
+                        id: k.id.clone(),
+                        version,
+                        published: p.clone(),
+                        top,
+                    };
                     let item = Item {
-                        source: Source::Kit {
-                            id: k.id.clone(),
-                            version,
-                            published: p.clone(),
-                            top,
-                        },
-                        name: crate::private::layer(src, top).into_owned(),
-                        set: n.set().is_some(),
-                        kit: Some((k.name.clone(), used)),
                         tile: self.kit_shelf.tile(ctx, &k.id, top),
-                        aliases: aliases(src, top),
+                        ..Item::new(src, top, source, Some((k.name.clone(), used)))
                     };
                     // A group is named for the frame it was published from, a
                     // layer's name: masked, the kit's own heading stands for it.
@@ -709,19 +779,11 @@ impl OndinApp {
             .collect();
         let mut groups = Vec::new();
         for c in &copies {
-            let Some(n) = doc.get(*c) else { continue };
-            push_grouped(
-                &mut groups,
-                String::new(),
-                Item {
-                    source: Source::Local(*c),
-                    name: crate::private::layer(doc, *c).into_owned(),
-                    set: n.set().is_some(),
-                    kit: None,
-                    tile: None,
-                    aliases: aliases(doc, *c),
-                },
-            );
+            if doc.get(*c).is_none() {
+                continue;
+            }
+            let item = Item::new(doc, *c, Source::Local(*c), None);
+            push_grouped(&mut groups, String::new(), item);
         }
         // The name the kit had when its copies were vendored — the library cannot
         // say, being exactly what lost it (`Origin::name`).
@@ -757,14 +819,8 @@ impl OndinApp {
         while let Some(id) = stack.pop() {
             let Some(n) = doc.get(id) else { continue };
             if !doc.is_page(id) && (n.set().is_some() || n.component()) {
-                out.push(Item {
-                    source: Source::Local(id),
-                    name: crate::private::layer(doc, id).into_owned(),
-                    set: n.set().is_some(),
-                    kit: Some(("This document".into(), true)),
-                    tile: None,
-                    aliases: aliases(doc, id),
-                });
+                let kit = Some(("This document".into(), true));
+                out.push(Item::new(doc, id, Source::Local(id), kit));
                 continue;
             }
             if n.link().is_none() {
@@ -1150,6 +1206,9 @@ struct Out<'a> {
     /// A right-click took the drag away (§15 D1033): until the button is up,
     /// the drag carries nothing and its release places nothing.
     cancelled: bool,
+    /// The tile or result under the pointer, and its rect — the hover card's
+    /// subject once it has stayed there long enough.
+    hovered: &'a mut Option<(Item, egui::Rect)>,
 }
 
 impl Out<'_> {
@@ -1159,8 +1218,15 @@ impl Out<'_> {
     /// every drag in the app is (§15 D1033). Returns how opaque the row draws —
     /// the pulse's low while its placement waits.
     fn take(&mut self, ui: &egui::Ui, resp: &egui::Response, item: &Item) -> f32 {
-        if resp.clicked() {
+        // `Alt`+click opens the link instead: a tile has no room for a button.
+        let alt = ui.input(|i| i.modifiers.alt);
+        if resp.clicked() && alt && !item.docs.is_empty() {
+            *self.act = Some(Act::OpenDocs(item.docs.clone()));
+        } else if resp.clicked() {
             *self.act = Some(Act::Place(item.source.clone()));
+        }
+        if resp.hovered() && !resp.dragged() {
+            *self.hovered = Some((item.clone(), resp.rect));
         }
         if resp.dragged() && !self.cancelled {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -1345,7 +1411,7 @@ fn push_grouped(groups: &mut Vec<(String, Vec<Item>)>, group: String, item: Item
 
 /// The search: every component of every kit, this document's own first among
 /// equals, ranked — a name that starts with the query, then one that holds it,
-/// then a match through a set's variants.
+/// then a match through a set's variants, then one through its description.
 fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
     // A search over names finds nothing while they are masked.
     if crate::private::on() {
@@ -1365,6 +1431,8 @@ fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
             1
         } else if item.aliases.iter().any(|a| a.contains(query)) {
             2
+        } else if item.about.to_lowercase().contains(query) {
+            3
         } else {
             continue;
         };
@@ -1592,22 +1660,25 @@ fn tiles(ui: &mut egui::Ui, items: &[Item], out: &mut Out<'_>) {
                 egui::pos2(x, band.top()),
                 egui::vec2(tile_w, TILE_H + 22.0),
             );
-            let resp = ui
-                .interact(
-                    cell,
-                    // Keyed by what the tile places, not where it sits: a list
-                    // scrolled under a drag would otherwise re-key the tile and
-                    // drop the drag.
-                    ui.id().with(match &item.source {
-                        Source::Local(id) => ("kit-tile", String::new(), *id),
-                        Source::Kit { id, top, .. } => ("kit-tile", id.clone(), *top),
-                    }),
-                    egui::Sense::click_and_drag(),
-                )
-                .on_hover_text(match &item.kit {
+            let resp = ui.interact(
+                cell,
+                // Keyed by what the tile places, not where it sits: a list
+                // scrolled under a drag would otherwise re-key the tile and
+                // drop the drag.
+                ui.id().with(match &item.source {
+                    Source::Local(id) => ("kit-tile", String::new(), *id),
+                    Source::Kit { id, top, .. } => ("kit-tile", id.clone(), *top),
+                }),
+                egui::Sense::click_and_drag(),
+            );
+            // A tile with a hover card says its name there instead.
+            let resp = match item.has_card() {
+                true => resp,
+                false => resp.on_hover_text(match &item.kit {
                     Some((kit, _)) => format!("{} · {kit}", item.name),
                     None => item.name.clone(),
-                });
+                }),
+            };
             // A drag's picture is drawn by `kit_picker_ui`, at the component's
             // own size (§15 D1029); it was this tile, card and all.
             let alpha = out.take(ui, &resp, item);
@@ -1667,10 +1738,11 @@ fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
 /// is the reach a result invites.
 fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut Out<'_>) {
     for (i, item) in items.iter().enumerate() {
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), ROW_H),
-            egui::Sense::hover(),
-        );
+        // A description takes a second line; without one the row stays one line.
+        let about = first_sentence(&item.about);
+        let h = if about.is_empty() { ROW_H } else { ROW_H2 };
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
         // Keyed by what it places, so a list re-ranked under a drag keeps it.
         let (kit, top) = key_of(&item.source);
         let resp = ui.interact(
@@ -1685,8 +1757,10 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
         if i == highlight || resp.hovered() {
             p.rect_filled(rect, egui::CornerRadius::same(5), color::text_a(20));
         }
+        // The first line's centre: the row's own, or its top line's.
+        let gy = rect.top() + ROW_H / 2.0;
         let thumb = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 6.0, rect.center().y - 9.0),
+            egui::pos2(rect.left() + 6.0, gy - 9.0),
             egui::vec2(28.0, 18.0),
         );
         p.rect_filled(thumb, egui::CornerRadius::same(3), color::text_a(26));
@@ -1696,7 +1770,6 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
             let shown = egui::Rect::from_center_size(thumb.center(), size * k);
             p.image(t.id(), shown, crate::thumbs::FULL_UV, egui::Color32::WHITE);
         }
-        let gy = rect.center().y;
         if item.set {
             p.text(
                 egui::pos2(rect.left() + 46.0, gy),
@@ -1734,6 +1807,24 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
                 color::text_a(102),
             );
         }
+        if !about.is_empty() {
+            // Dim and cut to the row, under the name.
+            let x = rect.left() + 56.0;
+            let line = egui::text::LayoutJob {
+                wrap: egui::text::TextWrapping::truncate_at_width(rect.right() - 6.0 - x),
+                ..egui::text::LayoutJob::simple_singleline(
+                    about.to_string(),
+                    egui::FontId::proportional(11.0),
+                    color::text_a(115),
+                )
+            };
+            let galley = ui.fonts_mut(|f| f.layout_job(line));
+            p.galley(
+                egui::pos2(x, rect.top() + ROW_H - 4.0),
+                galley,
+                color::text_a(115),
+            );
+        }
     }
     if items.is_empty() {
         ui.label(
@@ -1744,6 +1835,111 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
             .size(11.0)
             .color(theme::text::faint()),
         );
+    }
+}
+
+/// The card beside the picker for the item the pointer rests on: its name, a
+/// set's variant count, the description cut at [`CARD_LINES`] lines, and the
+/// link's host. **Outside the panel**, so the picker keeps its size and nothing
+/// under the pointer moves. In private mode only the (masked) name.
+fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Rect) {
+    let private = crate::private::on();
+    egui::Area::new(egui::Id::new("kit-picker-card"))
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .fixed_pos(egui::pos2(panel.right() + CARD_GAP, row.top()))
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(color::raised())
+                .corner_radius(6)
+                .stroke(egui::Stroke::new(1.0, color::text_a(20)))
+                .inner_margin(PAD)
+                .show(ui, |ui| {
+                    ui.set_width(CARD_W - 2.0 * PAD);
+                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 7.0;
+                        let glyph = if item.set {
+                            icon::SQUARES_FOUR
+                        } else {
+                            icon::HEXAGON
+                        };
+                        ui.label(
+                            egui::RichText::new(glyph)
+                                .font(theme::icon_font(14.0))
+                                .color(color::accent_300()),
+                        );
+                        ui.label(
+                            egui::RichText::new(&item.name)
+                                .size(12.5)
+                                .color(theme::text::strong()),
+                        );
+                        if item.variants > 0 {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let n = match item.variants {
+                                        1 => "1 variant".to_string(),
+                                        n => format!("{n} variants"),
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(n)
+                                            .size(10.5)
+                                            .color(theme::text::faint()),
+                                    );
+                                },
+                            );
+                        }
+                    });
+                    if private {
+                        return;
+                    }
+                    if !item.about.is_empty() {
+                        let mut job = egui::text::LayoutJob::simple(
+                            item.about.clone(),
+                            egui::FontId::proportional(11.5),
+                            theme::text::muted(),
+                            ui.available_width(),
+                        );
+                        job.wrap.max_rows = CARD_LINES;
+                        ui.label(job);
+                    }
+                    if !item.docs.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(
+                                egui::RichText::new(icon::BOOK_OPEN)
+                                    .font(theme::icon_font(13.0))
+                                    .color(theme::text::faint()),
+                            );
+                            ui.label(
+                                egui::RichText::new(ondin_core::link_host(&item.docs))
+                                    .size(11.0)
+                                    .color(theme::text::dim()),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new("Alt+click to open")
+                                            .size(10.5)
+                                            .color(theme::text::faint()),
+                                    );
+                                },
+                            );
+                        });
+                    }
+                });
+        });
+}
+
+/// A description's first sentence, for a result's second line: up to and with
+/// the first full stop that ends a sentence, or the first line.
+fn first_sentence(text: &str) -> &str {
+    let line = text.lines().next().unwrap_or_default().trim();
+    match line.find(". ") {
+        Some(i) => &line[..=i],
+        None => line,
     }
 }
 
@@ -3250,6 +3446,9 @@ pub(crate) mod tests {
             kit: None,
             tile: None,
             aliases: Vec::new(),
+            about: String::new(),
+            docs: String::new(),
+            variants: 0,
         };
         let mut ghost = Ghost::start(&item(Source::Local(badge)), &doc, 1.0);
         ghost.settle(&ctx);
@@ -3518,11 +3717,12 @@ pub(crate) mod tests {
     }
 
     /// **Search ranks a name that starts with the query, then one that holds
-    /// it, then a set found through its variants — this document's own first
-    /// among equal names — and stops at `MAX_RESULTS`** (§15 D1031). Asked of
-    /// `search` itself, over items built here.
+    /// it, then a set found through its variants, then a description — this
+    /// document's own first among equal names — and stops at `MAX_RESULTS`**.
+    /// Asked of `search` itself, over items built here.
     ///
-    /// Flip, run: every match scored 0 fails *"ranked"*, the five sorted by name
+    /// Flip, run: the description arm dropped fails *"ranked"* without *Card*.
+    /// Flip, run: every match scored 0 fails *"ranked"*, sorted by name
     /// alone. Flip, run: the kits chained before this document's own fails
     /// *"ranked"* too, the kit's *Badge* first. Flip, run: the `take(MAX_RESULTS)`
     /// dropped fails *"capped"* with 45.
@@ -3538,6 +3738,9 @@ pub(crate) mod tests {
             aliases: std::iter::once(name.to_lowercase())
                 .chain(aliases.iter().map(|a| a.to_string()))
                 .collect(),
+            about: String::new(),
+            docs: String::new(),
+            variants: 0,
         };
         let shown = |items: Vec<Item>| Shown {
             id: "k".into(),
@@ -3552,7 +3755,11 @@ pub(crate) mod tests {
             item("Kebab", &[], false),
             item("Button", &["basic"], false),
             item("Badge", &[], false),
-            item("Card", &[], false),
+            Item {
+                about: "A Basic box for content".into(),
+                ..item("Card", &[], false)
+            },
+            item("Sheet", &[], false),
         ]);
         let got: Vec<(String, bool)> = search("ba", &local, std::slice::from_ref(&kit))
             .iter()
@@ -3567,9 +3774,12 @@ pub(crate) mod tests {
                 want("Bar", true),
                 want("Kebab", false),
                 want("Button", false),
+                want("Card", false),
             ],
-            "ranked"
+            "ranked, a description's match under every name's"
         );
+        assert_eq!(first_sentence("One call. Use it once."), "One call.");
+        assert_eq!(first_sentence("v1.2 ships\nnext line"), "v1.2 ships");
 
         let many = shown(
             (0..45)
@@ -3581,6 +3791,113 @@ pub(crate) mod tests {
             MAX_RESULTS,
             "capped"
         );
+    }
+
+    /// **A tile the pointer rests on shows its card, and `Alt`+click opens its
+    /// link instead of placing.** The card's link line is not drawn before half
+    /// a second, is after; the `Alt`+click asks egui to open the address and
+    /// starts no placement.
+    ///
+    /// flip: `CARD_DELAY` at 0 → fails at "not before it has rested".
+    #[test]
+    fn a_resting_pointer_shows_the_card_and_alt_click_opens_the_link() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("docs-card");
+        let mut app = app_on(&ctx, root.clone());
+        let page = app.session.doc.page_ids().next().unwrap();
+        let m = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![
+            frame(m, page, 0, 40.0, "Docs"),
+            Operation::SetComponent {
+                id: m,
+                component: true,
+            },
+            Operation::SetDescription {
+                of: ondin_core::Described::Node(m),
+                text: "The one call to action.".into(),
+            },
+            Operation::SetDocLink {
+                id: m,
+                url: "https://design.kestrel.app/buttons".into(),
+            },
+        ])));
+        app.toggle_kit_picker();
+        let run = |app: &mut OndinApp, t: f64, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                time: Some(t),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |_| app.kit_picker_ui(&ctx))
+        };
+        let painted = |out: &egui::FullOutput| {
+            fn walk(s: &egui::Shape, v: &mut Vec<(String, egui::Rect)>) {
+                match s {
+                    egui::Shape::Text(t) => {
+                        v.push((t.galley.text().to_string(), t.visual_bounding_rect()))
+                    }
+                    egui::Shape::Vec(all) => all.iter().for_each(|s| walk(s, v)),
+                    _ => {}
+                }
+            }
+            let mut v = Vec::new();
+            out.shapes.iter().for_each(|s| walk(&s.shape, &mut v));
+            v
+        };
+        ctx.memory_mut(|mem| mem.surrender_focus(egui::Id::new(SEARCH_ID)));
+        let mut out = run(&mut app, 0.0, Vec::new());
+        for i in 1..4 {
+            out = run(&mut app, 0.01 * f64::from(i), Vec::new());
+        }
+        let tile = painted(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Docs")
+            .unwrap_or_else(|| panic!("the tile: {:?}", painted(&out)))
+            .1
+            .center();
+        let card =
+            |out: &egui::FullOutput| painted(out).iter().any(|(t, _)| t == "design.kestrel.app");
+        run(&mut app, 1.0, vec![egui::Event::PointerMoved(tile)]);
+        let out = run(&mut app, 1.2, Vec::new());
+        assert!(!card(&out), "not before it has rested");
+        run(&mut app, 1.7, Vec::new());
+        // A new `Area` sits out its first frame, sizing itself.
+        let out = run(&mut app, 1.8, Vec::new());
+        assert!(card(&out), "the card, once rested: {:?}", painted(&out));
+
+        let press = |pressed| egui::Event::PointerButton {
+            pos: tile,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::ALT,
+        };
+        let alt = |t| {
+            let mut input = egui::RawInput {
+                time: Some(t),
+                modifiers: egui::Modifiers::ALT,
+                ..Default::default()
+            };
+            input.events.push(press(t < 1.95));
+            input
+        };
+        let _ = ctx.run_ui(alt(1.9), |_| app.kit_picker_ui(&ctx));
+        let out = ctx.run_ui(alt(2.0), |_| app.kit_picker_ui(&ctx));
+        let opened: Vec<String> = out
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            opened,
+            vec!["https://design.kestrel.app/buttons".to_string()]
+        );
+        assert!(app.kit_placing.is_none(), "nothing placed");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// **`↓` moves the highlight and `Enter` places what it lit**.
@@ -3741,6 +4058,9 @@ pub(crate) mod tests {
             kit: None,
             tile: None,
             aliases: Vec::new(),
+            about: String::new(),
+            docs: String::new(),
+            variants: 0,
         };
         let mut ghost = Ghost::start(&item, &doc, 1.0);
         ghost.settle(&ctx);

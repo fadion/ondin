@@ -663,6 +663,9 @@ impl OndinApp {
                 ),
             );
         }
+        for f in crate::panels::EditableFormat::ALL {
+            push(&mut out, Cmd::verb(Item::ExportEditable(f), None));
+        }
         for item in [
             Item::Save,
             Item::NewDocument,
@@ -1762,6 +1765,31 @@ pub(crate) mod tests {
         assert!(find(Item::MakeKeyLayer).is_none());
         assert!(
             find(Item::ExportCode(ondin_export::code::Target::React)).is_some_and(|c| c.enabled)
+        );
+    }
+
+    /// *Export as Penpot file…* is a row with nothing selected, since it writes
+    /// the whole document, and it runs that export.
+    #[test]
+    fn exporting_as_another_tools_file_needs_no_selection() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_palette(&ctx);
+        let pal = app.palette.take().expect("the palette opened");
+        let cmds = app.palette_commands(&pal);
+        let item = Item::ExportEditable(crate::panels::EditableFormat::Penpot);
+        let row = cmds
+            .iter()
+            .find(|c| c.item == item)
+            .expect("the Penpot row");
+        assert!(row.enabled);
+        assert_eq!(row.label, "Export as Penpot file…");
+        assert_eq!(
+            item.action(),
+            Some(crate::input::Action::ExportEditable(
+                crate::panels::EditableFormat::Penpot
+            ))
         );
     }
 

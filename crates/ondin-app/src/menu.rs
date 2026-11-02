@@ -416,6 +416,7 @@ pub enum Item {
     Library,
     Settings,
     ExportCode(ondin_export::code::Target),
+    ExportEditable(crate::panels::EditableFormat),
     /// `Action::Present`: the top-level frames one at a time, fullscreen.
     Present,
     /// `Action::CheckContrast`: the contrast check mode, on or off.
@@ -1090,6 +1091,7 @@ impl Item {
                 None,
                 Group::Export,
             ),
+            Item::ExportEditable(f) => s(f.label(), icon::EXPORT, None, Group::Export),
             Item::Tool(tool) => {
                 let (label, glyph, accel) = match tool {
                     Tool::Select => ("Tool: Select", icon::CURSOR, "V"),
@@ -1311,6 +1313,7 @@ impl Item {
             Item::ExportFrames | Item::ExportFramesAllPages => &["artboards", "png", "export"],
             Item::ExportFramesPdf => &["artboards", "pdf", "pages", "deck", "export"],
             Item::ExportCode(_) => &["code", "html", "react", "vue", "zip"],
+            Item::ExportEditable(f) => f.aliases(),
             Item::ToggleHidden => &["hide", "show", "visibility"],
             Item::ToggleLocked => &["lock", "unlock"],
             Item::Delete => &["remove"],
@@ -1385,6 +1388,7 @@ impl Item {
             Item::Library => Action::Open,
             Item::Settings => Action::OpenSettings,
             Item::ExportCode(t) => Action::ExportCode(t),
+            Item::ExportEditable(f) => Action::ExportEditable(f),
             Item::Tool(tool) => Action::ChooseTool(tool),
             Item::PlaceImage => Action::PlaceImage,
             Item::ZoomIn => Action::ZoomIn,
@@ -3448,6 +3452,7 @@ impl OndinApp {
             | Item::Library
             | Item::Settings
             | Item::ExportCode(_)
+            | Item::ExportEditable(_)
             | Item::Present
             | Item::CheckContrast
             | Item::Tool(_)

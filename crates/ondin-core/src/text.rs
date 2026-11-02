@@ -3770,6 +3770,83 @@ pub fn layout(parts: TextRef<'_>) -> TextLayout {
     extract(&shaped, parts)
 }
 
+/// One line's stretch of one glyph run, in text-local space: the bytes it sets,
+/// its left edge and advance along the line, and its baseline with the run's
+/// ascent and descent. For a writer that places type line by line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineRun {
+    pub range: Range<usize>,
+    pub x: f64,
+    pub width: f64,
+    pub baseline: f64,
+    pub ascent: f64,
+    pub descent: f64,
+}
+
+/// Every [`LineRun`] of a text node, line by line, placed as [`layout`] places
+/// the glyphs. The ellipsis and list markers are not bytes of the content and are
+/// left out; type on a rail has no lines and gives none.
+pub fn line_runs(parts: TextRef<'_>) -> Vec<LineRun> {
+    if parts.on_path.is_some() {
+        return Vec::new();
+    }
+    let shaped = shape(parts);
+    let justify = (parts.paragraph.align == TextAlign::Justify)
+        .then_some(parts.paragraph.justify_last)
+        .filter(|j| *j != JustifyLast::Start);
+    let line_count = shaped.layout.len();
+    let mut out = Vec::new();
+    // Where the next glyph run of the current shaped run starts.
+    let mut cursor = (0..0, 0);
+    for (index, line) in shaped.layout.lines().enumerate() {
+        // The last line's shift, as `extract` makes it.
+        let dx = justify
+            .filter(|_| index + 1 == line_count || line.break_reason() == BreakReason::Explicit)
+            .map(|j| justify_shift(&line, j))
+            .unwrap_or(0.0);
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                continue;
+            };
+            let run = glyph_run.run();
+            let ours = shaped.runs.get(glyph_run.style().brush as usize);
+            let style = ours.map(|(_, s)| s).unwrap_or(parts.style);
+            // A shaped run splits into one glyph run per style, in byte order. A
+            // run in the defaults carries no index of ours, so its bytes run on
+            // from the last glyph run's across every run in the defaults.
+            let whole = run.text_range();
+            if cursor.0 != whole {
+                cursor = (whole.clone(), whole.start);
+            }
+            let start = cursor.1.max(whole.start);
+            let end = match ours {
+                Some((r, _)) => r.end,
+                None => shaped
+                    .runs
+                    .iter()
+                    .skip_while(|(r, _)| r.end <= start)
+                    .take_while(|(_, s)| s == parts.style)
+                    .last()
+                    .map_or(whole.end, |(r, _)| r.end),
+            }
+            .min(whole.end);
+            let range = start..end.max(start);
+            cursor.1 = range.end;
+            let shift = style.baseline_shift.resolve(style.font_size);
+            let m = run.metrics();
+            out.push(LineRun {
+                range,
+                x: f64::from(glyph_run.offset()) + dx,
+                width: f64::from(glyph_run.advance()),
+                baseline: shaped.ymap.to_local(f64::from(glyph_run.baseline())) - shift,
+                ascent: f64::from(m.ascent),
+                descent: f64::from(m.descent).abs(),
+            });
+        }
+    }
+    out
+}
+
 thread_local! {
     /// How many times [`shape`] has run on this thread. See [`shapes`].
     static SHAPES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -4595,6 +4672,40 @@ mod tests {
             on_path_flip: false,
             on_path_offset: 0.0,
         }
+    }
+
+    /// Each line run holds its own style's bytes, the run in the defaults
+    /// between two styled ones included, and they sit side by side.
+    /// flip: `line_runs` taking the shaped run's whole range → fails at the ranges.
+    #[test]
+    fn line_runs_give_each_style_its_own_bytes() {
+        let d = style(20.0);
+        let mut p = parts(&d, &TextSizing::Auto);
+        p.spans.set(0..5, CharAttr::Color(Some(Color::BLACK)), &d);
+        p.spans.set(6..11, CharAttr::Weight(700), &d);
+        let runs = line_runs(p.as_ref("Hello world"));
+        let ranges: Vec<Range<usize>> = runs.iter().map(|r| r.range.clone()).collect();
+        assert_eq!(ranges, [0..5, 5..6, 6..11]);
+        for pair in runs.windows(2) {
+            assert!((pair[0].x + pair[0].width - pair[1].x).abs() < 1e-3);
+        }
+    }
+
+    /// A wrapped text's runs cover every byte once, line by line, each line's
+    /// baseline below the last.
+    #[test]
+    fn line_runs_follow_the_lines_a_wrap_makes() {
+        let d = style(20.0);
+        let text = "one two three four five";
+        let runs = line_runs(parts(&d, &TextSizing::AutoHeight(60.0)).as_ref(text));
+        assert!(runs.len() > 2, "the width wraps the text: {runs:?}");
+        let mut at = 0;
+        for r in &runs {
+            assert_eq!(r.range.start, at, "{runs:?}");
+            at = r.range.end;
+        }
+        assert_eq!(at, text.len());
+        assert!(runs.windows(2).all(|w| w[1].baseline > w[0].baseline));
     }
 
     /// Styling a selection keeps it selected, so the next attribute lands on the

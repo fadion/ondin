@@ -95,6 +95,10 @@ pub enum Action {
     /// through a save dialog (`OndinApp::export_code`). No chord and no menu row:
     /// the command palette is its door.
     ExportCode(ondin_export::code::Target),
+    /// *Export as Penpot file…*: the whole document in another tool's editable
+    /// format, through a save dialog (`OndinApp::export_editable`). No chord and
+    /// no menu row: the command palette is its door.
+    ExportEditable(crate::panels::EditableFormat),
     /// `Ctrl+K` and `Ctrl+/` — open the command palette, or close it.
     Palette,
     /// `Ctrl+Shift+/` — the shortcut cheatsheet.

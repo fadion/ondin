@@ -2122,6 +2122,7 @@ impl OndinApp {
             Action::Present => self.start_presenting(ctx),
             Action::CheckContrast => self.toggle_contrast(),
             Action::ExportCode(target) => self.export_code(target),
+            Action::ExportEditable(format) => self.export_editable(format),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
             Action::VariablesBrowser => self.toggle_var_browser(),

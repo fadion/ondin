@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
-//! ondin export <file> [--svg|--pdf|--png|--json|--html|--react|--vue] [-o out]
+//! ondin export <file> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot] [-o out]
 //!            [--outlines] [--frames] [--scale <n> | --width <px> | --height <px>]
 //!            [--page <name|n>]
 //!                                render a page with no GPU and no window, by
@@ -16,7 +16,8 @@
 //!                                top-level frame;
 //!                                --html writes a zip of HTML and CSS,
 //!                                --react and --vue a zip of components;
-//!                                --json describes every page
+//!                                --json describes every page;
+//!                                --penpot writes every page as a Penpot file
 //! ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders]
 //!            [--page <name|n>] [-o dir]
 //!                                run the document's own export settings (§7) on
@@ -227,6 +228,8 @@ enum ExportFormat {
     React,
     /// Code export's Vue components, zipped.
     Vue,
+    /// The whole document as a `.penpot` file.
+    Penpot,
 }
 
 impl ExportFormat {
@@ -237,7 +240,13 @@ impl ExportFormat {
             ExportFormat::Png => "png",
             ExportFormat::Json => "json",
             ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => "zip",
+            ExportFormat::Penpot => "penpot",
         }
+    }
+
+    /// Whether the format writes every page, so `--page` has nothing to choose.
+    fn whole_document(self) -> bool {
+        matches!(self, ExportFormat::Json | ExportFormat::Penpot)
     }
 }
 
@@ -594,7 +603,7 @@ fn parse_tokens(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue] \
+    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--pdf|--png|--json|--html|--react|--vue|--penpot] \
          [--outlines] [--scale <n>|--width <px>|--height <px>] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --pdf --frames [--outlines] [--page <name|n>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] \
@@ -619,6 +628,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--html" => format = Some(ExportFormat::Html),
             "--react" => format = Some(ExportFormat::React),
             "--vue" => format = Some(ExportFormat::Vue),
+            "--penpot" => format = Some(ExportFormat::Penpot),
             "--all" => all = true,
             "--folders" => folders = true,
             "--outlines" => outlines = true,
@@ -731,9 +741,10 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "{had} is a raster size, so it applies only to --png\n{USAGE}"
         ));
     }
-    if page.is_some() && format == ExportFormat::Json {
+    if page.is_some() && format.whole_document() {
         return Err(format!(
-            "--json describes every page, so it takes no --page\n{USAGE}"
+            "--{} writes every page, so it takes no --page\n{USAGE}",
+            format.extension()
         ));
     }
     if outlines
@@ -1137,6 +1148,17 @@ fn run_export(
             let snap = ondin_export::snapshot(&doc, &res);
             serde_json::to_vec_pretty(&snap)
                 .map_err(|e| format!("cannot serialize snapshot: {e}"))?
+        }
+        ExportFormat::Penpot => {
+            let name = std::path::Path::new(file)
+                .file_stem()
+                .map_or_else(|| "Ondin".into(), |s| s.to_string_lossy().into_owned());
+            let export = ondin_export::penpot::export(&doc, &res, &name)
+                .map_err(|e| format!("cannot write the zip: {e}"))?;
+            if !export.approximated.is_empty() {
+                eprintln!("drawn differently: {}", export.approximated.join(", "));
+            }
+            export.bytes
         }
         ExportFormat::Png => {
             // Frame the whole page at `scale` device pixels per world unit. The
@@ -1932,6 +1954,7 @@ mod tests {
         for (flag, format) in [
             ("--react", ExportFormat::React),
             ("--vue", ExportFormat::Vue),
+            ("--penpot", ExportFormat::Penpot),
         ] {
             assert_eq!(
                 export(&["a.ondin", flag]).unwrap(),
@@ -1943,6 +1966,18 @@ mod tests {
                     page: None,
                     text: ExportText::Live,
                 }
+            );
+        }
+    }
+
+    /// A format that writes every page refuses `--page`, naming itself.
+    #[test]
+    fn a_whole_document_format_takes_no_page() {
+        for flag in ["--json", "--penpot"] {
+            let err = export(&["a.ondin", flag, "--page", "2"]).unwrap_err();
+            assert!(
+                err.starts_with(&format!("{flag} writes every page")),
+                "{err}"
             );
         }
     }

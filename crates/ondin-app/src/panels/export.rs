@@ -2218,6 +2218,121 @@ impl OndinApp {
             ..write_code(&doc, &resolved, &subjects, target, &path, cancel)
         });
     }
+
+    /// Write the whole document as `format` into one file the person names, and
+    /// say what it draws differently. Written on an export worker
+    /// ([`Self::spawn_export`]) from a copy of the committed document.
+    pub(crate) fn export_editable(&mut self, format: EditableFormat) {
+        let stem = self
+            .session
+            .path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .map_or_else(|| "Untitled".into(), |s| s.to_string_lossy().into_owned());
+        let Some(path) = rfd::FileDialog::new()
+            .set_directory(self.export_start_dir())
+            .add_filter(format!("{} file", format.name()), &[format.extension()])
+            .set_file_name(format!("{stem}.{}", format.extension()))
+            .save_file()
+        else {
+            return;
+        };
+        let (doc, resolved) = (self.session.doc.clone(), self.session.resolved.clone());
+        let asker = self.session.path.clone();
+        let label = path
+            .file_name()
+            .map_or_else(|| stem.clone(), |n| n.to_string_lossy().into_owned());
+        self.spawn_export(label, move |cancel| Delivered {
+            asker,
+            ..write_editable(&doc, &resolved, format, &stem, &path, cancel)
+        });
+    }
+}
+
+/// Another tool's editable file the whole document can be written as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditableFormat {
+    Penpot,
+}
+
+impl EditableFormat {
+    pub(crate) const ALL: [EditableFormat; 1] = [EditableFormat::Penpot];
+
+    /// The palette row.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            EditableFormat::Penpot => "Export as Penpot file…",
+        }
+    }
+
+    pub(crate) fn aliases(self) -> &'static [&'static str] {
+        match self {
+            EditableFormat::Penpot => &["penpot", "editable", "save as"],
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            EditableFormat::Penpot => "Penpot",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            EditableFormat::Penpot => "penpot",
+        }
+    }
+
+    /// The file's bytes and what it draws differently.
+    fn write(
+        self,
+        doc: &ondin_core::Document,
+        resolved: &ondin_core::Resolved,
+        name: &str,
+    ) -> std::io::Result<(Vec<u8>, Vec<String>)> {
+        match self {
+            EditableFormat::Penpot => {
+                ondin_export::penpot::export(doc, resolved, name).map(|e| (e.bytes, e.approximated))
+            }
+        }
+    }
+}
+
+/// Write the whole document as `format` to `path`, named `name` inside, off the
+/// UI thread; nothing is written once `cancel` is set.
+fn write_editable(
+    doc: &ondin_core::Document,
+    resolved: &ondin_core::Resolved,
+    format: EditableFormat,
+    name: &str,
+    path: &std::path::Path,
+    cancel: &ExportFlags,
+) -> Delivered {
+    if cancel.cancelled() {
+        return Delivered::cancelled();
+    }
+    // Text is set again on this thread, line by line, in the document's faces.
+    ondin_core::text::register_font_data(&resolved.text_fonts());
+    let made = format.write(doc, resolved, name);
+    if !cancel.begin_write() {
+        return Delivered::cancelled();
+    }
+    let written = made.and_then(|(bytes, notes)| std::fs::write(path, bytes).map(|()| notes));
+    let head = match &written {
+        Ok(notes) if notes.is_empty() => format!("Exported {} file", format.name()),
+        Ok(notes) => format!(
+            "Exported {} file — drawn differently: {}",
+            format.name(),
+            notes.join("; ")
+        ),
+        Err(_) => format!("Could not export the {} file", format.name()),
+    };
+    Delivered {
+        written: usize::from(written.is_ok()),
+        failed: written.err().map(|e| e.to_string()),
+        head: Some(head),
+        ..Delivered::empty(path.parent().map(Into::into).unwrap_or_default())
+    }
 }
 
 /// The zip a save dialog is seeded with for a layer named `layer`: a file name,

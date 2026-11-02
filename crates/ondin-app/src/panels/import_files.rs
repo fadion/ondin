@@ -40,9 +40,11 @@ const GROUP_GAP: f32 = 14.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ondin,
-    /// Sketch's own, which Lunacy saves too: read, never written back.
+    /// Sketch's own, which Lunacy saves too, read into a new document; the
+    /// file itself is never written to.
     Sketch,
-    /// Penpot 2's export: read, never written back.
+    /// Penpot 2's export, read into a new document; the file itself is never
+    /// written to.
     Penpot,
     /// A Figma file read through Figma's API from a pasted link, never a file
     /// on disk.

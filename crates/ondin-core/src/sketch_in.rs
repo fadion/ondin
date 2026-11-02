@@ -106,6 +106,7 @@ pub fn read(
         tally: Tally::default(),
         names: Names::default(),
         families: BTreeMap::new(),
+        archived: crate::keyed_archive::Budget::default(),
     };
     if lost > 0 {
         b.count("Pages missing from the file", lost, "", "Left out");
@@ -207,6 +208,8 @@ struct Builder<'a> {
     /// Style names by slot; `None` holds the colour variables'.
     names: Names<Option<StyleSlot>>,
     families: BTreeMap<String, usize>,
+    /// What reading the file's archived text may still cost.
+    archived: crate::keyed_archive::Budget,
 }
 
 impl Builder<'_> {
@@ -335,7 +338,7 @@ impl Builder<'_> {
             else {
                 continue;
             };
-            let attrs = crate::keyed_archive::encoded_attributes(attrs);
+            let attrs = crate::keyed_archive::encoded_attributes(attrs, &mut self.archived);
             let ts = crate::style::type_part(&self.text_style(&attrs));
             let id = self.ids.mint_style();
             self.add_style(
@@ -1022,7 +1025,9 @@ impl Builder<'_> {
         let archived = layer
             .get("attributedString")
             .and_then(|a| a.get("archivedAttributedString"))
-            .map(|a| crate::keyed_archive::attributed_string(str_of(a, "_archive")));
+            .map(|a| {
+                crate::keyed_archive::attributed_string(str_of(a, "_archive"), &mut self.archived)
+            });
         if matches!(archived, Some(None)) {
             self.count(
                 "Texts in Sketch's older format",
@@ -1036,7 +1041,7 @@ impl Builder<'_> {
         let content = attributed.map_or("", |a| str_of(a, "string")).to_owned();
         let runs = attributed.map(|a| arr(a, "attributes")).unwrap_or_default();
         let fallback = str_in_value(layer, &["style", "textStyle", "encodedAttributes"])
-            .map(crate::keyed_archive::encoded_attributes);
+            .map(|e| crate::keyed_archive::encoded_attributes(e, &mut self.archived));
         let first = runs
             .first()
             .and_then(|r| r.get("attributes"))
@@ -1397,12 +1402,15 @@ impl Builder<'_> {
 
     /// The node inside the instance at `root` that is the copy of the Sketch layer
     /// path `a/b/…`, each step a layer of the symbol the step before it names.
+    /// Each step is looked for strictly below the last, so a path repeating
+    /// one step cannot rebuild the same subtree step after step.
     fn copy_at(&self, root: NodeId, path: &str) -> Option<NodeId> {
         let mut at = root;
         for step in path.split('/') {
             let source = *self.layers.get(step)?;
             at = crate::build::subtree_nodes(&self.doc, &[at])
                 .into_iter()
+                .skip(1)
                 .find(|&n| self.copies(n, source))?;
         }
         Some(at)

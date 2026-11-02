@@ -691,6 +691,39 @@ fn an_override_through_a_nested_instance_lands_on_its_copy() {
     assert_eq!(named(doc, page, "Label").len(), 6);
 }
 
+/// An override path repeating a step (`ID2/ID2/TC`) finds nothing: each step is
+/// looked for below the one before, so a long run of repeats cannot walk the
+/// same instance over and over. flip: drop `skip(1)` in `copy_at` → fails at
+/// `Top`, the repeated path landing on the text.
+#[test]
+fn an_override_path_repeating_a_step_lands_nowhere() {
+    let c = json!({
+        "_class": "symbolMaster", "do_objectID": "MC", "name": "C", "symbolID": "C",
+        "frame": frame(0.0, 0.0, 50.0, 20.0),
+        "layers": [text("TC", "Deep", json!([run(0, 4, "Inter-Regular", 12.0, color(0.0, 0.0, 0.0))]), 0)],
+    });
+    let d = json!({
+        "_class": "symbolMaster", "do_objectID": "MD", "name": "D", "symbolID": "D",
+        "frame": frame(100.0, 0.0, 50.0, 20.0),
+        "layers": [{ "_class": "symbolInstance", "do_objectID": "ID2", "name": "Inner",
+                     "symbolID": "C", "frame": frame(0.0, 0.0, 50.0, 20.0) }],
+    });
+    let top = json!({ "_class": "symbolInstance", "do_objectID": "TOP", "name": "Top",
+                      "symbolID": "D", "frame": frame(300.0, 0.0, 50.0, 20.0),
+                      "overrideValues": [{ "overrideName": "ID2/ID2/TC_stringValue", "value": "changed" }] });
+    let r = import(sketch(&[("P", "Page", json!([c, d, top]))], json!({}), &[]));
+    let doc = &r.doc;
+    let root = one(doc, "Top");
+    let words: Vec<String> = ondin_core::build::subtree_nodes(doc, &[root])
+        .into_iter()
+        .filter_map(|n| match doc.get(n).unwrap().kind() {
+            NodeKind::Text { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(words, ["Deep"]);
+}
+
 /// A swatch is a colour variable a fill naming it is bound to; a shared style is
 /// an Ondin style its users are bound to while they match it.
 #[test]

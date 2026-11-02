@@ -11,9 +11,10 @@ use serde_json::{Map, Value, json};
 
 /// A layer's archived attributed string as the `attributedString` later Sketch
 /// writes: `string`, then `attributes` as runs of `location`, `length` and
-/// `attributes`, counted in UTF-16 units as Sketch counts them.
-pub fn attributed_string(archive: &str) -> Option<Value> {
-    let a = Archive::open(archive)?;
+/// `attributes`, counted in UTF-16 units as Sketch counts them. Reading spends
+/// from the document's `budget`.
+pub fn attributed_string(archive: &str, budget: &mut Budget) -> Option<Value> {
+    let a = Archive::open(archive, budget)?;
     let root = a.root()?;
     let text = a.string(a.get(root, "NSString")?)?;
     let attrs = a.get(root, "NSAttributes")?;
@@ -43,14 +44,15 @@ pub fn attributed_string(archive: &str) -> Option<Value> {
 
 /// A text style's `encodedAttributes` with each archived value read and each
 /// `NS` key renamed as later Sketch keys them; a later file's pass unchanged.
-pub fn encoded_attributes(encoded: &Value) -> Value {
+/// Reading spends from the document's `budget`.
+pub fn encoded_attributes(encoded: &Value, budget: &mut Budget) -> Value {
     let Some(map) = encoded.as_object() else {
         return encoded.clone();
     };
     let mut out = Map::new();
     for (k, v) in map {
         let read = match v.get("_archive").and_then(Value::as_str) {
-            Some(archive) => Archive::open(archive).and_then(|a| a.attr(k, a.root()?)),
+            Some(archive) => Archive::open(archive, budget).and_then(|a| a.attr(k, a.root()?)),
             None => attr_value(k, v.clone()),
         };
         match read {
@@ -92,11 +94,11 @@ struct Archive {
 }
 
 impl Archive {
-    fn open(b64: &str) -> Option<Archive> {
+    fn open(b64: &str, budget: &mut Budget) -> Option<Archive> {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(b64.trim())
             .ok()?;
-        let top = bplist(&bytes)?;
+        let top = bplist(&bytes, budget)?;
         let field = |k: &str| match &top {
             P::Dict(d) => d
                 .iter()
@@ -296,8 +298,23 @@ const MAX_DEPTH: usize = 64;
 /// object twice cost 2ᴺ; a real text archive costs a few thousand.
 const MAX_COST: usize = 1 << 24;
 
-/// A binary property list's top object.
-fn bplist(b: &[u8]) -> Option<P> {
+/// What all of one document's plists may cost together, so a file of many
+/// costly archives cannot hang the import a plist at a time: some thirty
+/// thousand real text archives.
+const MAX_DOCUMENT_COST: usize = 1 << 27;
+
+/// What is left of a document's [`MAX_DOCUMENT_COST`]; every archive read from
+/// one file spends from the same budget, and reads as nothing once it is spent.
+pub struct Budget(usize);
+
+impl Default for Budget {
+    fn default() -> Self {
+        Budget(MAX_DOCUMENT_COST)
+    }
+}
+
+/// A binary property list's top object, read within [`MAX_COST`] and `budget`.
+fn bplist(b: &[u8], budget: &mut Budget) -> Option<P> {
     if !b.starts_with(b"bplist00") || b.len() < 40 {
         return None;
     }
@@ -320,10 +337,13 @@ fn bplist(b: &[u8]) -> Option<P> {
         offsets,
         refs: ref_size,
         seen: vec![false; count],
-        cost: 0,
+        left: budget.0.min(MAX_COST),
         depth: 0,
     };
-    r.object(top)
+    let start = r.left;
+    let p = r.object(top);
+    budget.0 -= start - r.left;
+    p
 }
 
 /// A big-endian unsigned number.
@@ -343,19 +363,29 @@ struct Reader<'a> {
     refs: usize,
     /// The objects being read, so a reference back into one is refused.
     seen: Vec<bool>,
-    cost: usize,
+    /// What the read may still cost.
+    left: usize,
     depth: usize,
 }
 
 impl Reader<'_> {
-    /// Count `n` toward [`MAX_COST`], `None` once it is passed.
+    /// Spend `n`, `None` once the read has nothing left; a refused step spends
+    /// what was left.
     fn spend(&mut self, n: usize) -> Option<()> {
-        self.cost = self.cost.saturating_add(n);
-        (self.cost <= MAX_COST).then_some(())
+        match self.left.checked_sub(n) {
+            Some(left) => {
+                self.left = left;
+                Some(())
+            }
+            None => {
+                self.left = 0;
+                None
+            }
+        }
     }
 
     /// Object `i`, `None` for a reference back into the object being read, past
-    /// [`MAX_DEPTH`] or [`MAX_COST`], or anything cut short.
+    /// [`MAX_DEPTH`] or its cost, or anything cut short.
     fn object(&mut self, i: usize) -> Option<P> {
         if *self.seen.get(i)? || self.depth >= MAX_DEPTH {
             return None;
@@ -623,7 +653,8 @@ mod tests {
         );
         let root = k.p.dict(&[(ks, string), (ka, attrs), (ki, info)]);
         let root = k.obj(root);
-        let v = attributed_string(&k.finish(root)).expect("the archive reads");
+        let v =
+            attributed_string(&k.finish(root), &mut Budget::default()).expect("the archive reads");
         assert_eq!(v["string"], "Hi there");
         let runs = v["attributes"].as_array().unwrap();
         assert_eq!(runs.len(), 2);
@@ -659,7 +690,7 @@ mod tests {
         let (ks, ka) = (k.p.s("NSString"), k.p.s("NSAttributes"));
         let root = k.p.dict(&[(ks, string), (ka, a)]);
         let root = k.obj(root);
-        let v = attributed_string(&k.finish(root)).unwrap();
+        let v = attributed_string(&k.finish(root), &mut Budget::default()).unwrap();
         assert_eq!(v["attributes"][0]["length"], 2);
     }
 
@@ -676,7 +707,7 @@ mod tests {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&b64)
             .unwrap();
-        assert_eq!(bplist(&bytes), None);
+        assert_eq!(bplist(&bytes, &mut Budget::default()), None);
     }
 
     /// A trailer whose offsets take no bytes, claiming 2⁵⁰ objects, reads as
@@ -690,7 +721,7 @@ mod tests {
         b.extend((1u64 << 50).to_be_bytes());
         b.extend(0u64.to_be_bytes());
         b.extend(8u64.to_be_bytes());
-        assert_eq!(bplist(&b), None);
+        assert_eq!(bplist(&b, &mut Budget::default()), None);
     }
 
     /// Forty arrays each holding the next twice would be read 2⁴⁰ times; the
@@ -709,12 +740,34 @@ mod tests {
             .decode(&b64)
             .unwrap();
         let started = std::time::Instant::now();
-        assert_eq!(bplist(&bytes), None);
+        assert_eq!(bplist(&bytes, &mut Budget::default()), None);
         assert!(
             started.elapsed() < std::time::Duration::from_secs(20),
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// One budget spans every archive read from a document: once the archives
+    /// before have spent it, the next reads as nothing however small. flip:
+    /// leave `budget` unspent at the end of `bplist` → fails at `cost > 0`.
+    #[test]
+    fn archives_share_the_documents_budget() {
+        let mut k = Keyed::new();
+        let a = run_attrs(&mut k, "Avenir-Black", 6.0, "1 1 1 1");
+        let string = k.p.s("ab");
+        let string = k.obj(string);
+        let (ks, ka) = (k.p.s("NSString"), k.p.s("NSAttributes"));
+        let root = k.p.dict(&[(ks, string), (ka, a)]);
+        let root = k.obj(root);
+        let archive = k.finish(root);
+        let mut once = Budget::default();
+        assert!(attributed_string(&archive, &mut once).is_some());
+        let cost = MAX_DOCUMENT_COST - once.0;
+        assert!(cost > 0);
+        let mut budget = Budget(cost + cost / 2);
+        assert!(attributed_string(&archive, &mut budget).is_some());
+        assert!(attributed_string(&archive, &mut budget).is_none());
     }
 
     /// An `NSString` naming itself as its own string reads as nothing rather
@@ -731,7 +784,7 @@ mod tests {
         let ks = k.p.s("NSString");
         let root = k.p.dict(&[(ks, s)]);
         let root = k.obj(root);
-        assert!(attributed_string(&k.finish(root)).is_none());
+        assert!(attributed_string(&k.finish(root), &mut Budget::default()).is_none());
     }
 
     #[test]
@@ -741,7 +794,7 @@ mod tests {
 
     #[test]
     fn something_that_is_not_an_archive_reads_as_nothing() {
-        assert!(attributed_string("bm90IGEgcGxpc3Q=").is_none());
-        assert!(attributed_string("%%%").is_none());
+        assert!(attributed_string("bm90IGEgcGxpc3Q=", &mut Budget::default()).is_none());
+        assert!(attributed_string("%%%", &mut Budget::default()).is_none());
     }
 }

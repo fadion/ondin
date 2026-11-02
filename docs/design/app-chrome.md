@@ -107,6 +107,7 @@ ondin-app/src/
 ├─ slice.rs         slices on the canvas: the Slice tool's pick and the dashed outlines (tools.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ batch_rename.rs  the batch rename box: picks, orders and numbers the layers, previews, commits (app-canvas-chrome.md)
+├─ find.rs          find and replace in text: the box, its list, the canvas's match marks (app-canvas-chrome.md)
 ├─ contrast.rs      contrast check mode: badges, the fix card, the bar; measured on a worker (app-canvas-chrome.md)
 ├─ vision.rs        colour-blind simulation mode: the target frame, its device region, the bar and deficiency menu (app-canvas-chrome.md)
 ├─ spacing.rs       spacing handles: a flex or grid container's gaps and padding dragged on the canvas

@@ -155,6 +155,8 @@ fn sections(lead: Lead) -> Vec<Section> {
             Item::ToggleLocked,
             Item::Rename,
             Item::BatchRename,
+            Item::FindText,
+            Item::ReplaceText,
         ],
     );
     // Opacity digits are a value, not a verb; no registry row names them.

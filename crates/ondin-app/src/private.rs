@@ -526,6 +526,18 @@ mod leak {
             |app, ctx| app.toggle_palette(ctx),
             |app| app.palette = None,
         ));
+        // Find and replace lists each match under its page and beside its layer.
+        found.extend(surface(
+            c,
+            &mut app,
+            "find and replace",
+            |app, _| {
+                app.open_find(true);
+                app.find.find = "Hello".into();
+                app.find.scope = crate::find::In::All;
+            },
+            |app| app.close_find(),
+        ));
         found.extend(surface(
             c,
             &mut app,

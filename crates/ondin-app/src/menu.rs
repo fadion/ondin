@@ -317,6 +317,9 @@ pub enum Item {
     Rename,
     /// `Action::BatchRename`: the box that renames many layers at once.
     BatchRename,
+    /// `Action::FindText`: find, or find and replace, in text layers' text.
+    FindText,
+    ReplaceText,
     ZoomSelection,
 
     // --- export: *Copy/Paste as ▸*'s first group --------------------------
@@ -621,6 +624,8 @@ impl Item {
         Item::ToggleLocked,
         Item::Rename,
         Item::BatchRename,
+        Item::FindText,
+        Item::ReplaceText,
         Item::ZoomSelection,
         Item::CopyAsSvg,
         Item::CopyAsCss,
@@ -931,6 +936,13 @@ impl Item {
                 Some("Ctrl+Shift+R"),
                 Group::State,
             ),
+            Item::FindText => s(
+                "Find in text…",
+                icon::MAGNIFYING_GLASS,
+                Some("Ctrl+F"),
+                Group::State,
+            ),
+            Item::ReplaceText => s("Replace text…", icon::SWAP, Some("Ctrl+H"), Group::State),
 
             Item::ZoomSelection => s(
                 "Zoom to selection",
@@ -1354,6 +1366,8 @@ impl Item {
                 "tritanopia",
             ],
             Item::BatchRename => &["find", "replace", "number", "bulk"],
+            Item::FindText => &["search", "text", "copy"],
+            Item::ReplaceText => &["find", "search", "text", "copy", "substitute"],
             Item::NewPage | Item::GoToPage(_) | Item::StepPage(_) => &["page", "canvas"],
             Item::MoveTo(_) => &["page", "send"],
             Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
@@ -1400,6 +1414,8 @@ impl Item {
             Item::ToggleLocked => Action::ToggleLocked,
             Item::Rename => Action::Rename,
             Item::BatchRename => Action::BatchRename,
+            Item::FindText => Action::FindText { replace: false },
+            Item::ReplaceText => Action::FindText { replace: true },
             Item::Undo => Action::Undo,
             Item::Redo => Action::Redo,
             Item::Save => Action::Save,
@@ -3339,6 +3355,8 @@ impl OndinApp {
             Item::ToggleLocked => self.dispatch(ctx, Action::ToggleLocked),
             Item::Rename => self.dispatch(ctx, Action::Rename),
             Item::BatchRename => self.dispatch(ctx, Action::BatchRename),
+            Item::FindText => self.dispatch(ctx, Action::FindText { replace: false }),
+            Item::ReplaceText => self.dispatch(ctx, Action::FindText { replace: true }),
             Item::ZoomSelection => self.dispatch(ctx, Action::ZoomSelection),
             Item::ZoomFit => self.dispatch(ctx, Action::ZoomFit),
             Item::SelectAll => self.dispatch(ctx, Action::SelectAll),

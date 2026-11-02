@@ -1146,7 +1146,13 @@ fn row<R>(ui: &mut egui::Ui, label: &str, h: f32, add: impl FnOnce(&mut egui::Ui
 
 /// A segment of a segmented control: lit when `on`, with an optional count after
 /// its word.
-fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::Response {
+pub(crate) fn segment(
+    ui: &mut egui::Ui,
+    text: &str,
+    sub: &str,
+    on: bool,
+    h: f32,
+) -> egui::Response {
     let font = egui::FontId::proportional(11.5);
     let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color::text()));
     let sub_g = (!sub.is_empty()).then(|| {
@@ -1187,7 +1193,7 @@ fn segment(ui: &mut egui::Ui, text: &str, sub: &str, on: bool, h: f32) -> egui::
 }
 
 /// A rounded well holding segments `h` tall.
-fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(crate) fn well<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::NONE
         .fill(color::field())
         .corner_radius(5)
@@ -1231,7 +1237,7 @@ fn scope_row(ui: &mut egui::Ui, s: &mut Settings, selected: usize) {
 }
 
 /// A toggle inside a field: `Aa`, `.*`, `Ab`.
-fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: bool) {
+pub(crate) fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: bool) {
     let font = match mono {
         true => egui::FontId::monospace(11.0),
         false => egui::FontId::proportional(11.0),
@@ -1255,7 +1261,7 @@ fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: b
 }
 
 /// A field's well and ring, lit while `focused`.
-fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
+pub(crate) fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
     let p = ui.painter();
     p.rect_filled(rect, 5.0, color::field());
     let ring = if focused {

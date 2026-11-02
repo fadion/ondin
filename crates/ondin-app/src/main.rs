@@ -88,6 +88,7 @@ mod expr;
 mod eyedropper;
 #[cfg(windows)]
 mod file_type;
+mod find;
 mod fonts;
 mod gradient;
 mod grid;

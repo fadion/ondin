@@ -11,7 +11,6 @@ reads true.
 
 ## Now
 
-- **Find and replace** in text across the page or the document. The layers search matches names only.
 - **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
   the dictionary, untagged text falls back to the system's input languages. The OS checker
   (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.

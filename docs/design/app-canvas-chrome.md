@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, batch rename, the cheatsheet, focus, private and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, find and replace, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap menus and Settings button,
-the command palette, the batch rename box, the shortcut cheatsheet, focus mode, private mode and
+the command palette, the batch rename box, the find and replace box, the shortcut cheatsheet, focus mode, private mode and
 present mode.
 Part of §9.4.
 
@@ -506,6 +506,68 @@ worded for the scope that plan was made for (`Plan::scope`).
   text), template, from, step, pad and order are kept in `prefs.batch_rename` when a rename runs;
   the Layers header's search opens Find as plain text with both switches off.
 
+## Find and replace (`find.rs`)
+
+Find and replace in what text layers say; layer names are batch rename's. The rule is
+`ondin_core::find`, which shares batch rename's matcher (`rename::Rule`).
+
+- **Core.** `Query::new(find, replace, match_case, whole_words, pattern, keep_case)`: the
+  replacement is literal text unless `pattern` is set, when it is a rename `Template`, so `[1]`
+  inserts group 1. Whole words wrap the pattern in `\b(?:…)\b` (`Find::with_words`). `Scope` is
+  `Under(roots)` (those layers and all under them), `Page(p)`, or `Pages { here }`, every page but
+  the drafts while keeping `here`, as batch rename's gather does. `find` orders the `Hit`s by page in
+  document order, then by layer in the layers panel's order (top of the stack first), then by place
+  in the content. A `Hit` carries its node, page, byte range, `locked` and `hidden` (self or an
+  ancestor), `instance` (the instance root it is a copy inside) and `main` (the main it is part of,
+  with its copy count). `Hit::writable(inside_instances)` is never true when locked, and inside an
+  instance only when asked. `replace` builds one `SetText` per layer, applied back to front, and
+  leaves alone a hit whose range no longer matches; the replacement takes the first replaced byte's
+  character attributes (`Spans::replaced`, `text.md`).
+- **Stored text only.** Matching reads `content`: a case transform is drawn, not stored, and list
+  markers are not text. Text whose content is bound to a variable stores a placeholder and is skipped.
+- **Doors.** `Ctrl+F` (`Action::FindText { replace: false }`) opens on Find; `Ctrl+H` opens with the
+  Replace row showing, unshifted only, since `Ctrl+Shift+H` is hide/show. Both are normal-mode
+  chords. The palette rows *Find in text…* and *Replace text…* (`Item::FindText`, `ReplaceText`,
+  State group) are also in the cheatsheet's Layer section. Opening again while open only takes the
+  keyboard back.
+- **Placement.** Not a modal, so the canvas stays live and the matches are found again as the text
+  changes. An `Area` at the canvas's top right, 340 wide, 16 below the top (below the rulers when
+  they show) and 16 left of `inspector_column`, or of the canvas's right edge in focus mode, where it
+  is drawn too. Its height is capped at the canvas's and the list scrolls inside. `OndinApp::find`
+  (`FindBox`) is kept while closed, so the box reopens as it was left.
+- **Rows.** A caret folds the Replace row and the options under it; the fold is remembered. Find
+  shows *N of M*, a warm *No matches*, or *Not a pattern* with the reason under it, then ↑ ↓ ✕.
+  Replace has its field, *Replace* and an accent *All*. Then the switches *Aa*, *ab* (whole words)
+  and *.\**, and *Keep case*, on the first time the box opens. Then *In: Selection · This page · All
+  pages*: it opens on *Selection* when something is selected, else *This page*, and *Selection* is
+  disabled with nothing selected. Last, *Include text inside instances*.
+- **The list**, grouped under page headings with their counts. A row has the kind glyph (text, an
+  outlined hexagon inside an instance, a filled accent hexagon in a main), the text around the match
+  with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when
+  locked, a slashed eye when hidden, else `TEXT_AA` for a case-transformed run. A row a replace would
+  skip is drawn at 45%. The footer reads *N matches in M layers · K inside an instance skipped · L
+  locked*. An empty list reads *Nothing in ‹the selection / this page / any page› matches.* with a
+  button widening the scope (*Search this page*, *Search all pages*).
+- **Keys.** `Enter` in Find steps to the next match and `Shift+Enter` to the previous, round the
+  ends; `Enter` in Replace replaces. The fields keep the keyboard (`return_key(None)`). `Escape` is a
+  rung of `OndinApp::escape` just below a text edit, so a text edit opened from the box finishes
+  first; the box reads no `Escape` of its own.
+- **Showing a match never selects it.** Stepping switches page (`go_to_page`) if it must, then pans
+  the match itself into view by the least amount with the zoom kept (`OndinApp::reveal`, which
+  `reveal_selection` also calls; the layer's bounds when the match cannot be laid out), so a long
+  text's later lines come into view. A click on a row makes it current; a double-click edits that text
+  with the match selected (`begin_edit_text`, then `TextEdit::select_range`).
+- **Replacing.** *Replace* writes the current match if it is writable, else steps over it, and then
+  makes current the first match after what it wrote, so replacing *team* with *teams* moves on. *All*
+  writes every writable match as one undo step named *Replace text*; its *Replaced N in M layers ·
+  Ctrl+Z to undo* goes to the footer and the status line. A replace in a main reaches its copies
+  through the commit's propagation.
+- **On the canvas** `paint_find_marks`, drawn under the edited text's own highlight, tints this
+  page's matches accent (grey when not writable) and rings the current one. The quads come from
+  `TextEdit::range_quads`, cached per node per revision.
+- **Private mode** masks the layer and page names in the list. The text is the work, so it is
+  searched and shown.
+
 ## The shortcut cheatsheet (`cheatsheet.rs`)
 
 - **Doors.** `Ctrl+Shift+/` (and `Key::Questionmark`) in the editor (`discovery_chord`, both modes)
@@ -608,7 +670,7 @@ the first segment of a component's. It hides names, not content.
   `binding::kit_label`, `kit_heading`).
 - **What is masked:** layer, frame, component, page, document, project and version names, everywhere one is
   drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
-  colour-blind simulation's bar, the minimap, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
+  colour-blind simulation's bar, the minimap, find and replace's list, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
   kit dialogs and the whole library screen. A main's or set's description and documentation link
   are masked with the names: the description field is disabled and empty (*Description hidden in
   private mode*), the link field reads *Link hidden in private mode*, an instance shows no description
@@ -719,6 +781,9 @@ runs (`pages` names each frame's page, index for index).
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
   frame's input; `just_opened` is all that stops the opening press closing it.
   `the_chord_opens_the_sheet_and_closes_it` pins it.
+- Find and replace's `Escape` rung sits below `self.text` in `OndinApp::escape`: above it, the press
+  that should finish an edit opened from a row closes the box instead.
+  `editing_a_match_selects_it_and_escape_closes_one_thing` pins it.
 - The `return` after `present_ui` is what makes present mode view-only: without it the editor runs
   below and `Delete` deletes the selection nobody can see. `present_mode_steps_frames_and_edits_nothing`
   pins it.
@@ -730,7 +795,8 @@ runs (`pages` names each frame's page, index for index).
   name the app did not draw without it, so a surface that is not drawn at all (culled below the
   fold, a card folded shut) fails rather than passing unread. `no_surface_draws_a_name_in_private_mode`
   opens the editor with a layer, an instance, a main with a swap property and a variant set
-  selected, the swap property's picker open, the palette empty and typed, a layer's
+  selected, the swap property's picker open, the palette empty and typed, find and replace over
+  every page, a layer's
   menu with its *Move to page* list open, the variables browser, the Export card, the contrast check,
   the colour-blind simulation, version history, the recovery and close cards and present mode;
   `no_kit_surface_draws_a_name_in_private_mode` an instance's kit card, the insert picker, *Kits

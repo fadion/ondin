@@ -278,6 +278,11 @@ pub enum Action {
     /// Open the batch rename box — `Ctrl+Shift+R`. Live with any selection or
     /// none.
     BatchRename,
+    /// Open find and replace on Find — `Ctrl+F`; with `replace`, its Replace row
+    /// showing — `Ctrl+H`.
+    FindText {
+        replace: bool,
+    },
     /// Mirror the selection across the centreline of the box it occupies —
     /// `Shift+H` and `Shift+V`, Figma's.
     ///
@@ -1247,6 +1252,17 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             cmd_only && m.shift && i.key_pressed(egui::Key::R),
             Action::BatchRename,
+            &mut out,
+        );
+        // `Ctrl+Shift+H` is hide/show, so Replace is the unshifted chord only.
+        on(
+            cmd_only && !m.shift && i.key_pressed(egui::Key::F),
+            Action::FindText { replace: false },
+            &mut out,
+        );
+        on(
+            cmd_only && !m.shift && i.key_pressed(egui::Key::H),
+            Action::FindText { replace: true },
             &mut out,
         );
         // Flip, on Figma's pair. `plain` keeps these off `Alt+H`/`Alt+V` (align

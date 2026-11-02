@@ -904,6 +904,8 @@ pub struct OndinApp {
     pub(crate) vision: Option<crate::vision::Vision>,
     /// The batch rename box, while it is open (`batch_rename.rs`).
     pub(crate) batch_rename: Option<crate::batch_rename::BatchRename>,
+    /// The find and replace box, kept while closed so it reopens as it was left.
+    pub(crate) find: crate::find::FindBox,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1512,6 +1514,7 @@ impl OndinApp {
             contrast: None,
             vision: None,
             batch_rename: None,
+            find: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -1956,6 +1959,8 @@ impl eframe::App for OndinApp {
         self.palette_ui(&ctx, canvas, palette_keys);
         // Unguarded: it is not in a panel, so it works in focus mode.
         self.batch_rename_ui(&ctx, canvas);
+        // Unguarded too: in focus mode it keeps to the canvas's own corner.
+        self.find_ui(&ctx);
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
         self.settings_ui(&ctx);
         self.cheatsheet_ui(&ctx);
@@ -2239,6 +2244,7 @@ impl OndinApp {
             Action::ToggleLocked => self.toggle_locked(),
             Action::Rename => self.rename_selection(ctx),
             Action::BatchRename => self.open_batch_rename(ctx, None),
+            Action::FindText { replace } => self.open_find(replace),
             Action::Flip(axis) => self.flip(axis),
             Action::Align(axis, edge) => self.align(axis, edge),
             Action::Distribute(axis) => self.distribute(axis),
@@ -2579,6 +2585,9 @@ impl OndinApp {
             }
         } else if self.text.is_some() {
             self.finish_text_edit();
+        } else if self.find.open {
+            // Below a text edit, which a row's double-click opens from the box.
+            self.close_find();
         } else if self.pen.is_some() {
             self.finish_pen(false);
         } else if self.cancel_gesture(ctx) {
@@ -3685,9 +3694,14 @@ impl OndinApp {
     /// move a layer without the pointer (keyboard nudges, the inspector's X and Y).
     /// Size-only edits deliberately do not call this; scrolling would fight the hand.
     pub(crate) fn reveal_selection(&mut self) {
-        let Some(bounds) = self.selection_bounds() else {
-            return;
-        };
+        if let Some(bounds) = self.selection_bounds() {
+            self.reveal(bounds);
+        }
+    }
+
+    /// [`Self::reveal_selection`] for any world rect: the least pan that brings
+    /// it into view, the zoom kept.
+    pub(crate) fn reveal(&mut self, bounds: Rect) {
         let view = self.session.camera.viewport(self.canvas_px).view;
         // A margin in world units, so the layer lands inside the frame.
         let margin = (REVEAL_MARGIN_PX / self.session.camera.zoom)

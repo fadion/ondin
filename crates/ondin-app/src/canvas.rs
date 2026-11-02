@@ -9130,6 +9130,9 @@ impl OndinApp {
 
         self.draw_gradient_handles(painter, rect, ppp);
 
+        // Find and replace's matches, under the edited text's own highlight.
+        self.paint_find_marks(painter, rect, ppp);
+
         // Text caret and selection highlight. The phase is asked unconditionally:
         // `CaretBlink` notices a caret move by being asked.
         let (now, focused) = ui.input(|i| (i.time, i.focused));

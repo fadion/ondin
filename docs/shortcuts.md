@@ -173,6 +173,8 @@ without it); the `!m.shift` sits on `Equals` only.
 | `Ctrl+Shift+L` | lock / unlock | ✅ Figma, Sketch |
 | `Ctrl+R` · `F2` | **rename** | ✅ Figma · Windows alias. With two or more layers selected, opens batch rename |
 | `Ctrl+Shift+R` | **batch rename…** | ✅ `Action::BatchRename`; live with any selection or none (`app-canvas-chrome.md`, *Batch rename*) |
+| `Ctrl+F` | **find in text…** | ✅ `Action::FindText { replace: false }`, normal mode; opens the find and replace box on Find (`app-canvas-chrome.md`, *Find and replace*) |
+| `Ctrl+H` | **replace text…** | ✅ `Action::FindText { replace: true }`, the box with its Replace row showing. **Unshifted only**: `Ctrl+Shift+H` is hide / show |
 | `Shift+H` / `Shift+V` | flip horizontal / vertical | ✅ Figma |
 
 **Hide and lock are one switch for the whole selection, and a mixed selection hides / locks**:

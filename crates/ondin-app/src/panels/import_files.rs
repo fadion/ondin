@@ -273,13 +273,17 @@ pub(crate) struct ImportCard {
     /// Whether the keychain holds the token, so a paste fetches at once and
     /// unticking *Remember* forgets it then and there.
     remembered: bool,
-    /// Keychain writes under way: storing or forgetting, each on a worker since
-    /// the store can block; a failure lands in `fetch_error`.
-    keychain: Vec<Job<Result<(), String>>>,
+    /// The last keychain write asked for, storing or forgetting, on a worker
+    /// since the store can block; a failure lands in `fetch_error`. Each write
+    /// waits for the one before it, so a quick tick and untick end as asked.
+    keychain: Option<Job<Result<(), String>>>,
     /// What the card asked of the keychain, in order, for the tests to read: a
     /// test build's keychain keeps nothing.
     #[cfg(test)]
     asked: Vec<KeychainAsk>,
+    /// The writes in the order their workers made them, for the tests.
+    #[cfg(test)]
+    written: std::sync::Arc<std::sync::Mutex<Vec<KeychainAsk>>>,
     /// A cancelled copy's worker is still running: *Import* waits for it, since
     /// it may yet write under the name this copy would take.
     pub(crate) settling: bool,
@@ -415,29 +419,51 @@ impl ImportCard {
             remember: false,
             token_job: None,
             remembered: false,
-            keychain: Vec::new(),
+            keychain: None,
             #[cfg(test)]
             asked: Vec::new(),
+            #[cfg(test)]
+            written: Default::default(),
             settling: false,
             fetch_error: None,
         }
     }
 
     /// Store the card's token in the keychain, or forget the one kept there, on
-    /// a worker, and note which is kept.
+    /// a worker after the write before it, and note which is kept.
     fn ask_keychain(&mut self, ctx: &egui::Context, ask: KeychainAsk) {
         #[cfg(test)]
         self.asked.push(ask.clone());
         self.remembered = ask == KeychainAsk::Store;
         let token = self.token.trim().to_owned();
-        self.keychain
-            .push(Job::spawn("figma-keychain", ctx, move || match ask {
+        let before = self.keychain.take();
+        #[cfg(test)]
+        let written = self.written.clone();
+        self.keychain = Some(Job::spawn("figma-keychain", ctx, move || {
+            // Each `security`/`secret-tool` run is a process of its own, so two
+            // writes left to race could land in either order.
+            let earlier = before.map_or(Ok(()), |job| {
+                job.wait()
+                    .unwrap_or_else(|| Err("The keychain stopped before it answered".to_owned()))
+            });
+            // A test build's store is slow, as a real one can be, so a write
+            // after it that did not wait would land first.
+            #[cfg(test)]
+            {
+                if ask == KeychainAsk::Store {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                written.lock().unwrap().push(ask.clone());
+            }
+            let now = match ask {
                 KeychainAsk::Store => crate::keychain::store(&token),
                 KeychainAsk::Forget => {
                     crate::keychain::forget();
                     Ok(())
                 }
-            }));
+            };
+            earlier.and(now)
+        }));
     }
 
     /// *Remember the token*, ticked or unticked: kept at once once a fetch has
@@ -1208,18 +1234,14 @@ impl OndinApp {
         };
         card.settling = settling;
         let mut failed = None;
-        card.keychain.retain(|job| match job.poll() {
-            Ok(None) => true,
-            Ok(Some(Err(why))) => {
-                failed = Some(why);
-                false
-            }
-            Ok(Some(Ok(()))) => false,
-            Err(()) => {
-                failed = Some("The keychain stopped before it answered".to_owned());
-                false
-            }
+        let landed = card.keychain.as_ref().and_then(|job| match job.poll() {
+            Ok(answer) => answer,
+            Err(()) => Some(Err("The keychain stopped before it answered".to_owned())),
         });
+        if let Some(answer) = landed {
+            card.keychain = None;
+            failed = answer.err();
+        }
         if failed.is_some() {
             card.fetch_error = failed;
         }
@@ -2530,10 +2552,10 @@ impl OndinApp {
             if let Some(job) = card.token_job.take() {
                 card.token_job = Some(Job::done(job.wait().flatten()));
             }
-            card.keychain = std::mem::take(&mut card.keychain)
-                .into_iter()
-                .map(|job| Job::done(job.wait().unwrap_or(Ok(()))))
-                .collect();
+            card.keychain = card
+                .keychain
+                .take()
+                .map(|job| Job::done(job.wait().unwrap_or(Ok(()))));
             card.step = match std::mem::replace(&mut card.step, Step::Form) {
                 Step::Loading { job, cancel, what } => match job.wait() {
                     Some(landed) => Step::Loading {
@@ -3173,6 +3195,26 @@ mod tests {
             "control: both rows are there"
         );
         assert!(report(&mut f, false, [false, true]).is_empty());
+    }
+
+    /// A forget asked right after a store is written after it, so a quick tick
+    /// and untick leave nothing kept. flip: drop the wait on the write before
+    /// in `ask_keychain` → fails at the order.
+    #[test]
+    fn keychain_writes_land_in_the_order_asked() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "figma-keychain-order");
+        f.app.open_import_card();
+        f.app.settle_import();
+        let card = f.app.dash.import.as_mut().unwrap();
+        card.token = "figd_x".into();
+        card.ask_keychain(&ctx, KeychainAsk::Store);
+        card.ask_keychain(&ctx, KeychainAsk::Forget);
+        assert_eq!(card.keychain.take().and_then(Job::wait), Some(Ok(())));
+        assert_eq!(
+            *card.written.lock().unwrap(),
+            [KeychainAsk::Store, KeychainAsk::Forget]
+        );
     }
 
     /// *Remember* acts when it changes: a fetch that worked stores the token

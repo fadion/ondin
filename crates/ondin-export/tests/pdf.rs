@@ -354,6 +354,44 @@ fn a_missing_family_is_drawn_in_inter_and_noted() {
     );
 }
 
+/// A loaded family whose file has none of the text's characters, so Inter drew
+/// all of it, is not reported missing by an export on a worker thread, whose
+/// engine holds only the faces the layout drew from.
+///
+/// flip: `approximations` asking `text::is_family_available` instead of
+/// `TextLayout::absent` → fails at "no note".
+#[test]
+fn a_loaded_family_that_drew_nothing_is_not_reported_missing() {
+    let emoji = include_bytes!("../../ondin-app/assets/fonts/NotoEmoji.ttf").to_vec();
+    assert!(ondin_core::text::register_fonts_as(emoji, "Emoji Only Pdf"));
+    let mut f = styled(TextStyle {
+        font_family: "Emoji Only Pdf".into(),
+        ..inter(400)
+    });
+    f.doc
+        .apply(&Transaction(vec![Operation::SetText {
+            id: f.text,
+            content: "Hamburg".into(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        }]))
+        .expect("letters the emoji font lacks");
+    f.res = Resolved::rebuild(&f.doc);
+    let notes = std::thread::spawn(move || {
+        ondin_core::text::register_font_data(&f.res.text_fonts());
+        assert!(
+            !ondin_core::text::is_family_available("Emoji Only Pdf"),
+            "fixture: the worker never saw the family"
+        );
+        pdf_of(&f.doc, &f.res, &[f.artboard], ExportText::Live)
+            .expect("a pdf")
+            .approximated
+    })
+    .join()
+    .expect("the worker");
+    assert!(notes.is_empty(), "no note: {notes:?}");
+}
+
 /// `font` with its family name records (name ids 1 and 16) shortened to `name`,
 /// which must be no longer than each: two files then give themselves one family,
 /// as one family's subset files do.

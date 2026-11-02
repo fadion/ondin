@@ -837,6 +837,11 @@ pub struct TextLayout {
     /// its turned box, so it errs large. Unlike [`Self::bounds`] it holds the
     /// descenders under a trimmed box and glyphs taller than their line.
     pub ink: Option<Rect>,
+    /// The families the text's runs name that had no face when it was shaped, so
+    /// a stand-in or Inter drew them. Kept for an export on a worker thread, whose
+    /// engine holds only the faces layouts drew from and cannot tell a family
+    /// that is missing from one that drew no character.
+    pub absent: Vec<String>,
 }
 
 impl TextLayout {
@@ -1837,6 +1842,8 @@ struct Shaped {
     /// See [`NodeBox::untrimmed`].
     untrimmed: Size,
     truncated: bool,
+    /// See [`TextLayout::absent`].
+    absent: Vec<String>,
 }
 
 impl Shaped {
@@ -1884,6 +1891,14 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         runs.iter().map(|(r, s)| (r.clone(), s.locale.as_deref())),
     );
     let scripts = crate::fallback_fonts::scripts_in(text);
+    let mut absent: Vec<String> = Vec::new();
+    for family in
+        std::iter::once(&parts.style.font_family).chain(runs.iter().map(|(_, s)| &s.font_family))
+    {
+        if !absent.contains(family) && !is_family_available(family) {
+            absent.push(family.clone());
+        }
+    }
 
     let mut layout = ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
@@ -2089,6 +2104,7 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         size: node_box.size,
         untrimmed: node_box.untrimmed,
         truncated,
+        absent,
     }
 }
 
@@ -2985,6 +3001,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
         baselines,
         warp: None,
         ink: None,
+        absent: shaped.absent.clone(),
     };
     // Last, and after `skip_ink` on purpose: the pipeline stays flat until here (see [`bend`]).
     if let Some(warp) = warp_for(parts, shaped) {

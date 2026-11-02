@@ -338,22 +338,21 @@ fn approximations(
         {
             note("underlines and strikethroughs, drawn as the font's plain line");
         }
-        // A family with no face here was drawn in another, which the PDF names
-        // (`svg_linking`'s `faces`) and so never misses. Shaped again only when some
-        // family is absent: this runs on every edit for the export card.
+        // A family with no face was drawn in another, which the PDF names
+        // (`svg_linking`'s `faces`) and so never misses. Whether it had a face is
+        // the layout's word (`TextLayout::absent`), not this thread's engine. Shaped
+        // again only when some family is absent: this runs on every edit for the
+        // export card.
         if text == ExportText::Live
+            && let Some(absent) = res.text_layout(id).map(|l| &l.absent)
+            && !absent.is_empty()
             && let Some(parts) = ondin_core::TextRef::of(res.used_kind_of(node))
-            && parts
-                .spans
-                .runs(parts.style, parts.content.len())
-                .iter()
-                .any(|(_, s)| !ondin_core::text::is_family_available(&s.font_family))
         {
             for line in ondin_core::text::export_lines(parts) {
                 for run in &line.runs {
                     if let Some(face) = &run.face
                         && stands_in_for(&run.style.font_family, face)
-                        && !ondin_core::text::is_family_available(&run.style.font_family)
+                        && absent.contains(&run.style.font_family)
                     {
                         note(&format!(
                             "{}, which is not available, drawn in {face}",
@@ -385,11 +384,9 @@ fn approximations(
     out
 }
 
-/// Whether `face` drew a run because `family` was missing: core's fallback or a
-/// stand-in of the family. A script's fallback draws characters the family lacks
-/// whether or not it is there, so it says nothing of the family; asking the engine
-/// instead answers wrong on an export worker, which holds only the faces a layout
-/// drew from.
+/// Whether `face` can have drawn a run because `family` was missing: core's
+/// fallback or a stand-in of the family. A script's fallback draws characters the
+/// family lacks whether or not it is there, so it says nothing of the family.
 fn stands_in_for(family: &str, face: &str) -> bool {
     face.eq_ignore_ascii_case(FALLBACK_FAMILY)
         || ondin_core::fallback_fonts::stand_ins(family)

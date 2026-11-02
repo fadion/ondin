@@ -162,20 +162,23 @@ impl OndinApp {
                 return Some(Grab::Dot(i));
             }
         }
+        let (axis, band) = run
+            .bands()
+            .into_iter()
+            .find(|(axis, r)| !self.thin(&run, *axis) && r.contains(world))?;
         // A loose gap is open canvas: a layer outside the run lying in it takes the
-        // press, as it would with no selection.
+        // press, as it would with no selection. One spanning the whole band is a
+        // background behind the run, and leaves the band its press.
         let doc = &self.session.doc;
-        let outside = self.pick_leaf(world).is_some_and(|hit| {
+        let res = &self.session.resolved;
+        let in_gap = self.pick_leaf(world).is_some_and(|hit| {
             !std::iter::successors(Some(hit), |n| doc.get(*n).and_then(|n| n.parent()))
                 .any(|a| run.ids.contains(&a))
+                && res
+                    .world_bounds(hit)
+                    .is_none_or(|b| b.intersect(band) != band)
         });
-        if outside {
-            return None;
-        }
-        run.bands()
-            .into_iter()
-            .find(|(axis, r)| !self.thin(&run, *axis) && r.contains(world))
-            .map(|(axis, _)| Grab::Gap(axis))
+        (!in_gap).then_some(Grab::Gap(axis))
     }
 
     /// Start a run drag at the press `grab`, or `false` where it grabs nothing.
@@ -561,7 +564,7 @@ mod tests {
 
     /// A press on an unselected layer lying in a loose gap picks and moves that
     /// layer; the band yields to it.
-    /// flip: `loose_at` without its `outside` yield → fails at "the card under the
+    /// flip: `loose_at` without its `in_gap` yield → fails at "the card under the
     /// press moved".
     #[test]
     fn a_layer_in_a_loose_gap_takes_the_press() {
@@ -591,6 +594,44 @@ mod tests {
             "the run did not"
         );
         assert_eq!(app.session.selection.ids(), [cards[1]]);
+    }
+
+    /// A background layer behind the run, spanning the band, leaves a press in a
+    /// gap to the band.
+    /// flip: `loose_at` yielding to any hit outside the run → fails at the positions.
+    #[test]
+    fn a_background_behind_the_run_leaves_the_gap_its_press() {
+        let ctx = egui::Context::default();
+        let (mut app, cards) = app_with_cards(&ctx, [16.0; 3]);
+        let board = app.session.doc.get(cards[0]).unwrap().parent().unwrap();
+        let back = IdSource::new(0xBAC6).mint();
+        let tx = Transaction(vec![Operation::CreateNode {
+            id: back,
+            parent: board,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(600.0, 300.0),
+                corner_radii: Default::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        }]);
+        assert!(app.session.commit(tx), "the background");
+        frame(&ctx, &mut app, Vec::new());
+        assert!(app.loose_run().is_some(), "fixture: still a run");
+        assert_eq!(
+            app.pick_leaf(Point::new(220.0, 100.0)),
+            Some(back),
+            "fixture: the gap's hit is the background"
+        );
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(220.0, 100.0),
+            Point::new(244.0, 100.0),
+        );
+        assert_eq!(xs(&app, &cards), vec![40.0, 146.0, 252.0, 358.0]);
     }
 
     /// Zoomed out until the cards are small on screen, a press on a card's centre

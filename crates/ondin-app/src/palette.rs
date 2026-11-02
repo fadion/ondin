@@ -385,6 +385,12 @@ fn runnable(groups: Vec<Vec<menu::Row>>) -> Vec<menu::Row> {
                 child.enabled = false;
                 child.why = row.why;
             }
+            // A submenu shortens its rows under its head (*Left* under *Align*);
+            // out of it a row needs the verb back. A state's rename is kept.
+            let spec = child.item.spec().label;
+            if spec.to_lowercase().contains(&child.label.to_lowercase()) {
+                child.label = spec.into();
+            }
             out.push(child);
         }
     }
@@ -1760,9 +1766,10 @@ pub(crate) mod tests {
     }
 
     /// The verbs the layer menu keeps in submenus are live commands with two
-    /// layers selected, and the submenu heads are not commands.
-    /// flip: `runnable` returning heads without walking `sub` → fails at the
-    /// *Union* assertion.
+    /// layers selected, under their verbs' full names, and the submenu heads are
+    /// not commands. flip: `runnable` returning heads without walking `sub` →
+    /// fails at the *Union* assertion; keeping a child's short label in
+    /// `runnable` → fails at the *Align* labels.
     #[test]
     fn a_submenus_verbs_are_commands_and_its_head_is_not() {
         let ctx = egui::Context::default();
@@ -1789,6 +1796,14 @@ pub(crate) mod tests {
                 cmd.why
             );
         }
+        // Out of its submenu a row names its verb: *Align left*, not *Left*.
+        let aligns: Vec<&str> = cmds
+            .iter()
+            .filter(|c| matches!(c.item, Item::Align(..)))
+            .map(|c| c.label.as_str())
+            .collect();
+        assert_eq!(aligns.len(), 6, "{aligns:?}");
+        assert!(aligns.iter().all(|l| l.starts_with("Align")), "{aligns:?}");
         let replace = find(Item::PasteToReplace).expect("Paste to replace is listed");
         assert!(!replace.absent);
         assert_eq!(replace.why, Some("No layers have been copied"));

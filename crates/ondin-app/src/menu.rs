@@ -496,6 +496,7 @@ pub struct ViewState {
     pub grid: bool,
     pub layout_grid: bool,
     pub outline: bool,
+    pub pixel_preview: bool,
 }
 
 impl ViewState {
@@ -512,6 +513,7 @@ impl ViewState {
             ViewSwitch::Grid => Some(self.grid),
             ViewSwitch::LayoutGrid => Some(self.layout_grid),
             ViewSwitch::Outline => Some(self.outline),
+            ViewSwitch::PixelPreview => Some(self.pixel_preview),
             ViewSwitch::Layers
             | ViewSwitch::History
             | ViewSwitch::Minimap
@@ -637,6 +639,7 @@ impl Item {
         Item::ViewSwitch(ViewSwitch::Grid),
         Item::ViewSwitch(ViewSwitch::LayoutGrid),
         Item::ViewSwitch(ViewSwitch::Outline),
+        Item::ViewSwitch(ViewSwitch::PixelPreview),
         Item::RenamePage,
         Item::DuplicatePage,
         Item::PageDraft,
@@ -975,6 +978,7 @@ impl Item {
                     // The glyph the Layout grid card already draws for columns.
                     ViewSwitch::LayoutGrid => icon::COLUMNS,
                     ViewSwitch::Outline => icon::SQUARE,
+                    ViewSwitch::PixelPreview => icon::GRID_FOUR,
                     ViewSwitch::Lasso => icon::LASSO,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
@@ -2358,6 +2362,7 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
         ViewSwitch::Grid,
         ViewSwitch::LayoutGrid,
         ViewSwitch::Outline,
+        ViewSwitch::PixelPreview,
     ]
     .into_iter()
     .map(|sw| Row::new(Item::ViewSwitch(sw)).checked(cx.view.get(sw)))
@@ -3011,6 +3016,7 @@ impl OndinApp {
                 grid: self.view_switch(ViewSwitch::Grid),
                 layout_grid: self.view_switch(ViewSwitch::LayoutGrid),
                 outline: self.view_switch(ViewSwitch::Outline),
+                pixel_preview: self.view_switch(ViewSwitch::PixelPreview),
             },
             focus: self.focus,
             segment_selected: self
@@ -4496,6 +4502,7 @@ mod tests {
             grid: false,
             layout_grid: true,
             outline: false,
+            pixel_preview: true,
         };
         let mut cx = open(Target::Canvas, &[], &[]);
         cx.view = st;
@@ -4506,6 +4513,7 @@ mod tests {
             (ViewSwitch::Grid, false),
             (ViewSwitch::LayoutGrid, true),
             (ViewSwitch::Outline, false),
+            (ViewSwitch::PixelPreview, true),
         ] {
             let row = build(&cx)
                 .iter()
@@ -5738,6 +5746,7 @@ mod view_switch_registry_tests {
             grid: true,
             layout_grid: false,
             outline: false,
+            pixel_preview: false,
         };
         let answered: Vec<&str> = ViewSwitch::ALL
             .iter()
@@ -5752,7 +5761,8 @@ mod view_switch_registry_tests {
                 "Lock guides",
                 "Show grid",
                 "Show layout grid",
-                "Outline mode"
+                "Outline mode",
+                "Pixel preview"
             ],
             "the struct's fields and the switches it answers for are not the same set"
         );

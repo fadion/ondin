@@ -196,9 +196,10 @@ simulations barely move.
   `prefs.vision` (`Deficiency::key`; deuteranopia by default), written on the spot. Escape or a
   click away closes the menu, Escape before it reaches the canvas (`vision_owns_escape`).
 - **Drawing** (`CanvasRenderer::seen_through`). Every frame the mode is on, the pass writes the
-  canvas texture (`target`) into a second texture, `seen`, simulated inside the frame's device box
-  (`vision_region`: its world bounds mapped to device pixels, rounded out and clamped to the
-  canvas) and copied outside it, and egui is handed `seen`. `target` is never written, so pans
+  canvas texture (`target`) into a second texture, `seen`, simulated inside the frame's box
+  (`vision_region`: its world bounds mapped to texels through the camera and size that drew
+  `target`, rounded out and clamped to the texture) and copied outside it, and egui is handed
+  `seen`. Under pixel preview that is the 1x texture, simulated before it is enlarged. `target` is never written, so pans
   and patches keep working from true pixels and the eyedropper reads true colours. The edit
   chrome is painted after the canvas texture and is never simulated. The region is the frame's
   axis-aligned box, so a rounded or turned frame's corners take in a little of what lies outside
@@ -234,7 +235,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   row is found in one place:
   - what the canvas draws, `ViewSwitch::VIEW_CANVAS`: *Show rulers*, *Show guides*, *Lock guides*,
     *Show grid*, *Show layout grid*;
-  - the modes, `ViewSwitch::VIEW_MODES`: *Outline mode*, *Private mode*, *Focus mode*, then *Present
+  - the modes, `ViewSwitch::VIEW_MODES`: *Outline mode*, *Pixel preview*, *Private mode*, *Focus mode*, then *Present
     mode* — a verb, not a switch: a check row that never ticks, which closes the menu and dispatches
     `Action::Present`;
   - *Panels ▸* (`PANELS_ROW`), whose flyout (`OndinApp::panels_flyout`, placed by
@@ -268,12 +269,29 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   on every axis of a skewed or snapped layer. `RenderOverrides::set_outline` carries the ink, installed every frame
   by `draw_canvas` (present mode clears it). Hit testing and selection are unchanged. The eyedropper
   samples the canvas as drawn, so in outline view it picks up the ink.
-- The switches are **view state**, not document state. All but focus mode and outline view are kept in `prefs.view`
+- **Pixel preview** (`OndinApp::pixel_preview`, `Ctrl+Alt+Y`, glyph `GRID_FOUR`) shows the anti-aliasing a viewer
+  at 1x gets. The pixel grid (`grid.rs`) shows where pixels fall over artwork drawn at device
+  resolution, where a half-pixel edge looks sharp; the preview shows it blur. `canvas::pixel_preview`
+  takes whole world units from the unit at the view's corner, one more than the view spans so the
+  size holds whatever the corner, and returns a zoom-1 camera over exactly those units (one texel a
+  unit), the texture size, and where that texture lies on the canvas in device pixels. `draw_canvas`
+  renders through the same `CanvasRenderer::render` with that camera and size, so the drawn-key
+  cache, pans and patches apply unchanged, then paints the texture enlarged over that rect, clipped
+  to the canvas. The canvas texture
+  is registered with nearest filtering (`Gpu::texture`), which gives the hard edges; there is no
+  pass of its own. Overlays stay egui at screen resolution, and present mode draws as ever.
+  - Off at 100% or below (`camera.zoom` is device pixels per unit): the canvas already draws a unit
+    to a pixel or less, and the preview would only throw detail away.
+  - It yields while a dropper is armed (`dropper_armed`), since the eyedropper reads the canvas
+    texture at device pixels.
+  - Per session, as outline mode is: a launch into blurred artwork would look like a broken
+    renderer.
+- The switches are **view state**, not document state. All but focus mode, outline view and pixel preview are kept in `prefs.view`
   (`prefs::ViewPrefs`), written once a frame when one has changed
   (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
   ruler turning guides on), and a launch opens on them. All default on except *Lock guides*,
-  *Show history*, *Show minimap*, *Lasso select*, outline view and focus mode; a launch never opens in focus mode
-  or outline view. `prefs.view` also keeps what the rail's Frame and Pen slots last showed
+  *Show history*, *Show minimap*, *Lasso select*, outline view, pixel preview and focus mode; a launch never opens in focus mode,
+  outline view or pixel preview. `prefs.view` also keeps what the rail's Frame and Pen slots last showed
   (`rail_slice`, `rail_pencil`; `tools.md`, *The tool rail*). Private mode is a preference of its own (`Prefs::private`), below.
 
 ### Settings

@@ -11,9 +11,6 @@ reads true.
 
 ## Now
 
-- **Pixel preview.** The canvas rasterized at 1x and enlarged with hard pixel edges, so the
-  anti-aliasing a viewer gets is visible. The pixel grid (`grid.rs`) shows where pixels fall over
-  artwork drawn at device resolution, so a half-pixel edge looks sharp; the preview shows it blur.
 - **Find and replace** in text across the page or the document. The layers search matches names only.
 - **Component documentation.** A description and a link on a main, shown in the insert picker; and
   preferred values on a swap property, offered first in its picker.

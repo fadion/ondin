@@ -1027,6 +1027,45 @@ fn default_shape_fill() -> Color {
     Color::from_rgba8(217, 217, 217, 255)
 }
 
+/// Pixel preview's view of `camera` on a canvas `px` device pixels big: a camera
+/// drawing one world unit to a pixel over the whole units in view, the texture size
+/// it draws at, and that texture's place on the canvas in device pixels from the
+/// canvas corner (`x0, y0, x1, y1`), where nearest sampling enlarges it.
+///
+/// `None` at 100% or below: the canvas already draws a unit to a pixel or less,
+/// and the preview would only throw detail away.
+pub(crate) fn pixel_preview(
+    camera: &Camera,
+    px: (u32, u32),
+) -> Option<(Camera, (u32, u32), KRect)> {
+    if camera.zoom <= 1.0 {
+        return None;
+    }
+    let view = camera.viewport(px).view;
+    // Whole units, so each texel is one pixel of the artwork at 1x. A unit over the
+    // view's span whatever its corner, so a pan keeps the size and can move the last
+    // frame (`DrawnKey::pan_to`) instead of drawing anew.
+    let (x0, y0) = (view.x0.floor(), view.y0.floor());
+    let size = (
+        view.width().ceil() as u32 + 1,
+        view.height().ceil() as u32 + 1,
+    );
+    let (x1, y1) = (x0 + f64::from(size.0), y0 + f64::from(size.1));
+    // At zoom 1 `viewport` rounds the corner to a whole unit, which `x0` already is.
+    let one = Camera {
+        center: Point::new(x0 + (x1 - x0) / 2.0, y0 + (y1 - y0) / 2.0),
+        zoom: 1.0,
+    };
+    let at = |v: f64, from: f64| (v - from) * camera.zoom;
+    let placed = KRect::new(
+        at(x0, view.x0),
+        at(y0, view.y0),
+        at(x1, view.x0),
+        at(y1, view.y0),
+    );
+    Some((one, size, placed))
+}
+
 /// Outline mode's ink on a page of `ground`: near-black on a light page,
 /// near-white on a dark one, by the ground's luminance.
 fn outline_ink(ground: Color) -> Color {
@@ -8690,9 +8729,14 @@ impl OndinApp {
         self.session.set_outline(ink);
         self.session.set_level_of_detail(true);
 
+        // Pixel preview draws through the same path at one unit a pixel. It yields to
+        // the eyedropper, which samples the canvas texture at device pixels.
+        let preview = (self.pixel_preview && self.dropper_armed().is_none())
+            .then(|| pixel_preview(&self.session.camera, self.canvas_px))
+            .flatten();
         // Split the borrow so the read-only inputs and the mutable renderer coexist.
-        let camera = self.session.camera;
-        let px = self.canvas_px;
+        let (camera, px) =
+            preview.map_or((self.session.camera, self.canvas_px), |(c, s, _)| (c, s));
         let backdrop = self.session.preview_ground();
         let page = self.session.page;
         let stamps = (
@@ -8700,7 +8744,7 @@ impl OndinApp {
             self.session.drawn(),
             self.session.shaped(),
         );
-        let vision = self.vision_region();
+        let vision = self.vision_region(&camera, px);
         let (doc, res, overrides) = self.session.render_inputs();
         let ink = self.session.ink();
         let drawn = self.canvas.render(
@@ -8708,7 +8752,23 @@ impl OndinApp {
         );
         if let Some(tex) = drawn.map(|t| self.canvas.seen_through(t, vision)) {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            painter.image(tex, rect, uv, egui::Color32::WHITE);
+            match preview {
+                // Enlarged over the canvas and cut to it; the texture is registered
+                // with nearest sampling, which gives the hard pixel edges.
+                Some((_, _, placed)) => {
+                    let at = |x: f64, y: f64| rect.min + egui::vec2(x as f32, y as f32) / ppp;
+                    let over = egui::Rect::from_min_max(
+                        at(placed.x0, placed.y0),
+                        at(placed.x1, placed.y1),
+                    );
+                    painter
+                        .with_clip_rect(painter.clip_rect().intersect(rect))
+                        .image(tex, over, uv, egui::Color32::WHITE);
+                }
+                None => {
+                    painter.image(tex, rect, uv, egui::Color32::WHITE);
+                }
+            }
         }
         // An adjusted picture is showing a preview: ask for the frame that
         // promotes it, or the soft picture stays until the pointer moves.
@@ -23548,5 +23608,69 @@ mod hover_under_area_tests {
             None,
             "beside the area's edge"
         );
+    }
+}
+
+#[cfg(test)]
+mod pixel_preview_tests {
+    use super::*;
+
+    /// At 100% or below there is nothing to enlarge.
+    #[test]
+    fn pixel_preview_is_off_at_100_percent_and_below() {
+        for zoom in [0.25, 1.0] {
+            let camera = Camera {
+                center: Point::new(13.3, 7.7),
+                zoom,
+            };
+            assert!(pixel_preview(&camera, (800, 600)).is_none(), "{zoom}");
+        }
+    }
+
+    /// Zoomed in off the unit grid, the preview draws whole units one to a texel
+    /// from the unit at the view's corner, and enlarges that texture so each texel
+    /// covers exactly its unit on the canvas, covering the whole canvas; a pan keeps
+    /// the texture's size, so it can move the last frame.
+    ///
+    /// flip: `pixel_preview` taking the view's corner unfloored → fails at "whole
+    /// units from the corner"; sizing by `ceil(x1) - floor(x0)` → fails at "a pan
+    /// keeps the size".
+    #[test]
+    fn pixel_preview_draws_whole_units_and_lays_them_on_their_place() {
+        let mut camera = Camera {
+            center: Point::new(100.37, -40.81),
+            zoom: 6.5,
+        };
+        let px = (801, 603);
+        let view = camera.viewport(px).view;
+        let (one, size, placed) = pixel_preview(&camera, px).expect("on above 100%");
+        let drawn = one.viewport(size);
+        assert_eq!(drawn.pixel_size, size);
+        let units = KRect::new(
+            view.x0.floor(),
+            view.y0.floor(),
+            view.x0.floor() + f64::from(size.0),
+            view.y0.floor() + f64::from(size.1),
+        );
+        assert_eq!(drawn.view, units, "whole units from the corner");
+        // Each world unit lands where the camera itself would draw it.
+        let device = |w: f64, from: f64| (w - from) * camera.zoom;
+        assert_eq!(placed.x0, device(units.x0, view.x0));
+        assert_eq!(placed.y1, device(units.y1, view.y0));
+        assert!((placed.width() - units.width() * camera.zoom).abs() < 1e-9);
+        assert!(
+            placed.x0 <= 0.0
+                && placed.y0 <= 0.0
+                && placed.x1 >= f64::from(px.0)
+                && placed.y1 >= f64::from(px.1),
+            "covers the canvas: {placed:?}"
+        );
+
+        // Slide across a unit in small steps: the size never changes.
+        for step in 1..40 {
+            camera.center.x += 0.05 * f64::from(step);
+            let (_, moved, _) = pixel_preview(&camera, px).expect("on");
+            assert_eq!(moved, size, "a pan keeps the size, at step {step}");
+        }
     }
 }

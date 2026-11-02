@@ -340,6 +340,7 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
   hotspot, composited over the canvas ground and opaque, so a translucent layer gives the blended
   colour. egui paints the overlays (selection, handles, guides, rulers, pixel grid) over that
   texture, so they are never sampled. Read live, so a pan or zoom made while armed is followed.
+  Pixel preview yields while a dropper is armed, so the texture is at device pixels.
 - **Everywhere else**: the frozen frame (`OndinApp::dropper_frozen: eyedropper::Frozen`), a capture
   of the whole window, so the chrome's own colours are pickable. A live capture cannot work: the
   loupe sits under the pointer, so it would always read the loupe.

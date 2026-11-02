@@ -65,11 +65,15 @@ impl OndinApp {
             .or_else(|| self.frame_in_view())
     }
 
-    /// The deficiency the canvas is seen through and the device pixels it
-    /// covers (`x0, y0, x1, y1`), or `None` while the mode is off. Runs before
-    /// the canvas; a page switch, or its frame going away, moves the mode to the
-    /// frame in view.
-    pub(crate) fn vision_region(&mut self) -> Option<(Deficiency, [u32; 4])> {
+    /// The deficiency the canvas is seen through and the texels it covers
+    /// (`x0, y0, x1, y1`) of the texture `camera` draws at `px`, or `None` while
+    /// the mode is off. Runs before the canvas; a page switch, or its frame going
+    /// away, moves the mode to the frame in view.
+    pub(crate) fn vision_region(
+        &mut self,
+        camera: &crate::view::Camera,
+        px: (u32, u32),
+    ) -> Option<(Deficiency, [u32; 4])> {
         let page = self.session.page;
         let doc = &self.session.doc;
         // A frame deleted or undone away is retargeted as a page switch is.
@@ -83,12 +87,12 @@ impl OndinApp {
         }
         let v = self.vision.as_ref()?;
         let deficiency = Deficiency::from_key(&self.prefs.vision);
-        let (w, h) = self.canvas_px;
+        let (w, h) = px;
         let all = [0, 0, w, h];
         let Some(frame) = v.frame else {
             return Some((deficiency, all));
         };
-        let vp = self.session.camera.viewport(self.canvas_px);
+        let vp = camera.viewport(px);
         let region = self
             .session
             .resolved
@@ -317,6 +321,12 @@ mod tests {
         (app, near, far, dot)
     }
 
+    /// `vision_region` for the canvas as the session's camera draws it.
+    fn region(app: &mut OndinApp) -> Option<(Deficiency, [u32; 4])> {
+        let (camera, px) = (app.session.camera, app.canvas_px);
+        app.vision_region(&camera, px)
+    }
+
     /// The simulation takes the selection's frame, else the frame in view, and
     /// the contrast check and it never run together.
     /// flip: `toggle_vision` leaving the contrast check on → fails at "ends the
@@ -356,7 +366,7 @@ mod tests {
         app.zoom_to(Some(Rect::new(-50.0, -50.0, 350.0, 250.0)));
         app.toggle_vision();
         assert_eq!(app.vision_frame(), Some(Some(near)));
-        let (d, [x0, y0, x1, y1]) = app.vision_region().expect("on");
+        let (d, [x0, y0, x1, y1]) = region(&mut app).expect("on");
         assert_eq!(d, Deficiency::Tritanopia);
         assert!(
             x0 > 0 && y0 > 0 && x1 < 800 && y1 < 600,
@@ -366,7 +376,7 @@ mod tests {
         if let Some(v) = &mut app.vision {
             v.frame = None;
         }
-        assert_eq!(app.vision_region().map(|r| r.1), Some([0, 0, 800, 600]));
+        assert_eq!(region(&mut app).map(|r| r.1), Some([0, 0, 800, 600]));
     }
 
     /// Deleting the frame shown moves the simulation to the frame in view,
@@ -384,7 +394,7 @@ mod tests {
             app.session
                 .commit(Transaction(vec![Operation::DeleteNode { id: near }]))
         );
-        let (_, [x0, _, x1, _]) = app.vision_region().expect("on");
+        let (_, [x0, _, x1, _]) = region(&mut app).expect("on");
         assert_eq!(app.vision_frame(), Some(Some(far)), "retargeted");
         assert!(x1 >= x0);
     }

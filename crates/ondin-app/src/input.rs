@@ -347,6 +347,10 @@ pub enum ViewSwitch {
     /// Illustrator's `Ctrl+Y` is redo here, and `Ctrl+Shift+Y` stays unspent
     /// beside it (`ctrl_shift_is_not_a_second_spelling_of_ctrl`).
     Outline,
+    /// `Ctrl+Alt+Y` — Illustrator's. The canvas drawn at one pixel per unit and
+    /// enlarged with hard pixel edges, so the anti-aliasing a viewer at 1x gets is
+    /// visible (`canvas::pixel_preview`).
+    PixelPreview,
     /// `Ctrl+Alt+\`.
     Layers,
     /// The History section at the foot of the layers pane (`panels::history`).
@@ -395,6 +399,7 @@ impl ViewSwitch {
             Self::Grid => "Show grid",
             Self::LayoutGrid => "Show layout grid",
             Self::Outline => "Outline mode",
+            Self::PixelPreview => "Pixel preview",
             Self::Layers => "Show layers",
             Self::History => "Show history",
             Self::Minimap => "Show minimap",
@@ -424,6 +429,7 @@ impl ViewSwitch {
             Self::Rulers => "Shift+R",
             Self::Guides => "Ctrl+;",
             Self::GuideLock => "Ctrl+Alt+;",
+            Self::PixelPreview => "Ctrl+Alt+Y",
             Self::Grid => "Ctrl+'",
             Self::Layers => "Ctrl+Alt+\\",
             Self::Minimap => "Ctrl+Shift+M",
@@ -456,7 +462,12 @@ impl ViewSwitch {
     ];
 
     /// The View menu's modes, which *Present mode* follows as a verb.
-    pub const VIEW_MODES: [Self; 3] = [Self::Outline, Self::Private, Self::Focus];
+    pub const VIEW_MODES: [Self; 4] = [
+        Self::Outline,
+        Self::PixelPreview,
+        Self::Private,
+        Self::Focus,
+    ];
 
     /// The panes behind the View menu's *Panels ▸* row.
     pub const VIEW_PANELS: [Self; 5] = [
@@ -477,13 +488,14 @@ impl ViewSwitch {
     /// `#[cfg(test)]` because the tests are its only readers; an `#[allow]` would
     /// keep every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
         Self::Grid,
         Self::LayoutGrid,
         Self::Outline,
+        Self::PixelPreview,
         Self::Layers,
         Self::History,
         Self::Minimap,
@@ -1123,6 +1135,13 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Semicolon),
             Action::ToggleView(ViewSwitch::GuideLock),
+            &mut out,
+        );
+        // Illustrator's pixel preview. Alt keeps it off `Ctrl+Y`, redo, whose arm is
+        // `cmd_only`.
+        on(
+            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Y),
+            Action::ToggleView(ViewSwitch::PixelPreview),
             &mut out,
         );
 
@@ -2883,6 +2902,28 @@ mod guide_chord_tests {
             ),
             vec![Action::ToggleView(ViewSwitch::GuideLock)],
             "Ctrl+Alt+; must lock and only lock"
+        );
+    }
+
+    /// `Ctrl+Alt+Y` is pixel preview and only that; `Ctrl+Y` stays redo.
+    ///
+    /// flip: the pixel-preview arm without `m.alt` → fails at "Ctrl+Y stays redo".
+    #[test]
+    fn ctrl_alt_y_is_pixel_preview_and_ctrl_y_stays_redo() {
+        let cmd = egui::Modifiers::COMMAND;
+        let cmd_alt = egui::Modifiers {
+            alt: true,
+            ..egui::Modifiers::COMMAND
+        };
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::Y, cmd_alt)], cmd_alt),
+            vec![Action::ToggleView(ViewSwitch::PixelPreview)],
+            "Ctrl+Alt+Y is pixel preview, not redo as well"
+        );
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::Y, cmd)], cmd),
+            vec![Action::Redo],
+            "Ctrl+Y stays redo"
         );
     }
 

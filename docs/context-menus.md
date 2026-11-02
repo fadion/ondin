@@ -308,6 +308,7 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Show grid ✓ | `Ctrl+'` | |
 | Show layout grid ✓ | — | |
 | Outline mode ✓ | — | |
+| Pixel preview ✓ | `Ctrl+Alt+Y` | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
 canvas and mode switches less *Focus mode* and *Private mode*. Every View

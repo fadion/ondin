@@ -881,6 +881,9 @@ pub struct OndinApp {
     /// installed by `draw_canvas`). Not a preference: a launch into it would look
     /// like a broken document.
     pub(crate) outline_view: bool,
+    /// *View ▸ Pixel preview* (`canvas::pixel_preview`). Per session, as Outline
+    /// mode is: a launch into blurred artwork would look like a broken renderer.
+    pub(crate) pixel_preview: bool,
     /// *View ▸ Show layers* and *Show toolbar*: whether the left pane and the tool rail
     /// are on screen.
     pub(crate) show_layers: bool,
@@ -1498,6 +1501,7 @@ impl OndinApp {
             show_grid: view.grid,
             show_layout_grids: view.layout_grids,
             outline_view: false,
+            pixel_preview: false,
             show_layers: view.layers,
             show_history: view.history,
             show_minimap: view.minimap,
@@ -7391,6 +7395,7 @@ impl OndinApp {
             ViewSwitch::Grid => self.show_grid,
             ViewSwitch::LayoutGrid => self.show_layout_grids,
             ViewSwitch::Outline => self.outline_view,
+            ViewSwitch::PixelPreview => self.pixel_preview,
             ViewSwitch::Layers => self.show_layers,
             ViewSwitch::History => self.show_history,
             ViewSwitch::Minimap => self.show_minimap,
@@ -7419,6 +7424,7 @@ impl OndinApp {
             ViewSwitch::Grid => self.show_grid = on,
             ViewSwitch::LayoutGrid => self.show_layout_grids = on,
             ViewSwitch::Outline => self.outline_view = on,
+            ViewSwitch::PixelPreview => self.pixel_preview = on,
             ViewSwitch::Layers => self.show_layers = on,
             ViewSwitch::History => {
                 self.show_history = on;

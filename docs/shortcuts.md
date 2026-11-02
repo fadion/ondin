@@ -217,6 +217,7 @@ one is designated (§15 D113).
 | `Ctrl+'` | show grid | ✅ Illustrator, Photoshop |
 | — | show layout grid | **unbound** (§15 D755) |
 | — | outline mode | **unbound**: Figma's and Illustrator's `Ctrl+Y` is redo, and `Ctrl+Shift+Y` stays unspent beside it |
+| `Ctrl+Alt+Y` | pixel preview | ✅ Illustrator; Alt keeps it off `Ctrl+Y`, redo |
 | `Ctrl+Shift+'` | snap to grid | ✅ Illustrator's `Ctrl+"` |
 | `Ctrl+U` | snap to shapes | ✅ Illustrator's Smart Guides |
 | `Ctrl+;` | show / hide guides | ✅ Illustrator |
@@ -585,7 +586,7 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 ## Implementation notes
 
 - **View toggles are one action**, `Action::ToggleView(ViewSwitch)`: rulers, guides, guide lock,
-  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, focus, private
+  grid, layout grid, layers panel, history, minimap, toolbar, messages, outline mode, pixel preview, focus, private
   mode, the marquee's shape (lasso) and the snap switches.
   `ViewSwitch` also drives both dropdowns' rows, labelled by one `label()` but for the View menu's
   short *Panels ▸* list, so a row and the state it drives stay in step while the chord is a second

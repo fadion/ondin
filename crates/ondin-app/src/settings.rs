@@ -585,7 +585,7 @@ pub(crate) fn theme_section(ui: &mut egui::Ui, theme: &mut ThemePref) {
     if let Some(i) = ui::segmented(
         ui,
         ui.available_width(),
-        FIELD_H,
+        ui::SEGMENT_CELL_H,
         THEMES.len(),
         current,
         |p, i, rect, on| ui::segment_label(p, rect, THEMES[i].1, on),

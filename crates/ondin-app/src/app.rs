@@ -7242,7 +7242,9 @@ impl OndinApp {
                     app.dispatch(&ctx, crate::input::Action::Present);
                 }
                 crate::ui::menu_sep(ui);
-                let panels = crate::ui::menu_check_response(ui, PANELS_ROW, false, ITEM_H);
+                // Lit while its list is open, as the context menu holds its rows.
+                let held = flyout.is_some() && !elsewhere;
+                let panels = crate::ui::menu_check_held(ui, PANELS_ROW, false, ITEM_H, held);
                 crate::ui::paint_submenu_caret(ui, panels.rect);
                 if panels.hovered() || panels.clicked() {
                     flyout = Some(panels.rect);
@@ -13863,6 +13865,79 @@ mod library_wiring_tests {
             None,
             "another row closes the list"
         );
+    }
+
+    /// The View menu's *Panels* row stays lit while its list is open: with the
+    /// pointer between the row and the list, where it is over neither, and in the list.
+    ///
+    /// flip: `view_and_snap_menus` passing `held: false` for *Panels* → fails at
+    /// "lit in the gap".
+    #[test]
+    fn the_view_menu_s_panels_row_stays_lit_across_the_gap() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.open_menu = TopMenu::View;
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.top_bar(ui)).shapes
+        };
+        let text_at = |shapes: &[egui::epaint::ClippedShape], label: &str| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+        };
+        // A row-high ground under the *Panels* label, if one is painted; the fill is
+        // the theme's, which the test thread does not share.
+        let lit = |shapes: &[egui::epaint::ClippedShape], at: egui::Pos2| {
+            shapes.iter().any(|s| {
+                matches!(&s.shape, egui::Shape::Rect(r)
+                    if r.rect.height() == crate::ui::MENU_ITEM_H && r.rect.contains(at))
+            })
+        };
+        frame(&mut app, Vec::new());
+        let shapes = frame(&mut app, Vec::new());
+        let panels = text_at(&shapes, crate::app::PANELS_ROW).expect("the Panels row");
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&mut app, vec![egui::Event::PointerMoved(panels)]);
+        }
+        assert!(lit(&shapes, panels), "lit on hover");
+        let minimap = text_at(&shapes, "Minimap").expect("the list opens on hover");
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("view-menu")))
+            .expect("the View menu's area");
+        let list = ctx
+            .memory(|m| m.area_rect(OndinApp::flyout_id("view-menu")))
+            .expect("the list's area");
+        let row_left = card.left() + crate::ui::MENU_BORDER + crate::app::MENU_PAD;
+        assert!(list.right() < row_left, "the list opens to the left");
+
+        // Over the sliver between the list and the row, at both of its ends.
+        for gap in [
+            egui::pos2(row_left - 0.5, panels.y),
+            egui::pos2(list.right() + 0.5, panels.y),
+        ] {
+            for _ in 0..3 {
+                shapes = frame(&mut app, vec![egui::Event::PointerMoved(gap)]);
+            }
+            assert!(text_at(&shapes, "Minimap").is_some(), "the list stays open");
+            assert!(lit(&shapes, panels), "lit in the gap at {gap:?}");
+        }
+        for _ in 0..3 {
+            shapes = frame(&mut app, vec![egui::Event::PointerMoved(minimap)]);
+        }
+        assert!(lit(&shapes, panels), "lit with the pointer in the list");
     }
 
     /// The floating status bar shows a message for its hold, then nothing; the

@@ -492,13 +492,25 @@ pub fn menu_check_response(
     on: bool,
     height: f32,
 ) -> egui::Response {
+    menu_check_held(ui, label, on, height, false)
+}
+
+/// [`menu_check_response`] for a submenu's row: `held` lights it whatever the
+/// pointer does, so it stays lit across the gap to its open submenu and inside it.
+pub fn menu_check_held(
+    ui: &mut egui::Ui,
+    label: &str,
+    on: bool,
+    height: f32,
+    held: bool,
+) -> egui::Response {
     use menu_check_row::{GAP, PAD_X, TICK_W};
 
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
     );
-    let hovered = resp.hovered();
+    let hovered = held || resp.hovered();
     let p = ui.painter();
     if hovered {
         p.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(20));

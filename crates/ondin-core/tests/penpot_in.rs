@@ -396,6 +396,24 @@ fn a_background_blur_lands_as_one() {
     ));
 }
 
+/// A background blur under its own `backgroundBlur` key, as current Penpot
+/// writes it, lands beside a layer blur on the same shape.
+/// flip: `penpot_in` reading only `blur` → fails at the stack's length.
+#[test]
+fn a_background_blur_under_its_own_key_lands_beside_a_layer_blur() {
+    let mut glass = shape("G", "rect", ROOT, (0.0, 0.0, 10.0, 10.0));
+    glass["blur"] = json!({ "type": "layer-blur", "value": 2, "hidden": false });
+    glass["backgroundBlur"] = json!({ "type": "background-blur", "value": 6, "hidden": false });
+    let r = import(export(&["G"], vec![glass], &[]));
+    let fx = r.doc.get(one(&r.doc, "G")).unwrap().effects().to_vec();
+    assert_eq!(fx.len(), 2, "{fx:?}");
+    assert!(matches!(fx[0].kind, ondin_core::EffectKind::LayerBlur { radius } if radius == 4.0));
+    assert!(matches!(
+        fx[1].kind,
+        ondin_core::EffectKind::BackgroundBlur { radius } if radius == 6.0
+    ));
+}
+
 /// A group that lists itself, and two groups that list each other, read with
 /// each shape placed once and the repeat reported. flip: drop the
 /// `nodes.contains_key` test in `shape` → fails at `one(doc, "G")`, the group

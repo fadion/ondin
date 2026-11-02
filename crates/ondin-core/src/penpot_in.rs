@@ -709,7 +709,12 @@ impl Builder<'_> {
                 ..Effect::new(kind)
             });
         }
-        if let Some(blur) = shape.get("blur").filter(|b| b.is_object()) {
+        // A background blur sits under its own key in current files, typed under
+        // `blur` in older ones.
+        let blurs = ["blur", "backgroundBlur"]
+            .into_iter()
+            .filter_map(|k| shape.get(k).filter(|b| b.is_object()));
+        for blur in blurs {
             // Penpot draws a background blur at half its value, as Ondin draws a
             // radius, but a layer blur's value is the deviation itself.
             let value = num(blur, "value");

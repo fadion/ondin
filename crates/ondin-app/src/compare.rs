@@ -304,17 +304,17 @@ pub(crate) fn rows(
                 then: None,
             });
         }
-        // The row each listed layer went into, so a layer under it folds in too.
-        let mut row_of: HashMap<NodeId, usize> = HashMap::new();
-        for layer in &page.layers {
-            let Some(id) = NodeId::from_wire(&layer.id) else {
+        let tops = topmost(&page.layers, then, now);
+        // The row each topmost layer went into, by its index in the page's list.
+        let mut row_of: HashMap<usize, usize> = HashMap::new();
+        for (i, layer) in page.layers.iter().enumerate() {
+            let (Some(id), Some(top)) = (NodeId::from_wire(&layer.id), tops[i]) else {
                 continue;
             };
             groups[group].layers += 1;
             let name = layer.trail.last().cloned().unwrap_or_default();
-            if let Some(top) = ancestors(id, then, now).find_map(|a| row_of.get(&a).copied()) {
-                row_of.insert(id, top);
-                let row = &mut rows[top];
+            if top != i {
+                let row = &mut rows[row_of[&top]];
                 // An added or removed row already counts what came or went inside it.
                 if row.status != Status::Changed {
                     continue;
@@ -333,7 +333,7 @@ pub(crate) fn rows(
                 _ => now.page_of(id).filter(|p| now.is_page(*p)),
             };
             let above = &layer.trail[..layer.trail.len().saturating_sub(1)];
-            row_of.insert(id, rows.len());
+            row_of.insert(i, rows.len());
             rows.push(Row {
                 id,
                 group,
@@ -355,6 +355,29 @@ pub(crate) fn rows(
         }
     }
     (groups, rows, d.document)
+}
+
+/// For each of a page's listed `layers`, the index of the listed layer whose row it
+/// folds into: its nearest listed ancestor's, or its own when none is listed. `None`
+/// for an id that does not parse.
+pub(crate) fn topmost(
+    layers: &[diff::LayerDiff],
+    then: &Document,
+    now: &Document,
+) -> Vec<Option<usize>> {
+    let mut top_of: HashMap<NodeId, usize> = HashMap::new();
+    layers
+        .iter()
+        .enumerate()
+        .map(|(i, layer)| {
+            let id = NodeId::from_wire(&layer.id)?;
+            let top = ancestors(id, then, now)
+                .find_map(|a| top_of.get(&a).copied())
+                .unwrap_or(i);
+            top_of.insert(id, top);
+            Some(top)
+        })
+        .collect()
 }
 
 /// The compared pages the open document `open` lacks: `now`'s in its order, added

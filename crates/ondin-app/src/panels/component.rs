@@ -757,21 +757,31 @@ impl OndinApp {
             false => "Add a description",
         };
         ui.add_space(DESC_GAP);
-        let resp = ui::field_frame()
-            .inner_margin(egui::Margin::symmetric(ui::FIELD_PAD_X as i8, 5))
+        // One line sits in a text field's height; more lines grow the field. The
+        // padding is the edit's, so the whole field takes the press.
+        let font = egui::FontId::proportional(FIELD_PT);
+        let pad = ui::edit_frame(
+            ui,
+            &font,
+            ui::CONTROL_H - ui::FIELD_BORDER_H,
+            ui::FIELD_PAD_X,
+        );
+        let framed = ui::field_frame()
+            .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
                 ui.add_enabled(
                     !private,
                     egui::TextEdit::multiline(&mut text)
                         .id(ui.id().with(("description", id)))
-                        .frame(egui::Frame::NONE)
+                        .frame(pad)
                         .desired_rows(1)
                         .desired_width(f32::INFINITY)
-                        .font(egui::FontId::proportional(DESC_PT))
-                        .hint_text(egui::RichText::new(hint).size(DESC_PT)),
+                        .font(font)
+                        .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
                 )
-            })
-            .inner;
+            });
+        let resp = framed.inner;
+        focus_edge(ui, framed.response.rect, resp.has_focus());
         if resp.gained_focus() || resp.changed() {
             self.desc_edit = Some((id, text.clone()));
         }
@@ -824,42 +834,57 @@ impl OndinApp {
         ui.add_space(DESC_GAP);
         let ring = refused.map(|_| theme::color::error());
         let mut opened = false;
-        let resp = ui::field_frame()
-            .inner_margin(egui::Margin::symmetric(ui::FIELD_PAD_X as i8, 0))
-            .stroke(ring.map_or(egui::Stroke::NONE, |c| egui::Stroke::new(1.0, c)))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.set_min_height(LINK_H);
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(
-                        egui::RichText::new(icon::LINK_SIMPLE)
-                            .font(theme::icon_font(13.0))
-                            .color(theme::text::dim()),
-                    );
-                    let open = !inherited.is_empty() && edit.is_none() && !focused;
-                    let room = ui.available_width() - if open { LINK_H } else { 0.0 };
-                    let resp = ui.add_enabled(
-                        !private,
-                        egui::TextEdit::singleline(&mut text)
-                            .id(field_id)
-                            .frame(egui::Frame::NONE)
-                            .desired_width(room.max(12.0))
-                            .font(egui::FontId::proportional(DESC_PT))
-                            .text_color_opt(ring)
-                            .hint_text(egui::RichText::new(hint).size(DESC_PT)),
-                    );
-                    if open
-                        && ui::icon_button(ui, icon::ARROW_SQUARE_OUT, LINK_H, 13.0, false, true)
-                            .on_hover_text("Open in browser")
-                            .clicked()
-                    {
-                        opened = true;
-                    }
-                    resp
-                })
-                .inner
+        let mut frame = ui::field_frame();
+        if let Some(c) = ring {
+            frame = frame.stroke(egui::Stroke::new(1.0, c));
+        }
+        // The open button sits inside the field's right inset, so the field is as
+        // wide with it as without.
+        let open = !inherited.is_empty() && edit.is_none() && !focused;
+        if open {
+            frame = frame.inner_margin(egui::Margin {
+                left: ui::FIELD_PAD_X as i8,
+                right: 3,
+                top: 0,
+                bottom: 0,
+            });
+        }
+        let framed = frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_height(ui::CONTROL_H - ui::FIELD_BORDER_H);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label(
+                    egui::RichText::new(icon::LINK_SIMPLE)
+                        .font(theme::icon_font(13.0))
+                        .color(theme::text::dim()),
+                );
+                let button = if open { LINK_H + 6.0 } else { 0.0 };
+                let room = ui.available_width() - button;
+                let font = egui::FontId::proportional(FIELD_PT);
+                let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
+                let resp = ui.add_enabled(
+                    !private,
+                    egui::TextEdit::singleline(&mut text)
+                        .id(field_id)
+                        .frame(pad)
+                        .desired_width(room.max(12.0))
+                        .font(font)
+                        .text_color_opt(ring)
+                        .hint_text(egui::RichText::new(hint).size(FIELD_PT)),
+                );
+                if open
+                    && ui::icon_button(ui, icon::ARROW_SQUARE_OUT, LINK_H, 13.0, false, true)
+                        .on_hover_text("Open in browser")
+                        .clicked()
+                {
+                    opened = true;
+                }
+                resp
             })
-            .inner;
+            .inner
+        });
+        let resp = framed.inner;
+        focus_edge(ui, framed.response.rect, resp.has_focus() && ring.is_none());
         if opened {
             open_doc_link(ui.ctx(), &inherited);
         }
@@ -1894,11 +1919,25 @@ fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> Na
 
 /// A face's name size, and the count's after it.
 const NAME_PT: f32 = 13.0;
-/// A description's text size, and the air above it on a card.
+/// A description note's text size, and the air above it on a card.
 const DESC_PT: f32 = 11.5;
 const DESC_GAP: f32 = 2.0;
-/// A link field's height, and its open button's side.
+/// The description and link fields' text size, the inspector's text fields'.
+const FIELD_PT: f32 = 12.0;
+/// The side of the buttons on a heading and in the link field.
 const LINK_H: f32 = 22.0;
+
+/// The accent edge a focused description or link field takes, a value field's.
+fn focus_edge(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
+    if focused {
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(5),
+            egui::Stroke::new(1.0, theme::color::accent_700()),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
 
 /// An in-progress edit of a main's link field (`OndinApp::link_field`); `refused`
 /// is set once a commit was turned down, and keeps the typed text on show.
@@ -2547,6 +2586,77 @@ mod tests {
         for s in ["design.kestrel.app", "The primary action"] {
             assert!(!drawn(&out, s) && !drawn(&inst, s), "{s} masked");
         }
+    }
+
+    /// **A link's open button does not widen the card**: the link field ends
+    /// where the description field does, which ends where it did before the main
+    /// had a link, and both are a text field's height.
+    ///
+    /// flip: `link_field` leaving the button's item spacing out of the text's
+    /// room → fails at the link field's right edge.
+    #[test]
+    fn a_link_does_not_widen_its_card() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set_one(f.m);
+        // The field ground under the text `s`.
+        let ground = |out: &egui::FullOutput, s: &str| {
+            let at = texts(out)
+                .into_iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s}: {:?}", texts(out)))
+                .1
+                .center();
+            fn walk(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+                match shape {
+                    egui::Shape::Rect(r) if r.fill == theme::color::field() => out.push(r.rect),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                    _ => {}
+                }
+            }
+            let mut rects = Vec::new();
+            for s in &out.shapes {
+                walk(&s.shape, &mut rects);
+            }
+            rects
+                .into_iter()
+                .filter(|r| r.contains(at))
+                .min_by(|a, b| a.area().total_cmp(&b.area()))
+                .unwrap_or_else(|| panic!("no ground under {s}"))
+        };
+        let bare = settle(&mut f.app, &ctx);
+        let desc = ground(&bare, "Add a description");
+        assert!((desc.height() - ui::CONTROL_H).abs() < 0.5, "{desc:?}");
+        assert!(
+            (ground(&bare, "Add a link").height() - ui::CONTROL_H).abs() < 0.5,
+            "the link field's height"
+        );
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetDocLink {
+                    id: f.m,
+                    url: "https://design.kestrel.app".into(),
+                }]))
+        );
+        let linked = settle(&mut f.app, &ctx);
+        assert!(
+            texts(&linked)
+                .iter()
+                .any(|(t, _)| t == icon::ARROW_SQUARE_OUT),
+            "the open button shows"
+        );
+        let after = ground(&linked, "Add a description");
+        assert!(
+            (after.right() - desc.right()).abs() < 0.5,
+            "{desc:?} {after:?}"
+        );
+        let link = ground(&linked, "design.kestrel.app");
+        assert!(
+            (link.right() - desc.right()).abs() < 0.5,
+            "{desc:?} {link:?}"
+        );
     }
 
     /// Every text the frame painted with its fallback colour — what a galley

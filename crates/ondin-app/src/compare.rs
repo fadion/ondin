@@ -23,7 +23,7 @@ use ondin_core::diff::{self, Change, Status};
 use ondin_core::kurbo::Rect;
 use ondin_core::{Document, NodeId, Resolved};
 use ondin_render::RenderOverrides;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +49,8 @@ const HANDLE_REACH: f32 = 12.0;
 /// The changes card's row inset and the indent of a row's value lines.
 const ROW_PAD: f32 = 8.0;
 const LINE_INDENT: f32 = 23.0;
+/// How far an expanded row's folded layer's name and values sit past its tag.
+const FOLDED_INDENT: f32 = 17.0;
 /// A row's value lines past this many are summed up in one more.
 const LINES_SHOWN: usize = 4;
 
@@ -91,13 +93,45 @@ pub(crate) struct Row {
     pub(crate) layers: usize,
     /// For an added or removed layer, how many came or went inside it.
     pub(crate) inside: usize,
+    /// Its own changes; the folded layers' are in `folded`.
     pub(crate) lines: Vec<Change>,
+    /// The listed layers under it, in the diff's order.
+    pub(crate) folded: Vec<Folded>,
     /// Its box in the open document and in the version.
     pub(crate) now: Option<Rect>,
     pub(crate) then: Option<Rect>,
 }
 
+/// A listed layer folded into the row of a listed layer above it.
+#[derive(Debug)]
+pub(crate) struct Folded {
+    pub(crate) id: NodeId,
+    pub(crate) status: Status,
+    pub(crate) name: String,
+    pub(crate) lines: Vec<Change>,
+}
+
 impl Row {
+    /// Its changes and its folded layers' as one list, each folded change named
+    /// *Child · what*, or *Child added* / *removed*: what a folded row shows.
+    pub(crate) fn all_lines(&self) -> Vec<Change> {
+        let mut out = self.lines.clone();
+        for f in &self.folded {
+            match f.status {
+                Status::Changed => out.extend(f.lines.iter().map(|c| Change {
+                    what: format!("{} · {}", f.name, c.what),
+                    ..c.clone()
+                })),
+                Status::Added | Status::Removed => out.push(Change {
+                    what: format!("{} {}", f.name, f.status_word()),
+                    before: None,
+                    after: None,
+                }),
+            }
+        }
+        out
+    }
+
     /// Moved or resized: in both, its box differing by `diff::EPSILON` or more.
     pub(crate) fn moved(&self) -> bool {
         match (self.now, self.then) {
@@ -113,6 +147,16 @@ impl Row {
         match self.status {
             Status::Removed => self.then,
             _ => self.now,
+        }
+    }
+}
+
+impl Folded {
+    fn status_word(&self) -> &'static str {
+        match self.status {
+            Status::Added => "added",
+            Status::Removed => "removed",
+            Status::Changed => "changed",
         }
     }
 }
@@ -137,6 +181,8 @@ pub(crate) struct Compare {
     pub(crate) off_canvas: Vec<Change>,
     /// The row the canvas rings and the card fills.
     pub(crate) current: Option<usize>,
+    /// The rows whose folded layers the card lists apart.
+    pub(crate) expanded: HashSet<usize>,
     pub(crate) side: Side,
     /// Where Swipe splits the canvas, as a fraction of its width.
     pub(crate) split: f32,
@@ -193,6 +239,7 @@ pub(crate) fn rows(
                 layers: 0,
                 inside: page.inside,
                 lines: page.changes.clone(),
+                folded: Vec::new(),
                 now: None,
                 then: None,
             });
@@ -213,22 +260,12 @@ pub(crate) fn rows(
                     continue;
                 }
                 row.layers += 1;
-                match layer.status {
-                    Status::Changed => row.lines.extend(layer.changes.iter().map(|c| Change {
-                        what: format!("{name} · {}", c.what),
-                        ..c.clone()
-                    })),
-                    Status::Added => row.lines.push(Change {
-                        what: format!("{name} added"),
-                        before: None,
-                        after: None,
-                    }),
-                    Status::Removed => row.lines.push(Change {
-                        what: format!("{name} removed"),
-                        before: None,
-                        after: None,
-                    }),
-                }
+                row.folded.push(Folded {
+                    id,
+                    status: layer.status,
+                    name,
+                    lines: layer.changes.clone(),
+                });
                 continue;
             }
             let page_of = match layer.status {
@@ -249,6 +286,7 @@ pub(crate) fn rows(
                 layers: 1,
                 inside: layer.inside,
                 lines: layer.changes.clone(),
+                folded: Vec::new(),
                 now: now.contains(id).then(|| now_res.world_bounds(id)).flatten(),
                 then: then
                     .contains(id)
@@ -363,6 +401,7 @@ impl OndinApp {
             rows,
             off_canvas,
             current: None,
+            expanded: HashSet::new(),
             side: Side::Now,
             split: 0.5,
             dragging_split: false,
@@ -504,7 +543,8 @@ impl OndinApp {
             });
 
         match act {
-            None => {}
+            // The bar expands nothing.
+            None | Some(Act::Expand(_)) => {}
             Some(Act::Step(by)) => self.step_compare(by),
             Some(Act::Show(i)) => self.show_change(i),
             Some(Act::Toggle) => {
@@ -560,8 +600,16 @@ impl OndinApp {
                             .show(ui, |ui| card_list(ui, c, doc, &mut act));
                     });
             });
-        if let Some(Act::Show(i)) = act {
-            self.show_change(i);
+        match act {
+            Some(Act::Show(i)) => self.show_change(i),
+            Some(Act::Expand(i)) => {
+                if let Some(c) = self.session.compare.as_mut()
+                    && !c.expanded.remove(&i)
+                {
+                    c.expanded.insert(i);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -765,6 +813,8 @@ impl OndinApp {
 enum Act {
     Step(isize),
     Show(usize),
+    /// Expand a row with folded layers, or fold it again.
+    Expand(usize),
     Side(Side),
     Toggle,
     Done,
@@ -928,7 +978,28 @@ fn card_list(ui: &mut egui::Ui, c: &Compare, doc: &Document, act: &mut Option<Ac
                     _ => crate::private::layer(doc, row.id).into_owned(),
                 },
             };
-            if row_ui(ui, row, &name, private, c.current == Some(i)).clicked() {
+            let folded: Vec<String> = row
+                .folded
+                .iter()
+                .map(|f| match (private, f.status) {
+                    (false, _) => f.name.clone(),
+                    (true, Status::Removed) => crate::private::layer(&c.then, f.id).into_owned(),
+                    (true, _) => crate::private::layer(doc, f.id).into_owned(),
+                })
+                .collect();
+            let expanded = c.expanded.contains(&i);
+            let (resp, toggled) = row_ui(
+                ui,
+                row,
+                &name,
+                &folded,
+                private,
+                c.current == Some(i),
+                expanded,
+            );
+            if toggled {
+                *act = Some(Act::Expand(i));
+            } else if resp.clicked() {
                 *act = Some(Act::Show(i));
             }
         }
@@ -1040,30 +1111,72 @@ fn more_line(n: usize) -> Change {
     }
 }
 
+/// One line under a row's title: a changed value, or a folded layer's name, at
+/// an indent past the value lines'.
+enum Line {
+    Value(Change, f32),
+    Layer(Status, String),
+}
+
+/// `changes` as lines at `indent`: one *n changes* in private mode, else every one
+/// or, when `cut`, the first `LINES_SHOWN` and a line summing up the rest.
+fn value_lines(changes: &[Change], indent: f32, private: bool, cut: bool) -> Vec<Line> {
+    let mut out = Vec::new();
+    if private {
+        if !changes.is_empty() {
+            let what = plural(changes.len(), "change");
+            out.push(Line::Value(
+                Change {
+                    what,
+                    before: None,
+                    after: None,
+                },
+                indent,
+            ));
+        }
+        return out;
+    }
+    let shown = if cut { LINES_SHOWN } else { usize::MAX };
+    out.extend(
+        changes
+            .iter()
+            .take(shown)
+            .map(|c| Line::Value(c.clone(), indent)),
+    );
+    if changes.len() > shown {
+        out.push(Line::Value(more_line(changes.len() - shown), indent));
+    }
+    out
+}
+
+/// The lines under a row's title: folded, its folded layers' changes named under
+/// it and cut; expanded, its own, then each folded layer and all of its changes.
+fn row_lines(row: &Row, folded_names: &[String], private: bool, expanded: bool) -> Vec<Line> {
+    if !expanded || row.folded.is_empty() {
+        return value_lines(&row.all_lines(), 0.0, private, true);
+    }
+    let mut out = value_lines(&row.lines, 0.0, private, false);
+    for (f, name) in row.folded.iter().zip(folded_names) {
+        out.push(Line::Layer(f.status, name.clone()));
+        out.extend(value_lines(&f.lines, FOLDED_INDENT, private, false));
+    }
+    out
+}
+
 /// One row of the list: the status tag, the trail dim and the name, then the
-/// changed values a line each. Private mode draws no trail and no values.
+/// changed values a line each. A row with folded layers has a caret: expanded, it
+/// lists each of them apart (`folded_names`, in order) with all their values.
+/// Private mode draws no trail and no values. Answers whether the caret was hit.
 fn row_ui(
     ui: &mut egui::Ui,
     row: &Row,
     name: &str,
+    folded_names: &[String],
     private: bool,
     current: bool,
-) -> egui::Response {
-    let mut lines: Vec<Change> = Vec::new();
-    if private {
-        if !row.lines.is_empty() {
-            lines.push(Change {
-                what: plural(row.lines.len(), "change"),
-                before: None,
-                after: None,
-            });
-        }
-    } else {
-        lines.extend(row.lines.iter().take(LINES_SHOWN).cloned());
-        if row.lines.len() > LINES_SHOWN {
-            lines.push(more_line(row.lines.len() - LINES_SHOWN));
-        }
-    }
+    expanded: bool,
+) -> (egui::Response, bool) {
+    let lines = row_lines(row, folded_names, private, expanded);
     let line_h = 14.0;
     let h = 5.0 + 16.0 + lines.len() as f32 * (3.0 + line_h) + 5.0;
     let (rect, resp) =
@@ -1091,13 +1204,40 @@ fn row_ui(
     }
     let trail = if private { "" } else { row.trail.as_str() };
     let x = tag.right() + 7.0;
+    let mut end = rect.right() - ROW_PAD;
+    let mut toggled = false;
+    if !row.folded.is_empty() {
+        let caret = egui::Rect::from_min_max(
+            egui::pos2(end - 16.0, tag.top()),
+            egui::pos2(end, tag.bottom()),
+        );
+        let over = resp.hover_pos().is_some_and(|p| caret.contains(p));
+        toggled = resp.clicked()
+            && resp
+                .interact_pointer_pos()
+                .is_some_and(|p| caret.contains(p));
+        p.text(
+            caret.center(),
+            egui::Align2::CENTER_CENTER,
+            match expanded {
+                true => icon::CARET_DOWN,
+                false => icon::CARET_RIGHT,
+            },
+            theme::icon_font(12.0),
+            match over {
+                true => color::text(),
+                false => theme::text::dim(),
+            },
+        );
+        end = caret.left() - 4.0;
+    }
     let galley = one_line(
         ui,
         &[
             (trail, 12.0, theme::text::faint(), false),
             (&title, 12.0, color::text(), false),
         ],
-        rect.right() - ROW_PAD - x,
+        end - x,
     );
     p.galley(
         egui::pos2(x, tag.center().y - galley.size().y / 2.0),
@@ -1105,18 +1245,46 @@ fn row_ui(
         color::text(),
     );
     let mut y = tag.bottom() + 3.0;
-    for c in &lines {
-        let parts = value_parts(c);
-        let refs: Vec<(&str, f32, egui::Color32, bool)> = parts
-            .iter()
-            .map(|(t, s, i, k)| (t.as_str(), *s, *i, *k))
-            .collect();
-        let x = rect.left() + ROW_PAD + LINE_INDENT;
-        let galley = one_line(ui, &refs, rect.right() - ROW_PAD - x);
-        p.galley(egui::pos2(x, y), galley, theme::text::muted());
+    let left = rect.left() + ROW_PAD + LINE_INDENT;
+    for line in &lines {
+        match line {
+            Line::Value(c, indent) => {
+                let parts = value_parts(c);
+                let refs: Vec<(&str, f32, egui::Color32, bool)> = parts
+                    .iter()
+                    .map(|(t, s, i, k)| (t.as_str(), *s, *i, *k))
+                    .collect();
+                let x = left + indent;
+                let galley = one_line(ui, &refs, rect.right() - ROW_PAD - x);
+                p.galley(egui::pos2(x, y), galley, theme::text::muted());
+            }
+            Line::Layer(status, name) => {
+                let (hue, ink, sign) = look(*status);
+                let tag =
+                    egui::Rect::from_min_size(egui::pos2(left, y + 1.0), egui::vec2(12.0, 12.0));
+                p.rect_filled(tag, 2.0, hue);
+                p.text(
+                    tag.center(),
+                    egui::Align2::CENTER_CENTER,
+                    sign,
+                    egui::FontId::proportional(9.0),
+                    ink,
+                );
+                let x = left + FOLDED_INDENT;
+                let galley = one_line(
+                    ui,
+                    &[(name, 11.5, color::text(), false)],
+                    rect.right() - ROW_PAD - x,
+                );
+                p.galley(egui::pos2(x, y), galley, color::text());
+            }
+        }
         y += line_h + 3.0;
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    (
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand),
+        toggled,
+    )
 }
 
 /// A change no page holds: its status tag and what, the values under it.
@@ -1412,9 +1580,11 @@ mod tests {
         let card = row(card).expect("the card's row");
         assert_eq!(card.layers, 2, "it stands for the price too");
         assert!(
-            card.lines.iter().any(|l| l.what.starts_with("Price · ")),
+            card.all_lines()
+                .iter()
+                .any(|l| l.what.starts_with("Price · ")),
             "the price's change is named under it: {:?}",
-            card.lines
+            card.all_lines()
         );
         let old = row(old).expect("the removed box's row");
         assert_eq!(old.status, Status::Removed);
@@ -1425,6 +1595,41 @@ mod tests {
         assert_eq!(pay.page, Some(second));
         assert_eq!(c.changed_on(first), 4, "card, price, note and box");
         assert_eq!(c.changed_on(second), 1);
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// A folded row names its folded layers' changes under it; expanded, it lists
+    /// each folded layer apart with its own values, indented under its name.
+    ///
+    /// flip: `row_lines` ignoring `expanded` → fails at "the price listed apart".
+    #[test]
+    fn an_expanded_row_lists_its_folded_layers_apart() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "expand");
+        let card = f.card;
+        let c = open(&mut f);
+        let row = c.rows.iter().find(|r| r.id == card).unwrap();
+        assert_eq!(row.folded.len(), 1, "the price is folded in: {row:#?}");
+        let names = vec!["Price".to_string()];
+        let folded = row_lines(row, &names, false, false);
+        assert!(
+            folded.iter().all(|l| matches!(l, Line::Value(_, 0.0))),
+            "folded, every line is a value"
+        );
+        assert!(
+            folded
+                .iter()
+                .any(|l| matches!(l, Line::Value(c, _) if c.what.starts_with("Price · ")))
+        );
+        let open = row_lines(row, &names, false, true);
+        let at = open
+            .iter()
+            .position(|l| matches!(l, Line::Layer(Status::Changed, n) if n == "Price"))
+            .expect("the price listed apart");
+        assert!(
+            matches!(&open[at + 1], Line::Value(c, i) if *i == FOLDED_INDENT && !c.what.contains(" · ")),
+            "its value under it, named by itself"
+        );
         let _ = std::fs::remove_file(&f.version);
     }
 

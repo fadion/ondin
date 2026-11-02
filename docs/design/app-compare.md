@@ -33,9 +33,9 @@ matched by id, so a renamed or moved layer is one change.
 - **Rows** (`compare::rows`), from `diff::diff(then, now)`, grouped by page in the diff's order
   (removed pages last). A page's own change, or an added or removed page, is a row with no mark.
   **The topmost listed layer is marked**: a listed layer under one that already has a row folds
-  into it. Under a changed row its changes become lines named *Child · what* (or *Child added* /
-  *removed*) and it is counted in the row's `layers`; under an added or removed row nothing is
-  added, since its `inside` count already says. Each row keeps its world box in both documents
+  into it. Under a changed row it is kept in the row's `folded`, with its own changes, and counted
+  in the row's `layers`; under an added or removed row nothing is added, since its `inside` count
+  already says. Each row keeps its world box in both documents
   (`Resolved::world_bounds`); *moved or resized* is both boxes present and differing by
   `diff::EPSILON`. Variables, modes, styles, guides and publish state go under *Not on the canvas*,
   their status read from which side has a value.
@@ -72,7 +72,11 @@ matched by id, so a renamed or moved layer is one change.
   (file glyph, name, row count, dimmed when the page is not in the open document); each row a
   16pt status tag, the dim trail then the name (*· n inside* for an added or removed layer with
   contents), up to four value lines *what before → after* (before struck), then *and n more
-  changes*. A click on a row makes it current and steps to it.
+  changes*; a folded layer's changes are among them as *Child · what* (*Child added* / *removed*).
+  A row with folded layers has a caret at its right end (`Compare::expanded`): expanded, the row
+  shows all its own values, then each folded layer apart — a 12pt status tag and its name, and all
+  its values indented 17pt under it. A click on the caret expands or folds; a click elsewhere on a
+  row makes it current and steps to it.
 - **Private mode** masks the names in the card and in the marks' tags through `private::layer` and
   `private::page` and the bar's (*a version*), drops the trail, and replaces the value lines with
   *n changes*.

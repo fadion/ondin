@@ -327,6 +327,61 @@ fn a_filled_open_path_is_not_stroked_along_its_closing_edge() {
     assert_eq!(rows, ["Filled open paths"]);
 }
 
+/// A filled open path split in its main but not in an instance whose copy has
+/// its fill turned off is left out of the instance's links, a plain layer
+/// there, while the instance stays linked. flip: drop the split comparison in
+/// `matched` → fails at the copy's link.
+#[test]
+fn a_copy_split_unlike_its_source_is_not_linked_to_it() {
+    // Figma sends no fill geometry for a vector with no fill.
+    let v = |id: &str, fills: Value| {
+        let geometry = if fills.as_array().is_some_and(|f| f.is_empty()) {
+            json!([])
+        } else {
+            json!([{ "path": "M0 0L5 10L10 0Z", "windingRule": "NONZERO" }])
+        };
+        node(
+            id,
+            "VECTOR",
+            (0.0, 0.0, 10.0, 10.0),
+            json!({
+                "fills": fills,
+                "strokes": [solid(rgb(0.0, 0.0, 0.0))], "strokeWeight": 2,
+                "fillGeometry": geometry,
+                "strokeGeometry": [{ "path": "M-1 0L5 12L11 0L9 0L5 8L1 0Z" }],
+            }),
+        )
+    };
+    let main = node(
+        "1:1",
+        "COMPONENT",
+        (0.0, 0.0, 10.0, 10.0),
+        json!({ "children": [v("1:2", json!([solid(rgb(1.0, 0.0, 0.0))]))] }),
+    );
+    let inst = node(
+        "2:1",
+        "INSTANCE",
+        (50.0, 0.0, 10.0, 10.0),
+        json!({ "componentId": "1:1", "children": [v("I2:1;1:2", json!([]))] }),
+    );
+    let doc = import(fetched(vec![main, inst], json!({}), &[])).doc;
+    let at = |name: &str| doc.get(one(&doc, name)).unwrap();
+    assert!(
+        matches!(at("1:2").kind(), NodeKind::Group),
+        "the main's is split"
+    );
+    assert!(
+        matches!(at("I2:1;1:2").kind(), NodeKind::Path { .. }),
+        "the copy's is not"
+    );
+    assert_eq!(
+        at("2:1").link(),
+        Some(one(&doc, "1:1")),
+        "the instance stays linked"
+    );
+    assert_eq!(at("I2:1;1:2").link(), None, "its copy links to nothing");
+}
+
 /// An ellipse's arc: a full turn (Figma's `f32` 2π) is the whole ellipse, a
 /// ring when it has an inner radius; a quarter is 90°; an arc crossing 0° and
 /// one stored backwards keep their span. flip: wrap the sweep by

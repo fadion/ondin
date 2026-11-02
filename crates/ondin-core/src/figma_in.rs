@@ -1045,7 +1045,10 @@ impl Builder<'_> {
     }
 
     /// Whether `inst` is a swap, its main when that is in the file, and each of
-    /// its nodes paired with the node it copies, when every one finds it.
+    /// its nodes paired with the node it copies, when every one finds it. A
+    /// filled open path split on one side and not the other (a fill overridden
+    /// off in the copy) is left out, a plain layer of the instance: a group
+    /// linked to a path would take the path's edits, and the reverse its children.
     #[allow(clippy::type_complexity)]
     fn matched(&self, inst: &Instance) -> (bool, Option<NodeId>, Option<Vec<(NodeId, NodeId)>>) {
         let main = self
@@ -1060,7 +1063,7 @@ impl Builder<'_> {
             && source_of(&inst.fid)
                 .and_then(|s| self.shows.get(&s))
                 .is_some_and(|c| *c != inst.component);
-        let copies = inst
+        let copies: Option<Vec<Option<(NodeId, NodeId)>>> = inst
             .copies
             .iter()
             .map(|(id, fid)| {
@@ -1069,10 +1072,16 @@ impl Builder<'_> {
                 } else {
                     source_of(fid)
                 };
-                source.and_then(|s| self.nodes.get(&s)).map(|&s| (*id, s))
+                let &s = self.nodes.get(&source?)?;
+                let split = |n: &NodeId| self.parts.contains_key(n);
+                Some((split(id) == split(&s)).then_some((*id, s)))
             })
             .collect();
-        (swapped, main, copies)
+        (
+            swapped,
+            main,
+            copies.map(|c| c.into_iter().flatten().collect()),
+        )
     }
 
     /// Components become mains; each instance whose every node finds the node it

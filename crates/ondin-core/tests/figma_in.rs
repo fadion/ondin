@@ -414,12 +414,10 @@ fn gradient_handles_map_onto_the_box() {
     assert_eq!(g.transform * Point::new(0.0, 1.0), Point::new(100.0, 100.0));
 }
 
-/// A nested instance swapped to another component keeps its slot in the
-/// outer instance but shows its own component: its layers link to that
-/// component's, and an edit to the component it replaced does not reach it.
-/// flip: drop the swap test in `components` → fails at the swapped root.
-#[test]
-fn a_swapped_nested_instance_shows_its_own_component() {
+/// Icon A (3:1) inside Button (4:1), and an instance of Button (5:1) whose
+/// icon is swapped to Icon B (7:1); Icon B's main is left out unless `icon_b`,
+/// as a team library's is.
+fn swap_fixture(icon_b: bool) -> Vec<Value> {
     let icon = |id: &str, child: &str, kind: &str| {
         node(
             id,
@@ -448,17 +446,35 @@ fn a_swapped_nested_instance_shows_its_own_component() {
             ]})),
         ]}),
     );
-    let r = import(fetched(
-        vec![
-            icon("3:1", "3:2", "RECTANGLE"),
-            icon("7:1", "7:2", "ELLIPSE"),
-            button,
-            swapped,
-        ],
-        json!({}),
-        &[],
-    ));
-    let mut doc = r.doc;
+    let mut nodes = vec![icon("3:1", "3:2", "RECTANGLE"), button, swapped];
+    if icon_b {
+        nodes.push(icon("7:1", "7:2", "ELLIPSE"));
+    }
+    nodes
+}
+
+/// A layer added to Icon A, propagated and applied.
+fn add_to_icon_a(doc: &mut Document) {
+    let mut ids = IdSource::new(0xF2);
+    let mut tx = ondin_core::Transaction(vec![ondin_core::Operation::CreateNode {
+        id: ids.mint(),
+        parent: one(doc, "3:1"),
+        index: 1,
+        kind: NodeKind::Group,
+        transform: None,
+        name: Some("added".into()),
+    }]);
+    ondin_core::propagate::owed(doc, &mut tx, &mut ids);
+    doc.apply(&tx).expect("the edit applies");
+}
+
+/// A nested instance swapped to another component keeps its slot in the
+/// outer instance but shows its own component: its layers link to that
+/// component's, and an edit to the component it replaced does not reach it.
+/// flip: drop the swap test in `components` → fails at the swapped root.
+#[test]
+fn a_swapped_nested_instance_shows_its_own_component() {
+    let mut doc = import(fetched(swap_fixture(true), json!({}), &[])).doc;
     let at = |doc: &Document, name: &str| doc.get(one(doc, name)).unwrap().clone();
     let root = at(&doc, "I5:1;4:3");
     assert_eq!(root.link(), Some(one(&doc, "4:3")), "keeps its slot");
@@ -470,18 +486,7 @@ fn a_swapped_nested_instance_shows_its_own_component() {
     );
     assert_eq!(at(&doc, "5:1").link(), Some(one(&doc, "4:1")));
     // A layer added to Icon A reaches Button's icon but not the swapped one.
-    let mut ids = IdSource::new(0xF2);
-    let added = ids.mint();
-    let mut tx = ondin_core::Transaction(vec![ondin_core::Operation::CreateNode {
-        id: added,
-        parent: one(&doc, "3:1"),
-        index: 1,
-        kind: NodeKind::Group,
-        transform: None,
-        name: Some("added".into()),
-    }]);
-    ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
-    doc.apply(&tx).expect("the edit applies");
+    add_to_icon_a(&mut doc);
     assert_eq!(
         at(&doc, "4:3").children().len(),
         2,
@@ -491,6 +496,45 @@ fn a_swapped_nested_instance_shows_its_own_component() {
         at(&doc, "I5:1;4:3").children(),
         [one(&doc, "I5:1;4:3;7:2")],
         "the swapped instance does not"
+    );
+}
+
+/// A nested instance swapped to a component not in the file (a team library's)
+/// is left out of its outer instance's links rather than linked to the slot it
+/// replaced, so an edit to the replaced component never reaches it, while the
+/// outer instance stays linked. flip: link every copy in `components`, the
+/// unswapped root included → fails at the root's link.
+#[test]
+fn a_swap_to_a_component_not_in_the_file_is_not_linked_to_its_slot() {
+    let mut doc = import(fetched(swap_fixture(false), json!({}), &[])).doc;
+    let at = |doc: &Document, name: &str| doc.get(one(doc, name)).unwrap().clone();
+    assert_eq!(
+        at(&doc, "5:1").link(),
+        Some(one(&doc, "4:1")),
+        "Button's instance stays linked"
+    );
+    let root = at(&doc, "I5:1;4:3");
+    assert_eq!(
+        (root.link(), root.swap()),
+        (None, None),
+        "linked to nothing"
+    );
+    assert_eq!(at(&doc, "I5:1;4:3;7:2").link(), None);
+    add_to_icon_a(&mut doc);
+    assert_eq!(
+        at(&doc, "4:3").children().len(),
+        2,
+        "Icon A's instance takes it"
+    );
+    assert_eq!(
+        at(&doc, "I5:1;4:3").children(),
+        [one(&doc, "I5:1;4:3;7:2")],
+        "the swapped instance does not"
+    );
+    assert_eq!(
+        at(&doc, "5:1").children(),
+        [one(&doc, "I5:1;4:3")],
+        "nor is Icon A copied back in"
     );
 }
 

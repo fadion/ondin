@@ -1044,6 +1044,37 @@ impl Builder<'_> {
         }
     }
 
+    /// Whether `inst` is a swap, its main when that is in the file, and each of
+    /// its nodes paired with the node it copies, when every one finds it.
+    #[allow(clippy::type_complexity)]
+    fn matched(&self, inst: &Instance) -> (bool, Option<NodeId>, Option<Vec<(NodeId, NodeId)>>) {
+        let main = self
+            .nodes
+            .get(&inst.component)
+            .filter(|_| self.mains.contains(&inst.component))
+            .copied();
+        // A nested instance showing another component than the copy it sits in
+        // is a swap: it keeps that copy's slot, and its nodes copy its own
+        // component's, named from its root.
+        let swapped = inst.nested
+            && source_of(&inst.fid)
+                .and_then(|s| self.shows.get(&s))
+                .is_some_and(|c| *c != inst.component);
+        let copies = inst
+            .copies
+            .iter()
+            .map(|(id, fid)| {
+                let source = if swapped {
+                    source_within(fid, &inst.fid)
+                } else {
+                    source_of(fid)
+                };
+                source.and_then(|s| self.nodes.get(&s)).map(|&s| (*id, s))
+            })
+            .collect();
+        (swapped, main, copies)
+    }
+
     /// Components become mains; each instance whose every node finds the node it
     /// copies is linked to it, node by node, in one transaction.
     fn components(&mut self) -> Result<(), FigmaError> {
@@ -1057,32 +1088,25 @@ impl Builder<'_> {
             })
             .collect();
         let (mut linked, mut missing, mut unmatched) = (0, 0, 0);
-        for inst in &self.instances {
-            let main = self
-                .nodes
-                .get(&inst.component)
-                .filter(|_| self.mains.contains(&inst.component));
-            // A nested instance showing another component than the copy it
-            // sits in is a swap: it keeps that copy's slot, and its nodes copy
-            // its own component's, named from its root.
-            let swapped = inst.nested
-                && source_of(&inst.fid)
-                    .and_then(|s| self.shows.get(&s))
-                    .is_some_and(|c| *c != inst.component);
-            let copies: Option<Vec<(NodeId, NodeId)>> = inst
-                .copies
-                .iter()
-                .map(|(id, fid)| {
-                    let source = if swapped {
-                        source_within(fid, &inst.fid)
-                    } else {
-                        source_of(fid)
-                    };
-                    source.and_then(|s| self.nodes.get(&s)).map(|&s| (*id, s))
-                })
-                .collect();
+        let matched: Vec<_> = self.instances.iter().map(|i| self.matched(i)).collect();
+        // A swapped nested instance that cannot be swapped here (its component
+        // is a team library's, absent from the file) is no copy of the slot it
+        // sits in: linked there, it would take the original's children.
+        let unswapped: FxHashSet<NodeId> = self
+            .instances
+            .iter()
+            .zip(&matched)
+            .filter(|(_, (swapped, main, copies))| *swapped && (main.is_none() || copies.is_none()))
+            .map(|(inst, _)| inst.root)
+            .collect();
+        for (inst, (swapped, main, copies)) in self.instances.iter().zip(matched) {
+            let copies = copies.map(|c| {
+                c.into_iter()
+                    .filter(|(id, _)| !unswapped.contains(id))
+                    .collect::<Vec<_>>()
+            });
             match (main, copies) {
-                (Some(&main), Some(copies)) => {
+                (Some(main), Some(copies)) => {
                     linked += 1;
                     if !inst.nested {
                         ops.push(Operation::SetLink {

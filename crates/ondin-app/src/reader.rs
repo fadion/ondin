@@ -32,6 +32,14 @@ const READ_STACK: usize = 64 << 20;
 /// test build's is small enough to reach.
 const MAX_ANSWER: u64 = if cfg!(test) { 1 << 20 } else { 4 << 30 };
 
+/// How long the app waits for an answer before it ends the child: a canvas
+/// import lands in the order it was asked, so a stuck reader would hold every
+/// later paste and drop on its tab, with no cancel. Far past any real file's
+/// read; a test build's is short enough to wait out, yet long enough for a
+/// debug child reading a fixture while the whole suite runs.
+const DEADLINE: std::time::Duration =
+    std::time::Duration::from_secs(if cfg!(test) { 15 } else { 120 });
+
 /// What the child is asked to read.
 pub(crate) enum Request {
     Sketch(Vec<u8>),
@@ -45,6 +53,9 @@ pub(crate) enum Request {
     /// A child that answers past [`MAX_ANSWER`] (tests only).
     #[cfg(test)]
     Flood,
+    /// A child that never answers (tests only).
+    #[cfg(test)]
+    Hang,
 }
 
 /// Why the child gave no reading.
@@ -194,13 +205,34 @@ fn run(request: &Request) -> Result<Vec<u8>, Failure> {
     // The child reads the whole request before it writes, but a child that dies
     // mid-request must not leave this side blocked on a full pipe.
     let mut answer = Vec::new();
+    let mut late = false;
     let read = std::thread::scope(|s| {
         s.spawn(move || {
             // Dropping `input` when written tells the child the request is whole.
             let _ = encode(request, &mut std::io::BufWriter::new(input));
         });
-        (&mut output).take(MAX_ANSWER + 1).read_to_end(&mut answer)
+        let (done, finished) = std::sync::mpsc::channel();
+        let answer = &mut answer;
+        let reading = s.spawn(move || {
+            let read = (&mut output).take(MAX_ANSWER + 1).read_to_end(answer);
+            let _ = done.send(());
+            read
+        });
+        // Ending the child closes its pipes, which ends both threads above.
+        if finished.recv_timeout(DEADLINE).is_err() {
+            late = true;
+            let _ = child.kill();
+        }
+        reading
+            .join()
+            .unwrap_or_else(|_| Err(std::io::ErrorKind::Other.into()))
     });
+    if late {
+        let _ = child.wait();
+        return Err(Failure::Stopped(
+            "the reader took too long on it, so it was stopped".into(),
+        ));
+    }
     // A child still writing past the cap would block on the pipe for ever.
     if answer.len() as u64 > MAX_ANSWER {
         let _ = child.kill();
@@ -361,6 +393,10 @@ fn answer(request: Request) -> Vec<u8> {
         Request::Abort => std::process::abort(),
         #[cfg(test)]
         Request::Flood => vec![0; 2 * MAX_ANSWER as usize],
+        #[cfg(test)]
+        Request::Hang => loop {
+            std::thread::park();
+        },
     }
 }
 
@@ -418,6 +454,8 @@ fn encode(request: &Request, out: &mut impl std::io::Write) -> std::io::Result<(
         Request::Abort => (b'!', Vec::new()),
         #[cfg(test)]
         Request::Flood => (b'~', Vec::new()),
+        #[cfg(test)]
+        Request::Hang => (b'z', Vec::new()),
     };
     out.write_all(&[tag])?;
     out.write_all(&(entries.len() as u64).to_le_bytes())?;
@@ -449,6 +487,8 @@ fn decode(bytes: &[u8]) -> Option<Request> {
         b'!' => Request::Abort,
         #[cfg(test)]
         b'~' => Request::Flood,
+        #[cfg(test)]
+        b'z' => Request::Hang,
         _ => return None,
     })
 }
@@ -489,6 +529,22 @@ mod tests {
         assert!(
             matches!(&got, Err(Failure::Stopped(why)) if why.contains("too large")),
             "{got:?}"
+        );
+    }
+
+    /// A child that never answers is ended at the deadline, a stopped read.
+    /// flip: drop the deadline in `run` → the test hangs.
+    #[test]
+    fn a_child_past_the_deadline_is_a_stopped_read() {
+        let started = std::time::Instant::now();
+        let got = run(&Request::Hang);
+        assert!(
+            matches!(&got, Err(Failure::Stopped(why)) if why.contains("too long")),
+            "{got:?}"
+        );
+        assert!(
+            started.elapsed() >= DEADLINE,
+            "ended at the deadline, not before"
         );
     }
 

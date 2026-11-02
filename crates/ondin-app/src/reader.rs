@@ -22,6 +22,16 @@ pub(crate) const SUBCOMMAND: &str = "reader";
 /// skipped and a child that died before answering is told from one that did.
 const MAGIC: &[u8] = b"\nONDIN-READER-1\n";
 
+/// The reading thread's stack: the child does nothing else, so a large one
+/// costs nothing and leaves every reader's depth limit far inside it.
+const READ_STACK: usize = 64 << 20;
+
+/// The most of an answer the app reads, past what the largest file a reader
+/// takes comes back as (2 GiB of pictures, base64 in the saved document), so an
+/// answer that would cost the app its memory is refused rather than parsed. A
+/// test build's is small enough to reach.
+const MAX_ANSWER: u64 = if cfg!(test) { 1 << 20 } else { 4 << 30 };
+
 /// What the child is asked to read.
 pub(crate) enum Request {
     Sketch(Vec<u8>),
@@ -32,6 +42,9 @@ pub(crate) enum Request {
     /// A child that dies before answering (tests only).
     #[cfg(test)]
     Abort,
+    /// A child that answers past [`MAX_ANSWER`] (tests only).
+    #[cfg(test)]
+    Flood,
 }
 
 /// Why the child gave no reading.
@@ -186,8 +199,16 @@ fn run(request: &Request) -> Result<Vec<u8>, Failure> {
             // Dropping `input` when written tells the child the request is whole.
             let _ = encode(request, &mut std::io::BufWriter::new(input));
         });
-        output.read_to_end(&mut answer)
+        (&mut output).take(MAX_ANSWER + 1).read_to_end(&mut answer)
     });
+    // A child still writing past the cap would block on the pipe for ever.
+    if answer.len() as u64 > MAX_ANSWER {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(Failure::Stopped(
+            "what it holds is too large to bring in".into(),
+        ));
+    }
     let status = child.wait();
     let died = || {
         Failure::Stopped(
@@ -275,7 +296,15 @@ pub(crate) fn serve() -> i32 {
         return 2;
     };
     drop(bytes);
-    let answer = answer(request);
+    // On a thread of its own: the readers' depth limits are set for a worker's
+    // stack, and the main thread's is 1 MiB on Windows.
+    let Ok(Ok(answer)) = std::thread::Builder::new()
+        .stack_size(READ_STACK)
+        .spawn(move || answer(request))
+        .map(std::thread::JoinHandle::join)
+    else {
+        return 2;
+    };
     let mut out = std::io::stdout().lock();
     if out
         .write_all(MAGIC)
@@ -330,6 +359,8 @@ fn answer(request: Request) -> Vec<u8> {
         }
         #[cfg(test)]
         Request::Abort => std::process::abort(),
+        #[cfg(test)]
+        Request::Flood => vec![0; 2 * MAX_ANSWER as usize],
     }
 }
 
@@ -385,6 +416,8 @@ fn encode(request: &Request, out: &mut impl std::io::Write) -> std::io::Result<(
         Request::Pdf(b) => (b'D', vec![("", b)]),
         #[cfg(test)]
         Request::Abort => (b'!', Vec::new()),
+        #[cfg(test)]
+        Request::Flood => (b'~', Vec::new()),
     };
     out.write_all(&[tag])?;
     out.write_all(&(entries.len() as u64).to_le_bytes())?;
@@ -414,6 +447,8 @@ fn decode(bytes: &[u8]) -> Option<Request> {
         b'F' => Request::Figma(entries),
         #[cfg(test)]
         b'!' => Request::Abort,
+        #[cfg(test)]
+        b'~' => Request::Flood,
         _ => return None,
     })
 }
@@ -441,6 +476,20 @@ mod tests {
     fn a_child_that_dies_is_a_stopped_read() {
         let got = run(&Request::Abort);
         assert!(matches!(got, Err(Failure::Stopped(_))), "{got:?}");
+    }
+
+    /// An answer past the cap is a stopped read, the child ended rather than
+    /// left blocked on its pipe. flip: drop the cap check in `run` → the test
+    /// hangs, waiting on a child blocked on its full pipe. Reading to the end
+    /// instead of stopping at the cap does not bite: what it costs is memory,
+    /// unseen here.
+    #[test]
+    fn an_answer_past_the_cap_is_a_stopped_read() {
+        let got = run(&Request::Flood);
+        assert!(
+            matches!(&got, Err(Failure::Stopped(why)) if why.contains("too large")),
+            "{got:?}"
+        );
     }
 
     /// A refusal crosses in the reader's own words.

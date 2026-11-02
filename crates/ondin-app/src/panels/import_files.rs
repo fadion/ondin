@@ -544,6 +544,11 @@ const ZIP_LIMIT: u64 = 2 << 30;
 /// 3 GiB at most. A real `document.json` or page is tens of megabytes.
 const JSON_ENTRY_LIMIT: u64 = 128 << 20;
 
+/// The most all of a zip's JSON entries may inflate to together: a reader keeps
+/// every page it parsed until it builds, so sixteen entries each within
+/// [`JSON_ENTRY_LIMIT`] would otherwise ask for tens of gigabytes.
+const JSON_LIMIT: u64 = 256 << 20;
+
 /// Another tool's zip, for `ondin_core::foreign::Archive`, and how much of
 /// [`ZIP_LIMIT`] its entries have used.
 struct Zip<'a> {
@@ -551,6 +556,8 @@ struct Zip<'a> {
     read: u64,
     /// The most one `.json` entry may inflate to, [`JSON_ENTRY_LIMIT`].
     json_limit: u64,
+    /// What is left of [`JSON_LIMIT`] for the `.json` entries still to read.
+    json_left: u64,
 }
 
 impl ondin_core::foreign::Archive for Zip<'_> {
@@ -563,8 +570,9 @@ impl ondin_core::foreign::Archive for Zip<'_> {
     fn entry(&mut self, name: &str) -> Option<Vec<u8>> {
         let entry = self.zip.by_name(name).ok()?;
         let mut room = ZIP_LIMIT.saturating_sub(self.read);
-        if name.ends_with(".json") {
-            room = room.min(self.json_limit);
+        let json = name.ends_with(".json");
+        if json {
+            room = room.min(self.json_limit).min(self.json_left);
         }
         if entry.size() > room {
             return None;
@@ -576,6 +584,9 @@ impl ondin_core::foreign::Archive for Zip<'_> {
             return None;
         }
         self.read += out.len() as u64;
+        if json {
+            self.json_left -= out.len() as u64;
+        }
         Some(out)
     }
 }
@@ -645,6 +656,7 @@ pub(crate) fn read_foreign_here(kind: Kind, bytes: &[u8]) -> Result<Read, String
                 zip,
                 read: 0,
                 json_limit: JSON_ENTRY_LIMIT,
+                json_left: JSON_LIMIT,
             })
         };
     // A fresh stream, as a new document's: nothing else holds ids under it.
@@ -3313,10 +3325,34 @@ mod tests {
             zip: zip::ZipArchive::new(std::io::Cursor::new(&bytes[..])).unwrap(),
             read: 0,
             json_limit: 64,
+            json_left: JSON_LIMIT,
         };
         use ondin_core::foreign::Archive as _;
         assert_eq!(zip.entry("pages/P.json"), None);
         assert_eq!(zip.entry("images/p.png").map(|b| b.len()), Some(100));
+    }
+
+    /// JSON entries each within their own limit are not read once together
+    /// they pass the file's. flip: leave `json_left` unspent in `Zip::entry` →
+    /// fails at the third page.
+    #[test]
+    fn json_entries_share_the_files_limit() {
+        let bytes = ondin_export::plan::zip(&[
+            ("pages/A.json".into(), vec![b' '; 100]),
+            ("pages/B.json".into(), vec![b' '; 100]),
+            ("pages/C.json".into(), vec![b' '; 100]),
+        ])
+        .unwrap();
+        let mut zip = Zip {
+            zip: zip::ZipArchive::new(std::io::Cursor::new(&bytes[..])).unwrap(),
+            read: 0,
+            json_limit: 100,
+            json_left: 250,
+        };
+        use ondin_core::foreign::Archive as _;
+        assert!(zip.entry("pages/A.json").is_some());
+        assert!(zip.entry("pages/B.json").is_some());
+        assert_eq!(zip.entry("pages/C.json"), None);
     }
 
     /// A Penpot export is read in Penpot's words and filed under the name the

@@ -1107,8 +1107,14 @@ impl OndinApp {
             self.reset_marked(true, mark);
             return;
         }
-        // A disabled field reports no hover, so the reason hangs off its own sense.
-        let hover = ui.interact(row, edit_id.with("hover"), egui::Sense::click());
+        // A disabled field reports no hover, so the reason and the right-click hang
+        // off a sense of the row's own; over an editable field that sense, laid
+        // after it, would take its click, so it hovers only.
+        let sense = match read_only {
+            true => egui::Sense::click(),
+            false => egui::Sense::hover(),
+        };
+        let hover = ui.interact(row, edit_id.with("hover"), sense);
         if read_only {
             let why = if live {
                 "Being edited on the canvas"
@@ -8068,6 +8074,61 @@ mod loading_dot_tests {
         assert!(
             !service.is_loading("Nothing At All"),
             "nor may a family the service has never heard of"
+        );
+    }
+}
+
+/// The *Content* row's field, clicked as the pointer clicks it.
+#[cfg(test)]
+mod content_row_tests {
+    use super::*;
+
+    /// A click on the Content field focuses it.
+    ///
+    /// flip: `type_content_row` sensing clicks over the whole row while the field
+    /// is editable → fails at "the field takes focus".
+    #[test]
+    fn a_click_on_the_content_field_focuses_it() {
+        let (ctx, mut app, id) = app_with_text();
+        let edit_id = egui::Id::new(("type-content", id));
+        let frame = |app: &mut crate::app::OndinApp, events: Vec<egui::Event>| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            let mut row = egui::Rect::NOTHING;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(280.0, 200.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(240.0);
+                    let top = ui.cursor().min;
+                    app.type_content_row(ui, &subject, &None);
+                    row = egui::Rect::from_min_max(top, ui.min_rect().max);
+                },
+            );
+            row
+        };
+        frame(&mut app, Vec::new());
+        let row = frame(&mut app, Vec::new());
+        assert!(row.height() >= ROW_H - 1.0, "fixture: the row is laid out");
+        let at = row.center() + egui::vec2(20.0, 0.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut app, vec![press(true)]);
+        frame(&mut app, vec![press(false)]);
+        frame(&mut app, Vec::new());
+        assert!(
+            ctx.memory(|m| m.has_focus(edit_id)),
+            "the field takes focus"
         );
     }
 }

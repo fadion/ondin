@@ -673,7 +673,7 @@ the first segment of a component's. It hides names, not content.
   `binding::kit_label`, `kit_heading`).
 - **What is masked:** layer, frame, component, page, document, project and version names, everywhere one is
   drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
-  colour-blind simulation's bar, the minimap, find and replace's list, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
+  colour-blind simulation's bar, the minimap, find and replace's list, a compare's bar, card and mark tags, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
   kit dialogs and the whole library screen. A main's or set's description and documentation link
   are masked with the names: the description field is disabled and empty (*Description hidden in
   private mode*), the link field reads *Link hidden in private mode*, an instance shows no description

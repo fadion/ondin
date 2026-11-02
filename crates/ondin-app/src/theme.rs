@@ -811,6 +811,8 @@ pub mod icon {
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
     /// A main's documentation link, opened in the browser.
     pub const BOOK_OPEN: &str = "\u{e0e6}";
+    /// Comparing with a version: two states, each arrow carrying one into the other.
+    pub const GIT_DIFF: &str = "\u{f00c}";
     /// *Select all instances*.
     pub const SELECTION_ALL: &str = "\u{e746}";
     /// A variant clash — two variants on one combination (§15 D982): a
@@ -978,6 +980,7 @@ pub mod icon {
         ("square-dots", SQUARE_DOTS),
         ("incognito", INCOGNITO),
         ("book-open", BOOK_OPEN),
+        ("git-diff", GIT_DIFF),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),
         ("arrow-up", ARROW_UP),
         ("arrow-down", ARROW_DOWN),

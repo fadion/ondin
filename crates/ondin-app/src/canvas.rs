@@ -347,6 +347,15 @@ impl CanvasRenderer {
         }
     }
 
+    /// A second canvas on this one's device, with its own texture and decode cache:
+    /// what a compare draws the version through, so switching sides redraws
+    /// neither. `None` with no device.
+    pub(crate) fn another(&self) -> Option<Self> {
+        self.gpu
+            .as_ref()
+            .map(|gpu| Self::new(gpu.render_state.clone()))
+    }
+
     /// A canvas with no device behind it, for `OndinApp::headless`. The decode
     /// cache stays real, since the layers panel and the placeholder rule read it.
     #[cfg(test)]
@@ -1564,6 +1573,12 @@ impl OndinApp {
         // A click that dismisses a menu is spent doing so (`docs/context-menus.md`
         // §0 R4); `context_menu_ui` handles the dismissal itself further down, and
         // the tab menu's was done by the strip, which latched `menu_was_up` first.
+        if self.session.compare.is_some() {
+            // Read-only: the canvas pans and picks a mark, nothing else.
+            self.compare_input(ui, &resp, rect, ppp);
+            self.draw_canvas(ui, &painter, rect, ppp, &resp);
+            return;
+        }
         if self.context_menu.is_none() && !self.tabs.menu_was_up {
             match self.mode {
                 // A picker opened over a text session can pick too.
@@ -6514,7 +6529,7 @@ impl OndinApp {
 
     /// Move the camera by a pan drag's delta, shared by `update_drag` and
     /// [`Self::text_mode_input`].
-    fn pan_by_drag(&mut self, ui: &egui::Ui, resp: &egui::Response) {
+    pub(crate) fn pan_by_drag(&mut self, ui: &egui::Ui, resp: &egui::Response) {
         let ppp = ui.ctx().pixels_per_point();
         let d = resp.drag_delta();
         self.session
@@ -7927,7 +7942,7 @@ impl OndinApp {
     }
 
     /// Every frame's name, drawn under the selection chrome.
-    fn draw_frame_labels(
+    pub(crate) fn draw_frame_labels(
         &self,
         ui: &egui::Ui,
         painter: &egui::Painter,
@@ -8778,6 +8793,12 @@ impl OndinApp {
         // The eyedropper reads what was just drawn.
         if self.dropper_frame(ui, resp, rect, ppp) {
             ui.ctx().request_repaint();
+        }
+
+        // A compare draws its own chrome and none of the editing's.
+        if self.session.compare.is_some() {
+            self.paint_compare(ui, painter, rect, ppp);
+            return;
         }
 
         // Overlays in paint order: the pixel grid over the artwork, then labels

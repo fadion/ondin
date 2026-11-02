@@ -845,6 +845,12 @@ pub struct OndinApp {
     pub(crate) kits_used_open: bool,
     /// *Version history…*, while it is open (`versions.rs`).
     pub(crate) versions_open: bool,
+    /// The card was opened by *Compare with version…*, so its compare buttons are
+    /// lit; cleared when it closes.
+    pub(crate) versions_compare: bool,
+    /// The canvas a compare draws the version through (`crate::compare`), made on
+    /// the first frame one is open and dropped on the first without.
+    pub(crate) then_canvas: Option<CanvasRenderer>,
     /// The version whose name the card is editing.
     pub(crate) version_naming: Option<crate::versions::Naming>,
     /// The kit *Make all local*'s confirmation is asking about.
@@ -1492,6 +1498,8 @@ impl OndinApp {
             kit_return: None,
             kits_used_open: false,
             versions_open: false,
+            versions_compare: false,
+            then_canvas: None,
             version_naming: None,
             making_all_local: None,
             unsharing_kit: None,
@@ -1888,7 +1896,8 @@ impl eframe::App for OndinApp {
             if self.show_layers {
                 self.layers_panel(ui);
             }
-            if self.show_toolbar {
+            // A compare has no tools to choose.
+            if self.show_toolbar && self.session.compare.is_none() {
                 self.tool_rail(ui);
             } else {
                 self.rail.flyout = None;
@@ -1935,7 +1944,12 @@ impl eframe::App for OndinApp {
         self.poll_simplify();
         self.poll_imports();
         if !self.focus {
-            self.inspector_panel(&ctx);
+            // While comparing, the changes card takes the inspector's place.
+            if self.session.compare.is_some() {
+                self.compare_card(&ctx);
+            } else {
+                self.inspector_panel(&ctx);
+            }
             self.path_bar(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
@@ -1961,6 +1975,8 @@ impl eframe::App for OndinApp {
         self.batch_rename_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
+        // After the canvas, whose first visit to a page a step's reveal must follow.
+        self.compare_bar(&ctx);
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
         self.settings_ui(&ctx);
         self.cheatsheet_ui(&ctx);
@@ -2092,6 +2108,13 @@ impl OndinApp {
     }
 
     pub(crate) fn dispatch(&mut self, ctx: &egui::Context, action: Action) {
+        // A compare is read-only; its bar reads Enter itself.
+        if self.session.compare.is_some() && !crate::compare::admits(&action) {
+            if !matches!(action, Action::Enter) {
+                self.session.info(crate::compare::READ_ONLY);
+            }
+            return;
+        }
         // A menu row that forwards here has already named its step, more particularly.
         if !self.session.has_step_name()
             && let Some((label, glyph)) = crate::menu::Item::step_name(action)
@@ -2157,6 +2180,10 @@ impl OndinApp {
             Action::MakeKit | Action::KitsUsed | Action::StopSharingKit => {}
             Action::ShowInLibrary => self.go_to_dashboard(),
             Action::VersionHistory => self.versions_open = true,
+            Action::CompareVersion => {
+                self.versions_open = true;
+                self.versions_compare = true;
+            }
             Action::SaveNamedVersion => self.save_named_version(),
             Action::RotateQuarter(clockwise) => {
                 let turn = std::f64::consts::FRAC_PI_2;
@@ -2588,6 +2615,8 @@ impl OndinApp {
         } else if self.find.open {
             // Below a text edit, which a row's double-click opens from the box.
             self.close_find();
+        } else if self.session.compare.is_some() {
+            self.leave_compare();
         } else if self.pen.is_some() {
             self.finish_pen(false);
         } else if self.cancel_gesture(ctx) {
@@ -5878,6 +5907,7 @@ impl OndinApp {
         self.making_local = None;
         self.kits_used_open = false;
         self.versions_open = false;
+        self.versions_compare = false;
         // Kept, as every way out of the name field but Escape keeps it.
         if let Some(n) = self.version_naming.take() {
             self.commit_version_name(n);

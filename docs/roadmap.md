@@ -18,9 +18,11 @@ reads true.
   text is checked, not its case transform.
 - **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
   together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
-- **Document diff in the app.** `ondin diff` reports changes by id (`ondin_core::diff`); what is
-  open is a visual diff marking the changed regions over the canvas, and the same compare in the
-  version history card (`versions.rs`). The git merge driver is built (`ondin merge`).
+- **Compare with a version, what is left** (`compare.rs`, `app-compare.md`): two versions with each
+  other (Shift+click a second compare button; the bar names both and Now becomes the newer); a page
+  only the version has, listed dimmed in the Pages section so Then can show it (today it is only a
+  row in the card); Swipe's handle following a still pointer; expanding a folded row to list its
+  layers apart.
 - **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).
   Import of the same file matches by the id in `$extensions`, then by path, so a rename made in code
   is not a delete plus a create. It shows what is added, changed, removed and renamed, and applies it

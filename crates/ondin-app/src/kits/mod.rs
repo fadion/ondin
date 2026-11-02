@@ -103,6 +103,11 @@ impl OndinApp {
                 app.open_menu = TopMenu::None;
                 app.versions_open = true;
             }
+            if item(ui, Item::CompareVersion).clicked() {
+                app.open_menu = TopMenu::None;
+                app.versions_open = true;
+                app.versions_compare = true;
+            }
             if item(ui, Item::SaveNamedVersion).clicked() {
                 app.open_menu = TopMenu::None;
                 app.save_named_version();

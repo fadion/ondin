@@ -443,6 +443,7 @@ pub enum Item {
     StopSharingKit,
     ShowInLibrary,
     VersionHistory,
+    CompareVersion,
     SaveNamedVersion,
     /// A quarter turn of each selected layer about its own origin, as the Transform
     /// card's buttons do; `true` is clockwise.
@@ -1224,6 +1225,7 @@ impl Item {
                 None,
                 Group::File,
             ),
+            Item::CompareVersion => s("Compare with version…", icon::GIT_DIFF, None, Group::File),
             Item::SaveNamedVersion => {
                 s("Save named version…", icon::FLOPPY_DISK, None, Group::File)
             }
@@ -1374,6 +1376,7 @@ impl Item {
             Item::ZoomFit => &["fit", "all"],
             Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
             Item::SelectInverse => &["invert", "others", "rest"],
+            Item::CompareVersion => &["diff", "changes", "history", "before"],
             Item::TextChord(_) => &["text", "type"],
             Item::Tool(Tool::Rect) => &["square", "box"],
             Item::Tool(Tool::Node) => &["node", "direct"],
@@ -1444,6 +1447,7 @@ impl Item {
             Item::StopSharingKit => Action::StopSharingKit,
             Item::ShowInLibrary => Action::ShowInLibrary,
             Item::VersionHistory => Action::VersionHistory,
+            Item::CompareVersion => Action::CompareVersion,
             Item::SaveNamedVersion => Action::SaveNamedVersion,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
             Item::SelectSame(same) => Action::SelectSame(same),
@@ -3517,6 +3521,7 @@ impl OndinApp {
             | Item::StopSharingKit
             | Item::ShowInLibrary
             | Item::VersionHistory
+            | Item::CompareVersion
             | Item::SaveNamedVersion
             | Item::RotateQuarter(_)
             | Item::SelectSame(_)

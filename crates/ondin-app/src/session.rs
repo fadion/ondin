@@ -35,7 +35,7 @@ const RUN_WINDOW: Duration = Duration::from_millis(600);
 static NEXT_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// A revision no session has held before ([`EditorSession::revision`]).
-fn next_revision() -> u64 {
+pub(crate) fn next_revision() -> u64 {
     NEXT_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
@@ -518,6 +518,10 @@ pub struct EditorSession {
     /// Which frame a status write belongs to ([`Self::next_status_pass`]): writes in
     /// one frame are one handler's, and join after an error.
     status_pass: u64,
+    /// A compare with a pinned version, while one is open (`crate::compare`). The
+    /// document is read-only meanwhile: a commit, an undo and a redo are refused
+    /// here, behind the doors the app closes itself.
+    pub compare: Option<Box<crate::compare::Compare>>,
 }
 
 /// **The flex-item properties a resize changed on the user's behalf** — the
@@ -721,6 +725,7 @@ impl EditorSession {
             last_detached: Default::default(),
             status: Status::default(),
             status_pass: 0,
+            compare: None,
         }
     }
 
@@ -1435,6 +1440,10 @@ impl EditorSession {
         if tx.0.is_empty() {
             return Ok(());
         }
+        if self.compare.is_some() {
+            self.fail(crate::compare::READ_ONLY);
+            return Ok(());
+        }
         // **While the browser's *Edit* is open, an edit of the style's users is an
         // edit of the style** — first, so every pass below reads the style's edit and
         // `style::settle` writes it back onto every user.
@@ -1635,6 +1644,10 @@ impl EditorSession {
     /// [`crate::app::OndinApp::undo`] when the ground shifts. **Not "an undo
     /// happened"**: `Ctrl+Z` at the bottom of the stack must not deselect anything.
     pub fn undo(&mut self) -> bool {
+        if self.compare.is_some() {
+            self.fail(crate::compare::READ_ONLY);
+            return false;
+        }
         match self.step_quietly(true) {
             Ok(Some((subjects, before))) => {
                 match self.follow_step(&subjects, &before) {
@@ -1656,6 +1669,10 @@ impl EditorSession {
 
     /// Put back what [`Self::undo`] took, and answer the same question it does.
     pub fn redo(&mut self) -> bool {
+        if self.compare.is_some() {
+            self.fail(crate::compare::READ_ONLY);
+            return false;
+        }
         match self.step_quietly(false) {
             Ok(Some((subjects, before))) => {
                 match self.follow_step(&subjects, &before) {
@@ -1786,6 +1803,7 @@ impl EditorSession {
     /// save state, and re-seeds the id source so subsequent creates cannot
     /// collide with ids the loaded file already uses.
     pub fn adopt_document(&mut self, doc: Document, path: Option<PathBuf>) {
+        self.compare = None;
         self.resolved = Resolved::rebuild(&doc);
         self.page = doc.first_page();
         self.parked.clear();

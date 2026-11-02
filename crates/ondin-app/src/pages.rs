@@ -806,6 +806,7 @@ impl OndinApp {
                     ink,
                 );
             }
+            let mut right = rect.right() - 6.0;
             if *draft {
                 let tag = p.layout_no_wrap(
                     "Draft".to_string(),
@@ -813,10 +814,8 @@ impl OndinApp {
                     theme::text::dim(),
                 );
                 let size = tag.size() + egui::vec2(10.0, 3.0);
-                let at = egui::Rect::from_min_size(
-                    egui::pos2(rect.right() - 6.0 - size.x, cy - size.y / 2.0),
-                    size,
-                );
+                let at =
+                    egui::Rect::from_min_size(egui::pos2(right - size.x, cy - size.y / 2.0), size);
                 p.rect_stroke(
                     at,
                     egui::CornerRadius::same(3),
@@ -824,6 +823,30 @@ impl OndinApp {
                     egui::StrokeKind::Inside,
                 );
                 p.galley(at.min + egui::vec2(5.0, 1.5), tag, theme::text::dim());
+                right = at.left() - 4.0;
+            }
+            // While comparing, how many of the page's layers changed.
+            if let Some(n) = self
+                .session
+                .compare
+                .as_ref()
+                .map(|c| c.changed_on(*page))
+                .filter(|n| *n > 0)
+            {
+                let tag = p.layout_no_wrap(
+                    n.to_string(),
+                    egui::FontId::proportional(10.0),
+                    crate::compare::CHANGED_INK,
+                );
+                let size = egui::vec2(tag.size().x.max(6.0) + 10.0, tag.size().y + 3.0);
+                let at =
+                    egui::Rect::from_min_size(egui::pos2(right - size.x, cy - size.y / 2.0), size);
+                p.rect_filled(at, egui::CornerRadius::same(3), crate::compare::CHANGED);
+                p.galley(
+                    at.center() - tag.size() / 2.0,
+                    tag,
+                    crate::compare::CHANGED_INK,
+                );
             }
             if renaming {
                 self.page_rename_field(ui, *page, rect);

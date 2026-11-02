@@ -460,7 +460,7 @@ mod leak {
     /// flip: `set` ignoring its argument (names never masked) → fails at the
     /// editor's own frame; `property_row` drawing the filter field in private
     /// mode → "main selected"; `preferred_rows` naming a main by `.name()` →
-    /// "swap picker open".
+    /// "swap picker open"; `paint_mark` tagging a mark with `row.name` → "compare".
     #[test]
     fn no_surface_draws_a_name_in_private_mode() {
         let ctx = egui::Context::default();
@@ -538,6 +538,31 @@ mod leak {
             },
             |app| app.close_find(),
         ));
+        // A compare names each changed layer in its card and in its mark's tag.
+        let version = std::env::temp_dir().join(format!(
+            "ondin-private-compare-{}.ondin",
+            std::process::id()
+        ));
+        found.extend(surface(
+            c,
+            &mut app,
+            "compare",
+            |app, _| {
+                let doc = ondin_core::io::save(&app.session.doc).unwrap();
+                std::fs::write(&version, doc).unwrap();
+                let locked = app.session.doc.get(rect).unwrap().locked();
+                assert!(app.session.commit(ondin_core::Transaction(vec![
+                    ondin_core::Operation::SetLocked {
+                        id: rect,
+                        locked: !locked,
+                    }
+                ])));
+                app.compare_with(&version, "Before".into(), None);
+                assert!(app.session.compare.is_some(), "fixture: comparing");
+            },
+            |app| app.leave_compare(),
+        ));
+        let _ = std::fs::remove_file(&version);
         found.extend(surface(
             c,
             &mut app,

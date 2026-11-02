@@ -638,6 +638,14 @@ impl OndinApp {
         );
         push(&mut out, Cmd::verb(Item::ShowInLibrary, None));
         push(&mut out, Cmd::verb(Item::VersionHistory, None));
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::CompareVersion,
+                (!self.in_library())
+                    .then_some("Save this document to the library to keep its versions"),
+            ),
+        );
         push(&mut out, Cmd::verb(Item::SaveNamedVersion, None));
         for clockwise in [false, true] {
             push(

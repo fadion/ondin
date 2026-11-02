@@ -56,6 +56,7 @@ Read the file for the exact wording before relying on one.
 | `app-rulers-guides.md` | 9.4 | Rulers and guides |
 | `app-autopan.md` | 9.4 | Auto-pan |
 | `app-canvas-chrome.md` | 9.4 | Canvas chrome, the minimap, the contrast check mode, the colour-blind simulation, top-bar menus, the command palette, batch rename, find and replace in text, the shortcut cheatsheet, focus mode, private mode, present mode |
+| `app-compare.md` | 9.4 | Compare with a version: the read-only mode, its marks, bar, Then/Swipe and changes card |
 | `app-image-editing.md` | 9.4 | Image fills and image editing |
 | `inspector.md` | 9.4 | The inspector cards |
 | `type-panel.md` | 9.4 | The Type panel and typography popup |

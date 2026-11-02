@@ -1,0 +1,1530 @@
+//! *Compare with a version*: the open document drawn as it is now, read-only,
+//! with a mark over every layer that differs from a pinned version, and a card in
+//! the inspector's place listing the changes as `ondin diff` reports them
+//! (`ondin_core::diff`, matched by id, so a renamed or moved layer is one change).
+//! A bar over the canvas's top switches between Then (the version), Now and Swipe
+//! (the two split at a handle), steps through the changes and leaves.
+//!
+//! **A mode, not a document**: nothing is written. The compare lives on the
+//! document's session, which refuses commits, undo and redo while it is open;
+//! `dispatch` admits only the verbs that look ([`admits`]), and the canvas only
+//! pans and picks a mark.
+//!
+//! **The topmost changed layer is marked**: a layer under another listed one is
+//! folded into that row, its changes named under it and counted in the mark's tag.
+
+use crate::app::OndinApp;
+use crate::input::Action;
+use crate::session::InkLog;
+use crate::theme::{self, color, icon};
+use crate::ui::FieldButton;
+use eframe::egui;
+use ondin_core::diff::{self, Change, Status};
+use ondin_core::kurbo::Rect;
+use ondin_core::{Document, NodeId, Resolved};
+use ondin_render::RenderOverrides;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+/// What a refused edit says while a compare is open.
+pub(crate) const READ_ONLY: &str = "Comparing with a version — Done leaves it, to edit";
+
+/// The marks' hues and the ink on their tags. Told apart by more than hue: added
+/// is solid with `+`, removed dashed with `−`, changed solid with `~`.
+pub(crate) const ADDED: egui::Color32 = egui::Color32::from_rgb(0x4f, 0x8f, 0xe6);
+pub(crate) const REMOVED: egui::Color32 = egui::Color32::from_rgb(0xe8, 0x96, 0x4a);
+pub(crate) const CHANGED: egui::Color32 = egui::Color32::from_rgb(0xc9, 0xb4, 0x58);
+const ADDED_INK: egui::Color32 = egui::Color32::from_rgb(0x0b, 0x12, 0x20);
+const REMOVED_INK: egui::Color32 = egui::Color32::from_rgb(0x1d, 0x12, 0x06);
+pub(crate) const CHANGED_INK: egui::Color32 = egui::Color32::from_rgb(0x17, 0x14, 0x0a);
+
+/// The bar's height and its gap from the canvas's top.
+const BAR_H: f32 = 38.0;
+const BAR_TOP: f32 = 14.0;
+/// How far outside a layer's box its mark is drawn, in screen points.
+const MARK_OUTSET: f32 = 3.0;
+/// How near the Swipe handle a press must land to drag it.
+const HANDLE_REACH: f32 = 12.0;
+/// The changes card's row inset and the indent of a row's value lines.
+const ROW_PAD: f32 = 8.0;
+const LINE_INDENT: f32 = 23.0;
+/// A row's value lines past this many are summed up in one more.
+const LINES_SHOWN: usize = 4;
+
+/// Which state the canvas draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Side {
+    Then,
+    #[default]
+    Now,
+    /// Then left of a handle, Now right of it.
+    Swipe,
+}
+
+/// One page's heading in the card.
+#[derive(Debug)]
+pub(crate) struct Group {
+    pub(crate) name: String,
+    /// The page in the open document, `None` for a removed page or the kit vault.
+    pub(crate) page: Option<NodeId>,
+    /// How many layers changed on it.
+    pub(crate) layers: usize,
+}
+
+/// One change the card lists and the canvas marks.
+#[derive(Debug)]
+pub(crate) struct Row {
+    pub(crate) id: NodeId,
+    /// Its page's index in [`Compare::groups`].
+    pub(crate) group: usize,
+    /// The page of the open document it is drawn on; `None` when the canvas
+    /// cannot show it.
+    pub(crate) page: Option<NodeId>,
+    pub(crate) status: Status,
+    /// A page's own change (its name, its background), which has no mark.
+    pub(crate) is_page: bool,
+    /// The names above it, each followed by ` / `.
+    pub(crate) trail: String,
+    pub(crate) name: String,
+    /// The changed layers it stands for, itself included.
+    pub(crate) layers: usize,
+    /// For an added or removed layer, how many came or went inside it.
+    pub(crate) inside: usize,
+    pub(crate) lines: Vec<Change>,
+    /// Its box in the open document and in the version.
+    pub(crate) now: Option<Rect>,
+    pub(crate) then: Option<Rect>,
+}
+
+impl Row {
+    /// Moved or resized: in both, its box differing by `diff::EPSILON` or more.
+    pub(crate) fn moved(&self) -> bool {
+        match (self.now, self.then) {
+            (Some(a), Some(b)) => [a.x0 - b.x0, a.y0 - b.y0, a.x1 - b.x1, a.y1 - b.y1]
+                .iter()
+                .any(|d| d.abs() >= diff::EPSILON),
+            _ => false,
+        }
+    }
+
+    /// Where its mark goes in world space: where it was, for a removed layer.
+    fn shown_at(&self) -> Option<Rect> {
+        match self.status {
+            Status::Removed => self.then,
+            _ => self.now,
+        }
+    }
+}
+
+/// An open compare (`EditorSession::compare`).
+pub(crate) struct Compare {
+    pub(crate) version: PathBuf,
+    /// The version's name, else when it was pinned.
+    pub(crate) title: String,
+    /// When it was pinned, beside a name.
+    pub(crate) when: Option<String>,
+    pub(crate) then: Document,
+    then_res: Resolved,
+    /// The stamps the version's canvas keys its texture on; the version never
+    /// changes, so one serves for good.
+    stamp: u64,
+    overrides: RenderOverrides,
+    ink: InkLog,
+    pub(crate) groups: Vec<Group>,
+    pub(crate) rows: Vec<Row>,
+    /// Variables, modes, styles, guides and the like, which no page holds.
+    pub(crate) off_canvas: Vec<Change>,
+    /// The row the canvas rings and the card fills.
+    pub(crate) current: Option<usize>,
+    pub(crate) side: Side,
+    /// Where Swipe splits the canvas, as a fraction of its width.
+    pub(crate) split: f32,
+    dragging_split: bool,
+    /// A row stepped to on another page, revealed once its page is showing.
+    reveal: Option<usize>,
+    /// The page the compare opened on and its selection, given back when it closes
+    /// there; the document cannot change meanwhile, so it still holds.
+    selection: (NodeId, crate::session::Selection),
+}
+
+impl Compare {
+    /// How many layers changed on `page` of the open document.
+    pub(crate) fn changed_on(&self, page: NodeId) -> usize {
+        self.groups
+            .iter()
+            .filter(|g| g.page == Some(page))
+            .map(|g| g.layers)
+            .sum()
+    }
+}
+
+/// The card's groups and rows for what changed from `then` to `now`, and what
+/// changed outside every page. `then_res` and `now_res` give the boxes.
+pub(crate) fn rows(
+    then: &Document,
+    now: &Document,
+    then_res: &Resolved,
+    now_res: &Resolved,
+) -> (Vec<Group>, Vec<Row>, Vec<Change>) {
+    let d = diff::diff(then, now);
+    let mut groups = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
+    for page in &d.pages {
+        let Some(page_id) = NodeId::from_wire(&page.id) else {
+            continue;
+        };
+        let group = groups.len();
+        let shown = now.is_page(page_id).then_some(page_id);
+        groups.push(Group {
+            name: page.name.clone(),
+            page: shown,
+            layers: 0,
+        });
+        if page.status != Status::Changed || !page.changes.is_empty() {
+            rows.push(Row {
+                id: page_id,
+                group,
+                page: shown,
+                status: page.status,
+                is_page: true,
+                trail: String::new(),
+                name: page.name.clone(),
+                layers: 0,
+                inside: page.inside,
+                lines: page.changes.clone(),
+                now: None,
+                then: None,
+            });
+        }
+        // The row each listed layer went into, so a layer under it folds in too.
+        let mut row_of: HashMap<NodeId, usize> = HashMap::new();
+        for layer in &page.layers {
+            let Some(id) = NodeId::from_wire(&layer.id) else {
+                continue;
+            };
+            groups[group].layers += 1;
+            let name = layer.trail.last().cloned().unwrap_or_default();
+            if let Some(top) = ancestors(id, then, now).find_map(|a| row_of.get(&a).copied()) {
+                row_of.insert(id, top);
+                let row = &mut rows[top];
+                // An added or removed row already counts what came or went inside it.
+                if row.status != Status::Changed {
+                    continue;
+                }
+                row.layers += 1;
+                match layer.status {
+                    Status::Changed => row.lines.extend(layer.changes.iter().map(|c| Change {
+                        what: format!("{name} · {}", c.what),
+                        ..c.clone()
+                    })),
+                    Status::Added => row.lines.push(Change {
+                        what: format!("{name} added"),
+                        before: None,
+                        after: None,
+                    }),
+                    Status::Removed => row.lines.push(Change {
+                        what: format!("{name} removed"),
+                        before: None,
+                        after: None,
+                    }),
+                }
+                continue;
+            }
+            let page_of = match layer.status {
+                Status::Removed => then.page_of(id),
+                _ => now.page_of(id),
+            }
+            .filter(|p| now.is_page(*p));
+            let above = &layer.trail[..layer.trail.len().saturating_sub(1)];
+            row_of.insert(id, rows.len());
+            rows.push(Row {
+                id,
+                group,
+                page: page_of,
+                status: layer.status,
+                is_page: false,
+                trail: above.iter().map(|n| format!("{n} / ")).collect(),
+                name,
+                layers: 1,
+                inside: layer.inside,
+                lines: layer.changes.clone(),
+                now: now.contains(id).then(|| now_res.world_bounds(id)).flatten(),
+                then: then
+                    .contains(id)
+                    .then(|| then_res.world_bounds(id))
+                    .flatten(),
+            });
+        }
+    }
+    (groups, rows, d.document)
+}
+
+/// `id`'s ancestors, nearest first, in the document that holds it — the open one
+/// first.
+fn ancestors<'d>(
+    id: NodeId,
+    then: &'d Document,
+    now: &'d Document,
+) -> impl Iterator<Item = NodeId> + 'd {
+    let doc = if now.contains(id) { now } else { then };
+    std::iter::successors(doc.get(id).and_then(|n| n.parent()), move |p| {
+        doc.get(*p).and_then(|n| n.parent())
+    })
+}
+
+/// Whether `action` may run while a compare is open: what looks, moves the view,
+/// saves or leaves, never what edits.
+pub(crate) fn admits(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::Save
+            | Action::Open
+            | Action::NewDocument
+            | Action::CloseDocument
+            | Action::Tab(_)
+            | Action::OpenSettings
+            | Action::ExportAll
+            | Action::ExportCode(_)
+            | Action::ExportEditable(_)
+            | Action::Palette
+            | Action::Cheatsheet
+            | Action::ShowInLibrary
+            | Action::VersionHistory
+            | Action::CompareVersion
+            | Action::ZoomIn
+            | Action::ZoomOut
+            | Action::ZoomReset
+            | Action::ZoomFit
+            | Action::StepPage(_)
+            | Action::ToggleView(_)
+            | Action::Escape
+    )
+}
+
+/// A status's hue, the ink on its tag, and its sign.
+fn look(status: Status) -> (egui::Color32, egui::Color32, &'static str) {
+    match status {
+        Status::Added => (ADDED, ADDED_INK, "+"),
+        Status::Removed => (REMOVED, REMOVED_INK, "−"),
+        Status::Changed => (CHANGED, CHANGED_INK, "~"),
+    }
+}
+
+/// A change outside every page: added with no value before, removed with none after.
+fn status_of(c: &Change) -> Status {
+    match (&c.before, &c.after) {
+        (None, Some(_)) => Status::Added,
+        (Some(_), None) => Status::Removed,
+        _ => Status::Changed,
+    }
+}
+
+impl OndinApp {
+    /// Open a compare of the document with the version pinned at `version`, named
+    /// `title` (its `when` beside a name). Says why when it opens none.
+    pub(crate) fn compare_with(&mut self, version: &Path, title: String, when: Option<String>) {
+        self.finish_text_first();
+        let loaded = std::fs::read(version)
+            .map_err(|e| crate::private::io_error(&e))
+            .and_then(|b| ondin_core::io::load(&b).map_err(|e| e.to_string()));
+        let then = match loaded {
+            Ok(doc) => doc,
+            Err(e) => return self.session.fail(format!("Compare failed: {e}")),
+        };
+        let then_res = Resolved::rebuild(&then);
+        let (groups, rows, off_canvas) =
+            rows(&then, &self.session.doc, &then_res, &self.session.resolved);
+        if rows.is_empty() && off_canvas.is_empty() {
+            return self.session.info("Nothing has changed since this version");
+        }
+        // Their overlays and fixes are the editing's, not the compare's.
+        if self.find.open {
+            self.close_find();
+        }
+        self.end_contrast();
+        self.vision = None;
+        self.session.clear_gesture_preview();
+        let selection = (
+            self.session.page,
+            std::mem::take(&mut self.session.selection),
+        );
+        let stamp = crate::session::next_revision();
+        self.session.compare = Some(Box::new(Compare {
+            version: version.to_path_buf(),
+            title,
+            when,
+            then,
+            then_res,
+            stamp,
+            overrides: RenderOverrides::default(),
+            ink: InkLog::default(),
+            groups,
+            rows,
+            off_canvas,
+            current: None,
+            side: Side::Now,
+            split: 0.5,
+            dragging_split: false,
+            reveal: None,
+            selection,
+        }));
+    }
+
+    pub(crate) fn leave_compare(&mut self) {
+        if let Some(c) = self.session.compare.take()
+            && c.selection.0 == self.session.page
+        {
+            self.session.selection = c.selection.1;
+        }
+    }
+
+    /// Make the row `by` steps from the current one current, round the ends.
+    pub(crate) fn step_compare(&mut self, by: isize) {
+        let Some(c) = self.session.compare.as_ref() else {
+            return;
+        };
+        let n = c.rows.len();
+        if n == 0 {
+            return;
+        }
+        let at = match c.current {
+            None if by > 0 => 0,
+            None => n - 1,
+            Some(i) => (i as isize + by).rem_euclid(n as isize) as usize,
+        };
+        self.show_change(at);
+    }
+
+    /// Make row `i` current and show it: its page, then the view panned to it by
+    /// the least that will do, the zoom kept.
+    fn show_change(&mut self, i: usize) {
+        let Some(c) = self.session.compare.as_mut() else {
+            return;
+        };
+        let Some(page) = c.rows.get(i).map(|r| r.page) else {
+            return;
+        };
+        c.current = Some(i);
+        c.reveal = Some(i);
+        if let Some(page) = page {
+            self.go_to_page(page);
+        }
+    }
+
+    /// Reveal a stepped-to row once its page is showing: after the canvas, so a
+    /// first visit's framing is not drawn over it.
+    fn reveal_change(&mut self) {
+        let Some(c) = self.session.compare.as_mut() else {
+            return;
+        };
+        let Some(row) = c.reveal.and_then(|i| c.rows.get(i)) else {
+            return;
+        };
+        if row.page.is_some_and(|p| p != self.session.page) {
+            return;
+        }
+        let bounds = match (row.shown_at(), row.moved().then_some(row.then).flatten()) {
+            (Some(a), Some(b)) => Some(a.union(b)),
+            (a, b) => a.or(b),
+        };
+        c.reveal = None;
+        if let Some(b) = bounds.filter(|_| row.page.is_some()) {
+            self.reveal(b);
+        }
+    }
+
+    /// The compare's bar over the canvas's top, and its keys: Enter and
+    /// Shift+Enter step, `\` toggles Then and Now. Drops the version's canvas
+    /// once no compare is open.
+    pub(crate) fn compare_bar(&mut self, ctx: &egui::Context) {
+        if self.session.compare.is_none() {
+            self.then_canvas = None;
+            return;
+        }
+        self.reveal_change();
+        let mut act = None;
+        let free =
+            !self.modal_is_up() && self.palette.is_none() && !ctx.egui_wants_keyboard_input();
+        if free {
+            ctx.input(|i| {
+                if i.key_pressed(egui::Key::Enter) {
+                    act = Some(Act::Step(if i.modifiers.shift { -1 } else { 1 }));
+                } else if i.modifiers.is_none() && i.key_pressed(egui::Key::Backslash) {
+                    act = Some(Act::Toggle);
+                }
+            });
+        }
+
+        let right = if self.focus {
+            self.canvas_rect.right()
+        } else {
+            Self::inspector_column(ctx.content_rect()).left()
+        };
+        let left = self.canvas_rect.left();
+        let top = self.canvas_rect.top()
+            + if self.rulers_on() {
+                crate::rulers::THICKNESS
+            } else {
+                0.0
+            };
+        let anchor = egui::pos2((left + right) / 2.0, top + BAR_TOP);
+        let private = crate::private::on();
+        let Some(c) = self.session.compare.as_mut() else {
+            return;
+        };
+        egui::Area::new(egui::Id::new("compare-bar"))
+            .order(egui::Order::Foreground)
+            .pivot(egui::Align2::CENTER_TOP)
+            .fixed_pos(anchor)
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(color::card())
+                    .corner_radius(8)
+                    .stroke(egui::Stroke::new(1.0, color::text_a(16)))
+                    .shadow(egui::Shadow {
+                        offset: [0, 10],
+                        blur: 24,
+                        spread: 0,
+                        color: egui::Color32::from_black_alpha(82),
+                    })
+                    .inner_margin(egui::Margin {
+                        left: 12,
+                        right: 6,
+                        top: 0,
+                        bottom: 0,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_height(BAR_H);
+                        ui.horizontal_centered(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            bar(ui, c, private, &mut act);
+                        });
+                    });
+            });
+
+        match act {
+            None => {}
+            Some(Act::Step(by)) => self.step_compare(by),
+            Some(Act::Show(i)) => self.show_change(i),
+            Some(Act::Toggle) => {
+                if let Some(c) = self.session.compare.as_mut() {
+                    c.side = match c.side {
+                        Side::Now => Side::Then,
+                        _ => Side::Now,
+                    };
+                }
+            }
+            Some(Act::Side(side)) => {
+                if let Some(c) = self.session.compare.as_mut() {
+                    c.side = side;
+                }
+            }
+            Some(Act::Done) => self.leave_compare(),
+        }
+    }
+
+    /// The changes card, in the inspector's place while a compare is open.
+    pub(crate) fn compare_card(&mut self, ctx: &egui::Context) {
+        let column = Self::inspector_column(ctx.content_rect());
+        let mut act = None;
+        let Some(c) = self.session.compare.as_ref() else {
+            return;
+        };
+        let doc = &self.session.doc;
+        egui::Area::new(egui::Id::new("compare-card"))
+            .order(egui::Order::Middle)
+            .fixed_pos(column.min)
+            .show(ctx, |ui| {
+                ui.set_width(column.width());
+                egui::Frame::NONE
+                    .fill(color::card())
+                    .corner_radius(5)
+                    .stroke(egui::Stroke::new(1.0, color::card_border()))
+                    .inner_margin(egui::Margin {
+                        left: 6,
+                        right: 6,
+                        top: 12,
+                        bottom: 8,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(column.width() - 12.0);
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        card_head(ui, c);
+                        egui::ScrollArea::vertical()
+                            .max_height(column.height() - 60.0)
+                            .auto_shrink([false, true])
+                            .scroll_bar_visibility(
+                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                            )
+                            .show(ui, |ui| card_list(ui, c, doc, &mut act));
+                    });
+            });
+        if let Some(Act::Show(i)) = act {
+            self.show_change(i);
+        }
+    }
+
+    /// The canvas's input while comparing: any drag pans, the Swipe handle's
+    /// drags it, and a click on a mark makes it current.
+    pub(crate) fn compare_input(
+        &mut self,
+        ui: &egui::Ui,
+        resp: &egui::Response,
+        rect: egui::Rect,
+        ppp: f32,
+    ) {
+        let Some(c) = self.session.compare.as_ref() else {
+            return;
+        };
+        let split_x = rect.left() + rect.width() * c.split;
+        let swipe = c.side == Side::Swipe;
+        let near = |p: egui::Pos2| swipe && (p.x - split_x).abs() <= HANDLE_REACH;
+        let dragging = c.dragging_split;
+        let on_handle = resp.hover_pos().is_some_and(near);
+        if resp.drag_started() {
+            let origin = ui.input(|i| i.pointer.press_origin());
+            let grab = origin.is_some_and(near) && resp.dragged_by(egui::PointerButton::Primary);
+            if let Some(c) = self.session.compare.as_mut() {
+                c.dragging_split = grab;
+            }
+        }
+        if resp.dragged() {
+            if dragging
+                || self
+                    .session
+                    .compare
+                    .as_ref()
+                    .is_some_and(|c| c.dragging_split)
+            {
+                if let Some(p) = resp.interact_pointer_pos()
+                    && let Some(c) = self.session.compare.as_mut()
+                {
+                    c.split = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                }
+            } else {
+                self.pan_by_drag(ui, resp);
+            }
+        }
+        if resp.drag_stopped()
+            && let Some(c) = self.session.compare.as_mut()
+        {
+            c.dragging_split = false;
+        }
+        let cursor = if dragging || on_handle {
+            egui::CursorIcon::ResizeHorizontal
+        } else if resp.dragged() {
+            egui::CursorIcon::Grabbing
+        } else {
+            egui::CursorIcon::Default
+        };
+        if resp.hovered() || resp.dragged() {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        if resp.clicked()
+            && let Some(p) = resp.interact_pointer_pos()
+            && let Some(i) = self.compare_mark_at(p, rect, ppp)
+            && let Some(c) = self.session.compare.as_mut()
+        {
+            c.current = Some(i);
+        }
+    }
+
+    /// A row's mark on screen: its box, outset; `None` off this page.
+    fn mark_rect(&self, row: &Row, rect: egui::Rect, ppp: f32) -> Option<egui::Rect> {
+        if row.is_page || row.page != Some(self.session.page) {
+            return None;
+        }
+        let b = row.shown_at()?;
+        let a = self.to_screen(ondin_core::kurbo::Point::new(b.x0, b.y0), rect, ppp);
+        let z = self.to_screen(ondin_core::kurbo::Point::new(b.x1, b.y1), rect, ppp);
+        Some(egui::Rect::from_two_pos(a, z).expand(MARK_OUTSET))
+    }
+
+    /// The row whose mark holds `p`, the smallest of several.
+    fn compare_mark_at(&self, p: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<usize> {
+        let c = self.session.compare.as_ref()?;
+        c.rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| Some((i, self.mark_rect(row, rect, ppp)?)))
+            .filter(|(_, r)| r.contains(p))
+            .min_by(|(_, a), (_, b)| a.area().total_cmp(&b.area()))
+            .map(|(i, _)| i)
+    }
+
+    /// The compare over the drawn document: the version where Then or Swipe
+    /// shows it, the frame labels over that, the marks, and Swipe's handle.
+    pub(crate) fn paint_compare(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        ppp: f32,
+    ) {
+        let Some(side) = self.session.compare.as_ref().map(|c| c.side) else {
+            return;
+        };
+        let split_x = self
+            .session
+            .compare
+            .as_ref()
+            .map_or(rect.center().x, |c| rect.left() + rect.width() * c.split);
+        if side != Side::Now {
+            if self.then_canvas.is_none() {
+                self.then_canvas = self.canvas.another();
+            }
+            let clip = match side {
+                Side::Swipe => egui::Rect::from_min_max(rect.min, egui::pos2(split_x, rect.max.y)),
+                _ => rect,
+            }
+            .intersect(painter.clip_rect());
+            let (camera, px, page) = (self.session.camera, self.canvas_px, self.session.page);
+            if let Some(c) = self.session.compare.as_ref() {
+                let then = painter.with_clip_rect(clip);
+                if c.then.is_page(page) {
+                    let ground = crate::session::page_ground(&c.then, page);
+                    let tex = self.then_canvas.as_mut().and_then(|canvas| {
+                        canvas.render(
+                            &c.then,
+                            &c.then_res,
+                            &c.overrides,
+                            (c.stamp, c.stamp, c.stamp),
+                            &c.ink,
+                            &camera,
+                            px,
+                            ground,
+                            page,
+                        )
+                    });
+                    if let Some(tex) = tex {
+                        let uv =
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        then.image(tex, rect, uv, egui::Color32::WHITE);
+                    }
+                } else {
+                    // A page the version did not have: its ground, empty.
+                    let ground = crate::ui::color_to_egui(crate::session::theme_canvas());
+                    then.rect_filled(clip, 0.0, ground);
+                }
+            }
+        }
+        self.draw_frame_labels(ui, painter, rect, ppp);
+
+        let Some(c) = self.session.compare.as_ref() else {
+            return;
+        };
+        let marks: Vec<(usize, egui::Rect)> = c
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, row)| Some((i, self.mark_rect(row, rect, ppp)?)))
+            .collect();
+        let canvas = painter.with_clip_rect(painter.clip_rect().intersect(rect));
+        // The current mark last, over its neighbours.
+        let mut order: Vec<&(usize, egui::Rect)> = marks.iter().collect();
+        order.sort_by_key(|(i, _)| c.current == Some(*i));
+        for (i, at) in order {
+            let row = &c.rows[*i];
+            let current = c.current == Some(*i);
+            if row.status == Status::Changed && row.moved() {
+                self.paint_ghost(&canvas, row, *at, rect, ppp);
+            }
+            let name = match row.status {
+                Status::Removed => crate::private::layer(&c.then, row.id),
+                _ => crate::private::layer(&self.session.doc, row.id),
+            };
+            paint_mark(&canvas, row, &name, *at, current);
+        }
+
+        if side == Side::Swipe {
+            paint_handle(&canvas, rect, split_x);
+        }
+    }
+
+    /// Where a moved or resized layer was: a dashed box and a line to where it is.
+    fn paint_ghost(
+        &self,
+        painter: &egui::Painter,
+        row: &Row,
+        at: egui::Rect,
+        rect: egui::Rect,
+        ppp: f32,
+    ) {
+        let Some(b) = row.then else { return };
+        let a = self.to_screen(ondin_core::kurbo::Point::new(b.x0, b.y0), rect, ppp);
+        let z = self.to_screen(ondin_core::kurbo::Point::new(b.x1, b.y1), rect, ppp);
+        let was = egui::Rect::from_two_pos(a, z).expand(MARK_OUTSET);
+        let stroke = egui::Stroke::new(1.0, REMOVED.gamma_multiply(0.8));
+        dashed_rect(painter, was, stroke);
+        painter.line_segment([was.center(), at.center()], egui::Stroke::new(1.0, REMOVED));
+    }
+}
+
+/// What a frame of the bar or the card asked for.
+enum Act {
+    Step(isize),
+    Show(usize),
+    Side(Side),
+    Toggle,
+    Done,
+}
+
+/// The bar's contents: what is compared, the three sides, the steps, Done.
+fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
+    ui.label(theme::icon_text(icon::GIT_DIFF, 15.0, color::accent_400()));
+    let title = match private {
+        true => "a version".to_string(),
+        false => c.title.clone(),
+    };
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::FontId::proportional(12.0);
+    let part = |job: &mut egui::text::LayoutJob, text: &str, ink: egui::Color32| {
+        job.append(
+            text,
+            0.0,
+            egui::TextFormat {
+                font_id: font.clone(),
+                color: ink,
+                ..Default::default()
+            },
+        );
+    };
+    part(&mut job, "Comparing ", theme::text::muted());
+    part(&mut job, &title, color::text());
+    if let Some(when) = &c.when {
+        part(&mut job, &format!(" · {when}"), theme::text::dim());
+    }
+    part(&mut job, " with now", theme::text::muted());
+    ui.label(job);
+
+    crate::batch_rename::well(ui, |ui| {
+        for (side, label, tip) in [
+            (Side::Then, "Then", "The version"),
+            (
+                Side::Now,
+                "Now",
+                "The document as it is — \\ toggles the two",
+            ),
+            (
+                Side::Swipe,
+                "Swipe",
+                "The version left of a handle, now right of it",
+            ),
+        ] {
+            let on = c.side == side;
+            if crate::batch_rename::segment(ui, label, "", on, 24.0)
+                .on_hover_text(tip)
+                .clicked()
+            {
+                *act = Some(Act::Side(side));
+            }
+        }
+    });
+
+    let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, 18.0), egui::Sense::hover());
+    ui.painter().rect_filled(sep, 0.0, color::text_a(26));
+
+    let n = c.rows.len();
+    ui.spacing_mut().item_spacing.x = 2.0;
+    if crate::ui::icon_button(ui, icon::ARROW_UP, 26.0, 14.0, false, n > 0)
+        .on_hover_text("Previous change · Shift+Enter")
+        .clicked()
+    {
+        *act = Some(Act::Step(-1));
+    }
+    let count = match c.current {
+        Some(i) => format!("{} of {n}", i + 1),
+        None => plural(n, "change"),
+    };
+    ui.label(
+        egui::RichText::new(count)
+            .size(11.0)
+            .color(theme::text::muted()),
+    );
+    if crate::ui::icon_button(ui, icon::ARROW_DOWN, 26.0, 14.0, false, n > 0)
+        .on_hover_text("Next change · Enter")
+        .clicked()
+    {
+        *act = Some(Act::Step(1));
+    }
+    ui.add_space(6.0);
+    if crate::settings::text_button(ui, "Done", FieldButton::Off)
+        .on_hover_text("Leave the compare · Escape")
+        .clicked()
+    {
+        *act = Some(Act::Done);
+    }
+}
+
+fn plural(n: usize, what: &str) -> String {
+    match n {
+        1 => format!("1 {what}"),
+        n => format!("{n} {what}s"),
+    }
+}
+
+/// The card's heading: *Changes*, and how many layers on how many pages, and how
+/// many more off the canvas.
+fn card_head(ui: &mut egui::Ui, c: &Compare) {
+    let layers: usize = c.groups.iter().map(|g| g.layers).sum();
+    let mut sum = vec![plural(layers, "layer"), plural(c.groups.len(), "page")];
+    if !c.off_canvas.is_empty() {
+        sum.push(format!("{} more", c.off_canvas.len()));
+    }
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), egui::Sense::hover());
+    let p = ui.painter();
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        "CHANGES",
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(9.5),
+            color: theme::text::dim(),
+            extra_letter_spacing: 1.0,
+            ..Default::default()
+        },
+    );
+    let head = p.layout_job(job);
+    p.galley(
+        egui::pos2(
+            rect.left() + ROW_PAD,
+            rect.top() + (12.0 - head.size().y) / 2.0,
+        ),
+        head,
+        theme::text::dim(),
+    );
+    p.text(
+        egui::pos2(rect.right() - ROW_PAD, rect.top() + 6.0),
+        egui::Align2::RIGHT_CENTER,
+        sum.join(" · "),
+        egui::FontId::proportional(10.5),
+        theme::text::dim(),
+    );
+}
+
+/// The rows, grouped by page in the document's order, then what is not on the
+/// canvas.
+fn card_list(ui: &mut egui::Ui, c: &Compare, doc: &Document, act: &mut Option<Act>) {
+    let private = crate::private::on();
+    for (g, group) in c.groups.iter().enumerate() {
+        let rows: Vec<usize> = (0..c.rows.len())
+            .filter(|i| c.rows[*i].group == g)
+            .collect();
+        let name = match (private, group.page) {
+            (true, Some(page)) => crate::private::page(doc, page).into_owned(),
+            (true, None) => "Page".into(),
+            (false, _) => group.name.clone(),
+        };
+        heading(ui, icon::FILE, &name, rows.len(), group.page.is_none());
+        for i in rows {
+            let row = &c.rows[i];
+            let name = match private {
+                false => row.name.clone(),
+                true if row.is_page => name.clone(),
+                true => match row.status {
+                    Status::Removed => crate::private::layer(&c.then, row.id).into_owned(),
+                    _ => crate::private::layer(doc, row.id).into_owned(),
+                },
+            };
+            if row_ui(ui, row, &name, private, c.current == Some(i)).clicked() {
+                *act = Some(Act::Show(i));
+            }
+        }
+    }
+    if !c.off_canvas.is_empty() {
+        ui.add_space(6.0);
+        heading(
+            ui,
+            icon::SLIDERS,
+            "Not on the canvas",
+            c.off_canvas.len(),
+            false,
+        );
+        for change in &c.off_canvas {
+            off_canvas_row(ui, change, private);
+        }
+    }
+}
+
+/// A page's heading in the list: its glyph, its name, how many rows it has.
+fn heading(ui: &mut egui::Ui, glyph: &str, name: &str, count: usize, dim: bool) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+    let p = ui.painter();
+    let ink = match dim {
+        true => theme::text::faint(),
+        false => theme::text::muted(),
+    };
+    let cy = rect.center().y;
+    p.text(
+        egui::pos2(rect.left() + ROW_PAD, cy),
+        egui::Align2::LEFT_CENTER,
+        glyph,
+        theme::icon_font(12.0),
+        ink,
+    );
+    let room = rect.width() - ROW_PAD * 2.0 - 18.0 - 24.0;
+    let galley = one_line(ui, &[(name, 11.0, ink, false)], room);
+    p.galley(
+        egui::pos2(rect.left() + ROW_PAD + 18.0, cy - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+    p.text(
+        egui::pos2(rect.right() - ROW_PAD, cy),
+        egui::Align2::RIGHT_CENTER,
+        count.to_string(),
+        egui::FontId::proportional(10.5),
+        ink,
+    );
+}
+
+/// `parts` laid out as one line cut with an ellipsis at `width`: each part's text,
+/// size, ink and whether it is struck through.
+fn one_line(
+    ui: &egui::Ui,
+    parts: &[(&str, f32, egui::Color32, bool)],
+    width: f32,
+) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping {
+            max_width: width.max(1.0),
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        },
+        ..Default::default()
+    };
+    for (text, size, ink, struck) in parts {
+        job.append(
+            text,
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(*size),
+                color: *ink,
+                strikethrough: match struck {
+                    true => egui::Stroke::new(1.0, *ink),
+                    false => egui::Stroke::NONE,
+                },
+                ..Default::default()
+            },
+        );
+    }
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// A change's values as its line shows them: what, then before struck → after.
+fn value_parts(c: &Change) -> Vec<(String, f32, egui::Color32, bool)> {
+    let mut out = vec![(format!("{} ", c.what), 11.0, theme::text::muted(), false)];
+    match (&c.before, &c.after) {
+        (Some(b), Some(a)) => {
+            out.push((b.clone(), 11.0, theme::text::faint(), true));
+            out.push((" → ".into(), 11.0, theme::text::muted(), false));
+            out.push((a.clone(), 11.0, color::text(), false));
+        }
+        (None, Some(a)) => out.push((a.clone(), 11.0, color::text(), false)),
+        (Some(b), None) => out.push((b.clone(), 11.0, theme::text::faint(), true)),
+        (None, None) => {}
+    }
+    out
+}
+
+/// The line under a row past its first `LINES_SHOWN`.
+fn more_line(n: usize) -> Change {
+    Change {
+        what: format!("and {}", plural(n, "more change")),
+        before: None,
+        after: None,
+    }
+}
+
+/// One row of the list: the status tag, the trail dim and the name, then the
+/// changed values a line each. Private mode draws no trail and no values.
+fn row_ui(
+    ui: &mut egui::Ui,
+    row: &Row,
+    name: &str,
+    private: bool,
+    current: bool,
+) -> egui::Response {
+    let mut lines: Vec<Change> = Vec::new();
+    if private {
+        if !row.lines.is_empty() {
+            lines.push(Change {
+                what: plural(row.lines.len(), "change"),
+                before: None,
+                after: None,
+            });
+        }
+    } else {
+        lines.extend(row.lines.iter().take(LINES_SHOWN).cloned());
+        if row.lines.len() > LINES_SHOWN {
+            lines.push(more_line(row.lines.len() - LINES_SHOWN));
+        }
+    }
+    let line_h = 14.0;
+    let h = 5.0 + 16.0 + lines.len() as f32 * (3.0 + line_h) + 5.0;
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
+    let p = ui.painter();
+    if current {
+        p.rect_filled(rect, 5.0, color::text_a(26));
+    } else if resp.hovered() {
+        p.rect_filled(rect, 5.0, color::text_a(12));
+    }
+    let (hue, ink, sign) = look(row.status);
+    let tag =
+        egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::vec2(16.0, 16.0));
+    p.rect_filled(tag, 3.0, hue);
+    p.text(
+        tag.center(),
+        egui::Align2::CENTER_CENTER,
+        sign,
+        egui::FontId::proportional(11.0),
+        ink,
+    );
+    let mut title = name.to_string();
+    if row.inside > 0 {
+        title.push_str(&format!(" · {} inside", row.inside));
+    }
+    let trail = if private { "" } else { row.trail.as_str() };
+    let x = tag.right() + 7.0;
+    let galley = one_line(
+        ui,
+        &[
+            (trail, 12.0, theme::text::faint(), false),
+            (&title, 12.0, color::text(), false),
+        ],
+        rect.right() - ROW_PAD - x,
+    );
+    p.galley(
+        egui::pos2(x, tag.center().y - galley.size().y / 2.0),
+        galley,
+        color::text(),
+    );
+    let mut y = tag.bottom() + 3.0;
+    for c in &lines {
+        let parts = value_parts(c);
+        let refs: Vec<(&str, f32, egui::Color32, bool)> = parts
+            .iter()
+            .map(|(t, s, i, k)| (t.as_str(), *s, *i, *k))
+            .collect();
+        let x = rect.left() + ROW_PAD + LINE_INDENT;
+        let galley = one_line(ui, &refs, rect.right() - ROW_PAD - x);
+        p.galley(egui::pos2(x, y), galley, theme::text::muted());
+        y += line_h + 3.0;
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A change no page holds: its status tag and what, the values under it.
+fn off_canvas_row(ui: &mut egui::Ui, c: &Change, private: bool) {
+    let h = 5.0 + 16.0 + 3.0 + 14.0 + 5.0;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+    let p = ui.painter();
+    let (hue, ink, sign) = look(status_of(c));
+    let tag =
+        egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::vec2(16.0, 16.0));
+    p.rect_filled(tag, 3.0, hue);
+    p.text(
+        tag.center(),
+        egui::Align2::CENTER_CENTER,
+        sign,
+        egui::FontId::proportional(11.0),
+        ink,
+    );
+    let x = tag.right() + 7.0;
+    let galley = one_line(
+        ui,
+        &[(&c.what, 12.0, color::text(), false)],
+        rect.right() - ROW_PAD - x,
+    );
+    p.galley(
+        egui::pos2(x, tag.center().y - galley.size().y / 2.0),
+        galley,
+        color::text(),
+    );
+    if private {
+        return;
+    }
+    let values = Change {
+        what: String::new(),
+        ..c.clone()
+    };
+    let parts = value_parts(&values);
+    let refs: Vec<(&str, f32, egui::Color32, bool)> = parts
+        .iter()
+        .skip(1)
+        .map(|(t, s, i, k)| (t.as_str(), *s, *i, *k))
+        .collect();
+    let x = rect.left() + ROW_PAD + LINE_INDENT;
+    let galley = one_line(ui, &refs, rect.right() - ROW_PAD - x);
+    p.galley(
+        egui::pos2(x, tag.bottom() + 3.0),
+        galley,
+        theme::text::muted(),
+    );
+}
+
+/// A row's mark: its outline, solid or dashed, and a tag above its top-left
+/// corner naming it; the current one ringed in white and tinted.
+fn paint_mark(painter: &egui::Painter, row: &Row, name: &str, at: egui::Rect, current: bool) {
+    let (hue, ink, sign) = look(row.status);
+    if current {
+        painter.rect_filled(at, 3.0, hue.gamma_multiply(0.1));
+        painter.rect_stroke(
+            at,
+            3.0,
+            egui::Stroke::new(2.0, egui::Color32::WHITE),
+            egui::StrokeKind::Middle,
+        );
+    } else if row.status == Status::Removed {
+        dashed_rect(painter, at, egui::Stroke::new(1.5, hue));
+    } else {
+        painter.rect_stroke(
+            at,
+            3.0,
+            egui::Stroke::new(1.5, hue),
+            egui::StrokeKind::Middle,
+        );
+    }
+    let mut label = format!("{sign} {name}");
+    if row.layers > 1 {
+        label.push_str(&format!(" · {}", row.layers));
+    }
+    let galley = painter.layout_no_wrap(label, egui::FontId::proportional(10.0), ink);
+    let size = egui::vec2(galley.size().x + 10.0, 16.0);
+    let tag = egui::Rect::from_min_size(egui::pos2(at.left() - 1.0, at.top() - 19.0), size);
+    painter.rect_filled(tag, 3.0, hue);
+    painter.galley(
+        egui::pos2(tag.left() + 5.0, tag.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+}
+
+/// The outline of `r` in dashes.
+fn dashed_rect(painter: &egui::Painter, r: egui::Rect, stroke: egui::Stroke) {
+    let pts = [
+        r.left_top(),
+        r.right_top(),
+        r.right_bottom(),
+        r.left_bottom(),
+        r.left_top(),
+    ];
+    painter.extend(egui::Shape::dashed_line(&pts, stroke, 5.0, 3.0));
+}
+
+/// Swipe's split: a line down the canvas, a grip on it, and which side is which.
+fn paint_handle(painter: &egui::Painter, rect: egui::Rect, x: f32) {
+    let accent = color::accent();
+    painter.line_segment(
+        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+        egui::Stroke::new(2.0, accent),
+    );
+    let grip = egui::Rect::from_center_size(egui::pos2(x, rect.center().y), egui::vec2(24.0, 36.0));
+    painter.rect_filled(grip, 6.0, accent);
+    painter.text(
+        grip.center(),
+        egui::Align2::CENTER_CENTER,
+        icon::ARROWS_LEFT_RIGHT,
+        theme::icon_font(14.0),
+        egui::Color32::from_rgb(0x10, 0x13, 0x1b),
+    );
+    for (text, align, at) in [
+        (
+            "THEN",
+            egui::Align2::LEFT_BOTTOM,
+            rect.left_bottom() + egui::vec2(10.0, -10.0),
+        ),
+        (
+            "NOW",
+            egui::Align2::RIGHT_BOTTOM,
+            rect.right_bottom() + egui::vec2(-10.0, -10.0),
+        ),
+    ] {
+        let galley = painter.layout_no_wrap(
+            text.into(),
+            egui::FontId::proportional(10.0),
+            egui::Color32::WHITE,
+        );
+        let pill = align.anchor_size(at, galley.size() + egui::vec2(12.0, 6.0));
+        painter.rect_filled(pill, 3.0, egui::Color32::from_black_alpha(153));
+        painter.galley(
+            pill.min + egui::vec2(6.0, 3.0),
+            galley,
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
+    use ondin_core::{NodeKind, Operation, Transaction};
+
+    fn boxed(id: NodeId, parent: NodeId, name: &str, at: (f64, f64), frame: bool) -> Operation {
+        let (size, corner_radii) = (Size::new(40.0, 40.0), RoundedRectRadii::default());
+        Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: match frame {
+                true => NodeKind::Artboard {
+                    size,
+                    corner_radii,
+                    corner_smoothing: 0.0,
+                },
+                false => NodeKind::Rect {
+                    size,
+                    corner_radii,
+                    corner_smoothing: 0.0,
+                },
+            },
+            transform: Some(Affine::translate(at)),
+            name: Some(name.into()),
+        }
+    }
+
+    /// A version with a frame `Card` holding `Price`, and `Old`, on the first page,
+    /// and `Pay` on a second page far off; since then the card was renamed, the price
+    /// faded, `Seat note` added, `Old` deleted and `Pay` moved.
+    struct F {
+        app: OndinApp,
+        version: PathBuf,
+        first: NodeId,
+        second: NodeId,
+        card: NodeId,
+        old: NodeId,
+        pay: NodeId,
+    }
+
+    fn fixture(ctx: &egui::Context, tag: &str) -> F {
+        crate::theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let first = app.session.page;
+        let [second, card, price, old, pay, seat] = [(); 6].map(|_| app.session.ids.mint());
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddPage {
+                id: second,
+                index: 1,
+                name: "Checkout".into(),
+                ground: None,
+                draft: false,
+                mode: None,
+            },
+            boxed(card, first, "Card", (0.0, 0.0), true),
+            boxed(price, card, "Price", (5.0, 5.0), false),
+            boxed(old, first, "Old", (100.0, 0.0), false),
+            boxed(pay, second, "Pay", (5000.0, 5000.0), false),
+        ])));
+        let version =
+            std::env::temp_dir().join(format!("ondin-compare-{tag}-{}.ondin", std::process::id()));
+        std::fs::write(&version, ondin_core::io::save(&app.session.doc).unwrap()).unwrap();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::SetName {
+                id: card,
+                name: "Studio".into(),
+            },
+            Operation::SetOpacity {
+                id: price,
+                opacity: 0.5,
+            },
+            boxed(seat, first, "Seat note", (0.0, 200.0), false),
+            Operation::DeleteNode { id: old },
+            Operation::SetTransform {
+                id: pay,
+                transform: Affine::translate((5000.0, 5032.0)),
+            },
+        ])));
+        F {
+            app,
+            version,
+            first,
+            second,
+            card,
+            old,
+            pay,
+        }
+    }
+
+    /// One frame of the whole app, with `events` delivered to it.
+    fn whole_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1320.0, 820.0),
+            )),
+            modifiers: events
+                .iter()
+                .find_map(|e| match e {
+                    egui::Event::Key { modifiers, .. } => Some(*modifiers),
+                    _ => None,
+                })
+                .unwrap_or_default(),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            eframe::App::ui(app, ui, &mut frame);
+        });
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn open(f: &mut F) -> &Compare {
+        f.app.compare_with(&f.version, "Before review".into(), None);
+        f.app.session.compare.as_deref().expect("the compare opens")
+    }
+
+    /// A changed layer under a changed frame folds into the frame's row, named
+    /// under it and counted; an added, a removed and a moved layer each have their
+    /// own row on their page, and each page counts its changed layers.
+    ///
+    /// flip: `rows` without its fold under a listed ancestor → fails at "one row for
+    /// the card".
+    #[test]
+    fn the_topmost_changed_layer_is_marked_and_folds_the_rest() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "rows");
+        let (first, second, card, old, pay) = (f.first, f.second, f.card, f.old, f.pay);
+        let c = open(&mut f);
+        let row = |id: NodeId| c.rows.iter().find(|r| r.id == id);
+        let card_rows = c.rows.iter().filter(|r| r.group == 0 && !r.is_page).count();
+        assert_eq!(
+            card_rows, 3,
+            "one row for the card, the note and the old box: {:#?}",
+            c.rows
+        );
+        let card = row(card).expect("the card's row");
+        assert_eq!(card.layers, 2, "it stands for the price too");
+        assert!(
+            card.lines.iter().any(|l| l.what.starts_with("Price · ")),
+            "the price's change is named under it: {:?}",
+            card.lines
+        );
+        let old = row(old).expect("the removed box's row");
+        assert_eq!(old.status, Status::Removed);
+        assert_eq!(old.page, Some(first), "drawn on its page");
+        assert!(old.then.is_some() && old.now.is_none(), "where it was");
+        let pay = row(pay).expect("the moved box's row");
+        assert!(pay.moved(), "moved");
+        assert_eq!(pay.page, Some(second));
+        assert_eq!(c.changed_on(first), 4, "card, price, note and box");
+        assert_eq!(c.changed_on(second), 1);
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// Nothing changed since the version: no compare opens.
+    #[test]
+    fn an_unchanged_document_opens_no_compare() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "same");
+        std::fs::write(
+            &f.version,
+            ondin_core::io::save(&f.app.session.doc).unwrap(),
+        )
+        .unwrap();
+        f.app.compare_with(&f.version, "Now".into(), None);
+        assert!(f.app.session.compare.is_none());
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// While comparing, an edit, an undo and a chord that edits change nothing;
+    /// Escape leaves, and editing works again.
+    ///
+    /// flip: `commit_inner` without its compare refusal → fails at "the commit is
+    /// refused".
+    #[test]
+    fn a_compare_refuses_every_edit_and_escape_leaves_it() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "readonly");
+        open(&mut f);
+        let rename = |app: &mut OndinApp| {
+            app.session.commit(Transaction(vec![Operation::SetName {
+                id: f.card,
+                name: "Edited".into(),
+            }]))
+        };
+        let revision = f.app.session.revision();
+        rename(&mut f.app);
+        assert_eq!(f.app.session.revision(), revision, "the commit is refused");
+        assert!(!f.app.session.undo(), "and the undo");
+        f.app.dispatch(&ctx, Action::SelectAll);
+        assert!(f.app.session.selection.ids().is_empty(), "and a chord");
+
+        for _ in 0..2 {
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        whole_frame(
+            &ctx,
+            &mut f.app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(f.app.session.compare.is_none(), "Escape leaves");
+        rename(&mut f.app);
+        assert_ne!(
+            f.app.session.revision(),
+            revision,
+            "and editing works again"
+        );
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// Shift+Enter from no current change steps round to the last, on the other
+    /// page, whose view was left elsewhere: the page switches and the view comes to
+    /// the change, every side drawn on the way without a device.
+    ///
+    /// flip: `reveal_change` returning before its `reveal` → fails at "in view".
+    #[test]
+    fn stepping_switches_page_and_reveals_the_change() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "step");
+        for _ in 0..2 {
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        f.app.go_to_page(f.second);
+        for _ in 0..2 {
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        f.app.session.camera.center = ondin_core::kurbo::Point::new(-9000.0, -9000.0);
+        f.app.session.camera.set_zoom(1.0);
+        f.app.go_to_page(f.first);
+        whole_frame(&ctx, &mut f.app, Vec::new());
+        open(&mut f);
+        for side in [Side::Then, Side::Swipe, Side::Now] {
+            f.app.session.compare.as_mut().unwrap().side = side;
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        whole_frame(
+            &ctx,
+            &mut f.app,
+            vec![key(egui::Key::Enter, egui::Modifiers::SHIFT)],
+        );
+        whole_frame(&ctx, &mut f.app, Vec::new());
+        let c = f.app.session.compare.as_deref().expect("still comparing");
+        let current = c.current.map(|i| c.rows[i].id);
+        assert_eq!(current, Some(f.pay), "the last change is current");
+        assert_eq!(f.app.session.page, f.second, "on its page");
+        let at = c.rows.iter().find(|r| r.id == f.pay).unwrap().now.unwrap();
+        let view = f.app.session.camera.viewport(f.app.canvas_px).view;
+        assert!(
+            view.contains(at.center()),
+            "in view: {view:?} around {at:?}"
+        );
+        let _ = std::fs::remove_file(&f.version);
+    }
+}

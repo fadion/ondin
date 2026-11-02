@@ -82,6 +82,7 @@ mod canvas;
 mod cheatsheet;
 mod chrome;
 mod colour_text;
+mod compare;
 mod contrast;
 mod cursor;
 mod expr;

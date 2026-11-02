@@ -340,6 +340,19 @@ non-goal**; `DashboardState::selected` is one path and every verb takes one docu
 Stepping stops at either end. A step to another frame keeps the zoom and opens the frame at its
 top. `present_ui` reads these and nothing else: `OndinApp::ui` returns before `input::resolve` while presenting, so no editor chord runs (`design/app-canvas-chrome.md`).
 
+### 8c. Compare's own keys
+
+| Key | Action |
+|---|---|
+| `Enter` / `Shift+Enter` | next / previous change, round the ends |
+| `\` (no modifiers) | toggle Then and Now |
+| `Escape` | leave (a rung of `OndinApp::escape`, below the find box) |
+
+`compare_bar` reads the first two while no modal, palette or text field has the keyboard. Every
+other chord still resolves, but `dispatch` runs only what `compare::admits` (view, zoom, pages,
+save, files and tabs) and answers the rest with the read-only sentence, silently for `Enter`
+(`design/app-compare.md`).
+
 ## 9. Gesture modifiers
 
 Built: space+drag pan · `Shift` constrain / keep ratio · `Alt` duplicate-drag · `Alt` resize about
@@ -474,7 +487,8 @@ focus mode → a bindable field's menu / `--` list / mode menu → a style card'
 or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the
 rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
 insert picker (`kit_picker`) → the
-variables browser (inner rungs first) → a text session → the pen → **a gesture in flight**
+variables browser (inner rungs first) → a text session → the find box → a compare → the pen →
+**a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → the path bar's
 Offset card (`offset_card`) → pen bias armed over an edit → the point selection → the pivot handle → the entered group (selects it) → a tool that is
 not Select (to Select) → **the layer selection**, the fall-through `else`.

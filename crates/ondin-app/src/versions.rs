@@ -162,6 +162,9 @@ impl OndinApp {
         let title = format!("Version history of {}", self.shown_title());
         let mut close = false;
         let mut restore: Option<PathBuf> = None;
+        let mut compare: Option<(PathBuf, String, Option<String>)> = None;
+        let lit = self.versions_compare;
+        let compared = self.session.compare.as_ref().map(|c| c.version.clone());
         let private = crate::private::on();
         let mut naming = self.version_naming.take();
         // Private mode draws no field, so a name cannot be typed blind; one open as
@@ -205,6 +208,12 @@ impl OndinApp {
                         let editing = naming.as_ref().filter(|n| n.path == v.path).is_some();
                         let row = egui::vec2(ui.available_width(), row_h);
                         let layout = egui::Layout::left_to_right(egui::Align::Center);
+                        // The version being compared stays marked.
+                        if compared.as_ref() == Some(&v.path) {
+                            let at = egui::Rect::from_min_size(ui.cursor().min, row)
+                                .expand2(egui::vec2(4.0, 3.0));
+                            ui.painter().rect_filled(at, 5.0, color::text_a(20));
+                        }
                         ui.allocate_ui_with_layout(row, layout, |ui| {
                             ui.set_min_height(row_h);
                             ui.label(theme::icon_text(
@@ -219,6 +228,14 @@ impl OndinApp {
                                 None => ("Unknown time".into(), String::new()),
                             };
                             // A named version leads with its name, its time beneath.
+                            // What the compare bar names it by: its name, and when beside it.
+                            let named = match &v.label {
+                                Some(label) => (
+                                    crate::private::version(label, place).into_owned(),
+                                    Some(when.clone()),
+                                ),
+                                None => (when.clone(), None),
+                            };
                             let (head, foot) = match &v.label {
                                 Some(label) => (
                                     crate::private::version(label, place).into_owned(),
@@ -279,6 +296,18 @@ impl OndinApp {
                                             focused: false,
                                         });
                                     }
+                                    let diff = crate::ui::icon_button(
+                                        ui,
+                                        icon::GIT_DIFF,
+                                        22.0,
+                                        14.0,
+                                        lit,
+                                        true,
+                                    )
+                                    .on_hover_text("Compare with now");
+                                    if diff.clicked() {
+                                        compare = Some((v.path.clone(), named.0, named.1));
+                                    }
                                     if let Some(n) = naming.as_mut().filter(|_| editing)
                                         && name_field(ui, n)
                                     {
@@ -312,16 +341,20 @@ impl OndinApp {
             naming = Some(n);
         }
         self.version_naming = naming;
-        let leaving = restore.is_some() || close || (modal.should_close() && !escaped);
+        let leaving =
+            restore.is_some() || compare.is_some() || close || (modal.should_close() && !escaped);
         // Leaving the card keeps what was typed, as a press elsewhere does.
         if leaving && let Some(n) = self.version_naming.take() {
             self.commit_version_name(n);
         }
+        if leaving {
+            self.versions_open = false;
+            self.versions_compare = false;
+        }
         if let Some(path) = restore {
-            self.versions_open = false;
             self.restore_version(&path);
-        } else if leaving {
-            self.versions_open = false;
+        } else if let Some((path, title, when)) = compare {
+            self.compare_with(&path, title, when);
         }
     }
 

@@ -16,7 +16,7 @@
 
 use crate::app::OndinApp;
 use crate::canvas::CanvasRenderer;
-use crate::input::Action;
+use crate::input::{Action, ViewSwitch};
 use crate::session::InkLog;
 use crate::theme::{self, color, icon};
 use eframe::egui;
@@ -400,8 +400,10 @@ fn ancestors<'d>(
     })
 }
 
-/// Whether `action` may run while a compare is open: what looks, moves the view,
-/// saves or leaves, never what edits.
+/// Whether `action` may run while a compare is open: what moves the view, saves
+/// or leaves, never what edits. The palette and the view switches stay out with
+/// the View and Snap menus: each reaches modes and overlays the compare does not
+/// draw, and guarding every one of them is not worth what they add to a diff.
 pub(crate) fn admits(action: &Action) -> bool {
     matches!(
         action,
@@ -414,7 +416,6 @@ pub(crate) fn admits(action: &Action) -> bool {
             | Action::ExportAll
             | Action::ExportCode(_)
             | Action::ExportEditable(_)
-            | Action::Palette
             | Action::Cheatsheet
             | Action::ShowInLibrary
             | Action::VersionHistory
@@ -424,7 +425,8 @@ pub(crate) fn admits(action: &Action) -> bool {
             | Action::ZoomReset
             | Action::ZoomFit
             | Action::StepPage(_)
-            | Action::ToggleView(_)
+            // Private mode masks names, so it stays reachable for a shared screen.
+            | Action::ToggleView(ViewSwitch::Private)
             | Action::Escape
     )
 }
@@ -1781,6 +1783,19 @@ mod tests {
     fn open(f: &mut F) -> &Compare {
         f.app.compare_with(pick(&f.version, "Before review"), None);
         f.app.session.compare.as_deref().expect("the compare opens")
+    }
+
+    /// A compare refuses the palette and every view switch but private mode, and
+    /// keeps the zoom and Escape.
+    #[test]
+    fn a_compare_refuses_the_palette_and_the_view_switches() {
+        assert!(!admits(&Action::Palette));
+        assert!(!admits(&Action::ToggleView(ViewSwitch::Rulers)));
+        assert!(!admits(&Action::ToggleView(ViewSwitch::SnapGrid)));
+        assert!(!admits(&Action::Undo));
+        assert!(admits(&Action::ToggleView(ViewSwitch::Private)));
+        assert!(admits(&Action::ZoomFit));
+        assert!(admits(&Action::Escape));
     }
 
     /// A changed layer under a changed frame folds into the frame's row, named

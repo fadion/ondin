@@ -469,7 +469,8 @@ pub fn menu_head_min(
     let at = |g: &std::sync::Arc<egui::Galley>, x: f32| {
         egui::pos2(x, rect.center().y - g.size().y / 2.0)
     };
-    let lit = open || resp.hovered();
+    // A disabled head still hovers, for its tooltip, but never lights.
+    let lit = open || (resp.hovered() && ui.is_enabled());
     if lit {
         p.rect_filled(rect, egui::CornerRadius::same(5), theme::color::hover());
     }

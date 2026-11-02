@@ -7035,8 +7035,10 @@ impl OndinApp {
 
                         // Only the buttons' enabled state; the arms finish the text
                         // session (itself an undo step) before acting.
-                        let can_undo = self.session.history.can_undo();
-                        let can_redo = self.session.history.can_redo();
+                        // A compare is read-only, so it has nothing to undo.
+                        let comparing = self.session.compare.is_some();
+                        let can_undo = !comparing && self.session.history.can_undo();
+                        let can_redo = !comparing && self.session.history.can_redo();
                         // Redo first: the mirror again.
                         if icon_button(ui, icon::ARROW_U_UP_RIGHT, 26.0, 16.0, false, can_redo)
                             .on_hover_text("Redo (Ctrl+Shift+Z)")
@@ -7249,6 +7251,11 @@ impl OndinApp {
         const MENU_W: f32 = 160.0;
 
         let ctx = ui.ctx().clone();
+        // Neither menu has anything a compare draws or a read-only document takes.
+        let comparing = self.session.compare.is_some();
+        if comparing && matches!(self.open_menu, TopMenu::View | TopMenu::Snap) {
+            self.open_menu = TopMenu::None;
+        }
 
         // Snap first: in the `right_to_left` cluster the pair then reads View · Snap.
         for which in [TopMenu::Snap, TopMenu::View] {
@@ -7257,13 +7264,18 @@ impl OndinApp {
                 _ => (icon::MAGNET, "Snap"),
             };
             // `TOP_GAP` before the caret, matching the zoom readout's.
-            let head = crate::ui::menu_head(
-                ui,
-                theme::icon_text(glyph, 16.0, theme::text::muted()),
-                TOP_GAP,
-                self.open_menu == which,
-            )
-            .on_hover_text(tip);
+            let head = ui
+                .add_enabled_ui(!comparing, |ui| {
+                    crate::ui::menu_head(
+                        ui,
+                        theme::icon_text(glyph, 16.0, theme::text::muted()),
+                        TOP_GAP,
+                        self.open_menu == which,
+                    )
+                })
+                .inner
+                .on_hover_text(tip)
+                .on_disabled_hover_text(format!("{tip} — not while comparing"));
             if head.clicked() {
                 self.toggle_menu(which);
             }

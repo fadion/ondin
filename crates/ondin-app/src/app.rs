@@ -851,6 +851,12 @@ pub struct OndinApp {
     /// The canvas a compare draws the version through (`crate::compare`), made on
     /// the first frame one is open and dropped on the first without.
     pub(crate) then_canvas: Option<CanvasRenderer>,
+    /// The canvas the newer of two compared versions draws through, made and
+    /// dropped as `then_canvas` is.
+    pub(crate) now_canvas: Option<CanvasRenderer>,
+    /// The version history row Shift+clicked first, waiting for a second to be
+    /// compared with; cleared when the card closes.
+    pub(crate) versions_pick: Option<std::path::PathBuf>,
     /// The version whose name the card is editing.
     pub(crate) version_naming: Option<crate::versions::Naming>,
     /// The kit *Make all local*'s confirmation is asking about.
@@ -1500,6 +1506,8 @@ impl OndinApp {
             versions_open: false,
             versions_compare: false,
             then_canvas: None,
+            now_canvas: None,
+            versions_pick: None,
             version_naming: None,
             making_all_local: None,
             unsharing_kit: None,
@@ -3748,9 +3756,9 @@ impl OndinApp {
 
     /// Everything on the current page — what `Action::ZoomFit` fits.
     pub(crate) fn document_bounds(&self) -> Option<Rect> {
-        // While a compare shows a page only the version has, that page's.
+        // While a compare shows a page the open document lacks, that page's.
         if let Some((page, _)) = self.session.compare.as_ref().and_then(|c| c.away) {
-            return self.session.compare.as_ref()?.then_res.world_bounds(page);
+            return self.session.compare.as_ref()?.page_bounds(page);
         }
         self.session.preview_world_bounds(self.session.page)
     }
@@ -5912,6 +5920,7 @@ impl OndinApp {
         self.kits_used_open = false;
         self.versions_open = false;
         self.versions_compare = false;
+        self.versions_pick = None;
         // Kept, as every way out of the name field but Escape keeps it.
         if let Some(n) = self.version_naming.take() {
             self.commit_version_name(n);

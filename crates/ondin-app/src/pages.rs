@@ -93,10 +93,10 @@ impl OndinApp {
 
     /// A page's name as drawn, masked in private mode (`crate::private::page`).
     /// [`Self::page_name`] is the name itself, for comparing, renaming and files.
-    /// While comparing, a page only the version has is named from the version.
+    /// While comparing, a page the document lacks is named from the version holding it.
     pub(crate) fn shown_page_name(&self, page: NodeId) -> String {
         let doc = match &self.session.compare {
-            Some(c) if !self.session.doc.is_page(page) => &c.then,
+            Some(c) if !self.session.doc.is_page(page) => c.page_doc(page),
             _ => &self.session.doc,
         };
         crate::private::page(doc, page).into_owned()
@@ -636,7 +636,7 @@ impl OndinApp {
     }
 
     /// How many rows the Pages section lists: the document's pages, and while
-    /// comparing the pages only the version has.
+    /// comparing the compared pages it lacks.
     fn listed_pages(&self) -> usize {
         let elsewhere = self
             .session
@@ -898,13 +898,18 @@ impl OndinApp {
         self.elsewhere_rows(ui, shown);
     }
 
-    /// While comparing, a row per page only the version has, after the document's:
+    /// While comparing, a row per compared page the document lacks, after its own:
     /// dimmed, with its status tag; a click shows it (`OndinApp::go_away`).
     fn elsewhere_rows(&mut self, ui: &mut egui::Ui, shown: NodeId) {
-        let Some(elsewhere) = self.session.compare.as_ref().map(|c| c.elsewhere.clone()) else {
+        let Some(elsewhere) = self.session.compare.as_ref().map(|c| {
+            c.elsewhere
+                .iter()
+                .map(|(page, status)| (*page, *status, c.elsewhere_tip(*status)))
+                .collect::<Vec<_>>()
+        }) else {
             return;
         };
-        for (page, status) in elsewhere {
+        for (page, status, tip) in elsewhere {
             let (rect, resp) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), ROW_H),
                 egui::Sense::click(),
@@ -946,7 +951,7 @@ impl OndinApp {
                 egui::FontId::proportional(11.0),
                 ink,
             );
-            let resp = resp.on_hover_text("Only in the version");
+            let resp = resp.on_hover_text(tip);
             if resp.clicked() {
                 self.go_away(page);
             }

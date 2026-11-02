@@ -1,23 +1,32 @@
 # Compare with a version
 
-The open document set against one pinned version (`.versions/…`, `library.md`): a read-only mode
-on the canvas marking every layer that differs, a bar over the canvas and a changes card in the
-inspector's place. Part of §9.4. The engine is `ondin_core::diff`, the one `ondin diff` prints,
+The open document set against one pinned version (`.versions/…`, `library.md`), or two pinned
+versions against each other: a read-only mode on the canvas marking every layer that differs, a
+bar over the canvas and a changes card in the inspector's place. Part of §9.4. The engine is `ondin_core::diff`, the one `ondin diff` prints,
 matched by id, so a renamed or moved layer is one change.
 
 ## Compare with a version (`compare.rs`)
 
 - **State.** `EditorSession::compare: Option<Box<Compare>>`, on the document's session, so it
-  travels with its tab; `adopt_document` (open, restore) drops it. `OndinApp::then_canvas` is the
-  version's canvas, made on first use and dropped on the first frame with no compare.
+  travels with its tab; `adopt_document` (open, restore) drops it. `Compare::pick` is the version,
+  or the older of two; `Compare::newer`, when two are compared, is the newer, which stands for Now
+  everywhere the open document would (`Compare::now_doc`): the diff, the boxes, the names, Now's
+  drawing. `OndinApp::then_canvas` and `now_canvas` are the versions' canvases, each made on first
+  use and dropped on the first frame with no compare.
 - **Doors.** Each Version history row has a compare button (the git-diff glyph,
-  `theme::icon::GIT_DIFF`, before the pencil): it closes the card and opens the compare. The row
-  being compared is tinted when the card is opened again. *Compare with version…*
+  `theme::icon::GIT_DIFF`, before the pencil): it closes the card and opens the compare. With
+  Shift held it is the second of two (`OndinApp::compare_pick`): after a Shift+click on another
+  row, or with another row's compare with now open, it compares the older of the two (the lower
+  row) with the newer; else it picks its row (`OndinApp::versions_pick`, tinted, its button lit,
+  the status line asking for a second) and the card stays, a second Shift+click on the same row
+  dropping the pick and closing the card dropping it too. The rows being compared are tinted when
+  the card is opened again. *Compare with version…*
   (`Action::CompareVersion`, `menu::Item::CompareVersion`, the Document menu and the palette; the
   palette row disabled outside the library with the version card's sentence) opens the card with
   the compare buttons lit (`OndinApp::versions_compare`). A document unchanged since the version
-  opens no compare and says *Nothing has changed since this version*. Opening closes the find box,
-  ends a contrast check and a colour-vision simulation, clears any gesture preview, and takes the
+  opens no compare and says *Nothing has changed since this version* (two the same: *These
+  versions are the same*). Opening leaves a compare already open, closes the find box, ends a
+  contrast check and a colour-vision simulation, clears any gesture preview, and takes the
   selection aside; leaving gives it back when the compare ends on the page it opened on.
 - **Read-only, in three layers**: the session refuses behind the doors the app closes itself.
   - `EditorSession::commit_inner` refuses any non-empty transaction (returns `Ok` without applying)
@@ -43,13 +52,14 @@ matched by id, so a renamed or moved layer is one change.
   their status read from which side has a value.
 - **The bar** (`compare_bar`), centred over the canvas's top (14pt down, below the rulers when
   they show; 38 tall, card fill, radius 8, the find box's shadow): the git-diff glyph, *Comparing
-  ‹name› · ‹when› with now* (an unnamed version: its time), the segments *Then · Now · Swipe*,
+  ‹name› · ‹when› with now* (an unnamed version: its time; two versions: *with ‹name› · ‹when›*),
+  the segments *Then · Now · Swipe*,
   previous and next arrows round *i of n* (*n changes* before one is current), and *Done*.
 - **Keys.** `Enter` / `Shift+Enter` step, `\` with no modifiers toggles Then and Now, both read by
   the bar while no modal, palette or text field has the keyboard. `Escape` leaves: a rung of
   `OndinApp::escape` just below the find box.
 - **Stepping** (`step_compare`) goes round the ends. `show_change` switches page when it must, or
-  shows a page only the version has;
+  shows a page the open document lacks;
   `reveal_change` then pans the change, and a moved layer's old box with it, into view with the
   zoom kept (`OndinApp::reveal`). It runs from the bar, after the canvas, so a first visit's framing
   does not override it.
@@ -65,19 +75,24 @@ matched by id, so a renamed or moved layer is one change.
   The current mark is ringed white at 2pt and tinted, and drawn last. A click picks the smallest
   mark under the pointer. While comparing, each Pages row carries an ochre badge counting its
   changed layers.
-- **A page only the version has** (`Compare::elsewhere`) is listed in the Pages section after the
-  document's pages: its name faint, a 16pt removed tag at the row's end. A click on it, or stepping
-  to a row on it, shows it (`OndinApp::go_away`): `Compare::away` holds the page and parks the
-  camera of the current page, which `EditorSession::page` stays all the while, so nothing outside
-  the compare ever sees a page the document lacks. The page is fitted (`document_bounds` answers
-  for it), Now switches to Then, and Now's side draws the theme's canvas ground with no frame
-  labels. `go_to_page` comes back first, the parked camera with it, and so does leaving; the
+- **A compared page the open document lacks** (`Compare::elsewhere`) is listed in the Pages
+  section after the document's pages: its name faint (from the newer version when it has the page,
+  else the version: `Compare::page_doc`), a 16pt status tag at the row's end — removed for one
+  only Then has; with two versions, added for one only the newer has and changed for one both have
+  — and a tip saying which (`Compare::elsewhere_tip`). A click on it, or stepping to a row on it,
+  shows it (`OndinApp::go_away`): `Compare::away` holds the page and parks the camera of the
+  current page, which `EditorSession::page` stays all the while, so nothing outside the compare
+  ever sees a page the document lacks. The page is fitted (`document_bounds` answers for it), the
+  side switches when the one showing lacks the page (Now to Then, Then to Now), and a side without
+  it draws the theme's canvas ground; no frame labels are drawn. `go_to_page` comes back first, the parked camera with it, and so does leaving; the
   library's last view records the parked camera, never the away one. `OndinApp::compare_page` is
   the page the canvas shows, for the marks, the reveal and the Pages check.
 - **Then and Swipe** draw the version through a second `CanvasRenderer` (`CanvasRenderer::another`:
   the same device, its own texture and decode cache, so switching sides redraws neither) with the
   session's camera and page. The version never changes, so its stamps are one fresh
   `session::next_revision` for good. A page the version lacks draws the theme's canvas ground.
+  With two versions Now draws the newer through a third (`now_canvas`) over the open document's
+  drawing, and the frame labels, which are the open document's, are not drawn.
   Swipe clips the version left of a draggable handle (a 2pt accent line, a 24×36 accent grip with
   a left-right arrow), with *THEN* and *NOW* pills in the bottom corners.
 - **The card** (`compare_card`): *CHANGES* and *n layers · n pages · n more*; per page a heading
@@ -90,7 +105,7 @@ matched by id, so a renamed or moved layer is one change.
   its values indented 17pt under it. A click on the caret expands or folds; a click elsewhere on a
   row makes it current and steps to it.
 - **Private mode** masks the names in the card and in the marks' tags through `private::layer` and
-  `private::page` and the bar's (*a version*), drops the trail, and replaces the value lines with
+  `private::page` and the bar's (*a version*, *with another*), drops the trail, and replaces the value lines with
   *n changes*.
 
 ## Traps

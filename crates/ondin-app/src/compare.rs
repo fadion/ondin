@@ -3,7 +3,8 @@
 //! the inspector's place listing the changes as `ondin diff` reports them
 //! (`ondin_core::diff`, matched by id, so a renamed or moved layer is one change).
 //! A bar over the canvas's top switches between Then (the version), Now and Swipe
-//! (the two split at a handle), steps through the changes and leaves.
+//! (the two split at a handle), steps through the changes and leaves. Two versions
+//! can be compared with each other too; the newer then stands for Now.
 //!
 //! **A mode, not a document**: nothing is written. The compare lives on the
 //! document's session, which refuses commits, undo and redo while it is open;
@@ -14,6 +15,7 @@
 //! folded into that row, its changes named under it and counted in the mark's tag.
 
 use crate::app::OndinApp;
+use crate::canvas::CanvasRenderer;
 use crate::input::Action;
 use crate::session::InkLog;
 use crate::theme::{self, color, icon};
@@ -70,7 +72,7 @@ pub(crate) struct Group {
     pub(crate) name: String,
     /// The page, in either document; `None` for the kit vault.
     pub(crate) page: Option<NodeId>,
-    /// Only the version has it, so its heading is dimmed.
+    /// Only Then has it, so its heading is dimmed.
     pub(crate) removed: bool,
     /// How many layers changed on it.
     pub(crate) layers: usize,
@@ -163,15 +165,33 @@ impl Folded {
     }
 }
 
-/// An open compare (`EditorSession::compare`).
-pub(crate) struct Compare {
-    pub(crate) version: PathBuf,
+/// A pinned version as the compare is asked for it: its file and what the bar
+/// names it by.
+#[derive(Clone, Debug)]
+pub(crate) struct Pick {
+    pub(crate) path: PathBuf,
     /// The version's name, else when it was pinned.
     pub(crate) title: String,
     /// When it was pinned, beside a name.
     pub(crate) when: Option<String>,
+}
+
+/// The newer of two versions compared with each other, which stands for Now.
+pub(crate) struct Newer {
+    pub(crate) pick: Pick,
+    pub(crate) doc: Document,
+    pub(crate) res: Resolved,
+}
+
+/// An open compare (`EditorSession::compare`).
+pub(crate) struct Compare {
+    /// The version, or the older of two.
+    pub(crate) pick: Pick,
     pub(crate) then: Document,
-    pub(crate) then_res: Resolved,
+    then_res: Resolved,
+    /// The newer version when two are compared; `None` compares with the open
+    /// document.
+    pub(crate) newer: Option<Newer>,
     /// The stamps the version's canvas keys its texture on; the version never
     /// changes, so one serves for good.
     stamp: u64,
@@ -204,6 +224,38 @@ pub(crate) struct Compare {
 }
 
 impl Compare {
+    /// What Now draws: the newer version, else the open document `open`.
+    pub(crate) fn now_doc<'a>(&'a self, open: &'a Document) -> &'a Document {
+        self.newer.as_ref().map_or(open, |n| &n.doc)
+    }
+
+    /// The compared document holding `page`, one the open document lacks: the
+    /// newer version when it has it, else the version.
+    pub(crate) fn page_doc(&self, page: NodeId) -> &Document {
+        match &self.newer {
+            Some(n) if n.doc.is_page(page) => &n.doc,
+            _ => &self.then,
+        }
+    }
+
+    /// `page`'s bounds in [`Self::page_doc`].
+    pub(crate) fn page_bounds(&self, page: NodeId) -> Option<Rect> {
+        match &self.newer {
+            Some(n) if n.doc.is_page(page) => n.res.world_bounds(page),
+            _ => self.then_res.world_bounds(page),
+        }
+    }
+
+    /// What a page the open document lacks is, said over its Pages row.
+    pub(crate) fn elsewhere_tip(&self, status: Status) -> &'static str {
+        match (self.newer.is_some(), status) {
+            (false, _) => "Only in the version",
+            (true, Status::Removed) => "Only in the older version",
+            (true, Status::Added) => "Only in the newer version",
+            (true, Status::Changed) => "In both versions, not in the document",
+        }
+    }
+
     /// How many layers changed on `page` of the open document.
     pub(crate) fn changed_on(&self, page: NodeId) -> usize {
         self.groups
@@ -307,14 +359,34 @@ pub(crate) fn rows(
     (groups, rows, d.document)
 }
 
-/// The pages of `then` that `now` lacks, in `then`'s order, each removed.
-fn elsewhere(then: &Document, now: &Document) -> Vec<(NodeId, Status)> {
-    then.pages()
+/// The compared pages the open document `open` lacks: `now`'s in its order, added
+/// or (when `then` has it too) changed, then `then`'s that `now` lacks, removed.
+fn elsewhere(then: &Document, now: &Document, open: &Document) -> Vec<(NodeId, Status)> {
+    let mut out: Vec<(NodeId, Status)> = now
+        .pages()
         .iter()
         .map(|p| p.id)
-        .filter(|p| !now.is_page(*p))
-        .map(|p| (p, Status::Removed))
-        .collect()
+        .filter(|p| !open.is_page(*p))
+        .map(|p| match then.is_page(p) {
+            true => (p, Status::Changed),
+            false => (p, Status::Added),
+        })
+        .collect();
+    out.extend(
+        then.pages()
+            .iter()
+            .map(|p| p.id)
+            .filter(|p| !open.is_page(*p) && !now.is_page(*p))
+            .map(|p| (p, Status::Removed)),
+    );
+    out
+}
+
+/// Read the version pinned at `path`.
+fn load(path: &Path) -> Result<Document, String> {
+    std::fs::read(path)
+        .map_err(|e| crate::private::io_error(&e))
+        .and_then(|b| ondin_core::io::load(&b).map_err(|e| e.to_string()))
 }
 
 /// `id`'s ancestors, nearest first, in the document that holds it — the open one
@@ -378,23 +450,38 @@ fn status_of(c: &Change) -> Status {
 }
 
 impl OndinApp {
-    /// Open a compare of the document with the version pinned at `version`, named
-    /// `title` (its `when` beside a name). Says why when it opens none.
-    pub(crate) fn compare_with(&mut self, version: &Path, title: String, when: Option<String>) {
+    /// Open a compare of the document with the version `pick`, or of `pick` with
+    /// `newer`, a later version, which then stands for Now. Says why when it opens
+    /// none.
+    pub(crate) fn compare_with(&mut self, pick: Pick, newer: Option<Pick>) {
         self.finish_text_first();
-        let loaded = std::fs::read(version)
-            .map_err(|e| crate::private::io_error(&e))
-            .and_then(|b| ondin_core::io::load(&b).map_err(|e| e.to_string()));
-        let then = match loaded {
+        let newer = match newer.map(|n| load(&n.path).map(|doc| (n, doc))).transpose() {
+            Ok(n) => n.map(|(pick, doc)| Newer {
+                pick,
+                res: Resolved::rebuild(&doc),
+                doc,
+            }),
+            Err(e) => return self.session.fail(format!("Compare failed: {e}")),
+        };
+        let then = match load(&pick.path) {
             Ok(doc) => doc,
             Err(e) => return self.session.fail(format!("Compare failed: {e}")),
         };
         let then_res = Resolved::rebuild(&then);
-        let (groups, rows, off_canvas) =
-            rows(&then, &self.session.doc, &then_res, &self.session.resolved);
+        let (now, now_res) = match &newer {
+            Some(n) => (&n.doc, &n.res),
+            None => (&self.session.doc, &self.session.resolved),
+        };
+        let (groups, rows, off_canvas) = rows(&then, now, &then_res, now_res);
         if rows.is_empty() && off_canvas.is_empty() {
-            return self.session.info("Nothing has changed since this version");
+            return self.session.info(match newer {
+                Some(_) => "These versions are the same",
+                None => "Nothing has changed since this version",
+            });
         }
+        let elsewhere = elsewhere(&then, now, &self.session.doc);
+        // One open is left first, so the selection it took aside comes back to be taken.
+        self.leave_compare();
         // Their overlays and fixes are the editing's, not the compare's.
         if self.find.open {
             self.close_find();
@@ -407,13 +494,11 @@ impl OndinApp {
             std::mem::take(&mut self.session.selection),
         );
         let stamp = crate::session::next_revision();
-        let elsewhere = elsewhere(&then, &self.session.doc);
         self.session.compare = Some(Box::new(Compare {
-            version: version.to_path_buf(),
-            title,
-            when,
+            pick,
             then,
             then_res,
+            newer,
             stamp,
             overrides: RenderOverrides::default(),
             ink: InkLog::default(),
@@ -451,26 +536,31 @@ impl OndinApp {
             .map_or(self.session.page, |(page, _)| page)
     }
 
-    /// Show `page`, which only the version has: the open document's camera parked,
-    /// the page fitted, and Then drawn where Now has nothing to show.
+    /// Show `page`, which only the compared versions have: the open document's
+    /// camera parked, the page fitted, and the side switched when the one showing
+    /// has nothing there.
     pub(crate) fn go_away(&mut self, page: NodeId) {
         let camera = self.session.camera;
         let Some(c) = self.session.compare.as_mut() else {
             return;
         };
-        if !c.then.is_page(page) || c.away.is_some_and(|(p, _)| p == page) {
+        let in_now = c.newer.as_ref().is_some_and(|n| n.doc.is_page(page));
+        let in_then = c.then.is_page(page);
+        if !(in_now || in_then) || c.away.is_some_and(|(p, _)| p == page) {
             return;
         }
         let left = c.away.map_or(camera, |(_, left)| left);
         c.away = Some((page, left));
-        if c.side == Side::Now {
-            c.side = Side::Then;
-        }
+        c.side = match c.side {
+            Side::Now if !in_now => Side::Then,
+            Side::Then if !in_then => Side::Now,
+            side => side,
+        };
         self.session.camera = crate::view::Camera::default();
         self.zoom_to(self.document_bounds());
     }
 
-    /// Back from a page only the version has, to the open document's camera.
+    /// Back from a page the open document lacks, to its own camera.
     pub(crate) fn come_back(&mut self) {
         if let Some((_, camera)) = self.session.compare.as_mut().and_then(|c| c.away.take()) {
             self.session.camera = camera;
@@ -541,6 +631,7 @@ impl OndinApp {
     pub(crate) fn compare_bar(&mut self, ctx: &egui::Context) {
         if self.session.compare.is_none() {
             self.then_canvas = None;
+            self.now_canvas = None;
             return;
         }
         self.reveal_change();
@@ -633,7 +724,7 @@ impl OndinApp {
         let Some(c) = self.session.compare.as_ref() else {
             return;
         };
-        let doc = &self.session.doc;
+        let doc = c.now_doc(&self.session.doc);
         egui::Area::new(egui::Id::new("compare-card"))
             .order(egui::Order::Middle)
             .fixed_pos(column.min)
@@ -764,7 +855,9 @@ impl OndinApp {
     }
 
     /// The compare over the drawn document: the version where Then or Swipe
-    /// shows it, the frame labels over that, the marks, and Swipe's handle.
+    /// shows it, the newer version or an empty ground over Now where the open
+    /// document is not what Now shows, the frame labels where it is, the marks, and
+    /// Swipe's handle.
     pub(crate) fn paint_compare(
         &mut self,
         ui: &egui::Ui,
@@ -782,57 +875,42 @@ impl OndinApp {
             .map_or(rect.center().x, |c| rect.left() + rect.width() * c.split);
         let page = self.compare_page();
         let away = page != self.session.page;
-        if away && side != Side::Then {
-            // The open document has no such page: Now is the ground, empty.
-            let clip = match side {
-                Side::Swipe => egui::Rect::from_min_max(egui::pos2(split_x, rect.min.y), rect.max),
-                _ => rect,
-            }
-            .intersect(painter.clip_rect());
-            let ground = crate::ui::color_to_egui(crate::session::theme_canvas());
-            painter.rect_filled(clip, 0.0, ground);
+        let two = self
+            .session
+            .compare
+            .as_ref()
+            .is_some_and(|c| c.newer.is_some());
+        let left = egui::Rect::from_min_max(rect.min, egui::pos2(split_x, rect.max.y));
+        let right = egui::Rect::from_min_max(egui::pos2(split_x, rect.min.y), rect.max);
+        let (then_clip, now_clip) = match side {
+            Side::Then => (Some(rect), None),
+            Side::Now => (None, Some(rect)),
+            Side::Swipe => (Some(left), Some(right)),
+        };
+        // Now over the open document's drawing only when it is not that.
+        let now_clip = now_clip.filter(|_| two || away);
+        if then_clip.is_some() && self.then_canvas.is_none() {
+            self.then_canvas = self.canvas.another();
         }
-        if side != Side::Now {
-            if self.then_canvas.is_none() {
-                self.then_canvas = self.canvas.another();
+        if two && now_clip.is_some() && self.now_canvas.is_none() {
+            self.now_canvas = self.canvas.another();
+        }
+        let (camera, px) = (self.session.camera, self.canvas_px);
+        let view = (&camera, px, page, rect);
+        if let Some(c) = self.session.compare.as_ref() {
+            if let Some(clip) = now_clip {
+                let clip = painter.with_clip_rect(clip.intersect(painter.clip_rect()));
+                let doc = c.newer.as_ref().map(|n| (&n.doc, &n.res));
+                paint_version(&clip, self.now_canvas.as_mut(), c, doc, view);
             }
-            let clip = match side {
-                Side::Swipe => egui::Rect::from_min_max(rect.min, egui::pos2(split_x, rect.max.y)),
-                _ => rect,
-            }
-            .intersect(painter.clip_rect());
-            let (camera, px) = (self.session.camera, self.canvas_px);
-            if let Some(c) = self.session.compare.as_ref() {
-                let then = painter.with_clip_rect(clip);
-                if c.then.is_page(page) {
-                    let ground = crate::session::page_ground(&c.then, page);
-                    let tex = self.then_canvas.as_mut().and_then(|canvas| {
-                        canvas.render(
-                            &c.then,
-                            &c.then_res,
-                            &c.overrides,
-                            (c.stamp, c.stamp, c.stamp),
-                            &c.ink,
-                            &camera,
-                            px,
-                            ground,
-                            page,
-                        )
-                    });
-                    if let Some(tex) = tex {
-                        let uv =
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                        then.image(tex, rect, uv, egui::Color32::WHITE);
-                    }
-                } else {
-                    // A page the version did not have: its ground, empty.
-                    let ground = crate::ui::color_to_egui(crate::session::theme_canvas());
-                    then.rect_filled(clip, 0.0, ground);
-                }
+            if let Some(clip) = then_clip {
+                let clip = painter.with_clip_rect(clip.intersect(painter.clip_rect()));
+                let doc = Some((&c.then, &c.then_res));
+                paint_version(&clip, self.then_canvas.as_mut(), c, doc, view);
             }
         }
         // The labels are the open document's, of its current page.
-        if !away {
+        if !away && !two {
             self.draw_frame_labels(ui, painter, rect, ppp);
         }
 
@@ -857,7 +935,7 @@ impl OndinApp {
             }
             let name = match row.status {
                 Status::Removed => crate::private::layer(&c.then, row.id),
-                _ => crate::private::layer(&self.session.doc, row.id),
+                _ => crate::private::layer(c.now_doc(&self.session.doc), row.id),
             };
             paint_mark(&canvas, row, &name, *at, current);
         }
@@ -900,10 +978,6 @@ enum Act {
 /// The bar's contents: what is compared, the three sides, the steps, Done.
 fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     ui.label(theme::icon_text(icon::GIT_DIFF, 15.0, color::accent_400()));
-    let title = match private {
-        true => "a version".to_string(),
-        false => c.title.clone(),
-    };
     let mut job = egui::text::LayoutJob::default();
     let font = egui::FontId::proportional(12.0);
     let part = |job: &mut egui::text::LayoutJob, text: &str, ink: egui::Color32| {
@@ -917,12 +991,25 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
             },
         );
     };
+    // A version by its name, its time beside it; in private mode, by neither.
+    let name = |job: &mut egui::text::LayoutJob, pick: &Pick, masked: &str| {
+        if private {
+            return part(job, masked, color::text());
+        }
+        part(job, &pick.title, color::text());
+        if let Some(when) = &pick.when {
+            part(job, &format!(" · {when}"), theme::text::dim());
+        }
+    };
     part(&mut job, "Comparing ", theme::text::muted());
-    part(&mut job, &title, color::text());
-    if let Some(when) = &c.when {
-        part(&mut job, &format!(" · {when}"), theme::text::dim());
+    name(&mut job, &c.pick, "a version");
+    match &c.newer {
+        Some(n) => {
+            part(&mut job, " with ", theme::text::muted());
+            name(&mut job, &n.pick, "another");
+        }
+        None => part(&mut job, " with now", theme::text::muted()),
     }
-    part(&mut job, " with now", theme::text::muted());
     ui.label(job);
 
     crate::batch_rename::well(ui, |ui| {
@@ -1041,7 +1128,7 @@ fn card_list(ui: &mut egui::Ui, c: &Compare, doc: &Document, act: &mut Option<Ac
             .collect();
         let name = match (private, group.page) {
             (true, Some(page)) if doc.is_page(page) => crate::private::page(doc, page).into_owned(),
-            (true, Some(page)) => crate::private::page(&c.then, page).into_owned(),
+            (true, Some(page)) => crate::private::page(c.page_doc(page), page).into_owned(),
             (true, None) => "Page".into(),
             (false, _) => group.name.clone(),
         };
@@ -1452,6 +1539,42 @@ fn paint_mark(painter: &egui::Painter, row: &Row, name: &str, at: egui::Rect, cu
     );
 }
 
+/// A compared document's `page` drawn through `canvas` over `rect`, within
+/// `painter`'s clip; where `doc` is `None` or lacks the page, the theme's canvas
+/// ground, empty.
+fn paint_version(
+    painter: &egui::Painter,
+    canvas: Option<&mut CanvasRenderer>,
+    c: &Compare,
+    doc: Option<(&Document, &Resolved)>,
+    (camera, px, page, rect): (&crate::view::Camera, (u32, u32), NodeId, egui::Rect),
+) {
+    let Some((doc, res)) = doc.filter(|(d, _)| d.is_page(page)) else {
+        let ground = crate::ui::color_to_egui(crate::session::theme_canvas());
+        painter.rect_filled(painter.clip_rect(), 0.0, ground);
+        return;
+    };
+    let ground = crate::session::page_ground(doc, page);
+    let stamps = (c.stamp, c.stamp, c.stamp);
+    let tex = canvas.and_then(|canvas| {
+        canvas.render(
+            doc,
+            res,
+            &c.overrides,
+            stamps,
+            &c.ink,
+            camera,
+            px,
+            ground,
+            page,
+        )
+    });
+    if let Some(tex) = tex {
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        painter.image(tex, rect, uv, egui::Color32::WHITE);
+    }
+}
+
 /// The outline of `r` in dashes.
 fn dashed_rect(painter: &egui::Painter, r: egui::Rect, stroke: egui::Stroke) {
     let pts = [
@@ -1631,8 +1754,16 @@ mod tests {
         }
     }
 
+    fn pick(path: &Path, title: &str) -> Pick {
+        Pick {
+            path: path.to_path_buf(),
+            title: title.into(),
+            when: None,
+        }
+    }
+
     fn open(f: &mut F) -> &Compare {
-        f.app.compare_with(&f.version, "Before review".into(), None);
+        f.app.compare_with(pick(&f.version, "Before review"), None);
         f.app.session.compare.as_deref().expect("the compare opens")
     }
 
@@ -1771,6 +1902,74 @@ mod tests {
         let _ = std::fs::remove_file(&f.version);
     }
 
+    /// Shift+clicking two versions compares the older with the newer, whatever the
+    /// order: Now is the newer version, not the open document, which has since lost
+    /// a layer and a page the newer one has.
+    ///
+    /// flip: `compare_pick` answering the two the other way round → fails at the
+    /// newer's title.
+    #[test]
+    fn two_versions_compare_the_older_with_the_newer() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "two");
+        let drafts = f.app.session.ids.mint();
+        assert!(f.app.session.commit(Transaction(vec![Operation::AddPage {
+            id: drafts,
+            index: 2,
+            name: "Drafts".into(),
+            ground: None,
+            draft: false,
+            mode: None,
+        }])));
+        let doc = &f.app.session.doc;
+        let seat = *doc
+            .get(f.first)
+            .unwrap()
+            .children()
+            .iter()
+            .find(|id| doc.get(**id).unwrap().name() == "Seat note")
+            .unwrap();
+        let newer = f.version.with_extension("newer.ondin");
+        std::fs::write(&newer, ondin_core::io::save(&f.app.session.doc).unwrap()).unwrap();
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::DeleteNode { id: seat },
+            Operation::RemovePage { id: drafts },
+        ])));
+        // Newest first, as the card lists them.
+        let picks = [pick(&newer, "After"), pick(&f.version, "Before")];
+        assert!(
+            f.app.compare_pick(&picks, 1, true).is_none(),
+            "the first picks"
+        );
+        assert_eq!(f.app.versions_pick.as_deref(), Some(f.version.as_path()));
+        let (then, now) = f
+            .app
+            .compare_pick(&picks, 0, true)
+            .expect("the second compares");
+        assert!(f.app.versions_pick.is_none());
+        f.app.compare_with(then, now);
+        let c = f.app.session.compare.as_deref().expect("the compare opens");
+        assert_eq!(
+            c.newer.as_ref().map(|n| n.pick.title.as_str()),
+            Some("After"),
+            "the newer's title"
+        );
+        let row = c
+            .rows
+            .iter()
+            .find(|r| r.id == seat)
+            .expect("the note's row");
+        assert_eq!(row.status, Status::Added, "added in the newer");
+        assert!(row.now.is_some(), "its box from the newer version");
+        assert_eq!(c.elsewhere, vec![(drafts, Status::Added)]);
+        for side in [Side::Then, Side::Swipe, Side::Now] {
+            f.app.session.compare.as_mut().unwrap().side = side;
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        let _ = std::fs::remove_file(&f.version);
+        let _ = std::fs::remove_file(&newer);
+    }
+
     /// Nothing changed since the version: no compare opens.
     #[test]
     fn an_unchanged_document_opens_no_compare() {
@@ -1781,7 +1980,7 @@ mod tests {
             ondin_core::io::save(&f.app.session.doc).unwrap(),
         )
         .unwrap();
-        f.app.compare_with(&f.version, "Now".into(), None);
+        f.app.compare_with(pick(&f.version, "Now"), None);
         assert!(f.app.session.compare.is_none());
         let _ = std::fs::remove_file(&f.version);
     }

@@ -557,7 +557,12 @@ mod leak {
                         locked: !locked,
                     }
                 ])));
-                app.compare_with(&version, "Before".into(), None);
+                let pick = crate::compare::Pick {
+                    path: version.clone(),
+                    title: "Before".into(),
+                    when: None,
+                };
+                app.compare_with(pick, None);
                 assert!(app.session.compare.is_some(), "fixture: comparing");
             },
             |app| app.leave_compare(),

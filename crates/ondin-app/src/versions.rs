@@ -8,6 +8,7 @@
 //! history is the open document's), which is why the pin is unconditional.
 
 use crate::app::OndinApp;
+use crate::compare::Pick;
 use crate::library::{clock, store};
 use crate::theme::{self, color, icon};
 use eframe::egui;
@@ -162,10 +163,36 @@ impl OndinApp {
         let title = format!("Version history of {}", self.shown_title());
         let mut close = false;
         let mut restore: Option<PathBuf> = None;
-        let mut compare: Option<(PathBuf, String, Option<String>)> = None;
+        // A compare button's row, and whether Shift was held.
+        let mut compare: Option<(usize, bool)> = None;
         let lit = self.versions_compare;
-        let compared = self.session.compare.as_ref().map(|c| c.version.clone());
+        let compared: Vec<PathBuf> = self.session.compare.as_ref().map_or(Vec::new(), |c| {
+            std::iter::once(c.pick.path.clone())
+                .chain(c.newer.as_ref().map(|n| n.pick.path.clone()))
+                .collect()
+        });
+        let picked = self.versions_pick.clone();
         let private = crate::private::on();
+        // What the compare bar names each by: its name and when beside it, or its time.
+        let picks: Vec<Pick> = versions
+            .iter()
+            .enumerate()
+            .map(|(place, v)| {
+                let when = v.at.map_or_else(|| "Unknown time".into(), when_label);
+                match &v.label {
+                    Some(label) => Pick {
+                        path: v.path.clone(),
+                        title: crate::private::version(label, place).into_owned(),
+                        when: Some(when),
+                    },
+                    None => Pick {
+                        path: v.path.clone(),
+                        title: when,
+                        when: None,
+                    },
+                }
+            })
+            .collect();
         let mut naming = self.version_naming.take();
         // Private mode draws no field, so a name cannot be typed blind; one open as
         // it came on keeps what was typed.
@@ -208,8 +235,9 @@ impl OndinApp {
                         let editing = naming.as_ref().filter(|n| n.path == v.path).is_some();
                         let row = egui::vec2(ui.available_width(), row_h);
                         let layout = egui::Layout::left_to_right(egui::Align::Center);
-                        // The version being compared stays marked.
-                        if compared.as_ref() == Some(&v.path) {
+                        // A version being compared, or picked to be, stays marked.
+                        let picked = picked.as_ref() == Some(&v.path);
+                        if picked || compared.contains(&v.path) {
                             let at = egui::Rect::from_min_size(ui.cursor().min, row)
                                 .expand2(egui::vec2(4.0, 3.0));
                             ui.painter().rect_filled(at, 5.0, color::text_a(20));
@@ -228,14 +256,6 @@ impl OndinApp {
                                 None => ("Unknown time".into(), String::new()),
                             };
                             // A named version leads with its name, its time beneath.
-                            // What the compare bar names it by: its name, and when beside it.
-                            let named = match &v.label {
-                                Some(label) => (
-                                    crate::private::version(label, place).into_owned(),
-                                    Some(when.clone()),
-                                ),
-                                None => (when.clone(), None),
-                            };
                             let (head, foot) = match &v.label {
                                 Some(label) => (
                                     crate::private::version(label, place).into_owned(),
@@ -301,12 +321,15 @@ impl OndinApp {
                                         icon::GIT_DIFF,
                                         22.0,
                                         14.0,
-                                        lit,
+                                        lit || picked,
                                         true,
                                     )
-                                    .on_hover_text("Compare with now");
+                                    .on_hover_text(
+                                        "Compare with now · Shift+click two to compare them",
+                                    );
                                     if diff.clicked() {
-                                        compare = Some((v.path.clone(), named.0, named.1));
+                                        let shift = ui.input(|i| i.modifiers.shift);
+                                        compare = Some((place, shift));
                                     }
                                     if let Some(n) = naming.as_mut().filter(|_| editing)
                                         && name_field(ui, n)
@@ -341,8 +364,9 @@ impl OndinApp {
             naming = Some(n);
         }
         self.version_naming = naming;
+        let chosen = compare.and_then(|(place, shift)| self.compare_pick(&picks, place, shift));
         let leaving =
-            restore.is_some() || compare.is_some() || close || (modal.should_close() && !escaped);
+            restore.is_some() || chosen.is_some() || close || (modal.should_close() && !escaped);
         // Leaving the card keeps what was typed, as a press elsewhere does.
         if leaving && let Some(n) = self.version_naming.take() {
             self.commit_version_name(n);
@@ -350,11 +374,50 @@ impl OndinApp {
         if leaving {
             self.versions_open = false;
             self.versions_compare = false;
+            self.versions_pick = None;
         }
         if let Some(path) = restore {
             self.restore_version(&path);
-        } else if let Some((path, title, when)) = compare {
-            self.compare_with(&path, title, when);
+        } else if let Some((then, newer)) = chosen {
+            self.compare_with(then, newer);
+        }
+    }
+
+    /// What a press on row `place`'s compare button asks for, `picks` being every
+    /// row's newest first. Plain, that version with now. With Shift, it is the second
+    /// of two — after a Shift+click on another row, or another row's compare with now
+    /// being open — and answers the older with the newer; else it picks the row and
+    /// answers nothing, and a second Shift+click on it drops the pick.
+    pub(crate) fn compare_pick(
+        &mut self,
+        picks: &[Pick],
+        place: usize,
+        shift: bool,
+    ) -> Option<(Pick, Option<Pick>)> {
+        let pick = picks.get(place)?;
+        if !shift {
+            self.versions_pick = None;
+            return Some((pick.clone(), None));
+        }
+        let open = self
+            .session
+            .compare
+            .as_ref()
+            .filter(|c| c.newer.is_none())
+            .map(|c| c.pick.path.clone());
+        let first = self.versions_pick.take().or(open);
+        match first.and_then(|p| picks.iter().position(|k| k.path == p)) {
+            Some(other) if other == place => None,
+            Some(other) => {
+                let (newer, older) = (place.min(other), place.max(other));
+                Some((picks[older].clone(), Some(picks[newer].clone())))
+            }
+            None => {
+                self.versions_pick = Some(pick.path.clone());
+                self.session
+                    .info("Shift+click another version's compare to compare the two");
+                None
+            }
         }
     }
 

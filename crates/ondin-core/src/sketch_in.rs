@@ -1919,8 +1919,10 @@ mod tests {
             "layers": [{ "_class": "oval", "do_objectID": "O", "name": "Dot", "frame": frame,
                          "isClosed": true, "points": [] }],
         }));
-        layers.push(json!({ "_class": "symbolInstance", "do_objectID": "I", "name": "Placed",
-                            "symbolID": "S", "frame": frame }));
+        layers.push(
+            json!({ "_class": "symbolInstance", "do_objectID": "I", "name": "Placed",
+                            "symbolID": "S", "frame": frame }),
+        );
         let page =
             json!({ "_class": "page", "do_objectID": "P", "name": "Page", "layers": layers });
         let document = json!({ "_class": "document", "pages": [{ "_ref": "pages/P" }] });
@@ -1932,7 +1934,10 @@ mod tests {
             ("pages/P.json".to_owned(), page.to_string().into_bytes()),
         ]));
         let r = read(&mut files, &mut IdSource::new(3), &mut NoPictures).expect("the file reads");
-        assert!(r.doc.len() > MAX_NODES, "the file's own layers pass the budget");
+        assert!(
+            r.doc.len() > MAX_NODES,
+            "the file's own layers pass the budget"
+        );
         let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
         assert!(!rows.contains(&"Symbols too large to place"), "{rows:?}");
         let nodes = r.doc.node_map();

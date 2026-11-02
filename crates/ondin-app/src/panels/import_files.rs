@@ -1929,12 +1929,14 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
         let w = ui.available_width() - fetch_w - 8.0;
         ui::field_row_inset(ui, egui::vec2(w, FIELD_H), 8.0, 4.0, |ui| {
             let eye_w = 26.0;
+            let font = egui::FontId::proportional(12.0);
+            let pad = ui::edit_frame(ui, &font, FIELD_H - ui::FIELD_BORDER_H, 0.0);
             ui.add(
                 egui::TextEdit::singleline(&mut card.token)
                     .password(!card.show_token)
-                    .frame(egui::Frame::NONE)
+                    .frame(pad)
                     .desired_width(ui.available_width() - eye_w)
-                    .font(egui::FontId::proportional(12.0))
+                    .font(font)
                     .hint_text(egui::RichText::new("figd_…").size(12.0)),
             );
             let glyph = if card.show_token {

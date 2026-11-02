@@ -658,21 +658,23 @@ impl OndinApp {
             egui::vec2(14.0, 14.0),
         );
         paint_preview(p, &self.session.doc, style, sw);
-        // **One row tall, centred on the capsule** (§15 D1083): `put` stretches a
-        // `Frame::NONE` edit over the whole box with its row at the top, so the
-        // name sat high in the capsule.
-        let row_h = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(12.0)));
+        // **The capsule's whole height, its row centred by the edit's own
+        // padding**: `place` stretches the edit over the box with its row at the
+        // top, and padding that is the edit's takes a press anywhere on it.
+        // `place`, not `put`: the capsule is allocated already.
+        let font = egui::FontId::proportional(12.0);
         let field = egui::Rect::from_min_max(
-            egui::pos2(sw.right() + 8.0, mid - row_h / 2.0),
-            egui::pos2(rect.right() - 12.0, mid + row_h / 2.0),
+            egui::pos2(sw.right() + 8.0, rect.top()),
+            egui::pos2(rect.right() - 12.0, rect.bottom()),
         );
         let id = ui.id().with(("style-naming-field", style.id));
-        let edit = ui.put(
+        let pad = ui::edit_frame(ui, &font, field.height(), 0.0);
+        let edit = ui.place(
             field,
             egui::TextEdit::singleline(&mut n.text)
                 .id(id)
-                .frame(egui::Frame::NONE)
-                .font(egui::FontId::proportional(12.0))
+                .frame(pad)
+                .font(font)
                 .text_color(theme::text::strong()),
         );
         if n.focus {

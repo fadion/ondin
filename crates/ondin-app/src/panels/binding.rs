@@ -1572,7 +1572,7 @@ impl OndinApp {
             };
             let out = egui::TextEdit::singleline(&mut rt.text)
                 .id(edit_id)
-                .frame(egui::Frame::NONE)
+                .frame(ui::edit_frame(ui, &font, 28.0 - ui::FIELD_BORDER_H, 0.0))
                 .desired_width(f32::INFINITY)
                 .font(font.clone())
                 .layouter(&mut layouter)

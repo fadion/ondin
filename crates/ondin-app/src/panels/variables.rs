@@ -3092,31 +3092,27 @@ fn edit_field(
     };
     let mut edit = egui::TextEdit::singleline(text)
         .id(id)
-        .frame(egui::Frame::NONE)
+        .frame(crate::ui::edit_frame(
+            ui,
+            &egui::FontId::proportional(pt),
+            r.height(),
+            EDIT_PAD_X,
+        ))
         .font(egui::FontId::proportional(pt))
         .layouter(&mut layouter);
     if let Some(h) = hint {
         edit = edit.hint_text(h);
     }
-    // **Inset and centred in `r`, which is the outline the caller strokes**
-    // (§15 D1083): the text sat on the box's top edge flush against its left,
-    // because a `Frame::NONE` edit has no margin and `centered_and_justified`
-    // stretches it to the whole box with its row at the top. A box exactly one
-    // row tall, [`EDIT_PAD_X`] in from either side, puts it where the label it
-    // replaces was.
-    let row_h = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(pt)));
-    let inner = egui::Rect::from_min_max(
-        egui::pos2(r.left() + EDIT_PAD_X, r.center().y - row_h / 2.0),
-        egui::pos2(
-            (r.right() - EDIT_PAD_X).max(r.left() + EDIT_PAD_X),
-            r.center().y + row_h / 2.0,
-        ),
-    );
+    // **Over the whole of `r`, which is the outline the caller strokes, its text
+    // inset and centred by the edit's own frame** (`ui::edit_frame`):
+    // `centered_and_justified` stretches the edit to the box with its row at the
+    // top, so the padding is what centres it, and being the edit's, it takes a
+    // press anywhere in the box.
     // **A child that leaves the parent's cursor alone**, not a scope: a scope
     // advances the cursor past what it drew, and a field inside a row the
     // caller had already allocated put the cursor back *above* that row's
     // bottom — the table under a mode being renamed came up five points.
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(
         egui::Layout::centered_and_justified(egui::Direction::TopDown),
     ));
     let out = edit.show(&mut child);

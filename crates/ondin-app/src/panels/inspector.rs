@@ -6401,13 +6401,15 @@ impl OndinApp {
                 14.0,
                 theme::text::faint(),
             ));
+            let font = egui::FontId::proportional(11.5);
+            let pad = ui::edit_frame(ui, &font, cell - ui::FIELD_BORDER_H, 0.0);
             ui.add(
                 egui::TextEdit::singleline(&mut text)
                     .id(egui::Id::new(("stroke-dash-list", index)))
                     .desired_width(ui.available_width())
-                    .frame(egui::Frame::NONE)
+                    .frame(pad)
                     .hint_text("5, 10")
-                    .font(egui::FontId::proportional(11.5)),
+                    .font(font),
             )
         });
         // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() parses.
@@ -8618,9 +8620,14 @@ impl OndinApp {
             let at = super::binding::refused(table, VarKind::Color, buf.as_str()).map(|r| r.1);
             super::binding::refusal_galley(ui, buf.as_str(), at, &font)
         };
+        // As tall as the paint row it sits in.
+        let row_h = ui
+            .max_rect()
+            .height()
+            .min(ui::CONTROL_H - ui::FIELD_BORDER_H);
         let out = egui::TextEdit::singleline(&mut text)
             .id(edit_id)
-            .frame(egui::Frame::NONE)
+            .frame(ui::edit_frame(ui, &font, row_h, 0.0))
             .desired_width(62.0)
             .char_limit(limit)
             .font(font.clone())

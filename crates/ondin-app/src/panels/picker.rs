@@ -1212,12 +1212,14 @@ impl OndinApp {
             Format::Hex => 60.0,
             _ => ui.available_width() - pct_w - ROW_GAP,
         };
+        let font = egui::FontId::proportional(11.5);
+        let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
         let resp = ui.add(
             egui::TextEdit::singleline(&mut text)
-                .frame(egui::Frame::NONE)
+                .frame(pad)
                 .desired_width(width)
                 .char_limit(ui::COLOUR_CHAR_LIMIT)
-                .font(egui::FontId::proportional(11.5)),
+                .font(font),
         );
         if let Some(was) = was.filter(|_| format == Format::Hex) {
             ui.label(

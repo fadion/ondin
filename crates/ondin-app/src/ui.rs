@@ -1229,8 +1229,9 @@ pub fn field_row_active<R>(
 
 /// A single-line **text** field on the same ground as [`value_field`]. A bare
 /// `ui.add(TextEdit…)` differs in its frame, its inset and a focus ring nothing
-/// else draws. `Frame::NONE` turns the ring off but also drops `TextEdit::margin`
-/// (read only when no frame was passed), so padding goes in the frame.
+/// else draws. A custom frame turns the ring off but also drops `TextEdit::margin`
+/// (read only when no frame was passed), so padding goes in the frame
+/// ([`edit_frame`]), which covers the whole row.
 /// `size.y` is the painted ground, hairline included — see [`field_row`].
 pub fn text_field(
     ui: &mut egui::Ui,
@@ -1239,15 +1240,36 @@ pub fn text_field(
     hint: &str,
     pt: f32,
 ) -> egui::Response {
-    field_row(ui, size, |ui| {
+    let font = egui::FontId::proportional(pt);
+    let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
+    field_row_inset(ui, size, 0.0, 0.0, |ui| {
         ui.add(
             egui::TextEdit::singleline(text)
-                // The inset is the plate's; a `margin` here would be ignored.
-                .frame(egui::Frame::NONE)
+                .frame(frame)
                 .desired_width(f32::INFINITY)
-                .font(egui::FontId::proportional(pt))
+                .font(font)
                 .hint_text(egui::RichText::new(hint).size(pt)),
         )
+    })
+}
+
+/// The frame a frameless `TextEdit` in a field row takes: padding that makes the
+/// edit `h` tall — the row's content height — with its line centred, and `x` on
+/// either side for a row whose own inset is zero. The padding is part of the
+/// edit, so a press anywhere on the row's height focuses it and the pointer is an
+/// I-beam there; with `Frame::NONE` the edit is one line tall and the bands above
+/// and below it are dead.
+pub fn edit_frame(ui: &egui::Ui, font: &egui::FontId, h: f32, x: f32) -> egui::Frame {
+    let row = ui.fonts_mut(|f| f.row_height(font));
+    // Rounded down on both sides: a pixel over `h` would grow the row.
+    let spare = (h - row).max(0.0);
+    let top = (spare / 2.0).floor();
+    let bottom = (spare - top).floor();
+    egui::Frame::NONE.inner_margin(egui::Margin {
+        left: x as i8,
+        right: x as i8,
+        top: top as i8,
+        bottom: bottom as i8,
     })
 }
 
@@ -4735,6 +4757,56 @@ mod tests {
                 value.0 - label.0
             );
         }
+    }
+
+    /// **A text field takes a press anywhere on its height**, not only on its
+    /// line of text, and shows the I-beam there.
+    ///
+    /// flip: `text_field` giving its edit `Frame::NONE` rather than `edit_frame`
+    /// → fails at the edit spanning the row (one 15-point line in 26).
+    #[test]
+    fn a_text_field_takes_a_press_on_its_whole_height() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut text = String::new();
+        let mut pass = |events: Vec<egui::Event>| {
+            let mut field = None;
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let resp =
+                        text_field(ui, egui::vec2(200.0, CONTROL_H), &mut text, "Name", 12.0);
+                    field = Some((resp.rect, resp.has_focus()));
+                },
+            );
+            let (rect, focused) = field.expect("drawn");
+            (rect, focused, out.platform_output.cursor_icon)
+        };
+        let (rect, ..) = pass(Vec::new());
+        assert!(
+            rect.height() >= CONTROL_H - FIELD_BORDER_H - 0.5,
+            "the edit spans the row: {rect:?}"
+        );
+        // Three points under the hairline, well above the line of text.
+        let at = egui::pos2(rect.left() + 30.0, rect.top() + 3.0);
+        for _ in 0..3 {
+            pass(vec![egui::Event::PointerMoved(at)]);
+        }
+        let (.., icon) = pass(vec![egui::Event::PointerMoved(at)]);
+        assert_eq!(icon, egui::CursorIcon::Text);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        pass(vec![button(true)]);
+        pass(vec![button(false)]);
+        let (_, focused, _) = pass(Vec::new());
+        assert!(focused, "the press focused the field");
     }
 
     /// A colour typed into a hex field replaces the one there; driven with real events.

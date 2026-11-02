@@ -1233,13 +1233,15 @@ impl OndinApp {
             let resp = ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
                 ui.label(theme::icon_text(icon::TEXT_T, 13.0, theme::text::faint()));
+                let font = egui::FontId::proportional(11.5);
+                let pad = ui::edit_frame(ui, &font, POP_CELL - ui::FIELD_BORDER_H, 0.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .id(egui::Id::new((part.id_salt(), index)))
                         .desired_width(ui.available_width())
-                        .frame(egui::Frame::NONE)
+                        .frame(pad)
                         .hint_text(hint)
-                        .font(egui::FontId::proportional(11.5)),
+                        .font(font),
                 )
             });
             if resp.gained_focus() || resp.changed() {

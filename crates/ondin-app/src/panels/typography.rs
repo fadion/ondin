@@ -1087,13 +1087,15 @@ impl OndinApp {
                     reset_hit = badge.on_hover_text(&m.tip).clicked();
                 }
             }
+            let font = egui::FontId::proportional(12.0);
+            let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
             let out = ui.add_enabled(
                 !read_only,
                 egui::TextEdit::singleline(&mut text)
                     .id(edit_id)
-                    .frame(egui::Frame::NONE)
+                    .frame(pad)
                     .desired_width(f32::INFINITY)
-                    .font(egui::FontId::proportional(12.0)),
+                    .font(font),
             );
             field = Some(out);
             ui.max_rect()
@@ -2425,12 +2427,14 @@ impl OndinApp {
                         Some((s, buf)) if *s == slot => buf.clone(),
                         _ => ui::hex_of(shown),
                     };
+                    let font = egui::FontId::proportional(11.5);
+                    let pad = ui::edit_frame(ui, &font, CELL - ui::FIELD_BORDER_H, 0.0);
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut text)
-                            .frame(egui::Frame::NONE)
+                            .frame(pad)
                             .desired_width(62.0)
                             .char_limit(ui::COLOUR_CHAR_LIMIT)
-                            .font(egui::FontId::proportional(11.5)),
+                            .font(font),
                     );
                     ui::select_all_on_focus(ui, &resp, &text);
                     if resp.gained_focus() || resp.changed() {

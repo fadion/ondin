@@ -46,6 +46,8 @@ pub(crate) fn stamp_of(path: &Path) -> Option<u64> {
 fn name_field(ui: &mut egui::Ui, n: &mut Naming) -> bool {
     let id = egui::Id::new(("version-name", &n.path));
     let size = egui::vec2(ui.available_width(), crate::settings::FIELD_H);
+    let font = egui::FontId::proportional(12.5);
+    let pad = crate::ui::edit_frame(ui, &font, size.y - crate::ui::FIELD_BORDER_H, 0.0);
     let resp = crate::ui::field_row(ui, size, |ui| {
         ui.add(
             egui::TextEdit::singleline(&mut n.text)
@@ -53,9 +55,9 @@ fn name_field(ui: &mut egui::Ui, n: &mut Naming) -> bool {
                 .hint_text(egui::RichText::new("Name this version").size(12.5))
                 .char_limit(store::LABEL_MAX)
                 // The row is the frame.
-                .frame(egui::Frame::NONE)
+                .frame(pad)
                 .desired_width(f32::INFINITY)
-                .font(egui::FontId::proportional(12.5)),
+                .font(font),
         )
     });
     // Once, through the latch: requesting focus every frame would re-take the caret

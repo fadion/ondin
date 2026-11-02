@@ -875,7 +875,7 @@ pub struct OndinApp {
     pub(crate) show_grid: bool,
     /// The layout grids' workspace switch — *View ▸ Show layout grid*: the outermost of
     /// three gates (with each grid's eye and `shown_visible`). Nothing snaps to a layout
-    /// grid, so hiding the bands cannot change where anything lands. Per session.
+    /// grid, so hiding the bands cannot change where anything lands. Kept in `prefs.view`.
     pub(crate) show_layout_grids: bool,
     /// *View ▸ Outline mode*: the artwork as hairlines (`RenderOverrides::set_outline`,
     /// installed by `draw_canvas`). Not a preference: a launch into it would look

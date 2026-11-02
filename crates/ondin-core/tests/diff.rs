@@ -329,6 +329,58 @@ fn a_variable_cell_reads_by_name() {
     );
 }
 
+/// A change outside every page names its subject: a list item by its noun and its
+/// name or place, a block by its first word.
+///
+/// flip: `Change::subject` answering the noun alone → fails at the first `assert_eq`.
+#[test]
+fn a_document_change_names_its_subject() {
+    let mut f = fixture();
+    let var = f.ids.mint_var();
+    let cells = f
+        .doc
+        .variables()
+        .modes()
+        .iter()
+        .map(|m| (m.id, Cell::Color(RED)));
+    let b = edited(
+        &f,
+        vec![
+            Operation::SetVariableCell {
+                id: f.brand,
+                mode: f.dark,
+                cell: Cell::Color(RED),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand / 600".into(),
+                    kind: VarKind::Color,
+                    cells: cells.collect(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ],
+    );
+    let d = diff(&f.doc, &b);
+    let subjects: Vec<&str> = d.document.iter().map(Change::subject).collect();
+    assert_eq!(
+        subjects,
+        ["variable “brand/500”", "variable “brand / 600”"],
+        "{}",
+        d.text()
+    );
+    assert!(d.document.iter().all(|c| c.kind() == "variable"));
+    assert_eq!(change("guide 3 position", "1", "2").subject(), "guide 3");
+    assert_eq!(
+        change("library kit sharing", "on", "off").subject(),
+        "library"
+    );
+    assert_eq!(change("styles", "a", "b").subject(), "styles");
+}
+
 /// A list the file leaves out while empty reads as items added to an empty
 /// list, not as the whole list appearing.
 ///

@@ -66,6 +66,31 @@ impl Change {
             (None, None) => self.what.clone(),
         }
     }
+
+    /// What a change outside every page is about, as the head of its `what`: an
+    /// item of a list by its noun and name or place (`variable “brand/500”`,
+    /// `guide 3`), anything else by its first word (`library`).
+    pub fn subject(&self) -> &str {
+        let what = self.what.as_str();
+        let Some((noun, rest)) = what.split_once(' ') else {
+            return what;
+        };
+        let end = match rest.strip_prefix('“') {
+            Some(named) => named.find('”').map(|i| '“'.len_utf8() + i + '”'.len_utf8()),
+            None => rest
+                .starts_with(|c: char| c.is_ascii_digit())
+                .then(|| rest.find(' ').unwrap_or(rest.len())),
+        };
+        match end {
+            Some(end) => &what[..noun.len() + 1 + end],
+            None => noun,
+        }
+    }
+
+    /// The noun of [`Self::subject`]: `variable`, `mode`, `style`, `guide`, `image`…
+    pub fn kind(&self) -> &str {
+        self.what.split(' ').next().unwrap_or_default()
+    }
 }
 
 /// One layer that differs.

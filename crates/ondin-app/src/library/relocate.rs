@@ -73,13 +73,14 @@ impl Moved {
     ///
     /// Names only the first failure; the *Library settings* modal draws the full
     /// list. One name still says which folder to look in and whether a document or
-    /// a sidecar was left behind.
+    /// a sidecar was left behind. Private mode masks it as the modal does.
     pub fn summary(&self) -> String {
         if let Some(first) = self.failed.first() {
             let name = first
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| first.display().to_string());
+            let name = crate::private::document(&name, 0);
             return match self.failed.len() {
                 1 => format!(
                     "Moved {} file(s); “{name}” could not be moved",
@@ -669,6 +670,27 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&from);
         let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// In private mode the status line masks the document it could not move.
+    /// flip: `summary` without its `private::document` mask → fails at "masked".
+    #[test]
+    fn the_summary_masks_a_stranded_name_in_private_mode() {
+        let moved = Moved {
+            failed: vec![PathBuf::from("lib").join("Secret plan.ondin")],
+            ..Moved::default()
+        };
+        crate::private::set(true);
+        let line = moved.summary();
+        crate::private::set(false);
+        assert_eq!(
+            line, "Moved 0 file(s); “Document 1” could not be moved",
+            "masked"
+        );
+        assert!(
+            moved.summary().contains("Secret plan.ondin"),
+            "named when off"
+        );
     }
 
     /// The same version at both ends is the same version, so it is skipped

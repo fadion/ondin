@@ -546,6 +546,9 @@ pub struct OndinApp {
     pub(crate) layers_hover: Option<NodeId>,
     /// The top bar's resource meter.
     pub(crate) meter: crate::meter::Meter,
+    /// When this window last looked for private mode switched in another
+    /// ([`OndinApp::poll_private`]), and whether another Ondin was running then.
+    private_polled: Option<(std::time::Instant, bool)>,
     /// The first of a possible two opacity digits, and when it was typed; `None`
     /// outside the 600 ms window ([`OndinApp::opacity_digit`]).
     pub(crate) opacity_entry: Option<OpacityEntry>,
@@ -1042,6 +1045,9 @@ pub(crate) struct ContextMenu {
     pub leaving: Option<(crate::menu::Item, f64)>,
 }
 
+/// How often a window looks for private mode switched in another while one runs.
+const PRIVATE_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// How long the selection chrome stays away after the last keystroke, or after a
 /// scrub lets go ([`ChromeHold`]).
 const CHROME_HOLD_SECS: f64 = 1.5;
@@ -1399,6 +1405,7 @@ impl OndinApp {
             layers_flat: Default::default(),
             layers_hover: None,
             meter: Default::default(),
+            private_polled: None,
             opacity_entry: None,
             renaming_layer: None,
             pages: Default::default(),
@@ -1610,6 +1617,7 @@ impl eframe::App for OndinApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Before anything draws a name.
+        self.poll_private(&ctx);
         crate::private::set(self.prefs.private);
         // Before anything paints: an open Settings modal, on either screen, previews
         // its own pick.
@@ -7439,6 +7447,48 @@ impl OndinApp {
     pub(crate) fn set_private(&mut self, on: bool) {
         self.prefs.private = on;
         self.prefs.save_private();
+        self.follow_private(on);
+    }
+
+    /// Every [`PRIVATE_POLL`] while another Ondin runs, take up private mode as
+    /// the preferences file has it, so a window switched in another masks too;
+    /// the wake keeps an idle window following.
+    fn poll_private(&mut self, ctx: &egui::Context) {
+        if self.prefs.ephemeral {
+            return;
+        }
+        // A repaint request lasts one pass, so a pass between two polls asks again.
+        if let Some((at, others)) = self.private_polled
+            && let Some(left) = PRIVATE_POLL.checked_sub(at.elapsed())
+        {
+            if others {
+                ctx.request_repaint_after(left);
+            }
+            return;
+        }
+        let others = crate::instances::others() > 0;
+        self.private_polled = Some((std::time::Instant::now(), others));
+        if !others {
+            return;
+        }
+        ctx.request_repaint_after(PRIVATE_POLL);
+        if let Some(on) = crate::prefs::Prefs::private_on_disk() {
+            self.take_private(on);
+        }
+    }
+
+    /// Private mode as another window left it in the preferences file, taken up
+    /// here without saving.
+    fn take_private(&mut self, on: bool) {
+        if on != self.prefs.private {
+            self.prefs.private = on;
+            self.follow_private(on);
+        }
+    }
+
+    /// Private mode taken up, saved or not: the switch set, and turning it on
+    /// closes whatever is showing a real name to edit.
+    fn follow_private(&mut self, on: bool) {
         crate::private::set(on);
         if on {
             self.name_edit = None;
@@ -12130,6 +12180,22 @@ mod library_wiring_tests {
             assert!(said.starts_with("Save failed"), "{how}: {said}");
             assert!(!said.contains("Zqxsecret"), "{how}: {said}");
         }
+    }
+
+    /// Private mode found switched on in another window masks this one and
+    /// closes a rename in progress, as the switch here would, without saving.
+    /// flip: `take_private` setting the flag alone → fails at "masked".
+    #[test]
+    fn private_mode_from_another_window_is_taken_up() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let id = ondin_core::IdSource::new(0x9417).mint();
+        app.renaming_layer = Some((id, "Secret".into()));
+        app.take_private(true);
+        let masked = crate::private::on();
+        crate::private::set(false);
+        assert!(app.prefs.private && masked, "masked");
+        assert!(app.renaming_layer.is_none(), "the rename closes");
     }
 
     /// A writer that dies mid-save is noticed by the frame: with the worker gone no

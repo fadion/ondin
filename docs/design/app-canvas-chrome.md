@@ -531,8 +531,10 @@ the first segment of a component's. It hides names, not content.
   bare "Private" read as a document not shared with a team.
 - **A preference, not a workspace switch** (`Prefs::private`), so a restart in the middle of a shared
   screen comes back masked. Only the switch writes it (`Prefs::save_private`); every other preference
-  save keeps the file's value, so a second window that never re-reads it cannot write it back off.
-  That window keeps drawing names until it is switched itself. `OndinApp::set_private` writes and
+  save keeps the file's value, so a second window cannot write it back off. While another Ondin
+  runs, each window re-reads the file's `private` every two seconds (`OndinApp::poll_private`,
+  a `request_repaint_after` keeping an idle window awake for it) and takes up a change without
+  saving, so a window switched in another masks too. `OndinApp::set_private` writes and
   saves it, sets the switch at once and, turning on, drops whatever shows a real name for editing:
   the inline layer rename, the inspector's
   name buffer, batch rename, a page rename, layer search, the library's document rename and project

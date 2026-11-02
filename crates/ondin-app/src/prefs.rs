@@ -459,6 +459,24 @@ impl Prefs {
         }
     }
 
+    /// `private` as the file has it now, which another window may have switched;
+    /// `None` when there is nothing readable there.
+    pub fn private_on_disk() -> Option<bool> {
+        Self::private_in(&path()?)
+    }
+
+    /// [`Self::private_on_disk`] against an explicit path.
+    fn private_in(path: &std::path::Path) -> Option<bool> {
+        /// Only the one field, so the rest of the file is not built.
+        #[derive(Deserialize)]
+        struct Private {
+            #[serde(default)]
+            private: bool,
+        }
+        let bytes = std::fs::read(path).ok()?;
+        Some(serde_json::from_slice::<Private>(&bytes).ok()?.private)
+    }
+
     /// Write them, ignoring failure. Called after each change rather than at
     /// shutdown, which the app cannot rely on.
     pub fn save(&self) {
@@ -648,6 +666,11 @@ mod tests {
         };
         theirs.write_to(&at, true);
         assert!(read().private, "the fixture's file holds private mode");
+        assert_eq!(
+            Prefs::private_in(&at),
+            Some(true),
+            "a running window sees it"
+        );
         for tabs_private in [true, false] {
             let mine = Prefs {
                 tabs_private,
@@ -664,6 +687,7 @@ mod tests {
         }
         Prefs::default().write_to(&at, true);
         assert!(!read().private, "the switch itself writes");
+        assert_eq!(Prefs::private_in(&at), Some(false), "and is seen off");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

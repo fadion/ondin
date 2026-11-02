@@ -1138,6 +1138,38 @@ impl<A: SpanAttr> Spans<A> {
         self.set(range, sentinel, default);
     }
 
+    /// [`Self::edited`] for a replacement: the `inserted` bytes carry exactly
+    /// what the first replaced byte carried, so a match across two runs becomes
+    /// one run in the style it started in. With nothing removed it is `edited`.
+    pub fn replaced(
+        &self,
+        at: usize,
+        removed: usize,
+        inserted: usize,
+        default: &A::Defaults,
+    ) -> Self {
+        let mut out = self.edited(at, removed, inserted, default);
+        if removed == 0 || inserted == 0 {
+            return out;
+        }
+        let new = at..at + inserted;
+        let mut kinds: Vec<A::Kind> = out
+            .0
+            .iter()
+            .filter(|s| s.start < new.end && s.end > new.start)
+            .map(|s| s.attr.attr_kind())
+            .collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+        for k in kinds {
+            out.clear(new.clone(), k, default);
+        }
+        for s in self.0.iter().filter(|s| s.contains(at)) {
+            out.set(new.clone(), s.attr.clone(), default);
+        }
+        out
+    }
+
     /// Re-base the spans after `at..at + removed` bytes of content became
     /// `inserted` bytes.
     ///

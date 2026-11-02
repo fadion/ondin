@@ -4352,12 +4352,32 @@ impl TextEdit {
     }
 
     pub fn select_all(&mut self) {
+        self.select_range(0..self.content.len());
+    }
+
+    /// Select the bytes `r` of the content, clamped to it — what find and replace
+    /// opens the editor on.
+    pub fn select_range(&mut self, r: Range<usize>) {
         self.caret_moved();
-        let start = Selection::from_byte_index(&self.shaped.layout, 0usize, Affinity::Downstream);
-        self.selection = start.extend(
-            Selection::from_byte_index(&self.shaped.layout, self.content.len(), Affinity::Upstream)
-                .focus(),
-        );
+        self.selection = self.range_selection(r);
+    }
+
+    /// The highlight of the bytes `r` as convex quads in text-local space, as
+    /// [`Self::selection_quads`] draws a selection — without selecting them.
+    pub fn range_quads(&self, r: Range<usize>) -> Vec<[Point; 4]> {
+        self.range_selection(r)
+            .geometry(&self.shaped.layout)
+            .into_iter()
+            .flat_map(|(b, line)| self.warped(self.to_local_rect(b, line)))
+            .collect()
+    }
+
+    fn range_selection(&self, r: Range<usize>) -> Selection {
+        let len = self.content.len();
+        let (start, end) = (r.start.min(len), r.end.min(len));
+        Selection::from_byte_index(&self.shaped.layout, start, Affinity::Downstream).extend(
+            Selection::from_byte_index(&self.shaped.layout, end, Affinity::Upstream).focus(),
+        )
     }
 
     // --- pointer ----------------------------------------------------------

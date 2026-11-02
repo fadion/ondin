@@ -31,6 +31,7 @@ pub mod export;
 pub mod fallback_fonts;
 pub mod families;
 pub mod figma_in;
+pub mod find;
 pub mod fit;
 pub mod foreign;
 pub mod geometry;

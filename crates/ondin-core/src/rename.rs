@@ -111,14 +111,28 @@ impl Find {
     /// `text` as a regular expression, and a pattern that does not parse is `Err`
     /// with a one-line reason.
     pub fn new(text: &str, match_case: bool, pattern: bool) -> Result<Self, String> {
+        Self::with_words(text, match_case, pattern, false)
+    }
+
+    /// [`Self::new`], and with `whole_words` a match must start and end at a word
+    /// boundary, so *team* does not find *teams*.
+    pub fn with_words(
+        text: &str,
+        match_case: bool,
+        pattern: bool,
+        whole_words: bool,
+    ) -> Result<Self, String> {
         if text.is_empty() {
             return Ok(Self(None));
         }
-        let src = if pattern {
+        let mut src = if pattern {
             text.to_string()
         } else {
             regex::escape(text)
         };
+        if whole_words {
+            src = format!(r"\b(?:{src})\b");
+        }
         RegexBuilder::new(&src)
             .case_insensitive(!match_case)
             .build()
@@ -245,19 +259,7 @@ impl Rule {
         for caps in re.captures_iter(name) {
             let Some(m) = caps.get(0) else { continue };
             out.push(&name[at..m.start()], false);
-            let mut rep = Out::default();
-            for piece in &self.template.0 {
-                match piece {
-                    Piece::Text(t) => rep.push(t, true),
-                    Piece::Name => rep.push(m.as_str(), false),
-                    Piece::Number => rep.push(number, true),
-                    Piece::Group(k) => rep.push(caps.get(*k).map_or("", |g| g.as_str()), false),
-                }
-            }
-            if self.keep_case {
-                rep.match_case(m.as_str());
-            }
-            for s in rep.0 {
+            for s in self.replacement(&caps, number).0 {
                 out.push(&s.text, s.changed);
             }
             matched.push(m.range());
@@ -271,6 +273,46 @@ impl Rule {
             matched,
             spans: out.0,
         })
+    }
+
+    /// Every match of a filled Find in `text`, each with the text that replaces
+    /// it on its own; empty when Find is empty or matches nothing. A match is
+    /// found in the whole of `text`, so anchors and word boundaries see its
+    /// context.
+    pub fn replacements(&self, text: &str, number: &str) -> Vec<(Range<usize>, String)> {
+        let Some(re) = &self.find.0 else {
+            return Vec::new();
+        };
+        re.captures_iter(text)
+            .filter_map(|caps| {
+                let m = caps.get(0)?;
+                let rep: String = self
+                    .replacement(&caps, number)
+                    .0
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect();
+                Some((m.range(), rep))
+            })
+            .collect()
+    }
+
+    /// The template filled in for one match, its case carried when `keep_case`.
+    fn replacement(&self, caps: &regex::Captures<'_>, number: &str) -> Out {
+        let matched = caps.get(0).map_or("", |m| m.as_str());
+        let mut rep = Out::default();
+        for piece in &self.template.0 {
+            match piece {
+                Piece::Text(t) => rep.push(t, true),
+                Piece::Name => rep.push(matched, false),
+                Piece::Number => rep.push(number, true),
+                Piece::Group(k) => rep.push(caps.get(*k).map_or("", |g| g.as_str()), false),
+            }
+        }
+        if self.keep_case {
+            rep.match_case(matched);
+        }
+        rep
     }
 }
 

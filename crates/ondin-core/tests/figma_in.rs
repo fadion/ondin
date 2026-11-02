@@ -494,9 +494,10 @@ fn a_swapped_nested_instance_shows_its_own_component() {
     );
 }
 
-/// A text run's own fill keeps its opacity, and an invisible run fill is not
-/// drawn. flip: take the run's first fill's colour without its opacity in
-/// `text` → fails at the half-clear run.
+/// A text run's own fill keeps its opacity, and a run whose only fill is hidden
+/// is drawn clear. flip: take the run's first fill's colour without its
+/// opacity in `text` → fails at the half-clear run; read a hidden-only run's
+/// fills through `text_ink` alone → fails at the clear run.
 #[test]
 fn a_runs_fill_keeps_its_opacity() {
     let red = |opacity: f64, visible: bool| {
@@ -529,8 +530,8 @@ fn a_runs_fill_keeps_its_opacity() {
         .collect();
     assert_eq!(
         colours,
-        [(3..5, 128)],
-        "only the half-clear run is coloured"
+        [(3..5, 128), (6..8, 0)],
+        "the half-clear run and the hidden one"
     );
 }
 

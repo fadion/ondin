@@ -986,8 +986,18 @@ impl Builder<'_> {
             ] {
                 spans.set(range.clone(), attr, &default);
             }
+            // A run whose fills are all hidden draws nothing, as Figma draws it.
             let run_ink = over
-                .and_then(|o| text_ink(arr(o, "fills")))
+                .and_then(|o| {
+                    let fills = arr(o, "fills");
+                    let hidden =
+                        |f: &Value| f.get("visible").and_then(Value::as_bool) == Some(false);
+                    if !fills.is_empty() && fills.iter().all(hidden) {
+                        Some(Color::new([0.0; 4]))
+                    } else {
+                        text_ink(fills)
+                    }
+                })
                 .filter(|c| Some(*c) != ink);
             spans.set(range, CharAttr::Color(run_ink), &default);
         }

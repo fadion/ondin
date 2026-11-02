@@ -328,11 +328,12 @@ impl OndinApp {
                 let half = size.width.min(size.height).max(0.0) * 0.5;
                 // From where the dot is drawn: a radius past half draws at half.
                 let from = drawn[k].clamp(0.0, half);
-                let r = (from + inset(size, k, local) - inset(size, k, press))
-                    .round()
-                    .clamp(0.0, half.floor());
-                // A drag that ends where it began changes nothing, its binding included.
-                if (r - from).abs() < 0.5 {
+                let travel = inset(size, k, local) - inset(size, k, press);
+                let r = (from + travel).round().clamp(0.0, half.floor());
+                // A drag that ends where it began changes nothing, its binding
+                // included. Judged on the travel too: rounding moves a radius
+                // ending in .5 by half a unit even when the pointer stays put.
+                if travel.abs() < 0.5 || r == from {
                     return Some((Transaction(Vec::new()), format!("Radius {r}"), last));
                 }
                 let mut vars = node.corner_vars();
@@ -842,5 +843,34 @@ mod tests {
             &[dot, Point::new(125.0, 90.0), Point::new(120.0, 90.0)],
         );
         assert_eq!(radii(&app, id), [25.0; 4], "the drag lowers it");
+    }
+
+    /// A drag on the dot of a pill whose shorter side is odd, so its drawn radius
+    /// ends in .5, that comes back to where it began commits nothing.
+    /// flip: `shape_drag_tx` judging "no change" on the rounded radius alone →
+    /// fails at "no step". A press and release in place starts no drag, so
+    /// that path never reaches `shape_drag_tx` either way.
+    #[test]
+    fn a_drag_back_on_a_half_unit_radius_commits_nothing() {
+        let ctx = egui::Context::default();
+        let pill = NodeKind::Rect {
+            size: Size::new(160.0, 61.0),
+            corner_radii: RoundedRectRadii::from_single_radius(999.0),
+            corner_smoothing: 0.0,
+        };
+        let (mut app, id) = app_with(&ctx, pill);
+        let depth = app.session.history.undo_depth();
+        let dot = Point::new(130.5, 90.5);
+        let at = app.to_screen(dot, RECT, 1.0);
+        assert!(
+            matches!(
+                app.shape_handle_at(at, RECT, 1.0),
+                Some(super::Grab::Corner(_))
+            ),
+            "fixture: the dot is there"
+        );
+        drag_through(&ctx, &mut app, &[dot, Point::new(120.5, 90.5), dot]);
+        assert_eq!(app.session.history.undo_depth(), depth, "no step");
+        assert_eq!(radii(&app, id), [999.0; 4]);
     }
 }

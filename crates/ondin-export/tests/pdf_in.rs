@@ -170,6 +170,56 @@ fn a_shading_past_the_pixel_budget_is_left_out() {
     );
 }
 
+/// A page whose content fills with tiling patterns nested `depth` deep, the
+/// innermost filling a 300-point square with a function-based shading.
+fn nested_tiles(depth: usize) -> Vec<u8> {
+    let mut objects = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Pattern << /P 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
+        stream("", "/Pattern cs /P scn 0 0 100 100 re f"),
+    ];
+    for i in 0..depth {
+        let next = 6 + i;
+        let fill = if i + 1 == depth { 300 } else { 100 };
+        objects.push(stream(
+            &format!(
+                "/PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 100 100] /XStep 100 /YStep 100 /Resources << /Pattern << /P {next} 0 R >> >>"
+            ),
+            &format!("/Pattern cs /P scn 0 0 {fill} {fill} re f"),
+        ));
+    }
+    let shading = 6 + depth;
+    objects.push(format!("<< /PatternType 2 /Shading {} 0 R >>", shading + 1).into_bytes());
+    objects.push(
+        format!(
+            "<< /ShadingType 1 /ColorSpace /DeviceGray /Function {} 0 R >>",
+            shading + 2
+        )
+        .into_bytes(),
+    );
+    objects.push(stream(
+        "/FunctionType 4 /Domain [0 1 0 1] /Range [0 1]",
+        "{ pop pop 0.5 }",
+    ));
+    pdf(&objects)
+}
+
+/// Patterns nested past the depth the cost walk follows leave their page out,
+/// since `hayro-svg` would still draw what the walk did not count; nested
+/// within it, the page reads. flip: skip the subtree without marking it in
+/// `Cost::nested` → fails at `TooLarge`, the deep page read.
+#[test]
+fn patterns_nested_past_the_walk_leave_their_page_out() {
+    let within = import(nested_tiles(8)).expect("reads");
+    assert_eq!((within.pages.len(), within.too_large), (1, 0));
+    assert_eq!(
+        import(nested_tiles(9)).err(),
+        Some(PdfInError::TooLarge),
+        "its only page left out"
+    );
+}
+
 /// A pattern holding one gradient-filled shape, as `hayro-svg` draws a shading,
 /// becomes that gradient under the pattern's id, the pattern's transform folded in;
 /// a pattern of tiles stays, for `svg_in` to report.

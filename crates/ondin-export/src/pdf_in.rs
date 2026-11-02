@@ -44,6 +44,12 @@ pub const MAX_SHADING_PIXELS: f64 = 64e6;
 /// photographs, refusing a picture that declares absurd dimensions.
 pub const MAX_PICTURE_PIXELS: f64 = 256e6;
 
+/// The most shading and picture pixels the pages read may cost together, four
+/// pages' worth each: every page's drawing crosses back to the app and its
+/// pictures are decoded there, so fifty pages each just under the page budget
+/// would otherwise ask for tens of gigabytes. The pages past it are left out.
+const MAX_DOCUMENT_PIXELS: (f64, f64) = (4.0 * MAX_SHADING_PIXELS, 4.0 * MAX_PICTURE_PIXELS);
+
 /// Why a PDF could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PdfInError {
@@ -79,12 +85,21 @@ pub fn import(bytes: Vec<u8>) -> Result<PdfImport, PdfInError> {
     let settings = hayro_svg::hayro_interpret::InterpreterSettings::default();
     let render = hayro_svg::SvgRenderSettings::default();
     let mut too_large = 0;
+    let (mut shading, mut pictures) = (0.0, 0.0);
     let pages = all
         .iter()
         .take(MAX_PAGES)
         .filter(|page| {
             let cost = page_cost(page, &settings);
-            let fits = cost.shading <= MAX_SHADING_PIXELS && cost.pictures <= MAX_PICTURE_PIXELS;
+            let fits = !cost.too_deep
+                && cost.shading <= MAX_SHADING_PIXELS
+                && cost.pictures <= MAX_PICTURE_PIXELS
+                && shading + cost.shading <= MAX_DOCUMENT_PIXELS.0
+                && pictures + cost.pictures <= MAX_DOCUMENT_PIXELS.1;
+            if fits {
+                shading += cost.shading;
+                pictures += cost.pictures;
+            }
             too_large += usize::from(!fits);
             fits
         })
@@ -115,6 +130,9 @@ struct Cost {
     pictures: f64,
     /// Patterns, masks and glyphs being walked inside one another.
     depth: u32,
+    /// Whether they nested past [`MAX_COST_DEPTH`], where the walk stops
+    /// counting while `hayro-svg` still draws: such a page is not read.
+    too_deep: bool,
 }
 
 /// What `hayro-svg` would allocate to draw `page`: the page interpreted onto a
@@ -207,18 +225,26 @@ impl Cost {
                     self.shading += area(bbox);
                 }
             }
-            Pattern::Tiling(t) => {
-                if self.depth < MAX_COST_DEPTH {
-                    self.depth += 1;
-                    t.interpret(
-                        self,
-                        Affine::translate((-t.bbox.x0, -t.bbox.y0)),
-                        stroke.is_some(),
-                    );
-                    self.depth -= 1;
-                }
-            }
+            Pattern::Tiling(t) => self.nested(|c| {
+                t.interpret(
+                    c,
+                    Affine::translate((-t.bbox.x0, -t.bbox.y0)),
+                    stroke.is_some(),
+                );
+            }),
         }
+    }
+
+    /// Walk a pattern, mask or glyph's own content one level deeper, marking the
+    /// page [`Cost::too_deep`] instead past [`MAX_COST_DEPTH`].
+    fn nested(&mut self, walk: impl FnOnce(&mut Self)) {
+        if self.depth >= MAX_COST_DEPTH {
+            self.too_deep = true;
+            return;
+        }
+        self.depth += 1;
+        walk(self);
+        self.depth -= 1;
     }
 }
 
@@ -277,17 +303,15 @@ impl<'a> hayro_svg::hayro_interpret::Device<'a> for Cost {
         };
         for glyph in run.glyphs() {
             match &**glyph {
+                // Placed in text space before a stroke's width widens it, as
+                // `hayro-svg` strokes it: the outline's own units are 1000 an em.
                 Glyph::Outline(g) => {
-                    let at = props.transform * glyph.transform();
-                    self.paint(&props.paint, g.outline().bounding_box(), at, stroke);
+                    let bbox = (glyph.transform() * g.outline()).bounding_box();
+                    self.paint(&props.paint, bbox, props.transform, stroke);
                 }
-                Glyph::Type3(g) => {
-                    if self.depth < MAX_COST_DEPTH {
-                        self.depth += 1;
-                        g.interpret(self, props.transform, glyph.transform(), &props.paint);
-                        self.depth -= 1;
-                    }
-                }
+                Glyph::Type3(g) => self.nested(|c| {
+                    g.interpret(c, props.transform, glyph.transform(), &props.paint);
+                }),
             }
         }
     }
@@ -311,11 +335,7 @@ impl<'a> hayro_svg::hayro_interpret::Device<'a> for Cost {
 impl Cost {
     /// Add what a soft mask's own content draws.
     fn mask(&mut self, mask: &hayro_svg::hayro_interpret::SoftMask<'_>) {
-        if self.depth < MAX_COST_DEPTH {
-            self.depth += 1;
-            mask.interpret(self);
-            self.depth -= 1;
-        }
+        self.nested(|c| mask.interpret(c));
     }
 }
 

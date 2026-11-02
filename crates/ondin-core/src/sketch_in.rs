@@ -149,7 +149,7 @@ pub fn read(
     })
 }
 
-/// How many nodes the document may reach through placed symbols. Each instance
+/// How many nodes placed symbols may add to the document. Each instance
 /// copies its master whole, nested instances included, so masters holding two
 /// instances of the one before double per level: a few KB of JSON would ask for
 /// billions of nodes. Placing costs more than linearly in the document's size:
@@ -1166,6 +1166,7 @@ impl Builder<'_> {
         // three transactions whatever their number: each commit costs in
         // proportion to the whole document, so one per instance made a kit of
         // thousands take minutes.
+        let literal = self.doc.len();
         loop {
             let waiting: rustc_hash::FxHashSet<String> = self
                 .pending
@@ -1179,7 +1180,7 @@ impl Builder<'_> {
             if ready.is_empty() {
                 break;
             }
-            let ready = self.within_budget(ready);
+            let ready = self.within_budget(ready, literal);
             self.place(ready)?;
         }
         let left = self.pending.len();
@@ -1194,10 +1195,12 @@ impl Builder<'_> {
         Ok(())
     }
 
-    /// The instances of `ready` whose copies keep the document within
-    /// [`MAX_NODES`]; the rest are counted and stay empty groups.
-    fn within_budget(&mut self, ready: Vec<Pending>) -> Vec<Pending> {
-        let mut total = self.doc.len();
+    /// The instances of `ready` whose copies keep the nodes placing adds, past
+    /// the `literal` ones the file itself holds, within [`MAX_NODES`]; the rest
+    /// are counted and stay empty groups. The file's own layers are bounded by
+    /// its size, so only the copies, which can double, are budgeted.
+    fn within_budget(&mut self, ready: Vec<Pending>, literal: usize) -> Vec<Pending> {
+        let mut total = self.doc.len().saturating_sub(literal);
         let mut sizes: FxHashMap<String, usize> = FxHashMap::default();
         let mut kept = Vec::with_capacity(ready.len());
         let mut over = 0;
@@ -1888,11 +1891,55 @@ mod tests {
         let r = read(&mut files, &mut IdSource::new(3), &mut NoPictures).expect("the file reads");
         let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
         assert!(rows.contains(&"Symbols too large to place"), "{rows:?}");
-        assert!(r.doc.len() <= MAX_NODES, "{}", r.doc.len());
+        // The copies within the budget, the file's own few dozen layers on top.
+        assert!(r.doc.len() <= MAX_NODES + 4 * (n + 1), "{}", r.doc.len());
         assert!(
             started.elapsed() < std::time::Duration::from_secs(60),
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// A file whose own layers already pass `MAX_NODES` still places its
+    /// instances: the budget is for what the copies add. flip: start
+    /// `within_budget`'s total at the whole document's length → fails at the
+    /// report row.
+    #[test]
+    fn a_large_file_still_places_its_symbols() {
+        let frame = json!({ "_class": "rect", "x": 0, "y": 0, "width": 10, "height": 10 });
+        let mut layers: Vec<Value> = (0..MAX_NODES)
+            .map(|i| {
+                json!({ "_class": "rectangle", "do_objectID": format!("R{i}"), "name": "r",
+                        "frame": frame, "isClosed": true, "points": [] })
+            })
+            .collect();
+        layers.push(json!({
+            "_class": "symbolMaster", "do_objectID": "M", "name": "S", "symbolID": "S",
+            "frame": frame,
+            "layers": [{ "_class": "oval", "do_objectID": "O", "name": "Dot", "frame": frame,
+                         "isClosed": true, "points": [] }],
+        }));
+        layers.push(json!({ "_class": "symbolInstance", "do_objectID": "I", "name": "Placed",
+                            "symbolID": "S", "frame": frame }));
+        let page =
+            json!({ "_class": "page", "do_objectID": "P", "name": "Page", "layers": layers });
+        let document = json!({ "_class": "document", "pages": [{ "_ref": "pages/P" }] });
+        let mut files = Files(BTreeMap::from([
+            (
+                "document.json".to_owned(),
+                document.to_string().into_bytes(),
+            ),
+            ("pages/P.json".to_owned(), page.to_string().into_bytes()),
+        ]));
+        let r = read(&mut files, &mut IdSource::new(3), &mut NoPictures).expect("the file reads");
+        assert!(r.doc.len() > MAX_NODES, "the file's own layers pass the budget");
+        let rows: Vec<&str> = r.report.iter().map(|u| u.what).collect();
+        assert!(!rows.contains(&"Symbols too large to place"), "{rows:?}");
+        let nodes = r.doc.node_map();
+        let placed = nodes
+            .values()
+            .find(|n| n.name() == "Placed")
+            .expect("the instance");
+        assert_eq!(placed.children().len(), 1, "a copy of the master's dot");
     }
 }

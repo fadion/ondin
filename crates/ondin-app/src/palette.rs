@@ -637,6 +637,7 @@ impl OndinApp {
         );
         push(&mut out, Cmd::verb(Item::ShowInLibrary, None));
         push(&mut out, Cmd::verb(Item::VersionHistory, None));
+        push(&mut out, Cmd::verb(Item::SaveNamedVersion, None));
         for clockwise in [false, true] {
             push(
                 &mut out,

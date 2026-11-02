@@ -103,6 +103,10 @@ impl OndinApp {
                 app.open_menu = TopMenu::None;
                 app.versions_open = true;
             }
+            if item(ui, Item::SaveNamedVersion).clicked() {
+                app.open_menu = TopMenu::None;
+                app.save_named_version();
+            }
             crate::ui::menu_sep(ui);
             if shared {
                 // *Publish kit…*, disabled with its reason when nothing would go

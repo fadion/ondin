@@ -1,7 +1,7 @@
 //! Private mode: for sharing a screen without showing what things are called.
 //!
 //! While it is on, every name the app draws — a layer's, a frame's, a
-//! component's, a page's, a document's and a project's — is drawn masked, as its
+//! component's, a page's, a document's, a project's and a version's — is drawn masked, as its
 //! kind and its place ("Frame 2", "Page 3", "Document 1"). Text, pictures,
 //! colours, and style and variable names stay: they are the work being shown.
 //! Masked rather than removed, so whatever a name labels still selects, opens or
@@ -146,6 +146,15 @@ pub(crate) fn document(name: &str, place: usize) -> Cow<'_, str> {
         return Cow::Borrowed(name);
     }
     Cow::Owned(format!("Document {}", place + 1))
+}
+
+/// A version's name as drawn, given its place (from 0) in the version history: the
+/// name, or "Version" and that place.
+pub(crate) fn version(name: &str, place: usize) -> Cow<'_, str> {
+    if !on() {
+        return Cow::Borrowed(name);
+    }
+    Cow::Owned(format!("Version {}", place + 1))
 }
 
 /// A project's name as drawn, given its place (from 0) among the projects it is

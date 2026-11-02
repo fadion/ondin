@@ -356,6 +356,36 @@ pub fn version_stamp(path: &Path) -> Option<(u64, u64)> {
     Some((secs.parse().ok()?, n.parse().ok()?))
 }
 
+/// The extension of a version's name, kept beside it as `<stamp>.label`: a file per
+/// version rather than one index, so a library merge (`relocate`) moves a name with
+/// its version; only the same version named in both libraries collides, and the
+/// destination's name stays.
+const LABEL_EXT: &str = "label";
+
+/// The longest name a version keeps, in characters.
+pub const LABEL_MAX: usize = 80;
+
+/// The name given to the pinned copy at `version`, if it has one.
+pub fn version_label(version: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(version.with_extension(LABEL_EXT)).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// Name the pinned copy at `version`, trimmed and cut to [`LABEL_MAX`]; a blank
+/// `label` removes the name. The version's own bytes are never touched.
+pub fn set_version_label(version: &Path, label: &str) -> io::Result<()> {
+    let path = version.with_extension(LABEL_EXT);
+    let label: String = label.trim().chars().take(LABEL_MAX).collect();
+    if label.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    crate::atomic::write(&path, label.trim_end().as_bytes())
+}
+
 /// Read a document off disk.
 fn load(path: &Path) -> io::Result<Document> {
     load_digest(path).map(|(doc, _)| doc)
@@ -790,6 +820,45 @@ mod tests {
         doc.set_meta(DocumentMeta::default());
         let entry = entry_named(&root, "Loose");
         assert!(pin_version(&root, &entry).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A version's name sits beside it, trimmed and cut to `LABEL_MAX`, is not
+    /// listed as a version, leaves the version's bytes alone, and a blank name
+    /// removes it.
+    /// flip: `set_version_label` writing blank names instead of removing → fails at
+    /// "a blank name removes it".
+    #[test]
+    fn a_versions_name_sits_beside_it() {
+        let root = temp_root("version-label");
+        let mut doc = blank();
+        file_document(&root, None, "Landing v4", &mut doc).unwrap();
+        let id = doc.meta().id.clone().unwrap();
+        let pinned = pin_version(&root, &entry_named(&root, "Landing v4"))
+            .unwrap()
+            .unwrap();
+        let bytes = std::fs::read(&pinned).unwrap();
+        assert_eq!(version_label(&pinned), None, "unnamed when pinned");
+
+        set_version_label(&pinned, "  Sent to client \n").unwrap();
+        assert_eq!(version_label(&pinned).as_deref(), Some("Sent to client"));
+        assert_eq!(versions(&root, &id), vec![pinned.clone()], "not a version");
+        assert_eq!(
+            std::fs::read(&pinned).unwrap(),
+            bytes,
+            "the copy is untouched"
+        );
+
+        set_version_label(&pinned, &"x".repeat(LABEL_MAX + 20)).unwrap();
+        assert_eq!(version_label(&pinned).unwrap().chars().count(), LABEL_MAX);
+
+        set_version_label(&pinned, "   ").unwrap();
+        assert_eq!(version_label(&pinned), None);
+        assert!(
+            !pinned.with_extension(LABEL_EXT).exists(),
+            "a blank name removes it"
+        );
+        set_version_label(&pinned, "").unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -843,6 +843,8 @@ pub struct OndinApp {
     pub(crate) kits_used_open: bool,
     /// *Version history…*, while it is open (`versions.rs`).
     pub(crate) versions_open: bool,
+    /// The version whose name the card is editing.
+    pub(crate) version_naming: Option<crate::versions::Naming>,
     /// The kit *Make all local*'s confirmation is asking about.
     pub(crate) making_all_local: Option<String>,
     /// *Stop sharing as kit*'s confirmation: `Some(None)` asks about the open document,
@@ -1482,6 +1484,7 @@ impl OndinApp {
             kit_return: None,
             kits_used_open: false,
             versions_open: false,
+            version_naming: None,
             making_all_local: None,
             unsharing_kit: None,
             context_menu: None,
@@ -2142,6 +2145,7 @@ impl OndinApp {
             Action::MakeKit | Action::KitsUsed | Action::StopSharingKit => {}
             Action::ShowInLibrary => self.go_to_dashboard(),
             Action::VersionHistory => self.versions_open = true,
+            Action::SaveNamedVersion => self.save_named_version(),
             Action::RotateQuarter(clockwise) => {
                 let turn = std::f64::consts::FRAC_PI_2;
                 self.rotate_selection_quarter(if clockwise { turn } else { -turn });
@@ -5221,20 +5225,8 @@ impl OndinApp {
         self.session.mark_saved(path.clone());
         self.last_autosave = std::time::Instant::now();
 
-        if pin && self.prefs.version_history {
-            // The document may have just been filed; the entry carries the version's id.
-            self.library.refresh();
-            if let Some(entry) = self.library.entry_at(&path).cloned() {
-                match crate::library::store::pin_version(&self.library.root, &entry) {
-                    Ok(Some(_)) => self.session.info("Version saved"),
-                    // No id (opened from outside the library): nothing to pin to.
-                    Ok(None) => {}
-                    Err(e) => {
-                        let e = crate::private::io_error(&e);
-                        self.session.fail(format!("Version failed: {e}"))
-                    }
-                }
-            }
+        if pin && self.prefs.version_history && self.pin_saved_version().is_some() {
+            self.session.info("Version saved");
         }
 
         // Only after a successful save, so exports never describe something unsaved.
@@ -5242,6 +5234,24 @@ impl OndinApp {
             self.export_all(crate::panels::ExportAll::Quietly);
         }
         true
+    }
+
+    /// Pin the file the open document was just saved to as a version, answering
+    /// the copy's path. `None` for a file the library does not list, which has no
+    /// id to pin to, and after reporting a failed pin.
+    pub(crate) fn pin_saved_version(&mut self) -> Option<std::path::PathBuf> {
+        let path = self.session.path.clone()?;
+        // The document may have just been filed; the entry carries the version's id.
+        self.library.refresh();
+        let entry = self.library.entry_at(&path).cloned()?;
+        match crate::library::store::pin_version(&self.library.root, &entry) {
+            Ok(pinned) => pinned,
+            Err(e) => {
+                let e = crate::private::io_error(&e);
+                self.session.fail(format!("Version failed: {e}"));
+                None
+            }
+        }
     }
 
     /// File a document that has never been saved, under whatever name it carries.
@@ -5846,6 +5856,10 @@ impl OndinApp {
         self.making_local = None;
         self.kits_used_open = false;
         self.versions_open = false;
+        // Kept, as every way out of the name field but Escape keeps it.
+        if let Some(n) = self.version_naming.take() {
+            self.commit_version_name(n);
+        }
         self.making_all_local = None;
         self.unsharing_kit = None;
         self.paint_hex = None;

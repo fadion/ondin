@@ -582,12 +582,13 @@ the first segment of a component's. It hides names, not content.
   siblings of that word ("Component" for a main, "Instance" for a linked copy, else
   `NodeKind::default_name`); `page` gives "Page ‹n›" by page order; `document` and `project` give
   "Document ‹n›" and "Project ‹n›" by place in the list drawn beside them (the tab strip, the
-  library's entries or project list). So one document can carry different numbers on different
+  library's entries or project list); `version` gives "Version ‹n›" by place in the version history.
+  So one document can carry different numbers on different
   surfaces. `OndinApp::shown_page_name`, `shown_title`, `shown_project_name` and
   `Library::shown_project`/`shown_entry` are the drawn names; `page_name` stays the real one for
   comparing, renaming and file names. Kit names are document names (`kits::index::kits_in`,
   `binding::kit_label`, `kit_heading`).
-- **What is masked:** layer, frame, component, page, document and project names, everywhere one is
+- **What is masked:** layer, frame, component, page, document, project and version names, everywhere one is
   drawn — canvas tags, inspector headers, panels, palette, menus, toasts, the contrast check, the
   colour-blind simulation's bar, the minimap, present mode, exports' toasts (a single export's file name becomes a count), tabs, crumb,
   kit dialogs and the whole library screen. **What stays:** text, images, colours, style, variable
@@ -600,7 +601,8 @@ the first segment of a component's. It hides names, not content.
   inspector's layer and page name header, drawn masked), batch rename, page rename, the library's
   document rename and *Edit project* (*Leave private mode to rename*), *Import files* (*Leave
   private mode to import*) and *Combine as variants*, whose values would be the mains' names
-  (`private::DECLINE_COMBINE`). Searches over names find nothing and say *Leave private mode to search
+  (`private::DECLINE_COMBINE`). A version's pencil is disabled with the rename words as its tooltip,
+  and the version card drops an open name field, so a name is never typed blind. Searches over names find nothing and say *Leave private mode to search
   names*: the palette's layer search, the kit picker's, the library's, whose remembered searches
   are hidden too, and the swap picker's, which lists every main. A property made from a layer
   (`bind_line`'s *New property…*, a new swap property) is named for the layer as drawn. A swap

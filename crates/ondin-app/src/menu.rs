@@ -440,6 +440,7 @@ pub enum Item {
     StopSharingKit,
     ShowInLibrary,
     VersionHistory,
+    SaveNamedVersion,
     /// A quarter turn of each selected layer about its own origin, as the Transform
     /// card's buttons do; `true` is clockwise.
     RotateQuarter(bool),
@@ -1207,6 +1208,9 @@ impl Item {
                 None,
                 Group::File,
             ),
+            Item::SaveNamedVersion => {
+                s("Save named version…", icon::FLOPPY_DISK, None, Group::File)
+            }
             Item::RotateQuarter(false) => s(
                 "Rotate 90° counter-clockwise",
                 icon::ARROW_COUNTER_CLOCKWISE,
@@ -1420,6 +1424,7 @@ impl Item {
             Item::StopSharingKit => Action::StopSharingKit,
             Item::ShowInLibrary => Action::ShowInLibrary,
             Item::VersionHistory => Action::VersionHistory,
+            Item::SaveNamedVersion => Action::SaveNamedVersion,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
             Item::SelectSame(same) => Action::SelectSame(same),
             Item::SelectInverse => Action::SelectInverse,
@@ -3488,6 +3493,7 @@ impl OndinApp {
             | Item::StopSharingKit
             | Item::ShowInLibrary
             | Item::VersionHistory
+            | Item::SaveNamedVersion
             | Item::RotateQuarter(_)
             | Item::SelectSame(_)
             | Item::SelectInverse

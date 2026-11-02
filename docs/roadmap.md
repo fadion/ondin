@@ -11,9 +11,6 @@ reads true.
 
 ## Now
 
-- **Named versions.** A pinned version is known only by its timestamp (`store::versions`), and every
-  `Ctrl+S` pins one. An optional label, editable in the version card, and a *Save named version…*
-  palette command that pins and asks for one.
 - **Pixel preview.** The canvas rasterized at 1x and enlarged with hard pixel edges, so the
   anti-aliasing a viewer gets is visible. The pixel grid (`grid.rs`) shows where pixels fall over
   artwork drawn at device resolution, so a half-pixel edge looks sharp; the preview shows it blur.

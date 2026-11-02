@@ -193,6 +193,8 @@ pub enum Action {
     ShowInLibrary,
     /// *Version history…*, the Document menu's first row.
     VersionHistory,
+    /// *Save named version…*: save, pin a version and ask for its name.
+    SaveNamedVersion,
     /// A quarter turn of the selection, each layer about its own origin; `true` is
     /// clockwise. Unbound, as the Transform card's buttons are.
     RotateQuarter(bool),

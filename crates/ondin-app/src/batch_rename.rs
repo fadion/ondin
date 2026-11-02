@@ -1285,7 +1285,7 @@ fn text_rect(rect: egui::Rect, right: f32) -> egui::Rect {
 }
 
 /// The toggles at a field's right end, `w` wide.
-fn toggles(ui: &mut egui::Ui, rect: egui::Rect, w: f32) -> egui::Ui {
+pub(crate) fn toggles(ui: &mut egui::Ui, rect: egui::Rect, w: f32) -> egui::Ui {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_max(
@@ -1584,59 +1584,62 @@ fn order_row(ui: &mut egui::Ui, order: &mut Order) {
 fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
     ui.horizontal(|ui| {
         ui.add_space(LABEL_W + GAP);
-        let font = egui::FontId::proportional(12.0);
-        let galley = ui.fonts_mut(|f| {
-            f.layout_no_wrap(label.to_string(), font.clone(), theme::text::strong())
-        });
-        let note_g =
-            ui.fonts_mut(|f| f.layout_no_wrap(note.to_string(), font, theme::text::faint()));
-        let (rect, resp) = ui.allocate_exact_size(
-            egui::vec2(14.0 + 7.0 + galley.size().x + 5.0 + note_g.size().x, 24.0),
-            egui::Sense::click(),
-        );
-        let p = ui.painter();
-        let tick = egui::Rect::from_min_size(
-            egui::pos2(rect.left(), rect.center().y - 7.0),
-            egui::vec2(14.0, 14.0),
-        );
-        if *on {
-            p.rect_filled(tick, 3.0, color::accent());
-            p.text(
-                tick.center(),
-                egui::Align2::CENTER_CENTER,
-                icon::CHECK,
-                theme::icon_font(10.0),
-                egui::Color32::WHITE,
-            );
-        } else {
-            let ring = if resp.hovered() {
-                color::text_a(140)
-            } else {
-                color::text_a(90)
-            };
-            p.rect_stroke(
-                tick,
-                3.0,
-                egui::Stroke::new(1.0, ring),
-                egui::StrokeKind::Inside,
-            );
-        }
-        let x = tick.right() + 7.0;
-        let w = galley.size().x;
-        p.galley(
-            egui::pos2(x, rect.center().y - galley.size().y / 2.0),
-            galley,
-            theme::text::strong(),
-        );
-        p.galley(
-            egui::pos2(x + w + 5.0, rect.center().y - note_g.size().y / 2.0),
-            note_g,
-            theme::text::faint(),
-        );
-        if resp.clicked() {
-            *on = !*on;
-        }
+        tick_box(ui, label, note, on);
     });
+}
+
+/// A tick box, its label and a faint note after it; the find box's too.
+pub(crate) fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
+    let font = egui::FontId::proportional(12.0);
+    let galley =
+        ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), theme::text::strong()));
+    let note_g = ui.fonts_mut(|f| f.layout_no_wrap(note.to_string(), font, theme::text::faint()));
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(14.0 + 7.0 + galley.size().x + 5.0 + note_g.size().x, 24.0),
+        egui::Sense::click(),
+    );
+    let p = ui.painter();
+    let tick = egui::Rect::from_min_size(
+        egui::pos2(rect.left(), rect.center().y - 7.0),
+        egui::vec2(14.0, 14.0),
+    );
+    if *on {
+        p.rect_filled(tick, 3.0, color::accent());
+        p.text(
+            tick.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::CHECK,
+            theme::icon_font(10.0),
+            egui::Color32::WHITE,
+        );
+    } else {
+        let ring = if resp.hovered() {
+            color::text_a(140)
+        } else {
+            color::text_a(90)
+        };
+        p.rect_stroke(
+            tick,
+            3.0,
+            egui::Stroke::new(1.0, ring),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let x = tick.right() + 7.0;
+    let w = galley.size().x;
+    p.galley(
+        egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme::text::strong(),
+    );
+    p.galley(
+        egui::pos2(x + w + 5.0, rect.center().y - note_g.size().y / 2.0),
+        note_g,
+        theme::text::faint(),
+    );
+    if resp.clicked() {
+        *on = !*on;
+    }
 }
 
 fn checks(ui: &mut egui::Ui, s: &mut Settings, skipped: usize) {

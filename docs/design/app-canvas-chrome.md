@@ -531,16 +531,19 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   State group) are also in the cheatsheet's Layer section. Opening again while open only takes the
   keyboard back.
 - **Placement.** Not a modal, so the canvas stays live and the matches are found again as the text
-  changes. An `Area` at the canvas's top right, 340 wide, 16 below the top (below the rulers when
+  changes. An `Area` at the canvas's top right, 380 wide, 16 below the top (below the rulers when
   they show) and 16 left of `inspector_column`, or of the canvas's right edge in focus mode, where it
-  is drawn too. Its height is capped at the canvas's and the list scrolls inside. `OndinApp::find`
+  is drawn too. The list shows ten rows at most, fewer when the canvas is short, and scrolls without
+  a bar. With Find empty there is no list and no rule under the fields. `OndinApp::find`
   (`FindBox`) is kept while closed, so the box reopens as it was left.
 - **Rows.** A caret folds the Replace row and the options under it; the fold is remembered. Find
   shows *N of M*, a warm *No matches*, or *Not a pattern* with the reason under it, then ↑ ↓ ✕.
-  Replace has its field, *Replace* and an accent *All*. Then the switches *Aa*, *ab* (whole words)
-  and *.\**, and *Keep case*, on the first time the box opens. Then *In: Selection · This page · All
-  pages*: it opens on *Selection* when something is selected, else *This page*, and *Selection* is
-  disabled with nothing selected. Last, *Include text inside instances*.
+  Replace has its field with *Keep case* (*Ab*, on the first time the box opens) inside it, as Batch
+  rename's, then *Replace* and an accent *All* as field-row buttons. Then the scope *Selection · This
+  page · All pages*, and right of it the switches *Aa*, *ab* (whole words) and *.\**: the scope opens
+  on *Selection* when something is selected, else *This page*, and *Selection* is disabled with
+  nothing selected. Last, *Include text inside instances*. The fields, segments, switches and tick
+  box are Batch rename's.
 - **The list**, grouped under page headings with their counts. A row has the kind glyph (text, an
   outlined hexagon inside an instance, a filled accent hexagon in a main), the text around the match
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when

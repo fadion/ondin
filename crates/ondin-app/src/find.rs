@@ -8,8 +8,9 @@
 //! the zoom kept — and never selects it.
 
 use crate::app::OndinApp;
-use crate::batch_rename::{field_ground, field_toggle, segment, well};
+use crate::batch_rename::{field_ground, field_toggle, segment, tick_box, toggles, well};
 use crate::theme::{self, color, icon};
+use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::find::{self, Hit, Query, Scope};
 use ondin_core::kurbo::Point;
@@ -18,15 +19,24 @@ use ondin_core::{NodeId, NodeKind, TextEdit, TextRef};
 use std::collections::HashMap;
 use std::ops::Range;
 
-/// The box's width — the insert picker's.
-const W: f32 = 340.0;
+/// The box's width.
+const W: f32 = 380.0;
 const PAD: f32 = 12.0;
 /// Its gap from the canvas's top and right edges (or the inspector's left).
 const MARGIN: f32 = 16.0;
 const FIELD_H: f32 = 30.0;
 const ROW_H: f32 = 28.0;
+/// The list scrolls past this many rows.
+const ROWS_SHOWN: f32 = 10.0;
+/// The side of the arrow and close buttons, the caret's width, and the air
+/// between controls in a row.
+const BTN: f32 = 26.0;
+const CARET_W: f32 = 20.0;
+const GAP_X: f32 = 6.0;
 /// The indent under the caret, so the second rows line up with Find.
-const INDENT: f32 = 24.0;
+const INDENT: f32 = CARET_W + GAP_X;
+/// The switches' well: three toggles 2 apart, and its 2-point inset.
+const SWITCHES_W: f32 = 24.0 * 3.0 + 2.0 * 2.0 + 2.0 * 2.0;
 /// The ids of the two fields, which the keys ask about.
 const FIND_ID: &str = "find-box-find";
 const WITH_ID: &str = "find-box-with";
@@ -398,10 +408,15 @@ impl OndinApp {
                     .show(ui, |ui| {
                         ui.set_width(W);
                         ui.set_max_height(max_h);
-                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 7.0);
+                        ui.spacing_mut().item_spacing = egui::vec2(GAP_X, 8.0);
                         egui::Frame::NONE
                             .inner_margin(PAD)
                             .show(ui, |ui| controls(ui, f, selected, &mut act));
+                        // Nothing under the fields until there is something to
+                        // list, so the folded box is as deep below as above.
+                        if f.find.is_empty() {
+                            return;
+                        }
                         rule(ui);
                         list(ui, f, &names, &rows, &mut act);
                         if !f.found.hits.is_empty() {
@@ -544,17 +559,34 @@ enum Act {
 fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Option<Act>) {
     let n = f.found.hits.len();
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         let (caret, tip) = match f.replace_row {
             true => (icon::CARET_DOWN, "Hide replace"),
             false => (icon::CARET_RIGHT, "Show replace"),
         };
-        if glyph_button(ui, caret, egui::vec2(20.0, FIELD_H), 12.0, true)
-            .on_hover_text(tip)
-            .clicked()
+        // The whole button a point low: centred, it reads high beside the field.
+        let (slot, _) = ui.allocate_exact_size(egui::vec2(CARET_W, FIELD_H), egui::Sense::hover());
+        let mut child = ui.new_child(
+            egui::UiBuilder::new().max_rect(
+                egui::Rect::from_center_size(slot.center(), egui::vec2(CARET_W, BTN))
+                    .translate(egui::vec2(0.0, 1.0)),
+            ),
+        );
+        if ui::icon_button_sized(
+            &mut child,
+            caret,
+            egui::vec2(CARET_W, BTN),
+            12.0,
+            false,
+            true,
+        )
+        .on_hover_text(tip)
+        .clicked()
         {
             f.replace_row = !f.replace_row;
         }
-        let w = ui.available_width() - 26.0 * 2.0 - 22.0 - 3.0 * 4.0;
+        ui.add_space(GAP_X);
+        let w = ui.available_width() - BTN * 3.0 - GAP_X * 2.0 - 2.0;
         let count = if f.find.is_empty() {
             String::new()
         } else if f.found.error.is_some() {
@@ -566,7 +598,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         };
         // Warm when nothing was found; after *All* emptied the list it is news.
         let warm = n == 0 && !f.find.is_empty() && f.done.is_none();
-        let resp = field(
+        let (resp, _) = field(
             ui,
             FIND_ID,
             &mut f.find,
@@ -575,26 +607,40 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             w,
             &count,
             warm,
+            0.0,
         );
         if f.focus {
             f.focus = false;
             resp.request_focus();
-            crate::ui::select_all_on_focus(ui, &resp, &f.find);
+            ui::select_all_on_focus(ui, &resp, &f.find);
         }
         let live = n > 0;
-        if glyph_button(ui, icon::ARROW_UP, egui::vec2(26.0, FIELD_H), 14.0, live)
+        ui.add_space(GAP_X);
+        if ui::icon_button(ui, icon::ARROW_UP, BTN, 14.0, false, live)
             .on_hover_text("Previous match (Shift+Enter)")
             .clicked()
+            && live
         {
             *act = Some(Act::Step(-1));
         }
-        if glyph_button(ui, icon::ARROW_DOWN, egui::vec2(26.0, FIELD_H), 14.0, live)
-            .on_hover_text("Next match (Enter)")
-            .clicked()
+        ui.add_space(2.0);
+        // Its ink sits high in the em box; the button stays in line.
+        if ui::icon_button_nudged(
+            ui,
+            icon::ARROW_DOWN,
+            egui::vec2(BTN, BTN),
+            14.0,
+            live,
+            egui::vec2(0.0, 1.0),
+        )
+        .on_hover_text("Next match (Enter)")
+        .clicked()
+            && live
         {
             *act = Some(Act::Step(1));
         }
-        if glyph_button(ui, icon::X, egui::vec2(22.0, FIELD_H), 13.0, true)
+        ui.add_space(GAP_X);
+        if ui::icon_button(ui, icon::X, BTN, 13.0, false, true)
             .on_hover_text("Close (Escape)")
             .clicked()
         {
@@ -603,6 +649,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
     });
     if let Some(e) = &f.found.error {
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(INDENT);
             ui.label(egui::RichText::new(e).size(10.5).color(color::warn()));
         });
@@ -611,9 +658,18 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         return;
     }
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GAP_X;
         ui.add_space(INDENT);
-        let w = ui.available_width() - replace_buttons_w(ui) - 2.0 * 4.0;
-        field(
+        let live = n > 0 && f.found.error.is_none();
+        let state = |primary| match (live, primary) {
+            (false, _) => FieldButton::Disabled,
+            (true, true) => FieldButton::On,
+            (true, false) => FieldButton::Off,
+        };
+        let (replace_w, all_w) = (button_w(ui, "Replace"), button_w(ui, "All"));
+        let w = ui.available_width() - replace_w - all_w - GAP_X * 2.0;
+        let keep_case_w = 24.0;
+        let (_, rect) = field(
             ui,
             WITH_ID,
             &mut f.with,
@@ -622,37 +678,34 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             w,
             "",
             false,
+            keep_case_w,
         );
-        let live = n > 0 && f.found.error.is_none();
-        if pill(ui, "Replace", false, live).clicked() {
+        let mut child = toggles(ui, rect, keep_case_w);
+        field_toggle(
+            &mut child,
+            "Ab",
+            "Keep each match’s case",
+            &mut f.keep_case,
+            false,
+        );
+        if ui::label_button(ui, "Replace", egui::vec2(replace_w, FIELD_H), state(false)).clicked()
+            && live
+        {
             *act = Some(Act::Replace);
         }
-        if pill(ui, "All", true, live)
+        if ui::label_button(ui, "All", egui::vec2(all_w, FIELD_H), state(true))
             .on_hover_text("Replace every match in scope")
             .clicked()
+            && live
         {
             *act = Some(Act::All);
         }
     });
+    // The scope, then the switches pushed to the right edge: a right-to-left
+    // layout would reverse the segments inside each well.
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(INDENT);
-        well(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            field_toggle(ui, "Aa", "Match case", &mut f.match_case, false);
-            field_toggle(ui, "ab", "Whole words", &mut f.whole_words, false);
-            field_toggle(ui, ".*", "Regular expression", &mut f.pattern, true);
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            checkbox(ui, "Keep case", &mut f.keep_case);
-        });
-    });
-    ui.horizontal(|ui| {
-        ui.add_space(INDENT);
-        ui.label(
-            egui::RichText::new("In")
-                .size(11.0)
-                .color(theme::text::faint()),
-        );
         well(ui, |ui| {
             let n = match selected {
                 0 => String::new(),
@@ -679,16 +732,36 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
                 }
             }
         });
+        ui.add_space((ui.available_width() - SWITCHES_W).max(GAP_X));
+        well(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            field_toggle(ui, "Aa", "Match case", &mut f.match_case, false);
+            field_toggle(ui, "ab", "Whole words", &mut f.whole_words, false);
+            field_toggle(ui, ".*", "Regular expression", &mut f.pattern, true);
+        });
     });
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(INDENT);
-        checkbox(ui, "Include text inside instances", &mut f.inside_instances);
+        tick_box(
+            ui,
+            "Include text inside instances",
+            "",
+            &mut f.inside_instances,
+        );
     });
 }
 
-/// The width the Replace and All buttons take.
-fn replace_buttons_w(ui: &egui::Ui) -> f32 {
-    pill_w(ui, "Replace") + pill_w(ui, "All")
+/// A labelled button's width: its word and the Settings buttons' side padding.
+fn button_w(ui: &egui::Ui, label: &str) -> f32 {
+    let g = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            label.to_string(),
+            egui::FontId::proportional(11.5),
+            color::text(),
+        )
+    });
+    g.size().x + 24.0
 }
 
 /// The list: matches grouped by page, a long list scrolling inside the box. With
@@ -733,16 +806,20 @@ fn list(
                 };
                 if let Some(label) = widen
                     && f.found.error.is_none()
-                    && pill(ui, label, false, true).clicked()
+                    && crate::settings::text_button(ui, label, FieldButton::Off).clicked()
                 {
                     *act = Some(Act::Widen);
                 }
             });
         return;
     }
+    // At most `ROWS_SHOWN` rows, fewer when the canvas is short; the wheel scrolls
+    // it and no bar is drawn.
+    let most = (ROW_H + 1.0) * ROWS_SHOWN + 16.0;
     egui::ScrollArea::vertical()
         .auto_shrink([false, true])
-        .max_height(ui.available_height().max(ROW_H * 3.0) - 40.0)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .max_height(most.min(ui.available_height().max(ROW_H * 3.0) - 40.0))
         .show(ui, |ui| {
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(6, 8))
@@ -986,7 +1063,8 @@ fn plural(n: usize, what: &str) -> String {
     }
 }
 
-/// A field with a glyph before it and an optional note at its end, `w` wide.
+/// A field with a glyph before it and an optional note at its end, `w` wide,
+/// `toggles_w` left free at its right for [`toggles`]; with the rect it fills.
 #[allow(clippy::too_many_arguments)]
 fn field(
     ui: &mut egui::Ui,
@@ -997,7 +1075,8 @@ fn field(
     w: f32,
     note: &str,
     warm: bool,
-) -> egui::Response {
+    toggles_w: f32,
+) -> (egui::Response, egui::Rect) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w.max(60.0), FIELD_H), egui::Sense::hover());
     let id = egui::Id::new(id);
     field_ground(ui, rect, ui.memory(|m| m.has_focus(id)));
@@ -1009,6 +1088,11 @@ fn field(
         theme::icon_font(14.0),
         theme::text::dim(),
     );
+    let end = if toggles_w > 0.0 {
+        rect.right() - 8.0 - toggles_w
+    } else {
+        rect.right() - 9.0
+    };
     let note_w = if note.is_empty() {
         0.0
     } else {
@@ -1022,7 +1106,7 @@ fn field(
         });
         let w = g.size().x;
         p.galley(
-            egui::pos2(rect.right() - 9.0 - w, rect.center().y - g.size().y / 2.0),
+            egui::pos2(end - w, rect.center().y - g.size().y / 2.0),
             g,
             ink,
         );
@@ -1030,9 +1114,11 @@ fn field(
     };
     let inner = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 30.0, rect.top()),
-        egui::pos2(rect.right() - 9.0 - note_w, rect.bottom()),
+        egui::pos2(end - note_w, rect.bottom()),
     );
-    ui.put(
+    // `place`, not `put`: in a row, `put` leaves the cursor at the text's end,
+    // short of the note, and the buttons after the field land on it.
+    let resp = ui.place(
         inner,
         egui::TextEdit::singleline(text)
             .id(id)
@@ -1041,138 +1127,15 @@ fn field(
             .vertical_align(egui::Align::Center)
             .desired_width(inner.width())
             .return_key(None)
-            .font(egui::FontId::proportional(12.5))
+            .font(egui::FontId::proportional(12.0))
             .text_color(color::text())
             .hint_text(
                 egui::RichText::new(hint)
-                    .size(12.5)
+                    .size(12.0)
                     .color(theme::text::faint()),
             ),
-    )
-}
-
-/// A bare glyph button of `size`, its glyph faint while `live` is false.
-fn glyph_button(
-    ui: &mut egui::Ui,
-    glyph: &str,
-    size: egui::Vec2,
-    pt: f32,
-    live: bool,
-) -> egui::Response {
-    let sense = if live {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, resp) = ui.allocate_exact_size(size, sense);
-    if live && resp.hovered() {
-        ui.painter().rect_filled(rect, 5.0, color::text_a(15));
-    }
-    let ink = if !live {
-        color::text_a(56)
-    } else if resp.hovered() {
-        theme::text::strong()
-    } else {
-        theme::text::dim()
-    };
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        theme::icon_font(pt),
-        ink,
     );
-    resp
-}
-
-fn pill_w(ui: &egui::Ui, label: &str) -> f32 {
-    let g = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            label.to_string(),
-            egui::FontId::proportional(11.5),
-            color::text(),
-        )
-    });
-    g.size().x + 20.0
-}
-
-/// A small labelled button, the accent one for the box's main act.
-fn pill(ui: &mut egui::Ui, label: &str, accent: bool, live: bool) -> egui::Response {
-    let w = pill_w(ui, label);
-    let sense = if live {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(w, FIELD_H.min(ui.available_height().max(26.0))),
-        sense,
-    );
-    let mut p = ui.painter().clone();
-    if !live {
-        p.multiply_opacity(0.4);
-    }
-    let (fill, ink) = if accent {
-        (color::accent(), color::on_accent())
-    } else if resp.hovered() && live {
-        (color::text_a(36), color::text())
-    } else {
-        (color::text_a(20), color::text())
-    };
-    p.rect_filled(rect, 5.0, fill);
-    p.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        egui::FontId::proportional(11.5),
-        ink,
-    );
-    resp
-}
-
-/// A tick box and its label.
-fn checkbox(ui: &mut egui::Ui, label: &str, on: &mut bool) {
-    let font = egui::FontId::proportional(11.5);
-    let g = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font, color::text_a(184)));
-    let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(13.0 + 6.0 + g.size().x, 22.0),
-        egui::Sense::click(),
-    );
-    let p = ui.painter();
-    let tick = egui::Rect::from_min_size(
-        egui::pos2(rect.left(), rect.center().y - 6.5),
-        egui::vec2(13.0, 13.0),
-    );
-    if *on {
-        p.rect_filled(tick, 3.0, color::accent());
-        p.text(
-            tick.center(),
-            egui::Align2::CENTER_CENTER,
-            icon::CHECK,
-            theme::icon_font(9.0),
-            color::on_accent(),
-        );
-    } else {
-        let ring = if resp.hovered() {
-            color::text_a(120)
-        } else {
-            color::text_a(77)
-        };
-        p.rect_stroke(
-            tick,
-            3.0,
-            egui::Stroke::new(1.0, ring),
-            egui::StrokeKind::Inside,
-        );
-    }
-    p.galley(
-        egui::pos2(tick.right() + 6.0, rect.center().y - g.size().y / 2.0),
-        g,
-        color::text_a(184),
-    );
-    if resp.clicked() {
-        *on = !*on;
-    }
+    (resp, rect)
 }
 
 /// A hairline across the box.
@@ -1471,5 +1434,96 @@ mod tests {
         assert!((r.width() - W).abs() <= 2.0, "{r:?}");
         assert!((r.right() - (column.left() - MARGIN)).abs() < 0.5, "{r:?}");
         assert!(r.top() >= 80.0 + MARGIN, "{r:?}");
+    }
+
+    /// **The box's layout holds**: folded and empty it is as deep below Find as
+    /// above; the arrows stand clear of the count; a long list stops at
+    /// `ROWS_SHOWN` rows rather than running down the canvas.
+    ///
+    /// flip: `field` adding its text with `ui.put` → fails at the arrow's
+    /// distance from the count.
+    #[test]
+    fn the_box_is_laid_out_clear_and_bounded() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut f = fixture(&ctx);
+        let area = || {
+            ctx.memory(|m| m.area_rect(egui::Id::new("find-box")))
+                .expect("drawn")
+        };
+        f.app.open_find(false);
+        for _ in 0..3 {
+            run(&mut f.app, &ctx, Vec::new());
+        }
+        let folded = area();
+        assert!(
+            (folded.height() - (FIELD_H + PAD * 2.0)).abs() <= 2.5,
+            "{folded:?}"
+        );
+
+        f.app.find.find = "team".into();
+        let mut out = None;
+        for _ in 0..3 {
+            out = Some(drawn(&mut f.app, &ctx));
+        }
+        let painted = texts(&out.unwrap());
+        let at = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s}: {painted:?}"))
+                .1
+        };
+        let (count, up) = (at("1 of 3"), at(icon::ARROW_UP));
+        assert!(up.left() >= count.right() + 9.0, "{count:?} {up:?}");
+
+        let page = f.app.session.page;
+        let many: Vec<Operation> = (0..40)
+            .map(|i| Operation::CreateNode {
+                id: f.app.session.ids.mint(),
+                parent: page,
+                index: 0,
+                kind: text("team"),
+                transform: None,
+                name: Some(format!("Copy {i}")),
+            })
+            .collect();
+        assert!(f.app.session.commit(Transaction(many)));
+        for _ in 0..3 {
+            run(&mut f.app, &ctx, Vec::new());
+        }
+        assert_eq!(f.app.find.found.hits.len(), 43);
+        let long = area();
+        assert!(long.height() < 500.0, "{long:?}");
+    }
+
+    /// One frame of the box, its output kept.
+    fn drawn(app: &mut OndinApp, ctx: &egui::Context) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1400.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |_| app.find_ui(ctx))
+    }
+
+    /// Every text the frame painted, with where it was painted.
+    fn texts(out: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(t) => {
+                    out.push((t.galley.text().to_string(), t.visual_bounding_rect()))
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut v = Vec::new();
+        for s in &out.shapes {
+            walk(&s.shape, &mut v);
+        }
+        v
     }
 }

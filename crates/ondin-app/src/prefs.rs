@@ -222,6 +222,9 @@ pub struct Prefs {
     /// downloadable degrades to Inter at creation, and the preference stays, for a
     /// font that comes back.
     pub default_font: String,
+    /// Underline misspelled words while editing text, and offer corrections in
+    /// the text menu (`crate::spell`). On; the checker is the OS's and offline.
+    pub spell_check: bool,
     /// How wide the layers panel is, in points (`panels::layers::MIN_W ..= MAX_W`).
     ///
     /// A preference: how much room a tree needs is a fact about the monitor and
@@ -392,6 +395,7 @@ impl Default for Prefs {
             resource_meter: false,
             web_fonts: true,
             default_font: "Inter".into(),
+            spell_check: true,
             // An `f32`'s own default of 0.0 would clamp the panel to `MIN_W` on
             // every upgraded install.
             layers_width: crate::panels::layers::DEFAULT_W,

@@ -6749,6 +6749,44 @@ impl OndinApp {
         }
     }
 
+    /// The misspelled word at world point `p` in the text session, with its
+    /// suggestions — what the text menu opens with. `None` with spelling off.
+    pub(crate) fn misspelling_at(&self, p: Point) -> Option<crate::spell::Misspelling> {
+        if !self.prefs.spell_check {
+            return None;
+        }
+        let s = self.text.as_ref()?;
+        let world = self.session.preview_world_transform(s.id)?;
+        let at = s.editor.index_at(world.inverse() * p);
+        self.spell
+            .misspelling_at(s.editor.content(), &s.editor.locale_runs(), at)
+    }
+
+    /// A spelling row of the text menu (§6.4): put suggestion `n` in place of the
+    /// word `m` names, or add that word to the user's dictionary.
+    pub(crate) fn spelling_row(&mut self, item: crate::menu::Item, m: crate::spell::Misspelling) {
+        match item {
+            crate::menu::Item::Suggestion(n) => {
+                let Some(with) = m.suggestions.get(usize::from(n)) else {
+                    return;
+                };
+                let Some(s) = self.text.as_mut() else { return };
+                if s.editor.content().get(m.range.clone()) != Some(m.word.as_str()) {
+                    return;
+                }
+                s.editor.select_range(m.range);
+                s.editor.insert(with);
+                self.preview_session();
+            }
+            crate::menu::Item::AddToDictionary => {
+                self.spell.add(m.tag, &m.word);
+                self.session
+                    .info(format!("Added “{}” to the dictionary", m.word));
+            }
+            _ => {}
+        }
+    }
+
     /// Put copied or cut text on the **system** clipboard, and drop both in-app
     /// payloads, or a later `Ctrl+V` would paste layers the OS clipboard no
     /// longer describes.
@@ -9170,6 +9208,18 @@ impl OndinApp {
                     egui::Stroke::NONE,
                 ));
             }
+            // Misspelled words, along the foot of each word's line box.
+            if self.prefs.spell_check {
+                let editor = &session.editor;
+                let caret = (!editor.has_selection()).then(|| editor.selected_range().start);
+                let runs = editor.locale_runs();
+                for r in self.spell.misspelled(editor.content(), &runs, caret) {
+                    for q in editor.range_quads(r) {
+                        let p = self.poly(&q, world, rect, ppp);
+                        paint_squiggle(painter, p[3], p[2]);
+                    }
+                }
+            }
             // Only the caret blinks; the highlight shows even unfocused.
             if caret.is_some_and(|(on, _)| on) {
                 let caret_width = 1.5 / self.session.camera.zoom.max(f64::EPSILON);
@@ -9665,6 +9715,28 @@ impl OndinApp {
             .map(|p| self.to_screen(world * *p, rect, ppp))
             .collect()
     }
+}
+
+/// A spelling squiggle from `a` to `b` in screen points: a zigzag of a fixed
+/// size whatever the zoom, so it reads as chrome, not as the text's own ink.
+fn paint_squiggle(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2) {
+    const STEP: f32 = 2.0;
+    const RISE: f32 = 1.5;
+    let along = b - a;
+    let len = along.length();
+    if len < STEP {
+        return;
+    }
+    let dir = along / len;
+    let up = egui::vec2(dir.y, -dir.x) * RISE;
+    let n = (len / STEP) as usize;
+    let points: Vec<egui::Pos2> = (0..=n)
+        .map(|i| a + dir * (i as f32 * STEP) + if i % 2 == 0 { -up } else { up } * 0.5)
+        .collect();
+    painter.add(egui::Shape::line(
+        points,
+        egui::Stroke::new(1.0, color::danger()),
+    ));
 }
 
 /// The layer name a picture takes among siblings: the one it arrived with (a

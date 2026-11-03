@@ -335,12 +335,16 @@ row is live in focus mode, which hides none of what they switch.
 
 | Row | Chord | Shown / enabled |
 |---|---|---|
+| *each suggestion* | — | over a misspelled word only (`text.md`, *Spell check*), up to five, the word as the label; *No suggestions* dims *"The dictionary has nothing close to this word"* |
+| Add to dictionary | — | over a misspelled word only |
 | Cut | `Ctrl+X` | dims *"Nothing is selected"* without a text selection |
 | Copy | `Ctrl+C` | as above |
 | Paste | `Ctrl+V` | inserts at the caret; dims *"The clipboard holds no text"* (OS clipboard text, read once at open) |
 | Select all | `Ctrl+A` | dims *"There is no text yet"* when empty |
 
-The rows share their `Item` with the layer verbs and act on the editor.
+The clipboard rows share their `Item` with the layer verbs and act on the editor. The spelling
+rows (`Item::Suggestion`, `Item::AddToDictionary`) are answered by `context_menu_ui`, which holds
+the word the menu opened on (`ContextMenu::spelling`).
 
 ### 6.5 A point selection (node tool)
 

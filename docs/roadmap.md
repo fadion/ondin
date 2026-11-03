@@ -15,11 +15,6 @@ reads true.
   controls are tab stops and some are painted rects that sense the pointer only. Every control and
   field joins the Tab order in reading order, with `ui::focus_ring` showing where focus is, and
   Return/Space acting on a focused button as a click does (`app-chrome.md`, *Two kinds of focus*).
-- **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
-  the dictionary, untagged text falls back to the system's input languages. The OS checker
-  (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.
-  Squiggles are edit chrome only, never exported; suggestions head the text context menu; the stored
-  text is checked, not its case transform.
 - **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
   as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
   mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,

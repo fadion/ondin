@@ -301,7 +301,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 - Opens `settings.rs`'s modal: the theme and *Show resource meter* (under **Appearance**; the
   library's Settings shares the theme row only), nudge step, *Show tree guides* and *Collapse groups on open* (under a
   **Layers** eyebrow), *Default font* (under **Text**: the typography panel's family dropdown,
-  its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a), the web-font switch and
+  its glyph `warn()` with a tooltip when the family is `Missing`, §5.4a, and *Check spelling*), the web-font switch and
   cache row. `Ctrl+,` opens it (and only opens:
   `input::resolve` is not called while a modal is up). Staged; writes on *Save changes*.
 - Not a `TopMenu` value. Panel-owned preferences stay on their panel (export habits in the export

@@ -132,6 +132,7 @@ mod settings;
 mod slice;
 mod snap;
 mod spacing;
+mod spell;
 mod tabs;
 mod theme;
 mod thumbs;

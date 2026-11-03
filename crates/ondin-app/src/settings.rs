@@ -86,6 +86,7 @@ pub(crate) struct Settings {
     collapse_groups_on_open: bool,
     resource_meter: bool,
     default_font: String,
+    spell_check: bool,
     web_fonts: bool,
 }
 
@@ -99,6 +100,7 @@ impl Settings {
             collapse_groups_on_open: prefs.collapse_groups_on_open,
             resource_meter: prefs.resource_meter,
             default_font: prefs.default_font.clone(),
+            spell_check: prefs.spell_check,
             web_fonts: prefs.web_fonts,
         }
     }
@@ -126,6 +128,7 @@ impl Settings {
         prefs.collapse_groups_on_open = self.collapse_groups_on_open;
         prefs.resource_meter = self.resource_meter;
         prefs.default_font.clone_from(&self.default_font);
+        prefs.spell_check = self.spell_check;
         prefs.web_fonts = self.web_fonts;
         web_fonts_changed
     }
@@ -260,6 +263,15 @@ impl OndinApp {
                 "New text layers start in this font, or in Inter where it is neither \
                  installed nor downloadable.",
             );
+            ui.add_space(ROW_GAP);
+            if ui::switch_row(ui, "Check spelling", draft.spell_check, SWITCH_H)
+                .on_hover_text(
+                    "Underline misspelled words while editing text, in each run's language",
+                )
+                .clicked()
+            {
+                draft.spell_check = !draft.spell_check;
+            }
 
             // --- web fonts ---------------------------------------------
             section(ui, "Web fonts");
@@ -1150,6 +1162,7 @@ mod tests {
                 collapse_groups_on_open: false,
                 resource_meter: false,
                 default_font: "Inter".into(),
+                spell_check: true,
                 web_fonts: true,
             },
             "the form opens showing what is saved"
@@ -1165,6 +1178,7 @@ mod tests {
             collapse_groups_on_open: true,
             resource_meter: true,
             default_font: "Roboto".into(),
+            spell_check: false,
             web_fonts: false,
         };
         assert!(edited != opened, "the fixture has to be a real edit");

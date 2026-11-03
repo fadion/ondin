@@ -460,6 +460,11 @@ pub enum Item {
     SelectInverse,
     /// One of the chords a live text session admits.
     TextChord(crate::input::TextChord),
+    /// The text menu's `n`th spelling suggestion: replace the misspelled word
+    /// with it (`OndinApp::take_suggestion`). The row carries the word as its label.
+    Suggestion(u8),
+    /// Add the misspelled word under the text menu to the user's dictionary.
+    AddToDictionary,
     /// Scroll the inspector to the card with this title and open it.
     ShowCard(&'static str),
     Palette,
@@ -640,6 +645,8 @@ impl Item {
         Item::CopyAsPng(2),
         Item::SliceSelection,
         Item::SelectAll,
+        Item::Suggestion(0),
+        Item::AddToDictionary,
         Item::ZoomFit,
         Item::ExportAll,
         Item::ExportFrames,
@@ -950,6 +957,8 @@ impl Item {
                 Group::State,
             ),
             Item::ReplaceText => s("Replace text…", icon::SWAP, Some("Ctrl+H"), Group::State),
+            Item::Suggestion(_) => s("Use suggestion", icon::SWAP, None, Group::Head),
+            Item::AddToDictionary => s("Add to dictionary", icon::PLUS, None, Group::Head),
 
             Item::ZoomSelection => s(
                 "Zoom to selection",
@@ -1684,6 +1693,8 @@ pub struct Context<'a> {
     pub text_selection: bool,
     /// Whether the live text session's buffer is empty — what dims *Select all*.
     pub text_empty: bool,
+    /// The misspelled word under the pointer, whose suggestions head §6.4.
+    pub spelling: Option<&'a crate::spell::Misspelling>,
     /// Whether any layer carries export settings — what makes *Export all* offered
     /// (§7). A document question: it reads neither the selection nor the pointer.
     pub any_exports: bool,
@@ -1928,19 +1939,36 @@ fn page_menu(cx: &Context<'_>) -> Vec<Row> {
     ]
 }
 
-/// §6.4 — four rows, all acting on the editor rather than the document:
-/// `perform_menu_item` routes the shared [`Item`]s by target. *Paste* reads the OS
-/// clipboard's text, where the layer menus paste [`crate::app::OndinApp::clipboard`]'s
-/// captured subtrees.
+/// §6.4 — the clipboard's four rows, led over a misspelled word by its
+/// suggestions and *Add to dictionary*, all acting on the editor rather than the
+/// document: `perform_menu_item` routes the shared [`Item`]s by target. *Paste*
+/// reads the OS clipboard's text, where the layer menus paste
+/// [`crate::app::OndinApp::clipboard`]'s captured subtrees.
 fn text_session_menu(cx: &Context<'_>) -> Vec<Row> {
-    vec![
+    let mut rows = Vec::new();
+    // Over a misspelled word its corrections lead, then the dictionary.
+    if let Some(m) = cx.spelling {
+        if m.suggestions.is_empty() {
+            rows.push(
+                Row::new(Item::Suggestion(0))
+                    .label("No suggestions")
+                    .dim_if(true, "The dictionary has nothing close to this word"),
+            );
+        }
+        for (i, s) in m.suggestions.iter().enumerate() {
+            rows.push(Row::new(Item::Suggestion(i as u8)).label(s.clone()));
+        }
+        rows.push(Row::new(Item::AddToDictionary));
+    }
+    rows.extend([
         Row::new(Item::Cut).dim_if(!cx.text_selection, "Nothing is selected"),
         Row::new(Item::Copy).dim_if(!cx.text_selection, "Nothing is selected"),
         Row::new(Item::PasteHere)
             .label("Paste")
             .dim_if(!cx.system_text, "The clipboard holds no text"),
         Row::new(Item::SelectAll).dim_if(cx.text_empty, "There is no text yet"),
-    ]
+    ]);
+    rows
 }
 
 /// §6.5 — the anchors, the segment or the subpath under the pointer.
@@ -2776,6 +2804,10 @@ impl OndinApp {
                 Target::Layer { id, .. } => build::can_outline_text(&self.session.resolved, id),
                 _ => false,
             },
+            spelling: match (target, world) {
+                (Target::TextSession, Some(p)) => self.misspelling_at(p),
+                _ => None,
+            },
             // A fresh menu belongs to the pointer; the first `↓` takes it (§8).
             highlight: None,
             flyout: None,
@@ -3011,8 +3043,14 @@ impl OndinApp {
         }
 
         if let Some(item) = chosen {
-            self.context_menu = None;
-            self.perform_menu_item(ctx, item, target, world);
+            let spelling = self.context_menu.take().and_then(|m| m.spelling);
+            match spelling {
+                // The word is the menu's, which closes here.
+                Some(m) if matches!(item, Item::Suggestion(_) | Item::AddToDictionary) => {
+                    self.spelling_row(item, m);
+                }
+                _ => self.perform_menu_item(ctx, item, target, world),
+            }
             ctx.request_repaint();
             return;
         }
@@ -3049,7 +3087,11 @@ impl OndinApp {
     /// `open` is the snapshot taken when the menu was opened, not live state: the
     /// clipboard questions are all in it (see [`ContextMenu::system_text`] and
     /// [`ContextMenu::system_image`]).
-    pub(crate) fn menu_context<'a>(&'a self, open: &ContextMenu, kinds: &'a [Kind]) -> Context<'a> {
+    pub(crate) fn menu_context<'a>(
+        &'a self,
+        open: &'a ContextMenu,
+        kinds: &'a [Kind],
+    ) -> Context<'a> {
         let target = open.target;
         let state = match target {
             Target::Layer { id, .. } => self.layer_menu_state(id),
@@ -3126,6 +3168,7 @@ impl OndinApp {
                 .text
                 .as_ref()
                 .is_some_and(|s| s.editor.content().is_empty()),
+            spelling: open.spelling.as_ref(),
             can_frame: build::can_frame(&self.session.doc, self.session.selection.ids()),
             mask_refused: self.mask_refusal(),
             role: self.component_role(),
@@ -3272,6 +3315,8 @@ impl OndinApp {
             Item::Copy if in_text => self.copy_text_selection(ctx),
             Item::PasteHere if in_text => self.paste_text_selection(),
             Item::SelectAll if in_text => self.select_all_text(),
+            // Answered by `context_menu_ui`, which holds the misspelled word.
+            Item::Suggestion(_) | Item::AddToDictionary => {}
 
             // --- pages (`crate::pages`) -------------------------------------
             // The page menu's rows act on its page; the rest are the palette's.
@@ -3702,6 +3747,7 @@ mod tests {
             system_text: false,
             text_selection: false,
             text_empty: true,
+            spelling: None,
             can_frame: true,
             mask_refused: None,
             role: Role::Plain,

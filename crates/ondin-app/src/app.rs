@@ -496,6 +496,8 @@ pub struct OndinApp {
     /// The background update check and the staged update it offers a restart for.
     /// Inert unless [`Self::new`] started it.
     pub(crate) updater: crate::update::Updater,
+    /// The OS spell checker on its worker thread. Off unless [`Self::new`] started it.
+    pub(crate) spell: crate::spell::Speller,
     /// Family names rasterized in their own face, for the picker's rows.
     pub(crate) previews: crate::fonts::FontPreviews,
     /// Pictures cut down to a layer row's square, for the layers tree and the paint
@@ -1071,6 +1073,10 @@ pub(crate) struct ContextMenu {
     /// Whether the layer this menu opened on is text with contours to convert
     /// (`build::can_outline_text`). A snapshot, because asking builds the outlines.
     pub text_outlineable: bool,
+    /// The misspelled word a text session's menu opened on, with its suggestions
+    /// ([`crate::spell::Speller::misspelling_at`]). A snapshot, since asking waits
+    /// on the checker.
+    pub spelling: Option<crate::spell::Misspelling>,
     /// The row `↑`/`↓` have walked to, if the keyboard is driving this menu
     /// (`docs/context-menus.md` §8). An item rather than an index, as the menu is
     /// rebuilt each frame ([`crate::menu::navigate`]).
@@ -1297,6 +1303,7 @@ impl OndinApp {
             prefs,
         );
         app.updater = crate::update::Updater::start(&cc.egui_ctx);
+        app.spell = crate::spell::Speller::system(&cc.egui_ctx);
         app.open_at_launch(open.as_deref());
         app
     }
@@ -1424,6 +1431,7 @@ impl OndinApp {
             link_edit: None,
             fonts,
             updater: Default::default(),
+            spell: crate::spell::Speller::off(),
             previews: crate::fonts::FontPreviews::default(),
             thumbs: crate::thumbs::ImageThumbs::default(),
             font_filter: String::new(),

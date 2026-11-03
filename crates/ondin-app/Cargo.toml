@@ -62,6 +62,8 @@ serde_json.workspace = true
 zip.workspace = true
 # …and Penpot 1's `.penpot`, a zstd stream that `ondin_core::penpot_v1` unpacks.
 ruzstd.workspace = true
+# Spell check's word breaks (`spell::words`).
+unicode-segmentation.workspace = true
 
 # Three uses, the workspace root's comment naming each feature and whose it is:
 # the desktop cursor position a Windows file drag never sends (`GetCursorPos`,
@@ -71,6 +73,18 @@ ruzstd.workspace = true
 # §15 D971). The crate is compiled here by `winit` regardless.
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+# Spell check's COM checker (`spell::windows`); `windows-sys` has no COM interfaces.
+windows.workspace = true
+
+# Spell check's Enchant, opened at run time (`spell::enchant`).
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading.workspace = true
+
+# Spell check's `NSSpellChecker` (`spell::macos`).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
 
 # The same question on the two Unix platforms that ship: the library's local
 # dates, through `localtime_r` (`library::clock::local_offset`, §15 D959), and the

@@ -225,6 +225,30 @@ windows-sys = { version = "0.52.0", features = [
 # is one download covering every weight where the static cuts are one each. This
 # decodes it back to sfnt so core's shaper (which only knows sfnt) can take it.
 woff2 = { package = "woff2-patched", version = "0.4.0" }
+# Spell check (`ondin-app`'s `spell`): the words, then the OS checker on each
+# platform. Every one is already in the lock at these versions —
+# `unicode-segmentation` through egui, `windows` through `accesskit_windows`
+# (which turns on these three features too), `libloading` through `ash`, the
+# objc2 crates through `arboard` and `rfd` — so each declares an edge, not a tree.
+unicode-segmentation = "1.13.3"
+windows = { version = "0.62.2", features = [
+  "Win32_Globalization",
+  "Win32_System_Com",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }
+libloading = "0.8.9"
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "NSArray",
+  "NSEnumerator",
+  "NSRange",
+  "NSString",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "NSSpellChecker",
+] }
 # The icon *inside* `ondin.exe` — the one Explorer, a pinned taskbar button and a
 # file association draw, none of which have a window to read a runtime icon from.
 # A **build** dependency, and the only one in the workspace: it shells out to the

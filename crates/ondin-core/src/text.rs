@@ -4372,6 +4372,28 @@ impl TextEdit {
             .collect()
     }
 
+    /// The byte index a click at text-local `p` would put the caret at, without
+    /// moving it — what a right-click on a word asks.
+    pub fn index_at(&self, p: Point) -> usize {
+        let (x, y) = self.to_layout(p);
+        Selection::from_point(&self.shaped.layout, x, y)
+            .focus()
+            .index()
+    }
+
+    /// The content in maximal runs of one language tag (`TextStyle::locale`), in
+    /// order and covering it — what picks a run's spelling dictionary.
+    pub fn locale_runs(&self) -> Vec<(Range<usize>, Option<String>)> {
+        let mut out: Vec<(Range<usize>, Option<String>)> = Vec::new();
+        for (r, style) in self.spans.runs(&self.span_style, self.content.len()) {
+            match out.last_mut() {
+                Some((last, tag)) if *tag == style.locale => last.end = r.end,
+                _ => out.push((r, style.locale)),
+            }
+        }
+        out
+    }
+
     fn range_selection(&self, r: Range<usize>) -> Selection {
         let len = self.content.len();
         let (start, end) = (r.start.min(len), r.end.min(len));

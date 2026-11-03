@@ -22,6 +22,7 @@
 
 pub mod boolean;
 pub mod build;
+pub mod color_review;
 pub mod component;
 pub mod container;
 pub mod diff;

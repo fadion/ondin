@@ -5294,8 +5294,15 @@ impl OndinApp {
         self.session.mark_saved(path.clone());
         self.last_autosave = std::time::Instant::now();
 
-        if pin && self.prefs.version_history && self.pin_saved_version().is_some() {
-            self.session.info("Version saved");
+        // A save that changed nothing since the newest version pins none: a row
+        // that changes nothing only crowds the history.
+        if pin && self.prefs.version_history {
+            if self.saved_is_newest_version() {
+                self.session
+                    .info("Saved · nothing new since the last version");
+            } else if self.pin_saved_version().is_some() {
+                self.session.info("Version saved");
+            }
         }
 
         // Only after a successful save, so exports never describe something unsaved.
@@ -5321,6 +5328,18 @@ impl OndinApp {
                 None
             }
         }
+    }
+
+    /// Whether the file the open document was just saved to is its newest version
+    /// byte for byte. No refresh: a document the library does not list yet was
+    /// just filed, so it has no versions.
+    fn saved_is_newest_version(&self) -> bool {
+        let Some(path) = self.session.path.as_deref() else {
+            return false;
+        };
+        self.library.entry_at(path).is_some_and(|entry| {
+            crate::library::store::same_as_newest_version(&self.library.root, entry)
+        })
     }
 
     /// File a document that has never been saved, under whatever name it carries.

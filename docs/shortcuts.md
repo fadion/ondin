@@ -274,7 +274,7 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 
 | Key | Action | |
 |---|---|---|
-| `Ctrl+S` | **save and pin a version** | ✅ writes *and* copies into `.versions/<document id>/<unix seconds>.ondin`, keyed on the id so a rename cannot orphan history (§15 D364). Autosave runs every thirty seconds, so bare save meant nothing. The top bar's disk button is the same action |
+| `Ctrl+S` | **save and pin a version** | ✅ writes *and* copies into `.versions/<document id>/<unix seconds>.ondin`, keyed on the id so a rename cannot orphan history (§15 D364); a save of nothing new since the newest version pins none. Autosave runs every thirty seconds, so bare save meant nothing. The top bar's disk button is the same action |
 | `Ctrl+Shift+S` | ~~save as~~ | ⛔ every document lives in the base folder (§9.5); *Duplicate* in the dashboard mints a new id. ⚠️ The `!m.shift` on `Save` is all that keeps it unbound; `save_takes_the_bare_chord_and_the_shifted_one_is_free` asserts the **empty** result |
 | `Ctrl+O` | **the library** | ✅ the library tab: `go_to_dashboard`, which saves the document in front; its tab stays open. No file dialog exists |
 | `Ctrl+K` / `Ctrl+P` | **search files and projects** | ✅ **dashboard only**, read in `search_field` because `input::resolve` does not run while the library is up. `Enter` takes the first document match, never a project: most recently edited, ties by name (§15 D967). **`Ctrl` without Alt and Shift** (§15 D712) |

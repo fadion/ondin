@@ -1728,7 +1728,7 @@ mod tests {
         let ctx = egui::Context::default();
         let (mut app, root) = filed(&ctx, "steady");
         assert!(app.save_file(true), "fixture: one pin");
-        assert!(app.save_file(true), "fixture: two pins");
+        assert!(app.pin_saved_version().is_some(), "fixture: two pins");
         let versions = app.document_versions();
         assert_eq!(versions.len(), 2, "fixture: two rows");
         app.versions_open = true;
@@ -1760,7 +1760,8 @@ mod tests {
         let ctx = egui::Context::default();
         let (mut app, root) = filed(&ctx, "summary");
         assert!(app.save_file(true), "fixture: the first pin");
-        assert!(app.save_file(true), "fixture: the same again");
+        // `Ctrl+S` skips a save of nothing new; a named version still pins one.
+        assert!(app.pin_saved_version().is_some(), "fixture: the same again");
         add_rect(&mut app, 0x51, "Badge");
         assert!(app.save_file(true), "fixture: a rectangle more");
         let versions = app.document_versions();
@@ -1790,6 +1791,25 @@ mod tests {
             drawn.iter().any(|t| t.starts_with("No changes since ")),
             "Now: {drawn:?}"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `Ctrl+S` with nothing new since the newest version pins none, and with a
+    /// change it pins again.
+    ///
+    /// flip: `save_file` pinning without asking `saved_is_newest_version` → fails at
+    /// "nothing new, no pin".
+    #[test]
+    fn a_save_of_nothing_new_pins_no_version() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "nothing-new");
+        assert!(app.save_file(true), "fixture: the first pin");
+        assert_eq!(app.document_versions().len(), 1, "fixture: one version");
+        assert!(app.save_file(true), "the save itself still succeeds");
+        assert_eq!(app.document_versions().len(), 1, "nothing new, no pin");
+        add_rect(&mut app, 0x5a, "Badge");
+        assert!(app.save_file(true), "fixture: a change saved");
+        assert_eq!(app.document_versions().len(), 2, "a change pins");
         let _ = std::fs::remove_dir_all(&root);
     }
 

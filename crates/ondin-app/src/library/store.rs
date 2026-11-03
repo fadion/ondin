@@ -330,6 +330,26 @@ pub fn pin_version(root: &Path, entry: &Entry) -> io::Result<Option<PathBuf>> {
     Ok(Some(target))
 }
 
+/// Whether the file at `entry` is its newest pinned version byte for byte, so a pin
+/// would add a version that changes nothing. Sizes first, so a changed document is
+/// one stat per side rather than two whole reads.
+pub fn same_as_newest_version(root: &Path, entry: &Entry) -> bool {
+    let Some(id) = entry.meta.id.as_deref().filter(|id| ids::is_minted(id)) else {
+        return false;
+    };
+    let Some(newest) = versions(root, id).into_iter().next() else {
+        return false;
+    };
+    let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).ok();
+    if size(&newest).is_none() || size(&newest) != size(&entry.path) {
+        return false;
+    }
+    matches!(
+        (std::fs::read(&newest), std::fs::read(&entry.path)),
+        (Ok(a), Ok(b)) if a == b
+    )
+}
+
 /// A document's pinned versions, newest first — *Version history…*'s list
 /// (`versions.rs`).
 pub fn versions(root: &Path, id: &str) -> Vec<PathBuf> {

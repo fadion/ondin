@@ -27,9 +27,6 @@ reads true.
   layers do not pair falls back to the prop and is reported
   approximated. The prop stays either way, for forcing a state. Live hover in present mode is
   prototyping, a non-goal.
-- **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
-  Scoping would also make a number's DTCG `dimension` or `number` explicit rather than read from its
-  bindings (`export.md`, *Design tokens (DTCG)*).
 
 ## Illustrations
 
@@ -80,6 +77,10 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
   `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float.
 - **A per-component review table for kit updates** — deferred, not declined (§15 D1010 (3), D1011 5D).
 - **Binding the other users of an extracted value** after *Extract into variable…* (§15 D1037, D1038).
+- **Collection follow-ups** (`styles-variables.md`, *Collections and modes*): a kit's collection is not
+  in the browser's collection picker (its rows list under the document collection it maps from); the
+  browser's collapsed-group keys are shared across collections by path; and a DTCG alias whose scope
+  disagrees with its target's is not refused at the scope (the export types each from its own scope).
 - **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)) — trigger: a preset
   with a bindable field. The only one, `prefs::ExportPreset`, has none.
 

@@ -85,7 +85,8 @@ pub struct Node {
     variant: Vec<String>,      // a variant's values, one per property of the set around it
     props: Vec<Keyed<Property>>, // component properties a main or set defines
     origin: Option<kit::Origin>, // where a VAULT node was vendored from — §5.3e; vault nodes only
-    mode: Option<ModeId>,      // the mode a FRAME sets for itself and contents; None inherits — §5.3f
+    modes: Vec<ModeId>,        // the modes a FRAME or page sets for itself and contents, at most one per
+                               // collection, id order; a collection with none inherits — §5.3f
     corner_vars: [Option<VarId>; 4], // corner bindings (frame, rect, polygon, star), RoundedRectRadii order — §5.3f
 }
 
@@ -212,7 +213,7 @@ pub struct Guide {                 // guide.rs
 }
 ```
 
-- **A page is a parentless `NodeKind::Root` listed in `pages`.** Its layers are that root's subtree; its name is the root's name and its default mode the root's `Node::mode` (§5.3f); the ground and draft flag live in `Page`. Every page shares one origin, so a layer moved between pages keeps its coordinates. Components, styles, variables, images and the vault belong to the document and serve every page. Pages are roots in a table rather than nodes under one root so that the structural operations, the loader's tree rules and the clipboard's rules hold unchanged: Delete, Reparent and Reorder refuse a page as they refuse the vault (`CannotModifyRoot`), and `capture_subtree` answers `None` for one (it still captures the vault whole, which the kit verbs read).
+- **A page is a parentless `NodeKind::Root` listed in `pages`.** Its layers are that root's subtree; its name is the root's name and its modes the root's `Node::modes` (§5.3f); the ground and draft flag live in `Page`. Every page shares one origin, so a layer moved between pages keeps its coordinates. Components, styles, variables, images and the vault belong to the document and serve every page. Pages are roots in a table rather than nodes under one root so that the structural operations, the loader's tree rules and the clipboard's rules hold unchanged: Delete, Reparent and Reorder refuse a page as they refuse the vault (`CannotModifyRoot`), and `capture_subtree` answers `None` for one (it still captures the vault whole, which the kit verbs read).
 - `Document::new` makes a one-page document named `Page 1` (`page::PAGE_STEM`); new pages take the lowest free `Page N` (`page::free_name`). The vault is never a page.
 - A **draft** page is left out of everything that gathers from every page — kit publishing (§5.3e), *Export all* and *Export frames, all pages…* (§7), presenting past the current page, batch rename's *All pages* past the current page, the library cover — and kept by everything aimed at it directly. `gathered_pages` is what those read.
 - **Document state that is not a node:** each page's `ground` and `draft`, and `guides`. People set them for the artwork, not the sitting, so they are saved with the file; neither loosens the document/view-data line (§9.2, §9.3). Which page is current is view state and never saved (`app-chrome.md`, *Pages*).

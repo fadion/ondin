@@ -460,22 +460,25 @@ pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
         // Half black: a modal over a canvas must dim more than
         // egui's default 100/255, or a light document still reads as in focus.
         .backdrop_color(egui::Color32::from_black_alpha(128))
-        .frame(
-            egui::Frame::NONE
-                .fill(color::card())
-                // The token, not its value, so retuning `color::divider()` moves the
-                // modal hairline too; no gate could catch a respelled copy.
-                .stroke(egui::Stroke::new(1.0, theme::color::divider()))
-                .corner_radius(egui::CornerRadius::same(10))
-                // Deeper than a dropdown's: this floats over everything.
-                .shadow(egui::epaint::Shadow {
-                    offset: [0, 24],
-                    blur: 60,
-                    spread: 0,
-                    color: egui::Color32::from_black_alpha(128),
-                })
-                .inner_margin(egui::Margin::same(PAD as i8)),
-        )
+        .frame(card_frame().inner_margin(egui::Margin::same(PAD as i8)))
+}
+
+/// [`card_modal`]'s ground, hairline, corner and shadow, without its margin: also
+/// worn by Colour review, which floats at the palette's place but is no modal.
+pub(crate) fn card_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(color::card())
+        // The token, not its value, so retuning `color::divider()` moves the
+        // modal hairline too; no gate could catch a respelled copy.
+        .stroke(egui::Stroke::new(1.0, theme::color::divider()))
+        .corner_radius(egui::CornerRadius::same(10))
+        // Deeper than a dropdown's: this floats over everything.
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 24],
+            blur: 60,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(128),
+        })
 }
 
 /// The least room a card moved toward the canvas keeps from the window's edge.

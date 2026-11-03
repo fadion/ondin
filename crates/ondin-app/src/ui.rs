@@ -420,6 +420,12 @@ pub fn canvas_popup_area(ctx: &egui::Context, id: egui::Id, canvas: egui::Rect) 
     )
 }
 
+/// The most height a [`canvas_popup_area`]'s card may take: down to
+/// [`CANVAS_POPUP_TOP`] short of the canvas's bottom edge.
+pub fn canvas_popup_room(canvas: egui::Rect) -> f32 {
+    (canvas.height() - 2.0 * CANVAS_POPUP_TOP).max(160.0)
+}
+
 /// Where a submenu `size` big, padded `pad`, opens beside the menu row `row`: its
 /// first row level with the row, to the right — or the left when the right has
 /// no room — then clamped by [`menu_place`]. Short of room below, it shifts up
@@ -3199,32 +3205,6 @@ pub fn split_button(ui: &mut egui::Ui, text: &str, h: f32, enabled: bool) -> Spl
         resp,
         caret_rect,
     }
-}
-
-/// A round choice of one among rows — Colour review's target. The field's ground
-/// and hairline, the accent and a dot in its ink when `on`; `size` square.
-pub fn radio(ui: &mut egui::Ui, size: f32, on: bool) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
-    let p = ui.painter();
-    let c = rect.center();
-    let r = size / 2.0 - 1.0;
-    let hovered = resp.hovered();
-    if on {
-        p.circle_filled(c, r, color::accent());
-        p.circle_filled(c, r * 0.4, color::accent_ink());
-    } else {
-        p.circle(
-            c,
-            r - 0.5,
-            if hovered {
-                color::hover()
-            } else {
-                color::field()
-            },
-            egui::Stroke::new(1.0, color::field_border()),
-        );
-    }
-    resp
 }
 
 /// Between one labelled section and the next inside a popover: [`CARD_ROW_GAP`],

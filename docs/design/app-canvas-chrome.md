@@ -598,23 +598,29 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   with no modes, a variable valued the target's colour in every mode, and binds every raw member's
   users, the target's included.
 - **Doors and place.** The View menu's last row, after *Simulate colour blindness* and never ticked,
-  and the
-  palette (`Item::ColourReview`, unbound). Not a modal: it sits at Find and replace's place and width
-  (`canvas_card_place`, `card_frame`), and opening either closes the other. The census is taken again
-  when the revision, the scope or the threshold changes.
-- **Head.** Scope *Selection · Document*, opening on *Selection* when something is selected;
+  and the palette (`Item::ColourReview`, unbound). It hangs at the palette's place
+  (`ui::canvas_popup_area`), 420 wide, on the settings card's ground (`settings::card_frame`), but is
+  no modal: nothing blocks the canvas and a click there leaves it open. It is at most
+  `ui::canvas_popup_room` tall, its list scrolling past `ui::CANVAS_POPUP_LIST_H`; title, controls
+  and foot stay put. Opening it or Find closes the other, since centred it would run under Find's
+  corner. The census is taken again when the revision, the scope or the threshold changes.
+- **Head.** Batch rename's title row (*Colour review*, ✕). Scope *Selection · Document*, opening on *Selection* when something is selected;
   *Selection* is disabled with *Nothing is selected* when nothing is, and a card left on it says
   *Nothing selected · reviewing the document*. Threshold *Tight · Close · Loose*, *Close* by default,
   kept in `prefs.colour_review` across documents. Caption: *N groups · M colours could be N · Δ ≤ x*.
 - **Groups**, most-used first, the first unfolded (again after a merge). A folded row: caret, a split
   patch with a slice per member, the target's name (hex, or the variable's capsule, a kit's after
-  the package glyph) and *N colours · M uses*. A member row: the target `ui::radio`, swatch, hex or
-  capsule (a kit's reads *Kit · name*, the kit masked in private mode as on every kit surface), *kept* on a bound member that is not the target, uses,
-  *anchor* or *Δ x.x*, and a reticle selecting that colour's users on this page, else on the first
-  one's page, through `select_by_color`.
-- **Footer.** A `ui::split_button` *Merge N into X*; its caret holds *Merge into X* and *Merge into a
-  new variable…*, the second disabled with *The group has a variable* when the target is bound. The
-  button keeps the last choice. Naming a new variable turns the footer into *New colour variable ·
+  the package glyph) and *N colours · M uses*. A member row: a check on the target, swatch, hex or
+  capsule (a kit's reads *Kit · name*, the kit masked in private mode as on every kit surface),
+  *kept* on a bound member that is not the target, uses, *anchor* or *Δ x.x*, and a reticle
+  selecting that colour's users on this page, else on the first one's page, through
+  `select_by_color`. Rows wear `ui::list_row_ground`, hovered under the pointer and lit on the
+  target; a click anywhere on a member row but its reticle makes it the target.
+- **Foot.** Batch rename's: below a divider, what the merge does on the left (*Rewrites U uses*,
+  *Binds U uses*, or *Unfold a group to merge it* beside a disabled *Merge*) and a `ui::split_button`
+  *Merge N into X* on the right, merging the unfolded group; its caret holds *Merge into X* and
+  *Merge into a new variable…*, the second disabled with *The group has a variable* when the target
+  is bound. The button keeps the last choice. Naming a new variable turns the foot into *New colour variable ·
   value HEX in every mode*, a field seeded `color/` with the caret at its end, *Cancel* and *Create
   and merge*; a name is refused as the variables browser refuses one
   (`panels::variables::name_refusal`).

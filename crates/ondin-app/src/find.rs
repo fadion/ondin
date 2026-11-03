@@ -19,7 +19,7 @@ use ondin_core::{NodeId, NodeKind, TextEdit, TextRef};
 use std::collections::HashMap;
 use std::ops::Range;
 
-/// The box's width, which Colour review's card shares.
+/// The box's width.
 pub(crate) const W: f32 = 420.0;
 const PAD: f32 = 12.0;
 /// Its gap from the canvas's top and right edges (or the inspector's left).
@@ -134,7 +134,8 @@ impl OndinApp {
             f.seeded = true;
             f.keep_case = true;
         }
-        // One card at the canvas's corner at a time.
+        // One card over the canvas's top at a time: centred, Colour review would
+        // run under Find's corner on any canvas short of a wide one.
         self.colour_review.open = false;
         if !f.open {
             f.scope = match self.session.selection.ids().is_empty() {
@@ -151,10 +152,9 @@ impl OndinApp {
         }
     }
 
-    /// Where a card floating over the canvas hangs — its top-right corner, at the
-    /// canvas's top-right beside the inspector and under the rulers — and the
-    /// most height it may take. Find's place, which Colour review shares.
-    pub(crate) fn canvas_card_place(&self, ctx: &egui::Context) -> (egui::Pos2, f32) {
+    /// Where Find hangs — its top-right corner, at the canvas's top-right beside
+    /// the inspector and under the rulers — and the most height it may take.
+    fn canvas_card_place(&self, ctx: &egui::Context) -> (egui::Pos2, f32) {
         let right = if self.focus {
             self.canvas_rect.right()
         } else {
@@ -1123,8 +1123,7 @@ fn field(
     (resp, rect)
 }
 
-/// The ground, hairline and shadow of a card floating over the canvas: Find's,
-/// and Colour review's.
+/// The ground, hairline and shadow of Find's card.
 pub(crate) fn card_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(color::card())

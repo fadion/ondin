@@ -1,14 +1,13 @@
-//! Colour review (Document menu, palette): a card at Find's place over the canvas
-//! that lists the near-identical colours of the selection or the document
-//! (`ondin_core::color_review`) and merges each group into one colour, or into a
-//! new variable, as one undo step.
+//! Colour review (View menu, palette): a card at the command palette's place over
+//! the canvas that lists the near-identical colours of the selection or the
+//! document (`ondin_core::color_review`) and merges each group into one colour,
+//! or into a new variable, as one undo step.
 //!
 //! Not a modal: the canvas stays live, the groups are found again as the
 //! document, the selection or the threshold changes, and a member's reticle
 //! selects that colour's users.
 
 use crate::app::OndinApp;
-use crate::find::{W, card_frame, rule};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -17,10 +16,21 @@ use ondin_core::peniko::Color;
 use ondin_core::{Document, NodeId, VarId};
 use std::collections::HashMap;
 
-const PAD: f32 = 12.0;
-/// A group's folded row, and a member's row inside it.
-const HEAD_H: f32 = 36.0;
-const MEMBER_H: f32 = 28.0;
+/// The card's width: room for a member row's name, uses, distance and reticle.
+const W: f32 = 420.0;
+/// The card's inset, and the title row's height: batch rename's.
+const PAD: f32 = 14.0;
+const TITLE_H: f32 = 40.0;
+/// The foot holding the merge: batch rename's.
+const FOOT_H: f32 = 48.0;
+/// The list's inset inside the card; a row's ground spans it, and its content
+/// sits [`ROW_X`] further in, level with the controls above.
+const LIST_X: f32 = PAD - ROW_X;
+const ROW_X: f32 = 6.0;
+/// A group's folded row, and a member's row inside it. Each paints a list row's
+/// [`ui::MENU_ROW_H`] ground at its middle; the rest is air between rows.
+const HEAD_H: f32 = 30.0;
+const MEMBER_H: f32 = 26.0;
 /// The split patch that shows a group's members, one slice each.
 const PATCH: egui::Vec2 = egui::vec2(42.0, 20.0);
 const SWATCH: f32 = 16.0;
@@ -29,7 +39,7 @@ const USES_W: f32 = 52.0;
 const DELTA_W: f32 = 40.0;
 const BTN: f32 = 26.0;
 const COL_GAP: f32 = 8.0;
-/// A member row's indent, so its radio sits under the head's patch.
+/// Where a head's patch, and a member's check, start.
 const INDENT: f32 = 21.0;
 /// The caret menu's width.
 const MENU_W: f32 = 230.0;
@@ -181,8 +191,8 @@ enum Act {
 }
 
 impl OndinApp {
-    /// Open the card, on the selection when there is one; one card at the canvas's
-    /// corner at a time, so Find closes.
+    /// Open the card, on the selection when there is one. Find closes: centred, the
+    /// card would run under Find's corner on any canvas short of a wide one.
     pub(crate) fn open_colour_review(&mut self) {
         self.close_find();
         let r = &mut self.colour_review;
@@ -225,42 +235,49 @@ impl OndinApp {
             return;
         }
         self.refresh_colour_review();
-        let (anchor, max_h) = self.canvas_card_place(ctx);
+        let canvas = self.canvas_rect;
+        let room = ui::canvas_popup_room(canvas);
         let selected = !self.session.selection.ids().is_empty();
         let threshold = self.prefs.colour_review;
         let doc = &self.session.doc;
         let r = &mut self.colour_review;
         let mut act = None;
-        egui::Area::new(egui::Id::new("colour-review"))
-            .order(egui::Order::Foreground)
-            .pivot(egui::Align2::RIGHT_TOP)
-            .fixed_pos(anchor)
-            .show(ctx, |ui| {
-                card_frame().show(ui, |ui| {
-                    ui.set_width(W);
-                    ui.set_max_height(max_h);
-                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 9.0);
-                    egui::Frame::NONE
-                        .inner_margin(egui::Margin {
-                            left: PAD as i8,
-                            right: PAD as i8,
-                            top: PAD as i8,
-                            bottom: 0,
-                        })
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(0.0, 9.0);
-                            head(ui, &mut act);
-                            controls(ui, r, selected, threshold, &mut act);
-                            caption(ui, r, selected, threshold);
-                        });
-                    if r.seen.groups.is_empty() {
-                        rule(ui);
-                        empty(ui, r, threshold);
-                    } else {
-                        list(ui, doc, r, &mut act);
-                    }
-                });
+        ui::canvas_popup_area(ctx, egui::Id::new("colour-review"), canvas).show(ctx, |ui| {
+            crate::settings::card_frame().show(ui, |ui| {
+                ui.set_width(W);
+                ui.set_max_height(room);
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+                if head(ui) {
+                    act = Some(Act::Close);
+                }
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: PAD as i8,
+                        right: PAD as i8,
+                        top: PAD as i8,
+                        bottom: 4,
+                    })
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 10.0;
+                        controls(ui, r, selected, threshold, &mut act);
+                        caption(ui, r, selected, threshold);
+                    });
+                ui.add_space(8.0);
+                divider(ui);
+                if r.seen.groups.is_empty() {
+                    empty(ui, r, threshold);
+                    return;
+                }
+                // The title, the controls and the foot keep their place; the
+                // list gives up what the canvas lacks.
+                let list_h = ui::CANVAS_POPUP_LIST_H
+                    .min(ui.available_height() - FOOT_H - 1.0)
+                    .max(HEAD_H * 3.0);
+                list(ui, doc, r, list_h, &mut act);
+                divider(ui);
+                foot(ui, doc, r, &mut act);
             });
+        });
         self.colour_review_act(ctx, act);
     }
 
@@ -440,31 +457,22 @@ impl OndinApp {
     }
 }
 
-/// The glyph, the title and the close button.
-fn head(ui: &mut egui::Ui, act: &mut Option<Act>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        ui.set_height(24.0);
-        ui.label(
-            egui::RichText::new(icon::SWATCHES)
-                .font(theme::icon_font(15.0))
-                .color(theme::text::dim()),
-        );
-        ui.label(
-            egui::RichText::new("Colour review")
-                .size(12.0)
-                .strong()
-                .color(theme::text::strong()),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui::icon_button(ui, icon::X, 24.0, 13.0, false, true)
-                .on_hover_text("Close (Escape)")
-                .clicked()
-            {
-                *act = Some(Act::Close);
-            }
-        });
-    });
+/// The title row, batch rename's ([`crate::settings::modal_title`] inside
+/// [`PAD`]); true when its close button is clicked.
+fn head(ui: &mut egui::Ui) -> bool {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, TITLE_H), egui::Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(PAD, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    crate::settings::modal_title(&mut child, "Colour review")
+}
+
+/// A hairline across the whole card, between its parts.
+fn divider(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 1.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, color::divider());
 }
 
 /// The scope and the threshold, side by side.
@@ -593,37 +601,36 @@ fn empty(ui: &mut egui::Ui, r: &ColourReview, threshold: Threshold) {
         });
 }
 
-/// The groups, the unfolded one with its members and its merge.
-fn list(ui: &mut egui::Ui, doc: &Document, r: &mut ColourReview, act: &mut Option<Act>) {
+/// The groups, the unfolded one with its members, scrolling past `max_h`.
+fn list(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, max_h: f32, act: &mut Option<Act>) {
     let unfolded = r.unfolded();
     egui::ScrollArea::vertical()
+        .id_salt("colour-review-list")
         .auto_shrink([false, true])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-        .max_height(ui.available_height().max(HEAD_H * 3.0))
+        .max_height(max_h)
         .show(ui, |ui| {
             egui::Frame::NONE
-                .inner_margin(egui::Margin {
-                    left: PAD as i8,
-                    right: PAD as i8,
-                    top: 0,
-                    bottom: 4,
-                })
+                .inner_margin(egui::Margin::symmetric(LIST_X as i8, 6))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
                     for g in 0..r.seen.groups.len() {
-                        rule(ui);
                         let open = unfolded == Some(g);
                         if group_head(ui, doc, r, g, open).clicked() {
                             *act = Some(Act::Fold(g));
                         }
                         if open {
                             members(ui, doc, r, g, act);
-                            footer(ui, doc, r, g, act);
-                            ui.add_space(10.0);
+                            ui.add_space(4.0);
                         }
                     }
                 });
         });
+}
+
+/// A row's ground: a list row's height at the row's middle.
+fn ground(row: egui::Rect) -> egui::Rect {
+    egui::Rect::from_center_size(row.center(), egui::vec2(row.width(), ui::MENU_ROW_H))
 }
 
 /// One slice per member, in member order, in a rounded patch.
@@ -707,14 +714,13 @@ fn group_head(
 ) -> egui::Response {
     let group = &r.seen.groups[g];
     let census = &r.seen.census;
-    let (rect, resp) = ui.allocate_exact_size(
+    let (row, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), HEAD_H),
         egui::Sense::click(),
     );
     let p = ui.painter();
-    if resp.hovered() {
-        p.rect_filled(rect.expand2(egui::vec2(4.0, -3.0)), 5.0, color::hover());
-    }
+    ui::list_row_ground(p, ground(row), false, resp.hovered());
+    let rect = row.shrink2(egui::vec2(ROW_X, 0.0));
     let y = rect.center().y;
     p.text(
         egui::pos2(rect.left() + 6.0, y),
@@ -759,31 +765,40 @@ fn group_head(
     resp
 }
 
-/// The unfolded group's members: the target radio, the swatch, the name, uses,
-/// the distance from the anchor and the reticle.
+/// The unfolded group's members, one a click picks as the target, lit and
+/// checked as a picker's current row is: the swatch, the name, uses, the
+/// distance from the anchor and the reticle.
 fn members(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, g: usize, act: &mut Option<Act>) {
     let group = &r.seen.groups[g];
     let census = &r.seen.census;
     let target = r.target(group);
     let anchor = census[group.members[0]].color;
-    ui.add_space(2.0);
     for (i, &m) in group.members.iter().enumerate() {
         let s = &census[m];
-        let (rect, _) = ui.allocate_exact_size(
+        let (row, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), MEMBER_H),
-            egui::Sense::hover(),
+            egui::Sense::click(),
         );
+        // `contains_pointer`: the reticle on top takes the hover from the row.
+        let hovered = resp.contains_pointer();
+        ui::list_row_ground(ui.painter(), ground(row), i == target, hovered);
+        if i != target && resp.on_hover_text("Merge into this colour").clicked() {
+            *act = Some(Act::Target(g, i));
+        }
+        let rect = row.shrink2(egui::vec2(ROW_X, 0.0));
         let y = rect.center().y;
         let mut x = rect.left() + INDENT;
         let cell = |x: f32, w: f32| {
             egui::Rect::from_min_size(egui::pos2(x, y - w / 2.0), egui::vec2(w, w))
         };
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell(x, SWATCH)));
-        if ui::radio(&mut child, SWATCH, i == target)
-            .on_hover_text("Merge into this colour")
-            .clicked()
-        {
-            *act = Some(Act::Target(g, i));
+        if i == target {
+            ui.painter().text(
+                cell(x, SWATCH).center(),
+                egui::Align2::CENTER_CENTER,
+                icon::CHECK,
+                theme::icon_font(13.0),
+                color::accent(),
+            );
         }
         x += SWATCH + COL_GAP;
         paint_patch(ui.painter(), cell(x, SWATCH), &[s.color]);
@@ -835,15 +850,15 @@ fn members(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, g: usize, act: &
     }
 }
 
-/// The merge: a split button whose caret holds the other merge, or, while a
-/// new variable is being named, the name field.
-fn footer(
-    ui: &mut egui::Ui,
-    doc: &Document,
-    r: &mut ColourReview,
-    g: usize,
-    act: &mut Option<Act>,
-) {
+/// The card's foot, batch rename's: what the merge writes on the left and a
+/// split button merging the unfolded group on the right, its caret holding the
+/// other merge; or, while a new variable is being named, the name field.
+fn foot(ui: &mut egui::Ui, doc: &Document, r: &mut ColourReview, act: &mut Option<Act>) {
+    let Some(g) = r.unfolded() else {
+        let mut buttons = foot_row(ui, "Unfold a group to merge it");
+        crate::settings::text_button(&mut buttons, "Merge", FieldButton::Disabled);
+        return;
+    };
     let group = &r.seen.groups[g];
     let census = &r.seen.census;
     let target = r.target(group);
@@ -856,90 +871,36 @@ fn footer(
         .map(|&m| &census[m])
         .filter(|s| s.is_raw())
         .collect();
+    let uses: usize = raw.iter().map(|s| s.uses).sum();
     if let Some((name, focus)) = r.naming.as_mut().filter(|_| !bound) {
-        ui.add_space(4.0);
-        rule(ui);
-        ui.add_space(8.0);
-        ui.spacing_mut().item_spacing.y = 7.0;
-        ui.label(
-            egui::RichText::new(format!(
-                "New colour variable · value {} in every mode",
-                ui::hex_of(t.color)
-            ))
-            .size(10.5)
-            .color(theme::text::faint()),
-        );
-        let refusal = crate::panels::variables::name_refusal(doc.variables(), name.trim(), None);
-        let mut typed = name.clone();
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 7.0;
-            let cancel_w = crate::find::button_w(ui, "Cancel");
-            let create_w = crate::find::button_w(ui, "Create and merge");
-            let w = ui.available_width() - cancel_w - create_w - 14.0;
-            let resp = ui
-                .push_id(NAME_ID, |ui| {
-                    ui::text_field(ui, egui::vec2(w, ui::CONTROL_H), &mut typed, "color/name")
-                })
-                .inner;
-            if *focus {
-                *focus = false;
-                resp.request_focus();
-                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id) {
-                    state
-                        .cursor
-                        .set_char_range(Some(egui::text::CCursorRange::one(
-                            egui::text::CCursor::new(typed.chars().count()),
-                        )));
-                    state.store(ui.ctx(), resp.id);
-                }
-            }
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if crate::settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                *act = Some(Act::CancelName);
-            }
-            let ok = refusal.is_none();
-            let state = if ok {
-                FieldButton::Primary
-            } else {
-                FieldButton::Disabled
-            };
-            let resp = crate::settings::text_button(ui, "Create and merge", state);
-            if (resp.clicked() || enter) && ok {
-                *act = Some(Act::Create(g));
-            }
-        });
-        if typed != *name {
-            *act = Some(Act::Name(typed));
-        }
-        let uses: usize = raw.iter().map(|s| s.uses).sum();
-        let note = match (&refusal, name.trim() == "color/" || name.trim().is_empty()) {
-            (Some(why), false) => (why.clone(), color::warn()),
-            _ => (
-                format!(
-                    "Binds all {} of the {} to it",
-                    plural(uses, "use", "uses"),
-                    plural(raw.len(), "colour", "colours")
-                ),
-                theme::text::faint(),
-            ),
-        };
-        ui.label(egui::RichText::new(note.0).size(10.5).color(note.1));
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(PAD as i8, 12))
+            .show(ui, |ui| {
+                naming(ui, doc, t, name, focus, (uses, raw.len()), g, act)
+            });
         return;
     }
-    ui.add_space(6.0);
     let target_name = short_name(doc, t);
     let new_var = r.new_var && !bound;
-    let label = if new_var {
-        format!("Merge {} into a new variable…", raw.len())
+    let (label, hint) = if new_var {
+        (
+            format!("Merge {} into a new variable…", raw.len()),
+            format!("Binds {}", plural(uses, "use", "uses")),
+        )
     } else {
-        format!("Merge {merged} into {target_name}")
+        let rewrites: usize = group
+            .merged(census, target)
+            .iter()
+            .map(|&m| census[m].uses)
+            .sum();
+        (
+            format!("Merge {merged} into {target_name}"),
+            format!("Rewrites {}", plural(rewrites, "use", "uses")),
+        )
     };
     let live = if new_var { !raw.is_empty() } else { merged > 0 };
-    let button = ui
-        .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui::split_button(ui, &label, ui::CONTROL_H, live)
-        })
-        .inner;
+    let mut buttons = foot_row(ui, if live { &hint } else { "" });
+    let button = ui::split_button(&mut buttons, &label, ui::CONTROL_H, live);
     if button.action && live {
         *act = Some(Act::Merge(g));
     }
@@ -962,11 +923,19 @@ fn footer(
     if !r.menu {
         return;
     }
-    let at = egui::pos2(caret_rect.right(), caret_rect.bottom() + ui::MENU_GAP);
-    let menu = egui::Area::new(egui::Id::new("colour-review-menu"))
+    // Under the caret, right edges together; above it when the canvas is short.
+    let id = egui::Id::new("colour-review-menu");
+    let size = ui
+        .ctx()
+        .memory(|m| m.area_rect(id))
+        .map_or(egui::vec2(MENU_W, 64.0), |r| r.size());
+    let under = egui::Rect::from_min_max(
+        egui::pos2(caret_rect.right() - size.x, caret_rect.top()),
+        caret_rect.max,
+    );
+    let menu = egui::Area::new(id)
         .order(egui::Order::Foreground)
-        .pivot(egui::Align2::RIGHT_TOP)
-        .fixed_pos(at)
+        .fixed_pos(ui::dropdown_place(ui.ctx(), under, size, ui::MENU_GAP))
         .show(ui.ctx(), |ui| {
             ui::menu_frame(5.0).show(ui, |ui| {
                 ui.set_width(ui::menu_inner_w(MENU_W, 5.0));
@@ -992,6 +961,102 @@ fn footer(
     if outside && act.is_none() {
         r.menu = false;
     }
+}
+
+/// The foot's row: `hint` on the left, and the buttons' `Ui`, laid right to left.
+fn foot_row(ui: &mut egui::Ui, hint: &str) -> egui::Ui {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, FOOT_H), egui::Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() + PAD, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        hint,
+        egui::FontId::proportional(10.5),
+        theme::text::faint(),
+    );
+    ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(PAD, 10.0)))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    )
+}
+
+/// Naming the new variable `t`'s colour goes into: the field, *Cancel* and
+/// *Create and merge*, between what it will be and what it will bind — `(uses,
+/// colours)` — or why the name is refused.
+#[allow(clippy::too_many_arguments)]
+fn naming(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    t: &Swatch,
+    name: &mut String,
+    focus: &mut bool,
+    (uses, colours): (usize, usize),
+    g: usize,
+    act: &mut Option<Act>,
+) {
+    ui.spacing_mut().item_spacing.y = 7.0;
+    ui.label(
+        egui::RichText::new(format!(
+            "New colour variable · value {} in every mode",
+            ui::hex_of(t.color)
+        ))
+        .size(10.5)
+        .color(theme::text::faint()),
+    );
+    let refusal = crate::panels::variables::name_refusal(doc.variables(), name.trim(), None);
+    let mut typed = name.clone();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 7.0;
+        let cancel_w = crate::find::button_w(ui, "Cancel");
+        let create_w = crate::find::button_w(ui, "Create and merge");
+        let w = ui.available_width() - cancel_w - create_w - 14.0;
+        let resp = ui
+            .push_id(NAME_ID, |ui| {
+                ui::text_field(ui, egui::vec2(w, ui::CONTROL_H), &mut typed, "color/name")
+            })
+            .inner;
+        if *focus {
+            *focus = false;
+            resp.request_focus();
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id) {
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(typed.chars().count()),
+                    )));
+                state.store(ui.ctx(), resp.id);
+            }
+        }
+        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if crate::settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
+            *act = Some(Act::CancelName);
+        }
+        let ok = refusal.is_none();
+        let state = if ok {
+            FieldButton::Primary
+        } else {
+            FieldButton::Disabled
+        };
+        let resp = crate::settings::text_button(ui, "Create and merge", state);
+        if (resp.clicked() || enter) && ok {
+            *act = Some(Act::Create(g));
+        }
+    });
+    if typed != *name {
+        *act = Some(Act::Name(typed));
+    }
+    let note = match (&refusal, name.trim() == "color/" || name.trim().is_empty()) {
+        (Some(why), false) => (why.clone(), color::warn()),
+        _ => (
+            format!(
+                "Binds all {} of the {} to it",
+                plural(uses, "use", "uses"),
+                plural(colours, "colour", "colours")
+            ),
+            theme::text::faint(),
+        ),
+    };
+    ui.label(egui::RichText::new(note.0).size(10.5).color(note.1));
 }
 
 #[cfg(test)]
@@ -1255,5 +1320,70 @@ mod tests {
         f.app.prefs.colour_review = Threshold::Tight;
         run(&mut f.app, &ctx);
         assert_eq!(f.app.colour_review.seen.groups.len(), 1, "a hair apart");
+    }
+
+    /// The card hangs at the command palette's place — centred on the canvas,
+    /// `ui::CANVAS_POPUP_TOP` under its top — as tall as its rows with a group
+    /// unfolded, and no taller than its list's cap with many groups.
+    ///
+    /// flip: `list` scrolling past the room left rather than `CANVAS_POPUP_LIST_H`
+    /// → fails at "capped".
+    #[test]
+    fn the_card_sits_at_the_palettes_place_and_keeps_its_height() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.open_colour_review();
+        let card = |app: &mut OndinApp| {
+            for _ in 0..3 {
+                run(app, &ctx);
+            }
+            ctx.memory(|m| m.area_rect(egui::Id::new("colour-review")))
+                .expect("shown")
+        };
+        let rect = card(&mut f.app);
+        assert_eq!(f.app.colour_review.unfolded(), Some(0), "unfolded");
+        let canvas = f.app.canvas_rect;
+        assert!(
+            (rect.center().x - canvas.center().x).abs() < 1.0,
+            "{rect:?}"
+        );
+        assert!((rect.top() - canvas.top() - ui::CANVAS_POPUP_TOP).abs() < 1.0);
+        assert!(rect.height() < 320.0, "as tall as its rows: {rect:?}");
+
+        // Twenty pairs of greys a level apart, each pair ten levels from the next.
+        let page = f.app.session.page;
+        let mut ops = Vec::new();
+        for i in 0..40u8 {
+            let id = f.app.session.ids.mint();
+            let v = 20 + (i / 2) * 10 + i % 2;
+            ops.push(Operation::CreateNode {
+                id,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgb8(v, v, v)).into(),
+                    visible: true,
+                }]),
+            });
+        }
+        assert!(f.app.session.commit(Transaction(ops)));
+        let rect = card(&mut f.app);
+        assert!(
+            f.app.colour_review.groups_shown() > 15,
+            "the fixture's pairs"
+        );
+        let most = 40.0 + 90.0 + ui::CANVAS_POPUP_LIST_H + FOOT_H + 12.0;
+        assert!(rect.height() <= most, "capped: {} > {most}", rect.height());
+        assert!(rect.height() > most - 60.0, "the list filled its cap");
     }
 }

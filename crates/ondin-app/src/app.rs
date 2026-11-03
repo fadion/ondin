@@ -930,7 +930,7 @@ pub struct OndinApp {
     pub(crate) tokens_import: Option<crate::tokens_import::TokensImport>,
     /// The find and replace box, kept while closed so it reopens as it was left.
     pub(crate) find: crate::find::FindBox,
-    /// The Colour review card, at Find's place (`colour_review.rs`).
+    /// The Colour review card, at the palette's place (`colour_review.rs`).
     pub(crate) colour_review: crate::colour_review::ColourReview,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just

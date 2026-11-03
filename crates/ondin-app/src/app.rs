@@ -525,6 +525,9 @@ pub struct OndinApp {
     pub(crate) dropper_pick: Option<crate::eyedropper::PendingPick>,
     /// Numbers each eyedropper click, so its sample key is its own (`SampleKey::pick`).
     pub(crate) dropper_picks: u64,
+    /// The document's colours a pick snaps to, taken at a revision
+    /// (`OndinApp::dropper_snap`).
+    pub(crate) dropper_colours: Option<(u64, Vec<ondin_core::color_review::Swatch>)>,
     /// Where the pointer is while an armed eyedropper hides it from egui
     /// (`OndinApp::gate_dropper_input`).
     pub(crate) dropper_pointer: Option<egui::Pos2>,
@@ -1432,6 +1435,7 @@ impl OndinApp {
             dropper_return: Tool::Select,
             dropper_pick: None,
             dropper_picks: 0,
+            dropper_colours: None,
             dropper_pointer: None,
             dropper_frozen: Default::default(),
             dropper_press: None,

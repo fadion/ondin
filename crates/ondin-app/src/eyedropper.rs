@@ -11,6 +11,10 @@
 //!
 //! Nothing is previewed on the canvas: a preview would change the very pixels
 //! the next sample reads.
+//!
+//! **A pick snaps** to a colour the document already uses within Colour
+//! review's Tight limit, binding when that colour is a variable's; `Ctrl` takes
+//! the raw pixel ([`OndinApp::dropper_snap`]).
 
 use crate::app::OndinApp;
 use crate::canvas::{LOUPE_SIDE, Sample, SampleKey};
@@ -18,6 +22,7 @@ use crate::panels::paint;
 use crate::tools::Tool;
 use eframe::egui;
 use ondin_core::Brush;
+use ondin_core::color_review;
 use ondin_core::peniko::Color;
 use std::sync::Arc;
 
@@ -47,6 +52,8 @@ pub(crate) struct PendingPick {
     pub stroke: bool,
     /// Shift: stay armed after the pick.
     pub stay: bool,
+    /// Ctrl: the pixel as it is, never snapped to a document colour.
+    pub raw: bool,
 }
 
 /// The window captured while armed, which every pixel off the canvas is read
@@ -79,6 +86,24 @@ const CHIP_GAP: f32 = 5.0;
 const CHIP_H: f32 = 20.0;
 
 impl OndinApp {
+    /// The document colour a sampled pixel snaps to: one the document already
+    /// uses, within Colour review's Tight limit whatever the card is set to
+    /// (`color_review::snap`). The census is taken once per revision.
+    pub(crate) fn dropper_snap(&mut self, [r, g, b]: [u8; 3]) -> Option<color_review::Swatch> {
+        let rev = self.session.revision();
+        if self
+            .dropper_colours
+            .as_ref()
+            .is_none_or(|(at, _)| *at != rev)
+        {
+            let doc = &self.session.doc;
+            let roots = color_review::roots(doc, None);
+            self.dropper_colours = Some((rev, color_review::census(doc, &roots)));
+        }
+        let (_, census) = self.dropper_colours.as_ref()?;
+        color_review::snap(census, Color::from_rgba8(r, g, b, 255)).cloned()
+    }
+
     /// What an armed eyedropper would pick into, or `None` when it is not armed.
     /// A picker's pick button outranks the rail tool: it is the narrower ask.
     pub(crate) fn dropper_armed(&self) -> Option<DropTarget> {
@@ -222,6 +247,7 @@ impl OndinApp {
                     at: PickAt::Window(at),
                     stroke: modifiers.alt,
                     stay: modifiers.shift,
+                    raw: modifiers.command,
                 });
             }
             Some((_, egui::PointerButton::Secondary)) => {
@@ -247,15 +273,16 @@ impl OndinApp {
         let Some(p) = resp.interact_pointer_pos() else {
             return;
         };
-        let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
+        let m = ui.input(|i| i.modifiers);
         self.dropper_picks += 1;
         self.dropper_pick = Some(PendingPick {
             at: PickAt::Canvas(SampleKey {
                 pick: self.dropper_picks,
                 ..self.sample_key(p, rect, ppp)
             }),
-            stroke: alt,
-            stay: shift,
+            stroke: m.alt,
+            stay: m.shift,
+            raw: m.command,
         });
     }
 
@@ -278,7 +305,15 @@ impl OndinApp {
     /// Land a pick whose sample has arrived: `rgb` is the pixel under the click.
     pub(crate) fn land_pick(&mut self, ctx: &egui::Context, pick: PendingPick, rgb: [u8; 3]) {
         let [r, g, b] = rgb;
-        let color = Color::from_rgba8(r, g, b, 255);
+        // A document colour a hair away is what was meant; Ctrl takes the pixel.
+        let snapped = match pick.raw {
+            true => None,
+            false => self.dropper_snap(rgb),
+        };
+        let color = snapped
+            .as_ref()
+            .map_or(Color::from_rgba8(r, g, b, 255), |s| s.color);
+        let var = snapped.and_then(|s| s.var);
         match self.dropper_armed() {
             Some(DropTarget::Picker) => {
                 let Some((node, slot)) = self.picker.as_ref().map(|p| (p.node, p.slot)) else {
@@ -316,13 +351,23 @@ impl OndinApp {
                     } else {
                         ondin_core::PaintTarget::Fill
                     };
-                    let tx = ondin_core::set_top_paint_all(
-                        &self.session.doc,
-                        &ids,
-                        target,
-                        |b| Brush::Solid(color.with_alpha(b.map_or(1.0, paint::alpha_of))),
-                        &mut self.session.ids,
-                    );
+                    // Snapped to a bound colour, the pick binds rather than copying.
+                    let tx = match var {
+                        Some(var) => ondin_core::build::bind_top_paint_all(
+                            &self.session.doc,
+                            &ids,
+                            target,
+                            var,
+                            &mut self.session.ids,
+                        ),
+                        None => ondin_core::set_top_paint_all(
+                            &self.session.doc,
+                            &ids,
+                            target,
+                            |b| Brush::Solid(color.with_alpha(b.map_or(1.0, paint::alpha_of))),
+                            &mut self.session.ids,
+                        ),
+                    };
                     let label = if pick.stroke { "Stroke" } else { "Fill" };
                     self.session
                         .name_step(label, crate::theme::icon::EYEDROPPER);
@@ -444,14 +489,46 @@ impl OndinApp {
             p.preview = hovered;
         }
         let Some(p) = pointer else { return busy };
+        // What a click here would apply, for the chip: the snapped document
+        // colour unless Ctrl is held.
+        let raw = ctx.input(|i| i.modifiers.command);
+        let chip = |app: &mut Self, rgb: Option<[u8; 3]>| {
+            let rgb = rgb?;
+            let snapped = match raw {
+                true => None,
+                false => app.dropper_snap(rgb),
+            };
+            Some(match snapped {
+                Some(s) => Chip {
+                    color: s.color,
+                    text: s
+                        .var
+                        .and_then(|v| app.session.doc.variables().get(v))
+                        .map_or_else(|| crate::ui::hex_of(s.color), |v| v.name.clone()),
+                    snapped: true,
+                },
+                None => {
+                    let [r, g, b] = rgb;
+                    let color = Color::from_rgba8(r, g, b, 255);
+                    Chip {
+                        color,
+                        text: crate::ui::hex_of(color),
+                        snapped: false,
+                    }
+                }
+            })
+        };
         if over_canvas.is_some() {
             if !freezing {
+                let rgb = self.canvas.sample().and_then(Sample::center);
+                let chip = chip(self, rgb);
                 let sample = self.canvas.sample().map(|s| s.pixels.as_slice());
-                draw_loupe(&ctx, p, sample, ctx.content_rect());
+                draw_loupe(&ctx, p, sample, chip, ctx.content_rect());
             }
         } else if let Some(px) = &window {
             ctx.set_cursor_icon(egui::CursorIcon::None);
-            draw_loupe(&ctx, p, Some(px), ctx.content_rect());
+            let chip = chip(self, center(px));
+            draw_loupe(&ctx, p, Some(px), chip, ctx.content_rect());
         } else {
             // Until the frozen window lands there is nothing to read off the
             // canvas, and the dropper's own cursor stands in for the loupe.
@@ -524,7 +601,7 @@ fn loupe_painter(ctx: &egui::Context) -> egui::Painter {
     ))
 }
 
-/// The loupe centred on the hotspot `at`, with its hex chip under it — above it
+/// The loupe centred on the hotspot `at`, with `chip` under it — above it
 /// where the chip would leave `screen`. `pixels` are
 /// [`LOUPE_SIDE`]² row-major; before the first sample lands it is an empty
 /// frame with no chip.
@@ -536,6 +613,7 @@ fn draw_loupe(
     ctx: &egui::Context,
     at: egui::Pos2,
     pixels: Option<&[Option<[u8; 3]>]>,
+    chip: Option<Chip>,
     screen: egui::Rect,
 ) {
     let painter = loupe_painter(ctx);
@@ -609,19 +687,28 @@ fn draw_loupe(
     } else {
         loupe.top() - CHIP_GAP - CHIP_H
     };
-    if let Some(rgb) = pixels.and_then(center) {
-        draw_chip(&painter, at.x, top, rgb);
+    if let Some(chip) = chip.filter(|_| pixels.is_some()) {
+        draw_chip(&painter, at.x, top, &chip);
     }
 }
 
-/// The chip under the loupe — swatch and hex — centred on `x` with its top at
-/// `top`.
-fn draw_chip(painter: &egui::Painter, x: f32, top: f32, [r, g, b]: [u8; 3]) {
-    let text = crate::ui::hex_of(Color::from_rgba8(r, g, b, 255));
+/// What the chip under the loupe says: the colour a click would apply, by name.
+struct Chip {
+    color: Color,
+    /// Its hex, or its variable's name when it snapped to a bound colour.
+    text: String,
+    /// Snapped to a document colour: the chip wears the magnet.
+    snapped: bool,
+}
+
+/// The chip under the loupe — swatch and name, and the magnet when it snapped —
+/// centred on `x` with its top at `top`.
+fn draw_chip(painter: &egui::Painter, x: f32, top: f32, c: &Chip) {
     let font = egui::FontId::proportional(10.5);
-    let galley = painter.layout_no_wrap(text, font, egui::Color32::WHITE);
+    let galley = painter.layout_no_wrap(c.text.clone(), font, egui::Color32::WHITE);
     let swatch = 10.0 + 5.0;
-    let w = galley.size().x + swatch + 12.0;
+    let magnet = if c.snapped { 12.0 + 5.0 } else { 0.0 };
+    let w = galley.size().x + swatch + magnet + 12.0;
     let chip = egui::Rect::from_min_size(egui::pos2(x - w / 2.0, top), egui::vec2(w, CHIP_H));
     painter.rect(
         chip,
@@ -636,16 +723,26 @@ fn draw_chip(painter: &egui::Painter, x: f32, top: f32, [r, g, b]: [u8; 3]) {
     painter.rect(
         sw,
         egui::CornerRadius::same(3),
-        egui::Color32::from_rgb(r, g, b),
+        crate::ui::color_to_egui(c.color),
         egui::Stroke::new(1.0, egui::Color32::from_white_alpha(64)),
         egui::StrokeKind::Inside,
     );
     let x = x + swatch;
+    let text_w = galley.size().x;
     painter.galley(
         egui::pos2(x, chip.center().y - galley.size().y / 2.0),
         galley,
         egui::Color32::WHITE,
     );
+    if c.snapped {
+        painter.text(
+            egui::pos2(x + text_w + 5.0 + 6.0, chip.center().y),
+            egui::Align2::CENTER_CENTER,
+            crate::theme::icon::MAGNET,
+            crate::theme::icon_font(12.0),
+            crate::theme::color::accent_200(),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1471,9 +1568,105 @@ mod tests {
             at: PickAt::Canvas(key),
             stroke: false,
             stay: false,
+            raw: false,
         });
         frame(&ctx, &mut app, Vec::new());
         let [r, g, bl] = BLUE;
         assert_eq!(top_fill(&app, a), Some([r, g, bl, 102]));
+    }
+
+    /// A pixel a hair from a document colour, as antialiasing or a blend leaves
+    /// one.
+    fn near_blue() -> [u8; 3] {
+        let [r, g, b] = BLUE;
+        let near = [r + 1, g + 1, b];
+        let c = |[r, g, b]: [u8; 3]| Color::from_rgba8(r, g, b, 255);
+        assert!(
+            color_review::delta(c(near), c(BLUE)) <= color_review::Threshold::Tight.limit(),
+            "the fixture's pixel is within Tight"
+        );
+        near
+    }
+
+    fn pick(raw: bool) -> PendingPick {
+        PendingPick {
+            at: PickAt::Window(egui::Pos2::ZERO),
+            stroke: false,
+            stay: false,
+            raw,
+        }
+    }
+
+    /// **A pick snaps to the document colour a hair away; Ctrl takes the pixel.**
+    ///
+    /// flip: `land_pick` ignoring `dropper_snap` → fails at "snapped to b's blue".
+    #[test]
+    fn a_pick_snaps_to_a_near_document_colour_unless_ctrl_is_held() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        app.choose_tool(Tool::Eyedropper);
+        let near = near_blue();
+        app.land_pick(&ctx, pick(false), near);
+        let [r, g, b] = BLUE;
+        assert_eq!(
+            top_fill(&app, a),
+            Some([r, g, b, 102]),
+            "snapped to b's blue"
+        );
+
+        app.choose_tool(Tool::Eyedropper);
+        app.land_pick(&ctx, pick(true), near);
+        let [r, g, b] = near;
+        assert_eq!(top_fill(&app, a), Some([r, g, b, 102]), "the raw pixel");
+    }
+
+    /// Snapped to a bound colour, the pick binds the top fill to its variable,
+    /// keeping the fill's own `%`.
+    #[test]
+    fn a_pick_that_snaps_to_a_bound_colour_binds() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
+        let [r, g, bl] = BLUE;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: Vec::new(),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "color/blue".into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(Color::from_rgba8(r, g, bl, 255)))]
+                        .into_iter()
+                        .collect(),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetFills {
+                id: b,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: ondin_core::BrushSource::Bound { var, alpha: 1.0 },
+                    visible: true,
+                }]),
+            },
+        ])));
+        app.choose_tool(Tool::Eyedropper);
+        app.land_pick(&ctx, pick(false), near_blue());
+        match app.session.doc.get(a).unwrap().paint().fills[0].brush {
+            ondin_core::BrushSource::Bound { var: v, alpha } => {
+                assert_eq!(v, var);
+                assert!((alpha - 0.4).abs() < 1e-3, "a's own 40%: {alpha}");
+            }
+            ref other => panic!("bound, not {other:?}"),
+        }
     }
 }

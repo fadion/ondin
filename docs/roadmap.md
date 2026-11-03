@@ -22,14 +22,6 @@ reads true.
   text is checked, not its case transform.
 - **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
   together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
-- **Colour review.** A card (Document menu, palette) over the selection or the document that groups
-  near-identical raw colours — fills, strokes, gradient stops, effect and text-run colours — by OKLab
-  distance, alpha compared apart. Each group grows around its most-used colour so A≈B≈C cannot chain,
-  and shows its members as one split patch with hex, use count and distance; clicking a swatch selects
-  its users. *Merge* into a chosen member, or *Merge into a new variable…*, is one transaction through
-  recolour-by-colour. A bound colour is never merged away and is the preferred target; vendored kit
-  colours are targets only. A *Tight / Close / Loose* threshold reflows the groups. With it, the
-  eyedropper snaps to a document colour a hair from the sampled pixel (a modifier takes the raw pixel).
 - **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
   as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
   mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,

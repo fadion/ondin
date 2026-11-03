@@ -3859,6 +3859,54 @@ pub fn set_top_paint_all(
     top: impl Fn(Option<&Brush>) -> Brush,
     src: &mut IdSource,
 ) -> Transaction {
+    retop_all(
+        doc,
+        ids,
+        target,
+        |id, b| match b {
+            Some(b) => edited_brush(doc, id, b, |drawn| top(Some(drawn))),
+            None => top(None).into(),
+        },
+        src,
+    )
+}
+
+/// [`set_top_paint_all`] binding the top paint to colour variable `var` instead,
+/// keeping its `%` as [`bind_brush_at_all`] does: the eyedropper's pick that
+/// snapped to a bound colour.
+pub fn bind_top_paint_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    var: crate::VarId,
+    src: &mut IdSource,
+) -> Transaction {
+    retop_all(
+        doc,
+        ids,
+        target,
+        |_, b| {
+            let alpha = match b {
+                Some(crate::BrushSource::Literal(Brush::Solid(c))) => c.components[3],
+                Some(crate::BrushSource::Bound { alpha, .. }) => *alpha,
+                _ => 1.0,
+            };
+            crate::BrushSource::Bound { var, alpha }
+        },
+        src,
+    )
+}
+
+/// The walk [`set_top_paint_all`] and [`bind_top_paint_all`] share: each paint
+/// target's last visible fill (or stroke) becomes what `rebrush` makes of it, or
+/// a new one goes on top where none is visible (`rebrush` gets `None`).
+fn retop_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    rebrush: impl Fn(NodeId, Option<&crate::BrushSource>) -> crate::BrushSource,
+    src: &mut IdSource,
+) -> Transaction {
     fn retop<T: Clone + PartialEq>(
         own: &[Keyed<T>],
         visible: impl Fn(&T) -> bool,
@@ -3880,10 +3928,7 @@ pub fn set_top_paint_all(
     let mut fresh = crate::item::PastTheEnd::default();
     for id in paint_targets(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
-        let rebrush = |b: Option<&crate::BrushSource>| match b {
-            Some(b) => edited_brush(doc, id, b, |drawn| top(Some(drawn))),
-            None => top(None).into(),
-        };
+        let rebrush = |b: Option<&crate::BrushSource>| rebrush(id, b);
         match target {
             PaintTarget::Fill => {
                 let own = &node.paint().fills;

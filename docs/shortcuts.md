@@ -364,7 +364,8 @@ skew snap · `Ctrl`+click deep select · `Alt`+`Shift`+click key layer · `Ctrl`
 `Shift`+wheel horizontal scroll · `Shift` pen constrain · `Ctrl` pen/node curvature · `Alt` hover
 measure (`measure.rs`; the overlay is in `canvas.rs`) · middle-mouse pan in **both** modes (Space
 is not the alias in a text session, where it is a character) · `Alt`+click eyedropper onto the
-top stroke · `Shift`+click eyedropper stays armed · `Shift`+marquee toggles what it covers ·
+top stroke · `Shift`+click eyedropper stays armed · `Ctrl`+click eyedropper takes the raw pixel,
+not the document colour it would snap to · `Shift`+marquee toggles what it covers ·
 `Alt`+marquee removes it (box or lasso, layers and path points alike, read at the press) · `Alt` on
 a corner dot sets that corner alone · `Shift` on an ellipse's arc dot snaps to 15°
 (`design/tools.md`, *Shape handles*).

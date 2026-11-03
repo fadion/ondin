@@ -1865,6 +1865,7 @@ impl eframe::App for OndinApp {
             if let Some(key) = crate::tabs::read_keys(&ctx) {
                 self.tab_key(key);
             } else {
+                self.compare_overlay_key(&ctx);
                 for action in input::resolve(&ctx, self.mode, self.prefs.nudge) {
                     self.dispatch(&ctx, action);
                 }

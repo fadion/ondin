@@ -59,12 +59,20 @@ matched by id, so a renamed or moved layer is one change.
 - **The bar** (`compare_bar`) sits where the contrast checker's and the vision bar's do, on their
   frame: centred on the canvas, 12pt below its top (and below the rulers when they show). It holds
   the git-diff glyph, *Comparing ‹name› · ‹when› with now* (an unnamed version: its time; two
-  versions: *with ‹name› · ‹when›*), a `ui::segmented` *Then · Now · Swipe*, then the contrast
-  checker's steps: *n changes*, *i / n* once one is current (in a cell as wide as *n / n*), the
-  previous and next carets, and an × that leaves.
+  versions: *with ‹name› · ‹when›*), a `ui::segmented` *Then · Now · Swipe*, the *Overlay*
+  toggle (a 24pt field button with the bounding-box glyph, as tall as the segmented track;
+  `Compare::overlay`, lit while the marks show), then the contrast checker's steps: *n changes*,
+  *i / n* once one is current (in a cell as wide as *n / n*), the previous and next carets, and an
+  × that leaves.
 - **Keys.** `Enter` / `Shift+Enter` step, `\` with no modifiers toggles Then and Now, both read by
-  the bar while no modal, palette or text field has the keyboard. `Escape` leaves: a rung of
-  `OndinApp::escape` just below the find box.
+  the bar while no modal, palette or text field has the keyboard. `O` toggles the overlay under
+  the same conditions, taken before the keymap and consumed (`compare_overlay_key`), since it is
+  the Ellipse tool's letter and would otherwise reach `dispatch` and its read-only sentence.
+  `Escape` leaves: a rung of `OndinApp::escape` just below the find box.
+- **The overlay** is on whenever a compare opens. Off, no mark, tag or ghost is drawn and a click
+  on the canvas picks none; the Swipe handle, its pills, the frame labels and the card stay. A row
+  picked in the card turns it back on (`show_card_row`) and steps to it; the bar's steps and
+  `Enter` leave it as it is, so Then and Now can be flicked between bare.
 - **Stepping** (`step_compare`) goes round the ends. `show_change` switches page when it must, or
   shows a page the open document lacks;
   `reveal_change` then pans the change, and a moved layer's old box with it, into view with the

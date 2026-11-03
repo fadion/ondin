@@ -346,9 +346,12 @@ top. `present_ui` reads these and nothing else: `OndinApp::ui` returns before `i
 |---|---|
 | `Enter` / `Shift+Enter` | next / previous change, round the ends |
 | `\` (no modifiers) | toggle Then and Now |
+| `O` (no modifiers) | toggle the overlay (the change marks) |
 | `Escape` | leave (a rung of `OndinApp::escape`, below the find box) |
 
-`compare_bar` reads the first two while no modal, palette or text field has the keyboard. Every
+`compare_bar` reads the first two while no modal, palette or text field has the keyboard;
+`compare_overlay_key` takes `O` under the same conditions before the keymap and consumes it, so
+the Ellipse tool's letter never reaches `dispatch`. Every
 other chord still resolves, but `dispatch` runs only what `compare::admits` (view, zoom, pages,
 save, files and tabs) and answers the rest with the read-only sentence, silently for `Enter`
 (`design/app-compare.md`).

@@ -209,6 +209,10 @@ pub(crate) struct Compare {
     /// Where the split stood when its handle's drag began, while it is dragged; a
     /// right-click puts it back there (`OndinApp::cancel_gesture`).
     pub(crate) split_from: Option<f32>,
+    /// Whether the marks are drawn: the bar's *Overlay*, or `O`. A click on a card
+    /// row turns it back on; stepping leaves it, so Then and Now can be flicked
+    /// between bare.
+    pub(crate) overlay: bool,
     /// A row stepped to on another page, revealed once its page is showing.
     reveal: Option<usize>,
     /// The page the compare opened on and its selection, given back when it closes
@@ -535,6 +539,7 @@ impl OndinApp {
             side: Side::Now,
             split: 0.5,
             split_from: None,
+            overlay: true,
             reveal: None,
             selection,
             elsewhere,
@@ -589,6 +594,38 @@ impl OndinApp {
     pub(crate) fn come_back(&mut self) {
         if let Some((_, camera)) = self.session.compare.as_mut().and_then(|c| c.away.take()) {
             self.session.camera = camera;
+        }
+    }
+
+    /// Draw the marks, or stop drawing them: the bar's *Overlay* and `O`.
+    pub(crate) fn toggle_overlay(&mut self) {
+        if let Some(c) = self.session.compare.as_mut() {
+            c.overlay = !c.overlay;
+        }
+    }
+
+    /// A row picked in the changes card: the overlay comes back to show it, then
+    /// the row is shown as a step would show it.
+    pub(crate) fn show_card_row(&mut self, i: usize) {
+        if let Some(c) = self.session.compare.as_mut() {
+            c.overlay = true;
+        }
+        self.show_change(i);
+    }
+
+    /// While comparing, take a plain `O` for the overlay before the keymap reads
+    /// it as the Ellipse tool's letter, which a read-only compare would refuse
+    /// with a toast. Under the bar's own conditions for its keys.
+    pub(crate) fn compare_overlay_key(&mut self, ctx: &egui::Context) {
+        if self.session.compare.is_none()
+            || self.modal_is_up()
+            || self.palette.is_some()
+            || ctx.egui_wants_keyboard_input()
+        {
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::O)) {
+            self.toggle_overlay();
         }
     }
 
@@ -718,6 +755,7 @@ impl OndinApp {
                     c.side = side;
                 }
             }
+            Some(Act::Overlay) => self.toggle_overlay(),
             Some(Act::Done) => self.leave_compare(),
         }
     }
@@ -759,7 +797,7 @@ impl OndinApp {
                     });
             });
         match act {
-            Some(Act::Show(i)) => self.show_change(i),
+            Some(Act::Show(i)) => self.show_card_row(i),
             Some(Act::Expand(i)) => {
                 if let Some(c) = self.session.compare.as_mut()
                     && !c.expanded.remove(&i)
@@ -829,7 +867,9 @@ impl OndinApp {
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(cursor);
         }
+        // Marks the overlay hides cannot be clicked.
         if resp.clicked()
+            && self.session.compare.as_ref().is_some_and(|c| c.overlay)
             && let Some(p) = resp.interact_pointer_pos()
             && let Some(i) = self.compare_mark_at(p, rect, ppp)
             && let Some(c) = self.session.compare.as_mut()
@@ -928,6 +968,7 @@ impl OndinApp {
             .rows
             .iter()
             .enumerate()
+            .filter(|_| c.overlay)
             .filter_map(|(i, row)| Some((i, self.mark_rect(row, rect, ppp)?)))
             .collect();
         let canvas = painter.with_clip_rect(painter.clip_rect().intersect(rect));
@@ -979,6 +1020,8 @@ enum Act {
     Expand(usize),
     Side(Side),
     Toggle,
+    /// Draw the marks, or stop drawing them.
+    Overlay,
     Done,
 }
 
@@ -1045,6 +1088,18 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
         |p, i, rect, on| crate::ui::segment_label(p, rect, SIDES[i].1, on),
     ) {
         *act = Some(Act::Side(SIDES[i].0));
+    }
+    let state = match c.overlay {
+        true => crate::ui::FieldButton::On,
+        false => crate::ui::FieldButton::Off,
+    };
+    // The marks are boxes round the changed layers, so the glyph is one. As tall as
+    // the segmented track beside it: its 20pt cells plus 2pt padding each side.
+    if crate::ui::field_button(ui, icon::BOUNDING_BOX, 24.0, 14.0, state)
+        .on_hover_text("Overlay: the change marks on the canvas · O")
+        .clicked()
+    {
+        *act = Some(Act::Overlay);
     }
     ui.add_space(5.0);
 
@@ -2114,6 +2169,50 @@ mod tests {
         assert!(
             view.contains(at.center()),
             "in view: {view:?} around {at:?}"
+        );
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// `O` turns the overlay off without choosing the Ellipse tool or saying the
+    /// compare is read-only, stepping leaves it off, and a row picked in the card
+    /// turns it back on.
+    ///
+    /// flip: `compare_overlay_key` reading the key without consuming it → fails at
+    /// "no read-only toast".
+    #[test]
+    fn o_hides_the_overlay_and_a_card_row_brings_it_back() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "overlay");
+        for _ in 0..2 {
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        open(&mut f);
+        assert!(
+            f.app.session.compare.as_ref().unwrap().overlay,
+            "on at first"
+        );
+        let tool = f.app.tool;
+        whole_frame(
+            &ctx,
+            &mut f.app,
+            vec![key(egui::Key::O, Default::default())],
+        );
+        let c = f.app.session.compare.as_deref().expect("still comparing");
+        assert!(!c.overlay, "O hides it");
+        assert_eq!(f.app.tool, tool, "the tool is not chosen");
+        assert_ne!(f.app.session.status().text, READ_ONLY, "no read-only toast");
+        whole_frame(
+            &ctx,
+            &mut f.app,
+            vec![key(egui::Key::Enter, Default::default())],
+        );
+        let c = f.app.session.compare.as_deref().unwrap();
+        assert!(c.current.is_some(), "fixture: the step landed");
+        assert!(!c.overlay, "a step leaves it off");
+        f.app.show_card_row(0);
+        assert!(
+            f.app.session.compare.as_ref().unwrap().overlay,
+            "a card row brings it back"
         );
         let _ = std::fs::remove_file(&f.version);
     }

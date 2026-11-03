@@ -66,6 +66,10 @@ pub(crate) struct DocumentDto {
     /// part of the file, so a geometry edit's diff stays away from it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ImageDto>,
+    /// The linked `tokens.json` and the file as last applied, absent in a
+    /// document linked to none. Additive, so no version bump is owed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_link: Option<crate::meta::TokensLink>,
     /// What a kit last published (§5.3e, §15 D1012), absent in every document that
     /// has not. Last, for `images`' diff reason: it can hold a copy of every main.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -695,6 +699,7 @@ impl DocumentDto {
             styles: doc.styles().iter().cloned().collect(),
             images,
             meta: doc.meta().clone(),
+            tokens_link: doc.tokens_link().cloned(),
             published: doc.published().map(|p| PublishedDto {
                 groups: p
                     .groups()
@@ -844,7 +849,7 @@ impl DocumentDto {
                 Some(crate::kit::Published::from_parts(doc, groups, p.name))
             }
         };
-        Ok(Document::from_parts(
+        let mut doc = Document::from_parts(
             CURRENT_SCHEMA_VERSION,
             nodes,
             pages,
@@ -861,7 +866,9 @@ impl DocumentDto {
             // [`DocumentMeta::is_wellformed_id`].
             self.meta.sanitized(),
             published,
-        ))
+        );
+        doc.set_tokens_link(self.tokens_link);
+        Ok(doc)
     }
 }
 

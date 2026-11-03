@@ -79,6 +79,17 @@ pub struct KitMark {
     pub sharing: bool,
 }
 
+/// A design-tokens file the document is linked to (`ondin_export::dtcg_in`):
+/// where it is, and the file as it was last applied, so a change to it offers
+/// only what the file changed since. Not in [`DocumentMeta`], which the library
+/// scan reads from a file's first 4 KB: this copy can be any size.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokensLink {
+    /// The file's absolute path on the machine that linked it.
+    pub path: String,
+    pub applied: serde_json::Value,
+}
+
 fn sharing_by_default() -> bool {
     true
 }

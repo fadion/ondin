@@ -2476,6 +2476,23 @@ fn a_filed_document_round_trips_its_library_identity() {
     assert_eq!(io::save(&loaded).unwrap(), bytes);
 }
 
+/// A linked tokens file and its last-applied copy survive a save, and re-save
+/// byte-identically; a document linked to none writes no key.
+#[test]
+fn a_tokens_link_round_trips() {
+    let (mut doc, _root) = rich_document();
+    let plain = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    assert!(!plain.contains("tokens_link"), "{plain}");
+    doc.set_tokens_link(Some(ondin_core::meta::TokensLink {
+        path: "C:/work/tokens.json".into(),
+        applied: serde_json::json!({ "space": { "s": { "$type": "number", "$value": 4 } } }),
+    }));
+    let bytes = io::save(&doc).unwrap();
+    let loaded = io::load(&bytes).unwrap();
+    assert_eq!(loaded.tokens_link(), doc.tokens_link());
+    assert_eq!(io::save(&loaded).unwrap(), bytes);
+}
+
 /// A document filed under only *some* of the block writes only those keys.
 ///
 /// The case that matters is a document imported from outside the library: it

@@ -91,6 +91,10 @@ pub struct Document {
     /// cloned for scratch passes and background work. Not derived state under
     /// invariant 4: it is the tree as it was at the publish.
     published: Option<std::sync::Arc<crate::kit::Published>>,
+    /// The `tokens.json` this document is linked to (`crate::meta::TokensLink`).
+    /// Outside undo for `meta`'s reason: it records what the file was when last
+    /// applied, which an undo of that apply does not make untrue.
+    tokens_link: Option<std::sync::Arc<crate::meta::TokensLink>>,
     /// **True only while [`Self::apply_restoring`] runs** — a history step putting
     /// back values this document already held, which the layout operations then
     /// take whether or not CSS accepts them. Never true between calls.
@@ -124,6 +128,7 @@ impl Document {
             // fresh identity on a document nobody has saved.
             meta: DocumentMeta::default(),
             published: None,
+            tokens_link: None,
             restoring: false,
         }
     }
@@ -328,6 +333,17 @@ impl Document {
     /// is and for its reason.
     pub fn set_published(&mut self, published: Option<crate::kit::Published>) {
         self.published = published.map(std::sync::Arc::new);
+    }
+
+    /// The `tokens.json` this document is linked to, when it is.
+    pub fn tokens_link(&self) -> Option<&crate::meta::TokensLink> {
+        self.tokens_link.as_deref()
+    }
+
+    /// Link a tokens file, or unlink with `None`. Outside undo and reporting no
+    /// `DirtySet`, as [`Self::set_meta`] is.
+    pub fn set_tokens_link(&mut self, link: Option<crate::meta::TokensLink>) {
+        self.tokens_link = link.map(std::sync::Arc::new);
     }
 
     /// Every ruler guide on the document, in no particular order.
@@ -1028,6 +1044,7 @@ impl Document {
             styles,
             meta,
             published: published.map(std::sync::Arc::new),
+            tokens_link: None,
             restoring: false,
         }
     }
@@ -1204,6 +1221,7 @@ impl Document {
             styles: Default::default(),
             meta: DocumentMeta::default(),
             published: None,
+            tokens_link: None,
             restoring: self.restoring,
         };
         one.apply_one(op, &mut DirtySet::default(), &mut Numbering::default())

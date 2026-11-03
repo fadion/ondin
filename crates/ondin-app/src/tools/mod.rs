@@ -7377,6 +7377,7 @@ mod tests {
         let (mode, var) = (ids.mint_mode(), ids.mint_var());
         doc.apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -7390,6 +7391,7 @@ mod tests {
                     name: "type/size".into(),
                     kind: ondin_core::VarKind::Number,
                     cells: [(mode, ondin_core::Cell::Number(32.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

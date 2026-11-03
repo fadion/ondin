@@ -70,7 +70,7 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetFillRule { .. }
         // A copy's mode is an override like any field (§5.3f), and so is a
         // corner's binding: overrides compare the binding (§5.3d).
-        | Operation::SetMode { .. }
+        | Operation::SetModes { .. }
         | Operation::SetCornerVars { .. }
         | Operation::SetSpacingVars { .. }
         | Operation::SetVisibleVar { .. }
@@ -138,6 +138,9 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetVariableCell { .. }
         | Operation::SetVariable { .. }
         | Operation::AddMode { .. }
+        | Operation::AddCollection { .. }
+        | Operation::RemoveCollection { .. }
+        | Operation::SetCollectionName { .. }
         | Operation::RemoveMode { .. }
         | Operation::SetModeName { .. }
         | Operation::SetKitModes { .. }
@@ -1148,7 +1151,7 @@ pub(crate) fn untouched(
         && c.item == s.item
         // The bindings are overrides too (§5.3f): a copy differing from its
         // source by a binding alone — both literals canonical — is touched.
-        && c.mode == s.mode
+        && c.modes == s.modes
         && c.corner_vars == s.corner_vars
         && c.spacing_vars == s.spacing_vars
         && c.visible_var == s.visible_var

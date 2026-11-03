@@ -314,7 +314,7 @@ mod leak {
                     name: format!("{SECRET} page two"),
                     ground: None,
                     draft: false,
-                    mode: None,
+                    modes: Vec::new(),
                 },
             ]))
             .expect("the fixture commits");

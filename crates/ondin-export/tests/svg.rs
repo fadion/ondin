@@ -354,6 +354,7 @@ fn a_bound_opacity_exports_at_its_percentage() {
     f.doc
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -367,6 +368,7 @@ fn a_bound_opacity_exports_at_its_percentage() {
                     name: "opacity/muted".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(40.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -422,6 +424,7 @@ fn a_bound_stroke_width_exports_at_its_number() {
             )],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Mode 1".into(),
@@ -435,6 +438,7 @@ fn a_bound_stroke_width_exports_at_its_number() {
                 name: "stroke/thick".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(7.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -472,6 +476,7 @@ fn a_bound_fill_and_visibility_export_in_the_mode_in_force() {
     let red = ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255);
     let blue = ondin_core::peniko::Color::from_rgba8(0, 0, 255, 255);
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -486,6 +491,7 @@ fn a_bound_fill_and_visibility_export_in_the_mode_in_force() {
                 name: name.into(),
                 kind,
                 cells: cells.into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -507,9 +513,9 @@ fn a_bound_fill_and_visibility_export_in_the_mode_in_force() {
                 VarKind::Boolean,
                 [(a, Cell::Boolean(true)), (b, Cell::Boolean(false))],
             ),
-            Operation::SetMode {
+            Operation::SetModes {
                 id: f.artboard,
-                mode: Some(b),
+                modes: vec![b],
             },
         ]))
         .unwrap();
@@ -1194,6 +1200,7 @@ fn an_em_shift_under_a_bound_size_is_reported() {
     f.doc
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Base".into(),
@@ -1207,6 +1214,7 @@ fn an_em_shift_under_a_bound_size_is_reported() {
                     name: "type/size".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(20.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

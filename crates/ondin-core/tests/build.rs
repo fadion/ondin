@@ -658,6 +658,7 @@ fn the_conversion_predicate_refuses_what_the_conversion_cannot_do() {
     f.add(moded, rect(10.0, 10.0), (0.0, 0.0));
     f.commit(Transaction(vec![
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: ondin_core::Mode {
                 id: night,
                 name: "Night".into(),
@@ -665,9 +666,9 @@ fn the_conversion_predicate_refuses_what_the_conversion_cannot_do() {
             index: 0,
             cells: vec![],
         },
-        Operation::SetMode {
+        Operation::SetModes {
             id: moded,
-            mode: Some(night),
+            modes: vec![night],
         },
     ]));
     assert_eq!(
@@ -3438,6 +3439,7 @@ fn outline_stroke_keeps_visibility_opacity_and_masks() {
         },
         Operation::SetVisible { id, visible: false },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: ondin_core::Mode {
                 id: mode,
                 name: "Light".into(),
@@ -3451,6 +3453,7 @@ fn outline_stroke_keeps_visibility_opacity_and_masks() {
                 name: "half".into(),
                 kind: ondin_core::VarKind::Number,
                 cells: [(mode, ondin_core::Cell::Number(50.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

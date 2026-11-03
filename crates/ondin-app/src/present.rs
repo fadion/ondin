@@ -617,7 +617,7 @@ mod tests {
             name: name.into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         };
         let frame = |id, parent, name: &str| Operation::CreateNode {
             id,

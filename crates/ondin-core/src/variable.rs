@@ -1,13 +1,16 @@
 //! Variables and modes (§5.3f, §15 D1037, D1038, D1039).
 //!
-//! A **variable** is a named value of one type — a colour or a number in build
-//! step 1 — with **one value per mode**. The document has **one mode list**, no
-//! collections, and its default mode is the first (D1038 (a)). A frame may set
-//! one mode for itself and everything under it ([`crate::Node::mode`]); anything
-//! below no frame that sets one resolves in the default.
+//! A **variable** is a named value of one type with **one value per mode** of
+//! its [`Collection`]. Each collection has its own mode list, its default the
+//! first. A frame may set one mode per collection for itself and everything
+//! under it ([`crate::Node::modes`]); each collection inherits on its own, and
+//! anything below no frame that sets one of a collection's modes reads that
+//! collection's default.
 //!
 //! A cell is a value or an **alias** — another variable of the same type, named
-//! per mode — never a fifth type. A field bound to a variable holds
+//! per mode, in any collection — never a fifth type. The target reads its own
+//! collection's mode in force. A variable's **scope** ([`Scope`]) is the fields
+//! it may bind. A field bound to a variable holds
 //! [`BrushSource::Bound`]; the value it draws is found **at read**, against the mode
 //! in force at the node, and is in no node (invariant 4, §12 property 4).
 //!
@@ -57,6 +60,18 @@ macro_rules! wire_id {
 
 wire_id!(VarId, "variable");
 wire_id!(ModeId, "mode");
+wire_id!(CollectionId, "collection");
+
+impl CollectionId {
+    /// The id of the collection a document's variables open in when its file
+    /// names none — every document saved before collections. Never minted: actor
+    /// 0 is no session's.
+    pub const FIRST: CollectionId = CollectionId(NodeId { actor: 0, seq: 1 });
+
+    pub fn is_first(&self) -> bool {
+        *self == Self::FIRST
+    }
+}
 
 impl crate::IdSource {
     /// A fresh [`VarId`].
@@ -67,13 +82,201 @@ impl crate::IdSource {
     pub fn mint_mode(&mut self) -> ModeId {
         ModeId(self.mint())
     }
+    /// A fresh [`CollectionId`].
+    pub fn mint_collection(&mut self) -> CollectionId {
+        CollectionId(self.mint())
+    }
 }
 
-/// One of the document's modes — a column of the variables table.
+/// One of the document's modes — a column of its collection's table.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mode {
     pub id: ModeId,
     pub name: String,
+}
+
+/// The name the first collection takes when its file names none.
+pub const FIRST_COLLECTION_NAME: &str = "Variables";
+
+/// A named set of variables with modes of its own, the first its default.
+///
+/// **A variable's collection is the one owning its cells' modes**
+/// ([`Variables::collection_of`]), so a variable records none and moving one is
+/// rewriting its cells. A frame sets at most one mode per collection, and each
+/// collection's mode is inherited on its own ([`crate::Document::modes_at`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: CollectionId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<Mode>,
+}
+
+impl Collection {
+    /// The collection every document starts with: [`CollectionId::FIRST`],
+    /// named [`FIRST_COLLECTION_NAME`], no modes.
+    pub fn first() -> Collection {
+        Collection {
+            id: CollectionId::FIRST,
+            name: FIRST_COLLECTION_NAME.into(),
+            modes: Vec::new(),
+        }
+    }
+
+    pub fn default_mode(&self) -> Option<ModeId> {
+        self.modes.first().map(|m| m.id)
+    }
+
+    pub fn has(&self, mode: ModeId) -> bool {
+        self.modes.iter().any(|m| m.id == mode)
+    }
+}
+
+/// A family of fields a variable may bind — its **scope** is a set of these.
+///
+/// Grouped as the inspector's cards group them, each binding one kind
+/// ([`Field::kind`]). Visibility is the boolean's one field, so a boolean has
+/// no scope to narrow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Field {
+    /// A width or a height.
+    Size,
+    /// A min or max width or height.
+    Limits,
+    /// A gap or a padding.
+    Spacing,
+    Corner,
+    StrokeWidth,
+    Opacity,
+    /// An effect's X, Y, blur or spread.
+    Effect,
+    /// A text's size, line height, letter or paragraph spacing.
+    Type,
+    Weight,
+    Fill,
+    Stroke,
+    Content,
+    Family,
+    Visible,
+}
+
+impl Field {
+    pub const ALL: [Field; 14] = [
+        Field::Size,
+        Field::Limits,
+        Field::Spacing,
+        Field::Corner,
+        Field::StrokeWidth,
+        Field::Opacity,
+        Field::Effect,
+        Field::Type,
+        Field::Weight,
+        Field::Fill,
+        Field::Stroke,
+        Field::Content,
+        Field::Family,
+        Field::Visible,
+    ];
+
+    /// The kind of variable this field binds.
+    pub fn kind(self) -> VarKind {
+        match self {
+            Field::Fill | Field::Stroke => VarKind::Color,
+            Field::Content | Field::Family => VarKind::String,
+            Field::Visible => VarKind::Boolean,
+            _ => VarKind::Number,
+        }
+    }
+
+    /// Every field binding `kind`, in [`Field::ALL`]'s order.
+    pub fn of_kind(kind: VarKind) -> impl Iterator<Item = Field> {
+        Field::ALL.into_iter().filter(move |f| f.kind() == kind)
+    }
+
+    /// Whether the field holds a length in px — what makes a number scoped to
+    /// these alone a DTCG `dimension`. A text's type numbers are px or `%`;
+    /// counted as lengths, as the field shows px by default.
+    pub fn is_length(self) -> bool {
+        matches!(
+            self,
+            Field::Size
+                | Field::Limits
+                | Field::Spacing
+                | Field::Corner
+                | Field::StrokeWidth
+                | Field::Effect
+                | Field::Type
+        )
+    }
+
+    /// The name a scope is saved and exported under.
+    pub fn wire(self) -> &'static str {
+        match self {
+            Field::Size => "size",
+            Field::Limits => "limits",
+            Field::Spacing => "spacing",
+            Field::Corner => "corner",
+            Field::StrokeWidth => "strokeWidth",
+            Field::Opacity => "opacity",
+            Field::Effect => "effect",
+            Field::Type => "type",
+            Field::Weight => "weight",
+            Field::Fill => "fill",
+            Field::Stroke => "stroke",
+            Field::Content => "content",
+            Field::Family => "family",
+            Field::Visible => "visible",
+        }
+    }
+
+    pub fn from_wire(s: &str) -> Option<Field> {
+        Field::ALL.into_iter().find(|f| f.wire() == s)
+    }
+
+    fn bit(self) -> u16 {
+        1 << Field::ALL.iter().position(|f| *f == self).expect("listed")
+    }
+}
+
+/// The fields a variable may bind, when not every field of its kind
+/// ([`Variable::scope`]). Saved as a list of [`Field::wire`] names in
+/// [`Field::ALL`]'s order; an unknown name is dropped on load.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Scope(u16);
+
+impl Scope {
+    pub fn of(fields: impl IntoIterator<Item = Field>) -> Scope {
+        Scope(fields.into_iter().fold(0, |b, f| b | f.bit()))
+    }
+    pub fn contains(self, f: Field) -> bool {
+        self.0 & f.bit() != 0
+    }
+    pub fn with(self, f: Field, on: bool) -> Scope {
+        Scope(if on {
+            self.0 | f.bit()
+        } else {
+            self.0 & !f.bit()
+        })
+    }
+    pub fn fields(self) -> impl Iterator<Item = Field> {
+        Field::ALL.into_iter().filter(move |f| self.contains(*f))
+    }
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl Serialize for Scope {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(self.fields().map(Field::wire))
+    }
+}
+
+impl<'de> Deserialize<'de> for Scope {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let names = Vec::<String>::deserialize(d)?;
+        Ok(Scope::of(names.iter().filter_map(|n| Field::from_wire(n))))
+    }
 }
 
 /// What a variable holds. Build step 1's two, step 2's boolean, bound to a
@@ -159,19 +362,24 @@ impl From<Value> for Cell {
 /// A variable: a name, a kind and one cell per mode.
 ///
 /// **The name is a path** — `brand/500` — and the slashes are the browser's
-/// groups (D1038 G); there is no group object. Names are unique among the
-/// document's own variables, and among each kit's ([`check`]), which is what
+/// groups (D1038 G); there is no group object. Names are unique within each of
+/// the document's collections, and within each kit ([`check`]), which is what
 /// lets a paste from another document rebind by name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Variable {
     pub id: VarId,
     pub name: String,
     pub kind: VarKind,
-    /// One cell per mode, keyed by mode — **every** mode of the document for one
-    /// of its own, every mode of its kit for a kit's ([`KitModes`]), which
-    /// [`check`] holds, so a read never meets a missing column. Ordered by id for
-    /// byte-stable saves (invariant 9), not by the modes' order.
+    /// One cell per mode, keyed by mode — **every** mode of one collection of the
+    /// document for one of its own, which makes it that collection's, every mode
+    /// of its kit for a kit's ([`KitModes`]); [`check`] holds this, so a read
+    /// never meets a missing column. Ordered by id for byte-stable saves
+    /// (invariant 9), not by the modes' order.
     pub cells: BTreeMap<ModeId, Cell>,
+    /// The fields it may bind, `None` for every field of its kind — including
+    /// any that becomes bindable later. A boolean has none ([`check`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     /// Which kit it came from, for a variable a vendored main reads (§15 D1064)
     /// — `None` for the document's own. A kit's variable is **read-only** here, as
     /// a vendored main is: written by an update and by nothing the user does.
@@ -192,6 +400,11 @@ impl Variable {
     /// The kit this variable came from, `None` for the document's own.
     pub fn kit(&self) -> Option<&str> {
         self.origin.as_ref().map(|o| o.kit.as_str())
+    }
+
+    /// Whether it may bind `field`: of the field's kind, and in its scope.
+    pub fn binds(&self, field: Field) -> bool {
+        self.kind == field.kind() && self.scope.is_none_or(|s| s.contains(field))
     }
 }
 
@@ -216,22 +429,24 @@ impl VarOrigin {
 }
 
 /// One kit's modes, as a document holding its variables keeps them (§15 D1064,
-/// D1038 (b)): the kit's own list, and **the per-kit mapping** from the
-/// document's modes onto it.
+/// D1038 (b)): the kit's own lists, one per collection of the kit, and **the
+/// per-kit mapping** from the document's modes onto them.
 ///
-/// D1038 (b) keeps **one mode list per document**: a kit's modes are not modes
-/// of the document, no frame of the document's own sets one, and they appear
-/// nowhere but as the columns its variables are read in. Which column a layer
-/// reads is the mapping's ([`Variables::kit_mode`]): the entry set by hand, else
-/// the kit mode **of the same name** as the document's mode in force, else the
-/// kit's **first** mode.
+/// A kit's modes are not modes of the document, no frame of the document's own
+/// sets one, and they appear nowhere but as the columns its variables are read
+/// in. **Each kit collection maps from one document collection** — the one of
+/// its name, else the first ([`Variables::kit_onto`]). Which column a layer
+/// reads is the mapping's ([`Variables::kit_mode_at`]): the entry set by hand,
+/// else the kit mode **of the same name** as that collection's mode in force,
+/// else the kit collection's **first** mode.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct KitModes {
     /// The kit's name when its variables arrived — the browser's group header,
     /// as `crate::kit::Origin::name` names a lost kit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// The kit's modes, in its order — its first the fallback.
+    /// The kit's modes, collection by collection, each in its order — a
+    /// collection's first its fallback.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modes: Vec<KitMode>,
     /// The mapping's hand-set entries, a mode of the document to a mode of the
@@ -244,6 +459,22 @@ impl KitModes {
     pub fn mode(&self, id: ModeId) -> Option<&KitMode> {
         self.modes.iter().find(|m| m.id == id)
     }
+    /// The modes of kit collection `collection`, in order.
+    pub fn modes_in<'a>(&'a self, collection: &'a str) -> impl Iterator<Item = &'a KitMode> + 'a {
+        self.modes
+            .iter()
+            .filter(move |m| m.collection == collection)
+    }
+    /// The kit's collections by name, in order — `""` for a kit's only one.
+    pub fn collections(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for m in &self.modes {
+            if !out.contains(&m.collection.as_str()) {
+                out.push(&m.collection);
+            }
+        }
+        out
+    }
 }
 
 /// One of a kit's modes, held here under an id of this document's (`id`) and
@@ -253,33 +484,98 @@ pub struct KitMode {
     pub id: ModeId,
     pub name: String,
     pub from: ModeId,
+    /// The name of the kit's collection it is a mode of — empty for a kit with
+    /// one collection, so a kit published before collections reads as it did.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub collection: String,
 }
 
-/// The document's variables and its mode list.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// The document's variables and its collections.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Variables {
-    pub(crate) modes: Vec<Mode>,
+    /// Never empty ([`check`]): a document starts with [`Collection::first`].
+    pub(crate) collections: Vec<Collection>,
     pub(crate) vars: BTreeMap<VarId, Variable>,
     /// The modes of each kit whose variables this document holds, by kit id
     /// (§15 D1064).
     pub(crate) kits: BTreeMap<String, KitModes>,
 }
 
-impl Variables {
-    pub fn modes(&self) -> &[Mode] {
-        &self.modes
+impl Default for Variables {
+    fn default() -> Self {
+        Variables {
+            collections: vec![Collection::first()],
+            vars: BTreeMap::new(),
+            kits: BTreeMap::new(),
+        }
     }
-    /// The default mode — the first (D1038 (a)) — or `None` in a document with
-    /// no modes, which has no variables of its own either ([`check`]).
+}
+
+impl Variables {
+    /// The document's collections, in order.
+    pub fn collections(&self) -> &[Collection] {
+        &self.collections
+    }
+    pub fn collection(&self, id: CollectionId) -> Option<&Collection> {
+        self.collections.iter().find(|c| c.id == id)
+    }
+    pub fn collection_index(&self, id: CollectionId) -> Option<usize> {
+        self.collections.iter().position(|c| c.id == id)
+    }
+    /// The first collection — where a document with one keeps everything.
+    pub fn first_collection(&self) -> &Collection {
+        &self.collections[0]
+    }
+    /// Whether the document holds more than one collection — when the browser,
+    /// the frame's mode rows and the tooltips name them.
+    pub fn has_collections(&self) -> bool {
+        self.collections.len() > 1
+    }
+    /// The document's collection holding `mode` — `None` for a kit's mode.
+    pub fn collection_of_mode(&self, mode: ModeId) -> Option<&Collection> {
+        self.collections.iter().find(|c| c.has(mode))
+    }
+    /// The document's collection a variable of its own is in: the one owning
+    /// its cells' modes. `None` for a kit's variable, or none at all.
+    pub fn collection_of(&self, var: VarId) -> Option<&Collection> {
+        let m = self.vars.get(&var)?.cells.keys().next()?;
+        self.collection_of_mode(*m)
+    }
+    /// The document's own variables in collection `c`, in id order.
+    pub fn of_collection(&self, c: CollectionId) -> impl Iterator<Item = &Variable> {
+        let modes: Vec<ModeId> = self
+            .collection(c)
+            .map(|c| c.modes.iter().map(|m| m.id).collect())
+            .unwrap_or_default();
+        self.local()
+            .filter(move |v| v.cells.keys().next().is_some_and(|m| modes.contains(m)))
+    }
+    /// Every one of the document's modes, collection by collection — never a
+    /// kit's.
+    pub fn modes(&self) -> impl Iterator<Item = &Mode> {
+        self.collections.iter().flat_map(|c| c.modes.iter())
+    }
+    /// The first collection's default mode — what a document with one
+    /// collection reads everywhere no frame sets one — or `None` when it has no
+    /// modes.
     pub fn default_mode(&self) -> Option<ModeId> {
-        self.modes.first().map(|m| m.id)
+        self.collections.first().and_then(Collection::default_mode)
     }
     /// One of the **document's** modes — never a kit's.
     pub fn mode(&self, id: ModeId) -> Option<&Mode> {
-        self.modes.iter().find(|m| m.id == id)
+        self.modes().find(|m| m.id == id)
     }
+    /// Where `id` sits in its collection's list — index 0 is its default.
     pub fn mode_index(&self, id: ModeId) -> Option<usize> {
-        self.modes.iter().position(|m| m.id == id)
+        self.collection_of_mode(id)?
+            .modes
+            .iter()
+            .position(|m| m.id == id)
+    }
+    /// The default of the collection `mode` is a mode of, or `None` for a
+    /// kit's mode.
+    pub fn default_of(&self, mode: ModeId) -> Option<ModeId> {
+        self.collection_of_mode(mode)?.default_mode()
     }
     /// The kits whose variables this document holds, and their modes.
     pub fn kits(&self) -> &BTreeMap<String, KitModes> {
@@ -317,80 +613,147 @@ impl Variables {
             .values()
             .find(|v| v.origin.as_ref().is_some_and(|o| o.key() == key))
     }
+    /// Whether the table holds nothing a file need write: no variable, no kit,
+    /// and the one collection every document starts with, without modes.
     pub fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.modes.is_empty() && self.kits.is_empty()
+        self.vars.is_empty() && self.kits.is_empty() && self.collections == [Collection::first()]
     }
-    /// The document's own variable named `name` — a kit's are named in their
-    /// kit, and a paste rebinds to one of those by its origin instead.
+    /// The document's own variable named `name`, the first collection's first
+    /// — a kit's are named in their kit, and a paste rebinds to one of those by
+    /// its origin instead.
     pub fn by_name(&self, name: &str) -> Option<&Variable> {
-        self.local().find(|v| v.name == name)
+        self.collections
+            .iter()
+            .find_map(|c| self.by_name_in(c.id, name))
+    }
+    /// The document's own variable named `name` in collection `c`.
+    pub fn by_name_in(&self, c: CollectionId, name: &str) -> Option<&Variable> {
+        self.of_collection(c).find(|v| v.name == name)
     }
 
-    /// The column of `kit`'s variables read when `mode` is in force (§15 D1064,
-    /// D1038 (b)): `mode` itself when it is one of the kit's (a kit main's frame
-    /// set to it), else the mapping's hand-set entry, else the kit mode named as
-    /// the document's mode is, else the kit's first. `mode` `None` is the
-    /// document's default. `None` only for a kit this table does not hold.
+    /// The modes a variable's cells are keyed by: its collection's for one of
+    /// the document's own, its kit's for a kit's.
+    pub fn columns(&self, v: &Variable) -> Vec<ModeId> {
+        let first = v.cells.keys().next().copied();
+        match v.kit() {
+            None => first
+                .and_then(|m| self.collection_of_mode(m))
+                .map(|c| c.modes.iter().map(|m| m.id).collect()),
+            Some(kit) => self.kits.get(kit).and_then(|k| {
+                let c = &k.mode(first?)?.collection;
+                Some(k.modes_in(c).map(|m| m.id).collect())
+            }),
+        }
+        .unwrap_or_else(|| v.cells.keys().copied().collect())
+    }
+
+    /// The kit collection a kit's variable is in, by name — `""` for a kit's
+    /// only one. `None` for one of the document's own.
+    pub fn kit_collection_of<'a>(&'a self, v: &Variable) -> Option<&'a str> {
+        let k = self.kits.get(v.kit()?)?;
+        Some(k.mode(*v.cells.keys().next()?)?.collection.as_str())
+    }
+
+    /// The document collection kit collection `collection` maps from: the one
+    /// of its name, else the first.
+    pub fn kit_onto(&self, collection: &str) -> Option<&Collection> {
+        self.collections
+            .iter()
+            .find(|c| !collection.is_empty() && c.name == collection)
+            .or(self.collections.first())
+    }
+
+    /// The column of `kit`'s first collection read when `mode` is in force
+    /// (§15 D1064, D1038 (b)): [`Self::kit_mode_at`] with that one mode set,
+    /// `None` every collection's default. `None` only for a kit this table does
+    /// not hold.
     pub fn kit_mode(&self, kit: &str, mode: Option<ModeId>) -> Option<ModeId> {
+        let first = self.kits.get(kit)?.modes.first()?.collection.clone();
+        self.kit_mode_at(kit, &first, mode.as_slice())
+    }
+
+    /// The column of `kit`'s collection `collection` read under `set`, the
+    /// modes in force nearest first ([`crate::Document::modes_at`]). The first
+    /// of them that speaks for it wins: one of its own (a kit main's frame set
+    /// to it), or a mode of the document collection it maps from — through the
+    /// mapping's hand-set entry, else its mode of that name, else its first — or
+    /// another kit's mode it has one of the same name as (that kit's variable
+    /// having aliased this kit's). With none, that collection's default maps
+    /// the same way.
+    pub fn kit_mode_at(&self, kit: &str, collection: &str, set: &[ModeId]) -> Option<ModeId> {
         let k = self.kits.get(kit)?;
-        let mode = mode.or_else(|| self.default_mode());
-        if let Some(m) = mode {
-            if k.mode(m).is_some() {
-                return Some(m);
-            }
+        let own = || k.modes_in(collection);
+        let onto = self.kit_onto(collection);
+        let mapped = |m: ModeId| {
             if let Some(to) = k.map.get(&m)
-                && k.mode(*to).is_some()
+                && own().any(|x| x.id == *to)
             {
                 return Some(*to);
             }
-            // By name: the document mode's, or — another kit's variable having
-            // aliased this kit's — that kit's mode's.
-            let name = self
-                .mode(m)
-                .map(|dm| dm.name.as_str())
-                .or_else(|| self.kit_mode_of(m).map(|(_, km)| km.name.as_str()));
-            if let Some(named) = name.and_then(|n| k.modes.iter().find(|x| x.name == n)) {
+            let name = self.mode(m).map(|dm| dm.name.as_str())?;
+            Some(own().find(|x| x.name == name).or_else(|| own().next())?.id)
+        };
+        for &m in set {
+            if own().any(|x| x.id == m) {
+                return Some(m);
+            }
+            if onto.is_some_and(|c| c.has(m)) {
+                return mapped(m);
+            }
+            if let Some((_, other)) = self.kit_mode_of(m)
+                && let Some(named) = own().find(|x| x.name == other.name)
+            {
                 return Some(named.id);
             }
         }
-        k.modes.first().map(|x| x.id)
+        match onto.and_then(Collection::default_mode) {
+            Some(d) => mapped(d),
+            None => own().next().map(|x| x.id),
+        }
     }
 
-    /// The cell `v` reads when `mode` is in force — its own column of that mode
-    /// for one of the document's own, the mapped column for a kit's.
-    fn cell_in<'a>(&self, v: &'a Variable, mode: Option<ModeId>) -> Option<&'a Cell> {
-        let col = match v.kit() {
-            None => match mode {
-                Some(m) if self.mode(m).is_some() => m,
-                // A kit's mode governs its kit's variables alone.
-                _ => self.default_mode()?,
-            },
-            Some(kit) => self.kit_mode(kit, mode)?,
-        };
-        v.cells.get(&col)
+    /// The column `v` reads under `set` — the mode of its collection in force,
+    /// else that collection's default, for one of the document's own; the mapped
+    /// column for a kit's.
+    fn column_at(&self, v: &Variable, set: &[ModeId]) -> Option<ModeId> {
+        match v.kit() {
+            None => {
+                let c = self.collection_of_mode(*v.cells.keys().next()?)?;
+                set.iter()
+                    .copied()
+                    .find(|m| c.has(*m))
+                    .or_else(|| c.default_mode())
+            }
+            Some(kit) => self.kit_mode_at(kit, self.kit_collection_of(v)?, set),
+        }
     }
 
-    /// `var`'s value in `mode`, its aliases followed.
+    /// `var`'s value in `mode`, its aliases followed: [`Self::resolve_at`] with
+    /// that one mode in force, every other collection reading its default.
     ///
     /// `None` only for a table [`check`] refuses — a variable or a mode that is
     /// not there, a missing cell, or an alias loop — so every caller holding a
-    /// committed document can treat it as unreachable. The walk is bounded by the
-    /// variable count all the same: a loop is refused at the commit, and a read
-    /// that met one anyway must end.
-    ///
-    /// A kit's variable reads the column `mode` maps to ([`Self::kit_mode`]),
-    /// **at every step** of the walk: an alias of the document's own to a kit's
-    /// reads that kit's column for the same mode.
+    /// committed document can treat it as unreachable.
     pub fn resolve(&self, var: VarId, mode: ModeId) -> Option<Value> {
-        self.resolve_opt(var, Some(mode))
+        self.resolve_at(var, &[mode])
     }
 
-    /// [`Self::resolve`] with `None` for the document's default mode — what a
+    /// [`Self::resolve`] with `None` for every collection's default — what a
     /// kit's variable reads in a document with no modes of its own.
     pub fn resolve_opt(&self, var: VarId, mode: Option<ModeId>) -> Option<Value> {
+        self.resolve_at(var, mode.as_slice())
+    }
+
+    /// `var`'s value under `set`, the modes in force nearest first, its aliases
+    /// followed — **each step reading its own collection's column**: an alias to
+    /// another collection's variable reads the mode in force for that one. The
+    /// walk is bounded by the variable count: a loop is refused at the commit,
+    /// and a read that met one anyway must end.
+    pub fn resolve_at(&self, var: VarId, set: &[ModeId]) -> Option<Value> {
         let mut at = var;
         for _ in 0..=self.vars.len() {
-            match self.cell_in(self.vars.get(&at)?, mode)? {
+            let v = self.vars.get(&at)?;
+            match v.cells.get(&self.column_at(v, set)?)? {
                 Cell::Color(c) => return Some(Value::Color(*c)),
                 Cell::Number(n) => return Some(Value::Number(*n)),
                 Cell::Boolean(b) => return Some(Value::Boolean(*b)),
@@ -401,28 +764,35 @@ impl Variables {
         None
     }
 
-    /// Every value `var` takes — in each of the document's modes and each of
-    /// its kits', and in the default — its aliases followed, each once. What a
-    /// bound family asks the font service to load (§15 D1069): a frame set to
-    /// another mode draws another family, and it must be there before it is
-    /// switched to.
+    /// Every value `var` can take — each of its cells' values, and through each
+    /// alias every value its target can take — each once. What a bound family
+    /// asks the font service to load (§15 D1069): a frame set to another mode
+    /// draws another family, and it must be there before it is switched to.
     pub fn every_value(&self, var: VarId) -> Vec<Value> {
-        let modes = self
-            .modes
-            .iter()
-            .map(|m| Some(m.id))
-            .chain(
-                self.kits
-                    .values()
-                    .flat_map(|k| k.modes.iter().map(|m| Some(m.id))),
-            )
-            .chain(std::iter::once(None));
         let mut out: Vec<Value> = Vec::new();
-        for m in modes {
-            if let Some(v) = self.resolve_opt(var, m)
-                && !out.contains(&v)
-            {
-                out.push(v);
+        let mut seen = vec![var];
+        let mut stack = vec![var];
+        while let Some(at) = stack.pop() {
+            let Some(v) = self.vars.get(&at) else {
+                continue;
+            };
+            for cell in v.cells.values() {
+                let value = match cell {
+                    Cell::Color(c) => Value::Color(*c),
+                    Cell::Number(n) => Value::Number(*n),
+                    Cell::Boolean(b) => Value::Boolean(*b),
+                    Cell::String(s) => Value::String(s.clone()),
+                    Cell::Alias(next) => {
+                        if !seen.contains(next) {
+                            seen.push(*next);
+                            stack.push(*next);
+                        }
+                        continue;
+                    }
+                };
+                if !out.contains(&value) {
+                    out.push(value);
+                }
             }
         }
         out
@@ -449,26 +819,50 @@ impl Variables {
 
     /// Whether `var`'s cell in `mode` aliasing `target` would make a loop — the
     /// browser's dimmed rows (D1038 G). True when `target` is `var` or reaches it
-    /// in that mode.
+    /// under some choice of modes with `mode` among them.
+    ///
+    /// **Exact across collections**: a step into a collection no step has read
+    /// yet tries each of its modes, and a later step into it reads the one
+    /// chosen, since a layer reads one mode per collection. Reading every column
+    /// of every other collection instead would refuse chains no layer can walk.
     pub fn would_loop(&self, var: VarId, mode: ModeId, target: VarId) -> bool {
-        let mut at = target;
-        for _ in 0..=self.vars.len() {
-            if at == var {
-                return true;
-            }
-            match self.vars.get(&at).and_then(|v| self.cell_in(v, Some(mode))) {
-                Some(Cell::Alias(next)) => at = *next,
-                _ => return false,
-            }
+        let mut set = vec![mode];
+        self.reaches(target, var, &mut set, 0)
+    }
+
+    fn reaches(&self, at: VarId, goal: VarId, set: &mut Vec<ModeId>, depth: usize) -> bool {
+        if at == goal || depth > self.vars.len() {
+            return true;
         }
-        true
+        let Some(v) = self.vars.get(&at) else {
+            return false;
+        };
+        let columns = self.columns(v);
+        let next = |m: &ModeId| match v.cells.get(m) {
+            Some(Cell::Alias(next)) => Some(*next),
+            _ => None,
+        };
+        // A kit's variable is a collection of its own here: whichever document
+        // mode is in force maps it onto one of its columns.
+        if let Some(m) = columns.iter().find(|m| set.contains(m)) {
+            return next(m).is_some_and(|n| self.reaches(n, goal, set, depth + 1));
+        }
+        columns.iter().any(|m| {
+            let Some(n) = next(m) else { return false };
+            set.push(*m);
+            let hit = self.reaches(n, goal, set, depth + 1);
+            set.pop();
+            hit
+        })
     }
 
     /// Every id in the table, for `reserve_existing_ids`.
     pub(crate) fn ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.modes
+        self.collections
             .iter()
-            .map(|m| m.id.0)
+            .filter(|c| !c.id.is_first())
+            .map(|c| c.id.0)
+            .chain(self.modes().map(|m| m.id.0))
             .chain(self.vars.keys().map(|v| v.0))
             .chain(
                 self.kits
@@ -476,6 +870,51 @@ impl Variables {
                     .flat_map(|k| k.modes.iter().map(|m| m.id.0)),
             )
     }
+}
+
+/// What owns a mode: one of the document's collections, or a kit's collection
+/// by kit id and collection name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeOwner<'a> {
+    Collection(CollectionId),
+    Kit(&'a str, &'a str),
+}
+
+impl Variables {
+    /// What owns `mode`, `None` for a mode the table does not hold.
+    pub fn owner_of(&self, mode: ModeId) -> Option<ModeOwner<'_>> {
+        if let Some(c) = self.collection_of_mode(mode) {
+            return Some(ModeOwner::Collection(c.id));
+        }
+        self.kit_mode_of(mode)
+            .map(|(k, m)| ModeOwner::Kit(k, m.collection.as_str()))
+    }
+}
+
+/// Whether modes `a` and `b` are of one collection — of the document's or a
+/// kit's — so a frame can set only one of them.
+pub fn same_collection(t: &Variables, a: ModeId, b: ModeId) -> bool {
+    a == b || t.owner_of(a).is_some_and(|o| t.owner_of(b) == Some(o))
+}
+
+/// `set` — a frame's modes — with its mode of `owner` replaced by `mode`, or
+/// taken out for `None`; in id order, as [`crate::Node::modes`] keeps them.
+/// What one pick in a frame's mode row writes, with every other collection's
+/// mode kept.
+pub fn with_mode(
+    t: &Variables,
+    set: &[ModeId],
+    owner: ModeOwner<'_>,
+    mode: Option<ModeId>,
+) -> Vec<ModeId> {
+    let mut out: Vec<ModeId> = set
+        .iter()
+        .copied()
+        .filter(|m| t.owner_of(*m) != Some(owner))
+        .chain(mode)
+        .collect();
+    out.sort();
+    out
 }
 
 /// What a fill or a stroke paints with: a brush of its own, or a **colour
@@ -715,9 +1154,16 @@ pub fn binds_styled(vars: &TextVars) -> bool {
 
 /// The kind of variable [`TextVars`] slot `k` binds to.
 pub fn text_slot_kind(k: usize) -> VarKind {
+    text_slot_field(k).kind()
+}
+
+/// The field family [`TextVars`] slot `k` is of.
+pub fn text_slot_field(k: usize) -> Field {
     match k {
-        TEXT_CONTENT | TEXT_FAMILY => VarKind::String,
-        _ => VarKind::Number,
+        TEXT_CONTENT => Field::Content,
+        TEXT_FAMILY => Field::Family,
+        TEXT_WEIGHT => Field::Weight,
+        _ => Field::Type,
     }
 }
 
@@ -969,7 +1415,7 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.opacity = doc.drawn_opacity(id);
         node.opacity_var = None;
     }
-    node.mode = None;
+    node.modes = Vec::new();
     // And its styles, its lists already holding their values (§15 D1062).
     node.styles = Default::default();
     node
@@ -985,6 +1431,19 @@ pub struct CarriedVar {
     /// target's variable of the same origin, never one of the same name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<VarOrigin>,
+    /// The name of the document collection it was in — a paste prefers the
+    /// namesake in the collection of the same name. `None` for a kit's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
+}
+
+/// One mode a copied frame sets, with the name of its collection to map by.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CarriedMode {
+    pub id: ModeId,
+    pub name: String,
+    #[serde(default)]
+    pub collection: String,
 }
 
 /// What a copy carries about the variables its layers read (§15 D1039) — enough
@@ -999,7 +1458,7 @@ pub struct CarriedVar {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Carried {
     pub vars: Vec<CarriedVar>,
-    pub modes: Vec<Mode>,
+    pub modes: Vec<CarriedMode>,
     pub detached: Vec<crate::Node>,
     /// The styles the copied layers are bound to, by name and slot, for the
     /// same rule (§15 D1062, `crate::style::rebind`). A layer's own lists
@@ -1055,14 +1514,21 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
                     name: var.name.clone(),
                     kind: var.kind,
                     origin: var.origin.clone(),
+                    collection: doc.variables().collection_of(v).map(|c| c.name.clone()),
                 });
             }
         }
-        if let Some(m) = n.mode
-            && !out.modes.iter().any(|c| c.id == m)
-            && let Some(mode) = doc.variables().mode(m)
-        {
-            out.modes.push(mode.clone());
+        for &m in &n.modes {
+            if !out.modes.iter().any(|c| c.id == m)
+                && let Some(c) = doc.variables().collection_of_mode(m)
+                && let Some(mode) = c.modes.iter().find(|x| x.id == m)
+            {
+                out.modes.push(CarriedMode {
+                    id: m,
+                    name: mode.name.clone(),
+                    collection: c.name.clone(),
+                });
+            }
         }
         if n.reads_variables() {
             out.detached.push(detached(doc, n.clone()));
@@ -1086,27 +1552,36 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
     out
 }
 
-/// D1038's paste rule for one binding, landing in table `t`: `v` itself where
-/// `t` has it at the kind the copy knew, else `t`'s variable of the same name and
-/// kind, else `None` — the caller detaches. Shared by [`land`] and a property
-/// paste (`build::paste_properties`, §15 D1047), so the two cannot drift.
+/// D1038's paste rule for one binding of `field`, landing in table `t`: `v`
+/// itself where `t` has it at the kind the copy knew, else `t`'s variable of the
+/// same name and kind — in the collection of the same name first — else `None`,
+/// the caller detaching. Either only where its scope takes `field`. Shared by
+/// [`land`] and a property paste (`build::paste_properties`, §15 D1047), so the
+/// two cannot drift.
 ///
 /// **A kit's variable rebinds by its origin, not its name** (§15 D1064): to the
 /// target's copy of the same kit's same variable, else nothing — a kit's
 /// *brand/500* is not the document's *brand/500*, the namespaces being two.
-pub fn rebind(t: &Variables, carried: &[CarriedVar], v: VarId) -> Option<VarId> {
+pub fn rebind(t: &Variables, carried: &[CarriedVar], v: VarId, field: Field) -> Option<VarId> {
     let known = carried.iter().find(|c| c.id == v);
     if let Some(var) = t.get(v)
         && known.is_none_or(|c| c.kind == var.kind)
     {
-        return Some(v);
+        return var.binds(field).then_some(v);
     }
     let c = known?;
     let found = match &c.origin {
         Some(o) => t.by_origin(o.key()),
-        None => t.by_name(&c.name),
+        None => c
+            .collection
+            .as_deref()
+            .and_then(|name| t.collections().iter().find(|x| x.name == name))
+            .and_then(|x| t.by_name_in(x.id, &c.name))
+            .or_else(|| t.by_name(&c.name)),
     };
-    found.filter(|var| var.kind == c.kind).map(|var| var.id)
+    found
+        .filter(|var| var.kind == c.kind && var.binds(field))
+        .map(|var| var.id)
 }
 
 /// `nodes` — copied layers carrying `carried` — rebound for a paste into `doc`
@@ -1134,9 +1609,14 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
         let o = carried.vars.iter().find(|c| c.id == v)?.origin.as_ref()?;
         (Some(o.kit.as_str()) == own).then_some(o.var)
     };
-    let rebind = |v: VarId| match own_var(v) {
-        Some(orig) => t.get(orig).filter(|x| x.origin.is_none()).map(|x| x.id),
-        None => rebind(t, &carried.vars, v).or_else(|| carried.tokens.holds_var(v).then_some(v)),
+    let rebind = |v: VarId, field: Field| match own_var(v) {
+        Some(orig) => t
+            .get(orig)
+            .filter(|x| x.origin.is_none() && x.binds(field))
+            .map(|x| x.id),
+        None => {
+            rebind(t, &carried.vars, v, field).or_else(|| carried.tokens.holds_var(v).then_some(v))
+        }
     };
     let own_style = |s: crate::style::StyleId| {
         let o = carried.styles.iter().find(|c| c.id == s)?.origin.as_ref()?;
@@ -1163,7 +1643,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 };
                 n.styles.set(slot, to);
             }
-            if !n.reads_variables() && n.mode.is_none() {
+            if !n.reads_variables() && n.modes.is_empty() {
                 return n;
             }
             let twin = carried.detached.iter().find(|d| d.id == n.id);
@@ -1181,7 +1661,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             };
             for (i, f) in n.paint.fills.iter_mut().enumerate() {
                 if let BrushSource::Bound { var, alpha } = f.brush {
-                    f.brush = match rebind(var) {
+                    f.brush = match rebind(var, Field::Fill) {
                         Some(var) => BrushSource::Bound { var, alpha },
                         None => twin_brush(true, i).into(),
                     };
@@ -1189,14 +1669,14 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             }
             for (i, s) in n.paint.strokes.iter_mut().enumerate() {
                 if let BrushSource::Bound { var, alpha } = s.brush {
-                    s.brush = match rebind(var) {
+                    s.brush = match rebind(var, Field::Stroke) {
                         Some(var) => BrushSource::Bound { var, alpha },
                         None => twin_brush(false, i).into(),
                     };
                 }
                 // A bound width the same way, its fallback the twin's (§15 D1073).
                 if let Some(v) = s.width_var {
-                    s.width_var = rebind(v);
+                    s.width_var = rebind(v, Field::StrokeWidth);
                     if s.width_var.is_none() {
                         s.width = twin
                             .and_then(|d| d.paint.strokes.get(i))
@@ -1209,7 +1689,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             for (i, e) in n.effects.iter_mut().enumerate() {
                 for slot in 0..4 {
                     if let Some(v) = e.vars[slot] {
-                        e.vars[slot] = rebind(v);
+                        e.vars[slot] = rebind(v, Field::Effect);
                         if e.vars[slot].is_none()
                             && let Some(x) = twin
                                 .and_then(|d| d.effects.get(i))
@@ -1223,7 +1703,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             // A size limit's binding the same way, its fallback the twin's px.
             for k in 0..n.item.limit_vars.len() {
                 if let Some(v) = n.item.limit_vars[k] {
-                    n.item.limit_vars[k] = rebind(v);
+                    n.item.limit_vars[k] = rebind(v, Field::Limits);
                     if n.item.limit_vars[k].is_none()
                         && let Some(t) = twin
                     {
@@ -1245,7 +1725,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                         drawn.map(|r| [r.top_left, r.top_right, r.bottom_right, r.bottom_left]);
                     for (k, slot) in slots.into_iter().enumerate() {
                         if let Some(v) = vars[k] {
-                            vars[k] = rebind(v);
+                            vars[k] = rebind(v, Field::Corner);
                             if vars[k].is_none() {
                                 *slot = fallback.map_or(*slot, |f| f[k]);
                             }
@@ -1264,7 +1744,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 let mut s = d.spacing();
                 for (k, slot) in n.spacing_vars.iter_mut().enumerate() {
                     if let Some(v) = *slot {
-                        *slot = rebind(v);
+                        *slot = rebind(v, Field::Spacing);
                         if slot.is_none() {
                             s[k] = fallback.map_or(s[k], |f| f[k]);
                         }
@@ -1275,7 +1755,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 // Inert with no layout: a rebind has nothing to fall back to.
                 for slot in &mut n.spacing_vars {
                     if let Some(v) = *slot {
-                        *slot = rebind(v);
+                        *slot = rebind(v, Field::Spacing);
                     }
                 }
             }
@@ -1288,7 +1768,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     let slots: [&mut f64; 2] = [&mut size.width, &mut size.height];
                     for (k, slot) in slots.into_iter().enumerate() {
                         if let Some(v) = vars[k] {
-                            vars[k] = rebind(v);
+                            vars[k] = rebind(v, Field::Size);
                             if vars[k].is_none() {
                                 *slot = fallback.map_or(*slot, |f| [f.width, f.height][k]);
                             }
@@ -1303,7 +1783,7 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 let mut vars = n.text_vars;
                 for (k, var) in vars.iter_mut().enumerate() {
                     if let Some(v) = *var {
-                        *var = rebind(v);
+                        *var = rebind(v, text_slot_field(k));
                         if var.is_none()
                             && let Some(t) = twin
                         {
@@ -1316,42 +1796,52 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
             // A visibility's binding the same way, its fallback whether the twin
             // was shown (§15 D1059).
             if let Some(v) = n.visible_var {
-                n.visible_var = rebind(v);
+                n.visible_var = rebind(v, Field::Visible);
                 if n.visible_var.is_none() {
                     n.visible = twin.map_or(n.visible, |t| t.visible);
                 }
             }
             // And an opacity's, its fallback the twin's percentage (§15 D1072).
             if let Some(v) = n.opacity_var {
-                n.opacity_var = rebind(v);
+                n.opacity_var = rebind(v, Field::Opacity);
                 if n.opacity_var.is_none() {
                     n.opacity = twin.map_or(n.opacity, |t| t.opacity);
                 }
             }
             // A kit's mode the copy carries is kept, as its variables are — but
-            // one of `doc`'s own kit is that mode itself, or *Inherit*.
-            let carried_kit = n.mode.and_then(|m| {
-                carried
+            // one of `doc`'s own kit is that mode itself, or *Inherit*. A mode
+            // `doc` lacks maps to its namesake in the collection of the same
+            // name, else in the first, else *Inherit*.
+            let mut modes: Vec<ModeId> = Vec::new();
+            for &m in &n.modes {
+                let carried_kit = carried
                     .tokens
                     .kits
                     .iter()
-                    .find_map(|(k, km)| km.mode(m).map(|x| (k.as_str(), x.from)))
-            });
-            if let (Some(_), Some((k, from))) = (n.mode, carried_kit)
-                && Some(k) == own
-            {
-                n.mode = t.mode(from).map(|x| x.id);
-            } else if let Some(m) = n.mode
-                && !t.has_mode(m)
-                && carried_kit.is_none()
-            {
-                n.mode = carried
-                    .modes
-                    .iter()
-                    .find(|c| c.id == m)
-                    .and_then(|c| t.modes().iter().find(|here| here.name == c.name))
-                    .map(|here| here.id);
+                    .find_map(|(k, km)| km.mode(m).map(|x| (k.as_str(), x.from)));
+                let to = match carried_kit {
+                    Some((k, from)) if Some(k) == own => t.mode(from).map(|x| x.id),
+                    Some(_) => Some(m),
+                    None if t.has_mode(m) => Some(m),
+                    None => carried.modes.iter().find(|c| c.id == m).and_then(|c| {
+                        t.collections()
+                            .iter()
+                            .find(|x| x.name == c.collection)
+                            .unwrap_or(t.first_collection())
+                            .modes
+                            .iter()
+                            .find(|here| here.name == c.name)
+                            .map(|here| here.id)
+                    }),
+                };
+                if let Some(to) = to
+                    && !modes.iter().any(|x| same_collection(t, *x, to))
+                {
+                    modes.push(to);
+                }
             }
+            modes.sort();
+            n.modes = modes;
             n
         })
         .collect()
@@ -1398,25 +1888,119 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
 pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation> {
     use crate::Operation as O;
     let t = doc.variables();
+    let mut ops = detach_ops(doc, vars, &|_| true);
+    for v in t.iter().filter(|v| !vars.contains(&v.id)) {
+        for (mode, cell) in &v.cells {
+            if let Cell::Alias(target) = cell
+                && vars.contains(target)
+            {
+                let Some(cell) = t.resolve(v.id, *mode).map(Cell::from) else {
+                    continue;
+                };
+                ops.push(O::SetVariableCell {
+                    id: v.id,
+                    mode: *mode,
+                    cell,
+                });
+            }
+        }
+    }
+    ops.extend(vars.iter().map(|id| O::RemoveVariable { id: *id }));
+    ops
+}
+
+/// The operations narrowing `var`'s scope to `scope` (`None` every field):
+/// every field of a family it leaves that is bound to `var` detaches to the
+/// value it drew, then the variable takes the scope — one transaction, so a
+/// bound field never sits outside its variable's scope. Empty when `var` is
+/// not the document's own.
+pub fn scope_ops(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Vec<crate::Operation> {
+    let Some(v) = doc.variables().get(var).filter(|v| v.origin.is_none()) else {
+        return Vec::new();
+    };
+    let dropped = |f: Field| scope.is_some_and(|s| !s.contains(f));
+    let mut ops = detach_ops(doc, &[var], &dropped);
+    ops.push(crate::Operation::SetVariable {
+        var: Variable { scope, ..v.clone() },
+    });
+    ops
+}
+
+/// The layers bound to `var` in each family of its kind, in [`Field::ALL`]'s
+/// order — the counts beside a scope's boxes. A style's binding counts as its
+/// users'.
+pub fn users_by_field(doc: &crate::Document, var: VarId) -> Vec<(Field, Vec<NodeId>)> {
+    let Some(kind) = doc.variables().kind_of(var) else {
+        return Vec::new();
+    };
+    Field::of_kind(kind)
+        .map(|f| {
+            let mut ids: Vec<NodeId> = doc
+                .node_map()
+                .values()
+                .filter(|n| binds_in(n, &[var], f))
+                .map(|n| n.id)
+                .collect();
+            ids.sort();
+            (f, ids)
+        })
+        .collect()
+}
+
+/// Whether `n` binds one of `vars` in a field of family `f`.
+fn binds_in(n: &crate::Node, vars: &[VarId], f: Field) -> bool {
+    bound_in(n, f).any(|v| vars.contains(&v))
+}
+
+/// The fields of a style's value a variable in it binds.
+fn style_fields(value: &crate::style::StyleValue) -> &'static [Field] {
+    use crate::style::StyleValue as V;
+    match value {
+        V::Fills(_) => &[Field::Fill],
+        V::Strokes(_) => &[Field::Stroke, Field::StrokeWidth],
+        V::Effects(_) => &[Field::Effect],
+        V::Text(_) => &[],
+        V::Layout(_) => &[Field::Spacing],
+    }
+}
+
+/// The operations detaching every field of a family `on` answers for that is
+/// bound to one of `vars`, each to the value it drew — `remove_ops`' and
+/// `scope_ops`' first half. A style reading one detaches it too, a style's
+/// family being its slot's.
+fn detach_ops(
+    doc: &crate::Document,
+    vars: &[VarId],
+    on: &dyn Fn(Field) -> bool,
+) -> Vec<crate::Operation> {
+    use crate::Operation as O;
+    let t = doc.variables();
     let mut ops = Vec::new();
     let mut ids: Vec<NodeId> = doc
         .node_map()
         .values()
-        .filter(|n| reads(n, vars))
+        .filter(|n| {
+            Field::ALL
+                .into_iter()
+                .any(|f| on(f) && binds_in(n, vars, f))
+        })
         .map(|n| n.id)
         .collect();
     ids.sort();
     for id in ids {
         let n = doc.get(id).expect("listed from the document");
-        let gone = |b: &BrushSource| b.var().is_some_and(|v| vars.contains(&v));
-        if n.paint.fills.iter().any(|f| gone(&f.brush)) {
+        let gone_as =
+            |b: &BrushSource, f: Field| on(f) && b.var().is_some_and(|v| vars.contains(&v));
+        let gone_fill = |b: &BrushSource| gone_as(b, Field::Fill);
+        let gone = |b: &BrushSource| gone_as(b, Field::Stroke);
+        if n.paint.fills.iter().any(|f| gone_fill(&f.brush)) {
             let fills = n
                 .paint
                 .fills
                 .iter()
                 .map(|f| {
                     f.map(|f| crate::Fill {
-                        brush: if gone(&f.brush) {
+                        brush: if gone_fill(&f.brush) {
                             doc.resolve_brush(id, &f.brush).into_owned().into()
                         } else {
                             f.brush.clone()
@@ -1429,7 +2013,10 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
         }
         // And a stroke's width bound to one, detached to its number against the
         // committed table (§15 D1073), in the same list write.
-        let width_gone = |s: &crate::Stroke| s.width_var.is_some_and(|v| vars.contains(&v));
+        let width_gone = |s: &crate::Stroke| {
+            on(Field::StrokeWidth) && s.width_var.is_some_and(|v| vars.contains(&v))
+        };
+        let hit = |v: &Option<VarId>| v.is_some_and(|v| vars.contains(&v));
         if n.paint
             .strokes
             .iter()
@@ -1462,10 +2049,7 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
         }
         // And an effect's numbers bound to one, each detached to its number
         // against the committed table in one list write (§15 D1074).
-        if n.effects
-            .iter()
-            .any(|e| e.vars.iter().flatten().any(|v| vars.contains(v)))
-        {
+        if on(Field::Effect) && n.effects.iter().any(|e| e.vars.iter().any(hit)) {
             let mut effects = n.effects.clone();
             for e in effects.iter_mut() {
                 for slot in 0..4 {
@@ -1481,7 +2065,7 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             ops.push(O::SetEffects { id, effects });
         }
         // A size limit bound to one, detached to its px in one item write.
-        if n.item.limit_vars.iter().flatten().any(|v| vars.contains(v)) {
+        if on(Field::Limits) && n.item.limit_vars.iter().any(hit) {
             let drawn = doc.limits_drawn_in(t, id, n.item);
             let mut item = n.item;
             for k in 0..item.limit_vars.len() {
@@ -1492,8 +2076,9 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             }
             ops.push(O::SetLayoutItem { id, item });
         }
-        if let Some(corner_radii) = n.kind.corner_radii()
-            && n.corner_vars.iter().flatten().any(|v| vars.contains(v))
+        if on(Field::Corner)
+            && let Some(corner_radii) = n.kind.corner_radii()
+            && n.corner_vars.iter().any(hit)
             && let Some(drawn) = doc.resolve_corners(id, corner_radii)
         {
             let mut radii = corner_radii;
@@ -1516,8 +2101,9 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             });
             ops.push(O::SetCornerVars { id, vars: kept });
         }
+        let spacing = on(Field::Spacing) && n.spacing_vars.iter().any(hit);
         if let Some(d) = &n.display
-            && n.spacing_vars.iter().flatten().any(|v| vars.contains(v))
+            && spacing
         {
             let drawn = doc.spacing_drawn_in(t, id, d, n.spacing_vars).spacing();
             let mut s = d.spacing();
@@ -1535,7 +2121,7 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 display: Some(display),
             });
             ops.push(O::SetSpacingVars { id, vars: kept });
-        } else if n.display.is_none() && n.spacing_vars.iter().flatten().any(|v| vars.contains(v)) {
+        } else if n.display.is_none() && spacing {
             // Inert on a node with no layout, and nothing to detach it to: the
             // binding goes, or the removal would leave it dangling.
             let mut kept = n.spacing_vars;
@@ -1546,8 +2132,9 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             }
             ops.push(O::SetSpacingVars { id, vars: kept });
         }
-        if let Some(size) = n.kind.box_size()
-            && n.size_vars.iter().flatten().any(|v| vars.contains(v))
+        if on(Field::Size)
+            && let Some(size) = n.kind.box_size()
+            && n.size_vars.iter().any(hit)
         {
             let drawn = doc
                 .size_drawn_in(t, id, &n.kind, n.size_vars)
@@ -1567,39 +2154,24 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             });
             ops.push(O::SetSizeVars { id, vars: kept });
         }
-        if n.text_vars.iter().flatten().any(|v| vars.contains(v)) {
-            let which = n.text_vars.map(|v| v.is_some_and(|v| vars.contains(&v)));
+        let which: [bool; 7] =
+            std::array::from_fn(|k| on(text_slot_field(k)) && hit(&n.text_vars[k]));
+        if which.iter().any(|x| *x) {
             ops.extend(crate::build::detach_text_ops_in(doc, t, id, which));
         }
-        if n.visible_var.is_some_and(|v| vars.contains(&v)) {
+        if on(Field::Visible) && hit(&n.visible_var) {
             ops.push(O::SetVisible {
                 id,
                 visible: doc.shown_in(t, id),
             });
             ops.push(O::SetVisibleVar { id, var: None });
         }
-        if n.opacity_var.is_some_and(|v| vars.contains(&v)) {
+        if on(Field::Opacity) && hit(&n.opacity_var) {
             ops.push(O::SetOpacity {
                 id,
                 opacity: doc.opacity_drawn_in(t, id, n.opacity, n.opacity_var),
             });
             ops.push(O::SetOpacityVar { id, var: None });
-        }
-    }
-    for v in t.iter().filter(|v| !vars.contains(&v.id)) {
-        for (mode, cell) in &v.cells {
-            if let Cell::Alias(target) = cell
-                && vars.contains(target)
-            {
-                let Some(cell) = t.resolve(v.id, *mode).map(Cell::from) else {
-                    continue;
-                };
-                ops.push(O::SetVariableCell {
-                    id: v.id,
-                    mode: *mode,
-                    cell,
-                });
-            }
         }
     }
     // And a style whose paints read one detaches them too, to the colour they
@@ -1609,14 +2181,15 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
     // In a document with no modes of its own too: a kit's variable resolves in
     // its kit's default there (§15 D1064), and the style must not dangle.
     for s in doc.styles().iter() {
-        if s.value.vars().iter().any(|v| vars.contains(v)) {
+        if style_fields(&s.value).iter().any(|f| on(*f))
+            && s.value.vars().iter().any(|v| vars.contains(v))
+        {
             ops.push(O::SetStyleValue {
                 id: s.id,
                 value: crate::style::detach_vars(&s.value, t, t.default_mode(), vars),
             });
         }
     }
-    ops.extend(vars.iter().map(|id| O::RemoveVariable { id: *id }));
     ops
 }
 
@@ -1624,17 +2197,7 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
 /// *Inherit*, then the mode and its column go. Refused at the commit when it is
 /// the last mode and variables remain.
 pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operation> {
-    let mut frames: Vec<NodeId> = doc
-        .node_map()
-        .values()
-        .filter(|n| n.mode == Some(mode))
-        .map(|n| n.id)
-        .collect();
-    frames.sort();
-    let mut ops: Vec<crate::Operation> = frames
-        .into_iter()
-        .map(|id| crate::Operation::SetMode { id, mode: None })
-        .collect();
+    let mut ops = inherit_ops(doc, &[mode]);
     // And every kit mapping's entry for it (§15 D1064), which would name a mode
     // the document no longer has.
     for (kit, km) in doc.variables().kits() {
@@ -1651,16 +2214,39 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
     ops
 }
 
-/// Move document mode `mode` to `index` of the list — index 0 makes it the
-/// default every unset frame reads. The mode goes and comes back under its own id
-/// with its column, so frames set to it and kit mappings naming it hold. Empty
-/// when `mode` is not a mode or already sits there.
+/// `SetModes` returning every frame set to one of `modes` to *Inherit* for
+/// that mode's collection, in id order, every other mode it sets kept.
+fn inherit_ops(doc: &crate::Document, modes: &[ModeId]) -> Vec<crate::Operation> {
+    let mut frames: Vec<&crate::Node> = doc
+        .node_map()
+        .values()
+        .filter(|n| n.modes.iter().any(|m| modes.contains(m)))
+        .collect();
+    frames.sort_by_key(|n| n.id);
+    frames
+        .into_iter()
+        .map(|n| crate::Operation::SetModes {
+            id: n.id,
+            modes: n
+                .modes
+                .iter()
+                .copied()
+                .filter(|m| !modes.contains(m))
+                .collect(),
+        })
+        .collect()
+}
+
+/// Move document mode `mode` to `index` of its collection's list — index 0
+/// makes it the default every unset frame reads. The mode goes and comes back
+/// under its own id with its column, so frames set to it and kit mappings
+/// naming it hold. Empty when `mode` is not a mode or already sits there.
 pub fn move_mode_ops(doc: &crate::Document, mode: ModeId, index: usize) -> Vec<crate::Operation> {
     let t = doc.variables();
-    let Some(at) = t.mode_index(mode) else {
+    let (Some(c), Some(at)) = (t.collection_of_mode(mode), t.mode_index(mode)) else {
         return Vec::new();
     };
-    let index = index.min(t.modes.len() - 1);
+    let index = index.min(c.modes.len() - 1);
     if at == index {
         return Vec::new();
     }
@@ -1671,7 +2257,8 @@ pub fn move_mode_ops(doc: &crate::Document, mode: ModeId, index: usize) -> Vec<c
     vec![
         crate::Operation::RemoveMode { id: mode },
         crate::Operation::AddMode {
-            mode: t.modes[at].clone(),
+            collection: c.id,
+            mode: c.modes[at].clone(),
             index,
             cells,
         },
@@ -1682,7 +2269,7 @@ pub fn move_mode_ops(doc: &crate::Document, mode: ModeId, index: usize) -> Vec<c
 pub fn frames_set_to(doc: &crate::Document, mode: ModeId) -> usize {
     doc.node_map()
         .values()
-        .filter(|n| n.mode == Some(mode))
+        .filter(|n| n.modes.contains(&mode))
         .count()
 }
 
@@ -1699,14 +2286,15 @@ pub fn copy_mode_ops(
     index: usize,
 ) -> Vec<crate::Operation> {
     let t = doc.variables();
-    if t.mode(from).is_none() {
+    let Some(c) = t.collection_of_mode(from) else {
         return Vec::new();
-    }
+    };
     let cells = t
         .iter()
         .filter_map(|v| v.cells.get(&from).map(|c| (v.id, c.clone())))
         .collect();
     let mut ops = vec![crate::Operation::AddMode {
+        collection: c.id,
         mode: Mode {
             id,
             name: name.into(),
@@ -1714,7 +2302,7 @@ pub fn copy_mode_ops(
         index,
         cells,
     }];
-    ops.extend(keep_kit_columns(t, id, name, |kit| {
+    ops.extend(keep_kit_columns(t, c.id, id, name, |kit| {
         t.kit_mode(kit, Some(from))
     }));
     ops
@@ -1726,6 +2314,9 @@ pub fn copy_mode_ops(
 /// mode, it does not repoint what its layers draw.
 pub fn rename_mode_ops(doc: &crate::Document, mode: ModeId, name: &str) -> Vec<crate::Operation> {
     let t = doc.variables();
+    let Some(c) = t.collection_of_mode(mode) else {
+        return Vec::new();
+    };
     if t.mode(mode).is_none_or(|m| m.name == name) {
         return Vec::new();
     }
@@ -1733,31 +2324,38 @@ pub fn rename_mode_ops(doc: &crate::Document, mode: ModeId, name: &str) -> Vec<c
         id: mode,
         name: name.into(),
     }];
-    ops.extend(keep_kit_columns(t, mode, name, |kit| {
+    ops.extend(keep_kit_columns(t, c.id, mode, name, |kit| {
         t.kit_mode(kit, Some(mode))
     }));
     ops
 }
 
-/// `SetKitModes` giving document mode `mode`, named `name`, a mapping entry to
-/// `reads(kit)` in every kit where the name alone would map it elsewhere.
+/// `SetKitModes` giving document mode `mode` of collection `c`, named `name`, a
+/// mapping entry to `reads(kit)` in every kit where the name alone would map it
+/// elsewhere. Nothing when `c` is not the collection kits map from.
 fn keep_kit_columns(
     t: &Variables,
+    c: CollectionId,
     mode: ModeId,
     name: &str,
     reads: impl Fn(&str) -> Option<ModeId>,
 ) -> Vec<crate::Operation> {
     let mut ops = Vec::new();
     for (kit, km) in &t.kits {
+        // Only a kit whose first collection maps from `c` reads `reads`'
+        // column: `kit_mode` answers for that one.
+        let first = km.modes.first().map_or("", |m| m.collection.as_str());
+        if t.kit_onto(first).is_none_or(|onto| onto.id != c) {
+            continue;
+        }
         let Some(want) = reads(kit) else { continue };
         if km.map.get(&mode) == Some(&want) {
             continue;
         }
         let by_name = km
-            .modes
-            .iter()
+            .modes_in(first)
             .find(|x| x.name == name)
-            .or(km.modes.first())
+            .or_else(|| km.modes_in(first).next())
             .map(|x| x.id);
         if by_name == Some(want) && !km.map.contains_key(&mode) {
             continue;
@@ -1772,6 +2370,203 @@ fn keep_kit_columns(
     ops
 }
 
+/// The name *New collection* gives a collection's first mode.
+pub const FIRST_MODE_NAME: &str = "Mode 1";
+
+/// The modes a new variable of collection `c` takes a cell in, with the
+/// `AddMode` that gives `c` its first, `first_mode` named [`FIRST_MODE_NAME`],
+/// when it has none — what every door that files a value into a variable
+/// starts with. Both empty when `c` is not a collection.
+pub fn columns_for_new(
+    t: &Variables,
+    c: CollectionId,
+    first_mode: ModeId,
+) -> (Vec<crate::Operation>, Vec<ModeId>) {
+    match t.collection(c) {
+        None => (Vec::new(), Vec::new()),
+        Some(col) if col.modes.is_empty() => (
+            vec![crate::Operation::AddMode {
+                collection: c,
+                mode: Mode {
+                    id: first_mode,
+                    name: FIRST_MODE_NAME.into(),
+                },
+                index: 0,
+                cells: Vec::new(),
+            }],
+            vec![first_mode],
+        ),
+        Some(col) => (Vec::new(), col.modes.iter().map(|m| m.id).collect()),
+    }
+}
+
+/// *New collection*: collection `id` named `name` at `index` of the list, with
+/// one mode, `mode`, named [`FIRST_MODE_NAME`].
+pub fn new_collection_ops(
+    id: CollectionId,
+    mode: ModeId,
+    name: &str,
+    index: usize,
+) -> Vec<crate::Operation> {
+    vec![crate::Operation::AddCollection {
+        collection: Collection {
+            id,
+            name: name.into(),
+            modes: vec![Mode {
+                id: mode,
+                name: FIRST_MODE_NAME.into(),
+            }],
+        },
+        index,
+    }]
+}
+
+/// *Delete collection…*: its variables go as [`remove_ops`] deletes them, every
+/// user detached to the value it drew; every frame set to one of its modes
+/// returns to *Inherit* for it, every kit mapping entry naming one goes; then
+/// the collection. One transaction. Empty for the last collection, which
+/// cannot go.
+pub fn remove_collection_ops(doc: &crate::Document, c: CollectionId) -> Vec<crate::Operation> {
+    let t = doc.variables();
+    let Some(col) = t.collection(c).filter(|_| t.collections.len() > 1) else {
+        return Vec::new();
+    };
+    let vars: Vec<VarId> = t.of_collection(c).map(|v| v.id).collect();
+    let modes: Vec<ModeId> = col.modes.iter().map(|m| m.id).collect();
+    let mut ops = remove_ops(doc, &vars);
+    ops.extend(inherit_ops(doc, &modes));
+    for (kit, km) in t.kits() {
+        if km.map.keys().any(|m| modes.contains(m)) {
+            let mut next = km.clone();
+            next.map.retain(|m, _| !modes.contains(m));
+            ops.push(crate::Operation::SetKitModes {
+                kit: kit.clone(),
+                modes: Some(next),
+            });
+        }
+    }
+    ops.push(crate::Operation::RemoveCollection { id: c });
+    ops
+}
+
+/// What *Delete collection…* says before it goes: its variables, the layers
+/// bound to them, and the frames set to one of its modes.
+pub fn collection_reach(doc: &crate::Document, c: CollectionId) -> (usize, usize, usize) {
+    let t = doc.variables();
+    let vars: Vec<VarId> = t.of_collection(c).map(|v| v.id).collect();
+    let layers = doc.node_map().values().filter(|n| reads(n, &vars)).count();
+    let frames = t.collection(c).map_or(0, |col| {
+        doc.node_map()
+            .values()
+            .filter(|n| n.modes.iter().any(|m| col.has(*m)))
+            .count()
+    });
+    (vars.len(), layers, frames)
+}
+
+/// *Duplicate collection*: a copy of `c` named `name` after it, its modes and
+/// variables under fresh ids from `ids`, each copy's cells its source's — an
+/// alias to a variable of `c` pointing at that one's copy, one elsewhere kept.
+/// Empty when `c` is not a collection.
+pub fn duplicate_collection_ops(
+    doc: &crate::Document,
+    c: CollectionId,
+    name: &str,
+    ids: &mut crate::IdSource,
+) -> Vec<crate::Operation> {
+    let t = doc.variables();
+    let (Some(col), Some(at)) = (t.collection(c), t.collection_index(c)) else {
+        return Vec::new();
+    };
+    let modes: BTreeMap<ModeId, ModeId> =
+        col.modes.iter().map(|m| (m.id, ids.mint_mode())).collect();
+    let sources: Vec<&Variable> = t.of_collection(c).collect();
+    let copies: BTreeMap<VarId, VarId> = sources.iter().map(|v| (v.id, ids.mint_var())).collect();
+    let mut ops = vec![crate::Operation::AddCollection {
+        collection: Collection {
+            id: ids.mint_collection(),
+            name: name.into(),
+            modes: col
+                .modes
+                .iter()
+                .map(|m| Mode {
+                    id: modes[&m.id],
+                    name: m.name.clone(),
+                })
+                .collect(),
+        },
+        index: at + 1,
+    }];
+    for v in sources {
+        let cells = v
+            .cells
+            .iter()
+            .map(|(m, cell)| {
+                let cell = match cell {
+                    Cell::Alias(to) => Cell::Alias(copies.get(to).copied().unwrap_or(*to)),
+                    other => other.clone(),
+                };
+                (modes[m], cell)
+            })
+            .collect();
+        ops.push(crate::Operation::AddVariable {
+            var: Variable {
+                id: copies[&v.id],
+                cells,
+                forked: None,
+                ..v.clone()
+            },
+        });
+    }
+    ops
+}
+
+/// *Move to*: `vars` (the document's own) into collection `to`, each cell of
+/// `to`'s modes taken from the source's mode of the same name, else from the
+/// source's default. The ids stay, so bindings and aliases keep pointing at
+/// them, and nothing draws differently in a frame whose modes match. `Err` with
+/// the first name `to` already holds; a variable already in `to` is passed by.
+pub fn move_ops(
+    doc: &crate::Document,
+    vars: &[VarId],
+    to: CollectionId,
+) -> Result<Vec<crate::Operation>, String> {
+    let t = doc.variables();
+    let Some(target) = t.collection(to) else {
+        return Ok(Vec::new());
+    };
+    let mut ops = Vec::new();
+    let mut taken: Vec<&str> = t.of_collection(to).map(|o| o.name.as_str()).collect();
+    for &id in vars {
+        let Some(v) = t.get(id).filter(|v| v.origin.is_none()) else {
+            continue;
+        };
+        let Some(from) = t.collection_of(id).filter(|c| c.id != to) else {
+            continue;
+        };
+        if taken.contains(&v.name.as_str()) {
+            return Err(v.name.clone());
+        }
+        taken.push(&v.name);
+        let cells = target
+            .modes
+            .iter()
+            .filter_map(|m| {
+                let src = from
+                    .modes
+                    .iter()
+                    .find(|s| s.name == m.name)
+                    .or(from.modes.first())?;
+                Some((m.id, v.cells.get(&src.id)?.clone()))
+            })
+            .collect();
+        ops.push(crate::Operation::SetVariable {
+            var: Variable { cells, ..v.clone() },
+        });
+    }
+    Ok(ops)
+}
+
 /// The group a variable's name puts it in — everything before its last `/` —
 /// and its leaf. *brand/primary/500* is in *brand/primary*, named *500*; a name
 /// with no slash is in the unnamed top group.
@@ -1782,16 +2577,18 @@ pub fn split_name(name: &str) -> (&str, &str) {
     }
 }
 
-/// The renames that move every variable in group `from` (and its subgroups) to
+/// The renames that move every variable of collection `c` in group `from` (and its subgroups) to
 /// `to` — *Rename group*, the bindings following because they name ids. `Err`
 /// with the first name that would land on a variable already there: merging two
 /// groups is not ruled, so a taken name is refused, as a single rename's is.
 pub fn rename_group_ops(
     doc: &crate::Document,
+    c: CollectionId,
     from: &str,
     to: &str,
 ) -> Result<Vec<crate::Operation>, String> {
     let t = doc.variables();
+    let local = || t.of_collection(c);
     let moved = |name: &str| -> Option<String> {
         if name.starts_with(&format!("{from}/")) {
             let rest = &name[from.len() + 1..];
@@ -1804,17 +2601,17 @@ pub fn rename_group_ops(
             None
         }
     };
-    // The document's own groups only: a kit's variables are read-only here
-    // (§15 D1064), and their names a namespace of their own.
+    // The document's own groups only, in one collection: a kit's variables are
+    // read-only here (§15 D1064), and each collection's names a namespace of
+    // their own.
     let mut ops = Vec::new();
-    let moving: Vec<VarId> = t
-        .local()
+    let moving: Vec<VarId> = local()
         .filter(|v| moved(&v.name).is_some())
         .map(|v| v.id)
         .collect();
-    for v in t.local() {
+    for v in local() {
         let Some(next) = moved(&v.name) else { continue };
-        if t.local().any(|o| o.name == next && !moving.contains(&o.id)) {
+        if local().any(|o| o.name == next && !moving.contains(&o.id)) {
             return Err(next);
         }
         ops.push(crate::Operation::SetVariableName {
@@ -1858,23 +2655,46 @@ pub enum VarRule {
     BadKitModes(String),
     #[error("node {0:?} is in the vault and bound to a variable of the document's own")]
     InVault(NodeId),
+    #[error("the document has no collection")]
+    NoCollection,
+    #[error("collection {0:?} appears twice")]
+    DuplicateCollection(CollectionId),
+    #[error("two collections are named {0:?}")]
+    DuplicateCollectionName(String),
+    #[error("{0:?} is a boolean and has a scope")]
+    BooleanScope(VarId),
+    #[error("node {0:?} binds a variable outside its scope")]
+    OutOfScope(NodeId),
+    #[error("node {0:?} sets two modes of one collection")]
+    TwoModes(NodeId),
 }
 
 /// The table's own rules, without the bindings.
 ///
 /// A kit's variable (§15 D1064) has a cell in every mode **of its kit** and no
 /// other, aliases only a kit's variable (its own kit's or another's), and is named uniquely among
-/// its kit's; the document's own are held to the document's modes and named
-/// uniquely among themselves. A kit's modes and the document's never share an
-/// id, and a mapping maps a mode of the document onto a mode of its kit.
+/// its kit's; one of the document's own has a cell in every mode of **one** of
+/// its collections and no other, and is named uniquely in it. A kit's modes and
+/// the document's never share an id, and a mapping maps a mode of the document
+/// onto a mode of its kit. The collections are at least one, their ids and
+/// names each unique. Only a number, a colour or a string has a scope.
 pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
-    if t.modes.is_empty() && t.local().next().is_some() {
-        return Err(VarRule::NoModes);
+    if t.collections.is_empty() {
+        return Err(VarRule::NoCollection);
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    let mut cnames = std::collections::BTreeSet::new();
+    for c in &t.collections {
+        if !ids.insert(c.id) {
+            return Err(VarRule::DuplicateCollection(c.id));
+        }
+        if !cnames.insert(c.name.as_str()) {
+            return Err(VarRule::DuplicateCollectionName(c.name.clone()));
+        }
     }
     let mut seen = std::collections::BTreeSet::new();
     let every = t
-        .modes
-        .iter()
+        .modes()
         .map(|m| m.id)
         .chain(t.kits.values().flat_map(|k| k.modes.iter().map(|m| m.id)));
     for m in every {
@@ -1894,15 +2714,22 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
     }
     let mut names = std::collections::BTreeSet::new();
     for v in t.vars.values() {
-        if !names.insert((v.kit(), v.name.as_str())) {
+        if v.kind == VarKind::Boolean && v.scope.is_some() {
+            return Err(VarRule::BooleanScope(v.id));
+        }
+        let collection = match v.kit() {
+            None => Some(t.collection_of(v.id).ok_or(VarRule::NoModes)?.id),
+            Some(_) => None,
+        };
+        if !names.insert((v.kit(), collection, t.kit_collection_of(v), v.name.as_str())) {
             return Err(VarRule::DuplicateName(v.name.clone()));
         }
         let columns: Vec<ModeId> = match v.kit() {
-            None => t.modes.iter().map(|m| m.id).collect(),
+            None => t.columns(v),
             // A kit with no modes has no column to read: every read would
             // fall back to transparent or 0.
             Some(kit) => match t.kits.get(kit) {
-                Some(km) if !km.modes.is_empty() => km.modes.iter().map(|m| m.id).collect(),
+                Some(km) if !km.modes.is_empty() => t.columns(v),
                 _ => return Err(VarRule::NoKit(v.id)),
             },
         };
@@ -1983,7 +2810,7 @@ pub(crate) fn check<'a>(
                 .chain(n.visible_var)
                 .chain(n.opacity_var)
                 .any(own);
-            if reads_own || n.mode.is_some_and(|m| t.mode(m).is_some()) {
+            if reads_own || n.modes.iter().any(|m| t.mode(*m).is_some()) {
                 return Err(VarRule::InVault(n.id));
             }
         }
@@ -2071,17 +2898,62 @@ pub(crate) fn check<'a>(
         {
             return Err(VarRule::BadBinding(n.id));
         }
-        // A frame sets a mode of the document's or a kit's; a page's root only
-        // one of the document's own, since no kit's variables live on a page.
-        let page = matches!(n.kind, crate::NodeKind::Root) && !in_vault(n.id);
-        if let Some(m) = n.mode
-            && !(matches!(n.kind, crate::NodeKind::Artboard { .. }) && t.has_mode(m)
-                || page && t.mode(m).is_some())
+        // And every binding inside its variable's scope, the kinds being right.
+        if Field::ALL
+            .into_iter()
+            .any(|f| bound_in(n, f).any(|v| t.get(v).is_some_and(|v| !v.binds(f))))
         {
-            return Err(VarRule::BadMode(n.id));
+            return Err(VarRule::OutOfScope(n.id));
+        }
+        // A frame sets modes of the document's or a kit's; a page's root only
+        // the document's own, since no kit's variables live on a page. One per
+        // collection.
+        let page = matches!(n.kind, crate::NodeKind::Root) && !in_vault(n.id);
+        for (i, &m) in n.modes.iter().enumerate() {
+            if !(matches!(n.kind, crate::NodeKind::Artboard { .. }) && t.has_mode(m)
+                || page && t.mode(m).is_some())
+            {
+                return Err(VarRule::BadMode(n.id));
+            }
+            if n.modes[..i].iter().any(|x| same_collection(t, *x, m)) {
+                return Err(VarRule::TwoModes(n.id));
+            }
         }
     }
     Ok(())
+}
+
+/// The variables `n` binds in fields of family `f`.
+pub fn bound_in(n: &crate::Node, f: Field) -> impl Iterator<Item = VarId> + '_ {
+    let list: Vec<VarId> = match f {
+        Field::Fill => n.paint.fills.iter().filter_map(|x| x.brush.var()).collect(),
+        Field::Stroke => n
+            .paint
+            .strokes
+            .iter()
+            .filter_map(|x| x.brush.var())
+            .collect(),
+        Field::StrokeWidth => n.paint.strokes.iter().filter_map(|x| x.width_var).collect(),
+        Field::Effect => n
+            .effects
+            .iter()
+            .flat_map(|e| e.vars.iter().flatten().copied())
+            .collect(),
+        Field::Limits => n.item.limit_vars.iter().flatten().copied().collect(),
+        Field::Corner => n.corner_vars.iter().flatten().copied().collect(),
+        Field::Spacing => n.spacing_vars.iter().flatten().copied().collect(),
+        Field::Size => n.size_vars.iter().flatten().copied().collect(),
+        Field::Visible => n.visible_var.into_iter().collect(),
+        Field::Opacity => n.opacity_var.into_iter().collect(),
+        Field::Type | Field::Weight | Field::Content | Field::Family => n
+            .text_vars
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| text_slot_field(*k) == f)
+            .filter_map(|(_, v)| *v)
+            .collect(),
+    };
+    list.into_iter()
 }
 
 #[cfg(test)]
@@ -2096,16 +2968,20 @@ mod tests {
         let (light, dark) = (ModeId(id(1)), ModeId(id(2)));
         let (brand, accent) = (VarId(id(3)), VarId(id(4)));
         let mut t = Variables {
-            modes: vec![
-                Mode {
-                    id: light,
-                    name: "Light".into(),
-                },
-                Mode {
-                    id: dark,
-                    name: "Dark".into(),
-                },
-            ],
+            collections: vec![Collection {
+                id: CollectionId::FIRST,
+                name: FIRST_COLLECTION_NAME.into(),
+                modes: vec![
+                    Mode {
+                        id: light,
+                        name: "Light".into(),
+                    },
+                    Mode {
+                        id: dark,
+                        name: "Dark".into(),
+                    },
+                ],
+            }],
             vars: BTreeMap::new(),
             kits: Default::default(),
         };
@@ -2120,6 +2996,7 @@ mod tests {
                     (dark, Cell::Color(Color::BLACK)),
                 ]
                 .into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -2136,6 +3013,7 @@ mod tests {
                     (dark, Cell::Color(Color::WHITE)),
                 ]
                 .into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -2230,6 +3108,7 @@ mod tests {
                     id: day,
                     name: "Day".into(),
                     from: day,
+                    collection: String::new(),
                 }],
                 map: Default::default(),
             },

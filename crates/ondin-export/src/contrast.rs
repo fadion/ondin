@@ -22,6 +22,7 @@
 
 use ondin_core::kurbo::Rect;
 use ondin_core::peniko::Color;
+use ondin_core::variable::{self, CollectionId};
 use ondin_core::{
     Brush, CharAttr, Document, ModeId, NodeId, NodeKind, Operation, Resolved, Transaction, Value,
 };
@@ -286,39 +287,48 @@ pub fn check_with(
 /// redo them for every few.
 pub struct Prepared {
     page: NodeId,
-    /// Whether the document names its modes (it has several).
-    named: bool,
-    modes: Vec<(Document, Resolved, ImageStore)>,
+    /// The page in each mode checked, with the collection that mode is of —
+    /// `None` for the one document of a page no mode changes.
+    modes: Vec<(Option<CollectionId>, Document, Resolved, ImageStore)>,
 }
 
 impl Prepared {
-    /// `doc`'s `page`, in each of its modes.
+    /// `doc`'s `page`, in each mode of every collection with two or more that
+    /// holds a variable — a colour, or a visibility or size that makes a layer
+    /// a subject in one mode only — one collection at a time, every other as
+    /// the page sets it, since colours rarely vary along two.
     pub fn new(doc: &Document, page: NodeId) -> Self {
-        let docs: Vec<Document> = match doc.variables().modes() {
-            [] | [_] => vec![doc.clone()],
-            modes => modes.iter().map(|m| in_mode(doc, page, m.id)).collect(),
-        };
+        let t = doc.variables();
+        let mut docs: Vec<(Option<CollectionId>, Document)> = Vec::new();
+        for c in t.collections().iter().filter(|c| c.modes.len() > 1) {
+            if t.of_collection(c.id).next().is_none() {
+                continue;
+            }
+            for m in &c.modes {
+                docs.push((Some(c.id), in_mode(doc, page, c.id, m.id)));
+            }
+        }
+        if docs.is_empty() {
+            docs.push((None, doc.clone()));
+        }
         let modes = docs
             .into_iter()
-            .map(|d| {
+            .map(|(c, d)| {
                 let res = Resolved::rebuild(&d);
                 let mut images = ImageStore::new();
                 images.prepare(&d);
-                (d, res, images)
+                (c, d, res, images)
             })
             .collect();
-        Self {
-            page,
-            named: doc.variables().modes().len() > 1,
-            modes,
-        }
+        Self { page, modes }
     }
 
     /// [`check_with`] on the prepared page.
     pub fn check(&self, options: Options, only: Option<&[NodeId]>) -> Report {
-        let (page, named) = (self.page, self.named);
+        let page = self.page;
         let mut report = Report::default();
-        for (d, res, images) in &self.modes {
+        for (cycled, d, res, images) in &self.modes {
+            let named = *cycled;
             // Chosen in each mode: a bound visibility or size can make a layer a
             // subject in one mode only.
             let subjects: Vec<NodeId> = subjects(d, res, page, options.non_text)
@@ -352,8 +362,15 @@ impl Prepared {
             .skipped
             .retain(|s| !report.findings.iter().any(|f| f.id == s.id));
         let order = |m: Option<ModeId>| {
-            let vars = self.modes.first().map(|(d, ..)| d.variables());
-            m.and_then(|m| vars?.mode_index(m)).unwrap_or(usize::MAX)
+            let vars = self.modes.first().map(|(_, d, ..)| d.variables());
+            m.and_then(|m| {
+                let t = vars?;
+                Some((
+                    t.collection_index(t.collection_of_mode(m)?.id)?,
+                    t.mode_index(m)?,
+                ))
+            })
+            .unwrap_or((usize::MAX, usize::MAX))
         };
         for f in &mut report.findings {
             f.samples.sort_by_key(|s| order(s.mode));
@@ -363,22 +380,22 @@ impl Prepared {
     }
 }
 
-/// `doc` with every top-level frame of `page` that sets no mode set to `mode`.
-fn in_mode(doc: &Document, page: NodeId, mode: ModeId) -> Document {
+/// `doc` with every top-level frame of `page` that sets no mode of collection
+/// `c` set to `mode`, the modes it sets of others kept.
+fn in_mode(doc: &Document, page: NodeId, c: CollectionId, mode: ModeId) -> Document {
     let mut d = doc.clone();
+    let t = doc.variables();
+    let owner = variable::ModeOwner::Collection(c);
     let ops: Vec<Operation> = doc
         .get(page)
         .map(|p| p.children().to_vec())
         .unwrap_or_default()
         .into_iter()
-        .filter(|id| {
-            doc.get(*id).is_some_and(|n| {
-                matches!(n.kind(), NodeKind::Artboard { .. }) && n.mode().is_none()
-            })
-        })
-        .map(|id| Operation::SetMode {
-            id,
-            mode: Some(mode),
+        .filter_map(|id| doc.get(id))
+        .filter(|n| matches!(n.kind(), NodeKind::Artboard { .. }) && n.mode_of(t, owner).is_none())
+        .map(|n| Operation::SetModes {
+            id: n.id(),
+            modes: variable::with_mode(t, n.modes(), owner, Some(mode)),
         })
         .collect();
     // A refusal leaves the document as drawn, which is still a mode to check.
@@ -393,7 +410,7 @@ fn check_one(
     page: NodeId,
     options: Options,
     subjects: &[NodeId],
-    named: bool,
+    named: Option<CollectionId>,
 ) -> Report {
     let level = options.level;
     let mut report = Report::default();
@@ -504,9 +521,8 @@ fn check_one(
                 continue;
             }
         };
-        let mode = doc.mode_at(id);
+        let mode = named.and_then(|c| doc.mode_at(id, c));
         let name = mode
-            .filter(|_| named)
             .and_then(|m| doc.variables().mode(m))
             .map(|m| m.name.clone());
         report.findings.push(Finding {

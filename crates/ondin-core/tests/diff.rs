@@ -99,6 +99,7 @@ fn fixture() -> F {
             link: Some(label),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -107,6 +108,7 @@ fn fixture() -> F {
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dark,
                 name: "Dark".into(),
@@ -120,6 +122,7 @@ fn fixture() -> F {
                 name: "brand/500".into(),
                 kind: VarKind::Color,
                 cells: [(light, Cell::Color(RED)), (dark, Cell::Color(BLUE))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -337,12 +340,7 @@ fn a_variable_cell_reads_by_name() {
 fn a_document_change_names_its_subject() {
     let mut f = fixture();
     let var = f.ids.mint_var();
-    let cells = f
-        .doc
-        .variables()
-        .modes()
-        .iter()
-        .map(|m| (m.id, Cell::Color(RED)));
+    let cells = f.doc.variables().modes().map(|m| (m.id, Cell::Color(RED)));
     let b = edited(
         &f,
         vec![
@@ -357,6 +355,7 @@ fn a_document_change_names_its_subject() {
                     name: "brand / 600".into(),
                     kind: VarKind::Color,
                     cells: cells.collect(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -465,7 +464,7 @@ fn add_page(id: NodeId, index: usize, name: &str) -> Operation {
         name: name.into(),
         ground: Some(Color::from_rgba8(255, 255, 255, 255)),
         draft: false,
-        mode: None,
+        modes: Vec::new(),
     }
 }
 

@@ -92,12 +92,25 @@ pub(crate) struct PublishedDto {
     pub name: Option<String>,
 }
 
-/// The variables table on disk: the modes in their order (the first is the
-/// default) and the variables sorted by id (invariant 9), cells keyed by mode id.
+/// The variables table on disk: the first collection's modes in their order
+/// (the first is the default), the other collections, and the variables sorted
+/// by id (invariant 9), cells keyed by mode id.
+///
+/// **The first collection is the root's own fields**, its id and name written
+/// only when they are not [`crate::variable::CollectionId::FIRST`] and
+/// [`crate::variable::FIRST_COLLECTION_NAME`], so a document with one
+/// collection is the bytes it was before collections.
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct VariablesDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<crate::variable::CollectionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modes: Vec<crate::variable::Mode>,
+    /// The collections after the first, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<crate::variable::Collection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vars: Vec<crate::variable::Variable>,
     /// The kits' modes and mappings, by kit id (§15 D1064); a `BTreeMap`, so in
@@ -108,13 +121,23 @@ pub(crate) struct VariablesDto {
 
 impl VariablesDto {
     fn is_empty(&self) -> bool {
-        self.modes.is_empty() && self.vars.is_empty() && self.kits.is_empty()
+        self.collection.is_none()
+            && self.name.is_none()
+            && self.modes.is_empty()
+            && self.collections.is_empty()
+            && self.vars.is_empty()
+            && self.kits.is_empty()
     }
 
     fn from_table(t: &crate::variable::Variables) -> Self {
+        let first = t.first_collection();
         // `iter` is in id order already — a `BTreeMap` — so this is the sort.
         Self {
-            modes: t.modes().to_vec(),
+            collection: (!first.id.is_first()).then_some(first.id),
+            name: (first.name != crate::variable::FIRST_COLLECTION_NAME)
+                .then(|| first.name.clone()),
+            modes: first.modes.clone(),
+            collections: t.collections()[1..].to_vec(),
             vars: t.iter().cloned().collect(),
             kits: t.kits().clone(),
         }
@@ -130,8 +153,17 @@ impl VariablesDto {
                 return Err(IoError::Integrity(format!("duplicate variable id {id:?}")));
             }
         }
-        Ok(crate::variable::Variables {
+        let first = crate::variable::Collection {
+            id: self
+                .collection
+                .unwrap_or(crate::variable::CollectionId::FIRST),
+            name: self
+                .name
+                .unwrap_or_else(|| crate::variable::FIRST_COLLECTION_NAME.into()),
             modes: self.modes,
+        };
+        Ok(crate::variable::Variables {
+            collections: std::iter::once(first).chain(self.collections).collect(),
             vars,
             kits: self.kits,
         })
@@ -308,9 +340,14 @@ pub(crate) struct NodeDto {
     /// outside the vault — which `crate::kit::check` holds on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<OriginDto>,
-    /// The mode a frame sets (§5.3f), absent to inherit. New in v7.
+    /// The mode a frame sets (§5.3f) when it sets one, absent to inherit. New in
+    /// v7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<crate::variable::ModeId>,
+    /// The modes a frame sets when it sets more than one, each of another
+    /// collection, in id order; `mode` is absent then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<crate::variable::ModeId>,
     /// A rectangle's corner bindings (§15 D1039), absent when none is bound.
     /// New in v7.
     #[serde(default, skip_serializing_if = "no_corner_vars")]
@@ -434,7 +471,14 @@ impl NodeDto {
                 version: o.version,
                 name: o.name.clone(),
             }),
-            mode: n.mode(),
+            mode: match n.modes() {
+                [one] => Some(*one),
+                _ => None,
+            },
+            modes: match n.modes() {
+                [_] => Vec::new(),
+                many => many.to_vec(),
+            },
             corner_vars: n.corner_vars(),
             spacing_vars: n.spacing_vars(),
             visible_var: n.visible_var(),
@@ -542,7 +586,12 @@ impl NodeDto {
                     })
                 })
                 .transpose()?,
-            mode: self.mode,
+            modes: {
+                let mut m: Vec<_> = self.mode.into_iter().chain(self.modes).collect();
+                m.sort();
+                m.dedup();
+                m
+            },
             corner_vars: self.corner_vars,
             spacing_vars: self.spacing_vars,
             visible_var: self.visible_var,

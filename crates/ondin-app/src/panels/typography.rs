@@ -8923,6 +8923,7 @@ mod char_valve_tests {
         let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -8936,6 +8937,7 @@ mod char_valve_tests {
                     name: "type/size".into(),
                     kind: ondin_core::VarKind::Number,
                     cells: [(mode, ondin_core::Cell::Number(32.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -9262,6 +9264,7 @@ mod skip_ink_tests {
         let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -9275,6 +9278,7 @@ mod skip_ink_tests {
                     name: "copy/cta".into(),
                     kind: VarKind::String,
                     cells: [(mode, Cell::String("Sign in".into()))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

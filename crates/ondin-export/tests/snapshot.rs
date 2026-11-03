@@ -642,6 +642,7 @@ fn a_bound_field_reports_its_drawn_value() {
                 name: name.into(),
                 kind,
                 cells: cells.into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -650,6 +651,7 @@ fn a_bound_field_reports_its_drawn_value() {
     let red = ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255);
     let blue = ondin_core::peniko::Color::from_rgba8(0, 0, 255, 255);
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -688,9 +690,9 @@ fn a_bound_field_reports_its_drawn_value() {
                 VarKind::Boolean,
                 [(a, Cell::Boolean(true)), (b, Cell::Boolean(false))],
             ),
-            Operation::SetMode {
+            Operation::SetModes {
                 id: f.artboard,
-                mode: Some(b),
+                modes: vec![b],
             },
         ]))
         .unwrap();

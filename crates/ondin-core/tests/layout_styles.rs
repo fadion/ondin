@@ -76,6 +76,7 @@ fn fixture() -> F {
             display: Some(column()),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Mode 1".into(),
@@ -89,6 +90,7 @@ fn fixture() -> F {
                 name: "space/md".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(12.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

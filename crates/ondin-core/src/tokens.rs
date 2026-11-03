@@ -58,9 +58,9 @@ impl Tokens {
     }
     fn tables(&self) -> (Variables, Styles) {
         let vars = Variables {
-            modes: Vec::new(),
             vars: self.vars.iter().map(|v| (v.id, v.clone())).collect(),
             kits: self.kits.clone(),
+            ..Variables::default()
         };
         (vars, Styles::from_list(self.styles.clone()))
     }
@@ -160,8 +160,9 @@ pub fn carried<'a>(doc: &Document, nodes: impl IntoIterator<Item = &'a Node>) ->
 }
 
 /// One of a kit's modes as a [`Source`] holds it: its id there, the kit's own id
-/// for it (what a consumer's [`KitMode::from`] matches), and its name.
-type SourceMode = (ModeId, ModeId, String);
+/// for it (what a consumer's [`KitMode::from`] matches), its name, and the name
+/// of the kit's collection it is in ([`KitMode::collection`]).
+type SourceMode = (ModeId, ModeId, String, String);
 
 /// Where a [`plan`]'s variables and styles come from.
 pub(crate) struct Source<'a> {
@@ -202,11 +203,18 @@ impl Source<'_> {
         if let Some((own, _, name)) = self.kit
             && own == kit
         {
+            // A kit with one collection names none, as before collections.
+            let named = self.vars.has_collections();
             let modes = self
                 .vars
-                .modes()
+                .collections()
                 .iter()
-                .map(|m| (m.id, m.id, m.name.clone()))
+                .flat_map(|c| {
+                    let cname = if named { c.name.clone() } else { String::new() };
+                    c.modes
+                        .iter()
+                        .map(move |m| (m.id, m.id, m.name.clone(), cname.clone()))
+                })
                 .collect();
             return Some((modes, name.map(str::to_string)));
         }
@@ -214,7 +222,7 @@ impl Source<'_> {
         Some((
             km.modes
                 .iter()
-                .map(|m| (m.id, m.from, m.name.clone()))
+                .map(|m| (m.id, m.from, m.name.clone(), m.collection.clone()))
                 .collect(),
             km.name.clone(),
         ))
@@ -284,11 +292,12 @@ impl Plan {
         if let Some(x) = &mut n.opacity_var {
             v(x);
         }
-        if let Some(m) = n.mode
-            && let Some(to) = self.modes.get(&m)
-        {
-            n.mode = Some(*to);
+        for m in n.modes.iter_mut() {
+            if let Some(to) = self.modes.get(m) {
+                *m = *to;
+            }
         }
+        n.modes.sort();
         let refs = n.styles;
         for (slot, s) in refs.iter() {
             if let Some(to) = self.styles.get(&s) {
@@ -428,11 +437,12 @@ pub(crate) fn plan<'a>(
         }
     }
     for n in &nodes {
-        if let Some(m) = n.mode
-            && let Some(k) = src.kit_of_mode(m)
-            && !kits.contains(&k)
-        {
-            kits.push(k);
+        for &m in &n.modes {
+            if let Some(k) = src.kit_of_mode(m)
+                && !kits.contains(&k)
+            {
+                kits.push(k);
+            }
         }
     }
     if let Some(k) = sync
@@ -455,7 +465,7 @@ pub(crate) fn plan<'a>(
             None => continue,
         };
         if own == Some(kit.as_str()) {
-            for (sid, from, _) in &src_modes {
+            for (sid, from, ..) in &src_modes {
                 if t.mode(*from).is_some() {
                     plan.modes.insert(*sid, *from);
                 }
@@ -473,14 +483,14 @@ pub(crate) fn plan<'a>(
         let covers = held.is_some_and(|h| {
             src_modes
                 .iter()
-                .all(|(_, from, _)| h.modes.iter().any(|m| m.from == *from))
+                .all(|(_, from, ..)| h.modes.iter().any(|m| m.from == *from))
         });
         let record = match held {
             Some(h) if covers && sync != Some(kit.as_str()) => h.clone(),
             Some(h) if sync == Some(kit.as_str()) => {
                 let modes: Vec<KitMode> = src_modes
                     .iter()
-                    .map(|(_, from, nm)| KitMode {
+                    .map(|(_, from, nm, c)| KitMode {
                         id: h
                             .modes
                             .iter()
@@ -488,6 +498,7 @@ pub(crate) fn plan<'a>(
                             .map_or_else(|| ids.mint_mode(), |m| m.id),
                         name: nm.clone(),
                         from: *from,
+                        collection: c.clone(),
                     })
                     .collect();
                 let map = h
@@ -507,16 +518,17 @@ pub(crate) fn plan<'a>(
                 name: name.clone(),
                 modes: src_modes
                     .iter()
-                    .map(|(_, from, nm)| KitMode {
+                    .map(|(_, from, nm, c)| KitMode {
                         id: ids.mint_mode(),
                         name: nm.clone(),
                         from: *from,
+                        collection: c.clone(),
                     })
                     .collect(),
                 map: BTreeMap::new(),
             },
         };
-        for (sid, from, _) in &src_modes {
+        for (sid, from, ..) in &src_modes {
             if let Some(m) = record.modes.iter().find(|m| m.from == *from) {
                 plan.modes.insert(*sid, m.id);
             }
@@ -585,16 +597,22 @@ pub(crate) fn plan<'a>(
             .iter()
             .filter_map(|(m, c)| Some((*plan.modes.get(m)?, remap(c))))
             .collect();
-        // A mode the held record has and the source does not — a third kit held
-        // newer than the kit carrying it — takes the source's first mode's cell,
-        // that kit's default.
-        let first = src.modes_of(&o.kit).and_then(|(m, _)| {
-            m.first()
-                .and_then(|(sid, _, _)| var.cells.get(sid))
-                .map(remap)
-        });
+        // A mode of its collection the held record has and the source does not
+        // — a third kit held newer than the kit carrying it — takes the
+        // source's first mode's cell there, that collection's default.
+        let modes = src.modes_of(&o.kit).map(|(m, _)| m).unwrap_or_default();
+        let collection = modes
+            .iter()
+            .find(|(sid, ..)| var.cells.contains_key(sid))
+            .map(|(.., c)| c.clone())
+            .unwrap_or_default();
+        let first = modes
+            .iter()
+            .find(|(.., c)| *c == collection)
+            .and_then(|(sid, ..)| var.cells.get(sid))
+            .map(remap);
         if let (Some(r), Some(first)) = (records.get(&o.kit), first) {
-            for m in &r.modes {
+            for m in r.modes_in(&collection) {
                 cells.entry(m.id).or_insert_with(|| first.clone());
             }
         }
@@ -603,6 +621,7 @@ pub(crate) fn plan<'a>(
             name: var.name.clone(),
             kind: var.kind,
             cells,
+            scope: var.scope,
             origin: Some(o),
             forked: None,
             description: var.description.clone(),
@@ -1077,7 +1096,7 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
                 pending.extend(st.value.vars());
             }
         }
-        if n.mode.is_some_and(|m| t.kit_mode_of(m).is_some()) {
+        if n.modes.iter().any(|m| t.kit_mode_of(*m).is_some()) {
             out.kit_frames.push(n.id);
         }
     }
@@ -1118,20 +1137,21 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
     // The document's modes the forks are written in — its own, else the first
     // forked kit's, made its own.
     let mut modes = t.clone();
-    if modes.modes.is_empty()
-        && let Some(km) = fresh
-            .first()
-            .and_then(|v| t.get(*v))
-            .and_then(Variable::kit)
-            .and_then(|k| t.kits().get(k))
+    let first_collection = t.first_collection().id;
+    if modes.modes().next().is_none()
+        && let Some((km, kc)) = fresh.first().and_then(|v| t.get(*v)).and_then(|v| {
+            let km = t.kits().get(v.kit()?)?;
+            Some((km, t.kit_collection_of(v)?))
+        })
     {
-        for (i, m) in km.modes.iter().enumerate() {
+        for (i, m) in km.modes_in(kc).enumerate() {
             let mode = crate::variable::Mode {
                 id: ids.mint_mode(),
                 name: m.name.clone(),
             };
-            modes.modes.push(mode.clone());
+            modes.collections[0].modes.push(mode.clone());
             out.ops.push(Operation::AddMode {
+                collection: first_collection,
                 mode,
                 index: i,
                 cells: Vec::new(),
@@ -1143,7 +1163,7 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
         // elsewhere in its list — *Night, Day* beside *Day, Night* — would read
         // that one by name. So the new default is pinned, by hand, to the first
         // of each kit whose name match differs: what it drew is what it draws.
-        let default = modes.modes.first().map(|m| m.id);
+        let default = modes.default_mode();
         let adopted = fresh
             .first()
             .and_then(|v| t.get(*v))
@@ -1183,16 +1203,27 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
             names.iter().any(|x| x == n)
         });
         names.push(name.clone());
-        let cells = modes
+        // Into the document collection its kit collection maps from.
+        let kc = modes.kit_collection_of(var).unwrap_or_default().to_string();
+        // One with no modes has no column to write: the first, which adoption
+        // gave modes above, takes it.
+        let onto: Vec<crate::variable::ModeId> = modes
+            .kit_onto(&kc)
+            .filter(|c| !c.modes.is_empty())
+            .unwrap_or(modes.first_collection())
             .modes
             .iter()
+            .map(|m| m.id)
+            .collect();
+        let cells = onto
+            .iter()
             .filter_map(|m| {
-                let col = modes.kit_mode(kit, Some(m.id))?;
+                let col = modes.kit_mode_at(kit, &kc, &[*m])?;
                 let cell = match var.cells.get(&col)? {
                     Cell::Alias(a) => Cell::Alias(*out.vars.get(a).unwrap_or(a)),
                     c => c.clone(),
                 };
-                Some((m.id, cell))
+                Some((*m, cell))
             })
             .collect();
         out.ops.push(Operation::AddVariable {
@@ -1201,6 +1232,7 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
                 name,
                 kind: var.kind,
                 cells,
+                scope: var.scope,
                 origin: None,
                 forked: var.origin.clone(),
                 description: var.description.clone(),

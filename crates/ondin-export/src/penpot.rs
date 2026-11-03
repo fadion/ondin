@@ -196,7 +196,7 @@ impl Writer<'_> {
         let mut written = Vec::new();
         for var in t.iter().filter(|v| v.kind == VarKind::Color) {
             let value = match var.kit() {
-                None => t.default_mode().and_then(|m| t.resolve(var.id, m)),
+                None => t.resolve_opt(var.id, None),
                 Some(_) => t.every_value(var.id).into_iter().next(),
             };
             let Some(ondin_core::Value::Color(c)) = value else {
@@ -212,7 +212,7 @@ impl Writer<'_> {
             written.push((format!("files/{file}/colors/{id}.json"), v));
             self.colours.insert(var.id, (id, c));
         }
-        if !self.colours.is_empty() && t.modes().len() > 1 {
+        if !self.colours.is_empty() && t.modes().count() > t.collections().len() {
             self.approximate("Colour variables' other modes, left out");
         }
         if t.iter().any(|v| v.kind != VarKind::Color) {

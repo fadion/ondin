@@ -680,7 +680,7 @@ fn add_page(id: NodeId, index: usize, name: &str) -> Operation {
         name: name.into(),
         ground: Some(Color::from_rgba8(240, 240, 240, 255)),
         draft: false,
-        mode: None,
+        modes: Vec::new(),
     }
 }
 
@@ -748,6 +748,7 @@ fn with_a_mode(f: &mut Base) -> (Document, ModeId) {
     let doc = edited(
         &f.doc,
         vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -766,6 +767,7 @@ fn number_var(id: VarId, name: &str, mode: ModeId) -> Operation {
             name: name.into(),
             kind: VarKind::Number,
             cells: [(mode, Cell::Number(4.0))].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -798,6 +800,7 @@ fn a_variable_against_a_new_mode_is_a_conflict() {
     let theirs = edited(
         &start,
         vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dark,
                 name: "Dark".into(),

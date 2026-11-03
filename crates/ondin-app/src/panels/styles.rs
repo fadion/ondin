@@ -1773,6 +1773,7 @@ mod tests {
         let v = app.session.ids.mint_var();
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -1786,6 +1787,7 @@ mod tests {
                     name: "stroke/thick".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(4.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1824,6 +1826,7 @@ mod tests {
                 name: name.into(),
                 kind: VarKind::String,
                 cells: [(mode, Cell::String(family.into()))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -1831,6 +1834,7 @@ mod tests {
         };
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),

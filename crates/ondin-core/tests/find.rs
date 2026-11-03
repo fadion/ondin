@@ -78,7 +78,7 @@ fn fixture() -> F {
         name: name.into(),
         ground: None,
         draft,
-        mode: None,
+        modes: Vec::new(),
     };
     doc.apply(&Transaction(vec![
         page(checkout, 1, "Checkout", false),

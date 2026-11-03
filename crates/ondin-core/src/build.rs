@@ -1027,7 +1027,7 @@ pub fn convert_container_refusal(doc: &Document, id: NodeId) -> Option<&'static 
             return Some("Nothing inside to group");
         }
         // Only a frame sets a mode, and dropping it would recolour what it holds.
-        NodeKind::Artboard { .. } if n.mode().is_some() => {
+        NodeKind::Artboard { .. } if !n.modes().is_empty() => {
             return Some("A group cannot set a variable mode");
         }
         NodeKind::Group | NodeKind::Artboard { .. } => {}
@@ -5819,6 +5819,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
                 name: var.name.clone(),
                 kind: var.kind,
                 origin: var.origin.clone(),
+                collection: t.collection_of(v).map(|c| c.name.clone()),
             });
         }
     }
@@ -5875,10 +5876,11 @@ pub fn paste_properties(
     src: &mut IdSource,
 ) -> Transaction {
     let t = doc.variables();
-    let landed = |b: &crate::BrushSource, drawn: Option<&Brush>| -> crate::BrushSource {
+    use crate::variable::Field;
+    let landed = |b: &crate::BrushSource, drawn: Option<&Brush>, f: Field| -> crate::BrushSource {
         match b {
             crate::BrushSource::Bound { var, alpha } => {
-                match crate::variable::rebind(t, &props.carried, *var) {
+                match crate::variable::rebind(t, &props.carried, *var, f) {
                     Some(var) => crate::BrushSource::Bound { var, alpha: *alpha },
                     None => drawn
                         .cloned()
@@ -5894,7 +5896,7 @@ pub fn paste_properties(
         .iter()
         .enumerate()
         .map(|(i, f)| Fill {
-            brush: landed(&f.brush, props.drawn_fills.get(i)),
+            brush: landed(&f.brush, props.drawn_fills.get(i), Field::Fill),
             ..f.clone()
         })
         .collect();
@@ -5904,14 +5906,16 @@ pub fn paste_properties(
         .enumerate()
         .map(|(i, s)| {
             let (width, width_var) = match s.width_var {
-                Some(v) => match crate::variable::rebind(t, &props.carried, v) {
-                    Some(v) => (s.width, Some(v)),
-                    None => (props.drawn_widths.get(i).copied().unwrap_or(s.width), None),
-                },
+                Some(v) => {
+                    match crate::variable::rebind(t, &props.carried, v, Field::StrokeWidth) {
+                        Some(v) => (s.width, Some(v)),
+                        None => (props.drawn_widths.get(i).copied().unwrap_or(s.width), None),
+                    }
+                }
                 None => (s.width, None),
             };
             Stroke {
-                brush: landed(&s.brush, props.drawn_strokes.get(i)),
+                brush: landed(&s.brush, props.drawn_strokes.get(i), Field::Stroke),
                 width,
                 width_var,
                 ..s.clone()
@@ -5926,7 +5930,7 @@ pub fn paste_properties(
             let mut e = e.clone();
             for slot in 0..e.vars.len() {
                 let Some(v) = e.vars[slot] else { continue };
-                e.vars[slot] = crate::variable::rebind(t, &props.carried, v);
+                e.vars[slot] = crate::variable::rebind(t, &props.carried, v, Field::Effect);
                 if e.vars[slot].is_none() {
                     let drawn = props.drawn_effect_numbers.get(i).and_then(|d| d[slot]);
                     e.set_number(slot, drawn.unwrap_or(0.0));
@@ -5940,7 +5944,7 @@ pub fn paste_properties(
     ops.extend(set_effects_all(doc, ids, &effects, src).0);
     match props
         .opacity_var
-        .and_then(|v| crate::variable::rebind(t, &props.carried, v))
+        .and_then(|v| crate::variable::rebind(t, &props.carried, v, Field::Opacity))
     {
         Some(var) => {
             for id in outermost(doc, ids) {

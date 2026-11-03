@@ -92,6 +92,7 @@ fn kit() -> Kit {
     }]);
     doc.apply(&Transaction(vec![
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: day,
                 name: "Day".into(),
@@ -100,6 +101,7 @@ fn kit() -> Kit {
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: night,
                 name: "Night".into(),
@@ -113,6 +115,7 @@ fn kit() -> Kit {
                 name: "brand".into(),
                 kind: VarKind::Color,
                 cells: [(day, Cell::Color(WHITE)), (night, Cell::Color(NAVY))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -124,6 +127,7 @@ fn kit() -> Kit {
                 name: "spare".into(),
                 kind: VarKind::Number,
                 cells: [(day, Cell::Number(1.0)), (night, Cell::Number(2.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -209,6 +213,7 @@ fn consumer(modes: &[&str]) -> (Document, IdSource, Vec<ModeId>) {
         .zip(&made)
         .enumerate()
         .map(|(i, (name, id))| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: *id,
                 name: (*name).into(),
@@ -274,7 +279,7 @@ fn a_publish_carries_what_its_mains_read() {
     let p = published(&k).document();
     assert!(p.variables().get(k.brand).is_some(), "brand travels");
     assert!(p.variables().get(k.spare).is_none(), "spare stays home");
-    assert_eq!(p.variables().modes().len(), 2);
+    assert_eq!(p.variables().modes().count(), 2);
     assert!(p.styles().get(k.accent).is_some(), "the style travels");
     assert_eq!(
         p.get(k.dot).unwrap().paint().fills[0].brush,
@@ -354,9 +359,9 @@ fn the_mapping_reads_by_name_then_the_first_and_a_hand_set_entry_wins() {
     let dark = ids.mint();
     d.apply(&Transaction(vec![
         create(dark, root, 0, frame(100.0, 100.0), "Dark"),
-        Operation::SetMode {
+        Operation::SetModes {
             id: dark,
-            mode: Some(night),
+            modes: vec![night],
         },
     ]))
     .unwrap();
@@ -375,7 +380,7 @@ fn the_mapping_reads_by_name_then_the_first_and_a_hand_set_entry_wins() {
     .unwrap();
     assert_eq!(drawn(&d, plain), Brush::Solid(NAVY), "the hand-set entry");
     assert_eq!(
-        d.mode_at(plain),
+        d.mode_at(plain, ondin_core::variable::CollectionId::FIRST),
         Some(light),
         "a kit's mode is no mode of D's"
     );
@@ -433,6 +438,7 @@ fn an_update_rewrites_the_kits_variables_and_removes_what_it_dropped() {
     k.doc
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: dusk,
                     name: "Dusk".into(),
@@ -510,6 +516,7 @@ fn an_insert_over_older_kit_modes_asks_for_the_update() {
     let dusk = k.ids.mint_mode();
     k.doc
         .apply(&Transaction(vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dusk,
                 name: "Dusk".into(),
@@ -628,6 +635,7 @@ fn a_vault_node_bound_to_the_documents_own_variable_is_refused() {
                 name: "own".into(),
                 kind: VarKind::Color,
                 cells: [(modes[0], Cell::Color(RED))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -659,6 +667,7 @@ fn an_alias_of_the_documents_own_to_a_kits_reads_through_the_mapping() {
             name: "surface".into(),
             kind: VarKind::Color,
             cells: [(modes[0], Cell::Alias(held))].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -696,6 +705,7 @@ fn a_kits_alias_of_a_third_kits_variable_is_inserted() {
     let (light, surface) = (aids.mint_mode(), aids.mint_var());
     a.apply(&Transaction(vec![
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -709,6 +719,7 @@ fn a_kits_alias_of_a_third_kits_variable_is_inserted() {
                 name: "surface".into(),
                 kind: VarKind::Color,
                 cells: [(light, Cell::Alias(held))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -771,6 +782,7 @@ fn add_dusk(k: &mut Kit) -> ModeId {
     let dusk = k.ids.mint_mode();
     k.doc
         .apply(&Transaction(vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dusk,
                 name: "Dusk".into(),
@@ -832,7 +844,7 @@ fn a_kit_variable_named_as_a_held_one_asks_for_the_update() {
     let mut k = kit();
     let (mut d, mut ids, _) = consumer(&[]);
     insert(&mut d, &mut ids, &k, k.badge);
-    let night = k.doc.variables().modes()[1].id;
+    let night = k.doc.variables().first_collection().modes[1].id;
     let fresh = k.ids.mint_var();
     k.doc
         .apply(&Transaction(vec![
@@ -846,6 +858,7 @@ fn a_kit_variable_named_as_a_held_one_asks_for_the_update() {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(k.day, Cell::Color(RED)), (night, Cell::Color(GOLD))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -880,9 +893,9 @@ fn renaming_a_document_mode_dirties_what_reads_a_kit_column() {
     let k = kit();
     let (mut d, mut ids, modes) = consumer(&["Day", "Night"]);
     let inst = insert(&mut d, &mut ids, &k, k.badge);
-    d.apply(&Transaction(vec![Operation::SetMode {
+    d.apply(&Transaction(vec![Operation::SetModes {
         id: inst,
-        mode: Some(modes[1]),
+        modes: vec![modes[1]],
     }]))
     .unwrap();
     assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "Night reads Night");
@@ -907,9 +920,9 @@ fn renaming_or_duplicating_a_mode_keeps_its_kit_column() {
     let k = kit();
     let (mut d, mut ids, modes) = consumer(&["Day", "Night"]);
     let inst = insert(&mut d, &mut ids, &k, k.badge);
-    d.apply(&Transaction(vec![Operation::SetMode {
+    d.apply(&Transaction(vec![Operation::SetModes {
         id: inst,
-        mode: Some(modes[1]),
+        modes: vec![modes[1]],
     }]))
     .unwrap();
     assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "Night reads Night");
@@ -919,9 +932,9 @@ fn renaming_or_duplicating_a_mode_keeps_its_kit_column() {
     let ops = ondin_core::variable::rename_mode_ops(&d, modes[1], "Evening");
     d.apply(&Transaction(ops)).unwrap();
     assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "the rename keeps navy");
-    d.apply(&Transaction(vec![Operation::SetMode {
+    d.apply(&Transaction(vec![Operation::SetModes {
         id: inst,
-        mode: Some(copy),
+        modes: vec![copy],
     }]))
     .unwrap();
     assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "and so does the copy");
@@ -1106,11 +1119,11 @@ fn accept_all_takes_a_kit_carrying_a_newer_third_kit_in_either_order() {
 #[test]
 fn a_copy_on_a_removed_kit_mode_follows_its_main_to_the_new_one() {
     let mut k = kit();
-    let night = k.doc.variables().modes()[1].id;
+    let night = k.doc.variables().first_collection().modes[1].id;
     k.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: k.icon,
-            mode: Some(night),
+            modes: vec![night],
         }]))
         .unwrap();
     let dusk = add_dusk(&mut k);
@@ -1123,18 +1136,25 @@ fn a_copy_on_a_removed_kit_mode_follows_its_main_to_the_new_one() {
             .find(|m| m.name == name)
             .map(|m| m.id)
     };
-    assert_eq!(d.get(inst).unwrap().mode(), kit_mode(&d, "Night"));
+    assert_eq!(
+        d.get(inst).unwrap().modes().first().copied(),
+        kit_mode(&d, "Night")
+    );
     // The mode's removal returns Icon to *Inherit*, and Icon is then set to
     // *Dusk* — in that order, or the removal's write lands last.
     let mut ops = ondin_core::variable::remove_mode_ops(&k.doc, night);
-    ops.push(Operation::SetMode {
+    ops.push(Operation::SetModes {
         id: k.icon,
-        mode: Some(dusk),
+        modes: vec![dusk],
     });
     k.doc.apply(&Transaction(ops)).unwrap();
     kit::publish(&mut k.doc, None, 3);
     accept(&mut d, &mut ids, &k);
-    assert_eq!(d.get(inst).unwrap().mode(), kit_mode(&d, "Dusk"), "follows");
+    assert_eq!(
+        d.get(inst).unwrap().modes().first().copied(),
+        kit_mode(&d, "Dusk"),
+        "follows"
+    );
 }
 
 /// In a document with no modes of its own, a style of its own reading a kit's
@@ -1202,7 +1222,7 @@ fn a_documents_own_style_reading_a_removed_kit_variable_is_detached() {
 fn a_main_roots_visibility_binding_is_not_a_change() {
     let mut k = kit();
     let shown = k.ids.mint_var();
-    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    let modes: Vec<ModeId> = k.doc.variables().modes().map(|m| m.id).collect();
     k.doc
         .apply(&Transaction(vec![
             Operation::AddVariable {
@@ -1211,6 +1231,7 @@ fn a_main_roots_visibility_binding_is_not_a_change() {
                     name: "shown".into(),
                     kind: VarKind::Boolean,
                     cells: modes.iter().map(|m| (*m, Cell::Boolean(true))).collect(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1330,14 +1351,10 @@ fn make_local_in_a_document_without_modes_takes_the_kits() {
     let inst = insert(&mut d, &mut ids, &k, k.icon);
     make_local(&mut d, &mut ids, inst);
     let t = d.variables();
-    let names: Vec<&str> = t.modes().iter().map(|m| m.name.as_str()).collect();
+    let names: Vec<&str> = t.modes().map(|m| m.name.as_str()).collect();
     assert_eq!(names, ["Day", "Night"]);
     let fork = t.local().next().expect("a fork");
-    let cells: Vec<Cell> = t
-        .modes()
-        .iter()
-        .map(|m| fork.cells[&m.id].clone())
-        .collect();
+    let cells: Vec<Cell> = t.modes().map(|m| fork.cells[&m.id].clone()).collect();
     assert_eq!(cells, [Cell::Color(WHITE), Cell::Color(NAVY)]);
     assert_eq!(drawn(&d, first_child(&d, inst)), Brush::Solid(WHITE));
 }
@@ -1360,6 +1377,7 @@ fn adopting_a_kits_modes_leaves_another_kit_reading_its_first() {
     let ink = bi.mint_var();
     let chip = bi.mint();
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -1376,6 +1394,7 @@ fn adopting_a_kits_modes_leaves_another_kit_reading_its_first() {
                 name: "ink".into(),
                 kind: VarKind::Color,
                 cells: [(night, Cell::Color(NAVY)), (day, Cell::Color(WHITE))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -1409,7 +1428,11 @@ fn adopting_a_kits_modes_leaves_another_kit_reading_its_first() {
     let inst = insert(&mut d, &mut ids, &k, k.icon);
     assert_eq!(drawn(&d, b_inst), Brush::Solid(NAVY), "fixture: B's first");
     make_local(&mut d, &mut ids, inst);
-    assert_eq!(d.variables().modes().len(), 2, "fixture: D took L's modes");
+    assert_eq!(
+        d.variables().modes().count(),
+        2,
+        "fixture: D took L's modes"
+    );
     assert_eq!(
         drawn(&d, b_inst),
         Brush::Solid(NAVY),
@@ -1545,7 +1568,7 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
     let mut k = kit();
     let tag = k.ids.mint_var();
     let tagged = k.ids.mint_style();
-    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    let modes: Vec<ModeId> = k.doc.variables().modes().map(|m| m.id).collect();
     k.doc
         .apply(&Transaction(vec![
             Operation::AddVariable {
@@ -1554,6 +1577,7 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
                     name: "tag".into(),
                     kind: VarKind::Color,
                     cells: [(modes[0], Cell::Color(RED)), (modes[1], Cell::Color(GOLD))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1647,7 +1671,7 @@ fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
 fn a_removal_matches_a_drifted_copys_fills_by_item() {
     let mut k = kit();
     let tag = k.ids.mint_var();
-    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    let modes: Vec<ModeId> = k.doc.variables().modes().map(|m| m.id).collect();
     k.doc
         .apply(&Transaction(vec![
             Operation::AddVariable {
@@ -1656,6 +1680,7 @@ fn a_removal_matches_a_drifted_copys_fills_by_item() {
                     name: "tag".into(),
                     kind: VarKind::Color,
                     cells: modes.iter().map(|m| (*m, Cell::Color(RED))).collect(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1882,13 +1907,14 @@ fn kit_with_numbers(
 ) -> (Kit, VarId, VarId) {
     let mut k = kit();
     let (a, b) = (k.ids.mint_var(), k.ids.mint_var());
-    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    let modes: Vec<ModeId> = k.doc.variables().modes().map(|m| m.id).collect();
     let number = |id, name: &str, x| Operation::AddVariable {
         var: Variable {
             id,
             name: name.into(),
             kind: VarKind::Number,
             cells: modes.iter().map(|m| (*m, Cell::Number(x))).collect(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -2229,18 +2255,18 @@ fn a_documents_own_stroke_and_effects_styles_detach_a_removed_kit_number() {
 #[test]
 fn make_local_reports_a_frame_set_to_a_kits_mode() {
     let mut k = kit();
-    let night = k.doc.variables().modes()[1].id;
+    let night = k.doc.variables().first_collection().modes[1].id;
     k.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: k.icon,
-            mode: Some(night),
+            modes: vec![night],
         }]))
         .unwrap();
     assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
     let (mut d, mut ids, _) = consumer(&["Day"]);
     let inst = insert(&mut d, &mut ids, &k, k.icon);
     let main = d.get(inst).unwrap().link().unwrap();
-    let mode = d.get(main).unwrap().mode();
+    let mode = d.get(main).unwrap().modes().first().copied();
     assert_eq!(
         mode.and_then(|m| d.variables().kit_mode_of(m))
             .map(|(kit, m)| (kit.to_string(), m.name.clone())),
@@ -2249,7 +2275,11 @@ fn make_local_reports_a_frame_set_to_a_kits_mode() {
     );
     let (_, made) = make_local(&mut d, &mut ids, inst);
     assert_eq!(made.kit_frames, [main], "the main is reported");
-    assert_eq!(d.get(main).unwrap().mode(), mode, "and keeps its mode");
+    assert_eq!(
+        d.get(main).unwrap().modes().first().copied(),
+        mode,
+        "and keeps its mode"
+    );
 }
 
 /// ***Make local* forks a style the main reads with its value pointed at the

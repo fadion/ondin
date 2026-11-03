@@ -2974,8 +2974,7 @@ fn bound_chip(
         [var] if mixed => (name(*var), format!("{} · {}", name(*var), ui::MIXED_WORD)),
         [var] => {
             let at = cps[0];
-            let mode = doc.mode_at(at).and_then(|m| table.mode(m));
-            let tip = super::binding::chip_tip(&name(*var), doc.resolve_var(at, *var), mode);
+            let tip = super::binding::chip_tip(doc, at, *var);
             (name(*var), tip)
         }
         many => (

@@ -143,7 +143,7 @@ pub fn read(
                 name,
                 ground: None,
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             });
         }
         if let Some(bg) = page.get("backgroundColor") {

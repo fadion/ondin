@@ -3543,7 +3543,7 @@ mod export_all_scope_tests {
                     name: name.into(),
                     ground: None,
                     draft: false,
-                    mode: None,
+                    modes: Vec::new(),
                 });
             } else {
                 ops.push(Operation::SetName {

@@ -7762,12 +7762,17 @@ impl OndinApp {
                 egui::TextFormat::simple(egui::FontId::proportional(PT), ink),
             );
         };
-        // A mode the node sets follows its name on every tag, dim; an inherited
-        // one stays off the canvas.
-        let mode = node.mode().and_then(|m| doc.variables().mode(m));
+        // Every mode the node sets follows its name on every tag, dim, in
+        // collection order; an inherited one stays off the canvas.
+        let t = doc.variables();
+        let modes: Vec<&str> = t
+            .modes()
+            .filter(|m| node.modes().contains(&m.id))
+            .map(|m| m.name.as_str())
+            .collect();
         let mode_word = |job: &mut egui::text::LayoutJob, ink| {
-            if let Some(m) = mode {
-                words(job, &format!("· {}", m.name), 4.0, ink);
+            if !modes.is_empty() {
+                words(job, &format!("· {}", modes.join(" · ")), 4.0, ink);
             }
         };
         if is_set {
@@ -16793,11 +16798,13 @@ mod frame_menu_door_tests {
         };
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: mode(light, "Light"),
                 index: 0,
                 cells: vec![],
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: mode(dark, "Dark"),
                 index: 1,
                 cells: vec![],
@@ -16822,9 +16829,9 @@ mod frame_menu_door_tests {
             !tag(&app).contains('·'),
             "an inherited mode stays off the canvas"
         );
-        assert!(app.session.commit(Transaction(vec![Operation::SetMode {
+        assert!(app.session.commit(Transaction(vec![Operation::SetModes {
             id: frame,
-            mode: Some(dark),
+            modes: vec![dark],
         }])));
         assert!(tag(&app).ends_with("· Dark"), "{:?}", tag(&app));
         // A main's chip names the mode too; flip: the main's arm without `mode_word` fails here.
@@ -22211,6 +22218,7 @@ mod string_binding_session_tests {
                 name: None,
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -22224,6 +22232,7 @@ mod string_binding_session_tests {
                     name: "copy/cta".into(),
                     kind: VarKind::String,
                     cells: [(mode, Cell::String("Sign in".into()))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -22340,6 +22349,7 @@ mod bound_resize_tests {
                 name: None,
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -22353,6 +22363,7 @@ mod bound_resize_tests {
                     name: "size/w".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(100.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -22582,6 +22593,7 @@ mod join_and_grid_snap_tests {
                 grids: ondin_core::keyed_by_position([grid]),
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -22595,6 +22607,7 @@ mod join_and_grid_snap_tests {
                     name: "size/w".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(300.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -22675,11 +22688,13 @@ mod bound_default_span_tests {
                 name: None,
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: mode(light, "Light"),
                 index: 0,
                 cells: vec![],
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: mode(dark, "Dark"),
                 index: 1,
                 cells: vec![],
@@ -22690,14 +22705,15 @@ mod bound_default_span_tests {
                     name: "type/size".into(),
                     kind: VarKind::Number,
                     cells: [(light, Cell::Number(16.0)), (dark, Cell::Number(24.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
                 },
             },
-            Operation::SetMode {
+            Operation::SetModes {
                 id: frame,
-                mode: Some(dark),
+                modes: vec![dark],
             },
         ]))
         .expect("the fixture");
@@ -23140,7 +23156,7 @@ mod redraw_tests {
     /// delete"; leaving out the preview's ink → fails at "its commit, elsewhere";
     /// `InkLog::record` measuring only the tops and the deleted → fails at "a wrap
     /// into a new group"; `world_ink_of_parts` returning `world_bounds_of_parts` →
-    /// fails at "a delete of the trimmed text"; `SetMode` dirtying only its node →
+    /// fails at "a delete of the trimmed text"; `SetModes` dirtying only its node →
     /// fails at "a page's mode"; `touched` without the ghosts' parents → fails at
     /// "a ghost in a group previewed". Dropping its `order` chain does not bite:
     /// `absorb` gives a reordered node an entry of its own.
@@ -23420,6 +23436,7 @@ mod redraw_tests {
                 "a two-mode colour on a layer",
                 commit(vec![
                     Operation::AddMode {
+                        collection: ondin_core::variable::CollectionId::FIRST,
                         mode: ondin_core::Mode {
                             id: light,
                             name: "Light".into(),
@@ -23428,6 +23445,7 @@ mod redraw_tests {
                         cells: vec![],
                     },
                     Operation::AddMode {
+                        collection: ondin_core::variable::CollectionId::FIRST,
                         mode: ondin_core::Mode {
                             id: dark,
                             name: "Dark".into(),
@@ -23451,6 +23469,7 @@ mod redraw_tests {
                                 ),
                             ]
                             .into(),
+                            scope: None,
                             origin: None,
                             forked: None,
                             description: String::new(),
@@ -23470,9 +23489,9 @@ mod redraw_tests {
             ),
             (
                 "a page's mode",
-                commit(vec![Operation::SetMode {
+                commit(vec![Operation::SetModes {
                     id: session.page,
-                    mode: Some(dark),
+                    modes: vec![dark],
                 }]),
             ),
             (

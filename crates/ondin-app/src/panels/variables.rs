@@ -22,7 +22,9 @@ use crate::ui::{self, MENU_ROW_H};
 use eframe::egui;
 use ondin_core::peniko::Color;
 use ondin_core::style::{self as sty, Style, StyleId, StyleSlot};
-use ondin_core::variable::{self as var, Cell, Mode, ModeId, Value, VarId, VarKind, Variable};
+use ondin_core::variable::{
+    self as var, Cell, CollectionId, Field, Mode, ModeId, Scope, Value, VarId, VarKind, Variable,
+};
 use ondin_core::{Described, Document, NodeId, Operation, Transaction};
 use std::collections::{BTreeMap, HashSet};
 
@@ -93,6 +95,11 @@ enum Edit {
         of: Described,
         text: String,
     },
+    /// The shown collection's name, typed over the picker.
+    Collection {
+        id: CollectionId,
+        text: String,
+    },
 }
 
 impl Edit {
@@ -101,6 +108,7 @@ impl Edit {
         match self {
             Edit::Name { text, .. }
             | Edit::Cell { text, .. }
+            | Edit::Collection { text, .. }
             | Edit::Mode { text, .. }
             | Edit::Group { text, .. }
             | Edit::Style { text, .. }
@@ -128,6 +136,16 @@ enum Menu {
     /// A kit's mapping for one of the document's modes (D1038 (b), §15 D1065):
     /// the kit's modes, then *Match by name*.
     KitMap(String, ModeId),
+    /// The picker's row menu: *Rename collection*, *Duplicate collection*,
+    /// *Select n layers*, *Delete collection…*.
+    Collection(CollectionId),
+    /// *Delete collection…*'s confirmation, saying what goes.
+    ConfirmCollection(CollectionId),
+    /// A variable row's *Move to ▸*: the other collections, then *New
+    /// collection*.
+    MoveTo(VarId),
+    /// A variable's scope: the field families it may bind, ticked.
+    Scope(VarId),
 }
 
 /// The browser's own state while it is open.
@@ -241,6 +259,16 @@ enum Act {
     ExportTokens,
     UnlinkTokens,
     LinkedTokens,
+    /// The picker's pick: the collection the browser shows.
+    ShowCollection(CollectionId),
+    NewCollection,
+    CollectionName(CollectionId, String),
+    DuplicateCollection(CollectionId),
+    DeleteCollection(CollectionId),
+    /// *Move to*: variables into a collection, or into a new one.
+    MoveTo(VarId, Option<CollectionId>),
+    /// A scope ticked: the variable's new scope, `None` every field.
+    Scope(VarId, Option<Scope>),
 }
 
 /// One row of the table as drawn: a group's header or a variable, or a kit's
@@ -255,6 +283,9 @@ enum Line<'a> {
     },
     Var(&'a Variable),
     Kit(&'a str),
+    /// A collection's header in a search spanning them, over its own rows,
+    /// which read its modes.
+    Collection(&'a ondin_core::variable::Collection),
 }
 
 /// The key a group's collapse is kept under: its path for the document's own, a
@@ -300,6 +331,48 @@ impl OndinApp {
         };
     }
 
+    /// The collection the browser shows — what *New variable* and *Extract
+    /// into variable…* file into: the one picked for this document, else its
+    /// first.
+    pub(crate) fn shown_collection(&self) -> CollectionId {
+        let t = self.session.doc.variables();
+        self.var_collection
+            .get(&collapsed_key(&self.session.doc))
+            .copied()
+            .filter(|c| t.collection(*c).is_some())
+            .unwrap_or(t.first_collection().id)
+    }
+
+    /// Open the browser on `var`'s collection with its scope popover open — the
+    /// `--` list's *Scope…*.
+    pub(crate) fn open_scope(&mut self, var: VarId) {
+        let Some(c) = self
+            .session
+            .doc
+            .variables()
+            .collection_of(var)
+            .map(|c| c.id)
+        else {
+            return;
+        };
+        self.var_collection
+            .insert(collapsed_key(&self.session.doc), c);
+        if self.var_browser.is_none() {
+            self.toggle_var_browser();
+        }
+        if let Some(b) = self.var_browser.as_mut() {
+            b.tab = Tab::Variables;
+            b.focus = false;
+            // Beside the panel, which has not drawn yet when it just opened.
+            let at = b
+                .panel
+                .map_or(self.canvas_rect.left_top() + egui::vec2(60.0, 60.0), |p| {
+                    p.right_top() + egui::vec2(ui::MENU_GAP, 0.0)
+                });
+            b.menu = Some((Menu::Scope(var), at));
+        }
+    }
+
     /// Draw the browser when it is open, and do what it was asked to.
     pub(crate) fn var_browser_ui(&mut self, ctx: &egui::Context) {
         // Nowhere to stand until the canvas has been laid out once — its rect is
@@ -320,6 +393,7 @@ impl OndinApp {
             b.root = Some(root);
         }
         let pending = self.var_cell_preview;
+        let shown = self.shown_collection();
         // The kits with an update waiting, for their headers' *v8 → v9*.
         let waiting: Vec<(String, u32, u32)> = self
             .kits_waiting(false)
@@ -328,7 +402,10 @@ impl OndinApp {
             .collect();
         let doc = &self.session.doc;
         let table = doc.variables();
-        let modes: Vec<Mode> = table.modes().to_vec();
+        let modes: Vec<Mode> = table
+            .collection(shown)
+            .map(|c| c.modes.clone())
+            .unwrap_or_default();
         let anchor = if self.var_button.is_finite() && self.show_toolbar {
             egui::pos2(
                 self.var_button.right() + 8.0,
@@ -374,7 +451,9 @@ impl OndinApp {
                 .collect()
         });
         let query = b.query.trim().to_lowercase();
-        let lines = all_lines(doc, &query, picked.as_ref(), &b.collapsed);
+        // A search, and *In selection*, span every collection.
+        let across = table.has_collections() && (!query.is_empty() || b.in_selection);
+        let lines = all_lines(doc, shown, across, &query, picked.as_ref(), &b.collapsed);
         let selection_line = b.in_selection.then(|| {
             let (n, one, many) = match b.tab {
                 Tab::Variables => (
@@ -426,7 +505,7 @@ impl OndinApp {
                         ui.set_height(height - 2.0 * PAD);
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 10.0);
                         tabs(ui, &mut b.tab);
-                        search_row(ui, &mut b, &mut acts);
+                        search_row(ui, doc, shown, &mut b, &mut acts);
                         if let Some(link) = doc.tokens_link()
                             && linked_line(ui, &link.path, self.tokens_watch.changes)
                         {
@@ -466,6 +545,11 @@ impl OndinApp {
                                 "No variables yet",
                                 "Add a colour or a number with + above, then type -- in a field to bind it.",
                             ),
+                            Tab::Variables if lines.is_empty() && query.is_empty() && !b.in_selection => empty(
+                                ui,
+                                "No variables in this collection",
+                                "Add one with + above, or move one here from its menu.",
+                            ),
                             Tab::Variables if lines.is_empty() => empty(
                                 ui,
                                 "Nothing matches",
@@ -477,7 +561,11 @@ impl OndinApp {
                             ),
                             Tab::Variables => {
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                header(ui, &modes, &mut b, &mut acts);
+                                // Spanning, each collection heads its own rows,
+                                // so the columns are never shared across them.
+                                if !across {
+                                    header(ui, &modes, &mut b, &mut acts);
+                                }
                                 egui::ScrollArea::vertical()
                                     .auto_shrink([false, false])
                                     .scroll_bar_visibility(
@@ -486,8 +574,20 @@ impl OndinApp {
                                     .show(ui, |ui| {
                                         ui.spacing_mut().item_spacing.y = 1.0;
                                         ui.add_space(4.0);
+                                        let mut row_modes: &[Mode] = &modes;
                                         for line in &lines {
                                             match line {
+                                                Line::Collection(c) => {
+                                                    row_modes = &c.modes;
+                                                    collection_row(ui, c);
+                                                    continue;
+                                                }
+                                                Line::Kit(_) => row_modes = &modes,
+                                                _ => {}
+                                            }
+                                            let modes = row_modes;
+                                            match line {
+                                                Line::Collection(_) => {}
                                                 Line::Group {
                                                     path,
                                                     shown,
@@ -508,21 +608,21 @@ impl OndinApp {
                                                         ui,
                                                         doc,
                                                         v,
-                                                        &modes,
+                                                        modes,
                                                         &users[&v.id],
                                                         &b,
                                                         &mut acts,
                                                     )
                                                 }
                                                 Line::Var(v) => var_row(
-                                                    ui, doc, v, &modes, &users[&v.id], &mut b,
+                                                    ui, doc, v, modes, &users[&v.id], &mut b,
                                                     &mut acts, pending,
                                                 ),
                                                 Line::Kit(k) => kit_row(
                                                     ui,
                                                     doc,
                                                     k,
-                                                    &modes,
+                                                    modes,
                                                     waiting
                                                         .iter()
                                                         .find(|w| w.0 == *k)
@@ -604,14 +704,20 @@ impl OndinApp {
         let doc = &self.session.doc;
         let table = doc.variables();
         let menu_w = match &menu {
-            Menu::ConfirmMode(_) => 240.0,
+            Menu::ConfirmMode(_) | Menu::ConfirmCollection(_) => 240.0,
+            Menu::Scope(_) => SCOPE_W,
             _ => 200.0,
         };
+        let modes_of = |m: ModeId| table.collection_of_mode(m).map_or(0, |c| c.modes.len());
         let rows = match &menu {
-            Menu::Add => 6.0,
-            Menu::Var(_) => 5.0,
-            Menu::Mode(_) if table.modes().len() > 1 => 6.5,
+            Menu::Add => 7.0,
+            Menu::Var(_) => 7.0,
+            Menu::Mode(m) if modes_of(*m) > 1 => 6.5,
             Menu::Mode(_) => 3.0,
+            Menu::Collection(_) => 4.5,
+            Menu::ConfirmCollection(_) => 4.0,
+            Menu::MoveTo(_) => table.collections().len() as f32 + 1.5,
+            Menu::Scope(v) => scope_rows(table.get(*v)),
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
             Menu::Style(_) => 5.0,
@@ -658,6 +764,10 @@ impl OndinApp {
                                 acts.push(Act::NewMode);
                                 close = true;
                             }
+                            if row(ui, icon::DATABASE, "New collection") {
+                                acts.push(Act::NewCollection);
+                                close = true;
+                            }
                             ui::menu_sep(ui);
                             if row(ui, icon::ARROW_CIRCLE_DOWN, "Import tokens…") {
                                 acts.push(Act::ImportTokens);
@@ -702,6 +812,31 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
+                            // A boolean binds visibility and nothing else, so
+                            // it has no scope to narrow.
+                            let boolean = v.kind == VarKind::Boolean;
+                            let scope = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::TARGET, "Scope…").enabled(!boolean),
+                                MENU_ROW_H,
+                            );
+                            let scope = match boolean {
+                                true => scope.on_hover_text("A boolean binds visibility only."),
+                                false => scope,
+                            };
+                            // Not `close`: the popover takes the menu's place.
+                            if scope.clicked() && !boolean {
+                                b.menu = Some((Menu::Scope(v.id), at));
+                            }
+                            let move_to = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::DATABASE, "Move to"),
+                                MENU_ROW_H,
+                            );
+                            ui::paint_submenu_caret(ui, move_to.rect);
+                            if move_to.clicked() {
+                                b.menu = Some((Menu::MoveTo(v.id), at));
+                            }
                             let n = users.get(&v.id).map_or(0, Vec::len);
                             let select = ui::menu_row(
                                 ui,
@@ -741,7 +876,7 @@ impl OndinApp {
                             }
                             // The order: the first mode is the default every
                             // unset frame reads.
-                            let n = table.modes().len();
+                            let n = modes_of(mode.id);
                             let i = table.mode_index(mode.id).unwrap_or(0);
                             if n > 1 {
                                 ui::menu_sep(ui);
@@ -763,9 +898,12 @@ impl OndinApp {
                                 }
                                 ui::menu_sep(ui);
                             }
-                            // The last mode cannot go while there are variables:
-                            // every variable has a value in every mode.
-                            let last = table.modes().len() == 1 && table.local().next().is_some();
+                            // A collection's last mode cannot go while it has
+                            // variables: every variable has a value in every mode.
+                            let held = table
+                                .collection_of_mode(mode.id)
+                                .is_some_and(|c| table.of_collection(c.id).next().is_some());
+                            let last = n == 1 && held;
                             let del = ui::menu_row(
                                 ui,
                                 ui::MenuRow::new(icon::TRASH, "Delete mode…")
@@ -793,7 +931,7 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
-                            let members = group_members(table, path);
+                            let members = group_members(table, self.shown_collection(), path);
                             let mut who: Vec<NodeId> = members
                                 .iter()
                                 .flat_map(|v| users[&v.id].iter().copied())
@@ -963,6 +1101,134 @@ impl OndinApp {
                                 acts.push(Act::KitMap(kit.clone(), *mode, None));
                                 close = true;
                             }
+                        }
+                        Menu::Collection(c) => {
+                            let Some(col) = table.collection(*c) else {
+                                close = true;
+                                return;
+                            };
+                            if row(ui, icon::PENCIL_SIMPLE, "Rename collection") {
+                                acts.push(Act::StartEdit(Edit::Collection {
+                                    id: col.id,
+                                    text: col.name.clone(),
+                                }));
+                                close = true;
+                            }
+                            if row(ui, icon::COPY, "Duplicate collection") {
+                                acts.push(Act::DuplicateCollection(col.id));
+                                close = true;
+                            }
+                            let mut who: Vec<NodeId> = table
+                                .of_collection(col.id)
+                                .flat_map(|v| users[&v.id].iter().copied())
+                                .collect();
+                            who.sort();
+                            who.dedup();
+                            let select = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::SELECTION, &layers_label(who.len()))
+                                    .enabled(!who.is_empty()),
+                                MENU_ROW_H,
+                            );
+                            if select.clicked() {
+                                acts.push(Act::Select(who));
+                                close = true;
+                            }
+                            ui::menu_sep(ui);
+                            // The last collection holds the document's modes
+                            // and cannot go.
+                            let last = table.collections().len() == 1;
+                            let del = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::TRASH, "Delete collection…")
+                                    .danger(true)
+                                    .enabled(!last),
+                                MENU_ROW_H,
+                            );
+                            let del = match last {
+                                true => {
+                                    del.on_hover_text("A document keeps at least one collection")
+                                }
+                                false => del,
+                            };
+                            if del.clicked() && !last {
+                                b.menu = Some((Menu::ConfirmCollection(col.id), at));
+                            }
+                        }
+                        Menu::ConfirmCollection(c) => {
+                            let Some(col) = table.collection(*c) else {
+                                close = true;
+                                return;
+                            };
+                            let (vars, layers, frames) = var::collection_reach(doc, col.id);
+                            let mut what = format!("Delete {}?", col.name);
+                            what.push_str(&match vars {
+                                0 => " It holds no variable.".to_string(),
+                                1 => " 1 variable goes".to_string(),
+                                n => format!(" {n} variables go"),
+                            });
+                            if vars > 0 {
+                                what.push_str(&match layers {
+                                    0 => ".".to_string(),
+                                    1 => ", and 1 layer keeps its values.".to_string(),
+                                    n => format!(", and {n} layers keep their values."),
+                                });
+                            }
+                            what.push_str(&match frames {
+                                0 => String::new(),
+                                1 => " 1 frame returns to Inherit.".to_string(),
+                                n => format!(" {n} frames return to Inherit."),
+                            });
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(what)
+                                        .size(11.5)
+                                        .color(theme::text::muted()),
+                                )
+                                .wrap(),
+                            );
+                            ui.add_space(4.0);
+                            let del = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::TRASH, "Delete collection").danger(true),
+                                MENU_ROW_H,
+                            );
+                            if del.clicked() {
+                                acts.push(Act::DeleteCollection(col.id));
+                                close = true;
+                            }
+                            if row(ui, icon::X, "Cancel") {
+                                close = true;
+                            }
+                        }
+                        Menu::MoveTo(v) => {
+                            let here = table.collection_of(*v).map(|c| c.id);
+                            for c in table.collections() {
+                                let r = ui::menu_row(
+                                    ui,
+                                    ui::MenuRow::new("", &c.name)
+                                        .checked(Some(c.id) == here)
+                                        .enabled(Some(c.id) != here),
+                                    MENU_ROW_H,
+                                );
+                                if r.clicked() && Some(c.id) != here {
+                                    acts.push(Act::MoveTo(*v, Some(c.id)));
+                                    close = true;
+                                }
+                            }
+                            ui::menu_sep(ui);
+                            if row(ui, icon::PLUS, "New collection") {
+                                acts.push(Act::MoveTo(*v, None));
+                                close = true;
+                            }
+                        }
+                        Menu::Scope(v) => {
+                            let Some(v) = table.get(*v) else {
+                                close = true;
+                                return;
+                            };
+                            scope_popover(ui, doc, v, users, acts);
                         }
                         Menu::ConfirmMode(m) => {
                             let Some(mode) = table.mode(*m) else {
@@ -1177,27 +1443,11 @@ impl OndinApp {
                 }
             }
             Act::NewVar(kind) => {
-                let mut ops = Vec::new();
-                let first = match table.default_mode() {
-                    Some(m) => m,
-                    None => {
-                        let m = self.session.ids.mint_mode();
-                        ops.push(Operation::AddMode {
-                            mode: Mode {
-                                id: m,
-                                name: "Mode 1".into(),
-                            },
-                            index: 0,
-                            cells: vec![],
-                        });
-                        m
-                    }
-                };
-                let modes: Vec<ModeId> = if table.modes().is_empty() {
-                    vec![first]
-                } else {
-                    table.modes().iter().map(|m| m.id).collect()
-                };
+                // Into the collection on show.
+                let shown = self.shown_collection();
+                let first = self.session.ids.mint_mode();
+                let table = self.session.doc.variables();
+                let (mut ops, modes) = var::columns_for_new(table, shown, first);
                 let (stem, cell) = match kind {
                     VarKind::Color => ("colour", Cell::Color(Color::WHITE)),
                     VarKind::Number => ("number", Cell::Number(0.0)),
@@ -1207,7 +1457,10 @@ impl OndinApp {
                     // all, which reads as a fault.
                     VarKind::String => ("string", Cell::String("Text".into())),
                 };
-                let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
+                let taken: Vec<&str> = table
+                    .of_collection(shown)
+                    .map(|v| v.name.as_str())
+                    .collect();
                 let name = free_name(&taken, stem, 1);
                 let id = self.session.ids.mint_var();
                 ops.push(Operation::AddVariable {
@@ -1216,6 +1469,7 @@ impl OndinApp {
                         name: name.clone(),
                         kind,
                         cells: modes.into_iter().map(|m| (m, cell.clone())).collect(),
+                        scope: None,
                         origin: None,
                         forked: None,
                         description: String::new(),
@@ -1233,12 +1487,20 @@ impl OndinApp {
                 }
             }
             Act::NewMode => {
-                let taken: Vec<&str> = table.modes().iter().map(|m| m.name.as_str()).collect();
-                let name = free_name(&taken, "Mode", table.modes().len() + 1);
+                // A mode of the collection on show, copying its first.
+                let shown = self.shown_collection();
+                let table = self.session.doc.variables();
+                let Some(col) = table.collection(shown) else {
+                    return;
+                };
+                let taken: Vec<&str> = col.modes.iter().map(|m| m.name.as_str()).collect();
+                let name = free_name(&taken, "Mode", col.modes.len() + 1);
                 let id = self.session.ids.mint_mode();
-                let ops = match table.default_mode() {
-                    Some(first) => var::copy_mode_ops(doc, first, id, &name, table.modes().len()),
+                let doc = &self.session.doc;
+                let ops = match col.default_mode() {
+                    Some(first) => var::copy_mode_ops(doc, first, id, &name, col.modes.len()),
                     None => vec![Operation::AddMode {
+                        collection: shown,
                         mode: Mode {
                             id,
                             name: name.clone(),
@@ -1267,11 +1529,13 @@ impl OndinApp {
                 }
             }
             Act::DuplicateMode(from) => {
-                let Some(index) = table.mode_index(from) else {
+                let (Some(index), Some(col)) =
+                    (table.mode_index(from), table.collection_of_mode(from))
+                else {
                     return;
                 };
-                let taken: Vec<&str> = table.modes().iter().map(|m| m.name.as_str()).collect();
-                let stem = format!("{} copy", table.modes()[index].name);
+                let taken: Vec<&str> = col.modes.iter().map(|m| m.name.as_str()).collect();
+                let stem = format!("{} copy", col.modes[index].name);
                 let name = if taken.contains(&stem.as_str()) {
                     free_name(&taken, &stem, 2)
                 } else {
@@ -1286,7 +1550,10 @@ impl OndinApp {
             }
             Act::Name(id, text) => {
                 let text = text.trim().to_string();
-                match name_refusal(table, &text, Some(id)) {
+                let c = table
+                    .collection_of(id)
+                    .map_or(table.first_collection().id, |c| c.id);
+                match name_refusal(table, c, &text, Some(id)) {
                     Some(why) => self.var_refuse(why),
                     None => {
                         let changed = table.get(id).is_some_and(|v| v.name != text);
@@ -1304,7 +1571,10 @@ impl OndinApp {
             }
             Act::ModeName(id, text) => {
                 let text = text.trim().to_string();
-                let taken = table.modes().iter().any(|m| m.id != id && m.name == text);
+                // Unique in its collection: two collections may both have *Dark*.
+                let taken = table
+                    .collection_of_mode(id)
+                    .is_some_and(|c| c.modes.iter().any(|m| m.id != id && m.name == text));
                 if text.is_empty() {
                     self.var_refuse("A mode needs a name.".into());
                 } else if taken {
@@ -1328,7 +1598,7 @@ impl OndinApp {
                     self.var_refuse("A group's name cannot have an empty part.".into());
                     return;
                 }
-                match var::rename_group_ops(doc, &from, &to) {
+                match var::rename_group_ops(doc, self.shown_collection(), &from, &to) {
                     Err(clash) => self.var_refuse(format!("{clash} already exists.")),
                     Ok(ops) => {
                         self.var_edit_done();
@@ -1354,7 +1624,10 @@ impl OndinApp {
                 let Some(v) = table.get(id).filter(|v| v.origin.is_none()) else {
                     return;
                 };
-                let taken: Vec<&str> = table.local().map(|v| v.name.as_str()).collect();
+                let taken: Vec<&str> = match table.collection_of(v.id) {
+                    Some(c) => table.of_collection(c.id).map(|v| v.name.as_str()).collect(),
+                    None => Vec::new(),
+                };
                 let stem = format!("{} copy", v.name);
                 let name = if taken.contains(&stem.as_str()) {
                     free_name(&taken, &stem, 2)
@@ -1402,6 +1675,170 @@ impl OndinApp {
                         (n, None) => format!("Deleted {label}. {n} layers were detached."),
                     };
                     self.session.info(said);
+                }
+            }
+            Act::ShowCollection(c) => {
+                let root = collapsed_key(doc);
+                self.var_collection.insert(root, c);
+                if let Some(b) = self.var_browser.as_mut() {
+                    b.scroll_x = 0.0;
+                }
+            }
+            Act::NewCollection => {
+                let taken: Vec<&str> = table
+                    .collections()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect();
+                let name = free_name(&taken, "Collection", table.collections().len() + 1);
+                let (id, mode) = (
+                    self.session.ids.mint_collection(),
+                    self.session.ids.mint_mode(),
+                );
+                let ops = var::new_collection_ops(id, mode, &name, table.collections().len());
+                self.session.name_step("New collection", icon::DATABASE);
+                if self.commit_edit(Transaction(ops)) {
+                    let root = collapsed_key(&self.session.doc);
+                    self.var_collection.insert(root, id);
+                    if let Some(b) = self.var_browser.as_mut() {
+                        b.tab = Tab::Variables;
+                        b.edit = Some(Edit::Collection { id, text: name });
+                        b.edit_focus = true;
+                    }
+                }
+            }
+            Act::CollectionName(id, text) => {
+                let text = text.trim().to_string();
+                let taken = table
+                    .collections()
+                    .iter()
+                    .any(|c| c.id != id && c.name == text);
+                if text.is_empty() {
+                    self.var_refuse("A collection needs a name.".into());
+                } else if taken {
+                    self.var_refuse(format!("{text} already exists."));
+                } else {
+                    let changed = table.collection(id).is_some_and(|c| c.name != text);
+                    self.var_edit_done();
+                    if changed {
+                        self.session
+                            .name_step("Rename collection", icon::PENCIL_SIMPLE);
+                        self.commit_edit(Transaction(vec![Operation::SetCollectionName {
+                            id,
+                            name: text,
+                        }]));
+                    }
+                }
+            }
+            Act::DuplicateCollection(c) => {
+                let Some(col) = table.collection(c) else {
+                    return;
+                };
+                let taken: Vec<&str> = table
+                    .collections()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect();
+                let stem = format!("{} copy", col.name);
+                let name = if taken.contains(&stem.as_str()) {
+                    free_name(&taken, &stem, 2)
+                } else {
+                    stem
+                };
+                let ops = var::duplicate_collection_ops(doc, c, &name, &mut self.session.ids);
+                if !ops.is_empty() {
+                    self.session.name_step("Duplicate collection", icon::COPY);
+                    self.commit_edit(Transaction(ops));
+                }
+            }
+            Act::DeleteCollection(c) => {
+                let name = table
+                    .collection(c)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                let (_, layers, _) = var::collection_reach(doc, c);
+                let ops = var::remove_collection_ops(doc, c);
+                if ops.is_empty() {
+                    return;
+                }
+                self.session.name_step("Delete collection", icon::TRASH);
+                if self.commit_edit(Transaction(ops)) {
+                    self.session.info(match layers {
+                        0 => format!("Deleted {name}"),
+                        1 => format!("Deleted {name}. 1 layer keeps its values."),
+                        n => format!("Deleted {name}. {n} layers keep their values."),
+                    });
+                }
+            }
+            Act::MoveTo(v, to) => {
+                let mut ops = Vec::new();
+                let target = match to {
+                    Some(c) => c,
+                    None => {
+                        // Into a new collection, named after the one it leaves.
+                        let taken: Vec<&str> = table
+                            .collections()
+                            .iter()
+                            .map(|c| c.name.as_str())
+                            .collect();
+                        let name = free_name(&taken, "Collection", table.collections().len() + 1);
+                        let (id, mode) = (
+                            self.session.ids.mint_collection(),
+                            self.session.ids.mint_mode(),
+                        );
+                        let index = table.collections().len();
+                        // The new one's first mode takes the source's first's name,
+                        // so the move keeps the default's value by name too.
+                        let mut add = var::new_collection_ops(id, mode, &name, index);
+                        if let (Some(Operation::AddCollection { collection, .. }), Some(first)) = (
+                            add.first_mut(),
+                            table.collection_of(v).and_then(|c| c.modes.first()),
+                        ) {
+                            collection.modes[0].name = first.name.clone();
+                        }
+                        ops.extend(add);
+                        id
+                    }
+                };
+                // Planned against the document with the new collection in it.
+                let mut scratch = doc.clone();
+                if !ops.is_empty() && scratch.apply(&Transaction(ops.clone())).is_err() {
+                    return;
+                }
+                match var::move_ops(&scratch, &[v], target) {
+                    Err(clash) => self.session.info(format!(
+                        "{clash} is already in {}.",
+                        scratch
+                            .variables()
+                            .collection(target)
+                            .map_or("", |c| c.name.as_str())
+                    )),
+                    Ok(moves) => {
+                        ops.extend(moves);
+                        self.session.name_step("Move variable", icon::DATABASE);
+                        if self.commit_edit(Transaction(ops)) {
+                            let root = collapsed_key(&self.session.doc);
+                            self.var_collection.insert(root, target);
+                        }
+                    }
+                }
+            }
+            Act::Scope(v, scope) => {
+                let dropped: usize = var::users_by_field(doc, v)
+                    .iter()
+                    .filter(|(f, _)| scope.is_some_and(|s| !s.contains(*f)))
+                    .map(|(_, ids)| ids.len())
+                    .sum();
+                let ops = var::scope_ops(doc, v, scope);
+                if ops.is_empty() {
+                    return;
+                }
+                self.session.name_step("Scope", icon::TARGET);
+                if self.commit_edit(Transaction(ops)) && dropped > 0 {
+                    self.session.info(match dropped {
+                        1 => "1 layer was detached.".to_string(),
+                        n => format!("{n} layers were detached."),
+                    });
                 }
             }
             Act::DeleteMode(mode) => {
@@ -1467,6 +1904,320 @@ fn free_name(taken: &[&str], stem: &str, from: usize) -> String {
         .expect("an unbounded range has a free name")
 }
 
+/// A field family as the scope popover lists it.
+pub(crate) fn field_label(f: Field) -> &'static str {
+    match f {
+        Field::Size => "Width and height",
+        Field::Limits => "Min and max size",
+        Field::Spacing => "Gaps and padding",
+        Field::Corner => "Corner radius",
+        Field::StrokeWidth => "Stroke width",
+        Field::Opacity => "Opacity",
+        Field::Effect => "Effect numbers",
+        Field::Type => "Size, line height, spacing",
+        Field::Weight => "Weight",
+        Field::Fill => "Fill",
+        Field::Stroke => "Stroke",
+        Field::Content => "Text content",
+        Field::Family => "Font family",
+        Field::Visible => "Visibility",
+    }
+}
+
+/// The inspector card a number family sits under in the scope popover; `None`
+/// for a colour's or a string's, which list flat.
+fn field_group(f: Field) -> Option<&'static str> {
+    match f {
+        Field::Size | Field::Limits => Some("Size"),
+        Field::Spacing => Some("Layout"),
+        Field::Corner | Field::StrokeWidth => Some("Shape"),
+        Field::Opacity | Field::Effect => Some("Appearance"),
+        Field::Type | Field::Weight => Some("Type"),
+        _ => None,
+    }
+}
+
+/// What a variable's scope says in a sentence — *gaps and padding, corner
+/// radius* — or `None` when it binds every field of its kind.
+pub(crate) fn scope_line(v: &Variable) -> Option<String> {
+    let s = v.scope?;
+    let words: Vec<String> = s
+        .fields()
+        .filter(|f| f.kind() == v.kind)
+        .map(|f| field_label(f).to_lowercase())
+        .collect();
+    Some(match words.is_empty() {
+        true => "nothing".to_string(),
+        false => words.join(", "),
+    })
+}
+
+/// [`scope_line`] for a refusal: what it binds, every field when unscoped.
+pub(crate) fn scope_words(v: &Variable) -> String {
+    scope_line(v).unwrap_or_else(|| "every field".to_string())
+}
+
+/// A collection's header in a list naming several — the `--` list's and a
+/// search's: its glyph and name, small and dim.
+pub(crate) fn collection_head(ui: &mut egui::Ui, name: &str) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), GROUP_H),
+        egui::Sense::hover(),
+    );
+    let p = ui.painter();
+    let ink = theme::text::dim();
+    p.text(
+        egui::pos2(rect.left() + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        icon::DATABASE,
+        theme::icon_font(13.0),
+        ink,
+    );
+    p.text(
+        egui::pos2(rect.left() + 26.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(10.5),
+        ink,
+    );
+}
+
+/// A collection's header over its rows in a search spanning the collections:
+/// its glyph and name in small caps, its modes at the right.
+fn collection_row(ui: &mut egui::Ui, c: &ondin_core::variable::Collection) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), GROUP_H),
+        egui::Sense::hover(),
+    );
+    let p = ui.painter();
+    let ink = theme::text::dim();
+    p.text(
+        egui::pos2(rect.left() + 2.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        icon::DATABASE,
+        theme::icon_font(13.0),
+        ink,
+    );
+    p.text(
+        egui::pos2(rect.left() + 20.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        c.name.to_uppercase(),
+        egui::FontId::proportional(11.0),
+        ink,
+    );
+    let modes: Vec<&str> = c.modes.iter().map(|m| m.name.as_str()).collect();
+    p.text(
+        egui::pos2(rect.right() - 2.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        modes.join(" · "),
+        egui::FontId::proportional(11.0),
+        theme::text::faint(),
+    );
+}
+
+/// The scope popover's width.
+const SCOPE_W: f32 = 300.0;
+
+/// The scope popover's height in menu rows for `v`'s kind — fixed per kind,
+/// so it never resizes while boxes are ticked.
+fn scope_rows(v: Option<&Variable>) -> f32 {
+    let Some(v) = v else { return 2.0 };
+    let fields = Field::of_kind(v.kind).count() as f32;
+    let groups = match v.kind {
+        VarKind::Number => 5.0,
+        _ => 0.0,
+    };
+    // Head, *Every … field*, the rows and their headings, the two footer lines.
+    2.5 + fields + groups * 0.9 + 2.0
+}
+
+/// *Scope…*: which fields `v` may bind. *Every … field* on is no scope — every
+/// field of its kind, any bindable later too; off, a box per family, each
+/// counting the layers bound there (the count selects them). Unticking a family
+/// with users warns first, in the footer while it is hovered, and detaches on
+/// the tick itself (`variable::scope_ops`); a number's footer names the DTCG
+/// type the scope makes.
+fn scope_popover(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    v: &Variable,
+    users: &BTreeMap<VarId, Vec<NodeId>>,
+    acts: &mut Vec<Act>,
+) {
+    let t = doc.variables();
+    let by_field = var::users_by_field(doc, v.id);
+    let count = |f: Field| -> Vec<NodeId> {
+        let mut who = by_field
+            .iter()
+            .find(|(x, _)| *x == f)
+            .map(|(_, ids)| ids.clone())
+            .unwrap_or_default();
+        who.retain(|u| users.get(&v.id).is_some_and(|all| all.contains(u)));
+        who
+    };
+    // Head: its kind's glyph, its name, its collection.
+    ui.horizontal(|ui| {
+        ui.add_space(6.0);
+        ui.label(theme::icon_text(
+            kind_glyph(v.kind),
+            15.0,
+            theme::text::dim(),
+        ));
+        ui.label(
+            egui::RichText::new(&v.name)
+                .size(12.5)
+                .strong()
+                .color(color::text()),
+        );
+        if let Some(c) = t.collection_of(v.id) {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(&c.name)
+                        .size(11.0)
+                        .color(theme::text::faint()),
+                );
+            });
+        }
+    });
+    ui::menu_sep(ui);
+    let every = v.scope.is_none();
+    let every_label = format!("Every {} field", kind_word(v.kind));
+    if ui::switch_row(ui, &every_label, every, MENU_ROW_H).clicked() {
+        // Off leaves every box ticked to start from.
+        let next = match every {
+            true => Some(Scope::of(Field::of_kind(v.kind))),
+            false => None,
+        };
+        acts.push(Act::Scope(v.id, next));
+    }
+    ui::menu_sep(ui);
+    let scope = v.scope.unwrap_or_else(|| Scope::of(Field::of_kind(v.kind)));
+    let mut warn: Option<String> = None;
+    let mut group: Option<&str> = None;
+    for f in Field::of_kind(v.kind) {
+        if let Some(g) = field_group(f)
+            && group != Some(g)
+        {
+            group = Some(g);
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.add_space(8.0);
+                ui.label(ui::eyebrow(g));
+            });
+        }
+        let on = scope.contains(f);
+        let who = count(f);
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), MENU_ROW_H),
+            egui::Sense::click(),
+        );
+        let p = ui.painter();
+        ui::list_row_ground(p, rect, false, resp.hovered() && !every);
+        ui::paint_tick_box(
+            p,
+            egui::pos2(rect.left() + 8.0, rect.center().y - ui::TICK_BOX / 2.0),
+            on,
+            resp.hovered(),
+        );
+        let ink = match (every, on) {
+            (true, _) => theme::text::disabled(),
+            (false, true) => color::text(),
+            (false, false) => theme::text::muted(),
+        };
+        p.text(
+            egui::pos2(rect.left() + 8.0 + ui::TICK_BOX + 8.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            field_label(f),
+            egui::FontId::proportional(11.5),
+            ink,
+        );
+        // The count selects the layers bound there.
+        let picked = if who.is_empty() {
+            false
+        } else {
+            let n = who.len().to_string();
+            let r = egui::Rect::from_min_max(
+                egui::pos2(rect.right() - 36.0, rect.top()),
+                rect.right_bottom(),
+            );
+            let hit = ui.interact(r, resp.id.with("count"), egui::Sense::click());
+            ui.painter().text(
+                egui::pos2(rect.right() - 10.0, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                n,
+                egui::FontId::proportional(11.0),
+                if hit.hovered() {
+                    color::text()
+                } else {
+                    theme::text::faint()
+                },
+            );
+            let hit = hit.on_hover_text(layers_label(who.len()));
+            if hit.clicked() {
+                acts.push(Act::Select(who.clone()));
+            }
+            hit.clicked()
+        };
+        if every {
+            continue;
+        }
+        if on && !who.is_empty() && resp.hovered() {
+            warn = Some(match who.len() {
+                1 => format!("Unticking {} detaches 1 layer.", field_label(f)),
+                n => format!("Unticking {} detaches {n} layers.", field_label(f)),
+            });
+        }
+        if resp.clicked() && !picked {
+            acts.push(Act::Scope(v.id, Some(scope.with(f, !on))));
+        }
+    }
+    ui::menu_sep(ui);
+    let foot = |ui: &mut egui::Ui, text: String, ink: egui::Color32| {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(text).size(11.0).color(ink));
+        });
+    };
+    // Always the line's room, so the popover keeps its height.
+    match warn {
+        Some(w) => foot(ui, w, color::warn()),
+        None => foot(ui, String::new(), theme::text::faint()),
+    }
+    if v.kind == VarKind::Number {
+        let ty = match v.scope {
+            Some(s) => ondin_export::dtcg::scope_type(Some(s)),
+            None => "read from its bindings",
+        };
+        let line = match ty {
+            "dimension" => "Exports as dimension · px".to_string(),
+            "read from its bindings" => "Exports typed by what it binds".to_string(),
+            other => format!("Exports as {other}"),
+        };
+        foot(ui, line, theme::text::dim());
+    }
+}
+
+/// The glyph a variable's kind wears in its row.
+fn kind_glyph(k: VarKind) -> &'static str {
+    match k {
+        VarKind::Color => icon::PALETTE,
+        VarKind::Number => icon::HASH,
+        VarKind::Boolean => icon::CHECK,
+        VarKind::String => icon::TEXT_T,
+    }
+}
+
+/// What the picker says of a collection beside its name: its two modes, or
+/// how many.
+fn modes_summary(c: &ondin_core::variable::Collection) -> String {
+    match c.modes.as_slice() {
+        [a, b] => format!("{} · {}", a.name, b.name),
+        [_] => "1 mode".to_string(),
+        many => format!("{} modes", many.len()),
+    }
+}
+
 /// *Select 3 layers*, *Select 1 layer*, *No layers use it*.
 fn layers_label(n: usize) -> String {
     match n {
@@ -1507,11 +2258,12 @@ fn in_group(name: &str, path: &str) -> bool {
     path.is_empty() || name.starts_with(&format!("{path}/"))
 }
 
-/// Why `name` cannot be a variable's (`except` the one being renamed), if it
-/// cannot — empty, an empty group part, or taken. Colour review's new variable
-/// is refused the same way.
+/// Why `name` cannot be a variable's in collection `c` (`except` the one being
+/// renamed), if it cannot — empty, an empty group part, or taken there. Colour
+/// review's new variable is refused the same way.
 pub(crate) fn name_refusal(
     table: &ondin_core::Variables,
+    c: CollectionId,
     name: &str,
     except: Option<VarId>,
 ) -> Option<String> {
@@ -1521,15 +2273,24 @@ pub(crate) fn name_refusal(
     if name.split('/').any(|s| s.trim().is_empty()) {
         return Some("A name cannot have an empty group.".into());
     }
-    let taken = table.iter().any(|v| v.name == name && Some(v.id) != except);
+    let taken = table
+        .of_collection(c)
+        .any(|v| v.name == name && Some(v.id) != except);
     taken.then(|| format!("{name} already exists."))
 }
 
 /// The document's own variables under group `path` — what its menu deletes and
 /// selects the users of. A kit's group of the same path lists apart, and its
 /// rows are inert (§15 D1065).
-fn group_members<'a>(table: &'a ondin_core::Variables, path: &str) -> Vec<&'a Variable> {
-    table.local().filter(|v| in_group(&v.name, path)).collect()
+fn group_members<'a>(
+    table: &'a ondin_core::Variables,
+    c: CollectionId,
+    path: &str,
+) -> Vec<&'a Variable> {
+    table
+        .of_collection(c)
+        .filter(|v| in_group(&v.name, path))
+        .collect()
 }
 
 /// The document's own styles of `slot` under group `path` — what its menu
@@ -1586,7 +2347,11 @@ fn parse_cell(
             Some(Cell::Alias(t)) => table.get(*t).filter(|t| t.name == name),
             _ => None,
         };
-        let Some(target) = current.or_else(|| table.by_name(name)) else {
+        // Then its own collection's, then the first other one's by that name.
+        let own = table
+            .collection_of(v.id)
+            .and_then(|c| table.by_name_in(c.id, name));
+        let Some(target) = current.or(own).or_else(|| table.by_name(name)) else {
             return Err(format!("No variable is named {name}."));
         };
         if target.kind != v.kind {
@@ -1709,17 +2474,33 @@ fn lines_of<'a>(
     out
 }
 
-/// The whole table's lines: the document's own, then each kit's under its
-/// header, by the kit's name — *kit groups last* (D1038 B, §15 D1065). A kit
-/// with nothing shown has no header.
+/// The whole table's lines: collection `shown`'s own, then each kit's that maps
+/// from it under its header, by the kit's name — *kit groups last* (D1038 B,
+/// §15 D1065). A kit with nothing shown has no header.
+///
+/// **`across`, a search or *In selection* spans every collection**, each under
+/// its header with its own rows, and every kit after them.
 fn all_lines<'a>(
     doc: &'a Document,
+    shown: CollectionId,
+    across: bool,
     query: &str,
     picked: Option<&HashSet<VarId>>,
     collapsed: &HashSet<String>,
 ) -> Vec<Line<'a>> {
     let table = doc.variables();
-    let mut out = lines_of(table.local(), None, query, picked, collapsed);
+    let mut out = Vec::new();
+    if across {
+        for c in table.collections() {
+            let lines = lines_of(table.of_collection(c.id), None, query, picked, collapsed);
+            if !lines.is_empty() {
+                out.push(Line::Collection(c));
+                out.extend(lines);
+            }
+        }
+    } else {
+        out = lines_of(table.of_collection(shown), None, query, picked, collapsed);
+    }
     let mut kits: Vec<(String, &'a str)> = table
         .kits()
         .keys()
@@ -1727,7 +2508,15 @@ fn all_lines<'a>(
         .collect();
     kits.sort();
     for (_, k) in kits {
-        let lines = lines_of(table.of_kit(k), Some(k), query, picked, collapsed);
+        // Shown under the collection its variables map from, unless spanning.
+        let maps_here = |v: &&Variable| {
+            across
+                || table
+                    .kit_onto(table.kit_collection_of(v).unwrap_or_default())
+                    .is_some_and(|c| c.id == shown)
+        };
+        let vars = table.of_kit(k).filter(maps_here);
+        let lines = lines_of(vars, Some(k), query, picked, collapsed);
         if !lines.is_empty() {
             out.push(Line::Kit(k));
             out.extend(lines);
@@ -1756,12 +2545,106 @@ fn tabs(ui: &mut egui::Ui, tab: &mut Tab) {
     }
 }
 
-/// The search, the *In selection* toggle and the `+`.
-fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
+/// The collection picker's width, when it shows.
+const PICKER_W: f32 = 150.0;
+
+/// The collection picker: a dropdown of the document's collections, the shown
+/// one checked with its modes beside it, then *New collection*; a right-click
+/// opens the shown one's menu, and its rename types over it. Only with two
+/// collections, or one renamed or being renamed.
+fn collection_picker(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    shown: CollectionId,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) {
+    let t = doc.variables();
+    let Some(current) = t.collection(shown) else {
+        return;
+    };
+    let refused = b.refused.clone();
+    if let Some(Edit::Collection { id, text }) = &mut b.edit
+        && *id == shown
+    {
+        let (r, _) = ui.allocate_exact_size(egui::vec2(PICKER_W, SEARCH_H), egui::Sense::hover());
+        let resp = edit_field(
+            ui,
+            r,
+            text,
+            egui::Id::new("var-collection-name"),
+            ui::CONTROL_PT,
+            Some("Collection name"),
+            refused.as_deref(),
+        );
+        if b.edit_focus {
+            b.edit_focus = false;
+            resp.request_focus();
+        }
+        ui::select_all_on_focus(ui, &resp, text);
+        if ui::defocus_commits(&resp) {
+            acts.push(Act::CollectionName(shown, text.clone()));
+        }
+        return;
+    }
+    ui.spacing_mut().interact_size.y = SEARCH_H;
+    ui.spacing_mut().button_padding.y = 0.0;
+    let combo = egui::ComboBox::from_id_salt("var-collection")
+        .icon(ui::combo_chevron)
+        .width(PICKER_W)
+        .selected_text(ui::glyph_and_text(icon::DATABASE, &current.name))
+        .show_ui(ui, |ui| {
+            ui::menu_rows(ui);
+            for c in t.collections() {
+                let summary = modes_summary(c);
+                let row = ui::MenuRow::new("", &c.name)
+                    .checked(c.id == shown)
+                    .accel(Some(&summary));
+                if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
+                    acts.push(Act::ShowCollection(c.id));
+                }
+            }
+            ui::menu_sep(ui);
+            if ui::menu_row(
+                ui,
+                ui::MenuRow::new(icon::PLUS, "New collection"),
+                MENU_ROW_H,
+            )
+            .clicked()
+            {
+                acts.push(Act::NewCollection);
+            }
+        })
+        .response
+        .on_hover_text("Collection · right-click for its menu");
+    if combo.secondary_clicked() {
+        acts.push(Act::OpenMenu(
+            Menu::Collection(shown),
+            combo.rect.left_bottom() + egui::vec2(0.0, ui::MENU_GAP),
+        ));
+    }
+}
+
+/// The search, the *In selection* toggle and the `+` — and, with two
+/// collections, the collection picker before them.
+fn search_row(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    shown: CollectionId,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) {
+    let t = doc.variables();
+    let renaming = matches!(&b.edit, Some(Edit::Collection { .. }));
+    let picker = matches!(b.tab, Tab::Variables) && (t.has_collections() || renaming);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
+        if picker {
+            collection_picker(ui, doc, shown, b, acts);
+        }
         let w = ui.available_width() - 2.0 * (SEARCH_H + 6.0);
         let hint = match b.tab {
+            Tab::Variables if t.has_collections() => "Search all collections",
             Tab::Variables => "Search variables",
             Tab::Styles => "Search styles",
         };
@@ -2579,8 +3462,15 @@ fn var_row(
             }
         }
         let mut name_resp = ui.interact(name_rect, id.with("name-hit"), egui::Sense::click());
-        if !v.description.is_empty() {
-            name_resp = name_resp.on_hover_text(&v.description);
+        // The description, and under it the scope when it is not every field.
+        let tip = match (v.description.is_empty(), scope_line(v)) {
+            (true, None) => None,
+            (false, None) => Some(v.description.clone()),
+            (true, Some(s)) => Some(format!("Binds {s}")),
+            (false, Some(s)) => Some(format!("{}\nBinds {s}", v.description)),
+        };
+        if let Some(tip) = tip {
+            name_resp = name_resp.on_hover_text(tip);
         }
         if ui::double_clicked(ui, &name_resp) {
             acts.push(Act::StartEdit(Edit::Name {
@@ -3152,41 +4042,93 @@ pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
     ui::paint_colour_chip(&painter, rect, ui::color_to_egui(c));
 }
 
-/// The mode frame `id` inherits when it sets none — the nearest ancestor frame's
-/// that sets one, and that frame, else the document's default (D1038 (a)).
-pub(crate) fn inherited_mode(doc: &Document, id: NodeId) -> Option<(ModeId, Option<NodeId>)> {
+/// The mode of collection `c` frame `id` inherits when it sets none of it — the
+/// nearest ancestor frame's that sets one, and that frame, else the
+/// collection's default (D1038 (a)).
+pub(crate) fn inherited_mode(
+    doc: &Document,
+    id: NodeId,
+    c: CollectionId,
+) -> Option<(ModeId, Option<NodeId>)> {
+    let col = doc.variables().collection(c)?;
     let mut at = doc.get(id)?.parent();
     while let Some(p) = at {
         let n = doc.get(p)?;
-        if let Some(m) = n.mode() {
+        if let Some(m) = n.modes().iter().copied().find(|m| col.has(*m)) {
             return Some((m, Some(p)));
         }
         at = n.parent();
     }
-    Some((doc.variables().default_mode()?, None))
+    Some((col.default_mode()?, None))
+}
+
+/// The collections a frame's identity card gives a mode row: the one a
+/// document with one collection has, once it has a mode; else each with two or
+/// more modes — one mode has nothing to choose.
+pub(crate) fn mode_rows(t: &ondin_core::Variables) -> Vec<CollectionId> {
+    if !t.has_collections() {
+        return match t.first_collection().modes.is_empty() {
+            true => Vec::new(),
+            false => vec![t.first_collection().id],
+        };
+    }
+    t.collections()
+        .iter()
+        .filter(|c| c.modes.len() > 1)
+        .map(|c| c.id)
+        .collect()
 }
 
 impl OndinApp {
-    /// A frame's or a page's *Mode* row, in its identity card under its name
-    /// (D1038 (a); §15 D1042): set, the mode reads bright; inherited, dim and
-    /// naming its source — *Light · from Hero / Desktop*, *Dark · from page*,
-    /// *Light · default*. A click opens the menu, *Inherit* first. Drawn only in a
-    /// document that has a mode to set.
+    /// A frame's or a page's mode rows, in its identity card under its name
+    /// (D1038 (a); §15 D1042): one *Mode* row, or one per collection
+    /// ([`mode_rows`]) under a *Modes* eyebrow, each labelled by its collection.
     pub(crate) fn frame_mode_row(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let doc = &self.session.doc;
         let Some(node) = doc.get(id) else { return };
-        let page = doc.is_page(id);
-        if !page && !matches!(node.kind(), ondin_core::NodeKind::Artboard { .. }) {
+        if !doc.is_page(id) && !matches!(node.kind(), ondin_core::NodeKind::Artboard { .. }) {
             return;
         }
         let table = doc.variables();
-        if table.modes().is_empty() {
-            return;
+        let rows = mode_rows(table);
+        match rows.as_slice() {
+            [] => {}
+            [c] => self.collection_mode_row(ui, id, *c, "Mode", 48.0),
+            many => {
+                let named: Vec<(CollectionId, String)> = many
+                    .iter()
+                    .filter_map(|c| Some((*c, table.collection(*c)?.name.clone())))
+                    .collect();
+                ui.label(ui::eyebrow("Modes"));
+                ui.add_space(ui::SECTION_LABEL_GAP - ui.spacing().item_spacing.y);
+                for (c, name) in named {
+                    self.collection_mode_row(ui, id, c, &name, 74.0);
+                }
+            }
         }
-        let (value, suffix, set) = match node.mode().and_then(|m| table.mode(m)) {
+    }
+
+    /// One mode row of frame `id` for collection `c`, labelled `label` in a
+    /// `label_w` column: set, the mode reads bright; inherited, dim and naming
+    /// its source — *Light · from Hero / Desktop*, *Dark · from page*, *Light ·
+    /// default*. A click opens the menu, *Inherit* first.
+    fn collection_mode_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        c: CollectionId,
+        row_label: &str,
+        label_w: f32,
+    ) {
+        let doc = &self.session.doc;
+        let Some(node) = doc.get(id) else { return };
+        let page = doc.is_page(id);
+        let table = doc.variables();
+        let owner = var::ModeOwner::Collection(c);
+        let (value, suffix, set) = match node.mode_of(table, owner).and_then(|m| table.mode(m)) {
             Some(m) => (m.name.clone(), None, true),
             None => {
-                let Some((m, from)) = inherited_mode(doc, id) else {
+                let Some((m, from)) = inherited_mode(doc, id, c) else {
                     return;
                 };
                 let name = table.mode(m).map(|m| m.name.clone()).unwrap_or_default();
@@ -3198,21 +4140,27 @@ impl OndinApp {
                 (name, Some(from), false)
             }
         };
-        let open = self.mode_menu.is_some_and(|(n, _)| n == id);
+        let open = self.mode_menu.is_some_and(|(n, x, _)| n == id && x == c);
         // **On an instance a mode the copy sets is an override** (D1038 (a), §15
         // D1048, D1042's *Fix*): the label bright with D981's dot, ↺ in its place
         // while the pointer is on the row, a click on it the main's mode back —
-        // a field's mark, the label being this row's.
+        // a field's mark, the label being this row's. The field written is the
+        // frame's whole set; the row compares its own collection's mode in it.
+        let of = |set: &Vec<ModeId>| {
+            set.iter()
+                .copied()
+                .find(|m| table.owner_of(*m) == Some(owner))
+        };
         let mark = self.sub_mark(
             &[id],
             |op| match op {
-                ondin_core::Operation::SetMode { mode, .. } => Some(*mode),
+                ondin_core::Operation::SetModes { modes, .. } => Some(modes.clone()),
                 _ => None,
             },
-            |n| Some(n.mode()),
-            |v| *v,
-            |c, v| *c = v,
-            |id, mode| ondin_core::Operation::SetMode { id, mode },
+            |n| Some(n.modes().to_vec()),
+            of,
+            |set, v| *set = var::with_mode(table, set, owner, v),
+            |id, modes| ondin_core::Operation::SetModes { id, modes },
             |v| match v.and_then(|m| table.mode(m)) {
                 Some(m) => m.name.clone(),
                 None => "Inherit".into(),
@@ -3229,7 +4177,7 @@ impl OndinApp {
                 Some(_) => egui::Sense::click(),
                 None => egui::Sense::hover(),
             };
-            let (label, lresp) = ui.allocate_exact_size(egui::vec2(48.0, 28.0), sense);
+            let (label, lresp) = ui.allocate_exact_size(egui::vec2(label_w, 28.0), sense);
             match &mark {
                 Some(_) if over => {
                     ui.painter().text(
@@ -3244,7 +4192,7 @@ impl OndinApp {
                     let g = ui.painter().text(
                         label.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Mode",
+                        row_label,
                         egui::FontId::proportional(10.5),
                         theme::text::strong(),
                     );
@@ -3254,7 +4202,7 @@ impl OndinApp {
                     ui.painter().text(
                         label.left_center(),
                         egui::Align2::LEFT_CENTER,
-                        "Mode",
+                        row_label,
                         egui::FontId::proportional(10.5),
                         theme::text::dim(),
                     );
@@ -3313,16 +4261,17 @@ impl OndinApp {
                 }
             });
             if resp.clicked() {
-                self.mode_menu = if open { None } else { Some((id, rect)) };
+                self.mode_menu = if open { None } else { Some((id, c, rect)) };
             }
         });
         self.reset_marked(reset, &mark);
     }
 
-    /// The *Mode* menu: *Inherit* with the mode it would inherit, then every
-    /// mode, the frame's own checked.
+    /// The *Mode* menu of one collection: *Inherit* with the mode it would
+    /// inherit, then each of its modes, the frame's own checked. One pick is one
+    /// `SetModes`, every other collection's mode kept.
     pub(crate) fn mode_menu_ui(&mut self, ctx: &egui::Context) {
-        let Some((id, under)) = self.mode_menu else {
+        let Some((id, c, under)) = self.mode_menu else {
             return;
         };
         let doc = &self.session.doc;
@@ -3331,9 +4280,15 @@ impl OndinApp {
             return;
         };
         let table = doc.variables();
-        let modes: Vec<Mode> = table.modes().to_vec();
-        let current = node.mode();
-        let inherits = inherited_mode(doc, id)
+        let Some(col) = table.collection(c) else {
+            self.mode_menu = None;
+            return;
+        };
+        let modes: Vec<Mode> = col.modes.clone();
+        let owner = var::ModeOwner::Collection(c);
+        let current = node.mode_of(table, owner);
+        let set = node.modes().to_vec();
+        let inherits = inherited_mode(doc, id, c)
             .and_then(|(m, _)| table.mode(m))
             .map(|m| m.name.clone());
         let w = under.width().max(200.0);
@@ -3368,8 +4323,9 @@ impl OndinApp {
         if let Some(mode) = pick {
             self.mode_menu = None;
             if mode != current {
+                let modes = var::with_mode(self.session.doc.variables(), &set, owner, mode);
                 self.session.name_step("Mode", icon::COLUMNS);
-                self.commit_edit(Transaction(vec![Operation::SetMode { id, mode }]));
+                self.commit_edit(Transaction(vec![Operation::SetModes { id, modes }]));
             }
             return;
         }
@@ -3427,8 +4383,8 @@ mod tests {
         app.toggle_var_browser();
         app.var_act(Act::NewVar(VarKind::Color));
         let table = app.session.doc.variables();
-        assert_eq!(table.modes().len(), 1);
-        assert_eq!(table.modes()[0].name, "Mode 1");
+        assert_eq!(table.modes().count(), 1);
+        assert_eq!(table.modes().next().unwrap().name, "Mode 1");
         let v = the_only_var(&app);
         assert_eq!(v.name, "colour 1");
         assert_eq!(
@@ -3443,7 +4399,7 @@ mod tests {
         // And *New mode* copies the first mode's value into a second column.
         app.var_act(Act::NewMode);
         let v = the_only_var(&app);
-        assert_eq!(app.session.doc.variables().modes().len(), 2);
+        assert_eq!(app.session.doc.variables().modes().count(), 2);
         assert_eq!(v.cells.len(), 2);
         assert!(v.cells.values().all(|c| *c == Cell::Color(Color::WHITE)));
     }
@@ -3551,14 +4507,7 @@ mod tests {
         app.var_act(Act::NewVar(VarKind::Color));
         app.var_act(Act::NewMode);
         let v = the_only_var(&app);
-        let modes: Vec<ModeId> = app
-            .session
-            .doc
-            .variables()
-            .modes()
-            .iter()
-            .map(|m| m.id)
-            .collect();
+        let modes: Vec<ModeId> = app.session.doc.variables().modes().map(|m| m.id).collect();
         let next = Some(Edit::Cell {
             var: v.id,
             mode: modes[1],
@@ -3800,7 +4749,7 @@ mod tests {
             .expect("a boolean variable")
             .clone();
         assert_eq!(v.name, "boolean 1");
-        let mode = table.modes()[0].id;
+        let mode = table.modes().next().unwrap().id;
         assert_eq!(v.cells[&mode], Cell::Boolean(true), "true to start");
         app.var_act(Act::Cell(
             v.id,
@@ -3846,14 +4795,7 @@ mod tests {
         app.toggle_var_browser();
         app.var_act(Act::NewVar(VarKind::Color));
         app.var_act(Act::NewMode);
-        let modes: Vec<ModeId> = app
-            .session
-            .doc
-            .variables()
-            .modes()
-            .iter()
-            .map(|m| m.id)
-            .collect();
+        let modes: Vec<ModeId> = app.session.doc.variables().modes().map(|m| m.id).collect();
         let (outer, inner) = (app.session.ids.mint(), app.session.ids.mint());
         let root = app.session.doc.first_page();
         let frame = |id, parent| Operation::CreateNode {
@@ -3870,18 +4812,22 @@ mod tests {
         };
         assert!(app.commit_edit(Transaction(vec![frame(outer, root), frame(inner, outer)])));
         let doc = &app.session.doc;
+        let first = ondin_core::variable::CollectionId::FIRST;
         assert_eq!(
-            inherited_mode(doc, inner),
+            inherited_mode(doc, inner, first),
             Some((modes[0], None)),
             "the default"
         );
-        assert!(app.commit_edit(Transaction(vec![Operation::SetMode {
+        assert!(app.commit_edit(Transaction(vec![Operation::SetModes {
             id: outer,
-            mode: Some(modes[1]),
+            modes: vec![modes[1]],
         }])));
         let doc = &app.session.doc;
-        assert_eq!(inherited_mode(doc, inner), Some((modes[1], Some(outer))));
-        assert_eq!(doc.mode_at(inner), Some(modes[1]));
+        assert_eq!(
+            inherited_mode(doc, inner, first),
+            Some((modes[1], Some(outer)))
+        );
+        assert_eq!(doc.mode_at(inner, first), Some(modes[1]));
     }
 
     /// The panel is 340 wide with one mode and 436 with two, and draws
@@ -4035,7 +4981,11 @@ mod tests {
         if let Some(b) = app.var_browser.as_mut() {
             b.edit = None;
         }
-        assert_eq!(app.session.doc.variables().modes().len(), 4, "the fixture");
+        assert_eq!(
+            app.session.doc.variables().modes().count(),
+            4,
+            "the fixture"
+        );
         frame(&mut app, &ctx);
         frame(&mut app, &ctx);
         let panel = app.var_browser.as_ref().unwrap().panel.expect("drawn");
@@ -4141,14 +5091,7 @@ mod tests {
             app.var_act(Act::NewMode);
         }
         let v = the_only_var(&app);
-        let modes: Vec<ModeId> = app
-            .session
-            .doc
-            .variables()
-            .modes()
-            .iter()
-            .map(|m| m.id)
-            .collect();
+        let modes: Vec<ModeId> = app.session.doc.variables().modes().map(|m| m.id).collect();
         assert_eq!(modes.len(), 5, "fixture: five modes");
         let b = app.var_browser.as_mut().unwrap();
         b.edit = Some(Edit::Cell {
@@ -4194,7 +5137,7 @@ mod tests {
         app.toggle_var_browser();
         app.var_act(Act::NewVar(VarKind::Number));
         let v = the_only_var(&app);
-        let mode = app.session.doc.variables().modes()[0].clone();
+        let mode = app.session.doc.variables().modes().next().unwrap().clone();
         app.var_browser.as_mut().unwrap().edit = None;
         let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
         let mut shapes = vec![];
@@ -4339,6 +5282,7 @@ mod tests {
         let root = app.session.doc.first_page();
         let tx = Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: light,
                     name: "Light".into(),
@@ -4352,6 +5296,7 @@ mod tests {
                     name: "surface".into(),
                     kind: VarKind::Color,
                     cells: [(light, Cell::Color(Color::WHITE))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -4366,11 +5311,13 @@ mod tests {
                             id: day,
                             name: "Day".into(),
                             from: day,
+                            collection: String::new(),
                         },
                         ondin_core::variable::KitMode {
                             id: night,
                             name: "Night".into(),
                             from: night,
+                            collection: String::new(),
                         },
                     ],
                     map: Default::default(),
@@ -4382,6 +5329,7 @@ mod tests {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(day, Cell::Color(Color::WHITE)), (night, Cell::Color(navy))].into(),
+                    scope: None,
                     origin: Some(ondin_core::variable::VarOrigin {
                         kit: KIT.into(),
                         var: brand,
@@ -4450,6 +5398,7 @@ mod tests {
                 name: name.into(),
                 kind: VarKind::Number,
                 cells: [(light, Cell::Number(1.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4488,7 +5437,6 @@ mod tests {
                 .doc
                 .variables()
                 .modes()
-                .iter()
                 .map(|m| m.name.clone())
                 .collect()
         };
@@ -4502,7 +5450,7 @@ mod tests {
         );
         app.var_act(Act::ModeName(light, "Day copy".into()));
         assert_eq!(refusal(&app).as_deref(), Some("Day copy already exists."));
-        let last = app.session.doc.variables().modes()[2].id;
+        let last = app.session.doc.variables().modes().nth(2).unwrap().id;
         app.var_act(Act::MoveMode(last, 0));
         assert_eq!(
             modes(&app),
@@ -4512,7 +5460,7 @@ mod tests {
         app.var_act(Act::MoveMode(last, 2));
         assert_eq!(modes(&app), ["Day", "Day copy 2", "Day copy"], "moved back");
 
-        let copy = app.session.doc.variables().modes()[2].id;
+        let copy = app.session.doc.variables().modes().nth(2).unwrap().id;
         let frame = app.session.ids.mint();
         let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
@@ -4528,16 +5476,15 @@ mod tests {
                 transform: None,
                 name: None,
             },
-            Operation::SetMode {
+            Operation::SetModes {
                 id: frame,
-                mode: Some(copy),
+                modes: vec![copy],
             },
         ])));
         app.var_act(Act::DeleteMode(copy));
         assert_eq!(modes(&app), ["Day", "Day copy 2"]);
-        assert_eq!(
-            app.session.doc.get(frame).unwrap().mode(),
-            None,
+        assert!(
+            app.session.doc.get(frame).unwrap().modes().is_empty(),
             "back to Inherit"
         );
 
@@ -4571,6 +5518,7 @@ mod tests {
                     name: "brand/accent".into(),
                     kind: VarKind::Color,
                     cells: [(light, Cell::Color(Color::WHITE))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -4578,7 +5526,8 @@ mod tests {
             },
         ]);
         assert!(app.session.commit(tx));
-        let members: Vec<VarId> = group_members(app.session.doc.variables(), "brand")
+        let table = app.session.doc.variables();
+        let members: Vec<VarId> = group_members(table, table.first_collection().id, "brand")
             .iter()
             .map(|v| v.id)
             .collect();
@@ -4607,6 +5556,7 @@ mod tests {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(light, Cell::Color(Color::BLACK))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -4649,12 +5599,14 @@ mod tests {
         app.toggle_var_browser();
 
         let doc = &app.session.doc;
-        let order: Vec<String> = all_lines(doc, "", None, &HashSet::new())
+        let first = doc.variables().first_collection().id;
+        let order: Vec<String> = all_lines(doc, first, false, "", None, &HashSet::new())
             .iter()
             .map(|l| match l {
                 Line::Var(v) => v.name.clone(),
                 Line::Kit(k) => format!("kit {k}"),
                 Line::Group { path, .. } => format!("group {path}"),
+                Line::Collection(c) => format!("collection {}", c.name),
             })
             .collect();
         assert_eq!(
@@ -4720,7 +5672,7 @@ mod tests {
             name: "Two".into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }]))
         .unwrap();
         let before = collapsed_key(&doc);
@@ -4731,5 +5683,155 @@ mod tests {
         .unwrap();
         assert_eq!(doc.first_page(), second, "fixture: the first page changed");
         assert_eq!(collapsed_key(&doc), before);
+    }
+
+    /// **New collection shows it with its name to type, and new variables and
+    /// modes land in the collection on show**; a rename to a taken name is
+    /// refused; picking another shows it; a search spans both, each under its
+    /// header.
+    ///
+    /// flip: `Act::NewVar` filing into the first collection → fails at "into
+    /// the one on show".
+    #[test]
+    fn a_new_collection_is_shown_and_takes_what_is_made() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewCollection);
+        let t = app.session.doc.variables();
+        assert_eq!(t.collections().len(), 2);
+        let second = t.collections()[1].id;
+        assert_eq!(app.shown_collection(), second);
+        assert!(matches!(
+            &app.var_browser.as_ref().unwrap().edit,
+            Some(Edit::Collection { id, .. }) if *id == second
+        ));
+        app.var_act(Act::CollectionName(second, "Variables".into()));
+        assert!(
+            app.var_browser.as_ref().unwrap().refusal.is_some(),
+            "a taken name is refused"
+        );
+        app.var_act(Act::CollectionName(second, "Spacing".into()));
+        app.var_act(Act::NewVar(VarKind::Number));
+        app.var_act(Act::NewMode);
+        let t = app.session.doc.variables();
+        let num = t.iter().find(|v| v.kind == VarKind::Number).unwrap();
+        assert_eq!(
+            t.collection_of(num.id).map(|c| c.id),
+            Some(second),
+            "into the one on show"
+        );
+        assert_eq!(t.collection(second).unwrap().modes.len(), 2);
+        assert_eq!(t.first_collection().modes.len(), 1, "the other untouched");
+        assert_eq!(t.collection(second).unwrap().name, "Spacing");
+        frame(&mut app, &ctx);
+        app.var_act(Act::ShowCollection(CollectionId::FIRST));
+        assert_eq!(app.shown_collection(), CollectionId::FIRST);
+        let doc = &app.session.doc;
+        let lines = all_lines(doc, CollectionId::FIRST, true, "", None, &HashSet::new());
+        let heads = lines
+            .iter()
+            .filter(|l| matches!(l, Line::Collection(_)))
+            .count();
+        assert_eq!(heads, 2, "spanning, each collection heads its rows");
+        frame(&mut app, &ctx);
+    }
+
+    /// **Move to keeps the binding; narrowing a scope detaches what it drops**,
+    /// one undo bringing it back; deleting a collection takes its variables.
+    #[test]
+    fn move_to_scope_and_delete_collection() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        let v = the_only_var(&app).id;
+        let rect = app.session.ids.mint();
+        let root = app.session.doc.first_page();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetCornerVars {
+                id: rect,
+                vars: [Some(v); 4],
+            },
+        ])));
+        app.var_act(Act::MoveTo(v, None));
+        let t = app.session.doc.variables();
+        let to = t.collection_of(v).map(|c| c.id).unwrap();
+        assert_ne!(to, CollectionId::FIRST, "moved into a new collection");
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().corner_vars(),
+            [Some(v); 4]
+        );
+        app.var_act(Act::Scope(v, Some(Scope::of([Field::Spacing]))));
+        assert_eq!(app.session.doc.get(rect).unwrap().corner_vars(), [None; 4]);
+        app.undo();
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().corner_vars(),
+            [Some(v); 4]
+        );
+        app.var_act(Act::DeleteCollection(to));
+        let t = app.session.doc.variables();
+        assert!(t.collection(to).is_none());
+        assert!(t.get(v).is_none());
+        assert_eq!(app.session.doc.get(rect).unwrap().corner_vars(), [None; 4]);
+    }
+
+    /// **A frame's card has a mode row per collection with two modes or more**,
+    /// one for a document with one collection, none for a one-mode collection.
+    #[test]
+    fn mode_rows_are_one_per_choosing_collection() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        assert_eq!(
+            mode_rows(app.session.doc.variables()).len(),
+            1,
+            "one mode, one collection"
+        );
+        app.var_act(Act::NewCollection);
+        assert!(
+            mode_rows(app.session.doc.variables()).is_empty(),
+            "two collections of one mode each"
+        );
+        app.var_act(Act::NewMode);
+        let t = app.session.doc.variables();
+        assert_eq!(mode_rows(t), vec![t.collections()[1].id]);
+    }
+
+    /// **The `--` list offers only what is scoped to the field**, counts the
+    /// rest, and a whole out-of-scope name is the one refused.
+    #[test]
+    fn the_list_filters_by_scope() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        app.var_act(Act::NewVar(VarKind::Number));
+        let ids: Vec<VarId> = app.session.doc.variables().iter().map(|v| v.id).collect();
+        app.var_act(Act::Scope(ids[0], Some(Scope::of([Field::Corner]))));
+        let t = app.session.doc.variables();
+        let name = t.get(ids[0]).unwrap().name.clone();
+        let listed: Vec<VarId> = super::super::binding::matches_for(t, Field::Spacing, "")
+            .iter()
+            .map(|v| v.id)
+            .collect();
+        assert_eq!(listed, vec![ids[1]]);
+        assert_eq!(super::super::binding::scoped_out(t, Field::Spacing, ""), 1);
+        assert_eq!(
+            super::super::binding::out_of_scope(t, Field::Spacing, &format!("--{name}"))
+                .map(|v| v.id),
+            Some(ids[0])
+        );
+        assert_eq!(scope_words(t.get(ids[0]).unwrap()), "corner radius");
     }
 }

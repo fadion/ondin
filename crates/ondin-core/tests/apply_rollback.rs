@@ -55,6 +55,7 @@ fn number_var(id: VarId, name: &str, cells: &[(ModeId, f64)]) -> Variable {
         name: name.into(),
         kind: VarKind::Number,
         cells: cells.iter().map(|&(m, v)| (m, Cell::Number(v))).collect(),
+        scope: None,
         origin: None,
         forked: None,
         description: String::new(),
@@ -142,6 +143,7 @@ fn fixture() -> Fixture {
             fills: solid(255),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -212,7 +214,7 @@ fn fixture() -> Fixture {
             name: "Second".into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         },
         Operation::MovePage {
             id: page2,
@@ -244,6 +246,7 @@ fn fixture() -> Fixture {
         },
         Operation::RemoveImage { id: img0 },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dark,
                 name: "Dark".into(),
@@ -340,6 +343,7 @@ fn an_op_that_writes_before_refusing_is_rolled_back() {
     let mut f = fixture();
     let (late, missing) = (f.ids.mint_mode(), f.ids.mint_var());
     let last = Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id: late,
             name: "Late".into(),

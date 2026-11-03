@@ -173,7 +173,7 @@ pub(crate) fn root_node(id: NodeId, name: String) -> Node {
         description: String::new(),
         doc_link: String::new(),
         origin: None,
-        mode: None,
+        modes: Vec::new(),
         corner_vars: Default::default(),
         spacing_vars: Default::default(),
         visible_var: None,
@@ -402,45 +402,51 @@ impl Document {
         &self.styles
     }
 
-    /// The mode in force at `id` (§5.3f): the mode the nearest frame at or above
-    /// it sets, else its page's, else the document's default. `None` only in a
-    /// document with no modes. The page needs no case of its own: its root is
-    /// the last ancestor the walk meets.
+    /// The mode of collection `c` in force at `id` (§5.3f): the one the nearest
+    /// frame at or above it sets, else its page's, else the collection's
+    /// default. `None` only for a collection with no modes. The page needs no
+    /// case of its own: its root is the last ancestor the walk meets.
     ///
     /// **The node itself counts**: a frame's own fill reads in the mode it sets.
-    ///
-    /// Only the document's own modes count: a frame set to a kit's mode (§15 D1064)
-    /// governs that kit's variables alone, which [`Self::resolve_var_in`] reads.
-    pub fn mode_at(&self, id: NodeId) -> Option<crate::variable::ModeId> {
-        self.mode_for_in(&self.variables, id, None)
+    pub fn mode_at(
+        &self,
+        id: NodeId,
+        c: crate::variable::CollectionId,
+    ) -> Option<crate::variable::ModeId> {
+        let col = self.variables.collection(c)?;
+        self.modes_at(id)
+            .into_iter()
+            .find(|m| col.has(*m))
+            .or_else(|| col.default_mode())
     }
 
-    /// The mode `id` reads a variable of `kit` in — `None` for one of the
-    /// document's own: the nearest frame's at or above it that is a mode of the
-    /// document or of that kit, else `None`, the default (§15 D1064). For the
-    /// document's own, a default is filled in.
-    fn mode_for_in(
+    /// The modes set at or above `id`, nearest first, one per collection — of
+    /// the document's or a kit's (§15 D1064), the nearer frame's winning. What
+    /// [`crate::variable::Variables::resolve_at`] reads with; a collection with
+    /// none here reads its default.
+    pub fn modes_at(&self, id: NodeId) -> Vec<crate::variable::ModeId> {
+        self.modes_at_in(&self.variables, id)
+    }
+
+    fn modes_at_in(
         &self,
         t: &crate::variable::Variables,
         id: NodeId,
-        kit: Option<&str>,
-    ) -> Option<crate::variable::ModeId> {
+    ) -> Vec<crate::variable::ModeId> {
+        let mut out: Vec<crate::variable::ModeId> = Vec::new();
         let mut at = self.nodes.get(&id);
         while let Some(n) = at {
-            if let Some(m) = n.mode {
-                let ours = t.mode(m).is_some();
-                let kits =
-                    kit.is_some_and(|k| t.kits().get(k).is_some_and(|km| km.mode(m).is_some()));
-                if ours || kits {
-                    return Some(m);
+            for &m in &n.modes {
+                if !out
+                    .iter()
+                    .any(|x| crate::variable::same_collection(t, *x, m))
+                {
+                    out.push(m);
                 }
             }
             at = n.parent.and_then(|p| self.nodes.get(&p));
         }
-        if kit.is_some() {
-            return None;
-        }
-        t.default_mode()
+        out
     }
 
     /// `var`'s value as `id` reads it — in the mode in force there.
@@ -462,11 +468,9 @@ impl Document {
         id: NodeId,
         var: crate::variable::VarId,
     ) -> Option<crate::variable::Value> {
-        match t.get(var)?.kit() {
-            // A kit's variable, through the mapping (§15 D1064, D1038 (b)).
-            Some(kit) => t.resolve_opt(var, self.mode_for_in(t, id, Some(kit))),
-            None => t.resolve(var, self.mode_for_in(t, id, None)?),
-        }
+        // A kit's variable through the mapping (§15 D1064, D1038 (b)), each
+        // step of an alias reading its own collection's mode in force.
+        t.resolve_at(var, &self.modes_at_in(t, id))
     }
 
     /// The brush `brush` draws at `id`: itself when literal, a solid of its
@@ -1368,8 +1372,8 @@ impl Document {
                 name,
                 ground,
                 draft,
-                mode,
-            } => self.op_add_page(*id, *index, name, *ground, *draft, *mode, dirty),
+                modes,
+            } => self.op_add_page(*id, *index, name, *ground, *draft, modes, dirty),
             Operation::RemovePage { id } => self.op_remove_page(*id, dirty),
             Operation::MovePage { id, index } => self.op_move_page(*id, *index),
             Operation::AddGuide { guide } => self.op_add_guide(*guide),
@@ -1434,15 +1438,59 @@ impl Document {
             Operation::SetVariableCell { id, mode, cell } => {
                 self.op_set_variable_cell(*id, *mode, cell.clone(), dirty)
             }
-            Operation::AddMode { mode, index, cells } => {
-                self.op_add_mode(mode, *index, cells, dirty)
-            }
+            Operation::AddMode {
+                collection,
+                mode,
+                index,
+                cells,
+            } => self.op_add_mode(*collection, mode, *index, cells, dirty),
             Operation::RemoveMode { id } => self.op_remove_mode(*id, dirty),
+            Operation::AddCollection { collection, index } => {
+                let t = &mut self.variables;
+                if t.collection(collection.id).is_some() {
+                    return Err(OpError::DuplicateCollection(collection.id));
+                }
+                if let Some(m) = collection.modes.iter().find(|m| t.has_mode(m.id)) {
+                    return Err(OpError::DuplicateMode(m.id));
+                }
+                if *index > t.collections.len() {
+                    return Err(OpError::IndexOutOfRange);
+                }
+                t.collections.insert(*index, collection.clone());
+                // The order of collections moves which one kits map from.
+                dirty.0.extend(self.bound_nodes());
+                Ok(Operation::RemoveCollection { id: collection.id })
+            }
+            Operation::RemoveCollection { id } => {
+                let t = &mut self.variables;
+                let index = t
+                    .collection_index(*id)
+                    .ok_or(OpError::NoSuchCollection(*id))?;
+                let collection = t.collections.remove(index);
+                dirty.0.extend(self.bound_nodes());
+                Ok(Operation::AddCollection { collection, index })
+            }
+            Operation::SetCollectionName { id, name } => {
+                let c = self
+                    .variables
+                    .collections
+                    .iter_mut()
+                    .find(|c| c.id == *id)
+                    .ok_or(OpError::NoSuchCollection(*id))?;
+                let old = std::mem::replace(&mut c.name, name.clone());
+                // A kit's collection maps from the document's of its name, so a
+                // rename can move what every kit-bound layer reads.
+                if !self.variables.kits.is_empty() {
+                    dirty.0.extend(self.bound_nodes());
+                }
+                Ok(Operation::SetCollectionName { id: *id, name: old })
+            }
             Operation::SetModeName { id, name } => {
                 let m = self
                     .variables
-                    .modes
+                    .collections
                     .iter_mut()
+                    .flat_map(|c| c.modes.iter_mut())
                     .find(|m| m.id == *id)
                     .ok_or(OpError::NoSuchMode(*id))?;
                 let old = std::mem::replace(&mut m.name, name.clone());
@@ -1456,9 +1504,11 @@ impl Document {
             // Written on any node, so `reset::state_ops` can state every node's
             // mode; *setting* one anywhere but a frame is refused at the commit
             // (`variable::check`), where a transaction is judged by where it ends.
-            Operation::SetMode { id, mode } => {
+            Operation::SetModes { id, modes } => {
                 let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
-                let old = std::mem::replace(&mut node.mode, *mode);
+                let mut modes = modes.clone();
+                modes.sort();
+                let old = std::mem::replace(&mut node.modes, modes);
                 dirty.0.insert(*id);
                 // Every bound layer under it now reads another column. A page has no
                 // top-level layer above it to carry the change, so name them.
@@ -1472,7 +1522,10 @@ impl Document {
                     }
                     stack.extend(n.children().iter().copied());
                 }
-                Ok(Operation::SetMode { id: *id, mode: old })
+                Ok(Operation::SetModes {
+                    id: *id,
+                    modes: old,
+                })
             }
             Operation::SetCornerVars { id, vars } => {
                 let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
@@ -1722,15 +1775,20 @@ impl Document {
 
     fn op_add_mode(
         &mut self,
+        collection: crate::variable::CollectionId,
         mode: &crate::variable::Mode,
         index: usize,
         cells: &[(crate::variable::VarId, crate::variable::Cell)],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        if self.variables.mode(mode.id).is_some() {
+        if self.variables.has_mode(mode.id) {
             return Err(OpError::DuplicateMode(mode.id));
         }
-        if index > self.variables.modes.len() {
+        let at = self
+            .variables
+            .collection_index(collection)
+            .ok_or(OpError::NoSuchCollection(collection))?;
+        if index > self.variables.collections[at].modes.len() {
             return Err(OpError::IndexOutOfRange);
         }
         for (var, cell) in cells {
@@ -1741,7 +1799,9 @@ impl Document {
                 .cells
                 .insert(mode.id, cell.clone());
         }
-        self.variables.modes.insert(index, mode.clone());
+        self.variables.collections[at]
+            .modes
+            .insert(index, mode.clone());
         dirty.0.extend(self.bound_nodes());
         Ok(Operation::RemoveMode { id: mode.id })
     }
@@ -1753,11 +1813,20 @@ impl Document {
         id: crate::variable::ModeId,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
+        let collection = self
+            .variables
+            .collection_of_mode(id)
+            .ok_or(OpError::NoSuchMode(id))?
+            .id;
+        let at = self
+            .variables
+            .collection_index(collection)
+            .expect("found above");
         let index = self
             .variables
             .mode_index(id)
             .ok_or(OpError::NoSuchMode(id))?;
-        let mode = self.variables.modes.remove(index);
+        let mode = self.variables.collections[at].modes.remove(index);
         let cells = self
             .variables
             .vars
@@ -1765,7 +1834,12 @@ impl Document {
             .filter_map(|v| v.cells.remove(&id).map(|c| (v.id, c)))
             .collect();
         dirty.0.extend(self.bound_nodes());
-        Ok(Operation::AddMode { mode, index, cells })
+        Ok(Operation::AddMode {
+            collection,
+            mode,
+            index,
+            cells,
+        })
     }
 
     /// Open the vault as an empty parentless `Root` (§15 D1012). Refused when one
@@ -1892,7 +1966,7 @@ impl Document {
             description: String::new(),
             doc_link: String::new(),
             origin: None,
-            mode: None,
+            modes: Vec::new(),
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,
@@ -2697,7 +2771,7 @@ impl Document {
         name: &str,
         ground: Option<Color>,
         draft: bool,
-        mode: Option<crate::variable::ModeId>,
+        modes: &[crate::variable::ModeId],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         if self.nodes.contains_key(&id) {
@@ -2707,7 +2781,7 @@ impl Document {
             return Err(OpError::IndexOutOfRange);
         }
         let mut root = root_node(id, name.to_string());
-        root.mode = mode;
+        root.modes = modes.to_vec();
         self.nodes.insert(id, root);
         self.pages
             .insert(index, crate::page::Page { id, ground, draft });
@@ -2732,7 +2806,7 @@ impl Document {
             name: root.name,
             ground: page.ground,
             draft: page.draft,
-            mode: root.mode,
+            modes: root.modes,
         })
     }
 
@@ -3397,7 +3471,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             origin: None,
             // Bindings are ids into the document's table, not the template, so
             // nothing is remapped (§5.3f).
-            mode: n.mode,
+            modes: n.modes.clone(),
             corner_vars: n.corner_vars,
             spacing_vars: n.spacing_vars,
             visible_var: n.visible_var,
@@ -3646,7 +3720,7 @@ mod tests {
             description: String::new(),
             doc_link: String::new(),
             origin: None,
-            mode: None,
+            modes: Vec::new(),
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,

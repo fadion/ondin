@@ -1516,6 +1516,9 @@ impl RenderOverrides {
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. }
+            | Operation::AddCollection { .. }
+            | Operation::RemoveCollection { .. }
+            | Operation::SetCollectionName { .. }
             | Operation::SetVariable { .. }
             | Operation::SetKitModes { .. } => {}
             // A style draws through the lists it is copied into; the table and a
@@ -1576,9 +1579,9 @@ impl RenderOverrides {
                 self.set_kind(doc, res, *id, drawn);
                 self.moved.insert(*id);
             }
-            // A frame's mode changes what a whole subtree resolves to, read through
+            // A frame's modes change what a whole subtree resolves to, read through
             // the document and `Resolved`, which no override patches.
-            Operation::SetMode { .. } => return None,
+            Operation::SetModes { .. } => return None,
             // A mask changes which *other* nodes the walk clips, and an override
             // patches one node. Nothing sets these mid-gesture.
             Operation::SetClip { .. }

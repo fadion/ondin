@@ -873,6 +873,7 @@ mod tests {
         );
         let held = Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mine,
                     name: "Default".into(),
@@ -888,6 +889,7 @@ mod tests {
                         id: theirs,
                         name: "Default".into(),
                         from: theirs,
+                        collection: String::new(),
                     }],
                     map: Default::default(),
                 }),
@@ -898,6 +900,7 @@ mod tests {
                     name: "brand".into(),
                     kind: VarKind::Number,
                     cells: [(theirs, Cell::Number(1.0))].into(),
+                    scope: None,
                     origin: Some(VarOrigin {
                         kit: kit.clone(),
                         var,

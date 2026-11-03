@@ -61,7 +61,7 @@ struct CarriedDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     vars: Vec<crate::variable::CarriedVar>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    modes: Vec<crate::variable::Mode>,
+    modes: Vec<crate::variable::CarriedMode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     detached: Vec<NodeDto>,
     /// The styles the layers are bound to (§15 D1062).

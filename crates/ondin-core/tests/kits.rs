@@ -2633,6 +2633,7 @@ fn a_variants_own_visibility_binding_is_not_a_change() {
     k.doc
         .apply(&Transaction(vec![
             ondin_core::Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::Mode {
                     id: mode,
                     name: "Day".into(),
@@ -2646,6 +2647,7 @@ fn a_variants_own_visibility_binding_is_not_a_change() {
                     name: "shown".into(),
                     kind: ondin_core::VarKind::Boolean,
                     cells: [(mode, ondin_core::Cell::Boolean(false))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

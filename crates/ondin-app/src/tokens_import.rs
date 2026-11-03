@@ -114,7 +114,7 @@ fn linked_changes(doc: &ondin_core::Document, link: &TokensLink) -> usize {
         return 0;
     };
     let mut ids = IdSource::new(0x70C3);
-    match dtcg_in::review(doc, &file, &mut ids) {
+    match dtcg_in::review(doc, &file, doc.variables().first_collection().id, &mut ids) {
         Ok(mut r) => {
             r.since(&file, &old);
             r.changes()
@@ -204,13 +204,15 @@ impl OndinApp {
                 return;
             }
         };
-        let mut review = match dtcg_in::review(&self.session.doc, &file, &mut self.session.ids) {
-            Ok(r) => r,
-            Err(r) => {
-                self.session.info(format!("{name} cannot be read: {r}"));
-                return;
-            }
-        };
+        let into = self.shown_collection();
+        let mut review =
+            match dtcg_in::review(&self.session.doc, &file, into, &mut self.session.ids) {
+                Ok(r) => r,
+                Err(r) => {
+                    self.session.info(format!("{name} cannot be read: {r}"));
+                    return;
+                }
+            };
         let held = self.session.doc.tokens_link().cloned();
         let same = held
             .as_ref()
@@ -1125,7 +1127,7 @@ mod tests {
         assert!(t.link, "linking is on for a document linked to nothing");
         apply(&mut app);
         let doc = &app.session.doc;
-        assert_eq!(doc.variables().modes().len(), 2);
+        assert_eq!(doc.variables().modes().count(), 2);
         assert!(doc.variables().by_name("brand/500").is_some());
         let link = doc.tokens_link().expect("linked");
         assert_eq!(Path::new(&link.path), path.as_path());

@@ -720,7 +720,7 @@ mod tests {
             name: "Archive".into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }])));
         for _ in 0..3 {
             whole_frame(&ctx, &mut app, vec![]);

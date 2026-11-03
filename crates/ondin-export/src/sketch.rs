@@ -199,7 +199,7 @@ impl Writer<'_> {
         let mut swatches = Vec::new();
         for var in t.iter().filter(|v| v.kind == VarKind::Color) {
             let value = match var.kit() {
-                None => t.default_mode().and_then(|m| t.resolve(var.id, m)),
+                None => t.resolve_opt(var.id, None),
                 Some(_) => t.every_value(var.id).into_iter().next(),
             };
             let Some(ondin_core::Value::Color(c)) = value else {
@@ -211,7 +211,7 @@ impl Writer<'_> {
             }));
             self.swatches.insert(var.id, (id, c));
         }
-        if !self.swatches.is_empty() && t.modes().len() > 1 {
+        if !self.swatches.is_empty() && t.modes().count() > t.collections().len() {
             self.approximate("Colour variables' other modes, left out");
         }
         if t.iter().any(|v| v.kind != VarKind::Color) {

@@ -529,6 +529,7 @@ mod tests {
                     _ => VarKind::Color,
                 },
                 cells: [(day, cell)].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -572,6 +573,7 @@ mod tests {
         };
         kit.apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: day,
                     name: "Day".into(),
@@ -670,6 +672,7 @@ mod tests {
             Operation::RemoveVariable { id: old },
             // A new first mode, which the update's own record reads in.
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: dusk,
                     name: "Dusk".into(),

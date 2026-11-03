@@ -1436,6 +1436,7 @@ fn a_copys_own_gradient_follows_its_mains_resize() {
 fn vars(f: &mut F, cells: Vec<(ondin_core::VarKind, ondin_core::Cell)>) -> Vec<ondin_core::VarId> {
     let mode = f.ids.mint_mode();
     let mut ops = vec![Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: ondin_core::Mode {
             id: mode,
             name: "Light".into(),
@@ -1453,6 +1454,7 @@ fn vars(f: &mut F, cells: Vec<(ondin_core::VarKind, ondin_core::Cell)>) -> Vec<o
                 name: format!("v/{k}"),
                 kind,
                 cells: [(mode, cell)].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

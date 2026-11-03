@@ -1205,7 +1205,7 @@ mod tests {
                 name: "Checkout".into(),
                 ground: None,
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             },
             // The headline on top of the stack, so it is listed first.
             create(headline, first, text("A team for every team"), "Headline"),

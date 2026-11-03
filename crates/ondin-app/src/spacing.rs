@@ -1380,6 +1380,7 @@ mod canvas_tests {
         let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -1393,6 +1394,7 @@ mod canvas_tests {
                     name: "space/md".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(10.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1553,6 +1555,7 @@ mod canvas_tests {
         let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -1566,6 +1569,7 @@ mod canvas_tests {
                     name: "space/md".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(10.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

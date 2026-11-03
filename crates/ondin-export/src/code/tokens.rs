@@ -16,7 +16,7 @@
 use super::dom::slug;
 use crate::svg::fmt;
 use ondin_core::Document;
-use ondin_core::variable::{Cell, ModeId, VarId, Variables};
+use ondin_core::variable::{self, Cell, ModeId, VarId, Variables};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// The custom property names, the `data-mode` values, and which variables the
@@ -82,6 +82,10 @@ impl Tokens {
         for m in t.modes() {
             modes.insert(m.id, unique(slug(&m.name)));
         }
+        // A word of `data-mode`, so never two words.
+        for name in modes.values_mut() {
+            *name = name.replace(' ', "-");
+        }
         for (kit, km) in t.kits() {
             for m in &km.modes {
                 modes.insert(
@@ -137,6 +141,13 @@ impl Tokens {
         self.modes.get(&mode).map(String::as_str)
     }
 
+    /// The `data-mode` a frame setting `modes` writes: their names, one word
+    /// each, `None` for none.
+    pub fn modes_attr(&self, modes: impl IntoIterator<Item = ModeId>) -> Option<String> {
+        let words: Vec<&str> = modes.into_iter().filter_map(|m| self.mode(m)).collect();
+        (!words.is_empty()).then(|| words.join(" "))
+    }
+
     fn name(&self, id: VarId) -> &str {
         self.names.get(&id).map_or("missing", String::as_str)
     }
@@ -154,39 +165,22 @@ impl Tokens {
         let t = doc.variables();
         let shaken = self.reached(t);
         let mut out = String::new();
-        let doc_modes: Vec<Option<ModeId>> = if t.modes().is_empty() {
-            vec![None]
-        } else {
-            t.modes().iter().map(|m| Some(m.id)).collect()
-        };
-        for (i, mode) in doc_modes.iter().enumerate() {
-            // The default is a mode a frame can set too, inside one set to another.
-            let selector = match mode {
-                Some(m) if i > 0 => {
-                    format!("[data-mode=\"{}\"]", self.mode(*m).unwrap_or_default())
-                }
-                Some(m) => format!(
-                    ":root, [data-mode=\"{}\"]",
-                    self.mode(*m).unwrap_or_default()
-                ),
-                None => ":root".to_string(),
+        // A frame names every mode it sets in one `data-mode`, so with two
+        // collections a block matches one word of it.
+        let eq = if t.has_collections() { "~=" } else { "=" };
+        for c in t.collections() {
+            let modes: Vec<Option<ModeId>> = if c.modes.is_empty() {
+                vec![None]
+            } else {
+                c.modes.iter().map(|m| Some(m.id)).collect()
             };
-            out.push_str(&selector);
-            out.push_str(" {\n");
-            for id in &shaken {
-                let Some(v) = t.get(*id) else { continue };
-                let col = match v.kit() {
-                    Some(kit) => t.kit_mode(kit, *mode),
-                    None => *mode,
-                };
-                if let Some(value) = col
-                    .and_then(|c| v.cells.get(&c))
-                    .and_then(|c| self.value(c))
-                {
-                    out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
-                }
+            // An empty collection after the first declares nothing.
+            if c.modes.is_empty() && c.id != t.first_collection().id {
+                continue;
             }
-            out.push_str("}\n");
+            for (i, mode) in modes.iter().enumerate() {
+                self.mode_block(t, &shaken, c, i == 0, *mode, eq, &mut out);
+            }
         }
         for km in t.kits().values() {
             for m in &km.modes {
@@ -216,6 +210,56 @@ impl Tokens {
             }
         }
         Some(out)
+    }
+
+    /// One mode's block of collection `c`: its variables, and a kit's that map
+    /// from it, in the column that mode maps to. The default is a mode a frame
+    /// can set too, inside one set to another, so it matches `:root` and its
+    /// name.
+    #[allow(clippy::too_many_arguments)]
+    fn mode_block(
+        &self,
+        t: &Variables,
+        shaken: &BTreeSet<VarId>,
+        c: &variable::Collection,
+        default: bool,
+        mode: Option<ModeId>,
+        eq: &str,
+        out: &mut String,
+    ) {
+        let selector = match mode {
+            Some(m) if !default => {
+                format!("[data-mode{eq}\"{}\"]", self.mode(m).unwrap_or_default())
+            }
+            Some(m) => format!(
+                ":root, [data-mode{eq}\"{}\"]",
+                self.mode(m).unwrap_or_default()
+            ),
+            None => ":root".to_string(),
+        };
+        out.push_str(&selector);
+        out.push_str(" {\n");
+        for id in shaken {
+            let Some(v) = t.get(*id) else { continue };
+            let col = match v.kit() {
+                Some(kit) => {
+                    let kc = t.kit_collection_of(v).unwrap_or_default();
+                    if t.kit_onto(kc).is_none_or(|o| o.id != c.id) {
+                        continue;
+                    }
+                    t.kit_mode_at(kit, kc, mode.as_slice())
+                }
+                None if t.collection_of(*id).is_some_and(|x| x.id == c.id) => mode,
+                None => continue,
+            };
+            if let Some(value) = col
+                .and_then(|c| v.cells.get(&c))
+                .and_then(|c| self.value(c))
+            {
+                out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
+            }
+        }
+        out.push_str("}\n");
     }
 
     /// The variables read and every alias target they reach, in any column.

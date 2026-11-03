@@ -84,7 +84,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         // A vendored node's provenance (§15 D1012) — never on a copy, so never an
         // override.
         origin: _,
-        mode,
+        modes,
         corner_vars,
         spacing_vars,
         visible_var,
@@ -155,7 +155,10 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetLayoutItem { id, item: *item },
         // A copy's mode and its corners' bindings are overrides like any field
         // (§5.3f): compared by the binding, never by what it resolves to.
-        O::SetMode { id, mode: *mode },
+        O::SetModes {
+            id,
+            modes: modes.clone(),
+        },
         O::SetCornerVars {
             id,
             vars: *corner_vars,

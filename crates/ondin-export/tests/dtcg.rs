@@ -19,6 +19,7 @@ fn add_var(id: VarId, name: &str, kind: VarKind, cells: Vec<(ModeId, Cell)>) -> 
             name: name.into(),
             kind,
             cells: cells.into_iter().collect(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -28,6 +29,7 @@ fn add_var(id: VarId, name: &str, kind: VarKind, cells: Vec<(ModeId, Cell)>) -> 
 
 fn add_mode(id: ModeId, name: &str, index: usize) -> Operation {
     Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -395,6 +397,7 @@ fn an_alias_to_a_kit_variable_resolves_in_each_mode() {
         id,
         name: name.into(),
         from: id,
+        collection: String::new(),
     };
     f.doc
         .apply(&Transaction(vec![
@@ -418,6 +421,7 @@ fn an_alias_to_a_kit_variable_resolves_in_each_mode() {
                         (k_dark, Cell::Color(Color::from_rgba8(0, 0, 128, 255))),
                     ]
                     .into(),
+                    scope: None,
                     origin: Some(ondin_core::variable::VarOrigin {
                         kit: KIT.into(),
                         var: primary,

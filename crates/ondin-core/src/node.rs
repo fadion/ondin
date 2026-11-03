@@ -130,9 +130,10 @@ pub struct Node {
     /// document's vault (§5.3e). A copy never keeps it (`remap_subtree`); only
     /// the kit verbs write one (`crate::kit::check`).
     pub(crate) origin: Option<crate::kit::Origin>,
-    /// The **mode** this frame sets for itself and everything under it (§5.3f);
-    /// `None` inherits. Only on an `Artboard` (`crate::variable::check`).
-    pub(crate) mode: Option<crate::variable::ModeId>,
+    /// The **modes** this frame sets for itself and everything under it (§5.3f),
+    /// at most one per collection, in id order; a collection with none here
+    /// inherits. Only on an `Artboard` or a page (`crate::variable::check`).
+    pub(crate) modes: Vec<crate::variable::ModeId>,
     /// The variables this rectangle's corners are bound to.
     pub(crate) corner_vars: crate::variable::CornerVars,
     /// The variables this container's gaps and padding are bound to.
@@ -206,10 +207,22 @@ impl Node {
     pub fn origin(&self) -> Option<&crate::kit::Origin> {
         self.origin.as_ref()
     }
-    /// The mode this frame sets, if any (§5.3f) — not the mode in force here,
-    /// which is [`crate::Document::mode_at`].
-    pub fn mode(&self) -> Option<crate::variable::ModeId> {
-        self.mode
+    /// The modes this frame sets, one per collection at most (§5.3f) — not the
+    /// modes in force here, which are [`crate::Document::modes_at`].
+    pub fn modes(&self) -> &[crate::variable::ModeId] {
+        &self.modes
+    }
+    /// The mode this frame sets of `owner`, a collection of the document's or
+    /// a kit.
+    pub fn mode_of(
+        &self,
+        t: &crate::variable::Variables,
+        owner: crate::variable::ModeOwner<'_>,
+    ) -> Option<crate::variable::ModeId> {
+        self.modes
+            .iter()
+            .copied()
+            .find(|m| t.owner_of(*m) == Some(owner))
     }
     /// The variables this rectangle's corners are bound to.
     pub fn corner_vars(&self) -> crate::variable::CornerVars {

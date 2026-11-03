@@ -118,6 +118,7 @@ pub fn fixture() -> Fixture {
     bold.set(6..11, CharAttr::Weight(700), &title_style);
     doc.apply(&Transaction(vec![
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -131,6 +132,7 @@ pub fn fixture() -> Fixture {
                 name: "Brand/Primary".into(),
                 kind: VarKind::Color,
                 cells: [(mode, Cell::Color(Color::from_rgb8(30, 90, 200)))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

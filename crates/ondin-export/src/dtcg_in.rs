@@ -21,7 +21,9 @@ use ondin_core::node::{Fill, Stroke};
 use ondin_core::peniko::{self, Color};
 use ondin_core::style::{self, Style, StyleId, StyleSlot, StyleValue};
 use ondin_core::typography::{Length, TextStyle};
-use ondin_core::variable::{self, Cell, Mode, ModeId, VarId, VarKind, Variable};
+use ondin_core::variable::{
+    self, Cell, Collection, CollectionId, Mode, ModeId, VarId, VarKind, Variable,
+};
 use ondin_core::{
     Brush, BrushSource, Described, Document, Effect, EffectKind, IdSource, Keyed, NodeId,
     Operation, Transaction,
@@ -62,11 +64,25 @@ pub struct LeftOut {
 /// A read token file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct File {
-    /// The modes the file names, in its order; empty for a file without Ondin's
-    /// extension, whose `$value`s are one unnamed mode.
-    modes: Vec<String>,
+    /// The collections the file holds: first the root's — every token outside a
+    /// collection's group — then one per top-level group carrying Ondin's
+    /// collection extension.
+    collections: Vec<FileCollection>,
     tokens: Vec<Token>,
     left_out: Vec<LeftOut>,
+}
+
+/// One collection of a token file.
+#[derive(Clone, Debug, PartialEq)]
+struct FileCollection {
+    /// Its name, matched against the document's; `None` for the root's, which
+    /// lands in the collection the import is made into.
+    name: Option<String>,
+    /// The top-level group it is, `None` for the root's.
+    key: Option<String>,
+    /// The modes it names, in its order; empty for a file without Ondin's
+    /// extension, whose `$value`s are one unnamed mode.
+    modes: Vec<String>,
 }
 
 impl File {
@@ -74,14 +90,28 @@ impl File {
     pub fn left_out(&self) -> &[LeftOut] {
         &self.left_out
     }
+    /// Whether the file names its collections — written from a document with
+    /// two or more — so it lands in them by name rather than in one.
+    pub fn has_collections(&self) -> bool {
+        self.collections.len() > 1
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct Token {
     /// The token's path, a group's `$root` ending at the group.
     path: Vec<String>,
+    /// Its path within its collection's group: the variable's name.
+    name: Vec<String>,
+    /// Which of [`File::collections`] it is in.
+    collection: usize,
     id: Option<NodeId>,
     description: Option<String>,
+    /// The scope Ondin's extension gives it, when it gives one.
+    scope: Option<variable::Scope>,
+    /// The scope its `$type` makes for a new variable: the length families
+    /// for a `dimension`, weight for a `fontWeight`.
+    type_scope: Option<variable::Scope>,
     body: Body,
 }
 
@@ -102,12 +132,13 @@ enum Body {
 }
 
 /// A value as the file wrote it: a literal, a `{reference}` to another token's
-/// path, or (for the export's strings and booleans) another variable by name.
+/// path, or (for the export's strings and booleans) another variable by name —
+/// and by its collection's name when that is another.
 #[derive(Clone, Debug, PartialEq)]
 enum V {
     Lit(Cell),
     Ref(Vec<String>),
-    Named(String),
+    Named(Option<String>, String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -267,25 +298,100 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
     }
     let ext = root.get("$extensions").and_then(|e| e.get(EXTENSION));
 
-    // The modes, and the key each one's values are filed under.
-    let mut modes = Vec::new();
-    let mut key_to_name: HashMap<String, String> = HashMap::new();
-    if let Some(J::Arr(list)) = ext.and_then(|e| e.get("modes")) {
-        for m in list {
-            let Some(name) = m.get("name").and_then(J::str) else {
-                return refuse(&[], "a mode in the Ondin extension has no name");
-            };
-            let key = m.get("key").and_then(J::str).unwrap_or(name);
-            key_to_name.insert(key.to_string(), name.to_string());
-            modes.push(name.to_string());
-        }
+    // The collections: the root's, then each top-level group carrying the
+    // collection extension. For each, its modes, the key each one's values are
+    // filed under, and the mode its `$value`s hold.
+    struct ModesRead {
+        key: Option<String>,
+        key_to_name: HashMap<String, String>,
+        value_mode: String,
     }
-    let value_mode = ext
-        .and_then(|e| e.get("valueMode"))
-        .and_then(J::str)
-        .map(str::to_string)
-        .or_else(|| modes.first().cloned())
-        .unwrap_or_default();
+    let read_modes = |at: &[String], e: Option<&J>| -> Result<(Vec<String>, ModesRead), Refusal> {
+        let mut modes = Vec::new();
+        let mut key_to_name = HashMap::new();
+        if let Some(J::Arr(list)) = e.and_then(|e| e.get("modes")) {
+            for m in list {
+                let Some(name) = m.get("name").and_then(J::str) else {
+                    return refuse(at, "a mode in the Ondin extension has no name");
+                };
+                let key = m.get("key").and_then(J::str).unwrap_or(name);
+                key_to_name.insert(key.to_string(), name.to_string());
+                modes.push(name.to_string());
+            }
+        }
+        let value_mode = e
+            .and_then(|e| e.get("valueMode"))
+            .and_then(J::str)
+            .map(str::to_string)
+            .or_else(|| modes.first().cloned())
+            .unwrap_or_default();
+        Ok((
+            modes,
+            ModesRead {
+                key: None,
+                key_to_name,
+                value_mode,
+            },
+        ))
+    };
+    let (modes, first) = read_modes(&[], ext)?;
+    let mut collections = vec![FileCollection {
+        name: None,
+        key: None,
+        modes,
+    }];
+    let mut reads = vec![first];
+    let mut loose_lists: Vec<(usize, &J)> = Vec::new();
+    if let Some(vars) = ext.and_then(|e| e.get("variables")) {
+        loose_lists.push((0, vars));
+    }
+    for (k, g) in root.entries() {
+        let Some(c) = g
+            .get("$extensions")
+            .and_then(|e| e.get(EXTENSION))
+            .and_then(|e| e.get("collection"))
+        else {
+            continue;
+        };
+        let at = [k.clone()];
+        let (modes, mut read) = read_modes(&at, Some(c))?;
+        read.key = Some(k.clone());
+        let name = c.get("name").and_then(J::str).unwrap_or(k).to_string();
+        if let Some(vars) = g
+            .get("$extensions")
+            .and_then(|e| e.get(EXTENSION))
+            .and_then(|e| e.get("variables"))
+        {
+            loose_lists.push((collections.len(), vars));
+        }
+        collections.push(FileCollection {
+            name: Some(name),
+            key: Some(k.clone()),
+            modes,
+        });
+        reads.push(read);
+    }
+    // The collection a path is in, and its path within it.
+    let place = |path: &[String]| -> (usize, Vec<String>) {
+        match reads.iter().position(|r| {
+            r.key
+                .as_deref()
+                .is_some_and(|k| path.first().is_some_and(|p| p == k))
+        }) {
+            Some(i) if path.len() > 1 => (i, path[1..].to_vec()),
+            _ => (0, path.to_vec()),
+        }
+    };
+    let scope_of = |e: Option<&J>| -> Option<variable::Scope> {
+        let J::Arr(list) = e?.get("scope")? else {
+            return None;
+        };
+        Some(variable::Scope::of(
+            list.iter()
+                .filter_map(J::str)
+                .filter_map(variable::Field::from_wire),
+        ))
+    };
     // The export's styles group; a file without the extension has none.
     let styles_key = ext.map(|e| {
         e.get("styles")
@@ -383,6 +489,11 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
                 }),
                 _ => match var_kind(&ty) {
                     Some(kind) => {
+                        let ModesRead {
+                            key_to_name,
+                            value_mode,
+                            ..
+                        } = &reads[place(&r.path).0];
                         let mut values = Vec::new();
                         let ext_modes = r
                             .body
@@ -395,11 +506,11 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
                         }
                         if !matches!(value, J::Null) || values.is_empty() {
                             let v = read_v(&r.path, &ty, value)?;
-                            values.retain(|(m, _)| *m != value_mode);
+                            values.retain(|(m, _)| m != value_mode);
                             values.push((value_mode.clone(), v));
                         }
                         // First, as what a mode the token has no value for takes.
-                        if let Some(i) = values.iter().position(|(m, _)| *m == value_mode) {
+                        if let Some(i) = values.iter().position(|(m, _)| m == value_mode) {
                             let held = values.remove(i);
                             values.insert(0, held);
                         }
@@ -410,12 +521,27 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
             }
         };
         match body {
-            Some(body) => tokens.push(Token {
-                path: r.path.clone(),
-                id,
-                description,
-                body,
-            }),
+            Some(body) => {
+                let (collection, name) = place(&r.path);
+                let scope = scope_of(r.body.get("$extensions").and_then(|e| e.get(EXTENSION)));
+                let type_scope = match ty.as_str() {
+                    "dimension" => Some(variable::Scope::of(
+                        variable::Field::of_kind(VarKind::Number).filter(|f| f.is_length()),
+                    )),
+                    "fontWeight" => Some(variable::Scope::of([variable::Field::Weight])),
+                    _ => None,
+                };
+                tokens.push(Token {
+                    path: r.path.clone(),
+                    name,
+                    collection,
+                    id,
+                    description,
+                    scope,
+                    type_scope,
+                    body,
+                })
+            }
             None => left_out.push(LeftOut {
                 path: r.path.join("."),
                 ty,
@@ -423,10 +549,15 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
         }
     }
 
-    // The export's strings and booleans, which have no DTCG type.
-    if let Some(vars) = ext.and_then(|e| e.get("variables")) {
+    // The export's strings and booleans, which have no DTCG type: the root's,
+    // and each collection's.
+    for (c, vars) in loose_lists {
+        let ModesRead {
+            key, key_to_name, ..
+        } = &reads[c];
         for (name, v) in vars.entries() {
-            let path: Vec<String> = name.split('/').map(str::to_string).collect();
+            let name: Vec<String> = name.split('/').map(str::to_string).collect();
+            let path: Vec<String> = key.iter().cloned().chain(name.iter().cloned()).collect();
             let kind = match v.get("kind").and_then(J::str) {
                 Some("string") => VarKind::String,
                 Some("boolean") => VarKind::Boolean,
@@ -439,7 +570,10 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
                     (J::Str(s), VarKind::String) => V::Lit(Cell::String(s.clone())),
                     (J::Bool(b), VarKind::Boolean) => V::Lit(Cell::Boolean(*b)),
                     (c, _) => match c.get("alias").and_then(J::str) {
-                        Some(to) => V::Named(to.to_string()),
+                        Some(to) => V::Named(
+                            c.get("collection").and_then(J::str).map(str::to_string),
+                            to.to_string(),
+                        ),
                         None => return refuse(&path, "a value of the wrong kind"),
                     },
                 };
@@ -448,7 +582,11 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
             tokens.push(Token {
                 id: v.get("id").and_then(J::str).and_then(NodeId::from_wire),
                 description: v.get("description").and_then(J::str).map(str::to_string),
+                scope: scope_of(Some(v)),
+                type_scope: None,
                 path,
+                name,
+                collection: c,
                 body: Body::Var { kind, values },
             });
         }
@@ -457,7 +595,7 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
         return refuse(&[], "the file holds no design token");
     }
     Ok(File {
-        modes,
+        collections,
         tokens,
         left_out,
     })
@@ -806,15 +944,20 @@ enum Item {
 /// A token file compared with a document.
 #[derive(Clone, Debug)]
 pub struct Review {
-    /// The mode columns: the document's, then those the file adds; one *Value*
-    /// column when there is no mode.
+    /// The mode columns of each collection the file lands in: the document's,
+    /// then those the file adds, each named *Collection · Mode* when there are
+    /// two collections; one *Value* column when there is no mode.
     pub columns: Vec<String>,
     pub rows: Vec<Row>,
     /// Tokens with no variable or style here, and why.
     pub left_out: Vec<LeftOut>,
     /// The document's modes the file lacks, which keep their values.
     pub kept_modes: Vec<String>,
-    added_modes: Vec<Mode>,
+    /// The modes the file adds, each to its collection.
+    added_modes: Vec<(CollectionId, Mode)>,
+    /// The collections the file adds — one of the file's no collection here is
+    /// named as — made when one of their modes is ticked.
+    added_collections: Vec<Collection>,
     /// Every variable the file reaches, changed or not: an unchanged one still
     /// takes its values for an added mode.
     vars: Vec<Wanted>,
@@ -845,63 +988,164 @@ struct Target {
 }
 
 /// Compare `file` with `doc`: what applying it would add, change, rename and
-/// remove. New variables, styles and modes are minted from `ids` here, so an
-/// alias between two new tokens names a real id.
-pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review, Refusal> {
+/// remove. New variables, styles, modes and collections are minted from `ids`
+/// here, so an alias between two new tokens names a real id.
+///
+/// **A file's collection lands in the document's of its name**, else in a new
+/// one; a file that names none — written from a document with one collection,
+/// or by another tool — lands in `into`, the collection on show. A removal is
+/// offered only among the collections the file lands in.
+pub fn review(
+    doc: &Document,
+    file: &File,
+    into: CollectionId,
+    ids: &mut IdSource,
+) -> Result<Review, Refusal> {
     let t = doc.variables();
-    let mut columns: Vec<(String, ModeId)> =
-        t.modes().iter().map(|m| (m.name.clone(), m.id)).collect();
-    let mut added_modes = Vec::new();
-    let mut mode_of: HashMap<String, ModeId> = HashMap::new();
-    let mut add_mode = |name: &str, columns: &mut Vec<(String, ModeId)>| {
-        let id = ids.mint_mode();
-        added_modes.push(Mode {
-            id,
-            name: name.to_string(),
-        });
-        columns.push((name.to_string(), id));
-        id
-    };
-    for name in &file.modes {
-        let id = match t.modes().iter().find(|m| m.name == *name) {
-            Some(m) => m.id,
-            None => add_mode(name, &mut columns),
-        };
-        mode_of.insert(name.clone(), id);
-    }
-    if file.modes.is_empty() {
-        let id = match t.default_mode() {
-            Some(m) => m,
-            None if file
-                .tokens
-                .iter()
-                .any(|tk| matches!(tk.body, Body::Var { .. })) =>
-            {
-                add_mode("Mode 1", &mut columns)
-            }
-            None => ModeId(NodeId::NOWHERE),
-        };
-        mode_of.insert(String::new(), id);
-    }
-    let kept_modes: Vec<String> = match file.modes.is_empty() {
-        true => Vec::new(),
-        false => t
-            .modes()
+    let into = t.collection(into).map_or(t.first_collection().id, |c| c.id);
+    let has_vars = |k: usize| {
+        file.tokens
             .iter()
-            .filter(|m| !file.modes.contains(&m.name))
-            .map(|m| m.name.clone())
-            .collect(),
+            .any(|tk| tk.collection == k && matches!(tk.body, Body::Var { .. }))
     };
+    // The collection each of the file's lands in, minted for a new one. The
+    // root's is `into` — unless it holds no variable while the file names its
+    // collections.
+    let mut added_collections: Vec<Collection> = Vec::new();
+    let landing: Vec<CollectionId> = file
+        .collections
+        .iter()
+        .map(|fc| match &fc.name {
+            None => into,
+            Some(name) => match t.collections().iter().find(|c| c.name == *name) {
+                Some(c) => c.id,
+                None => {
+                    let id = ids.mint_collection();
+                    added_collections.push(Collection {
+                        id,
+                        name: name.clone(),
+                        modes: Vec::new(),
+                    });
+                    id
+                }
+            },
+        })
+        .collect();
+    let touched: Vec<CollectionId> = {
+        let mut out = Vec::new();
+        for (k, c) in landing.iter().enumerate() {
+            if (has_vars(k) || !file.collections[k].modes.is_empty()) && !out.contains(c) {
+                out.push(*c);
+            }
+        }
+        out
+    };
+    let held_modes = |c: CollectionId| -> Vec<Mode> {
+        t.collection(c).map(|c| c.modes.clone()).unwrap_or_default()
+    };
+    let mut added_modes: Vec<(CollectionId, Mode)> = Vec::new();
+    let mut mode_of: HashMap<(usize, String), ModeId> = HashMap::new();
+    for (k, fc) in file.collections.iter().enumerate() {
+        let c = landing[k];
+        let add_mode =
+            |name: &str, added_modes: &mut Vec<(CollectionId, Mode)>, ids: &mut IdSource| {
+                let id = ids.mint_mode();
+                added_modes.push((
+                    c,
+                    Mode {
+                        id,
+                        name: name.to_string(),
+                    },
+                ));
+                id
+            };
+        for name in &fc.modes {
+            let known = held_modes(c)
+                .into_iter()
+                .chain(
+                    added_modes
+                        .iter()
+                        .filter(|(x, _)| *x == c)
+                        .map(|(_, m)| m.clone()),
+                )
+                .find(|m| m.name == *name);
+            let id = match known {
+                Some(m) => m.id,
+                None => add_mode(name, &mut added_modes, ids),
+            };
+            mode_of.insert((k, name.clone()), id);
+        }
+        if fc.modes.is_empty() {
+            let default = held_modes(c)
+                .first()
+                .map(|m| m.id)
+                .or_else(|| added_modes.iter().find(|(x, _)| *x == c).map(|(_, m)| m.id));
+            let id = match default {
+                Some(m) => m,
+                None if has_vars(k) => add_mode(variable::FIRST_MODE_NAME, &mut added_modes, ids),
+                None => ModeId(NodeId::NOWHERE),
+            };
+            mode_of.insert((k, String::new()), id);
+        }
+    }
+    // The columns: each collection landed in, its modes then the added ones.
+    let labelled = touched.len() > 1 || t.has_collections();
+    let mut columns: Vec<(String, ModeId)> = Vec::new();
+    for c in &touched {
+        let cname = t
+            .collection(*c)
+            .map(|x| x.name.clone())
+            .or_else(|| {
+                added_collections
+                    .iter()
+                    .find(|x| x.id == *c)
+                    .map(|x| x.name.clone())
+            })
+            .unwrap_or_default();
+        let modes = held_modes(*c).into_iter().chain(
+            added_modes
+                .iter()
+                .filter(|(x, _)| x == c)
+                .map(|(_, m)| m.clone()),
+        );
+        for m in modes {
+            let label = match labelled {
+                true => format!("{cname} \u{b7} {}", m.name),
+                false => m.name.clone(),
+            };
+            columns.push((label, m.id));
+        }
+    }
+    let column_of = |m: ModeId| -> Option<CollectionId> {
+        t.collection_of_mode(m)
+            .map(|c| c.id)
+            .or_else(|| added_modes.iter().find(|(_, x)| x.id == m).map(|(c, _)| *c))
+    };
+    let mut kept_modes: Vec<String> = Vec::new();
+    for (k, fc) in file.collections.iter().enumerate() {
+        if fc.modes.is_empty() {
+            continue;
+        }
+        for m in held_modes(landing[k]) {
+            if !fc.modes.contains(&m.name) && !kept_modes.contains(&m.name) {
+                kept_modes.push(m.name);
+            }
+        }
+    }
 
-    // Each variable token's variable: by id, then by path, else a new one.
-    let mut by_path: HashMap<Vec<String>, VarId> = HashMap::new();
+    // Each variable token's variable: by id, then by path in the collection it
+    // lands in, else a new one.
+    let mut by_path: HashMap<(CollectionId, Vec<String>), VarId> = HashMap::new();
     let mut kit_by_path: HashMap<Vec<String>, VarId> = HashMap::new();
     for v in t.iter() {
-        let at = match v.origin {
-            None => &mut by_path,
-            Some(_) => &mut kit_by_path,
-        };
-        at.entry(token_path(&v.name)).or_insert(v.id);
+        match (v.origin.as_ref(), t.collection_of(v.id)) {
+            (None, Some(c)) => {
+                by_path.entry((c.id, token_path(&v.name))).or_insert(v.id);
+            }
+            _ => {
+                kit_by_path.entry(token_path(&v.name)).or_insert(v.id);
+            }
+        }
     }
     let mut taken: BTreeSet<VarId> = BTreeSet::new();
     let mut target: Vec<Option<Target>> = vec![None; file.tokens.len()];
@@ -918,11 +1162,11 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
         let found = by_id
             .or_else(|| {
                 by_path
-                    .get(&tk.path)
+                    .get(&(landing[tk.collection], tk.name.clone()))
                     .copied()
                     .filter(|id| !taken.contains(id))
             })
-            .or_else(|| kit_by_path.get(&tk.path).copied());
+            .or_else(|| kit_by_path.get(&tk.name).copied());
         let id = match found.and_then(|id| t.get(id)) {
             Some(v) if v.kind != kind => {
                 // Still the file's, so not offered for removal as well.
@@ -951,6 +1195,26 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
         .collect();
     // A reference into the document rather than the file keeps that variable.
     let mut referenced: BTreeSet<VarId> = BTreeSet::new();
+    // A reference to the document: under a collection's group, its variable of
+    // that path; else `into`'s, else any collection's, else a kit's.
+    let in_doc = |to: &[String]| -> Option<&VarId> {
+        let grouped = file.collections.iter().enumerate().find(|(_, fc)| {
+            fc.key
+                .as_deref()
+                .is_some_and(|k| to.first().is_some_and(|p| p == k))
+        });
+        match grouped {
+            Some((k, _)) if to.len() > 1 => by_path.get(&(landing[k], to[1..].to_vec())),
+            _ => by_path
+                .get(&(into, to.to_vec()))
+                .or_else(|| {
+                    t.collections()
+                        .iter()
+                        .find_map(|c| by_path.get(&(c.id, to.to_vec())))
+                })
+                .or_else(|| kit_by_path.get(to)),
+        }
+    };
     let resolve = |path: &[String],
                    to: &[String],
                    kind: VarKind,
@@ -958,7 +1222,7 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
      -> Result<VarId, Refusal> {
         let (id, k) = match at_path.get(to) {
             Some(x) => (x.id, x.kind),
-            None => match by_path.get(to).or_else(|| kit_by_path.get(to)) {
+            None => match in_doc(to) {
                 Some(id) => {
                     referenced.insert(*id);
                     (*id, t.get(*id).map_or(kind, |v| v.kind))
@@ -979,16 +1243,38 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
         }
         Ok(id)
     };
-    let named = |path: &[String], name: &str, kind: VarKind| -> Result<VarId, Refusal> {
+    // A string's or a boolean's alias by name: in the referrer's collection,
+    // or the one it names.
+    let named = |path: &[String],
+                 from: usize,
+                 collection: Option<&str>,
+                 name: &str,
+                 kind: VarKind|
+     -> Result<VarId, Refusal> {
+        let k = match collection {
+            Some(c) => file
+                .collections
+                .iter()
+                .position(|fc| fc.name.as_deref() == Some(c)),
+            None => Some(from),
+        };
         let in_file = file
             .tokens
             .iter()
             .zip(&target)
-            .find(|(tk, _)| tk.path.join("/") == name)
+            .find(|(tk, _)| Some(tk.collection) == k && tk.name.join("/") == name)
             .and_then(|(_, t)| *t);
+        let here = match collection {
+            Some(c) => t
+                .collections()
+                .iter()
+                .find(|x| x.name == c)
+                .and_then(|x| t.by_name_in(x.id, name)),
+            None => t.by_name_in(landing[from], name),
+        };
         match in_file
             .map(|t| t.id)
-            .or_else(|| t.by_name(name).map(|v| v.id))
+            .or_else(|| here.or_else(|| t.by_name(name)).map(|v| v.id))
         {
             Some(id) if t.get(id).is_none_or(|v| v.kind == kind) => Ok(id),
             _ => refuse(path, format!("refers to {name}, which is not in the file")),
@@ -1010,18 +1296,28 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
             Ok(match v {
                 V::Lit(c) => c.clone(),
                 V::Ref(to) => Cell::Alias(resolve(&tk.path, to, *kind, referenced)?),
-                V::Named(name) => Cell::Alias(named(&tk.path, name, *kind)?),
+                V::Named(c, name) => {
+                    Cell::Alias(named(&tk.path, tk.collection, c.as_deref(), name, *kind)?)
+                }
             })
         };
         let fallback = values.first().map(|(_, v)| v);
-        let mut cells = held.map(|v| v.cells.clone()).unwrap_or_default();
-        for (_, m) in &columns {
+        // Its cells in the collection it lands in: a variable matched in
+        // another moves there, keeping none of the cells it had.
+        let lands = landing[tk.collection];
+        let stays = held.is_some_and(|v| t.collection_of(v.id).map(|c| c.id) == Some(lands));
+        let mut cells = match stays {
+            true => held.map(|v| v.cells.clone()).unwrap_or_default(),
+            false => BTreeMap::new(),
+        };
+        let held_here = held.filter(|_| stays);
+        for (_, m) in columns.iter().filter(|(_, m)| column_of(*m) == Some(lands)) {
             let given = values
                 .iter()
-                .find(|(name, _)| mode_of.get(name) == Some(m))
+                .find(|(name, _)| mode_of.get(&(tk.collection, name.clone())) == Some(m))
                 .map(|(_, v)| v);
-            let added = added_modes.iter().any(|a| a.id == *m);
-            let v = match (given, held) {
+            let added = added_modes.iter().any(|(_, a)| a.id == *m);
+            let v = match (given, held_here) {
                 (Some(v), _) => v,
                 (None, Some(_)) if !added => continue,
                 (None, _) => match fallback {
@@ -1041,14 +1337,21 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
             return refuse(&tk.path, "the token refers to itself");
         }
         let name = match held {
-            Some(v) if token_path(&v.name) == tk.path => v.name.clone(),
-            _ => tk.path.join("/"),
+            Some(v) if token_path(&v.name) == tk.name => v.name.clone(),
+            _ => tk.name.join("/"),
         };
         let description = match (&tk.description, held) {
             (Some(d), _) => d.clone(),
             (None, Some(v)) => v.description.clone(),
             (None, None) => String::new(),
         };
+        // The extension's scope, else the one held, else its type's for a new
+        // number; a boolean has none.
+        let scope = match held {
+            Some(v) => tk.scope.or(v.scope),
+            None => tk.scope.or(tk.type_scope),
+        }
+        .filter(|_| *kind != VarKind::Boolean);
         plan_of[i] = Some(vars.len());
         vars.push(Wanted {
             var: Variable {
@@ -1056,6 +1359,7 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
                 name,
                 kind: *kind,
                 cells,
+                scope,
                 origin: None,
                 forked: held.and_then(|v| v.forked.clone()),
                 description,
@@ -1097,9 +1401,11 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
         };
         at.entry((s.slot(), token_path(&s.name))).or_insert(s.id);
     }
-    let value_mode = mode_of
-        .get(file.modes.first().map_or("", String::as_str))
-        .copied();
+    let value_mode = file.collections.first().and_then(|fc| {
+        mode_of
+            .get(&(0, fc.modes.first().cloned().unwrap_or_default()))
+            .copied()
+    });
     let ctx = Ctx {
         doc,
         file,
@@ -1173,11 +1479,25 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
     let mut rows: Vec<Row> = Vec::new();
     // A document without modes still shows a style's value in one column.
     let blank = || vec![Column::default(); columns.len().max(1)];
-    for (i, m) in added_modes.iter().enumerate() {
+    let collection_name = |c: CollectionId| {
+        t.collection(c)
+            .or_else(|| added_collections.iter().find(|x| x.id == c))
+            .map(|x| x.name.clone())
+            .unwrap_or_default()
+    };
+    for (i, (c, m)) in added_modes.iter().enumerate() {
+        let name = match labelled {
+            true => format!(
+                "Adds mode \u{201c}{}\u{201d} to {}",
+                m.name,
+                collection_name(*c)
+            ),
+            false => format!("Adds mode \u{201c}{}\u{201d}", m.name),
+        };
         rows.push(Row {
             change: Change::Added,
             group: "Modes".to_string(),
-            name: format!("Adds mode \u{201c}{}\u{201d}", m.name),
+            name,
             sub: Some("every token\u{2019}s value for it comes from the file".to_string()),
             cells: blank(),
             ticked: true,
@@ -1215,13 +1535,16 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
                 // writes it whether this one is ticked or not.
                 Some(h)
                     if h.cells.iter().any(|(m, c)| w.var.cells.get(m) != Some(c))
-                        || h.description != w.var.description =>
+                        || h.description != w.var.description
+                        || h.scope != w.var.scope =>
                 {
                     let same = h.cells.iter().all(|(m, c)| w.var.cells.get(m) == Some(c));
-                    (
-                        Change::Changed,
-                        same.then(|| "description changed".to_string()),
-                    )
+                    let sub = match (same, h.scope != w.var.scope) {
+                        (false, _) => None,
+                        (true, true) => Some("scope changed".to_string()),
+                        (true, false) => Some("description changed".to_string()),
+                    };
+                    (Change::Changed, sub)
                 }
                 Some(_) => continue,
             };
@@ -1285,7 +1608,11 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
         }
     }
     for v in t.local() {
-        if taken.contains(&v.id) || referenced.contains(&v.id) {
+        if taken.contains(&v.id)
+            || referenced.contains(&v.id)
+            || t.collection_of(v.id)
+                .is_none_or(|c| !touched.contains(&c.id))
+        {
             continue;
         }
         let path = token_path(&v.name);
@@ -1336,6 +1663,7 @@ pub fn review(doc: &Document, file: &File, ids: &mut IdSource) -> Result<Review,
         left_out,
         kept_modes,
         added_modes,
+        added_collections,
         vars,
         styles,
         fresh,
@@ -1359,9 +1687,16 @@ impl Ctx<'_> {
         match self.at_path.get(to) {
             Some(x) if x.kind == kind => Some(x.id),
             Some(_) => None,
+            // The document's, by its path — under its collection's group too.
             None => t
                 .iter()
-                .find(|v| v.kind == kind && token_path(&v.name) == to)
+                .find(|v| {
+                    let path = token_path(&v.name);
+                    let grouped = t.collection_of(v.id).is_some_and(|c| {
+                        to.first() == Some(&token_path(&c.name).join("_")) && to[1..] == path[..]
+                    });
+                    v.kind == kind && (path == to || grouped)
+                })
                 .map(|v| v.id),
         }
     }
@@ -1380,7 +1715,7 @@ impl Ctx<'_> {
                     );
                 }
             },
-            V::Named(_) => return refuse(path, "a style cannot read a string variable"),
+            V::Named(..) => return refuse(path, "a style cannot read a string variable"),
         };
         let mut at = start;
         for _ in 0..64 {
@@ -1722,7 +2057,10 @@ impl Review {
         };
         let modes = &self.added_modes;
         self.rows.retain(|r| match &r.item {
-            Item::Mode(i) => !old.modes.contains(&modes[*i].name),
+            Item::Mode(i) => !old
+                .collections
+                .iter()
+                .any(|c| c.modes.contains(&modes[*i].1.name)),
             Item::Var { token, .. } | Item::Style { token, .. } | Item::Kit { token } => {
                 let tk = &file.tokens[*token];
                 before(tk) != Some(tk)
@@ -1769,7 +2107,7 @@ impl Review {
             .iter()
             .zip(&modes_on)
             .filter(|(_, on)| !**on)
-            .map(|(m, _)| m.id)
+            .map(|((_, m), _)| m.id)
             .collect();
         let shaped = |v: &Variable| {
             let mut v = v.clone();
@@ -1781,45 +2119,73 @@ impl Review {
             ops.extend(variable::remove_ops(doc, &removed));
         }
         let by_id: HashMap<VarId, &Wanted> = self.vars.iter().map(|w| (w.var.id, w)).collect();
-        let mut index = t.modes().len();
-        for (m, _) in self
+        // A new collection is made when one of its modes is ticked.
+        for c in &self.added_collections {
+            let wanted = self
+                .added_modes
+                .iter()
+                .zip(&modes_on)
+                .any(|((x, _), on)| *x == c.id && *on);
+            if wanted {
+                ops.push(Operation::AddCollection {
+                    collection: c.clone(),
+                    index: t.collections().len(),
+                });
+            }
+        }
+        let mut index: HashMap<CollectionId, usize> = HashMap::new();
+        for ((c, m), _) in self
             .added_modes
             .iter()
             .zip(&modes_on)
             .filter(|(_, on)| **on)
         {
+            let at = index
+                .entry(*c)
+                .or_insert_with(|| t.collection(*c).map_or(0, |x| x.modes.len()));
+            let default = t
+                .collection(*c)
+                .and_then(variable::Collection::default_mode);
             let mut cells = Vec::new();
-            for v in t.local().filter(|v| !removed.contains(&v.id)) {
+            for v in t.of_collection(*c).filter(|v| !removed.contains(&v.id)) {
                 let cell = by_id
                     .get(&v.id)
                     .and_then(|w| w.var.cells.get(&m.id))
-                    .or_else(|| t.default_mode().and_then(|d| v.cells.get(&d)))
+                    .or_else(|| default.and_then(|d| v.cells.get(&d)))
                     .cloned()
-                    .map(|c| match c {
+                    .map(|cell| match cell {
                         // A removal turns aliases to it into values; so does this.
-                        Cell::Alias(to) if removed.contains(&to) => t
-                            .default_mode()
+                        Cell::Alias(to) if removed.contains(&to) => default
                             .and_then(|d| t.resolve(v.id, d))
-                            .map_or(c, Cell::from),
-                        c => c,
+                            .map_or(cell, Cell::from),
+                        cell => cell,
                     });
-                if let Some(c) = cell {
-                    cells.push((v.id, c));
+                if let Some(cell) = cell {
+                    cells.push((v.id, cell));
                 }
             }
             ops.push(Operation::AddMode {
+                collection: *c,
                 mode: m.clone(),
-                index,
+                index: *at,
                 cells,
             });
-            index += 1;
-        }
-        if index == 0 && vars_on.iter().any(|p| self.vars[*p].new) {
-            return Err("Tick a mode: a variable needs one to hold its value".to_string());
+            *at += 1;
         }
         for p in &vars_on {
             let w = &self.vars[*p];
             let var = shaped(&w.var);
+            if var.cells.is_empty() {
+                return Err("Tick a mode: a variable needs one to hold its value".to_string());
+            }
+            // A scope that drops a field detaches what it held there.
+            if !w.new && t.get(var.id).is_some_and(|h| h.scope != var.scope) {
+                ops.extend(
+                    variable::scope_ops(doc, var.id, var.scope)
+                        .into_iter()
+                        .filter(|op| !matches!(op, Operation::SetVariable { .. })),
+                );
+            }
             ops.push(match w.new {
                 true => Operation::AddVariable { var },
                 false => Operation::SetVariable { var },

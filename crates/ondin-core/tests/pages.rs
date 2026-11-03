@@ -43,7 +43,7 @@ fn add_page(id: NodeId, index: usize, name: &str) -> Operation {
         name: name.into(),
         ground: Some(Color::from_rgb8(10, 20, 30)),
         draft: false,
-        mode: None,
+        modes: Vec::new(),
     }
 }
 
@@ -285,6 +285,7 @@ fn a_frame_reads_its_pages_mode_unless_it_sets_one() {
         ondin_core::variable::ModeId(ids.mint()),
     );
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: ondin_core::variable::Mode {
             id,
             name: name.into(),
@@ -297,19 +298,31 @@ fn a_frame_reads_its_pages_mode_unless_it_sets_one() {
         mode(dark, "Dark", 1),
     ]))
     .unwrap();
-    assert_eq!(doc.mode_at(a), Some(light), "the default first");
-    doc.apply(&Transaction(vec![Operation::SetMode {
+    assert_eq!(
+        doc.mode_at(a, ondin_core::variable::CollectionId::FIRST),
+        Some(light),
+        "the default first"
+    );
+    doc.apply(&Transaction(vec![Operation::SetModes {
         id: first,
-        mode: Some(dark),
+        modes: vec![dark],
     }]))
     .unwrap();
-    assert_eq!(doc.mode_at(a), Some(dark), "the page's");
-    doc.apply(&Transaction(vec![Operation::SetMode {
+    assert_eq!(
+        doc.mode_at(a, ondin_core::variable::CollectionId::FIRST),
+        Some(dark),
+        "the page's"
+    );
+    doc.apply(&Transaction(vec![Operation::SetModes {
         id: a,
-        mode: Some(light),
+        modes: vec![light],
     }]))
     .unwrap();
-    assert_eq!(doc.mode_at(a), Some(light), "the frame's own wins");
+    assert_eq!(
+        doc.mode_at(a, ondin_core::variable::CollectionId::FIRST),
+        Some(light),
+        "the frame's own wins"
+    );
 }
 
 /// A main placed for drawing (`kit::as_placed`) reads the default mode, as it does
@@ -324,6 +337,7 @@ fn a_main_placed_for_drawing_reads_the_default_mode() {
         ondin_core::variable::ModeId(ids.mint()),
     );
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: ondin_core::variable::Mode {
             id,
             name: name.into(),
@@ -334,14 +348,14 @@ fn a_main_placed_for_drawing_reads_the_default_mode() {
     doc.apply(&Transaction(vec![
         mode(light, "Light", 0),
         mode(dark, "Dark", 1),
-        Operation::SetMode {
+        Operation::SetModes {
             id: first,
-            mode: Some(dark),
+            modes: vec![dark],
         },
     ]))
     .unwrap();
     assert_eq!(
-        doc.mode_at(b),
+        doc.mode_at(b, ondin_core::variable::CollectionId::FIRST),
         Some(light),
         "fixture: page 2 reads the default"
     );
@@ -351,7 +365,10 @@ fn a_main_placed_for_drawing_reads_the_default_mode() {
         Some(first),
         "fixture: moved"
     );
-    assert_eq!(placed.mode_at(b), Some(light));
+    assert_eq!(
+        placed.mode_at(b, ondin_core::variable::CollectionId::FIRST),
+        Some(light)
+    );
 }
 
 /// Several pages, a draft, a page mode and a page-wide guide save and load

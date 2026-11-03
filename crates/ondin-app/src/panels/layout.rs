@@ -5766,6 +5766,7 @@ mod tests {
         let (mode, var) = (s.app.session.ids.mint_mode(), s.app.session.ids.mint_var());
         assert!(s.app.commit_edit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -5779,6 +5780,7 @@ mod tests {
                     name: "space/4".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(8.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

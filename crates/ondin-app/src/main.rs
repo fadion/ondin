@@ -1029,7 +1029,7 @@ fn diff_files(a: &str, b: &str, json: bool) -> Result<(String, bool), String> {
 fn run_tokens_export(file: &str, mode: Option<&str>, out: Option<&str>) -> Result<(), String> {
     let bytes = std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?;
     let doc = ondin_core::io::load(&bytes).map_err(|e| format!("cannot load {file}: {e}"))?;
-    let modes = doc.variables().modes();
+    let modes: Vec<&ondin_core::Mode> = doc.variables().modes().collect();
     let mode = match mode {
         None => None,
         Some(name) => Some(
@@ -1823,6 +1823,7 @@ mod tests {
         let (m, dark, v) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
         doc.apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: m,
                     name: "Light".into(),
@@ -1831,6 +1832,7 @@ mod tests {
                 cells: vec![],
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: dark,
                     name: "Dark".into(),
@@ -1844,6 +1846,7 @@ mod tests {
                     name: "space/4".into(),
                     kind: VarKind::Number,
                     cells: [(m, Cell::Number(4.0)), (dark, Cell::Number(8.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

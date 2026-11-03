@@ -1556,6 +1556,7 @@ fn variables_match_the_canvas_in_every_mode() {
     let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
     d.apply(vec![
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -1564,6 +1565,7 @@ fn variables_match_the_canvas_in_every_mode() {
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dark,
                 name: "Dark".into(),
@@ -1580,6 +1582,7 @@ fn variables_match_the_canvas_in_every_mode() {
                 name: name.into(),
                 kind,
                 cells: [(light, a), (dark, b)].into_iter().collect(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -1632,7 +1635,10 @@ fn variables_match_the_canvas_in_every_mode() {
     for (i, mode) in [None, Some(dark)].into_iter().enumerate() {
         let f = d.frame(None, 0.0, i as f64 * 90.0, 260.0, 80.0, "Board");
         d.apply(vec![
-            Operation::SetMode { id: f, mode },
+            Operation::SetModes {
+                id: f,
+                modes: mode.into_iter().collect(),
+            },
             Operation::SetDisplay {
                 id: f,
                 display: Some(Display::Flex(Flex {
@@ -1710,9 +1716,9 @@ fn variables_match_the_canvas_in_every_mode() {
                 "Light again",
             );
             d.apply(vec![
-                Operation::SetMode {
+                Operation::SetModes {
                     id: inner,
-                    mode: Some(light),
+                    modes: vec![light],
                 },
                 Operation::SetFills {
                     id: inner,
@@ -1772,6 +1778,7 @@ fn bound_type_numbers_match_the_canvas_in_every_mode() {
     let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
     for (index, (id, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
         d.apply(vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id,
                 name: name.into(),
@@ -1790,6 +1797,7 @@ fn bound_type_numbers_match_the_canvas_in_every_mode() {
                 cells: [(light, Cell::Number(a)), (dark, Cell::Number(b))]
                     .into_iter()
                     .collect(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -1806,7 +1814,10 @@ fn bound_type_numbers_match_the_canvas_in_every_mode() {
     let space = num(&mut d, "space", 6.0, 12.0);
     for (i, mode) in [None, Some(dark)].into_iter().enumerate() {
         let f = d.frame(None, 0.0, i as f64 * 140.0, 300.0, 130.0, "Board");
-        d.apply(vec![Operation::SetMode { id: f, mode }]);
+        d.apply(vec![Operation::SetModes {
+            id: f,
+            modes: mode.into_iter().collect(),
+        }]);
         let kind = text_node(
             "Bound type\nA second paragraph",
             TextSizing::Auto,
@@ -1854,6 +1865,7 @@ fn a_paragraph_spacing_of_its_own_stays_under_a_bound_default() {
     let mut d = Doc::new();
     let mode = d.ids.mint_mode();
     d.apply(vec![Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id: mode,
             name: "Mode 1".into(),
@@ -1868,6 +1880,7 @@ fn a_paragraph_spacing_of_its_own_stays_under_a_bound_default() {
             name: "space".into(),
             kind: VarKind::Number,
             cells: [(mode, Cell::Number(6.0))].into_iter().collect(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -2226,6 +2239,7 @@ fn bound_text_colour_and_side_width_are_written_as_var() {
     let mut d = Doc::new();
     let mode = d.ids.mint_mode();
     d.apply(vec![Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id: mode,
             name: "Base".into(),
@@ -2244,6 +2258,7 @@ fn bound_text_colour_and_side_width_are_written_as_var() {
                 name: name.into(),
                 kind,
                 cells: [(mode, cell)].into_iter().collect(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -2544,6 +2559,7 @@ fn a_use_in_another_mode_draws_that_modes_values() {
     let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
     for (i, (mode, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
         d.apply(vec![Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: name.into(),
@@ -2576,6 +2592,7 @@ fn a_use_in_another_mode_draws_that_modes_values() {
                 name: name.into(),
                 kind,
                 cells: cells.into_iter().collect(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -2615,9 +2632,9 @@ fn a_use_in_another_mode_draws_that_modes_values() {
     // The main past the board's clipping edge: only the instance is compared.
     let main = d.card(board, (500.0, 10.0), None, painted);
     let used = d.card(board, (10.0, 10.0), Some(main), painted);
-    d.apply(vec![Operation::SetMode {
+    d.apply(vec![Operation::SetModes {
         id: used[0],
-        mode: Some(dark),
+        modes: vec![dark],
     }]);
     let (doc, res) = d.done();
     assert_eq!(html_of_components(&doc, &res, &[board]).inlined.len(), 1);
@@ -2634,6 +2651,7 @@ fn a_bound_corner_reading_zero_still_notes_its_smoothing() {
     let mut d = Doc::new();
     let (light, dark, radius) = (d.ids.mint_mode(), d.ids.mint_mode(), d.ids.mint_var());
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -2652,6 +2670,7 @@ fn a_bound_corner_reading_zero_still_notes_its_smoothing() {
                 cells: [(light, Cell::Number(0.0)), (dark, Cell::Number(16.0))]
                     .into_iter()
                     .collect(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

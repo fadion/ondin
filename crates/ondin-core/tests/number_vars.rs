@@ -40,6 +40,7 @@ fn fixture() -> F {
         name: name.into(),
         kind,
         cells: cells.into(),
+        scope: None,
         origin: None,
         forked: None,
         description: String::new(),
@@ -70,11 +71,13 @@ fn fixture() -> F {
             name: None,
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: mode(light, "Light"),
             index: 0,
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: mode(dark, "Dark"),
             index: 1,
             cells: vec![],
@@ -118,9 +121,9 @@ fn bind(f: &mut F) {
 
 fn dark(f: &mut F) {
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
 }

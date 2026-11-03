@@ -96,6 +96,7 @@ impl F {
             None => {
                 let m = self.ids.mint_mode();
                 ops.push(Operation::AddMode {
+                    collection: ondin_core::variable::CollectionId::FIRST,
                     mode: Mode {
                         id: m,
                         name: "Mode 1".into(),
@@ -113,6 +114,7 @@ impl F {
                 name: name.into(),
                 kind: VarKind::Color,
                 cells: [(mode, Cell::Color(c))].into_iter().collect(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

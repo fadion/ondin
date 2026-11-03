@@ -211,13 +211,16 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
             },
         ) {
             let mut el = el;
-            // The mode its ancestors set, which the export does not hold.
+            // The modes its ancestors set, which the export does not hold.
+            let t = doc.variables();
             let inherited = node
                 .parent()
-                .and_then(|p| doc.mode_at(p))
-                .filter(|m| Some(*m) != doc.variables().default_mode());
-            if node.mode().is_none()
-                && let Some(mode) = inherited.and_then(|m| walk.tokens.mode(m))
+                .map(|p| doc.modes_at(p))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|m| t.mode(*m).is_some() && t.default_of(*m) != Some(*m));
+            if node.modes().is_empty()
+                && let Some(mode) = walk.tokens.modes_attr(inherited)
             {
                 if el.instance.is_some() {
                     let mode = mode.to_string();
@@ -356,11 +359,16 @@ impl Walk<'_> {
         const OVERRIDES: &str = "inlined because of overrides; make it a property to keep the link";
         // The root's own mode goes on an element around the use, which a mode
         // the component's root sets itself would override.
-        let main_mode = doc.get(main)?.mode();
-        if main_mode.is_some() && doc.get(root)?.mode() != main_mode {
+        let main_mode = doc.get(main)?.modes();
+        if !main_mode.is_empty() && doc.get(root)?.modes() != main_mode {
             return Some(OVERRIDES.into());
         }
-        if doc.mode_at(root) != doc.mode_at(main) && self.varies_by_mode(main) {
+        let in_force = |id: NodeId| {
+            let mut m = doc.modes_at(id);
+            m.sort();
+            m
+        };
+        if in_force(root) != in_force(main) && self.varies_by_mode(main) {
             return Some(
                 "drawn in another mode than its main, whose pictures, strokes, effects, \
                  visibility or content read a variable that changes with the mode"
@@ -400,7 +408,7 @@ impl Walk<'_> {
                         }
                         O::SetText { .. } => props.contains(&(id, PropKind::Text)),
                         O::SetSwap { .. } => props.contains(&(id, PropKind::Swap)),
-                        O::SetGeometry { .. } | O::SetMode { .. } => id == at,
+                        O::SetGeometry { .. } | O::SetModes { .. } => id == at,
                         _ => false,
                     };
                     if !allowed {
@@ -855,10 +863,13 @@ impl Walk<'_> {
             slot,
         });
         // `why_inline` let a root's own mode through only where the main sets none.
+        let main_modes = doc.get(main).map(Node::modes).unwrap_or_default();
         let own = node
-            .mode()
-            .filter(|m| doc.get(main).and_then(Node::mode) != Some(*m));
-        match own.and_then(|m| self.tokens.mode(m)) {
+            .modes()
+            .iter()
+            .copied()
+            .filter(|m| !main_modes.contains(m));
+        match self.tokens.modes_attr(own) {
             Some(mode) => {
                 let mode = mode.to_string();
                 self.with_mode(el, mode)
@@ -1235,8 +1246,8 @@ impl Walk<'_> {
         let mut el = Element::new("div", self.classes.mint(node.name(), kind.default_name()));
         let bx = self.box_rect(node);
         self.place(&mut el, node, &kind, bx, place);
-        if let Some(mode) = node.mode().and_then(|m| self.tokens.mode(m)) {
-            el.attrs.push(("data-mode", mode.to_string()));
+        if let Some(mode) = self.tokens.modes_attr(node.modes().iter().copied()) {
+            el.attrs.push(("data-mode", mode));
         }
         if let Some(var) = node.visible_var()
             && tokens::varies(doc, var)

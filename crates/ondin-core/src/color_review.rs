@@ -19,7 +19,7 @@ use crate::id::NodeId;
 use crate::node::{Fill, NodeKind, Stroke};
 use crate::op::{Operation, Transaction};
 use crate::typography::{CharAttr, Span, Spans};
-use crate::variable::{BrushSource, Cell, Mode, ModeId, Value, VarId, VarKind, Variable};
+use crate::variable::{BrushSource, Cell, ModeId, Value, VarId, VarKind, Variable};
 use peniko::Color;
 use peniko::color::{DynamicColor, Oklab, Srgb};
 
@@ -385,27 +385,15 @@ pub fn merge_into_new(
         first_mode,
     } = new;
     let value = census[group.members[target]].color;
-    let mut ops = Vec::new();
-    let modes: Vec<ModeId> = match doc.variables().modes() {
-        [] => {
-            ops.push(Operation::AddMode {
-                mode: Mode {
-                    id: first_mode,
-                    name: "Mode 1".into(),
-                },
-                index: 0,
-                cells: Vec::new(),
-            });
-            vec![first_mode]
-        }
-        modes => modes.iter().map(|m| m.id).collect(),
-    };
+    let t = doc.variables();
+    let (mut ops, modes) = crate::variable::columns_for_new(t, t.first_collection().id, first_mode);
     ops.push(Operation::AddVariable {
         var: Variable {
             id: var,
             name: name.to_owned(),
             kind: VarKind::Color,
             cells: modes.into_iter().map(|m| (m, Cell::Color(value))).collect(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),

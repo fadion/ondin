@@ -6825,7 +6825,7 @@ mod submenu_tests {
             name: "Second".into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }])));
         frame(&ctx, &mut app, 0.0, None, Vec::new());
         let shapes = frame(&ctx, &mut app, 0.0, None, Vec::new());

@@ -1920,7 +1920,7 @@ mod tests {
             description: String::new(),
             doc_link: String::new(),
             origin: None,
-            mode: None,
+            modes: Vec::new(),
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,

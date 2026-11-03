@@ -327,6 +327,7 @@ fn descriptions_round_trip_and_are_absent_while_empty() {
         &mut f,
         vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -340,6 +341,7 @@ fn descriptions_round_trip_and_are_absent_while_empty() {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(RED))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -575,6 +577,7 @@ fn deleting_a_variable_inside_a_style_detaches_the_style() {
         &mut f,
         vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: m,
                     name: "Default".into(),
@@ -588,6 +591,7 @@ fn deleting_a_variable_inside_a_style_detaches_the_style() {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(m, Cell::Color(GREEN))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -625,6 +629,7 @@ fn an_effects_style_binding_a_number_its_kind_lacks_is_refused() {
         &mut f,
         vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Default".into(),
@@ -638,6 +643,7 @@ fn an_effects_style_binding_a_number_its_kind_lacks_is_refused() {
                     name: "space/x".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(4.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

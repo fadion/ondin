@@ -63,11 +63,13 @@ fn fixture() -> F {
             })),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: mode(light, "Light"),
             index: 0,
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: mode(dark, "Dark"),
             index: 1,
             cells: vec![],
@@ -78,6 +80,7 @@ fn fixture() -> F {
                 name: "size/min".into(),
                 kind: VarKind::Number,
                 cells: [(light, Cell::Number(100.0)), (dark, Cell::Number(140.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -126,9 +129,9 @@ fn a_bound_min_width_lays_out_in_the_mode_in_force() {
     );
     assert_eq!(width(&f.doc, f.rect), 100.0, "Light's 100");
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     assert_eq!(width(&f.doc, f.rect), 140.0, "Dark's 140");

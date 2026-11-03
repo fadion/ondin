@@ -401,6 +401,7 @@ impl OndinApp {
                 if let Some(name) = name
                     && crate::panels::variables::name_refusal(
                         self.session.doc.variables(),
+                        self.session.doc.variables().first_collection().id,
                         &name,
                         None,
                     )
@@ -1145,7 +1146,9 @@ fn naming(
         .size(10.5)
         .color(theme::text::faint()),
     );
-    let refusal = crate::panels::variables::name_refusal(doc.variables(), name.trim(), None);
+    let t = doc.variables();
+    let refusal =
+        crate::panels::variables::name_refusal(t, t.first_collection().id, name.trim(), None);
     let mut typed = name.clone();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 7.0;
@@ -1394,6 +1397,7 @@ mod tests {
                         id: mode,
                         name: "Light".into(),
                         from,
+                        collection: String::new(),
                     }],
                     map: Default::default(),
                 }),
@@ -1404,6 +1408,7 @@ mod tests {
                     name: "warning".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(A))].into_iter().collect(),
+                    scope: None,
                     origin: Some(VarOrigin {
                         kit: KIT.into(),
                         var: foreign,

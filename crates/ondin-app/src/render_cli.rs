@@ -296,11 +296,11 @@ fn render_modes(
     page: Option<&str>,
     spec: &ExportSpec,
 ) -> Result<Vec<Rendered>, String> {
+    // Every collection's modes, each set alone over the frame's own.
     let modes: Vec<(ondin_core::variable::ModeId, String)> = s
         .doc
         .variables()
         .modes()
-        .iter()
         .map(|m| (m.id, m.name.clone()))
         .collect();
     if modes.is_empty() {
@@ -334,9 +334,19 @@ fn render_modes(
             .map(|n| n.name().to_string())
             .unwrap_or_default();
         for (mode, mode_name) in &modes {
-            s.try_commit(ondin_core::Transaction(vec![Operation::SetMode {
+            let t = s.doc.variables();
+            let set = s
+                .doc
+                .get(frame)
+                .map(|n| n.modes().to_vec())
+                .unwrap_or_default();
+            let modes = match t.owner_of(*mode) {
+                Some(owner) => ondin_core::variable::with_mode(t, &set, owner, Some(*mode)),
+                None => continue,
+            };
+            s.try_commit(ondin_core::Transaction(vec![Operation::SetModes {
                 id: frame,
-                mode: Some(*mode),
+                modes,
             }]))
             .map_err(|e| format!("cannot set {name:?} to mode {mode_name:?}: {e}"))?;
             if !s.doc.shown(frame) {
@@ -1065,7 +1075,7 @@ mod tests {
     /// Every visible top-level frame renders once per mode, in that mode, named
     /// frame then mode, and the frame inherits again afterwards.
     ///
-    /// flip: `render_modes` without its `SetMode` commit → fails at the Dark
+    /// flip: `render_modes` without its `SetModes` commit → fails at the Dark
     /// render's colour.
     #[test]
     fn every_frame_renders_once_per_mode() {
@@ -1077,6 +1087,7 @@ mod tests {
         let (light, dark) = (ids.mint_mode(), ids.mint_mode());
         let (var, card) = (ids.mint_var(), ids.mint());
         let mode = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id,
                 name: name.into(),
@@ -1098,6 +1109,7 @@ mod tests {
                     ]
                     .into_iter()
                     .collect(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1131,7 +1143,10 @@ mod tests {
         assert_eq!(names, ["Card-Light.svg", "Card-Dark.svg"]);
         assert!(svg(&out[0]).contains("#fafafa"), "{}", svg(&out[0]));
         assert!(svg(&out[1]).contains("#141414"), "{}", svg(&out[1]));
-        assert_eq!(s.doc.get(card).unwrap().mode(), None, "inherits again");
+        assert!(
+            s.doc.get(card).unwrap().modes().is_empty(),
+            "inherits again"
+        );
 
         // Hidden by a variable in Dark, the frame renders in Light only.
         let show = ids.mint_var();
@@ -1144,6 +1159,7 @@ mod tests {
                     cells: [(light, Cell::Boolean(true)), (dark, Cell::Boolean(false))]
                         .into_iter()
                         .collect(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1236,7 +1252,7 @@ mod tests {
             name: name.into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         };
         let frame = |id, parent, name: &str| Operation::CreateNode {
             id,
@@ -1269,6 +1285,7 @@ mod tests {
         if modes {
             for (index, name) in ["Dark", "dark"].into_iter().enumerate() {
                 ops.push(Operation::AddMode {
+                    collection: ondin_core::variable::CollectionId::FIRST,
                     mode: Mode {
                         id: ids.mint_mode(),
                         name: name.into(),

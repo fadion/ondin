@@ -818,6 +818,10 @@ pub struct OndinApp {
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
     /// The browser's collapsed groups per document root; view state, not saved.
     pub(crate) var_collapsed: std::collections::HashMap<NodeId, HashSet<String>>,
+    /// The collection the browser shows per document root, for the process, as
+    /// the collapsed groups are; a document with none set shows its first.
+    pub(crate) var_collection:
+        std::collections::HashMap<NodeId, ondin_core::variable::CollectionId>,
     /// Where the rail's swatches button was drawn last frame. `NOTHING` until the rail
     /// has drawn.
     pub(crate) var_button: egui::Rect,
@@ -829,7 +833,7 @@ pub struct OndinApp {
     /// the `--` list would hang under (`context-menus.md` §6.7).
     pub(crate) field_menu: Option<(crate::panels::binding::FieldKey, egui::Pos2, egui::Rect)>,
     /// A frame's *Mode* menu, open under its row.
-    pub(crate) mode_menu: Option<(NodeId, egui::Rect)>,
+    pub(crate) mode_menu: Option<(NodeId, ondin_core::variable::CollectionId, egui::Rect)>,
     /// A style slot card's `⋯` menu.
     pub(crate) style_menu: Option<crate::panels::styles::StyleMenu>,
     /// *Apply style…*'s picker.
@@ -1513,6 +1517,7 @@ impl OndinApp {
             egui_ctx: ctx.clone(),
             var_browser: None,
             var_collapsed: Default::default(),
+            var_collection: Default::default(),
             var_button: egui::Rect::NOTHING,
             var_complete: None,
             var_retype: None,
@@ -6736,27 +6741,37 @@ fn properties_landing(
     doc: &ondin_core::Document,
     props: &ondin_core::build::Properties,
 ) -> (Vec<String>, Vec<String>) {
+    use ondin_core::variable::Field;
     let t = doc.variables();
     let bound = props
         .fills
         .iter()
-        .map(|f| &f.brush)
-        .chain(props.strokes.iter().map(|s| &s.brush))
-        .filter_map(ondin_core::BrushSource::var)
-        .chain(props.strokes.iter().filter_map(|s| s.width_var))
+        .filter_map(|f| f.brush.var().map(|v| (v, Field::Fill)))
+        .chain(
+            props
+                .strokes
+                .iter()
+                .filter_map(|s| s.brush.var().map(|v| (v, Field::Stroke))),
+        )
+        .chain(
+            props
+                .strokes
+                .iter()
+                .filter_map(|s| s.width_var.map(|v| (v, Field::StrokeWidth))),
+        )
         .chain(
             props
                 .effects
                 .iter()
-                .flat_map(|e| e.vars.into_iter().flatten()),
+                .flat_map(|e| e.vars.into_iter().flatten().map(|v| (v, Field::Effect))),
         )
-        .chain(props.opacity_var);
+        .chain(props.opacity_var.map(|v| (v, Field::Opacity)));
     let (mut rebound, mut detached) = (Vec::new(), Vec::new());
-    for v in bound {
+    for (v, field) in bound {
         let Some(c) = props.carried.iter().find(|c| c.id == v) else {
             continue;
         };
-        let list = match ondin_core::variable::rebind(t, &props.carried, v) {
+        let list = match ondin_core::variable::rebind(t, &props.carried, v, field) {
             Some(to) if to == v => continue,
             Some(_) => &mut rebound,
             None => &mut detached,
@@ -11363,6 +11378,7 @@ mod image_drop_tests {
             rect(a, 0.0),
             rect(b, 200.0),
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -11376,6 +11392,7 @@ mod image_drop_tests {
                     name: "brand/primary".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::from_rgba8(0, 0, 255, 255)))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -11475,6 +11492,7 @@ mod paste_properties_report_tests {
                 name: name.into(),
                 kind: VarKind::Color,
                 cells: [(mode, Cell::Color(Color::from_rgba8(0, 0, 255, 255)))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -11504,6 +11522,7 @@ mod paste_properties_report_tests {
                 name: name.into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(2.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -11518,6 +11537,7 @@ mod paste_properties_report_tests {
         };
         doc.apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Default".into(),
@@ -11581,6 +11601,7 @@ mod paste_properties_report_tests {
         there
             .apply(&Transaction(vec![
                 Operation::AddMode {
+                    collection: ondin_core::variable::CollectionId::FIRST,
                     mode: Mode {
                         id: mode,
                         name: "Mode 1".into(),
@@ -11626,6 +11647,7 @@ mod paste_properties_report_tests {
         }]);
         assert!(app.commit_edit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),

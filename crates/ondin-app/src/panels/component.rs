@@ -1332,8 +1332,11 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::OpenVault { .. }
         | O::CloseVault { .. }
         | O::SetOrigin { .. }
-        // A frame's mode is a row of the identity card, under its name.
-        | O::SetMode { .. }
+        // A frame's modes are rows of the identity card, under its name.
+        | O::SetModes { .. }
+        | O::AddCollection { .. }
+        | O::RemoveCollection { .. }
+        | O::SetCollectionName { .. }
         | O::AddVariable { .. }
         | O::RemoveVariable { .. }
         | O::SetVariableName { .. }
@@ -2848,12 +2851,14 @@ mod tests {
             name: name.into(),
             kind: ondin_core::variable::VarKind::Number,
             cells: [(mode, ondin_core::variable::Cell::Number(n))].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
         };
         let mut ops = vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::variable::Mode {
                     id: mode,
                     name: "Default".into(),
@@ -2947,6 +2952,7 @@ mod tests {
         let (mode, w) = (f.app.session.ids.mint_mode(), f.app.session.ids.mint_var());
         let mut ops = vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::variable::Mode {
                     id: mode,
                     name: "Default".into(),
@@ -2960,6 +2966,7 @@ mod tests {
                     name: "size/w".into(),
                     kind: ondin_core::variable::VarKind::Number,
                     cells: [(mode, ondin_core::variable::Cell::Number(30.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -3028,6 +3035,7 @@ mod tests {
         let mut f = fixture(&ctx);
         let (light, dark) = (f.app.session.ids.mint_mode(), f.app.session.ids.mint_mode());
         let add = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: ondin_core::variable::Mode {
                 id,
                 name: name.into(),
@@ -3038,9 +3046,9 @@ mod tests {
         assert!(f.app.session.commit(Transaction(vec![
             add(light, "Light", 0),
             add(dark, "Dark", 1),
-            Operation::SetMode {
+            Operation::SetModes {
                 id: f.i,
-                mode: Some(dark),
+                modes: vec![dark],
             },
         ])));
         f.app.session.selection.set_one(f.i);
@@ -3059,9 +3067,8 @@ mod tests {
             "with a dot on its line"
         );
         click(&mut f.app, &ctx, label.center());
-        assert_eq!(
-            f.app.session.doc.get(f.i).unwrap().mode(),
-            None,
+        assert!(
+            f.app.session.doc.get(f.i).unwrap().modes().is_empty(),
             "the reset puts the copy back to inheriting"
         );
     }
@@ -5394,6 +5401,7 @@ mod tests {
         let (mode, on) = (v.app.session.ids.mint_mode(), v.app.session.ids.mint_var());
         assert!(v.app.commit_edit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -5407,6 +5415,7 @@ mod tests {
                     name: "state/on".into(),
                     kind: VarKind::Boolean,
                     cells: [(mode, Cell::Boolean(true))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -5459,6 +5468,7 @@ mod tests {
         let (mode, var) = (v.app.session.ids.mint_mode(), v.app.session.ids.mint_var());
         assert!(v.app.commit_edit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -5472,6 +5482,7 @@ mod tests {
                     name: "copy/cta".into(),
                     kind: VarKind::String,
                     cells: [(mode, Cell::String("Sign in".into()))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -5584,6 +5595,7 @@ mod tests {
                 name: name.into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(true))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -5591,6 +5603,7 @@ mod tests {
         };
         assert!(v.app.commit_edit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),

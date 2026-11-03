@@ -504,7 +504,7 @@ fn frozen_tables<'a>(
     let nodes: Vec<&Node> = nodes.into_iter().collect();
     let t = doc.variables();
     let (vs, ss) = crate::tokens::reached(t, doc.styles(), nodes.iter().copied());
-    if vs.is_empty() && ss.is_empty() && nodes.iter().all(|n| n.mode.is_none()) {
+    if vs.is_empty() && ss.is_empty() && nodes.iter().all(|n| n.modes.is_empty()) {
         return Default::default();
     }
     let vars: std::collections::BTreeMap<_, _> = vs
@@ -514,7 +514,7 @@ fn frozen_tables<'a>(
     let mut kits = std::collections::BTreeMap::new();
     let kit_modes = nodes
         .iter()
-        .filter_map(|n| n.mode)
+        .flat_map(|n| n.modes.iter().copied())
         .filter_map(|m| t.kit_mode_of(m).map(|(k, _)| k.to_string()));
     for k in vars
         .values()
@@ -533,9 +533,13 @@ fn frozen_tables<'a>(
     let own = vars.values().any(|v| v.origin.is_none())
         || nodes
             .iter()
-            .any(|n| n.mode.is_some_and(|m| t.mode(m).is_some()));
+            .any(|n| n.modes.iter().any(|m| t.mode(*m).is_some()));
     let variables = crate::variable::Variables {
-        modes: if own { t.modes().to_vec() } else { Vec::new() },
+        collections: if own {
+            t.collections().to_vec()
+        } else {
+            vec![crate::variable::Collection::first()]
+        },
         vars,
         kits,
     };
@@ -1292,10 +1296,10 @@ pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
             index: end + i,
         })
         .collect();
-    if doc.get(root).is_some_and(|r| r.mode().is_some()) {
-        ops.push(Operation::SetMode {
+    if doc.get(root).is_some_and(|r| !r.modes().is_empty()) {
+        ops.push(Operation::SetModes {
             id: root,
-            mode: None,
+            modes: Vec::new(),
         });
     }
     if !ops.is_empty() {
@@ -1657,25 +1661,33 @@ fn update_in_order(
         // copies off it, and the commit detaches them on the mode this reset is
         // for — and must have set the copy's mode before the update.
         let follows = |n: &Node| {
-            let before = doc.get(n.id).map(|x| x.mode);
+            let before = doc.get(n.id).map(|x| x.modes.clone());
             let main = n
                 .link
                 .filter(|l| b.scratch.contains(*l))
                 .and_then(|l| doc.get(l))
-                .map(|s| s.mode);
+                .map(|s| s.modes.clone());
             !b.scratch.in_vault(n.id) && main.is_some() && main == before
         };
-        let mut stale: Vec<NodeId> = b
+        let mut stale: Vec<(NodeId, Vec<crate::variable::ModeId>)> = b
             .scratch
             .node_map()
             .values()
-            .filter(|n| n.mode.is_some_and(|m| !b.scratch.variables().has_mode(m)))
+            .filter(|n| n.modes.iter().any(|m| !b.scratch.variables().has_mode(*m)))
             .filter(|n| !follows(n))
-            .map(|n| n.id)
+            .map(|n| {
+                let kept = n
+                    .modes
+                    .iter()
+                    .copied()
+                    .filter(|m| b.scratch.variables().has_mode(*m))
+                    .collect();
+                (n.id, kept)
+            })
             .collect();
         stale.sort();
-        for id in stale {
-            b.push(Operation::SetMode { id, mode: None })?;
+        for (id, modes) in stale {
+            b.push(Operation::SetModes { id, modes })?;
         }
     }
     // The references a sync could not point yet, now that every main of every

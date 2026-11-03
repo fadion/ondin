@@ -242,6 +242,7 @@ impl Builder<'_> {
         }
         let mode = self.ids.mint_mode();
         self.push(Operation::AddMode {
+            collection: crate::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -265,6 +266,7 @@ impl Builder<'_> {
                     name,
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(color(value)))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -382,7 +384,7 @@ impl Builder<'_> {
                 name: name.to_owned(),
                 ground: None,
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             });
         }
         self.children(page, id, None);

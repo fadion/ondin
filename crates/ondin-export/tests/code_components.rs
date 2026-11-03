@@ -285,6 +285,7 @@ fn a_use_keeps_the_mode_its_ancestors_set() {
     f.doc
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: light,
                     name: "Light".into(),
@@ -293,6 +294,7 @@ fn a_use_keeps_the_mode_its_ancestors_set() {
                 cells: vec![],
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: dark,
                     name: "Dark".into(),
@@ -311,9 +313,9 @@ fn a_use_keeps_the_mode_its_ancestors_set() {
                 (300.0, 0.0),
                 "Board",
             ),
-            Operation::SetMode {
+            Operation::SetModes {
                 id: board,
-                mode: Some(dark),
+                modes: vec![dark],
             },
         ]))
         .unwrap();
@@ -340,6 +342,7 @@ fn an_instance_setting_a_mode_is_a_use_inside_it() {
     f.doc
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: light,
                     name: "Light".into(),
@@ -348,6 +351,7 @@ fn an_instance_setting_a_mode_is_a_use_inside_it() {
                 cells: vec![],
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: dark,
                     name: "Dark".into(),
@@ -355,13 +359,13 @@ fn an_instance_setting_a_mode_is_a_use_inside_it() {
                 index: 1,
                 cells: vec![],
             },
-            Operation::SetMode {
+            Operation::SetModes {
                 id: f.clean,
-                mode: Some(dark),
+                modes: vec![dark],
             },
         ]))
         .unwrap();
-    assert_eq!(f.doc.get(f.clean).unwrap().mode(), Some(dark));
+    assert_eq!(f.doc.get(f.clean).unwrap().modes(), [dark]);
     let res = Resolved::rebuild(&f.doc);
     let out = react_of(&f.doc, &res, &[f.clean]);
     let app = file(&out, "App.tsx");
@@ -372,12 +376,12 @@ fn an_instance_setting_a_mode_is_a_use_inside_it() {
     assert!(out.inlined.is_empty(), "{:?}", out.inlined);
 
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.main[0],
-            mode: Some(light),
+            modes: vec![light],
         }]))
         .unwrap();
-    assert_eq!(f.doc.get(f.clean).unwrap().mode(), Some(dark), "still dark");
+    assert_eq!(f.doc.get(f.clean).unwrap().modes(), [dark], "still dark");
     let res = Resolved::rebuild(&f.doc);
     let out = react_of(&f.doc, &res, &[f.clean]);
     assert!(!file(&out, "App.tsx").contains("<Card "));

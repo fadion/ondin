@@ -2604,7 +2604,7 @@ mod tests {
             name: "Archive".into(),
             ground: Some(ondin_core::peniko::Color::WHITE),
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }]))
         .unwrap();
         store::file_document(&f.outside, None, name, &mut doc).unwrap()

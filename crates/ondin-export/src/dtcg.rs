@@ -11,14 +11,22 @@
 //! [`EXTENSION`], with the variable's id, which is what an import matches on
 //! first so a rename made in code is not a delete plus a create.
 //!
-//! **A number is a `dimension` or a `number` by what it binds**: a variable read
-//! only as lengths (sizes, radii, gaps, stroke widths, shadow offsets, px type
-//! sizes) is a px `dimension`, one read only as a font weight a `fontWeight`,
-//! and anything else — an opacity, an em length, both, or nothing — a `number`.
-//! An alias and its target pool what reads them, since the format gives them one
-//! type.
+//! **A document with more than one collection writes each as a top-level
+//! group**, its mode list and `valueMode` in the group's extension; a document
+//! with one writes as before collections, its modes in the root's, so existing
+//! files round-trip unchanged.
 //!
-//! Strings and booleans have no DTCG type and ride in the root's `$extensions`.
+//! **A number's type is its scope's** when it has one: lengths only is a px
+//! `dimension`, weight only a `fontWeight`, anything else a `number`. A number
+//! that may bind every field is typed **by what it binds**: read only as lengths
+//! (sizes, radii, gaps, stroke widths, shadow offsets, px type sizes) a
+//! `dimension`, only as a font weight a `fontWeight`, anything else — an
+//! opacity, an em length, both, or nothing — a `number`. An alias and its
+//! target pool what reads them, since the format gives them one type. The scope
+//! itself rides in the extension, so a round trip keeps it exactly.
+//!
+//! Strings and booleans have no DTCG type and ride in the root's — or their
+//! collection's — `$extensions`.
 //! Styles go under a `styles` group, one subgroup per slot, as the composite type
 //! each maps to; what has no DTCG form is left out and said so in
 //! [`Tokens::notes`].
@@ -28,7 +36,7 @@ use ondin_core::kurbo::Vec2;
 use ondin_core::peniko::Color;
 use ondin_core::style::{StyleSlot, StyleValue};
 use ondin_core::typography::{Length, TextStyle};
-use ondin_core::variable::{self, Cell, ModeId, VarId, VarKind, Variable, Variables};
+use ondin_core::variable::{self, Cell, CollectionId, ModeId, VarId, VarKind, Variable, Variables};
 use ondin_core::{Brush, BrushSource, EffectKind, NodeKind};
 use serde_json::{Map, Value as Json, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,26 +63,33 @@ enum Read {
 }
 
 /// `doc`'s own variables and styles as a DTCG file, `mode`'s values the
-/// `$value`s — the default mode when `None`, or when `mode` is not one of the
-/// document's.
+/// `$value`s of its collection — each other collection's, and every one's when
+/// `mode` is `None` or not one of the document's, its default.
 pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
     let t = doc.variables();
-    let mode = mode
-        .filter(|m| t.modes().iter().any(|x| x.id == *m))
-        .or_else(|| t.default_mode());
+    let value_modes = t
+        .collections()
+        .iter()
+        .filter_map(|c| {
+            let m = mode.filter(|m| c.has(*m)).or_else(|| c.default_mode())?;
+            Some((c.id, m))
+        })
+        .collect();
     let mut w = Writer {
         t,
-        mode,
+        value_modes,
         reads: number_reads(doc),
         paths: BTreeMap::new(),
         mode_keys: BTreeMap::new(),
+        collection_keys: BTreeMap::new(),
         notes: Vec::new(),
     };
+    w.name_collections();
     w.name_modes();
     w.name_variables();
 
     let mut root = Map::new();
-    let mut loose = Map::new();
+    let mut loose: BTreeMap<CollectionId, Map<String, Json>> = BTreeMap::new();
     for v in t.local() {
         match v.kind {
             VarKind::Color | VarKind::Number => {
@@ -85,8 +100,37 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
                 insert(&mut root, &path, token, &mut w.notes, &v.name);
             }
             VarKind::String | VarKind::Boolean => {
-                loose.insert(v.name.clone(), w.loose_variable(v));
+                let Some(c) = t.collection_of(v.id) else {
+                    continue;
+                };
+                let entry = w.loose_variable(v);
+                loose.entry(c.id).or_default().insert(v.name.clone(), entry);
             }
+        }
+    }
+    // Each collection's group carries its modes, when there are groups.
+    for c in t.collections() {
+        let Some(key) = w.collection_keys.get(&c.id).cloned() else {
+            continue;
+        };
+        let mut ext = Map::new();
+        let mut col = Map::new();
+        col.insert("id".to_string(), Json::String(c.id.0.to_wire()));
+        col.insert("name".to_string(), Json::String(c.name.clone()));
+        col.insert("modes".to_string(), w.modes_list(c));
+        if let Some(m) = w.value_modes.get(&c.id).and_then(|m| t.mode(*m)) {
+            col.insert("valueMode".to_string(), Json::String(m.name.clone()));
+        }
+        ext.insert("collection".to_string(), Json::Object(col));
+        if let Some(vars) = loose.remove(&c.id) {
+            ext.insert("variables".to_string(), Json::Object(vars));
+        }
+        let group = root.entry(key).or_insert_with(|| Json::Object(Map::new()));
+        if let Json::Object(g) = group {
+            g.insert(
+                "$extensions".to_string(),
+                json!({ EXTENSION: Json::Object(ext) }),
+            );
         }
     }
 
@@ -112,27 +156,16 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
     if let Some(key) = styles_key {
         ext.insert("styles".to_string(), Json::String(key));
     }
-    ext.insert(
-        "modes".to_string(),
-        Json::Array(
-            t.modes()
-                .iter()
-                .map(|m| {
-                    let mut out = json!({ "id": m.id.0.to_wire(), "name": m.name });
-                    let key = &w.mode_keys[&m.id];
-                    if *key != m.name {
-                        out["key"] = Json::String(key.clone());
-                    }
-                    out
-                })
-                .collect(),
-        ),
-    );
-    if let Some(m) = mode.and_then(|m| t.mode(m)) {
-        ext.insert("valueMode".to_string(), Json::String(m.name.clone()));
-    }
-    if !loose.is_empty() {
-        ext.insert("variables".to_string(), Json::Object(loose));
+    // One collection: its modes at the root, as before collections.
+    if w.collection_keys.is_empty() {
+        let c = t.first_collection();
+        ext.insert("modes".to_string(), w.modes_list(c));
+        if let Some(m) = w.value_modes.get(&c.id).and_then(|m| t.mode(*m)) {
+            ext.insert("valueMode".to_string(), Json::String(m.name.clone()));
+        }
+        if let Some(vars) = loose.remove(&c.id) {
+            ext.insert("variables".to_string(), Json::Object(vars));
+        }
     }
     let mut exts = Map::new();
     exts.insert(EXTENSION.to_string(), Json::Object(ext));
@@ -149,14 +182,17 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
 
 struct Writer<'a> {
     t: &'a Variables,
-    mode: Option<ModeId>,
+    /// Each collection's `$value` mode.
+    value_modes: BTreeMap<CollectionId, ModeId>,
     reads: BTreeMap<VarId, BTreeSet<Read>>,
     /// Each exported variable's token path, its segments already made legal, and
     /// ending in `$root` when the token is its group's.
     paths: BTreeMap<VarId, Vec<String>>,
     /// The key each mode's values are filed under in a token's extension: its
-    /// name, numbered when an earlier mode has the same one.
+    /// name, numbered when an earlier mode of its collection has the same one.
     mode_keys: BTreeMap<ModeId, String>,
+    /// Each collection's top-level group — none in a document with one.
+    collection_keys: BTreeMap<CollectionId, String>,
     notes: Vec<String>,
 }
 
@@ -169,35 +205,97 @@ impl Writer<'_> {
         }
     }
 
-    /// A key for every mode, unique although names need not be.
-    fn name_modes(&mut self) {
-        let mut taken = BTreeSet::new();
-        for m in self.t.modes() {
-            let key = std::iter::once(m.name.clone())
-                .chain((2..).map(|n| format!("{} {n}", m.name)))
+    /// A top-level group for each collection when there are two or more: its
+    /// name made legal, numbered when another holds it, never `styles`.
+    fn name_collections(&mut self) {
+        if !self.t.has_collections() {
+            return;
+        }
+        let mut taken: BTreeSet<String> = ["styles".to_string()].into();
+        for c in self.t.collections() {
+            let legal = token_path(&c.name).join("_");
+            let key = std::iter::once(legal.clone())
+                .chain((2..).map(|n| format!("{legal}_{n}")))
                 .find(|k| !taken.contains(k))
                 .expect("an unbounded run of names has a free one");
-            if key != m.name {
-                self.notes.push(format!(
-                    "Two modes are named {}: one's values are under `{key}`.",
-                    m.name
-                ));
+            if key != c.name {
+                self.notes
+                    .push(format!("The collection {} is written as `{key}`.", c.name));
             }
             taken.insert(key.clone());
-            self.mode_keys.insert(m.id, key);
+            self.collection_keys.insert(c.id, key);
         }
+    }
+
+    /// A key for every mode, unique in its collection although names need not
+    /// be.
+    fn name_modes(&mut self) {
+        for c in self.t.collections() {
+            let mut taken = BTreeSet::new();
+            for m in &c.modes {
+                let key = std::iter::once(m.name.clone())
+                    .chain((2..).map(|n| format!("{} {n}", m.name)))
+                    .find(|k| !taken.contains(k))
+                    .expect("an unbounded run of names has a free one");
+                if key != m.name {
+                    self.notes.push(format!(
+                        "Two modes are named {}: one's values are under `{key}`.",
+                        m.name
+                    ));
+                }
+                taken.insert(key.clone());
+                self.mode_keys.insert(m.id, key);
+            }
+        }
+    }
+
+    /// A collection's modes as an extension lists them: id, name, and the key
+    /// its values are under where that is not the name.
+    fn modes_list(&self, c: &variable::Collection) -> Json {
+        Json::Array(
+            c.modes
+                .iter()
+                .map(|m| {
+                    let mut out = json!({ "id": m.id.0.to_wire(), "name": m.name });
+                    let key = &self.mode_keys[&m.id];
+                    if *key != m.name {
+                        out["key"] = Json::String(key.clone());
+                    }
+                    out
+                })
+                .collect(),
+        )
+    }
+
+    /// The `$value` mode `v` is written in: its collection's.
+    fn value_mode(&self, v: VarId) -> Option<ModeId> {
+        self.value_modes.get(&self.t.collection_of(v)?.id).copied()
+    }
+
+    /// The modes of `v`'s collection, in order.
+    fn modes_of(&self, v: &Variable) -> Vec<ModeId> {
+        self.t.columns(v)
     }
 
     /// A legal path for every colour and number variable of the document's own,
     /// one each: a name that becomes another's path is numbered. A path another
     /// continues is that group's `$root`, which is how a reference has to name it.
+    /// Under its collection's group, when there are groups.
     fn name_variables(&mut self) {
         let mut taken: BTreeSet<Vec<String>> = BTreeSet::new();
         for v in self.t.local() {
             if !matches!(v.kind, VarKind::Color | VarKind::Number) {
                 continue;
             }
-            let legal = token_path(&v.name);
+            let prefix: Vec<String> = self
+                .t
+                .collection_of(v.id)
+                .and_then(|c| self.collection_keys.get(&c.id))
+                .cloned()
+                .into_iter()
+                .collect();
+            let grouped = prefix.len();
+            let legal: Vec<String> = prefix.into_iter().chain(token_path(&v.name)).collect();
             let mut path = legal.clone();
             let mut n = 2;
             while taken.contains(&path) {
@@ -212,7 +310,7 @@ impl Writer<'_> {
                     path.join("."),
                     legal.join(".")
                 ));
-            } else if path.join("/") != v.name {
+            } else if path[grouped..].join("/") != v.name {
                 self.notes.push(format!(
                     "{}: written as {}, since a token name cannot hold `.`, `{{`, `}}` or a leading `$`.",
                     v.name,
@@ -232,11 +330,13 @@ impl Writer<'_> {
         }
     }
 
-    /// The `$type` a token of `v` declares. An alias declares one too: its reads
-    /// were handed to its target, so the two agree.
+    /// The `$type` a token of `v` declares: its scope's, else its reads'. An
+    /// alias declares one too: its reads were handed to its target, so the two
+    /// agree unless a scope says otherwise.
     fn type_of(&self, v: &Variable) -> &'static str {
         match v.kind {
             VarKind::Color => "color",
+            _ if v.scope.is_some() => scope_type(v.scope),
             _ => {
                 let reads = self.reads.get(&v.id).filter(|r| !r.is_empty());
                 match reads {
@@ -253,7 +353,7 @@ impl Writer<'_> {
         let mut token = Map::new();
         token.insert("$type".to_string(), Json::String(ty.to_string()));
         let value = self
-            .mode
+            .value_mode(v.id)
             .and_then(|m| Some((m, v.cells.get(&m)?)))
             .map(|(m, c)| self.cell(v, c, ty, m));
         token.insert("$value".to_string(), value.unwrap_or(Json::Null));
@@ -264,13 +364,16 @@ impl Writer<'_> {
             );
         }
         let mut modes = Map::new();
-        for m in self.t.modes() {
-            if let Some(c) = v.cells.get(&m.id) {
-                let value = self.cell(v, c, ty, m.id);
-                modes.insert(self.mode_keys[&m.id].clone(), value);
+        for m in self.modes_of(v) {
+            if let Some(c) = v.cells.get(&m) {
+                let value = self.cell(v, c, ty, m);
+                modes.insert(self.mode_keys[&m].clone(), value);
             }
         }
-        let ext = json!({ "id": v.id.0.to_wire(), "modes": modes });
+        let mut ext = json!({ "id": v.id.0.to_wire(), "modes": modes });
+        if let Some(s) = v.scope {
+            ext["scope"] = serde_json::to_value(s).expect("a scope serializes");
+        }
         token.insert("$extensions".to_string(), json!({ EXTENSION: ext }));
         Json::Object(token)
     }
@@ -309,23 +412,37 @@ impl Writer<'_> {
             _ => "boolean",
         };
         let mut modes = Map::new();
-        for m in self.t.modes() {
-            if let Some(c) = v.cells.get(&m.id) {
+        for m in self.modes_of(v) {
+            if let Some(c) = v.cells.get(&m) {
                 let value = match c {
                     Cell::Alias(to) => match self.t.get(*to) {
-                        Some(target) => json!({ "alias": target.name }),
+                        // Named with its collection where that is another.
+                        Some(target) => {
+                            let theirs = self.t.collection_of(*to).map(|c| c.id);
+                            let mine = self.t.collection_of(v.id).map(|c| c.id);
+                            match theirs.filter(|c| Some(*c) != mine) {
+                                Some(c) => json!({
+                                    "alias": target.name,
+                                    "collection": self.t.collection(c).map(|c| c.name.clone()),
+                                }),
+                                None => json!({ "alias": target.name }),
+                            }
+                        }
                         None => Json::Null,
                     },
                     Cell::Boolean(b) => Json::Bool(*b),
                     Cell::String(s) => Json::String(s.clone()),
                     _ => Json::Null,
                 };
-                modes.insert(self.mode_keys[&m.id].clone(), value);
+                modes.insert(self.mode_keys[&m].clone(), value);
             }
         }
         let mut out = json!({ "id": v.id.0.to_wire(), "kind": kind, "modes": modes });
         if !v.description.is_empty() {
             out["description"] = Json::String(v.description.clone());
+        }
+        if let Some(s) = v.scope {
+            out["scope"] = serde_json::to_value(s).expect("a scope serializes");
         }
         out
     }
@@ -569,7 +686,8 @@ impl Writer<'_> {
         if let Some(target) = t.get(var)
             && self.paths.contains_key(&var)
             && self.type_of(target) != "dimension"
-            && let Some(variable::Value::Number(n)) = self.mode.and_then(|m| t.resolve(var, m))
+            && let Some(variable::Value::Number(n)) =
+                self.value_mode(var).and_then(|m| t.resolve(var, m))
         {
             self.note(format!(
                 "{style}: reads {}, a `number` token, so its value is written in px.",
@@ -676,9 +794,24 @@ fn number_reads(doc: &Document) -> BTreeMap<VarId, BTreeSet<Read>> {
             StyleValue::Fills(_) | StyleValue::Text(_) => {}
         }
     }
+    // A scoped number reads as its scope says, whatever binds it now: what it
+    // hands an unscoped alias or target is its type.
+    let t = doc.variables();
+    for v in t.iter() {
+        if let Some(s) = v.scope.filter(|_| v.kind == VarKind::Number) {
+            let mine: BTreeSet<Read> = s
+                .fields()
+                .map(|f| match f {
+                    _ if f.is_length() => Read::Length,
+                    variable::Field::Weight => Read::Weight,
+                    _ => Read::Other,
+                })
+                .collect();
+            reads.insert(v.id, mine);
+        }
+    }
     // An alias and its target are one type in the format, so each pair shares
     // its reads both ways, until nothing changes.
-    let t = doc.variables();
     loop {
         let mut changed = false;
         for v in t.iter() {
@@ -798,6 +931,22 @@ fn color(c: Color) -> Json {
         "alpha": round(a),
         "hex": format!("#{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b),
     })
+}
+
+/// The DTCG type a number scoped to `scope` is written as: lengths only a
+/// `dimension`, weight only a `fontWeight`, anything else — every field
+/// included — a `number`.
+pub fn scope_type(scope: Option<variable::Scope>) -> &'static str {
+    let Some(s) = scope.filter(|s| !s.is_empty()) else {
+        return "number";
+    };
+    if s.fields().all(variable::Field::is_length) {
+        "dimension"
+    } else if s.fields().all(|f| f == variable::Field::Weight) {
+        "fontWeight"
+    } else {
+        "number"
+    }
 }
 
 /// A number as a `$value` of type `ty`.

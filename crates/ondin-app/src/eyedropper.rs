@@ -1631,6 +1631,7 @@ mod tests {
         let [r, g, bl] = BLUE;
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -1646,6 +1647,7 @@ mod tests {
                     cells: [(mode, Cell::Color(Color::from_rgba8(r, g, bl, 255)))]
                         .into_iter()
                         .collect(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

@@ -339,7 +339,7 @@ impl Gen {
             name: format!("Page {}", n + 1),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         });
         self.pages += 1;
         self.commit(doc);

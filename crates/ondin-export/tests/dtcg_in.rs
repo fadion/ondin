@@ -20,6 +20,7 @@ fn add_var(id: VarId, name: &str, kind: VarKind, cells: Vec<(ModeId, Cell)>) -> 
             name: name.into(),
             kind,
             cells: cells.into_iter().collect(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -63,6 +64,7 @@ fn doc() -> Doc {
     let [brand, bg, radius, count, label, shown] = [(); 6].map(|_| ids.mint_var());
     let num = |a: f64, b: f64| vec![(light, Cell::Number(a)), (dark, Cell::Number(b))];
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -189,7 +191,8 @@ fn read(v: &Value) -> File {
 }
 
 fn reviewed(d: &mut Doc, v: &Value) -> Review {
-    review(&d.doc, &read(v), &mut d.ids).unwrap_or_else(|r| panic!("refused: {r}"))
+    let into = d.doc.variables().first_collection().id;
+    review(&d.doc, &read(v), into, &mut d.ids).unwrap_or_else(|r| panic!("refused: {r}"))
 }
 
 /// Apply every row as it starts ticked, or as `tick` says for the named ones.
@@ -294,8 +297,8 @@ fn added_changed_removed_and_a_new_mode_are_rows() {
 
     apply(&mut d, &r, &[("count", true)]);
     let t = d.doc.variables();
-    assert_eq!(t.modes().len(), 3);
-    let hc = t.modes()[2].id;
+    assert_eq!(t.modes().count(), 3);
+    let hc = t.modes().nth(2).unwrap().id;
     assert_eq!(
         t.get(d.brand).unwrap().cells[&hc],
         Cell::Color(Color::from_rgba8(0, 0, 0, 255))
@@ -405,7 +408,8 @@ fn unreadable_files_are_refused_with_a_path() {
     assert_eq!(r.to_string(), "a: the token has no $type");
     let mut d = doc();
     let dangling = parse(r#"{"a": {"$type": "color", "$value": "{nowhere.at.all}"}}"#).unwrap();
-    let r = review(&d.doc, &dangling, &mut d.ids).unwrap_err();
+    let into = d.doc.variables().first_collection().id;
+    let r = review(&d.doc, &dangling, into, &mut d.ids).unwrap_err();
     assert_eq!(
         r.to_string(),
         "a: refers to {nowhere.at.all}, which is not in the file"

@@ -19,7 +19,7 @@ use crate::panels::PaintSlot;
 use crate::theme::{self, color, icon};
 use crate::ui;
 use eframe::egui;
-use ondin_core::variable::{Cell, Mode, Value, VarId, VarKind, Variable};
+use ondin_core::variable::{Cell, Field, Scope, Value, VarId, VarKind, Variable};
 use ondin_core::{NodeId, Operation, PaintTarget, Transaction};
 
 /// A field that can be bound, and where its binding writes.
@@ -265,6 +265,31 @@ impl FieldKey {
             FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
         }
     }
+
+    /// The family of fields this one is of — what a variable's scope must take
+    /// for it to bind here.
+    pub(crate) fn field(self) -> Field {
+        use ondin_core::PaintTarget;
+        match self {
+            FieldKey::Paint { slot, .. } => match slot {
+                PaintSlot::Stroke(_)
+                | PaintSlot::Selection(PaintTarget::Stroke, _)
+                | PaintSlot::SelectionAll(PaintTarget::Stroke) => Field::Stroke,
+                _ => Field::Fill,
+            },
+            FieldKey::Radius { .. } | FieldKey::Corner { .. } => Field::Corner,
+            FieldKey::Spacing { .. } => Field::Spacing,
+            FieldKey::Size { .. } => Field::Size,
+            FieldKey::Limit { .. } => Field::Limits,
+            FieldKey::Opacity { .. } => Field::Opacity,
+            FieldKey::StrokeWidth { .. } => Field::StrokeWidth,
+            FieldKey::EffectNumber { .. } => Field::Effect,
+            FieldKey::Type { slot, .. } => ondin_core::variable::text_slot_field(slot),
+            FieldKey::Visible { .. } => Field::Visible,
+            FieldKey::Content { .. } => Field::Content,
+            FieldKey::Family { .. } => Field::Family,
+        }
+    }
 }
 
 /// The `--` list while it is open.
@@ -499,17 +524,28 @@ pub(crate) fn elide_groups(ui: &egui::Ui, name: &str, font: &egui::FontId, width
 
 /// A resolved value and the mode it resolved in, for a chip's tooltip:
 /// `16 · Dark`, `8BA5E0 · Light` — the full name first when the chip elides it.
-pub(crate) fn chip_tip(name: &str, value: Option<Value>, mode: Option<&Mode>) -> String {
-    let v = match value {
+pub(crate) fn chip_tip(doc: &ondin_core::Document, at: NodeId, var: VarId) -> String {
+    let t = doc.variables();
+    let name = t.get(var).map_or("", |v| v.name.as_str());
+    let v = match doc.resolve_var(at, var) {
         Some(Value::Color(c)) => ui::hex_of(c),
         Some(Value::Number(x)) => trim_number(x),
         Some(Value::Boolean(b)) => bool_word(b).into(),
         Some(Value::String(s)) => super::variables::string_text(&s),
         None => "—".into(),
     };
-    match mode {
-        Some(m) => format!("{name} · {v} · {}", m.name),
-        None => format!("{name} · {v}"),
+    // The mode its own collection reads there, and that collection's name once
+    // the document holds two.
+    let collection = t.collection_of(var);
+    let mode = collection
+        .and_then(|c| doc.mode_at(at, c.id))
+        .and_then(|m| t.mode(m));
+    match (mode, collection) {
+        (Some(m), Some(c)) if t.has_collections() => {
+            format!("{name} · {v} · {}: {}", c.name, m.name)
+        }
+        (Some(m), _) => format!("{name} · {v} · {}", m.name),
+        (None, _) => format!("{name} · {v}"),
     }
 }
 
@@ -552,6 +588,58 @@ pub(crate) fn matches<'a>(
             .then(a.name.cmp(&b.name))
     });
     out
+}
+
+/// [`matches()`] for a field of family `field`: only the variables whose scope
+/// takes it, each collection's together, in collection order — kits last.
+pub(crate) fn matches_for<'a>(
+    table: &'a ondin_core::Variables,
+    field: Field,
+    query: &str,
+) -> Vec<&'a Variable> {
+    let mut out = matches(table, field.kind(), query);
+    out.retain(|v| v.binds(field));
+    let rank = |v: &Variable| {
+        table
+            .collection_of(v.id)
+            .and_then(|c| table.collection_index(c.id))
+            .unwrap_or(0)
+    };
+    out.sort_by_key(|v| (v.kit().is_some(), rank(v)));
+    out
+}
+
+/// How many variables of `field`'s kind match `query` and are scoped to other
+/// fields — the dim line under the list, never the rows themselves.
+pub(crate) fn scoped_out(table: &ondin_core::Variables, field: Field, query: &str) -> usize {
+    matches(table, field.kind(), query)
+        .iter()
+        .filter(|v| !v.binds(field))
+        .count()
+}
+
+/// The dim line under a variables list counting [`scoped_out`]'s.
+pub(crate) fn scoped_out_line(n: usize) -> String {
+    match n {
+        1 => "1 more matches, scoped to other fields.".to_string(),
+        n => format!("{n} more match, scoped to other fields."),
+    }
+}
+
+/// The variable a whole typed name names, when its scope refuses `field` —
+/// `--radius/md` in a gap field — and nothing in scope still matches.
+pub(crate) fn out_of_scope<'a>(
+    table: &'a ondin_core::Variables,
+    field: Field,
+    text: &str,
+) -> Option<&'a Variable> {
+    let q = text.strip_prefix("--")?.trim();
+    if q.is_empty() || !matches_for(table, field, q).is_empty() {
+        return None;
+    }
+    table
+        .iter()
+        .find(|v| v.kind == field.kind() && !v.binds(field) && v.name.eq_ignore_ascii_case(q))
 }
 
 /// What a kit is called where its variables are listed (§15 D1065): its name as
@@ -912,7 +1000,7 @@ impl OndinApp {
     pub(crate) fn open_complete(&mut self, ctx: &egui::Context, key: FieldKey, under: egui::Rect) {
         let current = self.field_var(key);
         let table = self.session.doc.variables();
-        let list = matches(table, key.kind(), "");
+        let list = matches_for(table, key.field(), "");
         let highlight = current
             .and_then(|v| list.iter().position(|x| x.id == v))
             .unwrap_or(0);
@@ -1123,7 +1211,9 @@ impl OndinApp {
         }
         let doc = &self.session.doc;
         let table = doc.variables();
-        let list = matches(table, c.key.kind(), &c.query);
+        let field = c.key.field();
+        let list = matches_for(table, field, &c.query);
+        let hidden = scoped_out(table, field, &c.query);
         c.highlight = c.highlight.min(list.len().saturating_sub(1));
         let (down, up, enter, escape) = ctx.input(|i| {
             (
@@ -1139,10 +1229,18 @@ impl OndinApp {
         if up {
             c.highlight = c.highlight.saturating_sub(1);
         }
-        // The mode the values read in, as the footer names it: the selected layer's.
+        // The mode the values read in, as the footer names it: the selected
+        // layer's, of the lit row's collection.
         let at = c.key.at();
-        let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
+        let mode = list
+            .get(c.highlight)
+            .and_then(|v| table.collection_of(v.id))
+            .or(Some(table.first_collection()))
+            .and_then(|col| doc.mode_at(at, col.id))
+            .and_then(|m| table.mode(m))
+            .cloned();
         let mut chosen: Option<VarId> = None;
+        let mut scope_of: Option<VarId> = None;
         let pos = ui::dropdown_place(ctx, c.under, egui::vec2(LIST_W, VAR_LIST_H + 40.0), 6.0);
         let rect = egui::Area::new(egui::Id::new("var-complete"))
             .order(egui::Order::Tooltip)
@@ -1176,8 +1274,34 @@ impl OndinApp {
                     let refusal = (!c.own_search)
                         .then(|| format!("--{}", c.query))
                         .and_then(|t| refused(table, c.key.kind(), &t).map(|(v, at)| (v, t, at)));
+                    // A whole name scoped to other fields: refused with its
+                    // scope named, and a door to widen it.
+                    let scoped = out_of_scope(table, field, &format!("--{}", c.query));
                     let notes_top = ui.cursor().top();
-                    if let Some((v, t, at)) = &refusal {
+                    if let (None, Some(v)) = (&refusal, scoped) {
+                        let words = super::variables::scope_words(v);
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(format!("{} binds {words} only.", v.name))
+                                    .size(11.5)
+                                    .color(theme::text::dim()),
+                            );
+                        });
+                        let adds = super::variables::field_label(field).to_lowercase();
+                        if ui::menu_item(
+                            ui,
+                            icon::TARGET,
+                            &format!("Scope… adds {adds}"),
+                            ui::MENU_ROW_H,
+                        )
+                        .clicked()
+                        {
+                            scope_of = Some(v.id);
+                        }
+                        ui.add_space(4.0);
+                    } else if let Some((v, t, at)) = &refusal {
                         let font = egui::FontId::proportional(11.5);
                         let plain = egui::TextFormat::simple(font.clone(), theme::text::dim());
                         let mut job = egui::text::LayoutJob::default();
@@ -1199,7 +1323,7 @@ impl OndinApp {
                             ui.label(job);
                         });
                         ui.add_space(4.0);
-                    } else if list.is_empty() {
+                    } else if list.is_empty() && hidden == 0 {
                         ui.label(
                             egui::RichText::new(if table.iter().any(|v| v.kind == c.key.kind()) {
                                 "No variable matches"
@@ -1232,7 +1356,18 @@ impl OndinApp {
                         .max_height(list_h)
                         .min_scrolled_height(list_h)
                         .show(ui, |ui| {
+                            let mut head: Option<ondin_core::variable::CollectionId> = None;
                             for (i, v) in list.iter().enumerate() {
+                                // With two collections, each is a header over its
+                                // own, as the browser's search draws them.
+                                let col = table.collection_of(v.id).map(|x| x.id);
+                                if table.has_collections() && col.is_some() && col != head {
+                                    head = col;
+                                    let name = col
+                                        .and_then(|x| table.collection(x))
+                                        .map_or("", |x| x.name.as_str());
+                                    super::variables::collection_head(ui, name);
+                                }
                                 // What the binding would draw at the field's layer —
                                 // the door the chip and the face read through, so a
                                 // kit's variable under a frame set to one of its kit's
@@ -1250,6 +1385,21 @@ impl OndinApp {
                                 if row.clicked() {
                                     chosen = Some(v.id);
                                 }
+                            }
+                            // Counted, never listed: a user who knows the name
+                            // learns it exists.
+                            if hidden > 0 && scoped.is_none() {
+                                if !list.is_empty() {
+                                    ui::menu_sep(ui);
+                                }
+                                ui.horizontal(|ui| {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(scoped_out_line(hidden))
+                                            .size(11.0)
+                                            .color(theme::text::faint()),
+                                    );
+                                });
                             }
                         });
                     if let Some(m) = &mode {
@@ -1269,6 +1419,11 @@ impl OndinApp {
         }
         if let Some(var) = chosen {
             self.bind_field(c.key, var);
+            return;
+        }
+        if let Some(var) = scope_of {
+            self.session.clear_gesture_preview();
+            self.open_scope(var);
             return;
         }
         if escape {
@@ -1297,44 +1452,37 @@ impl OndinApp {
     }
 
     /// *Extract into variable…* (D1038 D1–D3): a new variable holding `key`'s
-    /// value in every mode, the field bound to it, in one transaction — then the
+    /// value in every mode of the collection on show in the browser, scoped to
+    /// the field's family, the field bound to it, in one transaction — then the
     /// browser opens on its name. A first variable brings the first mode.
     pub(crate) fn extract_field(&mut self, key: FieldKey, value: Cell) {
+        let collection = self.shown_collection();
+        let first = self.session.ids.mint_mode();
         let table = self.session.doc.variables();
-        let mut ops = Vec::new();
-        let modes: Vec<ondin_core::ModeId> = match table.modes() {
-            [] => {
-                let m = self.session.ids.mint_mode();
-                ops.push(Operation::AddMode {
-                    mode: Mode {
-                        id: m,
-                        name: "Mode 1".into(),
-                    },
-                    index: 0,
-                    cells: vec![],
-                });
-                vec![m]
-            }
-            modes => modes.iter().map(|m| m.id).collect(),
-        };
+        let (mut ops, modes) = ondin_core::variable::columns_for_new(table, collection, first);
         let stem = match key.kind() {
             VarKind::Color => "colour",
             VarKind::Number => "number",
             VarKind::Boolean => "boolean",
             VarKind::String => "string",
         };
-        let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
+        let taken: Vec<&str> = table
+            .of_collection(collection)
+            .map(|v| v.name.as_str())
+            .collect();
         let name = (1..)
             .map(|n| format!("{stem} {n}"))
             .find(|c| !taken.contains(&c.as_str()))
             .expect("an unbounded range has a free name");
         let id = self.session.ids.mint_var();
+        let field = key.field();
         ops.push(Operation::AddVariable {
             var: Variable {
                 id,
                 name: name.clone(),
                 kind: key.kind(),
                 cells: modes.into_iter().map(|m| (m, value.clone())).collect(),
+                scope: (field != Field::Visible).then(|| Scope::of([field])),
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -1443,8 +1591,7 @@ impl OndinApp {
         let table = doc.variables();
         let at = key.at();
         let name = table.get(var).map(|v| v.name.clone()).unwrap_or_default();
-        let mode = doc.mode_at(at).and_then(|m| table.mode(m));
-        let tip = chip_tip(&name, doc.resolve_var(at, var), mode);
+        let tip = chip_tip(doc, at, var);
         let id = egui::Id::new(("var-chip", format!("{key:?}")));
         let out = chip(ui, rect, id, &name, &tip, true);
         if out.detach {
@@ -2024,7 +2171,14 @@ impl OndinApp {
         let list_h = (h - ui::CONTROL_H - ui.spacing().item_spacing.y).max(4.0 * ui::MENU_ROW_H);
         let doc = &self.session.doc;
         let table = doc.variables();
-        let list = matches(table, VarKind::Color, &search);
+        // A field's face offers what is scoped to it; a cell's alias any colour.
+        let (list, hidden) = match target {
+            FaceTarget::Field(key) => (
+                matches_for(table, key.field(), &search),
+                scoped_out(table, key.field(), &search),
+            ),
+            FaceTarget::Cell(..) => (matches(table, VarKind::Color, &search), 0),
+        };
         let mut chosen: Option<VarId> = None;
         egui::ScrollArea::vertical()
             .id_salt("picker-vars")
@@ -2033,7 +2187,7 @@ impl OndinApp {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                if list.is_empty() {
+                if list.is_empty() && hidden == 0 {
                     let none = match table.iter().any(|v| v.kind == VarKind::Color) {
                         true => "No variable matches",
                         false => "No colour variables yet — Shift+S to add one",
@@ -2090,6 +2244,16 @@ impl OndinApp {
                     if resp.clicked() && refusal.is_none() {
                         chosen = Some(v.id);
                     }
+                }
+                if hidden > 0 {
+                    if !list.is_empty() {
+                        ui::menu_sep(ui);
+                    }
+                    ui.label(
+                        egui::RichText::new(scoped_out_line(hidden))
+                            .size(11.0)
+                            .color(theme::text::faint()),
+                    );
                 }
             });
         if let Some(p) = self.picker.as_mut() {
@@ -2319,6 +2483,7 @@ mod tests {
     use super::*;
     use ondin_core::kurbo::{RoundedRectRadii, Size};
     use ondin_core::peniko::Color;
+    use ondin_core::variable::Mode;
     use ondin_core::{BrushSource, Fill, NodeKind, keyed_by_position};
 
     const RED: Color = Color::from_rgba8(200, 30, 30, 255);
@@ -2359,6 +2524,7 @@ mod tests {
                 }]),
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Light".into(),
@@ -2372,6 +2538,7 @@ mod tests {
                     name: "brand/500".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::WHITE))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -2383,6 +2550,7 @@ mod tests {
                     name: "radius/md".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(6.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -2585,7 +2753,7 @@ mod tests {
     fn the_arrows_scroll_the_list_to_the_lit_row() {
         let (ctx, mut app, rect, _, _) = fixture();
         crate::theme::install(&ctx);
-        let mode = app.session.doc.variables().modes()[0].id;
+        let mode = app.session.doc.variables().modes().next().unwrap().id;
         let ops: Vec<Operation> = (1..=12)
             .map(|i| Operation::AddVariable {
                 var: Variable {
@@ -2593,6 +2761,7 @@ mod tests {
                     name: format!("n/{i:02}"),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(i as f64))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -3027,7 +3196,7 @@ mod tests {
     #[test]
     fn a_whole_name_with_more_after_it_is_refused() {
         let (_ctx, mut app, _rect, _, _) = fixture();
-        let mode = app.session.doc.variables().modes()[0].id;
+        let mode = app.session.doc.variables().modes().next().unwrap().id;
         let alt = app.session.ids.mint_var();
         assert!(app.commit_edit(Transaction(vec![Operation::AddVariable {
             var: Variable {
@@ -3035,6 +3204,7 @@ mod tests {
                 name: "brand/500-alt".into(),
                 kind: VarKind::Color,
                 cells: [(mode, Cell::Color(Color::BLACK))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -3176,7 +3346,7 @@ mod tests {
     fn layers_bound_to_different_variables_read_mixed_in_a_capsule() {
         let (ctx, mut app, rect, brand, _) = fixture();
         crate::theme::install(&ctx);
-        let mode = app.session.doc.variables().modes()[0].id;
+        let mode = app.session.doc.variables().modes().next().unwrap().id;
         let (other, accent) = (app.session.ids.mint(), app.session.ids.mint_var());
         let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
@@ -3205,6 +3375,7 @@ mod tests {
                     name: "accent/400".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::BLACK))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -3586,7 +3757,7 @@ mod tests {
         let (ctx, mut app, _, _, radius) = fixture();
         crate::theme::install(&ctx);
         let (frame, wide) = (app.session.ids.mint(), app.session.ids.mint_var());
-        let mode = app.session.doc.variables().modes()[0].id;
+        let mode = app.session.doc.variables().modes().next().unwrap().id;
         let root = app.session.doc.first_page();
         assert!(app.commit_edit(Transaction(vec![
             Operation::CreateNode {
@@ -3611,6 +3782,7 @@ mod tests {
                     name: "space/wide".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(12.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -3830,7 +4002,7 @@ mod tests {
     #[test]
     fn the_eye_binds_to_a_boolean_and_its_click_detaches() {
         let (_ctx, mut app, rect, _, _) = fixture();
-        let mode = app.session.doc.variables().modes()[0].id;
+        let mode = app.session.doc.variables().modes().next().unwrap().id;
         let off = app.session.ids.mint_var();
         assert!(app.commit_edit(Transaction(vec![Operation::AddVariable {
             var: Variable {
@@ -3838,6 +4010,7 @@ mod tests {
                 name: "state/off".into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

@@ -1817,12 +1817,7 @@ impl OndinApp {
                                 theme::icon_font(14.0),
                                 color::text(),
                             );
-                            let doc = &self.session.doc;
-                            let table = doc.variables();
-                            let name = table.get(var).map(|v| v.name.clone()).unwrap_or_default();
-                            let mode = doc.mode_at(id).and_then(|m| table.mode(m));
-                            let tip =
-                                super::binding::chip_tip(&name, doc.resolve_var(id, var), mode);
+                            let tip = super::binding::chip_tip(&self.session.doc, id, var);
                             resp.on_hover_text(format!("{tip}\nClick to toggle and detach"))
                         }
                         None => icon_button(ui, eye, 22.0, 16.0, false, true)
@@ -15302,6 +15297,7 @@ mod several_layer_binding_tests {
         let (mode, var) = (ids.mint_mode(), ids.mint_var());
         doc.apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Default".into(),
@@ -15315,6 +15311,7 @@ mod several_layer_binding_tests {
                     name: "x/md".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(6.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -15422,6 +15419,7 @@ mod several_layer_binding_tests {
         let white = ondin_core::peniko::Color::WHITE;
         let black = ondin_core::peniko::Color::BLACK;
         let mode = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id,
                 name: name.into(),
@@ -15443,9 +15441,9 @@ mod several_layer_binding_tests {
                     transform: None,
                     name: None,
                 },
-                Operation::SetMode {
+                Operation::SetModes {
                     id,
-                    mode: Some(mode),
+                    modes: vec![mode],
                 },
             ]
         };
@@ -15484,6 +15482,7 @@ mod several_layer_binding_tests {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(light, Cell::Color(white)), (dark, Cell::Color(black))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -15522,7 +15521,7 @@ mod several_layer_binding_tests {
         let ctx = egui::Context::default();
         let (mut app, ids, var) = bound_pair(&ctx);
         let (frame, other) = (app.session.ids.mint(), app.session.ids.mint_var());
-        let mode = app.session.doc.variables().modes()[0].id;
+        let mode = app.session.doc.variables().modes().next().unwrap().id;
         let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::AddVariable {
@@ -15531,6 +15530,7 @@ mod several_layer_binding_tests {
                     name: "o/2".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(40.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -15592,6 +15592,7 @@ mod several_layer_binding_tests {
         let root = app.session.doc.first_page();
         assert!(app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: dusk,
                     name: "Dusk".into(),
@@ -15611,9 +15612,9 @@ mod several_layer_binding_tests {
                 transform: None,
                 name: None,
             },
-            Operation::SetMode {
+            Operation::SetModes {
                 id: frame_id,
-                mode: Some(dusk),
+                modes: vec![dusk],
             },
             Operation::Reparent {
                 id: ids[1],

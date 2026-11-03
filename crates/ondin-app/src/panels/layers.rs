@@ -6381,6 +6381,7 @@ mod bound_eye_tests {
         let on = app.session.ids.mint_var();
         assert!(app.commit_edit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::variable::Mode {
                     id: mode,
                     name: "Light".into(),
@@ -6394,6 +6395,7 @@ mod bound_eye_tests {
                     name: "state/on".into(),
                     kind: VarKind::Boolean,
                     cells: [(mode, Cell::Boolean(true))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

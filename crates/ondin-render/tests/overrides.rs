@@ -696,6 +696,7 @@ fn a_dropped_copy_previews_at_its_opacity_bound_or_not() {
     f.doc
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Default".into(),
@@ -709,6 +710,7 @@ fn a_dropped_copy_previews_at_its_opacity_bound_or_not() {
                     name: "opacity/muted".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(30.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -2656,6 +2658,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 name: "v".into(),
                 kind: ondin_core::VarKind::Number,
                 cells: Default::default(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -2673,6 +2676,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             name: "m".into(),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: ondin_core::Mode {
                 id: mode,
                 name: "m".into(),
@@ -2689,6 +2693,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 name: "v".into(),
                 kind: ondin_core::VarKind::Number,
                 cells: Default::default(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4274,6 +4279,7 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4287,6 +4293,7 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
                 name: "radius/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4368,6 +4375,7 @@ fn a_smoothed_rects_bound_corners_preview_smoothed() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4381,6 +4389,7 @@ fn a_smoothed_rects_bound_corners_preview_smoothed() {
                 name: "radius/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4476,6 +4485,7 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
             })),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4489,6 +4499,7 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
                 name: "space/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(16.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4580,6 +4591,7 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4593,6 +4605,7 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
                 name: "state/open".into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4682,6 +4695,7 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
             })),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4695,6 +4709,7 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
                 name: "state/open".into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4747,6 +4762,7 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4760,6 +4776,7 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
                 name: "radius/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -4807,6 +4824,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
             name: name.into(),
             kind: VarKind::Number,
             cells: [(mode, Cell::Number(x))].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -4833,6 +4851,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -4910,6 +4929,7 @@ fn a_copy_bound_on_its_own_previews_its_mains_resize_as_committed() {
             name: name.into(),
             kind: VarKind::Number,
             cells: [(mode, Cell::Number(x))].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -4948,6 +4968,7 @@ fn a_copy_bound_on_its_own_previews_its_mains_resize_as_committed() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5096,6 +5117,7 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
             })),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5109,6 +5131,7 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
                 name: "size/w".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(90.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -5227,6 +5250,7 @@ fn a_rect_with_bound_corners_previews_rounded_when_relaid_or_ghosted() {
             display: row(10.0),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5240,6 +5264,7 @@ fn a_rect_with_bound_corners_previews_rounded_when_relaid_or_ghosted() {
                 name: "radius/md".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(8.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -5309,6 +5334,7 @@ fn a_variable_cell_previews_on_what_reads_it() {
             name: name.into(),
             kind,
             cells: [(mode, cell)].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -5328,6 +5354,7 @@ fn a_variable_cell_previews_on_what_reads_it() {
             name: None,
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5403,6 +5430,7 @@ fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5416,6 +5444,7 @@ fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
                 name: "opacity/muted".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(40.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -5498,6 +5527,7 @@ fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
             )],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5511,6 +5541,7 @@ fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
                 name: "stroke/thick".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(9.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -5603,6 +5634,7 @@ fn an_effect_binding_previews_as_the_number_it_will_draw() {
             )],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: mode,
                 name: "Default".into(),
@@ -5616,6 +5648,7 @@ fn an_effect_binding_previews_as_the_number_it_will_draw() {
                 name: "shadow/soft".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(9.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

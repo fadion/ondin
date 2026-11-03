@@ -2520,6 +2520,7 @@ mod tests {
                 name: name.into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(10.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -2527,6 +2528,7 @@ mod tests {
         };
         assert!(s.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Mode 1".into(),
@@ -3716,7 +3718,7 @@ mod tests {
             name: "Archive".into(),
             ground: Some(Color::WHITE),
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }])));
         let card = add_rect(&mut s);
         let opened = s.history.undo_depth();

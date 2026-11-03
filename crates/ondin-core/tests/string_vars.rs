@@ -37,6 +37,7 @@ fn var(id: VarId, name: &str, kind: VarKind, cells: [(ModeId, Cell); 2]) -> Vari
         name: name.into(),
         kind,
         cells: cells.into(),
+        scope: None,
         origin: None,
         forked: None,
         description: String::new(),
@@ -90,11 +91,13 @@ fn fixture() -> F {
             name: None,
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: mode(light, "Light"),
             index: 0,
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: mode(dark, "Dark"),
             index: 1,
             cells: vec![],
@@ -219,9 +222,9 @@ fn a_bound_content_and_family_draw_their_strings_in_the_mode_in_force() {
         "Light's string, through Resolved"
     );
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     assert_eq!(
@@ -396,9 +399,9 @@ fn an_edit_of_a_bound_text_detaches_what_it_edits() {
 fn string_bindings_detach_to_what_they_draw_and_round_trip() {
     let mut f = fixture();
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let ops = ondin_core::bind_text_ops(&f.doc, f.text, two(Some(f.label), Some(f.font)));
@@ -514,7 +517,7 @@ fn a_bound_text_emptied_detaches_empty() {
 }
 
 /// **A bound text in a layout is re-measured when its frame's mode changes**
-/// (§15 D1069's fourth reading): `SetMode` dirties the frame alone, and the
+/// (§15 D1069's fourth reading): `SetModes` dirties the frame alone, and the
 /// layout's text memo dropped only dirty ids, so the row kept placing the
 /// second item beside *Sign in*'s width after the text read *Anmelden*.
 ///
@@ -556,9 +559,9 @@ fn a_mode_change_re_measures_a_bound_text_in_a_layout() {
     let light = x(&live);
     let out = f
         .doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     live.update(&f.doc, &out.dirty);
@@ -706,7 +709,7 @@ fn a_mains_span_edit_skips_a_copy_bound_to_its_own_string() {
     let mut f = fixture();
     let ru = f.ids.mint_var();
     let (light, dark) = {
-        let m = f.doc.variables().modes();
+        let m = &f.doc.variables().first_collection().modes;
         (m[0].id, m[1].id)
     };
     f.doc
@@ -770,7 +773,7 @@ fn a_mains_span_edit_skips_a_copy_bound_to_its_own_string() {
 #[test]
 fn a_bound_content_draws_without_spans_it_should_not_hold() {
     let mut f = fixture();
-    let light = f.doc.variables().modes()[0].id;
+    let light = f.doc.variables().first_collection().modes[0].id;
     let ru = f.ids.mint_var();
     f.doc
         .apply(&Transaction(vec![Operation::AddVariable {

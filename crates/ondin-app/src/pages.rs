@@ -293,7 +293,7 @@ impl OndinApp {
             name,
             ground: doc.own_ground(self.session.page),
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }]);
         self.name_step_as(crate::menu::Item::NewPage);
         if !self.session.commit(tx) {
@@ -388,7 +388,7 @@ impl OndinApp {
             name,
             ground: info.ground,
             draft: info.draft,
-            mode: root.mode(),
+            modes: root.modes().to_vec(),
         }];
         let templates: Vec<Vec<ondin_core::Node>> = root
             .children()
@@ -1081,7 +1081,7 @@ mod tests {
                 name: "Pricing".into(),
                 ground: None,
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             },
             frame(a, first, 0.0),
             frame(b, second, 500.0),
@@ -1540,7 +1540,7 @@ mod tests {
             name: "Archive".into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }])));
         section(&ctx, &mut app, vec![]);
         let rows = section(&ctx, &mut app, vec![]);

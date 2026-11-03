@@ -302,6 +302,7 @@ mod tests {
             name: name.into(),
             kind: VarKind::String,
             cells: [(mode, cell)].into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -316,6 +317,7 @@ mod tests {
                 name: None,
             },
             Operation::AddMode {
+                collection: crate::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Base".into(),

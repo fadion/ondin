@@ -1770,7 +1770,7 @@ mod tests {
                 name: "Checkout".into(),
                 ground: None,
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             },
             boxed(card, first, "Card", (0.0, 0.0), true),
             boxed(price, card, "Price", (5.0, 5.0), false),
@@ -1959,7 +1959,7 @@ mod tests {
                 name: "Archive".into(),
                 ground: None,
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             },
             boxed(note, archive, "Note", (-3000.0, 800.0), false),
         ])));
@@ -2018,7 +2018,7 @@ mod tests {
             name: "Drafts".into(),
             ground: None,
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         }])));
         let doc = &f.app.session.doc;
         let seat = *doc

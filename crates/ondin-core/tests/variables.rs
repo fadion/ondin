@@ -6,6 +6,7 @@ use ondin_core::Brush;
 use ondin_core::container::{Display, Flex};
 use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
+use ondin_core::variable::CollectionId;
 use ondin_core::{
     BrushSource, Cell, Document, Fill, IdSource, Mode, ModeId, NodeId, NodeKind, OpError,
     Operation, Placement, Resolved, Transaction, Value, VarId, VarKind, Variable,
@@ -43,6 +44,7 @@ fn var(id: VarId, name: &str, kind: VarKind, cells: [(ModeId, Cell); 2]) -> Vari
         name: name.into(),
         kind,
         cells: cells.into(),
+        scope: None,
         origin: None,
         forked: None,
         description: String::new(),
@@ -82,11 +84,13 @@ fn fixture() -> F {
             name: None,
         },
         Operation::AddMode {
+            collection: CollectionId::FIRST,
             mode: mode(light, "Light"),
             index: 0,
             cells: vec![],
         },
         Operation::AddMode {
+            collection: CollectionId::FIRST,
             mode: mode(dark, "Dark"),
             index: 1,
             cells: vec![],
@@ -161,18 +165,18 @@ fn a_bound_fill_draws_in_the_mode_in_force() {
     );
     let out = f
         .doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
-    assert_eq!(f.doc.mode_at(f.rect), Some(f.dark));
+    assert_eq!(f.doc.mode_at(f.rect, CollectionId::FIRST), Some(f.dark));
     assert_eq!(
         drawn(&f.doc, f.rect),
         Brush::Solid(NAVY.multiply_alpha(0.5))
     );
     f.doc.apply(&out.inverse).unwrap();
-    assert_eq!(f.doc.mode_at(f.rect), Some(f.light));
+    assert_eq!(f.doc.mode_at(f.rect, CollectionId::FIRST), Some(f.light));
 }
 
 /// **A group never sets a mode, and a frame only one that exists** — refused at
@@ -181,14 +185,14 @@ fn a_bound_fill_draws_in_the_mode_in_force() {
 fn a_mode_is_set_only_on_a_frame_and_only_one_the_document_has() {
     let mut f = fixture();
     let before = f.doc.clone();
-    let on_rect = f.doc.apply(&Transaction(vec![Operation::SetMode {
+    let on_rect = f.doc.apply(&Transaction(vec![Operation::SetModes {
         id: f.rect,
-        mode: Some(f.dark),
+        modes: vec![f.dark],
     }]));
     assert!(matches!(on_rect, Err(OpError::Variables(_))));
-    let stray = f.doc.apply(&Transaction(vec![Operation::SetMode {
+    let stray = f.doc.apply(&Transaction(vec![Operation::SetModes {
         id: f.frame,
-        mode: Some(ModeId(f.ids.mint())),
+        modes: vec![ModeId(f.ids.mint())],
     }]));
     assert!(matches!(stray, Err(OpError::Variables(_))));
     assert_eq!(f.doc, before);
@@ -236,9 +240,9 @@ fn removing_a_variable_in_use_needs_its_users_detached() {
 fn removing_a_mode_carries_its_column_in_the_inverse() {
     let mut f = fixture();
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let alone = f
@@ -249,14 +253,14 @@ fn removing_a_mode_carries_its_column_in_the_inverse() {
     let out = f
         .doc
         .apply(&Transaction(vec![
-            Operation::SetMode {
+            Operation::SetModes {
                 id: f.frame,
-                mode: None,
+                modes: Vec::new(),
             },
             Operation::RemoveMode { id: f.dark },
         ]))
         .unwrap();
-    assert_eq!(f.doc.variables().modes().len(), 1);
+    assert_eq!(f.doc.variables().modes().count(), 1);
     assert!(
         !f.doc
             .variables()
@@ -281,7 +285,7 @@ fn moving_a_mode_first_makes_it_the_default() {
     let before = f.doc.clone();
     let ops = ondin_core::variable::move_mode_ops(&f.doc, f.dark, 0);
     let out = f.doc.apply(&Transaction(ops)).expect("a move");
-    let order: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
+    let order: Vec<ModeId> = f.doc.variables().modes().map(|m| m.id).collect();
     assert_eq!(order, [f.dark, f.light]);
     assert_eq!(drawn(&f.doc, f.rect), Brush::Solid(NAVY));
     let brand = f.doc.variables().get(f.brand).unwrap();
@@ -362,9 +366,9 @@ fn a_bound_corner_is_drawn_from_the_used_kind_and_follows_a_cell_edit() {
     // A mode set on the frame dirties only the frame; `update` takes its subtree.
     let out = f
         .doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     res.update(&f.doc, &out.dirty);
@@ -443,9 +447,9 @@ fn the_table_and_its_bindings_round_trip_through_a_save() {
     let ops = ondin_core::bind_corners_ops(&f.doc, f.rect, [Some(f.radius); 4]);
     f.doc.apply(&Transaction(ops)).unwrap();
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let bytes = ondin_core::io::save(&f.doc).unwrap();
@@ -492,9 +496,9 @@ fn a_paste_keeps_rebinds_or_detaches() {
     let mut f = fixture();
     bind_fill(&mut f.doc, f.rect, f.brand, 1.0);
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let copy = vec![f.doc.capture_subtree(f.rect).unwrap()];
@@ -511,6 +515,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
     other
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: CollectionId::FIRST,
                 mode: mode(m, "Default"),
                 index: 0,
                 cells: vec![],
@@ -521,6 +526,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
                     name: "brand/500".into(),
                     kind: VarKind::Color,
                     cells: [(m, Cell::Color(RED))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -563,6 +569,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
     numbered
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: CollectionId::FIRST,
                 mode: mode(m, "Default"),
                 index: 0,
                 cells: vec![],
@@ -573,6 +580,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
                     name: "brand/500".into(),
                     kind: VarKind::Number,
                     cells: [(m, Cell::Number(4.0))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -602,9 +610,9 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
     let mut f = fixture();
     bind_fill(&mut f.doc, f.rect, f.brand, 0.5);
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let props = ondin_core::build::properties_of(&f.doc, f.rect).unwrap();
@@ -648,6 +656,7 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
     other
         .apply(&Transaction(vec![
             Operation::AddMode {
+                collection: CollectionId::FIRST,
                 mode: mode(m, "Default"),
                 index: 0,
                 cells: vec![],
@@ -658,6 +667,7 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
                     name: "brand/500".into(),
                     kind: VarKind::Color,
                     cells: [(m, Cell::Color(RED))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -866,9 +876,9 @@ fn deleting_a_variable_detaches_each_user_in_its_own_mode() {
     let ops = ondin_core::bind_corners_ops(&f.doc, f.rect, [Some(f.radius), None, None, None]);
     f.doc.apply(&Transaction(ops)).unwrap();
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let tx = Transaction(ondin_core::variable::remove_ops(
@@ -905,7 +915,7 @@ fn copying_a_mode_copies_its_column() {
     assert!(!ops.is_empty(), "Dark is a mode");
     f.doc.apply(&Transaction(ops)).unwrap();
     let t = f.doc.variables();
-    assert_eq!(t.modes()[2].id, dusk, "at the index asked");
+    assert_eq!(t.first_collection().modes[2].id, dusk, "at the index asked");
     for v in [f.brand, f.radius, alias] {
         let cells = &t.get(v).unwrap().cells;
         assert_eq!(cells[&dusk], cells[&f.dark], "{v:?}'s Dusk is its Dark");
@@ -920,20 +930,22 @@ fn copying_a_mode_copies_its_column() {
 fn deleting_a_mode_and_renaming_a_group() {
     let mut f = fixture();
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     assert_eq!(ondin_core::variable::frames_set_to(&f.doc, f.dark), 1);
     let tx = Transaction(ondin_core::variable::remove_mode_ops(&f.doc, f.dark));
     f.doc.apply(&tx).unwrap();
-    assert_eq!(f.doc.get(f.frame).unwrap().mode(), None);
+    assert!(f.doc.get(f.frame).unwrap().modes().is_empty());
 
-    let ops = ondin_core::variable::rename_group_ops(&f.doc, "brand", "ink").unwrap();
+    let ops = ondin_core::variable::rename_group_ops(&f.doc, CollectionId::FIRST, "brand", "ink")
+        .unwrap();
     f.doc.apply(&Transaction(ops)).unwrap();
     assert_eq!(f.doc.variables().get(f.brand).unwrap().name, "ink/500");
-    let ops = ondin_core::variable::rename_group_ops(&f.doc, "ink", "").unwrap();
+    let ops =
+        ondin_core::variable::rename_group_ops(&f.doc, CollectionId::FIRST, "ink", "").unwrap();
     f.doc.apply(&Transaction(ops)).unwrap();
     assert_eq!(f.doc.variables().get(f.brand).unwrap().name, "500");
     // `radius/md` → `md` is free; then `radius` again over a taken `md`.
@@ -946,6 +958,7 @@ fn deleting_a_mode_and_renaming_a_group() {
                 name: "md".into(),
                 kind: VarKind::Number,
                 cells: [(f.light, Cell::Number(1.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
@@ -953,7 +966,7 @@ fn deleting_a_mode_and_renaming_a_group() {
         }]))
         .unwrap();
     assert_eq!(
-        ondin_core::variable::rename_group_ops(&f.doc, "radius", ""),
+        ondin_core::variable::rename_group_ops(&f.doc, CollectionId::FIRST, "radius", ""),
         Err("md".to_string())
     );
 }
@@ -1111,9 +1124,9 @@ fn a_bound_gap_and_padding_lay_out_at_the_variables_number() {
     assert_eq!(x(&f.doc, f.rect), 4.0, "the padding is Light's 4");
     assert_eq!(x(&f.doc, second), 48.0, "and so is the gap");
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     assert_eq!(x(&f.doc, f.rect), 12.0, "Dark's 12");
@@ -1262,9 +1275,9 @@ fn a_bound_visibility_shows_by_its_variable_in_the_mode_in_force() {
     let x = |doc: &Document| Resolved::rebuild(doc).world_bounds(second).unwrap().min_x();
     assert_eq!(x(&f.doc), 45.0, "beside the bound rect, gap 5");
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     assert!(!f.doc.shown(f.rect), "Dark's false");
@@ -1304,9 +1317,9 @@ fn a_visibility_written_over_a_bound_layer_detaches_it() {
         "a write of what it shows keeps the binding"
     );
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let tx = write(&f.doc, true);
@@ -1327,9 +1340,9 @@ fn a_visibility_binding_detaches_to_what_it_shows_and_round_trips() {
     let mut f = fixture();
     let show = show_var(&mut f);
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let ops = ondin_core::bind_visible_ops(&f.doc, f.rect, show);
@@ -1463,6 +1476,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
             id,
             name: name.into(),
             from: id,
+            collection: String::new(),
         };
         f.doc
             .apply(&Transaction(vec![
@@ -1480,6 +1494,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                         name: "kit/radius".into(),
                         kind: VarKind::Number,
                         cells: [(k_light, Cell::Number(3.0)), (k_night, Cell::Number(9.0))].into(),
+                        scope: None,
                         origin: Some(ondin_core::variable::VarOrigin {
                             kit: KIT.into(),
                             var: kr,
@@ -1495,7 +1510,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
         let mut hist = ondin_core::History::new();
         let mut res = Resolved::rebuild(&f.doc);
         for step in 0..50 {
-            let modes: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
+            let modes: Vec<ModeId> = f.doc.variables().modes().map(|m| m.id).collect();
             let rect = rects[rng.below(rects.len())];
             let number = if rng.below(2) == 0 { f.radius } else { kr };
             let tx = match rng.below(19) {
@@ -1531,9 +1546,9 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                         0 => None,
                         k => Some(modes[k - 1]),
                     };
-                    Transaction(vec![Operation::SetMode {
+                    Transaction(vec![Operation::SetModes {
                         id: frames[rng.below(2)],
-                        mode,
+                        modes: mode.into_iter().collect(),
                     }])
                 }
                 5 => Transaction(vec![Operation::Reparent {
@@ -1560,6 +1575,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                         })
                         .collect();
                     Transaction(vec![Operation::AddMode {
+                        collection: CollectionId::FIRST,
                         mode: mode(id, &format!("M{step}")),
                         index: 0,
                         cells,
@@ -1651,10 +1667,10 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                     let gone = modes[rng.below(modes.len())];
                     let mut ops: Vec<Operation> = frames
                         .iter()
-                        .filter(|fr| f.doc.get(**fr).unwrap().mode() == Some(gone))
-                        .map(|fr| Operation::SetMode {
+                        .filter(|fr| f.doc.get(**fr).unwrap().modes() == [gone])
+                        .map(|fr| Operation::SetModes {
                             id: *fr,
-                            mode: None,
+                            modes: Vec::new(),
                         })
                         .collect();
                     ops.push(Operation::RemoveMode { id: gone });
@@ -1786,9 +1802,9 @@ fn a_bound_size_is_drawn_and_laid_out_at_the_variables_number() {
     assert_eq!(right(&live), 50.0, "pinned against the frame's bound 60");
     let out = f
         .doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     live.update(&f.doc, &out.dirty);
@@ -2357,9 +2373,9 @@ fn a_bound_width_in_another_mode_stretches_its_gradient() {
     let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
     commit_carried(&mut f, ops);
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
@@ -2410,9 +2426,9 @@ fn a_stars_radius_takes_a_variable() {
     };
     assert_eq!(drawn(&f.doc), 4.0, "Light's radius");
     f.doc
-        .apply(&Transaction(vec![Operation::SetMode {
+        .apply(&Transaction(vec![Operation::SetModes {
             id: f.frame,
-            mode: Some(f.dark),
+            modes: vec![f.dark],
         }]))
         .unwrap();
     assert_eq!(drawn(&f.doc), 12.0, "Dark's radius");

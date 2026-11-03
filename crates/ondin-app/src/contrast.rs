@@ -2324,6 +2324,7 @@ mod tests {
         spans.set(0..6, CharAttr::Color(Some(grey)), &TextStyle::default());
         assert!(f.app.session.commit(Transaction(vec![
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: ondin_core::Mode {
                     id: mode,
                     name: "Light".into(),
@@ -2337,6 +2338,7 @@ mod tests {
                     name: "text/primary".into(),
                     kind: ondin_core::VarKind::Color,
                     cells: [(mode, ondin_core::Cell::Color(Color::BLACK))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -2460,6 +2462,7 @@ mod tests {
         let ids = &mut app.session.ids;
         let (light, dark, fg) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
         let mode = |id, name: &str, index| Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: ondin_core::Mode {
                 id,
                 name: name.into(),
@@ -2480,6 +2483,7 @@ mod tests {
                         (dark, ondin_core::Cell::Color(Color::WHITE)),
                     ]
                     .into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

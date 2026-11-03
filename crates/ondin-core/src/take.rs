@@ -71,7 +71,7 @@ pub fn census(doc: &Document) -> Census {
             .count(),
         styles: doc.styles().iter().count(),
         variables: doc.variables().iter().count(),
-        modes: doc.variables().modes().len(),
+        modes: doc.variables().modes().count(),
         picture_bytes: pictures
             .iter()
             .map(|(_, e)| match &e.source {
@@ -151,10 +151,23 @@ pub fn take(doc: &mut Document, keep: &Keep) -> Result<(), TakeError> {
     if !keep.variables {
         let vars: Vec<_> = doc.variables().iter().map(|v| v.id).collect();
         commit(doc, crate::variable::remove_ops(doc, &vars), &mut ids)?;
-        let modes: Vec<_> = doc.variables().modes().iter().map(|m| m.id).collect();
+        let modes: Vec<_> = doc.variables().modes().map(|m| m.id).collect();
         for mode in modes {
             commit(doc, crate::variable::remove_mode_ops(doc, mode), &mut ids)?;
         }
+        // Back to the one collection a new document has.
+        let t = doc.variables();
+        let mut ops: Vec<Operation> = t.collections()[1..]
+            .iter()
+            .map(|c| Operation::RemoveCollection { id: c.id })
+            .collect();
+        if t.first_collection().name != crate::variable::FIRST_COLLECTION_NAME {
+            ops.push(Operation::SetCollectionName {
+                id: t.first_collection().id,
+                name: crate::variable::FIRST_COLLECTION_NAME.into(),
+            });
+        }
+        commit(doc, ops, &mut ids)?;
         let kits: Vec<String> = doc.variables().kits().keys().cloned().collect();
         let ops = kits
             .into_iter()

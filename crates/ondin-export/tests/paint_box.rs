@@ -53,6 +53,7 @@ fn stretched() -> (Document, Resolved, NodeId) {
             }]),
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -61,6 +62,7 @@ fn stretched() -> (Document, Resolved, NodeId) {
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dark,
                 name: "Dark".into(),
@@ -74,14 +76,15 @@ fn stretched() -> (Document, Resolved, NodeId) {
                 name: "w".into(),
                 kind: VarKind::Number,
                 cells: [(light, Cell::Number(50.0)), (dark, Cell::Number(100.0))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),
             },
         },
-        Operation::SetMode {
+        Operation::SetModes {
             id: board,
-            mode: Some(dark),
+            modes: vec![dark],
         },
     ]))
     .expect("the fixture");

@@ -196,6 +196,7 @@ fn the_worst_mode_is_reported() {
     let mut d = doc((0, 0, 0), 16.0, false);
     let (light, dark, ink) = (d.ids.mint_mode(), d.ids.mint_mode(), d.ids.mint_var());
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -217,6 +218,7 @@ fn the_worst_mode_is_reported() {
                         (dark, Cell::Color(Color::from_rgba8(240, 240, 240, 255))),
                     ]
                     .into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -288,6 +290,7 @@ fn every_mode_keeps_its_sample() {
     let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
     let (ink, both, light_only) = (d.ids.mint_var(), d.ids.mint_var(), d.ids.mint_var());
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -305,6 +308,7 @@ fn every_mode_keeps_its_sample() {
                 (dark, Cell::Color(Color::from_rgba8(k.0, k.1, k.2, 255))),
             ]
             .into(),
+            scope: None,
             origin: None,
             forked: None,
             description: String::new(),
@@ -609,6 +613,7 @@ fn a_layer_shown_in_one_mode_only_is_checked_there() {
     let mut d = doc((0, 0, 0), 16.0, false);
     let (light, dark, shown) = (d.ids.mint_mode(), d.ids.mint_mode(), d.ids.mint_var());
     let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
         mode: Mode {
             id,
             name: name.into(),
@@ -626,6 +631,7 @@ fn a_layer_shown_in_one_mode_only_is_checked_there() {
                     name: "dark-only".into(),
                     kind: VarKind::Boolean,
                     cells: [(light, Cell::Boolean(false)), (dark, Cell::Boolean(true))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

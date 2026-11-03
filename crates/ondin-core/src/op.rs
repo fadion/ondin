@@ -299,7 +299,7 @@ pub enum Operation {
         name: String,
         ground: Option<Color>,
         draft: bool,
-        mode: Option<crate::variable::ModeId>,
+        modes: Vec<crate::variable::ModeId>,
     },
     /// Remove a page. Refused for the last page and for one still holding layers
     /// or guides: deleting a page is those deletes first, then this, so undo
@@ -424,12 +424,31 @@ pub enum Operation {
         mode: crate::variable::ModeId,
         cell: crate::variable::Cell,
     },
-    /// Add a mode at `index`, with **every variable's cell in it**, so the table
-    /// is whole after this one op. Inverts to [`Self::RemoveMode`].
+    /// Add a mode at `index` of `collection`'s list, with **every one of its
+    /// variables' cells in it**, so the table is whole after this one op.
+    /// Inverts to [`Self::RemoveMode`].
     AddMode {
+        collection: crate::variable::CollectionId,
         mode: crate::variable::Mode,
         index: usize,
         cells: Vec<(crate::variable::VarId, crate::variable::Cell)>,
+    },
+    /// Add a collection, with its modes and no variables, at `index` of the
+    /// list. Inverts to [`Self::RemoveCollection`].
+    AddCollection {
+        collection: crate::variable::Collection,
+        index: usize,
+    },
+    /// Remove a collection and its modes. Its variables must go and the frames
+    /// set to its modes return to *Inherit* in the same transaction, or the
+    /// commit refuses (`variable::remove_collection_ops`). Inverts to
+    /// [`Self::AddCollection`].
+    RemoveCollection {
+        id: crate::variable::CollectionId,
+    },
+    SetCollectionName {
+        id: crate::variable::CollectionId,
+        name: String,
     },
     /// Remove a mode and its column. Inverts to [`Self::AddMode`] with the column
     /// it took; frames set to it must return to *Inherit* in the same
@@ -441,11 +460,12 @@ pub enum Operation {
         id: crate::variable::ModeId,
         name: String,
     },
-    /// The mode a frame sets for itself and its contents, `None` to inherit
-    /// (§5.3f). Only on a frame.
-    SetMode {
+    /// The modes a frame sets for itself and its contents (§5.3f), whole: at
+    /// most one per collection, in id order; a collection with none inherits.
+    /// Only on a frame or a page. `variable::with_mode` writes one pick.
+    SetModes {
         id: NodeId,
-        mode: Option<crate::variable::ModeId>,
+        modes: Vec<crate::variable::ModeId>,
     },
     /// The variables a rectangle's corners are bound to (§15 D1039). Writes the
     /// bindings alone; `build::bind_corners_ops` writes the literals beside it.
@@ -591,7 +611,7 @@ impl Operation {
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. }
-            | Operation::SetMode { id, .. }
+            | Operation::SetModes { id, .. }
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
@@ -638,6 +658,9 @@ impl Operation {
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. }
+            | Operation::AddCollection { .. }
+            | Operation::RemoveCollection { .. }
+            | Operation::SetCollectionName { .. }
             | Operation::SetKitModes { .. }
             // And the styles table (§15 D1062): these name a style.
             | Operation::AddStyle { .. }
@@ -692,7 +715,7 @@ impl Operation {
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. }
-            | Operation::SetMode { id, .. }
+            | Operation::SetModes { id, .. }
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
@@ -890,7 +913,12 @@ impl Operation {
             | Operation::SetModeName { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
-            | Operation::SetMode { .. }
+            // A collection's going or coming moves no binding by itself, but its
+            // modes are columns; and the safe answer is `true`.
+            | Operation::AddCollection { .. }
+            | Operation::RemoveCollection { .. }
+            | Operation::SetCollectionName { .. }
+            | Operation::SetModes { .. }
             | Operation::SetCornerVars { .. }
             | Operation::SetSpacingVars { .. }
             | Operation::SetVisibleVar { .. }
@@ -941,6 +969,8 @@ impl Operation {
             | Operation::RemoveVariable { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
+            | Operation::AddCollection { .. }
+            | Operation::RemoveCollection { .. }
             | Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. } => false,
             Operation::MovePage { id, index } => doc.page_index(*id) == Some(*index),
@@ -999,7 +1029,13 @@ impl Operation {
             Operation::SetModeName { id, name } => {
                 doc.variables().mode(*id).is_some_and(|m| m.name == *name)
             }
-            Operation::SetMode { id, mode } => node(id).is_some_and(|n| n.mode() == *mode),
+            Operation::SetCollectionName { id, name } => doc
+                .variables()
+                .collection(*id)
+                .is_some_and(|c| c.name == *name),
+            Operation::SetModes { id, modes } => {
+                node(id).is_some_and(|n| n.modes() == modes.as_slice())
+            }
             Operation::SetCornerVars { id, vars } => {
                 node(id).is_some_and(|n| n.corner_vars() == *vars)
             }
@@ -1505,6 +1541,10 @@ pub enum OpError {
     NoSuchMode(crate::variable::ModeId),
     #[error("duplicate mode id: {0:?}")]
     DuplicateMode(crate::variable::ModeId),
+    #[error("no such collection: {0:?}")]
+    NoSuchCollection(crate::variable::CollectionId),
+    #[error("duplicate collection id: {0:?}")]
+    DuplicateCollection(crate::variable::CollectionId),
     /// A variables rule broken (§5.3f, `crate::variable::check`) — a binding to
     /// nothing, a column missing, an alias loop. Checked after the last op, as
     /// [`Self::BadLink`] is.
@@ -1673,7 +1713,7 @@ mod changes_ink_tests {
                 name: "p".into(),
                 ground: Some(peniko::Color::BLACK),
                 draft: false,
-                mode: None,
+                modes: Vec::new(),
             },
             Operation::RemovePage { id },
             Operation::MovePage { id, index: 0 },
@@ -1685,6 +1725,7 @@ mod changes_ink_tests {
                     name: "v".into(),
                     kind: crate::variable::VarKind::Color,
                     cells: Default::default(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -1753,6 +1794,7 @@ mod changes_ink_tests {
                     name: "v".into(),
                     kind: crate::variable::VarKind::Color,
                     cells: Default::default(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

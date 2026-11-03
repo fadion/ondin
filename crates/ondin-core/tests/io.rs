@@ -2919,6 +2919,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                 },
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Default".into(),
@@ -2932,6 +2933,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(peniko::color::palette::css::RED))].into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
@@ -3258,6 +3260,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                         Cell::Color(Color::new([0.0, f32::INFINITY, 0.0, 1.0])),
                     )]
                     .into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),

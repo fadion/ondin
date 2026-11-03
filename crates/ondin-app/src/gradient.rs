@@ -1121,11 +1121,13 @@ mod canvas_tests {
                 index: 0,
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: mode(light, "Light"),
                 index: 0,
                 cells: vec![],
             },
             Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
                 mode: mode(dark, "Dark"),
                 index: 1,
                 cells: vec![],
@@ -1140,14 +1142,15 @@ mod canvas_tests {
                         (dark, ondin_core::Cell::Number(400.0)),
                     ]
                     .into(),
+                    scope: None,
                     origin: None,
                     forked: None,
                     description: String::new(),
                 },
             },
-            Operation::SetMode {
+            Operation::SetModes {
                 id: board,
-                mode: Some(dark),
+                modes: vec![dark],
             },
         ]))
         .expect("a Dark frame and a width variable");

@@ -109,7 +109,7 @@ fn fixture() -> F {
             name: "Archive".into(),
             ground: Some(Color::WHITE),
             draft: false,
-            mode: None,
+            modes: Vec::new(),
         },
         picture("hero", 10),
         picture("old", 20),
@@ -135,6 +135,7 @@ fn fixture() -> F {
         frame(old_frame, archive, 0),
         rect(old, old_frame),
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: light,
                 name: "Light".into(),
@@ -143,6 +144,7 @@ fn fixture() -> F {
             cells: vec![],
         },
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: Mode {
                 id: dark,
                 name: "Dark".into(),
@@ -156,6 +158,7 @@ fn fixture() -> F {
                 name: "accent".into(),
                 kind: VarKind::Color,
                 cells: [(light, Cell::Color(RED)), (dark, Cell::Color(BLUE))].into(),
+                scope: None,
                 origin: None,
                 forked: None,
                 description: String::new(),

@@ -273,6 +273,7 @@ impl Builder<'_> {
         if !solid_colours.is_empty() {
             let mode = self.ids.mint_mode();
             self.push(Operation::AddMode {
+                collection: crate::variable::CollectionId::FIRST,
                 mode: Mode {
                     id: mode,
                     name: "Default".into(),
@@ -294,6 +295,7 @@ impl Builder<'_> {
                         name,
                         kind: VarKind::Color,
                         cells: [(mode, Cell::Color(colour))].into(),
+                        scope: None,
                         origin: None,
                         forked: None,
                         description: String::new(),
@@ -372,7 +374,7 @@ impl Builder<'_> {
                     name,
                     ground: None,
                     draft: false,
-                    mode: None,
+                    modes: Vec::new(),
                 });
             }
             self.pages += 1;

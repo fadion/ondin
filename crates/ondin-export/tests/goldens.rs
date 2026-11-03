@@ -475,6 +475,7 @@ fn golden_document() -> (Document, Resolved) {
     let (mode, second, frame) = (ids.mint_mode(), ids.mint(), ids.mint());
     doc.apply(&Transaction(vec![
         Operation::AddMode {
+            collection: ondin_core::variable::CollectionId::FIRST,
             mode: ondin_core::variable::Mode {
                 id: mode,
                 name: "Dark".into(),
@@ -488,7 +489,7 @@ fn golden_document() -> (Document, Resolved) {
             name: "Drafts".into(),
             ground: Some(Color::from_rgb8(30, 30, 34)),
             draft: true,
-            mode: Some(mode),
+            modes: vec![mode],
         },
         Operation::CreateNode {
             id: frame,
@@ -796,7 +797,7 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
             && pages.iter().any(|p| p.draft)
             && pages
                 .iter()
-                .any(|p| doc.get(p.id).is_some_and(|n| n.mode().is_some())),
+                .any(|p| doc.get(p.id).is_some_and(|n| !n.modes().is_empty())),
         "no second, draft or moded page, so `pages` is watched for one: {}",
         regenerate_hint()
     );

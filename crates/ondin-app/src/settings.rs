@@ -60,7 +60,7 @@ pub(crate) const FIELD_H: f32 = ui::CONTROL_H;
 /// height they sit among.
 const BUTTON_H: f32 = FIELD_H;
 /// What a button's label keeps clear of its own corners, per side.
-const BUTTON_PAD_X: f32 = 14.0;
+const BUTTON_PAD_X: f32 = ui::LABEL_BUTTON_PAD_X;
 /// Between two controls on one row: the inspector's.
 pub(crate) const COL_GAP: f32 = ui::CARD_COL_GAP;
 /// The *Default font* dropdown: room for a long family name beside its label.

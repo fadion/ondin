@@ -3134,6 +3134,10 @@ pub fn button_face(
     (rect, resp, fg)
 }
 
+/// What a word on a [`label_button`] sized to it keeps clear of the button's
+/// corners, per side: `settings::text_button`'s, and [`split_button`]'s word.
+pub const LABEL_BUTTON_PAD_X: f32 = 14.0;
+
 /// The caret end of a [`split_button`]: its width.
 pub const SPLIT_CARET_W: f32 = 24.0;
 
@@ -3156,10 +3160,11 @@ pub struct SplitButton {
 /// word dimmed, and the caret still opens the choices.
 pub fn split_button(ui: &mut egui::Ui, text: &str, h: f32, enabled: bool) -> SplitButton {
     let font = egui::FontId::proportional(Scale::of(h).text_pt());
+    // The placeholder, so the word takes the face's ink when it is painted.
     let galley = ui
         .painter()
-        .layout_no_wrap(text.into(), font, color::text());
-    let main_w = galley.size().x + 24.0;
+        .layout_no_wrap(text.into(), font, egui::Color32::PLACEHOLDER);
+    let main_w = galley.size().x + LABEL_BUTTON_PAD_X * 2.0;
     let state = match enabled {
         true => FieldButton::Primary,
         false => FieldButton::Off,
@@ -8629,5 +8634,50 @@ mod double_click_tests {
             pass(&ctx, Vec::new());
         }
         assert!(!click(&ctx, a).0, "half a second apart is two clicks");
+    }
+}
+
+#[cfg(test)]
+mod split_button_tests {
+    use super::*;
+
+    /// A live `split_button`'s word is the primary's ink, as a primary
+    /// `label_button`'s is, and the two keep the same air around a word.
+    ///
+    /// flip: `split_button` laying its word out in `color::text()` → fails at "ink".
+    #[test]
+    fn a_split_button_word_wears_the_primary_ink() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let word = |shapes: &[egui::epaint::ClippedShape], text: &str| {
+            shapes
+                .iter()
+                .find_map(|c| match &c.shape {
+                    egui::Shape::Text(t) if t.galley.job.text == text => Some(t.clone()),
+                    _ => None,
+                })
+                .expect("the word is painted")
+        };
+        // What a glyph is drawn in: its section's colour, or the fallback for one
+        // laid out in the placeholder.
+        let ink = |t: &egui::epaint::TextShape| match t.galley.job.sections[0].format.color {
+            egui::Color32::PLACEHOLDER => t.fallback_color,
+            c => c,
+        };
+        let mut split = None;
+        let out = ctx.run_ui(Default::default(), |ui| {
+            split = Some(split_button(ui, "Merge", CONTROL_H, true).resp.rect);
+        });
+        let s = word(&out.shapes, "Merge");
+        assert_eq!(ink(&s), color::accent_ink(), "ink");
+        let mut plain = egui::Rect::NOTHING;
+        let out = ctx.run_ui(Default::default(), |ui| {
+            let w = s.galley.size().x + LABEL_BUTTON_PAD_X * 2.0;
+            plain = label_button(ui, "Merge", egui::vec2(w, CONTROL_H), FieldButton::Primary).rect;
+        });
+        assert_eq!(ink(&word(&out.shapes, "Merge")), color::accent_ink());
+        let split = split.unwrap();
+        assert_eq!(split.width() - SPLIT_CARET_W, plain.width(), "the same air");
     }
 }

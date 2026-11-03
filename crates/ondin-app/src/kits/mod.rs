@@ -58,7 +58,7 @@ impl OndinApp {
     /// ⚠️ **The menu holds only rows whose verbs exist**: *Rename*, *Duplicate* and
     /// *Export…* are left out, with no editor verb behind them yet, and a row that
     /// does nothing is worse than a short menu. *Version history…*, *Save named
-    /// version…* and *Colour review* lead, the document's own verbs above a
+    /// version…* lead, the document's own verbs above a
     /// separator; on a kit, *Publish kit…* heads the kit
     /// rows, disabled with *No changes* when there is nothing to publish; *Kits
     /// used…* is offered while the vault holds anything.
@@ -107,10 +107,6 @@ impl OndinApp {
             if item(ui, Item::SaveNamedVersion).clicked() {
                 app.open_menu = TopMenu::None;
                 app.save_named_version();
-            }
-            if item(ui, Item::ColourReview).clicked() {
-                app.open_menu = TopMenu::None;
-                app.open_colour_review();
             }
             crate::ui::menu_sep(ui);
             if shared {

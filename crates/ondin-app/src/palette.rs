@@ -663,7 +663,6 @@ impl OndinApp {
             ),
         );
         push(&mut out, Cmd::verb(Item::SaveNamedVersion, None));
-        push(&mut out, Cmd::verb(Item::ColourReview, None));
         for clockwise in [false, true] {
             push(
                 &mut out,
@@ -721,6 +720,7 @@ impl OndinApp {
             vision.label = "Stop simulating colour blindness".into();
         }
         push(&mut out, vision);
+        push(&mut out, Cmd::verb(Item::ColourReview, None));
         push(&mut out, Cmd::verb(Item::BatchRename, None));
         push(&mut out, Cmd::verb(Item::FindText, None));
         push(&mut out, Cmd::verb(Item::ReplaceText, None));

@@ -175,7 +175,7 @@ stack.
 ## The colour-blind simulation (`vision.rs`)
 
 *View ▸ Simulate colour blindness* (`Action::SimulateColourBlindness`,
-`menu::Item::SimulateColourBlindness`, `Group::View`, no chord): the View menu's last row, after
+`menu::Item::SimulateColourBlindness`, `Group::View`, no chord): the View menu's row after
 *Check contrast*, ticked while on, and a palette row reading *Stop simulating colour blindness*
 while on. One frame of the canvas is shown as someone with a colour-vision deficiency sees it
 (`ondin_render::vision`, `render.md`). `OndinApp::vision` is view state, as the contrast check is:
@@ -596,7 +596,8 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   locked layers are never written (`Merged::locked`). `merge_into_new` adds *Mode 1* to a document
   with no modes, a variable valued the target's colour in every mode, and binds every raw member's
   users, the target's included.
-- **Doors and place.** The Document menu's *Colour review* row, after *Save named version…*, and the
+- **Doors and place.** The View menu's last row, after *Simulate colour blindness* and never ticked,
+  and the
   palette (`Item::ColourReview`, unbound). Not a modal: it sits at Find and replace's place and width
   (`canvas_card_place`, `card_frame`), and opening either closes the other. The census is taken again
   when the revision, the scope or the threshold changes.

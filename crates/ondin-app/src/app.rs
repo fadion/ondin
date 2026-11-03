@@ -7392,6 +7392,7 @@ impl OndinApp {
                         PANELS_ROW,
                         crate::menu::Item::CheckContrast.spec().label,
                         crate::menu::Item::SimulateColourBlindness.spec().label,
+                        crate::menu::Item::ColourReview.spec().label,
                     ])
                     .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
@@ -7457,6 +7458,14 @@ impl OndinApp {
                 if vision.clicked() {
                     app.open_menu = TopMenu::None;
                     app.toggle_vision();
+                }
+                // A tool over the canvas, a verb as *Present* is: no tick.
+                let label = crate::menu::Item::ColourReview.spec().label;
+                let review = crate::ui::menu_check_response(ui, label, false, ITEM_H);
+                elsewhere |= review.hovered();
+                if review.clicked() {
+                    app.open_menu = TopMenu::None;
+                    app.open_colour_review();
                 }
                 if elsewhere {
                     flyout = None;

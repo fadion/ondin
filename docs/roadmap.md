@@ -37,8 +37,6 @@ reads true.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
   Scoping would also make a number's DTCG `dimension` or `number` explicit rather than read from its
   bindings (`export.md`, *Design tokens (DTCG)*).
-- **Pattern fills.** A layer or component tiled as a fill, with spacing, scale and offset. Today only
-  an image fill tiles (`app-image-editing.md`, framing modes).
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 
 ## Illustrations

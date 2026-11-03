@@ -55,6 +55,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Diamond gradients** — Figma-only; peniko has no such kind, so the model would need its own gradient type for it. The Figma import reads one as radial and says so.
 - **A CSS display format in the picker** — CSS colours are typed or pasted into any colour field; the value row shows Hex, RGB, HSL or HSB.
 - **Setting one channel across layers that disagree** — over a *Mixed* row the value row is the text field, which sets the whole colour.
+- **Pattern fills (a layer or component tiled as a fill)** — niche outside illustration, a tiled image fill covers the common case, and CSS can only repeat an image.
 
 ## Text
 

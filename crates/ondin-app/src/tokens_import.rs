@@ -16,6 +16,7 @@ use eframe::egui;
 use ondin_core::meta::TokensLink;
 use ondin_core::{IdSource, Transaction};
 use ondin_export::dtcg_in::{self, Change, Review, Row, Shown};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// The box's width: a value column per mode needs more than batch rename's.
@@ -45,6 +46,8 @@ pub(crate) struct TokensImport {
     review: Review,
     ticked: Vec<bool>,
     filter: Option<Change>,
+    /// The groups closed by their caret.
+    collapsed: HashSet<String>,
     /// *Keep this file linked*.
     link: bool,
     /// Whether the file has a path to link: a browser drag brings only bytes.
@@ -230,6 +233,7 @@ impl OndinApp {
             review,
             ticked,
             filter: None,
+            collapsed: HashSet::new(),
             link: linkable && (held.is_none() || same),
             linkable,
             from_link,
@@ -441,7 +445,7 @@ impl OndinApp {
                 }
                 filters(ui, &t.review, &mut t.filter);
                 divider(ui);
-                changed |= list(ui, &t.review, &mut t.ticked, t.filter);
+                changed |= list(ui, &t.review, &mut t.ticked, t.filter, &mut t.collapsed);
                 if let Some(note) = note(&t.review) {
                     divider(ui);
                     note_row(ui, &note);
@@ -664,9 +668,15 @@ fn col_w(n: usize) -> f32 {
     (room / n).clamp(72.0, COL_W)
 }
 
-/// The header, then the rows under their group headers; true when a box
-/// changed.
-fn list(ui: &mut egui::Ui, r: &Review, ticked: &mut [bool], filter: Option<Change>) -> bool {
+/// The header, then the rows under their group headers, a closed group's
+/// hidden; true when a box changed.
+fn list(
+    ui: &mut egui::Ui,
+    r: &Review,
+    ticked: &mut [bool],
+    filter: Option<Change>,
+    collapsed: &mut HashSet<String>,
+) -> bool {
     let cw = col_w(r.columns.len());
     let (head, _) = ui.allocate_exact_size(egui::vec2(W, 28.0), egui::Sense::hover());
     let p = ui.painter();
@@ -723,19 +733,46 @@ fn list(ui: &mut egui::Ui, r: &Review, ticked: &mut [bool], filter: Option<Chang
                 .id_salt("tokens-import-list")
                 .max_height(LIST_H)
                 .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let mut group: Option<&str> = None;
-                    for i in &shown {
+                    let mut toggle = None;
+                    for (n, i) in shown.iter().enumerate() {
                         let row = &r.rows[*i];
                         if group != Some(row.group.as_str()) {
                             group = Some(row.group.as_str());
                             if !row.group.is_empty() {
-                                group_head(ui, &row.group);
+                                let count = shown[n..]
+                                    .iter()
+                                    .take_while(|j| r.rows[**j].group == row.group)
+                                    .count();
+                                let open = !collapsed.contains(&row.group);
+                                if group_head(ui, &row.group, count, open) {
+                                    toggle = Some(row.group.clone());
+                                }
                             }
+                        }
+                        if collapsed.contains(&row.group) {
+                            continue;
                         }
                         if row_ui(ui, row, &mut ticked[*i], cw, cols_x) {
                             changed = true;
+                        }
+                    }
+                    // Alt-click closes or opens every group, as in the variables panel.
+                    if let Some(g) = toggle {
+                        let all = || {
+                            r.rows
+                                .iter()
+                                .map(|x| x.group.clone())
+                                .filter(|g| !g.is_empty())
+                        };
+                        match (ui.input(|i| i.modifiers.alt), collapsed.contains(&g)) {
+                            (true, true) => collapsed.clear(),
+                            (true, false) => collapsed.extend(all()),
+                            (false, true) => _ = collapsed.remove(&g),
+                            (false, false) => _ = collapsed.insert(g),
                         }
                     }
                 });
@@ -743,25 +780,42 @@ fn list(ui: &mut egui::Ui, r: &Review, ticked: &mut [bool], filter: Option<Chang
     changed
 }
 
-fn group_head(ui: &mut egui::Ui, name: &str) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(W - 2.0 * GAP, GROUP_H), egui::Sense::hover());
+/// A group's header: its caret, name and the count of rows on show; true when
+/// clicked.
+fn group_head(ui: &mut egui::Ui, name: &str, count: usize, open: bool) -> bool {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(W - 2.0 * GAP, GROUP_H), egui::Sense::click());
     let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, 5.0, color::text_a(10));
+    }
     let y = rect.center().y;
     p.text(
         egui::pos2(rect.left() + 8.0, y),
         egui::Align2::LEFT_CENTER,
-        icon::FOLDER_SIMPLE,
-        theme::icon_font(12.0),
-        theme::text::dim(),
+        if open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        },
+        theme::icon_font(11.0),
+        theme::text::faint(),
     );
-    p.text(
+    let label = p.text(
         egui::pos2(rect.left() + 8.0 + 18.0, y),
         egui::Align2::LEFT_CENTER,
         name,
         egui::FontId::proportional(11.0),
         theme::text::dim(),
     );
+    p.text(
+        egui::pos2(label.right() + 6.0, y),
+        egui::Align2::LEFT_CENTER,
+        count.to_string(),
+        egui::FontId::proportional(10.5),
+        theme::text::faint(),
+    );
+    resp.clicked()
 }
 
 /// One row: its box, tag, name and second line, and a value per mode; true when
@@ -839,11 +893,13 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
     );
     job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
     let g = ui.fonts_mut(|f| f.layout_job(job));
-    p.galley(
-        egui::pos2(x + 23.0, line_y - g.size().y / 2.0),
-        g,
-        color::text(),
-    );
+    // The whole text of whatever cut-short piece the pointer is on.
+    let mut tip = None;
+    let at = egui::pos2(x + 23.0, line_y - g.size().y / 2.0);
+    if g.elided && ui.rect_contains_pointer(egui::Rect::from_min_size(at, g.size())) {
+        tip = Some(row.name.clone());
+    }
+    p.galley(at, g, color::text());
     if let Some(sub) = &row.sub {
         let mut job = egui::text::LayoutJob::simple_singleline(
             sub.clone(),
@@ -852,7 +908,11 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
         );
         job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
         let g = ui.fonts_mut(|f| f.layout_job(job));
-        p.galley(egui::pos2(x + 23.0, rect.top() + 21.0), g, color::text());
+        let at = egui::pos2(x + 23.0, rect.top() + 21.0);
+        if g.elided && ui.rect_contains_pointer(egui::Rect::from_min_size(at, g.size())) {
+            tip = Some(sub.clone());
+        }
+        p.galley(at, g, color::text());
     }
     // A value per mode: the old one struck through beside the new.
     for (i, c) in row.cells.iter().enumerate() {
@@ -860,18 +920,20 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
         let mut at = cx;
         let right = cx + cw;
         if let Some(old) = &c.old {
-            at = value(ui, old, at, line_y, right, true, fade);
+            at = value(ui, old, at, line_y, right, true, fade, &mut tip);
             at += 5.0;
         }
         if let Some(new) = &c.new {
-            value(ui, new, at, line_y, right, false, fade);
+            value(ui, new, at, line_y, right, false, fade, &mut tip);
         }
     }
     let clicked = resp.clicked() && !kit;
     if clicked {
         *on = !*on;
     }
-    if kit {
+    if let Some(tip) = tip {
+        resp.on_hover_text_at_pointer(tip);
+    } else if kit {
         resp.on_hover_text(
             "A kit\u{2019}s variable or style changes through the kit\u{2019}s own update",
         );
@@ -880,7 +942,9 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
 }
 
 /// A swatch and a value from `x`, cut at `right`; struck and dim when `old`.
-/// Returns where it ended.
+/// Returns where it ended, and sets `tip` to the whole value when it is cut
+/// short under the pointer.
+#[allow(clippy::too_many_arguments)]
 fn value(
     ui: &egui::Ui,
     s: &Shown,
@@ -889,6 +953,7 @@ fn value(
     right: f32,
     old: bool,
     fade: impl Fn(egui::Color32) -> egui::Color32,
+    tip: &mut Option<String>,
 ) -> f32 {
     let p = ui.painter();
     if let Some(c) = s.swatch {
@@ -927,7 +992,11 @@ fn value(
     job.wrap = egui::text::TextWrapping::truncate_at_width((right - x).max(10.0));
     let g = ui.fonts_mut(|f| f.layout_job(job));
     let w = g.size().x;
-    p.galley(egui::pos2(x, y - g.size().y / 2.0), g, color::text());
+    let at = egui::pos2(x, y - g.size().y / 2.0);
+    if g.elided && ui.rect_contains_pointer(egui::Rect::from_min_size(at, g.size())) {
+        *tip = Some(s.text.clone());
+    }
+    p.galley(at, g, color::text());
     x + w
 }
 
@@ -1179,6 +1248,86 @@ mod tests {
         frame(&mut app, vec![escape]);
         assert!(app.tokens_import.is_none());
         assert!(app.session.doc.variables().is_empty(), "nothing applied");
+    }
+
+    /// A click on a group's header closes that group and a second opens it;
+    /// Alt-click closes every group.
+    /// flip: `group_head` sensing hover only → fails at "the click closes it".
+    #[test]
+    fn a_group_header_click_closes_and_opens_it() {
+        let (ctx, mut app) = app();
+        let path = temp_file("collapse", FILE);
+        app.open_tokens_import(path, false);
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(1200.0, 760.0));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>, modifiers| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                events,
+                modifiers,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| app.tokens_import_ui(ui.ctx(), canvas));
+        };
+        let none = egui::Modifiers::NONE;
+        for _ in 0..3 {
+            frame(&mut app, vec![], none);
+        }
+        let boxed = ctx
+            .memory(|m| m.area_rect(egui::Id::new("tokens-import")))
+            .expect("the box is laid out");
+        // Under the title, the chips, a divider and the column header.
+        let at = egui::pos2(
+            boxed.left() + 120.0,
+            boxed.top() + 40.0 + 34.0 + 1.0 + 28.0 + 12.0,
+        );
+        let groups: HashSet<String> = {
+            let t = app.tokens_import.as_ref().unwrap();
+            t.review
+                .rows
+                .iter()
+                .map(|r| r.group.clone())
+                .filter(|g| !g.is_empty())
+                .collect()
+        };
+        assert!(groups.len() >= 2, "the fixture has groups: {groups:?}");
+        let first = {
+            let t = app.tokens_import.as_ref().unwrap();
+            t.review
+                .rows
+                .iter()
+                .map(|r| &r.group)
+                .find(|g| !g.is_empty())
+                .unwrap()
+                .clone()
+        };
+        let click = |app: &mut OndinApp, modifiers: egui::Modifiers| {
+            frame(app, vec![egui::Event::PointerMoved(at)], modifiers);
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers,
+            };
+            frame(app, vec![button(true)], modifiers);
+            frame(app, vec![button(false)], modifiers);
+            for _ in 0..40 {
+                frame(app, vec![], none);
+            }
+        };
+        let collapsed = |app: &OndinApp| app.tokens_import.as_ref().unwrap().collapsed.clone();
+        click(&mut app, none);
+        assert_eq!(
+            collapsed(&app),
+            HashSet::from([first.clone()]),
+            "the click closes it"
+        );
+        click(&mut app, none);
+        assert!(collapsed(&app).is_empty(), "a second click opens it");
+        click(&mut app, egui::Modifiers::ALT);
+        assert_eq!(collapsed(&app), groups, "Alt-click closes every group");
     }
 
     /// A `.json` dropped on the window opens the review; a browser's drop, which

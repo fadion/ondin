@@ -1,6 +1,13 @@
 //! *Version history…* — the door to the copies `Ctrl+S` and *Save named version…*
 //! pin under `.versions/<document id>/` (`library::store::pin_version`): a card
-//! listing them newest first, each restorable and each nameable.
+//! drawing them as a timeline, newest first under the open document's own stop
+//! (*Now*), grouped by day. Each row says what that version changed against the one
+//! before it (`crate::version_diffs`), in the compare's signs and hues — `~`
+//! changed, `+` added, `−` removed — and opens, on a click or Space, to that diff in
+//! brief, with *Show on canvas* opening the full compare of the pair.
+//!
+//! **Nothing moves.** Rows are one fixed height: hover, naming and a summary
+//! arriving shift nothing, and opening a row pushes only the rows below it.
 //!
 //! **A restore loses nothing.** The current state is written and pinned first, so the
 //! version it replaces is the newest entry in the same list; the restored document
@@ -8,16 +15,43 @@
 //! history is the open document's), which is why the pin is unconditional.
 
 use crate::app::OndinApp;
-use crate::compare::Pick;
+use crate::compare::{self, Pick};
 use crate::library::{clock, store};
 use crate::theme::{self, color, icon};
+use crate::version_diffs::{Brief, Counts, Later, Pair, Part, Summary, plural};
 use eframe::egui;
+use ondin_core::diff::Status;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The card's width.
 const CARD_W: f32 = 504.0;
 /// How tall the list grows before it scrolls.
-const LIST_MAX_H: f32 = 360.0;
+const LIST_MAX_H: f32 = 420.0;
+/// A row: its name on the first line, its summary on the second.
+const ROW_H: f32 = 46.0;
+/// A day's heading.
+const DAY_H: f32 = 30.0;
+/// The time column, its text right-aligned.
+const TIME_W: f32 = 44.0;
+/// The rail's column, the stops centred in it.
+const RAIL_W: f32 = 18.0;
+/// Between the columns.
+const COL_GAP: f32 = 10.0;
+/// How far a lit row's ground reaches past the list on either side.
+const ROW_OUTSET: f32 = 10.0;
+/// The centres of a row's two lines, from its top.
+const LINE1_Y: f32 = 15.5;
+const LINE2_Y: f32 = 33.5;
+/// A line of an opened row's list.
+const LIST_LINE_H: f32 = 20.0;
+/// An opened row lists this many layers a page, then says how many more.
+const LINES_SHOWN: usize = 4;
+/// How long a summary may take before its placeholder shows, so a fast one never
+/// flickers.
+const PLACEHOLDER_AFTER: f64 = 0.15;
+/// One beat of a placeholder's pulse, in seconds.
+const PULSE_S: f64 = 1.4;
 
 /// One pinned copy as the card lists it.
 pub(crate) struct Version {
@@ -41,15 +75,149 @@ pub(crate) fn stamp_of(path: &Path) -> Option<u64> {
     store::version_stamp(path).map(|(secs, _)| secs)
 }
 
-/// The name field over a version's row, filling what the row's buttons leave.
-/// Answers `true` once the field lets go of focus, by Enter, Escape or a press
-/// elsewhere; the caller tells Escape apart.
-fn name_field(ui: &mut egui::Ui, n: &mut Naming) -> bool {
+/// `"24 Oct 2026, 14:32"` in local time.
+pub(crate) fn when_label(secs: u64) -> String {
+    format!("{}, {}", clock::date_label(secs), hm(secs))
+}
+
+/// `"14:32"` in local time.
+fn hm(secs: u64) -> String {
+    let local = (secs as i64 + clock::local_offset(secs)).max(0) as u64;
+    let (h, m) = ((local % 86_400) / 3_600, (local % 3_600) / 60);
+    format!("{h:02}:{m:02}")
+}
+
+/// The local day `secs` falls on, counted from the epoch.
+fn local_day(secs: u64) -> i64 {
+    (secs as i64 + clock::local_offset(secs)).div_euclid(86_400)
+}
+
+/// A day's heading and the date beside it: *Today* and *Yesterday* by name, an
+/// older day by its date, with the year only when it is not this one.
+fn day_heading(secs: u64, today: i64) -> (String, String) {
+    let date = clock::date_label(secs);
+    let year = clock::date_label(clock::now());
+    let short = |d: &str| d.rsplit_once(' ').map_or(d.to_string(), |(s, _)| s.into());
+    match today - local_day(secs) {
+        0 => ("Today".into(), short(&date)),
+        1 => ("Yesterday".into(), short(&date)),
+        _ if year.rsplit_once(' ').map(|y| y.1) == date.rsplit_once(' ').map(|d| d.1) => {
+            (short(&date), String::new())
+        }
+        _ => (date, String::new()),
+    }
+}
+
+/// Text at `pct` percent over the ground.
+fn ink(pct: u32) -> egui::Color32 {
+    color::text_a((pct * 255 / 100) as u8)
+}
+
+/// A placeholder's opacity at `time`, `delay` into its beat.
+fn pulse(time: f64, delay: f64) -> f32 {
+    let phase = (time - delay) / PULSE_S * std::f64::consts::TAU;
+    (0.35 + 0.65 * (0.5 - 0.5 * phase.cos())) as f32
+}
+
+/// One stop on the timeline: the open document, or a version.
+struct Stop {
+    key: Later,
+    pair: Pair,
+    /// Its place among the versions, newest first; `None` for Now.
+    place: Option<usize>,
+    time: String,
+    /// How long ago, beside a row of today.
+    ago: String,
+    /// Its name as drawn.
+    name: Option<String>,
+    summary: Option<Arc<Summary>>,
+    /// When its summary was asked for, while it is being worked out.
+    asked: Option<f64>,
+    /// The time of the version it is compared with.
+    before: Option<String>,
+}
+
+impl Stop {
+    /// Whether the row opens: its diff has something to list, or is still coming.
+    fn openable(&self) -> bool {
+        self.before.is_some()
+            && match self.summary.as_deref() {
+                None => self.asked.is_some(),
+                Some(s) => matches!(s, Summary::Changed(_)),
+            }
+    }
+
+    fn same(&self) -> bool {
+        matches!(self.summary.as_deref(), Some(Summary::Same))
+    }
+
+    /// Its own version cannot be read, so it cannot be compared.
+    fn unreadable(&self) -> bool {
+        matches!(
+            self.summary.as_deref(),
+            Some(Summary::Failed { this: true })
+        )
+    }
+}
+
+/// What a press on a row asked for.
+enum Press {
+    Toggle,
+    /// Its compare with now, and whether Shift was held.
+    Compare(bool),
+    Name,
+    Restore,
+}
+
+/// How a row is drawn beyond what its stop says.
+struct Look<'a> {
+    /// One of its buttons has keyboard focus, so its buttons stay.
+    held: bool,
+    opened: bool,
+    /// Another version's row had the pointer or focus last frame, so an opened row
+    /// gives its buttons up to it: one row's buttons at a time.
+    elsewhere: bool,
+    /// Compared, or picked to be.
+    marked: bool,
+    /// The card was opened to compare: every row shows its compare button lit.
+    comparing: bool,
+    private: bool,
+    time: f64,
+    first: bool,
+    last: bool,
+    /// Under Now with no versions: the rail below is dashed.
+    dashed: bool,
+    /// The row's place among the pending, for its placeholder's widths and beat.
+    pending: usize,
+    naming: Option<&'a mut Naming>,
+}
+
+/// What a row did this frame.
+#[derive(Default)]
+struct RowOut {
+    press: Option<Press>,
+    /// One of its buttons has keyboard focus.
+    held: bool,
+    /// A version's row under the pointer or with focus.
+    pointed: bool,
+    /// Its name field let go of focus.
+    named: bool,
+}
+
+/// The name field over a version's first line, `rect`. Answers `true` once the
+/// field lets go of focus, by Enter, Escape or a press elsewhere; the caller tells
+/// Escape apart.
+fn name_field(ui: &mut egui::Ui, rect: egui::Rect, n: &mut Naming) -> bool {
     let id = egui::Id::new(("version-name", &n.path));
-    let size = egui::vec2(ui.available_width(), crate::settings::FIELD_H);
     let font = egui::FontId::proportional(12.5);
-    let pad = crate::ui::edit_frame(ui, &font, size.y - crate::ui::FIELD_BORDER_H, 0.0);
-    let resp = crate::ui::field_row(ui, size, |ui| {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let pad = crate::ui::edit_frame(
+        &child,
+        &font,
+        rect.height() - crate::ui::FIELD_BORDER_H,
+        0.0,
+    );
+    let resp = crate::ui::field_row_active(&mut child, rect.size(), true, |ui| {
         ui.add(
             egui::TextEdit::singleline(&mut n.text)
                 .id(id)
@@ -78,11 +246,781 @@ fn name_field(ui: &mut egui::Ui, n: &mut Naming) -> bool {
     resp.lost_focus()
 }
 
-/// `"24 Oct 2026, 14:32"` in local time.
-pub(crate) fn when_label(secs: u64) -> String {
-    let local = (secs as i64 + clock::local_offset(secs)).max(0) as u64;
-    let (h, m) = ((local % 86_400) / 3_600, (local % 3_600) / 60);
-    format!("{}, {h:02}:{m:02}", clock::date_label(secs))
+/// A status tag, the compare card's: its hue, and its sign in the tag's ink.
+fn tag(p: &egui::Painter, at: egui::Rect, status: Status) {
+    let (hue, ink, sign) = compare::look(status);
+    p.rect_filled(at, 2.0, hue);
+    p.text(
+        at.center(),
+        egui::Align2::CENTER_CENTER,
+        sign,
+        egui::FontId::proportional(9.0),
+        ink,
+    );
+}
+
+/// `counts` as runs of a line: `~5`, `+2`, `−3`, each in its status's hue.
+fn count_runs(counts: Counts) -> Vec<(String, egui::Color32)> {
+    counts
+        .each()
+        .map(|(status, n)| {
+            let (hue, _, sign) = compare::look(status);
+            (format!("{sign}{n}"), hue)
+        })
+        .collect()
+}
+
+/// `runs` laid out as one line at 11 points, a space between each, cut at `width`.
+fn runs_line(ui: &egui::Ui, runs: &[(String, egui::Color32)], width: f32) -> Arc<egui::Galley> {
+    let mut parts: Vec<(&str, f32, egui::Color32, bool)> = Vec::new();
+    for (i, (text, ink)) in runs.iter().enumerate() {
+        if i > 0 {
+            parts.push((" ", 11.0, *ink, false));
+        }
+        parts.push((text, 11.0, *ink, false));
+    }
+    compare::one_line(ui, &parts, width)
+}
+
+/// The summary line under a row's name, or `None` while it is being worked out
+/// (or failed, which draws its own line).
+fn summary_runs(s: &Stop, private: bool) -> Option<Vec<(String, egui::Color32)>> {
+    let before = s.before.as_deref().unwrap_or_default();
+    let quiet = |t: String| vec![(t, ink(35))];
+    let runs = match (s.summary.as_deref()?, s.place) {
+        (Summary::Failed { .. }, _) => return None,
+        (Summary::Same, None) => quiet(format!("No changes since {before}")),
+        (Summary::Same, Some(_)) => quiet(format!("Same as {before}")),
+        (Summary::Size { pages, layers }, place) => {
+            let size = format!("{}, {}", plural(*pages, "page"), plural(*layers, "layer"));
+            match place {
+                None => vec![(size.replace(", ", " · "), ink(40))],
+                Some(_) => quiet(format!("First version · {size}")),
+            }
+        }
+        (Summary::Changed(brief), place) => {
+            let mut runs = Vec::new();
+            if place.is_none() {
+                runs.push((format!("Since {before}:"), ink(35)));
+            }
+            runs.extend(brief.parts(private).into_iter().map(|part| match part {
+                Part::Words(w) => (w, ink(55)),
+                Part::Count(status, n) => {
+                    let (hue, _, sign) = compare::look(status);
+                    (format!("{sign}{n}"), hue)
+                }
+            }));
+            runs
+        }
+    };
+    Some(runs)
+}
+
+/// The *Restore* button's width.
+fn restore_w(ui: &egui::Ui) -> f32 {
+    let text = ui.fonts_mut(|f| {
+        f.layout_no_wrap("Restore".into(), egui::FontId::proportional(11.5), ink(62))
+    });
+    10.0 + 12.0 + 5.0 + text.size().x + 10.0
+}
+
+/// `add` at `rect`, over what `ui` has laid out. Not `Ui::put`, which moves the
+/// cursor to below `rect` — above the row's bottom, so the row would shrink.
+fn placed(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> egui::Response {
+    add(&mut ui.new_child(egui::UiBuilder::new().max_rect(rect)))
+}
+
+/// A small button with a glyph and a word on the app's button face.
+fn word_button(ui: &mut egui::Ui, rect: egui::Rect, glyph: &str, word: &str) -> egui::Response {
+    placed(ui, rect, move |ui: &mut egui::Ui| {
+        let (rect, resp, fg) = crate::ui::button_face(ui, rect.size(), crate::ui::FieldButton::Off);
+        let p = ui.painter();
+        let cy = rect.center().y;
+        p.text(
+            egui::pos2(rect.left() + 10.0, cy),
+            egui::Align2::LEFT_CENTER,
+            glyph,
+            theme::icon_font(12.0),
+            fg,
+        );
+        p.text(
+            egui::pos2(rect.left() + 10.0 + 12.0 + 5.0, cy),
+            egui::Align2::LEFT_CENTER,
+            word,
+            egui::FontId::proportional(11.5),
+            fg,
+        );
+        resp
+    })
+}
+
+/// One stop of the timeline: the time, the rail and the stop, the name and the
+/// summary, and at the right edge how long ago — or, under the pointer, with
+/// keyboard focus or opened, *Compare with now*, the pencil and *Restore*.
+fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
+    let mut out = RowOut::default();
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), ROW_H),
+        egui::Sense::hover(),
+    );
+    let id = egui::Id::new(("version-row", &s.key));
+    let sense = match s.openable() {
+        true => egui::Sense::click(),
+        false => egui::Sense::hover(),
+    };
+    let resp = ui.interact(rect, id, sense);
+    let editing = look.naming.is_some();
+    let pointed = ui.rect_contains_pointer(rect) || resp.has_focus() || look.held;
+    let version = s.place.is_some();
+    let buttons = version && (pointed || (look.opened && !look.elsewhere) || editing);
+    out.pointed = version && pointed;
+    let lit = look.opened || look.marked || editing || (pointed && (version || s.openable()));
+    let p = ui.painter().clone();
+    if lit {
+        let ground = rect.expand2(egui::vec2(ROW_OUTSET, 0.0));
+        let r = match look.opened {
+            true => egui::CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 0,
+                se: 0,
+            },
+            false => egui::CornerRadius::same(6),
+        };
+        p.rect_filled(ground, r, ink(6));
+    }
+    let same = s.same();
+    let named = s.name.is_some();
+    let lit_stop = buttons || editing;
+
+    // The time, level with the first line.
+    let time_ink = match (s.place, same, named) {
+        (None, _, _) => color::accent_300(),
+        (_, true, _) => ink(35),
+        (_, _, true) => ink(72),
+        _ => ink(50),
+    };
+    let y1 = rect.top() + LINE1_Y;
+    p.text(
+        egui::pos2(rect.left() + TIME_W, y1),
+        egui::Align2::RIGHT_CENTER,
+        &s.time,
+        egui::FontId::proportional(11.5),
+        time_ink,
+    );
+
+    // The rail and the stop on it.
+    let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
+    let line = egui::Stroke::new(1.0, ink(12));
+    let r = match (s.place, named) {
+        (None, _) => 5.5,
+        (_, true) => 5.0,
+        _ => 3.0,
+    };
+    if !look.first {
+        p.line_segment(
+            [egui::pos2(rail, rect.top()), egui::pos2(rail, y1 - r)],
+            line,
+        );
+    }
+    if look.dashed {
+        dashed_rail(&p, rail, y1 + r, rect.bottom());
+    } else if !look.last || look.opened {
+        p.line_segment(
+            [egui::pos2(rail, y1 + r), egui::pos2(rail, rect.bottom())],
+            line,
+        );
+    }
+    let c = egui::pos2(rail, y1);
+    match (s.place, named) {
+        (None, _) => {
+            p.circle_stroke(c, r - 1.0, egui::Stroke::new(2.0, color::accent_400()));
+        }
+        (_, true) => {
+            p.circle_filled(c, r + 3.0, color::accent_a(56));
+            p.circle_filled(c, r, color::accent_400());
+        }
+        _ => {
+            p.circle_filled(
+                c,
+                r,
+                match (lit_stop, same) {
+                    (true, _) => ink(60),
+                    (_, true) => ink(22),
+                    _ => ink(32),
+                },
+            );
+        }
+    }
+
+    // The right edge: the buttons, or how long ago.
+    let mid = rect.center().y;
+    let mut right = rect.right();
+    let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
+    if buttons {
+        let rw = restore_w(ui);
+        let restore =
+            egui::Rect::from_min_size(egui::pos2(right - rw, mid - 12.0), egui::vec2(rw, 24.0));
+        let pencil = egui::Rect::from_min_size(
+            egui::pos2(restore.left() - 6.0 - 24.0, mid - 12.0),
+            egui::vec2(24.0, 24.0),
+        );
+        let diff = pencil.translate(egui::vec2(-28.0, 0.0));
+        let compare = placed(ui, diff, |ui: &mut egui::Ui| {
+            crate::ui::icon_button(
+                ui,
+                icon::GIT_DIFF,
+                24.0,
+                14.0,
+                look.marked || look.comparing,
+                !s.unreadable(),
+            )
+        })
+        .on_hover_text(match s.unreadable() {
+            true => "This version could not be read",
+            false => "Compare with now · Shift+click two to compare them",
+        });
+        let tip = match (look.private, named) {
+            (true, _) => crate::private::DECLINE_RENAME,
+            (false, true) => "Rename this version",
+            (false, false) => "Name this version",
+        };
+        let name = placed(ui, pencil, |ui: &mut egui::Ui| {
+            crate::ui::icon_button(ui, icon::PENCIL_SIMPLE, 24.0, 13.0, editing, !look.private)
+        })
+        .on_hover_text(tip);
+        let back = word_button(ui, restore, icon::ARROW_COUNTER_CLOCKWISE, "Restore")
+            .on_hover_text(
+                "Make this the document — the current state is kept as the newest version",
+            );
+        if compare.clicked() && !s.unreadable() {
+            out.press = Some(Press::Compare(ui.input(|i| i.modifiers.shift)));
+        } else if name.clicked() && !look.private && !editing {
+            out.press = Some(Press::Name);
+        } else if back.clicked() {
+            out.press = Some(Press::Restore);
+        }
+        out.held = compare.has_focus() || name.has_focus() || back.has_focus();
+        right = diff.left() - 8.0;
+    } else if version && look.comparing {
+        let diff =
+            egui::Rect::from_min_size(egui::pos2(right - 24.0, mid - 12.0), egui::vec2(24.0, 24.0));
+        let compare = placed(ui, diff, |ui: &mut egui::Ui| {
+            crate::ui::icon_button(ui, icon::GIT_DIFF, 24.0, 14.0, true, !s.unreadable())
+        })
+        .on_hover_text("Compare with now · Shift+click two to compare them");
+        if compare.clicked() && !s.unreadable() {
+            out.press = Some(Press::Compare(ui.input(|i| i.modifiers.shift)));
+        }
+        out.held = compare.has_focus();
+        right = diff.left() - 8.0;
+    } else if !s.ago.is_empty() {
+        let g = p.layout_no_wrap(s.ago.clone(), egui::FontId::proportional(11.0), ink(40));
+        right -= g.size().x;
+        p.galley(egui::pos2(right, mid - g.size().y / 2.0), g, ink(40));
+        right -= 8.0;
+    }
+
+    // The name, or its field.
+    let label_w = right - x0;
+    match look.naming {
+        Some(n) => {
+            let at = egui::Rect::from_min_size(
+                egui::pos2(x0, rect.top() + 4.0),
+                egui::vec2(label_w, 23.0),
+            );
+            out.named = name_field(ui, at, n);
+        }
+        None => {
+            let (text, ink_) = match (s.place, &s.name) {
+                (None, _) => ("Current state", ink(72)),
+                (_, Some(name)) if same => (name.as_str(), ink(62)),
+                (_, Some(name)) => (name.as_str(), color::text()),
+                _ if lit_stop => ("Saved", ink(62)),
+                _ if same => ("Saved", ink(32)),
+                _ => ("Saved", ink(45)),
+            };
+            let g = compare::one_line(ui, &[(text, 12.5, ink_, false)], label_w);
+            p.galley(egui::pos2(x0, y1 - g.size().y / 2.0), g, ink_);
+        }
+    }
+
+    // The summary.
+    let y2 = rect.top() + LINE2_Y;
+    match (summary_runs(s, look.private), s.summary.as_deref()) {
+        (Some(runs), _) => {
+            let g = runs_line(ui, &runs, label_w);
+            p.galley(egui::pos2(x0, y2 - g.size().y / 2.0), g, ink(55));
+        }
+        (None, Some(Summary::Failed { this })) => {
+            p.text(
+                egui::pos2(x0, y2),
+                egui::Align2::LEFT_CENTER,
+                icon::WARNING,
+                theme::icon_font(12.0),
+                color::warn(),
+            );
+            let words = match this {
+                true => "Couldn’t compare: this version could not be read",
+                false => "Couldn’t compare: the version before it could not be read",
+            };
+            let g = compare::one_line(ui, &[(words, 11.0, ink(40), false)], label_w - 17.0);
+            p.galley(egui::pos2(x0 + 17.0, y2 - g.size().y / 2.0), g, ink(40));
+        }
+        _ if s
+            .asked
+            .is_some_and(|at| look.time - at >= PLACEHOLDER_AFTER) =>
+        {
+            const BARS: [(f32, f32); 5] = [
+                (150.0, 40.0),
+                (96.0, 28.0),
+                (124.0, 36.0),
+                (110.0, 32.0),
+                (88.0, 30.0),
+            ];
+            let (a, b) = BARS[look.pending % BARS.len()];
+            let beat = pulse(look.time, look.pending as f64 * 0.12);
+            let bar = |x: f32, w: f32, pct: u32| {
+                let r = egui::Rect::from_min_size(egui::pos2(x, y2 - 3.5), egui::vec2(w, 7.0));
+                p.rect_filled(r, 4.0, ink(pct).gamma_multiply(beat));
+            };
+            bar(x0, a.min(label_w), 14);
+            bar(x0 + a + 5.0, b.min((label_w - a - 5.0).max(0.0)), 10);
+        }
+        _ => {}
+    }
+    if out.press.is_none() && resp.clicked() {
+        out.press = Some(Press::Toggle);
+    }
+    out
+}
+
+/// The rail from `top` to `bottom` in dashes: the line under Now before any version.
+fn dashed_rail(p: &egui::Painter, x: f32, top: f32, bottom: f32) {
+    let stroke = egui::Stroke::new(1.0, ink(18));
+    let mut y = top + 2.0;
+    while y < bottom {
+        p.line_segment(
+            [egui::pos2(x, y), egui::pos2(x, (y + 3.0).min(bottom))],
+            stroke,
+        );
+        y += 6.0;
+    }
+}
+
+/// One group of an opened row: a page, or what belongs to none.
+struct Group {
+    glyph: &'static str,
+    name: String,
+    counts: Counts,
+    /// Each line's status, trail, name and what changed.
+    lines: Vec<(Status, String, String, String)>,
+}
+
+/// An opened row's groups: its pages in the document's order, then *Document*.
+fn groups(brief: &Brief, private: bool) -> Vec<Group> {
+    let mut out: Vec<Group> = brief
+        .pages
+        .iter()
+        .map(|page| Group {
+            glyph: icon::FILE,
+            name: match private {
+                true => page.masked.clone(),
+                false => page.name.clone(),
+            },
+            counts: page.counts,
+            lines: page
+                .lines
+                .iter()
+                .map(|l| match private {
+                    true => (l.status, String::new(), l.masked.clone(), l.what.clone()),
+                    false => (l.status, l.trail.clone(), l.name.clone(), l.what.clone()),
+                })
+                .collect(),
+        })
+        .collect();
+    if !brief.document.is_empty() {
+        let mut counts = Counts::default();
+        for item in &brief.document {
+            match item.status {
+                Status::Changed => counts.changed += 1,
+                Status::Added => counts.added += 1,
+                Status::Removed => counts.removed += 1,
+            }
+        }
+        out.push(Group {
+            glyph: icon::SLIDERS,
+            name: "Document".into(),
+            counts,
+            lines: brief
+                .document
+                .iter()
+                .map(|item| {
+                    let name = match private {
+                        true => item.kind.clone(),
+                        false => item.subject.clone(),
+                    };
+                    (item.status, String::new(), name, String::new())
+                })
+                .collect(),
+        });
+    }
+    out
+}
+
+/// A group's height in an opened row.
+fn group_h(g: &Group) -> f32 {
+    let shown = g.lines.len().min(LINES_SHOWN) as f32;
+    let more = if g.lines.len() > LINES_SHOWN {
+        3.0 + 14.0
+    } else {
+        0.0
+    };
+    LIST_LINE_H + shown * (3.0 + LIST_LINE_H) + more
+}
+
+/// Under an opened row: its diff in brief, by page, a line per changed layer, and
+/// *Show on canvas* — or, while the diff is worked out, which pair it is comparing
+/// and three pulsing lines. Answers whether *Show on canvas* was pressed.
+fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool) -> bool {
+    let brief = match s.summary.as_deref() {
+        Some(Summary::Changed(b)) => Some(b),
+        _ => None,
+    };
+    let groups = brief.map(|b| groups(b, private)).unwrap_or_default();
+    let body = match brief {
+        Some(_) => {
+            groups.iter().map(group_h).sum::<f32>() + 10.0 * groups.len().saturating_sub(1) as f32
+        }
+        None => LIST_LINE_H + 3.0 * (3.0 + LIST_LINE_H),
+    };
+    let h = 6.0 + body + 10.0 + 26.0 + 10.0;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+    let p = ui.painter().clone();
+    p.rect_filled(
+        rect.expand2(egui::vec2(ROW_OUTSET, 0.0)),
+        egui::CornerRadius {
+            nw: 0,
+            ne: 0,
+            sw: 6,
+            se: 6,
+        },
+        ink(6),
+    );
+    let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
+    if !last {
+        p.line_segment(
+            [
+                egui::pos2(rail, rect.top()),
+                egui::pos2(rail, rect.bottom()),
+            ],
+            egui::Stroke::new(1.0, ink(12)),
+        );
+    }
+    let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
+    let w = rect.right() - x0;
+    let before = s.before.clone().unwrap_or_default();
+    let mut y = rect.top() + 6.0;
+    let centre = |y: f32| y + LIST_LINE_H / 2.0;
+    if brief.is_none() {
+        p.text(
+            egui::pos2(x0, centre(y)),
+            egui::Align2::LEFT_CENTER,
+            icon::CIRCLE_NOTCH,
+            theme::icon_font(12.0),
+            color::accent_400(),
+        );
+        p.text(
+            egui::pos2(x0 + 18.0, centre(y)),
+            egui::Align2::LEFT_CENTER,
+            format!("Comparing with {before}…"),
+            egui::FontId::proportional(11.0),
+            ink(50),
+        );
+        y += LIST_LINE_H;
+        for (i, frac) in [0.78, 0.62, 0.70].into_iter().enumerate() {
+            y += 3.0;
+            let beat = pulse(time, i as f64 * 0.12);
+            let cy = centre(y);
+            let dot = egui::Rect::from_center_size(egui::pos2(x0 + 7.0, cy), egui::vec2(6.0, 6.0));
+            p.rect_filled(dot, 2.0, ink(14).gamma_multiply(beat));
+            let bar = egui::Rect::from_min_size(
+                egui::pos2(x0 + 20.0, cy - 3.5),
+                egui::vec2((w - 20.0) * frac, 7.0),
+            );
+            p.rect_filled(bar, 4.0, ink(10).gamma_multiply(beat));
+            y += LIST_LINE_H;
+        }
+    }
+    for (gi, g) in groups.iter().enumerate() {
+        if gi > 0 {
+            y += 10.0;
+        }
+        // The heading: glyph, name, counts.
+        let cy = centre(y);
+        p.text(
+            egui::pos2(x0, cy),
+            egui::Align2::LEFT_CENTER,
+            g.glyph,
+            theme::icon_font(12.0),
+            ink(45),
+        );
+        let mut runs = vec![(g.name.clone(), ink(85))];
+        runs.extend(count_runs(g.counts));
+        let head = runs_line(ui, &runs, w - 18.0);
+        p.galley(
+            egui::pos2(x0 + 18.0, cy - head.size().y / 2.0),
+            head,
+            ink(85),
+        );
+        y += LIST_LINE_H;
+        for (status, trail, name, what) in g.lines.iter().take(LINES_SHOWN) {
+            y += 3.0;
+            let cy = centre(y);
+            let at = egui::Rect::from_center_size(egui::pos2(x0 + 7.0, cy), egui::vec2(12.0, 12.0));
+            tag(&p, at, *status);
+            let what = match what.is_empty() {
+                true => String::new(),
+                false => format!(" · {what}"),
+            };
+            let line = compare::one_line(
+                ui,
+                &[
+                    (trail, 11.0, ink(40), false),
+                    (name, 11.0, ink(78), false),
+                    (&what, 11.0, ink(45), false),
+                ],
+                w - 20.0,
+            );
+            p.galley(
+                egui::pos2(x0 + 20.0, cy - line.size().y / 2.0),
+                line,
+                ink(78),
+            );
+            y += LIST_LINE_H;
+        }
+        if g.lines.len() > LINES_SHOWN {
+            y += 3.0;
+            let more = g.lines.len() - LINES_SHOWN;
+            let words = match g.glyph == icon::FILE {
+                true => format!("and {more} more on {}", g.name),
+                false => format!("and {more} more"),
+            };
+            let line = compare::one_line(ui, &[(&words, 10.5, ink(40), false)], w - 20.0);
+            p.galley(egui::pos2(x0 + 20.0, y), line, ink(40));
+            y += 14.0;
+        }
+    }
+    // The footer: the pair as a compare, and which pair it is.
+    y += 10.0;
+    let words = ui.fonts_mut(|f| {
+        f.layout_no_wrap(
+            "Show on canvas".into(),
+            egui::FontId::proportional(11.5),
+            ink(62),
+        )
+    });
+    let bw = 10.0 + 13.0 + 6.0 + words.size().x + 10.0;
+    let button = egui::Rect::from_min_size(egui::pos2(x0, y), egui::vec2(bw, 26.0));
+    let show = word_button(ui, button, icon::GIT_DIFF, "Show on canvas");
+    p.text(
+        egui::pos2(button.right() + 8.0, button.center().y),
+        egui::Align2::LEFT_CENTER,
+        format!("{} against {before}", s.time),
+        egui::FontId::proportional(10.5),
+        ink(40),
+    );
+    show.clicked()
+}
+
+/// A day's heading on the rail: the day, and its date dim beside it.
+fn day_row(ui: &mut egui::Ui, day: &str, date: &str) {
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), DAY_H),
+        egui::Sense::hover(),
+    );
+    let p = ui.painter();
+    let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
+    p.line_segment(
+        [
+            egui::pos2(rail, rect.top()),
+            egui::pos2(rail, rect.bottom()),
+        ],
+        egui::Stroke::new(1.0, ink(12)),
+    );
+    let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &day.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(10.0),
+            color: ink(55),
+            extra_letter_spacing: 0.8,
+            ..Default::default()
+        },
+    );
+    job.append(
+        date,
+        7.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(10.5),
+            color: ink(38),
+            ..Default::default()
+        },
+    );
+    let g = p.layout_job(job);
+    p.galley(egui::pos2(x0, rect.bottom() - 6.0 - g.size().y), g, ink(55));
+}
+
+/// Under Now with no versions: why there are none, beside the dashed rail. `pins`
+/// is the version-history preference: off, `Ctrl+S` pins nothing.
+fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
+    let w = ui.available_width();
+    let x0 = TIME_W + COL_GAP + RAIL_W + COL_GAP;
+    let words = match (filed, pins) {
+        (true, true) => {
+            "Each Ctrl+S adds a stop here, with what it changed. Name one to find it again."
+        }
+        (true, false) => "Save named version… adds a stop here, with what it changed.",
+        (false, _) => "Save this document to the library to keep its versions.",
+    };
+    let body = ui.fonts_mut(|f| {
+        f.layout(
+            words.into(),
+            egui::FontId::proportional(11.5),
+            ink(50),
+            w - x0,
+        )
+    });
+    let h = 10.0 + 17.0 + 4.0 + body.size().y + 4.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+    let p = ui.painter();
+    let rail = rect.left() + TIME_W + COL_GAP + RAIL_W / 2.0;
+    dashed_rail(p, rail, rect.top() - 2.0, rect.bottom());
+    let x = rect.left() + x0;
+    if filed {
+        p.text(
+            egui::pos2(x, rect.top() + 10.0),
+            egui::Align2::LEFT_TOP,
+            "No versions yet",
+            egui::FontId::proportional(12.5),
+            color::text(),
+        );
+    }
+    let top = if filed {
+        rect.top() + 31.0
+    } else {
+        rect.top() + 10.0
+    };
+    p.galley(egui::pos2(x, top), body, ink(50));
+}
+
+/// The card's head: the glyph, the title, the document and its count dim beside it,
+/// how far the summaries have got while they are worked out, and the close button.
+/// Answers whether the close button was pressed.
+fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -> bool {
+    let close = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.label(theme::icon_text(
+                icon::CLOCK_COUNTER_CLOCKWISE,
+                16.0,
+                color::accent_400(),
+            ));
+            ui.label(
+                egui::RichText::new("Version history")
+                    .size(13.5)
+                    .color(theme::text::strong()),
+            );
+            ui.add(
+                egui::Label::new(egui::RichText::new(title).size(11.5).color(ink(45))).truncate(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let close = crate::ui::icon_button(ui, icon::X, 22.0, 13.0, false, true).clicked();
+                if let Some((done, all)) = progress {
+                    ui.label(
+                        egui::RichText::new(format!("Comparing {done} of {all}"))
+                            .size(11.0)
+                            .color(ink(40)),
+                    );
+                }
+                close
+            })
+            .inner
+        })
+        .inner;
+    // A thin bar under the head across the whole card, while summaries are coming.
+    if let Some((done, all)) = progress {
+        let at = ui.cursor().min.y + 4.0;
+        let full = ui.max_rect().x_range();
+        let (x0, x1) = (
+            full.min - crate::settings::PAD,
+            full.max + crate::settings::PAD,
+        );
+        let p = ui.painter();
+        p.rect_filled(
+            egui::Rect::from_x_y_ranges(x0..=x1, at..=at + 2.0),
+            0.0,
+            ink(6),
+        );
+        let to = x0 + (x1 - x0) * done as f32 / all.max(1) as f32;
+        p.rect_filled(
+            egui::Rect::from_x_y_ranges(x0..=to, at..=at + 2.0),
+            0.0,
+            color::accent_400(),
+        );
+    }
+    close
+}
+
+/// The card's foot: how a version is saved — said only while `Ctrl+S` pins one
+/// (`pins`) — *Save named version…* and *Close*. Answers which was pressed:
+/// `Some(true)` to save a named version, `Some(false)` to close.
+fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
+    let rule = ui.cursor().min.y;
+    let full = ui.max_rect().x_range();
+    ui.painter().line_segment(
+        [
+            egui::pos2(full.min - crate::settings::PAD, rule),
+            egui::pos2(full.max + crate::settings::PAD, rule),
+        ],
+        egui::Stroke::new(1.0, ink(8)),
+    );
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        let chip = egui::RichText::new(" Ctrl+S ")
+            .size(10.5)
+            .color(ink(72))
+            .background_color(ink(8));
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if pins {
+            ui.label(chip);
+            ui.label(
+                egui::RichText::new("saves a version")
+                    .size(11.0)
+                    .color(ink(45)),
+            );
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let off = crate::ui::FieldButton::Off;
+            if crate::settings::text_button(ui, "Close", off).clicked() {
+                return Some(false);
+            }
+            if crate::settings::text_button(ui, "Save named version…", off).clicked() {
+                return Some(true);
+            }
+            None
+        })
+        .inner
+    })
+    .inner
 }
 
 impl OndinApp {
@@ -153,6 +1091,68 @@ impl OndinApp {
         }
     }
 
+    /// The stops of the timeline, Now first, and each version's pair asked for in
+    /// that order — the row opened first of all.
+    fn timeline(&mut self, ctx: &egui::Context, versions: &[Version]) -> Vec<Stop> {
+        let time = ctx.input(|i| i.time);
+        let today = local_day(clock::now());
+        let mut stops = vec![Stop {
+            key: Later::Now(self.session.revision()),
+            pair: Pair {
+                older: versions.first().map(|v| v.path.clone()),
+                newer: Later::Now(self.session.revision()),
+            },
+            place: None,
+            time: "Now".into(),
+            ago: String::new(),
+            name: None,
+            summary: None,
+            asked: None,
+            before: versions
+                .first()
+                .map(|v| v.at.map_or_else(|| "—".into(), hm)),
+        }];
+        for (place, v) in versions.iter().enumerate() {
+            let key = Later::Version(v.path.clone());
+            let older = versions.get(place + 1);
+            stops.push(Stop {
+                pair: Pair {
+                    older: older.map(|o| o.path.clone()),
+                    newer: key.clone(),
+                },
+                key,
+                place: Some(place),
+                time: v.at.map_or_else(|| "—".into(), hm),
+                ago: match v.at {
+                    Some(at) if local_day(at) == today => clock::relative_label(clock::since(at)),
+                    _ => String::new(),
+                },
+                name: v
+                    .label
+                    .as_ref()
+                    .map(|l| crate::private::version(l, place).into_owned()),
+                summary: None,
+                asked: None,
+                before: older.map(|o| o.at.map_or_else(|| "—".into(), hm)),
+            });
+        }
+        let pairs: Vec<Pair> = stops.iter().map(|s| s.pair.clone()).collect();
+        let first = self
+            .version_opened
+            .as_ref()
+            .and_then(|k| stops.iter().find(|s| &s.key == k))
+            .map(|s| s.pair.clone());
+        let doc = &self.session.doc;
+        self.version_diffs
+            .want(&pairs, first.as_ref(), time, || doc.clone());
+        self.version_diffs.pump(ctx);
+        for s in &mut stops {
+            s.summary = self.version_diffs.get(&s.pair);
+            s.asked = self.version_diffs.asked(&s.pair);
+        }
+        stops
+    }
+
     /// The *Version history* card, while it is open.
     pub(crate) fn version_history_dialog(&mut self, ctx: &egui::Context) {
         if !self.versions_open {
@@ -160,19 +1160,35 @@ impl OndinApp {
         }
         let versions = self.document_versions();
         let filed = self.in_library();
-        let title = format!("Version history of {}", self.shown_title());
+        let private = crate::private::on();
+        let stops = self.timeline(ctx, &versions);
+        let time = ctx.input(|i| i.time);
+        let done = stops.iter().filter(|s| s.summary.is_some()).count();
+        let progress = (done < stops.len()).then_some((done, stops.len()));
+        if progress.is_some() {
+            // The placeholders pulse.
+            ctx.request_repaint();
+        }
+        let title = format!(
+            "{} · {}",
+            self.shown_title(),
+            plural(versions.len(), "version")
+        );
         let mut close = false;
+        let mut save_named = false;
         let mut restore: Option<PathBuf> = None;
         // A compare button's row, and whether Shift was held.
         let mut compare: Option<(usize, bool)> = None;
-        let lit = self.versions_compare;
+        let mut toggle: Option<Later> = None;
+        let mut show: Option<Option<usize>> = None;
+        let comparing = self.versions_compare;
         let compared: Vec<PathBuf> = self.session.compare.as_ref().map_or(Vec::new(), |c| {
             std::iter::once(c.pick.path.clone())
                 .chain(c.newer.as_ref().map(|n| n.pick.path.clone()))
                 .collect()
         });
         let picked = self.versions_pick.clone();
-        let private = crate::private::on();
+        let opened = self.version_opened.clone();
         // What the compare bar names each by: its name and when beside it, or its time.
         let picks: Vec<Pick> = versions
             .iter()
@@ -203,152 +1219,121 @@ impl OndinApp {
         let was_naming = naming.is_some();
         let mut name: Option<Naming> = None;
         let mut kept: Option<Naming> = None;
+        let held_id = egui::Id::new("version-row-held");
+        let held: Option<Later> = ctx.data(|d| d.get_temp(held_id));
+        let mut held_now: Option<Later> = None;
+        let pointed_id = egui::Id::new("version-row-pointed");
+        let pointed: Option<Later> = ctx.data(|d| d.get_temp(pointed_id));
+        let mut pointed_now: Option<Later> = None;
+        let pins = self.prefs.version_history;
+        let today = local_day(clock::now());
         let modal = crate::settings::card("version-history", ctx, |ui| {
             ui.set_width(crate::ui::menu_inner_w(CARD_W, crate::settings::PAD));
-            if crate::settings::modal_title(ui, &title) {
+            if card_head(ui, &title, progress) {
                 close = true;
             }
-            ui.add_space(8.0);
-            let empty = match (filed, versions.is_empty()) {
-                (false, _) => Some("Save this document to the library to keep its versions."),
-                (true, true) => Some("No versions yet — Ctrl+S saves one."),
-                _ => None,
-            };
-            if let Some(words) = empty {
-                ui.label(
-                    egui::RichText::new(words)
-                        .size(12.0)
-                        .color(theme::text::dim()),
-                );
-            }
+            ui.add_space(10.0);
             egui::ScrollArea::vertical()
                 .max_height(LIST_MAX_H)
                 .auto_shrink([false, true])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
-                    // A fixed row height, so the name field standing in for the two
-                    // lines moves nothing.
-                    let line =
-                        |pt: f32| ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(pt)));
-                    let row_h = (line(12.5) + 1.0 + line(11.0)).max(crate::settings::FIELD_H);
-                    for (place, v) in versions.iter().enumerate() {
-                        let editing = naming.as_ref().filter(|n| n.path == v.path).is_some();
-                        let row = egui::vec2(ui.available_width(), row_h);
-                        let layout = egui::Layout::left_to_right(egui::Align::Center);
-                        // A version being compared, or picked to be, stays marked.
-                        let picked = picked.as_ref() == Some(&v.path);
-                        if picked || compared.contains(&v.path) {
-                            let at = egui::Rect::from_min_size(ui.cursor().min, row)
-                                .expand2(egui::vec2(4.0, 3.0));
-                            ui.painter().rect_filled(at, 5.0, color::text_a(20));
-                        }
-                        ui.allocate_ui_with_layout(row, layout, |ui| {
-                            ui.set_min_height(row_h);
-                            ui.label(theme::icon_text(
-                                icon::CLOCK_COUNTER_CLOCKWISE,
-                                14.0,
-                                theme::text::muted(),
-                            ));
-                            let (when, ago) = match v.at {
-                                Some(at) => {
-                                    (when_label(at), clock::relative_label(clock::since(at)))
-                                }
-                                None => ("Unknown time".into(), String::new()),
-                            };
-                            // A named version leads with its name, its time beneath.
-                            let (head, foot) = match &v.label {
-                                Some(label) => (
-                                    crate::private::version(label, place).into_owned(),
-                                    match ago.is_empty() {
-                                        true => when,
-                                        false => format!("{when} · {ago}"),
-                                    },
-                                ),
-                                None => (when, ago),
-                            };
-                            if !editing {
-                                ui.vertical(|ui| {
-                                    ui.spacing_mut().item_spacing.y = 1.0;
-                                    ui.label(
-                                        egui::RichText::new(head).size(12.5).color(color::text()),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(foot)
-                                            .size(11.0)
-                                            .color(theme::text::dim()),
-                                    );
-                                });
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let mut day: Option<Option<i64>> = None;
+                    let mut pending = 0;
+                    let last = stops.len() - 1;
+                    for (i, s) in stops.iter().enumerate() {
+                        if let Some(place) = s.place {
+                            let at = versions[place].at;
+                            let key = at.map(local_day);
+                            if day != Some(key) {
+                                day = Some(key);
+                                let (head, date) = match at {
+                                    Some(at) => day_heading(at, today),
+                                    None => ("Unknown time".into(), String::new()),
+                                };
+                                day_row(ui, &head, &date);
                             }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if crate::settings::text_button(
-                                        ui,
-                                        "Restore",
-                                        crate::ui::FieldButton::Off,
-                                    )
-                                    .on_hover_text(
-                                        "Make this the document — the current state is kept \
-                                         as the newest version",
-                                    )
-                                    .clicked()
-                                    {
-                                        restore = Some(v.path.clone());
-                                    }
-                                    let tip = match (private, &v.label) {
-                                        (true, _) => crate::private::DECLINE_RENAME,
-                                        (false, Some(_)) => "Rename this version",
-                                        (false, None) => "Name this version",
-                                    };
-                                    let pencil = crate::ui::icon_button(
-                                        ui,
-                                        icon::PENCIL_SIMPLE,
-                                        22.0,
-                                        14.0,
-                                        editing,
-                                        !private,
-                                    )
-                                    .on_hover_text(tip);
-                                    if pencil.clicked() && !private && !editing {
-                                        name = Some(Naming {
-                                            path: v.path.clone(),
-                                            text: v.label.clone().unwrap_or_default(),
-                                            focused: false,
-                                        });
-                                    }
-                                    let diff = crate::ui::icon_button(
-                                        ui,
-                                        icon::GIT_DIFF,
-                                        22.0,
-                                        14.0,
-                                        lit || picked,
-                                        true,
-                                    )
-                                    .on_hover_text(
-                                        "Compare with now · Shift+click two to compare them",
-                                    );
-                                    if diff.clicked() {
-                                        let shift = ui.input(|i| i.modifiers.shift);
-                                        compare = Some((place, shift));
-                                    }
-                                    if let Some(n) = naming.as_mut().filter(|_| editing)
-                                        && name_field(ui, n)
-                                    {
-                                        kept = naming.take();
-                                    }
-                                },
-                            );
+                        }
+                        let editing = s.place.is_some_and(|p| {
+                            naming.as_ref().is_some_and(|n| n.path == versions[p].path)
                         });
-                        ui.add_space(6.0);
+                        let path = s.place.map(|p| versions[p].path.clone());
+                        let marked = path
+                            .as_ref()
+                            .is_some_and(|p| picked.as_ref() == Some(p) || compared.contains(p));
+                        let is_open = opened.as_ref() == Some(&s.key);
+                        let out = stop_row(
+                            ui,
+                            s,
+                            Look {
+                                held: held.as_ref() == Some(&s.key),
+                                opened: is_open,
+                                elsewhere: pointed.as_ref().is_some_and(|k| k != &s.key),
+                                marked,
+                                comparing,
+                                private,
+                                time,
+                                first: i == 0,
+                                last: i == last,
+                                dashed: versions.is_empty(),
+                                pending,
+                                naming: naming.as_mut().filter(|_| editing),
+                            },
+                        );
+                        if s.summary.is_none() {
+                            pending += 1;
+                        }
+                        if out.held {
+                            held_now = Some(s.key.clone());
+                        }
+                        if out.pointed {
+                            pointed_now = Some(s.key.clone());
+                        }
+                        if out.named {
+                            kept = naming.take();
+                        }
+                        match out.press {
+                            Some(Press::Toggle) => toggle = Some(s.key.clone()),
+                            Some(Press::Compare(shift)) => {
+                                compare = s.place.map(|p| (p, shift));
+                            }
+                            Some(Press::Name) => {
+                                if let Some(p) = s.place {
+                                    name = Some(Naming {
+                                        path: versions[p].path.clone(),
+                                        text: versions[p].label.clone().unwrap_or_default(),
+                                        focused: false,
+                                    });
+                                }
+                            }
+                            Some(Press::Restore) => restore = path.clone(),
+                            None => {}
+                        }
+                        if is_open && s.openable() && opened_rows(ui, s, private, time, i == last) {
+                            show = Some(s.place);
+                        }
+                    }
+                    if versions.is_empty() {
+                        empty_rows(ui, filed, pins);
                     }
                 });
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if crate::settings::text_button(ui, "Close", crate::ui::FieldButton::Off).clicked()
-                {
-                    close = true;
+            ui.add_space(12.0);
+            match card_foot(ui, pins) {
+                Some(true) => save_named = true,
+                Some(false) => close = true,
+                None => {}
+            }
+        });
+        ctx.data_mut(|d| {
+            for (id, key) in [(held_id, held_now), (pointed_id, pointed_now)] {
+                match key {
+                    Some(k) => {
+                        d.insert_temp(id, k);
+                    }
+                    None => d.remove::<Later>(id),
                 }
-            });
+            }
         });
         // Escape in the field is the field's: it surrendered focus this frame, so
         // `name_field` answered and `naming` is gone, and the card stays.
@@ -364,9 +1349,26 @@ impl OndinApp {
             naming = Some(n);
         }
         self.version_naming = naming;
+        // One row open at a time: opening another closes the first.
+        if let Some(key) = toggle {
+            self.version_opened = match self.version_opened.as_ref() == Some(&key) {
+                true => None,
+                false => Some(key),
+            };
+        }
         let chosen = compare.and_then(|(place, shift)| self.compare_pick(&picks, place, shift));
-        let leaving =
-            restore.is_some() || chosen.is_some() || close || (modal.should_close() && !escaped);
+        // *Show on canvas*: Now against the newest, or a version against the one before.
+        let shown = show.and_then(|place| match place {
+            None => picks.first().map(|p| (p.clone(), None)),
+            Some(p) => picks
+                .get(p + 1)
+                .map(|older| (older.clone(), Some(picks[p].clone()))),
+        });
+        let leaving = restore.is_some()
+            || chosen.is_some()
+            || shown.is_some()
+            || close
+            || (modal.should_close() && !escaped);
         // Leaving the card keeps what was typed, as a press elsewhere does.
         if leaving && let Some(n) = self.version_naming.take() {
             self.commit_version_name(n);
@@ -375,11 +1377,15 @@ impl OndinApp {
             self.versions_open = false;
             self.versions_compare = false;
             self.versions_pick = None;
+            self.version_opened = None;
+            self.version_diffs.stop();
         }
         if let Some(path) = restore {
             self.restore_version(&path);
-        } else if let Some((then, newer)) = chosen {
+        } else if let Some((then, newer)) = chosen.or(shown) {
             self.compare_with(then, newer);
+        } else if save_named {
+            self.save_named_version();
         }
     }
 
@@ -584,6 +1590,30 @@ mod tests {
         (app, root)
     }
 
+    /// Add a rectangle named `name` to the open document's page, unsaved.
+    fn add_rect(app: &mut OndinApp, seed: u64, name: &str) {
+        let id = ondin_core::IdSource::new(seed).mint();
+        let page = app.session.page;
+        app.session
+            .doc
+            .apply(&ondin_core::Transaction(vec![
+                ondin_core::Operation::CreateNode {
+                    id,
+                    parent: page,
+                    index: 0,
+                    kind: ondin_core::NodeKind::Rect {
+                        size: ondin_core::kurbo::Size::new(20.0, 20.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                    transform: None,
+                    name: Some(name.into()),
+                },
+            ]))
+            .expect("the rectangle");
+        app.session.mark_unsaved();
+    }
+
     /// One frame of the card alone, answering the strings it drew.
     fn card_frame(
         ctx: &egui::Context,
@@ -622,10 +1652,41 @@ mod tests {
             .collect()
     }
 
-    /// Opening a row's name field moves no row: every *Restore* sits where it sat.
+    /// A few frames, the summaries worked out between them, answering the last's
+    /// strings and where they were drawn.
+    fn settled(ctx: &egui::Context, app: &mut OndinApp) -> Vec<(String, egui::Pos2)> {
+        card_texts(ctx, app, Vec::new());
+        app.version_diffs.settle();
+        for _ in 0..3 {
+            card_texts(ctx, app, Vec::new());
+        }
+        card_texts(ctx, app, Vec::new())
+    }
+
+    /// Whether `t` is a row's time, `HH:MM`.
+    fn is_time(t: &str) -> bool {
+        t.len() == 5 && t.as_bytes()[2] == b':'
+    }
+
+    /// How far below the card's title each string `keep` takes was drawn: the card
+    /// is centred, so it moves as a whole when it grows.
+    fn below_title(drawn: &[(String, egui::Pos2)], keep: impl Fn(&str) -> bool) -> Vec<f32> {
+        let title = drawn
+            .iter()
+            .find(|(t, _)| t == "Version history")
+            .map(|(_, p)| p.y)
+            .expect("the title is drawn");
+        drawn
+            .iter()
+            .filter(|(t, _)| keep(t))
+            .map(|(_, p)| p.y - title)
+            .collect()
+    }
+
+    /// Opening a row's name field moves no row: every time sits where it sat.
     ///
-    /// flip: the row sized by its content rather than `row_h` → fails at "no row
-    /// moves".
+    /// flip: `stop_row` allocating the field's rect instead of placing it over the
+    /// first line → fails at "no row moves".
     #[test]
     fn opening_a_name_field_moves_no_row() {
         let ctx = egui::Context::default();
@@ -635,17 +1696,9 @@ mod tests {
         let versions = app.document_versions();
         assert_eq!(versions.len(), 2, "fixture: two rows");
         app.versions_open = true;
-        let restores = |drawn: Vec<(String, egui::Pos2)>| -> Vec<f32> {
-            drawn
-                .into_iter()
-                .filter(|(t, _)| t == "Restore")
-                .map(|(_, p)| p.y)
-                .collect()
-        };
-        for _ in 0..4 {
-            card_texts(&ctx, &mut app, Vec::new());
-        }
-        let before = restores(card_texts(&ctx, &mut app, Vec::new()));
+        let times =
+            |drawn: Vec<(String, egui::Pos2)>| below_title(&drawn, |t| is_time(t) || t == "Now");
+        let before = times(settled(&ctx, &mut app));
         app.version_naming = Some(Naming {
             path: versions[0].path.clone(),
             text: String::new(),
@@ -654,10 +1707,163 @@ mod tests {
         for _ in 0..4 {
             card_texts(&ctx, &mut app, Vec::new());
         }
-        let after = restores(card_texts(&ctx, &mut app, Vec::new()));
+        let after = times(card_texts(&ctx, &mut app, Vec::new()));
         assert!(app.version_naming.is_some(), "fixture: the field is open");
-        assert_eq!(before.len(), 2, "fixture: both rows drawn");
+        assert_eq!(before.len(), 3, "fixture: Now and both rows drawn");
         assert_eq!(before, after, "no row moves");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Each row says what its version changed against the one before: a layer added
+    /// is `+1` on its page, a save of nothing new is *Same as* the one before, and
+    /// the oldest gives the document's size. Now, saved, has no changes since.
+    ///
+    /// flip: `Brief::parts` leaving out the counts → fails at "the added layer".
+    #[test]
+    fn a_row_says_what_its_version_changed() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "summary");
+        assert!(app.save_file(true), "fixture: the first pin");
+        assert!(app.save_file(true), "fixture: the same again");
+        add_rect(&mut app, 0x51, "Badge");
+        assert!(app.save_file(true), "fixture: a rectangle more");
+        let versions = app.document_versions();
+        assert_eq!(versions.len(), 3, "fixture: three rows");
+        app.versions_open = true;
+        let drawn: Vec<String> = settled(&ctx, &mut app)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
+        let page = crate::private::page(&app.session.doc, app.session.page).into_owned();
+        let same = hm(versions[2].at.unwrap());
+        assert!(
+            drawn.iter().any(|t| t == &format!("{page} +1")),
+            "the added layer: {drawn:?}"
+        );
+        assert!(
+            drawn.iter().any(|t| t == &format!("Same as {same}")),
+            "the save of nothing new: {drawn:?}"
+        );
+        assert!(
+            drawn
+                .iter()
+                .any(|t| t.starts_with("First version · 1 page, ")),
+            "the oldest: {drawn:?}"
+        );
+        assert!(
+            drawn.iter().any(|t| t.starts_with("No changes since ")),
+            "Now: {drawn:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Opening a row lists its changes under it and pushes only the rows below; the
+    /// rows above stay where they were.
+    ///
+    /// flip: `version_history_dialog` drawing `opened_rows` under every openable row
+    /// → fails at "the row below is pushed".
+    #[test]
+    fn opening_a_row_moves_only_the_rows_below() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "open");
+        assert!(app.save_file(true), "fixture: the first pin");
+        add_rect(&mut app, 0x52, "Badge");
+        assert!(app.save_file(true), "fixture: the second");
+        add_rect(&mut app, 0x53, "Chip");
+        assert!(app.save_file(true), "fixture: the third");
+        let versions = app.document_versions();
+        app.versions_open = true;
+        let saved = |drawn: &[(String, egui::Pos2)]| below_title(drawn, |t| t == "Saved");
+        let before = saved(&settled(&ctx, &mut app));
+        assert_eq!(before.len(), 3, "fixture: three rows");
+        app.version_opened = Some(Later::Version(versions[1].path.clone()));
+        let drawn = settled(&ctx, &mut app);
+        let after = saved(&drawn);
+        assert_eq!(after[..2], before[..2], "the rows above stay");
+        assert!(after[2] > before[2] + 40.0, "the row below is pushed");
+        assert!(
+            drawn.iter().any(|(t, _)| t.starts_with("Badge")),
+            "the change is listed: {drawn:?}"
+        );
+        assert!(drawn.iter().any(|(t, _)| t == "Show on canvas"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One row's buttons at a time: an opened row shows its buttons at rest, and gives
+    /// them up to another row under the pointer.
+    ///
+    /// flip: `stop_row` showing an opened row's buttons whatever `Look::elsewhere`
+    /// says → fails at "one row's buttons".
+    #[test]
+    fn an_opened_row_gives_its_buttons_up_to_the_hovered_one() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "buttons");
+        assert!(app.save_file(true), "fixture: the first pin");
+        add_rect(&mut app, 0x56, "Badge");
+        assert!(app.save_file(true), "fixture: the second");
+        add_rect(&mut app, 0x57, "Chip");
+        assert!(app.save_file(true), "fixture: the third");
+        let versions = app.document_versions();
+        app.versions_open = true;
+        app.version_opened = Some(Later::Version(versions[1].path.clone()));
+        let drawn = settled(&ctx, &mut app);
+        let restores =
+            |drawn: &[(String, egui::Pos2)]| drawn.iter().filter(|(t, _)| t == "Restore").count();
+        assert_eq!(restores(&drawn), 1, "the opened row's, at rest");
+        let (_, top) = drawn
+            .iter()
+            .find(|(t, _)| t == "Saved")
+            .cloned()
+            .expect("fixture: the newest row");
+        let at = top + egui::vec2(4.0, 4.0);
+        let mut last = Vec::new();
+        for _ in 0..4 {
+            last = card_texts(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        assert_eq!(restores(&last), 1, "one row's buttons");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// *Show on canvas* on an opened row compares its version with the one before
+    /// it, the newer standing for Now, and leaves the card.
+    ///
+    /// flip: `version_history_dialog` answering *Show on canvas* with the version
+    /// against now → fails at "with the version before it".
+    #[test]
+    fn show_on_canvas_compares_a_version_with_the_one_before() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = filed(&ctx, "show");
+        assert!(app.save_file(true), "fixture: the first pin");
+        add_rect(&mut app, 0x54, "Badge");
+        assert!(app.save_file(true), "fixture: the second");
+        add_rect(&mut app, 0x55, "Chip");
+        let versions = app.document_versions();
+        app.versions_open = true;
+        app.version_opened = Some(Later::Version(versions[0].path.clone()));
+        let drawn = settled(&ctx, &mut app);
+        let (_, at) = drawn
+            .iter()
+            .find(|(t, _)| t == "Show on canvas")
+            .cloned()
+            .expect("fixture: the row is open");
+        let at = at + egui::vec2(4.0, 4.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        card_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        card_frame(&ctx, &mut app, vec![button(true)]);
+        card_frame(&ctx, &mut app, vec![button(false)]);
+        let c = app.session.compare.as_ref().expect("a compare opens");
+        assert_eq!(c.pick.path, versions[1].path, "with the version before it");
+        assert_eq!(
+            c.newer.as_ref().map(|n| n.pick.path.clone()),
+            Some(versions[0].path.clone()),
+            "the version standing for Now"
+        );
+        assert!(!app.versions_open, "and the card closes");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -744,8 +1950,8 @@ mod tests {
     /// In private mode a version's name is drawn as its place, and no name field
     /// opens, so a name cannot be typed blind; one open as it came on is kept.
     ///
-    /// flip: the row drawing `v.label` without `private::version` → fails at "the
-    /// name is masked".
+    /// flip: `timeline` naming the row by `v.label` without `private::version` →
+    /// fails at "the name is masked".
     #[test]
     fn private_mode_masks_a_versions_name() {
         let ctx = egui::Context::default();

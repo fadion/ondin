@@ -135,6 +135,7 @@ mod thumbs;
 mod tools;
 mod ui;
 mod update;
+mod version_diffs;
 mod versions;
 mod view;
 mod vision;

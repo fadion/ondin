@@ -859,6 +859,11 @@ pub struct OndinApp {
     pub(crate) versions_pick: Option<std::path::PathBuf>,
     /// The version whose name the card is editing.
     pub(crate) version_naming: Option<crate::versions::Naming>,
+    /// Each version's summary against the one before it, kept for the app's life
+    /// (`crate::version_diffs`).
+    pub(crate) version_diffs: crate::version_diffs::Diffs,
+    /// The card's row opened to its changes; cleared when the card closes.
+    pub(crate) version_opened: Option<crate::version_diffs::Later>,
     /// The kit *Make all local*'s confirmation is asking about.
     pub(crate) making_all_local: Option<String>,
     /// *Stop sharing as kit*'s confirmation: `Some(None)` asks about the open document,
@@ -1509,6 +1514,8 @@ impl OndinApp {
             now_canvas: None,
             versions_pick: None,
             version_naming: None,
+            version_diffs: Default::default(),
+            version_opened: None,
             making_all_local: None,
             unsharing_kit: None,
             context_menu: None,
@@ -5921,6 +5928,8 @@ impl OndinApp {
         self.versions_open = false;
         self.versions_compare = false;
         self.versions_pick = None;
+        self.version_opened = None;
+        self.version_diffs.stop();
         // Kept, as every way out of the name field but Escape keeps it.
         if let Some(n) = self.version_naming.take() {
             self.commit_version_name(n);

@@ -118,6 +118,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D362** Documents live in one base folder (default `~/.ondin`). Identity is a block at the top of the `.ondin` file, holding only user-changed values.
 - **D363** A project is an id in each file's metadata; metadata wins over folder location.
 - **D364** `Ctrl+S` pins a version under `.versions/`. Autosave is silent and only when dirty. There is no Save As.
+- Version history says under each version what it changed against the one pinned before it, counted as the compare counts (topmost changed layers). The summary is worked out off the UI thread and cached for the app's life by the pair's two paths, since a pinned version never changes.
 - **D366** Recent files, stars and covers are local to the machine.
 - **D377** Crash recovery is a whole-document snapshot every 10 s, not a journal. **D393** One writer thread serialises autosave, snapshots and forgets; `Ctrl+S` stays synchronous.
 - **D378** Every record is written atomically (`atomic::write`: temp, fsync, rename). **D975** It keeps the file's mode and writes through a symlink.

@@ -78,7 +78,8 @@ ondin-app/src/
 ├─ chrome.rs        caption buttons, drag strip, resize edges per host; focus strip
 ├─ update.rs        Velopack updater and top-bar chip
 ├─ meter.rs         the top bar's resource meter: CPU and memory
-├─ versions.rs      Version history: the card listing pinned copies, naming, restore and the compare door
+├─ versions.rs      Version history: the timeline of pinned copies, naming, restore and the compare doors
+├─ version_diffs.rs what each version changed against the one before, worked out off the UI thread and cached
 ├─ compare.rs       compare with a version: the read-only mode, its marks, bar and changes card (app-compare.md)
 ├─ logging.rs       config_dir()/ondin/ondin.log
 ├─ machine_dir.rs   cache_dir()/ondin (OndinData on Windows)

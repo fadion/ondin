@@ -1241,7 +1241,7 @@ fn heading(ui: &mut egui::Ui, glyph: &str, name: &str, count: usize, dim: bool) 
 
 /// `parts` laid out as one line cut with an ellipsis at `width`: each part's text,
 /// size, ink and whether it is struck through.
-fn one_line(
+pub(crate) fn one_line(
     ui: &egui::Ui,
     parts: &[(&str, f32, egui::Color32, bool)],
     width: f32,

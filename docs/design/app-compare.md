@@ -13,10 +13,12 @@ matched by id, so a renamed or moved layer is one change.
   everywhere the open document would (`Compare::now_doc`): the diff, the boxes, the names, Now's
   drawing. `OndinApp::then_canvas` and `now_canvas` are the versions' canvases, each made on first
   use and dropped on the first frame with no compare.
-- **Doors.** Each Version history row has a compare button (the git-diff glyph,
-  `theme::icon::GIT_DIFF`, before the pencil, shown with the row's other buttons): it closes the
-  card and opens the compare. An opened row's *Show on canvas* opens the version against the one
-  before it, as two versions (Now's: the newest version against now; `library.md`). With
+- **Doors.** Each Version history row has two compare buttons, before the pencil and shown with
+  the row's other buttons (`library.md`): *Compare with now* (`versions::NOW_GLYPH`) and the
+  compare with the previous version (`versions::PREVIOUS_GLYPH`), which opens the version against
+  the one before it as two versions. Either closes the card and opens the compare. An opened
+  row's *Show on canvas* (the git-diff glyph) opens that same pair; Now's opens the newest version
+  against now. With
   Shift held it is the second of two (`OndinApp::compare_pick`): after a Shift+click on another
   row, or with another row's compare with now open, it compares the older of the two (the lower
   row) with the newer; else it picks its row (`OndinApp::versions_pick`, tinted, its button lit,

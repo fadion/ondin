@@ -1097,6 +1097,10 @@ fn field(
     frame.inner_margin.left = lead as i8;
     // `place`, not `put`: in a row, `put` leaves the cursor at the text's end,
     // short of the note, and the buttons after the field land on it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+    )]
     let resp = ui.place(
         inner,
         egui::TextEdit::singleline(text)

@@ -4,6 +4,11 @@
 //! buttons, fields, segmented controls, colour ramps. Nothing here knows about
 //! the document.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the primitives that wrap egui's raw controls live here"
+)]
+
 use crate::theme::{self, color, icon};
 use eframe::egui;
 
@@ -1261,7 +1266,7 @@ fn framed_row<R>(
     frame: egui::Frame,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
-    ui.allocate_ui_with_layout(
+    let row = ui.allocate_ui_with_layout(
         size,
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
@@ -1272,8 +1277,26 @@ fn framed_row<R>(
                 })
                 .inner
         },
-    )
-    .inner
+    );
+    if typing_inside(ui.ctx(), row.response.rect) {
+        typing_edge(ui, row.response.rect);
+    }
+    row.inner
+}
+
+/// Whether the focused widget is a text entry lying inside `rect`: a field row's
+/// own edit, a number being typed, so the row wears [`typing_edge`] whatever its
+/// caller composed into it. A focused button in the row is keyboard focus, which
+/// [`focus_ring`] shows, so only a widget holding a `TextEdit`'s state counts.
+fn typing_inside(ctx: &egui::Context, rect: egui::Rect) -> bool {
+    // Separate reads: the context lock is not re-entrant.
+    let Some(id) = ctx.memory(|m| m.focused()) else {
+        return false;
+    };
+    let Some(w) = widget_rect(ctx, id) else {
+        return false;
+    };
+    rect.expand(0.5).contains_rect(w.rect) && egui::TextEdit::load_state(ctx, id).is_some()
 }
 
 /// [`field_row`] with an accent border, marking the paint the open picker is
@@ -1307,21 +1330,16 @@ pub fn text_field(
     let pt = Scale::of(size.y).text_pt();
     let font = egui::FontId::proportional(pt);
     let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
-    let scope = ui.scope(|ui| {
-        field_row_inset(ui, size, 0.0, 0.0, |ui| {
-            ui.add(
-                egui::TextEdit::singleline(text)
-                    .frame(frame)
-                    .desired_width(f32::INFINITY)
-                    .font(font)
-                    .hint_text(egui::RichText::new(hint).size(pt)),
-            )
-        })
-    });
-    if scope.inner.has_focus() {
-        typing_edge(ui, scope.response.rect);
-    }
-    scope.inner
+    // The row paints the typing edge (`framed_row`).
+    field_row_inset(ui, size, 0.0, 0.0, |ui| {
+        ui.add(
+            egui::TextEdit::singleline(text)
+                .frame(frame)
+                .desired_width(f32::INFINITY)
+                .font(font)
+                .hint_text(egui::RichText::new(hint).size(pt)),
+        )
+    })
 }
 
 /// Typing focus: the `accent_700` hairline on a text entry's own edge while it
@@ -1361,34 +1379,30 @@ pub fn search_box(
     let font = egui::FontId::proportional(pt);
     let mut frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
     frame.inner_margin.left = 0;
-    let scope = ui.scope(|ui| {
-        field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
-            // Registered first, so the edit above it wins its own area and this
-            // takes only the magnifier's.
-            let row = ui.interact(ui.max_rect(), id.with("row"), egui::Sense::click());
-            ui.label(theme::icon_text(
-                icon::MAGNIFYING_GLASS,
-                scale.glyph_pt(),
-                theme::text::faint(),
-            ));
-            let edit = ui.add(
-                egui::TextEdit::singleline(text)
-                    .id(id)
-                    .frame(frame)
-                    .desired_width(f32::INFINITY)
-                    .font(font)
-                    .hint_text(egui::RichText::new(hint).size(pt)),
-            );
-            if row.clicked() {
-                edit.request_focus();
-            }
-            edit
-        })
-    });
-    if scope.inner.has_focus() {
-        typing_edge(ui, scope.response.rect);
-    }
-    scope.inner
+    // The row paints the typing edge (`framed_row`).
+    field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
+        // Registered first, so the edit above it wins its own area and this
+        // takes only the magnifier's. The bare `CLICK` flag: `Sense::click()`
+        // adds `FOCUSABLE`, a tab stop in front of the edit.
+        let row = ui.interact(ui.max_rect(), id.with("row"), egui::Sense::CLICK);
+        ui.label(theme::icon_text(
+            icon::MAGNIFYING_GLASS,
+            scale.glyph_pt(),
+            theme::text::faint(),
+        ));
+        let edit = ui.add(
+            egui::TextEdit::singleline(text)
+                .id(id)
+                .frame(frame)
+                .desired_width(f32::INFINITY)
+                .font(font)
+                .hint_text(egui::RichText::new(hint).size(pt)),
+        );
+        if row.clicked() {
+            edit.request_focus();
+        }
+        edit
+    })
 }
 
 /// The inset of an [`inline_edit`]'s text from its rect's left edge; a caller

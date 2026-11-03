@@ -1937,6 +1937,10 @@ fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>
                     let eye_w = 26.0;
                     let font = egui::FontId::proportional(ui::CONTROL_PT);
                     let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+                    )]
                     let edit = ui.add(
                         egui::TextEdit::singleline(&mut card.token)
                             .password(!card.show_token)

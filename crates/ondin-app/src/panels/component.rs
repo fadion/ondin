@@ -766,6 +766,10 @@ impl OndinApp {
             ui::CONTROL_H - ui::FIELD_BORDER_H,
             ui::FIELD_PAD_X,
         );
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+        )]
         let framed = ui::field_frame()
             .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
@@ -864,6 +868,10 @@ impl OndinApp {
                 let room = ui.available_width() - button;
                 let font = egui::FontId::proportional(FIELD_PT);
                 let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+                )]
                 let resp = ui.add_enabled(
                     !private,
                     egui::TextEdit::singleline(&mut text)

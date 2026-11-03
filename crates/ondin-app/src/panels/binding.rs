@@ -1581,6 +1581,10 @@ impl OndinApp {
                 let at = refused(table, key.kind(), buf.as_str()).map(|r| r.1);
                 refusal_galley(ui, buf.as_str(), at, &font)
             };
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+            )]
             let out = egui::TextEdit::singleline(&mut rt.text)
                 .id(edit_id)
                 .frame(ui::edit_frame(ui, &font, 28.0 - ui::FIELD_BORDER_H, 0.0))

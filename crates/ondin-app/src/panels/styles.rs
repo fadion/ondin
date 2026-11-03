@@ -670,6 +670,10 @@ impl OndinApp {
         );
         let id = ui.id().with(("style-naming-field", style.id));
         let pad = ui::edit_frame(ui, &font, field.height(), 0.0);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+        )]
         let edit = ui.place(
             field,
             egui::TextEdit::singleline(&mut n.text)

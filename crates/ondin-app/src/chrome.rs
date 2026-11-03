@@ -668,6 +668,7 @@ mod tests {
                     ui.spacing_mut().item_spacing.x = 5.0;
                     caption_buttons(ui, chrome, act);
                     ui.add_space(9.0);
+                    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
                     let _ = ui.button("Settings");
                 },
             );

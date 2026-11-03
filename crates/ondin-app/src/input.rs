@@ -2853,6 +2853,7 @@ mod boolean_key_tests {
     /// gives the focus back at the end of a frame in which it claimed a `Tab`.
     /// Pinned so an egui upgrade that narrows `wants_keyboard_input` shows here.
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn a_focused_widget_silences_the_keymap_and_tab_is_what_focuses_one() {
         let ctx = egui::Context::default();
         let screen = egui::RawInput {

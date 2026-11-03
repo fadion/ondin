@@ -1157,6 +1157,10 @@ impl OndinApp {
                 // minimum width would push it over the last channel.
                 ui.spacing_mut().interact_size.x = PCT_W;
                 ui.spacing_mut().button_padding.x = 0.0;
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "the number inside a composed field row"
+                )]
                 let r = ui::bare_drag_value(
                     ui,
                     egui::DragValue::new(&mut pct)
@@ -1220,6 +1224,10 @@ impl OndinApp {
         };
         let font = egui::FontId::proportional(ui::CONTROL_PT);
         let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+        )]
         let resp = ui.add(
             egui::TextEdit::singleline(&mut text)
                 .frame(pad)
@@ -1323,6 +1331,10 @@ impl OndinApp {
                     }
                     // Read only when the edit ends, so a number half-typed is never
                     // mistaken for a colour on the way.
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "the number inside a composed field row"
+                    )]
                     let field = egui::DragValue::new(&mut v)
                         .range(0.0..=max)
                         .speed(ui::scrub(if max > 100.0 { 1.0 } else { 0.5 }))

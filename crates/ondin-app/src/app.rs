@@ -11004,6 +11004,7 @@ mod edit_valve_report_tests {
                     .doc
                     .get(id)
                     .map_or(100.0, |n| n.opacity() * 100.0);
+                #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
                 let resp = ui.add(egui::DragValue::new(&mut pct).range(0.0..=100.0));
                 let tx = Transaction(vec![Operation::SetOpacity {
                     id,

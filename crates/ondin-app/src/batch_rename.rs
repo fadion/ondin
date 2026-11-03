@@ -1228,6 +1228,10 @@ pub(crate) fn field_edit<'t>(
         rect.min,
         egui::pos2(rect.right() - 4.0 - right, rect.bottom()),
     );
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+    )]
     let edit = egui::TextEdit::singleline(text)
         .frame(frame)
         .desired_width(at.width() - ui::FIELD_PAD_X)

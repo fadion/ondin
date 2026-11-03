@@ -84,6 +84,8 @@ mod chrome;
 mod colour_text;
 mod compare;
 mod contrast;
+#[cfg(test)]
+mod control_audit;
 mod cursor;
 mod expr;
 mod eyedropper;

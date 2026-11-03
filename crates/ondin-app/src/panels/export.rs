@@ -1209,6 +1209,10 @@ impl OndinApp {
         let mut out = None;
         ui::labelled(ui, part.label(), |ui| {
             // `ui::text_field` has no leading glyph, so its numbers are kept here.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+            )]
             let row = ui.scope(|ui| {
                 ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;

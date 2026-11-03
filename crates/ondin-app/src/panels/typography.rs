@@ -1085,6 +1085,10 @@ impl OndinApp {
             }
             let font = egui::FontId::proportional(12.0);
             let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+            )]
             let out = ui.add_enabled(
                 !read_only,
                 egui::TextEdit::singleline(&mut text)
@@ -2423,6 +2427,10 @@ impl OndinApp {
                     };
                     let font = egui::FontId::proportional(ui::CONTROL_PT);
                     let pad = ui::edit_frame(ui, &font, CELL - ui::FIELD_BORDER_H, 0.0);
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+                    )]
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut text)
                             .frame(pad)
@@ -2458,6 +2466,10 @@ impl OndinApp {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut pct = f64::from(shown.components[3]) * 100.0;
+                        #[expect(
+                            clippy::disallowed_methods,
+                            reason = "the number inside a composed field row"
+                        )]
                         let resp = ui::bare_drag_value(
                             ui,
                             egui::DragValue::new(&mut pct)
@@ -6116,6 +6128,7 @@ mod tests {
     /// A combo with a search field above rows survives a click in the field under
     /// `CloseOnClickOutside` (egui's default closes it) and still closes on a pick.
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn a_combo_survives_a_click_in_its_search_field_but_not_a_pick() {
         let still_open = |close_outside: bool, hit_row: bool| {
             let ctx = egui::Context::default();
@@ -7187,6 +7200,7 @@ mod tests {
 
     /// No ink lands right of the card's inner edge, asserted on the painted shapes.
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn nothing_in_the_popup_paints_past_the_card() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -7903,6 +7917,7 @@ mod cancel_gate {
 
     /// Drive a `DragValue` into a real drag, then hand it `events` and report
     /// whether egui still calls it dragged.
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn dragged_after(events: Vec<egui::Event>) -> bool {
         let ctx = egui::Context::default();
         let mut v = 50.0_f64;
@@ -10534,6 +10549,7 @@ mod valve_arm_tests {
     ///
     /// flip: restoring the `else if resp.changed() && !resp.lost_focus()` arm → fails at "no undo step" (1 against 0).
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn a_changed_frame_with_no_engagement_commits_nothing() {
         let (ctx, mut app, id) = app_with_text();
         let before = app.session.history.undo_depth();

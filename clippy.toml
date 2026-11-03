@@ -1,0 +1,15 @@
+# A form control is built from the shared primitives in `crates/ondin-app/src/ui.rs`, which hold
+# the standard (`docs/design/app-chrome.md`, *Shared rules*). The raw egui constructors are refused
+# everywhere else; a site that has to use one says why in `#[expect(clippy::disallowed_methods,
+# reason = "…")]`, so every exception is named and greppable.
+disallowed-methods = [
+    { path = "egui::TextEdit::singleline", reason = "a text entry is ui::text_field, ui::search_box or ui::inline_edit, which carry the field ground and the typing edge" },
+    { path = "egui::TextEdit::multiline", reason = "a text entry is built in ui.rs, which carries the field ground and the typing edge" },
+    { path = "egui::DragValue::new", reason = "a number is ui::value_field*, which carries the ground, the scrub strip and the typing edge" },
+    { path = "egui::Button::new", reason = "a button is ui::field_button, ui::label_button, ui::action_button or settings::text_button, on ui::button_face's states" },
+    { path = "egui::Ui::button", reason = "a button is ui::field_button, ui::label_button, ui::action_button or settings::text_button, on ui::button_face's states" },
+    { path = "egui::Ui::small_button", reason = "a button is ui::field_button, ui::label_button, ui::action_button or settings::text_button, on ui::button_face's states" },
+    { path = "egui::Ui::checkbox", reason = "a tick is ui::tick_box, a switch ui::switch_row" },
+    { path = "egui::Ui::radio_value", reason = "a choice of a few is ui::segmented" },
+    { path = "egui::Ui::text_edit_singleline", reason = "a text entry is ui::text_field, ui::search_box or ui::inline_edit" },
+]

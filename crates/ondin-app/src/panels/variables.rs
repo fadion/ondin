@@ -3104,6 +3104,10 @@ fn edit_field(
         let at = (refused == Some(buf.as_str()) && !buf.as_str().is_empty()).then_some(0);
         super::binding::refusal_galley(ui, buf.as_str(), at, &font)
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+    )]
     let mut edit = egui::TextEdit::singleline(text)
         .id(id)
         .frame(crate::ui::edit_frame(

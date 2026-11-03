@@ -712,6 +712,10 @@ const BOOL_ROW_H: f32 = 28.0;
 const BOOL_ROW_GAP: f32 = ui::CARD_COL_GAP;
 /// Glyph size inside the identity row's 28×28 actions.
 const ACTION_GLYPH: f32 = 16.0;
+/// How far the typing edge stands off a card head's name while it is edited, so
+/// the hairline clears the heading's glyphs.
+const HEAD_NAME_EDGE: egui::Vec2 = egui::vec2(5.0, 3.0);
+
 /// Outer height of the boolean dropdown's menu: its rows with headroom, so a
 /// retuned row height does not add a scroll area.
 const BOOL_MENU_H: f32 = 220.0;
@@ -826,12 +830,19 @@ impl OndinApp {
                         Some((_, buf)) if editing => buf.clone(),
                         _ => name0.clone(),
                     };
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "the card head's name, a heading edited in place"
+                    )]
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut name)
                             .frame(egui::Frame::NONE)
                             .desired_width(140.0)
                             .font(egui::FontId::proportional(13.0)),
                     );
+                    if resp.has_focus() {
+                        ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
+                    }
                     // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() commits the typed name once.
                     if resp.gained_focus() || resp.changed() {
                         self.name_edit = Some((id, name.clone()));
@@ -1736,12 +1747,19 @@ impl OndinApp {
                         Some((_, buf)) if editing => buf.clone(),
                         _ => name0.to_string(),
                     };
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "the card head's name, a heading edited in place"
+                    )]
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut name)
                             .frame(egui::Frame::NONE)
                             .desired_width(140.0)
                             .font(egui::FontId::proportional(13.0)),
                     );
+                    if resp.has_focus() {
+                        ui::typing_edge(ui, resp.rect.expand2(HEAD_NAME_EDGE));
+                    }
                     // The I-beam is kept: the frameless field has no other cue.
                     if resp.gained_focus() || resp.changed() {
                         self.name_edit = Some((id, name.clone()));
@@ -6381,6 +6399,10 @@ impl OndinApp {
         };
         let mut out = None;
         // `ui::text_field` has no leading glyph, so its numbers are kept here.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+        )]
         let row = ui.scope(|ui| {
             ui::field_row(ui, egui::vec2(width, cell), |ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -8012,6 +8034,10 @@ impl OndinApp {
                             Some(a) => a * 100.0,
                             None => paint::alpha_of(brush) * 100.0,
                         };
+                        #[expect(
+                            clippy::disallowed_methods,
+                            reason = "the number inside a composed field row"
+                        )]
                         let value = egui::DragValue::new(&mut pct)
                             .speed(ui::scrub(0.5))
                             .max_decimals(0)
@@ -8614,6 +8640,10 @@ impl OndinApp {
             .max_rect()
             .height()
             .min(ui::CONTROL_H - ui::FIELD_BORDER_H);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
+        )]
         let out = egui::TextEdit::singleline(&mut text)
             .id(edit_id)
             .frame(ui::edit_frame(ui, &font, row_h, 0.0))
@@ -9680,6 +9710,10 @@ impl OndinApp {
             self.paint_hex_field(ui, id, slot, &brush, false);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut pct = f64::from(color.components[3]) * 100.0;
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "the number inside a composed field row"
+                )]
                 let resp = ui::bare_drag_value(
                     ui,
                     egui::DragValue::new(&mut pct)
@@ -11663,6 +11697,7 @@ mod carry_tests {
     ///
     /// Debug-only: egui puts `Style::debug` behind `debug_assertions`.
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn shrinking_a_paint_list_paints_no_warning_outline() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -13481,6 +13516,7 @@ mod identity_row_tests {
     }
 
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn the_two_identity_rows_are_the_same_height() {
         let single = row_height(|ui| {
             identity_glyph(ui, icon::SQUARE, color::accent_300());
@@ -13518,6 +13554,7 @@ mod identity_row_tests {
     /// The name field keeps the I-beam: it is frameless, so the cursor is the only signal that
     /// the heading is editable (unlike the chrome eyebrows, `ui::head_tests`).
     #[test]
+    #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
     fn the_inspector_name_still_offers_the_i_beam_it_is_editable_with() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -15063,6 +15100,7 @@ mod scale_row_tests {
     /// drawn, unlike the plain `ui.horizontal` it replaced.
     #[test]
     fn a_conditional_row_does_not_renumber_the_rows_below_it() {
+        #[expect(clippy::disallowed_methods, reason = "a test's probe widget")]
         fn second_row_id(ctx: &egui::Context, keyed: bool, first_row_drawn: bool) -> egui::Id {
             let mut got = None;
             let _ = ctx.run_ui(

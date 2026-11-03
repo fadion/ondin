@@ -1153,6 +1153,10 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
             if pal.layers_only {
                 layers_chip(ui);
             }
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the command palette's field, its own scale by design"
+            )]
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut pal.query)
                     .id(egui::Id::new("command-palette-field"))

@@ -464,7 +464,8 @@ pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
 }
 
 /// [`card_modal`]'s ground, hairline, corner and shadow, without its margin: also
-/// worn by Colour review, which floats at the palette's place but is no modal.
+/// worn by every popup over the canvas, the command palette and Colour review
+/// among them.
 pub(crate) fn card_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(color::card())

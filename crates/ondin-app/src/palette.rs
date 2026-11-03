@@ -1029,18 +1029,8 @@ impl OndinApp {
         let modal = egui::Modal::new(egui::Id::new("command-palette"))
             .area(area)
             .backdrop_color(egui::Color32::TRANSPARENT)
-            .frame(
-                egui::Frame::NONE
-                    .fill(color::card())
-                    .stroke(egui::Stroke::new(1.0, theme::color::divider()))
-                    .corner_radius(egui::CornerRadius::same(8))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 14],
-                        blur: 30,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(102),
-                    }),
-            )
+            // Batch rename's card, as every popup over the canvas wears.
+            .frame(crate::settings::card_frame())
             .show(ctx, |ui| {
                 ui.set_width(W);
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);

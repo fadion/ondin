@@ -3104,7 +3104,9 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
         }
         Cell::Alias(t) => {
             let name = table.get(*t).map(|t| t.name.clone()).unwrap_or_default();
-            let galley = p.layout(name, font, color::text(), MODE_W - 12.0 - 14.0);
+            let mut job = egui::text::LayoutJob::simple_singleline(name, font, color::text());
+            job.wrap = egui::text::TextWrapping::truncate_at_width(MODE_W - 12.0 - 14.0);
+            let galley = p.layout_job(job);
             let w = (galley.size().x + 14.0).min(MODE_W - 12.0);
             let cap = egui::Rect::from_min_size(
                 egui::pos2(cell.left() + 6.0, y - 9.0),

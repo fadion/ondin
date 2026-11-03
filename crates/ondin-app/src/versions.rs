@@ -158,25 +158,17 @@ impl Stop {
             Some(Summary::Failed { this: true })
         )
     }
-
-    /// It can be compared with the version before it: there is one, and both read.
-    fn has_previous(&self) -> bool {
-        self.before.is_some() && !matches!(self.summary.as_deref(), Some(Summary::Failed { .. }))
-    }
 }
 
-/// *Compare with now*: an arrow up the rail to the top stop.
-const NOW_GLYPH: &str = icon::ARROW_LINE_UP;
-/// *Compare with the previous version*: an arrow down the rail to the stop below.
-const PREVIOUS_GLYPH: &str = icon::ARROW_DOWN;
+/// *Compare with now*: the compare's own Then ⇄ Now grip, so it reads apart from
+/// *Show on canvas*'s git-diff glyph, which opens a different pair.
+const NOW_GLYPH: &str = icon::ARROWS_LEFT_RIGHT;
 
 /// What a press on a row asked for.
 enum Press {
     Toggle,
     /// Its compare with now, and whether Shift was held.
     Compare(bool),
-    /// Its compare with the version before it, the newer standing for Now.
-    Previous,
     Name,
     Restore,
 }
@@ -482,15 +474,6 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
             egui::vec2(24.0, 24.0),
         );
         let diff = pencil.translate(egui::vec2(-28.0, 0.0));
-        let back_diff = diff.translate(egui::vec2(-28.0, 0.0));
-        let previous = placed(ui, back_diff, |ui: &mut egui::Ui| {
-            crate::ui::icon_button(ui, PREVIOUS_GLYPH, 24.0, 14.0, false, s.has_previous())
-        })
-        .on_hover_text(match (&s.before, s.has_previous()) {
-            (Some(before), true) => format!("Compare with the previous version, {before}"),
-            (None, _) => "The first version: nothing before it".into(),
-            (Some(_), false) => "A version here could not be read".into(),
-        });
         let compare = placed(ui, diff, |ui: &mut egui::Ui| {
             crate::ui::icon_button(
                 ui,
@@ -520,17 +503,13 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
             );
         if compare.clicked() && !s.unreadable() {
             out.press = Some(Press::Compare(ui.input(|i| i.modifiers.shift)));
-        } else if previous.clicked() && s.has_previous() {
-            out.press = Some(Press::Previous);
         } else if name.clicked() && !look.private && !editing {
             out.press = Some(Press::Name);
         } else if back.clicked() {
             out.press = Some(Press::Restore);
         }
-        out.held = [&previous, &compare, &name, &back]
-            .iter()
-            .any(|r| r.has_focus());
-        right = back_diff.left() - 8.0;
+        out.held = compare.has_focus() || name.has_focus() || back.has_focus();
+        right = diff.left() - 8.0;
     } else if version && look.comparing {
         let diff =
             egui::Rect::from_min_size(egui::pos2(right - 24.0, mid - 12.0), egui::vec2(24.0, 24.0));
@@ -1342,8 +1321,6 @@ impl OndinApp {
                                 }
                             }
                             Some(Press::Restore) => restore = path.clone(),
-                            // The same pair *Show on canvas* opens.
-                            Some(Press::Previous) => show = Some(s.place),
                             None => {}
                         }
                         if is_open && s.openable() && opened_rows(ui, s, private, time, i == last) {
@@ -1923,15 +1900,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A collapsed row under the pointer shows both compares, and the one with the
-    /// previous version compares the pair *Show on canvas* would.
+    /// A collapsed row under the pointer shows one compare, and it compares that
+    /// version with now, not with the version before it.
     ///
-    /// flip: `version_history_dialog` answering `Press::Previous` as a compare with
-    /// now → fails at "with the version before it".
+    /// flip: `version_history_dialog` answering `Press::Compare` with the pair *Show
+    /// on canvas* opens → fails at "of the hovered version".
     #[test]
-    fn the_previous_button_compares_with_the_version_before() {
+    fn a_rows_one_compare_is_with_now() {
         let ctx = egui::Context::default();
-        let (mut app, root) = filed(&ctx, "previous");
+        let (mut app, root) = filed(&ctx, "with-now");
         assert!(app.save_file(true), "fixture: the first pin");
         add_rect(&mut app, 0x58, "Badge");
         assert!(app.save_file(true), "fixture: the second");
@@ -1955,12 +1932,12 @@ mod tests {
         }
         let glyph = |g: &str| drawn.iter().filter(|(t, _)| t == g).count();
         assert_eq!(glyph(NOW_GLYPH), 1, "compare with now, collapsed");
-        assert_eq!(glyph(PREVIOUS_GLYPH), 1, "and with the previous version");
-        let (_, at) = drawn
-            .iter()
-            .find(|(t, _)| t == PREVIOUS_GLYPH)
-            .cloned()
-            .unwrap();
+        assert_eq!(
+            glyph(icon::ARROW_DOWN),
+            0,
+            "and no compare with the previous"
+        );
+        let (_, at) = drawn.iter().find(|(t, _)| t == NOW_GLYPH).cloned().unwrap();
         let at = at + egui::vec2(3.0, 3.0);
         let button = |pressed| egui::Event::PointerButton {
             pos: at,
@@ -1972,11 +1949,8 @@ mod tests {
         card_frame(&ctx, &mut app, vec![button(true)]);
         card_frame(&ctx, &mut app, vec![button(false)]);
         let c = app.session.compare.as_ref().expect("a compare opens");
-        assert_eq!(c.pick.path, versions[1].path, "with the version before it");
-        assert_eq!(
-            c.newer.as_ref().map(|n| n.pick.path.clone()),
-            Some(versions[0].path.clone())
-        );
+        assert_eq!(c.pick.path, versions[0].path, "of the hovered version");
+        assert!(c.newer.is_none(), "with now");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -28,6 +28,8 @@ const CAPSULE_H: f32 = 28.0;
 /// The menu's and the picker's widths.
 const MENU_W: f32 = 210.0;
 const PICKER_W: f32 = 256.0;
+/// The height of the picker's list, which its rows scroll past.
+const STYLE_LIST_H: f32 = 300.0;
 /// Greyed rows' opacity under a read-only capsule.
 const GREYED: f32 = 0.42;
 
@@ -965,11 +967,6 @@ impl OndinApp {
                 .then(g(a).cmp(&g(b)))
                 .then(a.name.cmp(&b.name))
         });
-        let kit_heads = rows
-            .iter()
-            .filter_map(|s| s.kit())
-            .collect::<std::collections::BTreeSet<_>>()
-            .len();
         let counts: Vec<usize> = rows.iter().map(|s| style::users(doc, s.id).len()).collect();
         pk.highlight = pk.highlight.min(rows.len().saturating_sub(1));
         let (up, down, enter, escape) = ctx.input(|i| {
@@ -995,24 +992,10 @@ impl OndinApp {
         let mut pick: Option<StyleId> = enter
             .then(|| rows.get(pk.highlight).map(|s| s.id))
             .flatten();
-        let groups = rows
-            .iter()
-            .enumerate()
-            .filter(|(i, s)| {
-                let g = |s: &Style| s.name.rsplit_once('/').map(|(g, _)| g.to_string());
-                *i == 0 || g(s) != g(rows[i - 1]) || s.kit() != rows[i - 1].kit()
-            })
-            .filter(|(_, s)| s.name.contains('/'))
-            .count();
-        let head = super::binding::FACE_HEAD_H;
-        let h = 40.0
-            + (rows.len().max(1) as f32) * ui::MENU_ROW_H
-            + groups as f32 * head
-            + kit_heads as f32 * (head + 4.0);
         let pos = ui::menu_place(
             ctx,
             egui::pos2(menu_left(pk.under), pk.under.bottom() + 6.0),
-            egui::vec2(PICKER_W, h.min(360.0)),
+            egui::vec2(PICKER_W, STYLE_LIST_H + 40.0),
         );
         let slot_word = pk.slot.title().to_lowercase();
         let rect = egui::Area::new(egui::Id::new("style-picker"))
@@ -1040,15 +1023,22 @@ impl OndinApp {
                         } else {
                             "Nothing matches".to_string()
                         };
-                        ui.label(
+                        let note = ui.label(
                             egui::RichText::new(text)
                                 .size(11.0)
                                 .color(theme::text::faint()),
                         );
+                        // The list's room, so the next search's rows fit.
+                        let gap = ui.spacing().item_spacing.y;
+                        ui.add_space((STYLE_LIST_H - note.rect.height() - gap).max(0.0));
                         return;
                     }
+                    // One height whatever the search matches: an egui popup can
+                    // shrink but never grows back.
                     egui::ScrollArea::vertical()
-                        .max_height(300.0)
+                        .auto_shrink([false, false])
+                        .max_height(STYLE_LIST_H)
+                        .min_scrolled_height(STYLE_LIST_H)
                         .show(ui, |ui| {
                             let mut last_group: Option<(Option<&str>, Option<&str>)> = None;
                             let mut last_kit: Option<&str> = None;
@@ -1519,6 +1509,39 @@ mod tests {
         assert!(app.style_picker.is_none(), "one press closes it");
         assert!(!app.session.has_gesture_preview(), "and its preview");
         assert_eq!(fill_style(&app, b), None, "nothing applied");
+    }
+
+    /// The picker is one height whether its search matches or not, so clearing a
+    /// search that matched nothing brings the rows back into a full list.
+    /// flip: dropping the space `style_picker_ui` leaves after "Nothing matches"
+    /// → fails at "matching nothing".
+    #[test]
+    fn the_picker_keeps_one_height_whatever_it_matches() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        app.style_naming = None;
+        app.style_picker = Some(StylePicker {
+            slot: StyleSlot::Fills,
+            targets: vec![b],
+            under: egui::Rect::from_min_size(egui::pos2(300.0, 100.0), egui::vec2(20.0, 20.0)),
+            query: String::new(),
+            focus: false,
+            highlight: 0,
+        });
+        let height = |app: &mut OndinApp, query: &str| {
+            app.style_picker.as_mut().expect("open").query = query.to_owned();
+            for _ in 0..2 {
+                frame(&ctx, app, vec![]);
+            }
+            ctx.memory(|m| m.area_rect(egui::Id::new("style-picker")))
+                .expect("drawn")
+                .height()
+        };
+        let full = height(&mut app, "");
+        assert!(full > STYLE_LIST_H, "fixture: the list is laid out, {full}");
+        assert_eq!(height(&mut app, "zzz"), full, "matching nothing");
+        assert_eq!(height(&mut app, ""), full, "and cleared again");
     }
 
     /// **The picker's highlight previews on the canvas and `Enter` applies it**.

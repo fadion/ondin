@@ -308,6 +308,8 @@ pub(crate) struct ChipOut {
 /// The chip's capsule: 20 tall, fully round (D1038).
 const CHIP_H: f32 = 20.0;
 const LIST_W: f32 = 256.0;
+/// The height of the variable list, eight rows, which the rest scroll past.
+const VAR_LIST_H: f32 = 8.0 * (ui::MENU_ROW_H + 1.0);
 
 /// Draw a bound field's chip in `rect` — the field's value area — and read what
 /// it is asked. `name` is the variable's full name, `tip` the resolved value and
@@ -1120,15 +1122,7 @@ impl OndinApp {
         let at = c.key.at();
         let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
         let mut chosen: Option<VarId> = None;
-        let pos = ui::dropdown_place(
-            ctx,
-            c.under,
-            egui::vec2(
-                LIST_W,
-                (list.len().clamp(1, 8) as f32) * ui::MENU_ROW_H + 40.0,
-            ),
-            6.0,
-        );
+        let pos = ui::dropdown_place(ctx, c.under, egui::vec2(LIST_W, VAR_LIST_H + 40.0), 6.0);
         let rect = egui::Area::new(egui::Id::new("var-complete"))
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
@@ -1161,6 +1155,7 @@ impl OndinApp {
                     let refusal = (!c.own_search)
                         .then(|| format!("--{}", c.query))
                         .and_then(|t| refused(table, c.key.kind(), &t).map(|(v, at)| (v, t, at)));
+                    let notes_top = ui.cursor().top();
                     if let Some((v, t, at)) = &refusal {
                         let font = egui::FontId::proportional(11.5);
                         let plain = egui::TextFormat::simple(font.clone(), theme::text::dim());
@@ -1207,8 +1202,14 @@ impl OndinApp {
                             .color(theme::text::dim()),
                         );
                     }
+                    // One height whatever the query matches, a note above the
+                    // list taking its room from the list: an egui popup can
+                    // shrink but never grows back.
+                    let list_h = VAR_LIST_H - (ui.cursor().top() - notes_top);
                     egui::ScrollArea::vertical()
-                        .max_height(8.0 * (ui::MENU_ROW_H + 1.0))
+                        .auto_shrink([false, false])
+                        .max_height(list_h)
+                        .min_scrolled_height(list_h)
                         .show(ui, |ui| {
                             for (i, v) in list.iter().enumerate() {
                                 // What the binding would draw at the field's layer —
@@ -2526,6 +2527,31 @@ mod tests {
             ondin_core::Brush::Solid(RED.with_alpha(0.5)),
             "drawn as before"
         );
+    }
+
+    /// The variable list is one height whether its search matches or not, its
+    /// "No variable matches" note taking its room from the list.
+    /// flip: `var_complete_ui` sizing the list at `VAR_LIST_H` whatever the notes
+    /// above it took → fails at "matching nothing".
+    #[test]
+    fn the_variable_list_keeps_one_height_whatever_it_matches() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        let under = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(80.0, 20.0));
+        app.open_complete(&ctx, FieldKey::Radius { id: rect }, under);
+        let height = |app: &mut OndinApp, query: &str| {
+            app.var_complete.as_mut().expect("open").query = query.to_owned();
+            for _ in 0..2 {
+                let _ = ctx.run_ui(Default::default(), |_| app.var_complete_ui(&ctx));
+            }
+            ctx.memory(|m| m.area_rect(egui::Id::new("var-complete")))
+                .expect("drawn")
+                .height()
+        };
+        let full = height(&mut app, "");
+        assert!(full > VAR_LIST_H, "fixture: the list is laid out, {full}");
+        assert_eq!(height(&mut app, "zzz"), full, "matching nothing");
+        assert_eq!(height(&mut app, ""), full, "and cleared again");
     }
 
     /// **The arrows scroll the `--` list to the row they light** (§15 D1084):

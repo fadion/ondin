@@ -40,6 +40,8 @@ pub(crate) use picker::Picker;
 /// The picker's window id, for the eyedropper tests' layer fixture.
 #[cfg(test)]
 pub(crate) use picker::layer_id as picker_layer_id;
+/// The family dropdown's popup height, for the settings dialog's default-font combo.
+pub(crate) use typography::FAMILY_POPUP_H;
 pub(crate) use typography::TypeSubject;
 /// A value delete awaiting its confirmation (§15 D996).
 pub(crate) use variants::ValueDelete;

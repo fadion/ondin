@@ -1236,6 +1236,7 @@ impl OndinApp {
                             .icon(ui::combo_chevron)
                             .width(ui.available_width())
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .height(super::typography::FAMILY_POPUP_H)
                             .selected_text(
                                 egui::RichText::new("Replace with…").color(theme::text::faint()),
                             )

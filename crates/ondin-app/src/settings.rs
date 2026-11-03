@@ -373,6 +373,7 @@ impl OndinApp {
                     .width(DEFAULT_FONT_W)
                     // The popup holds a search field, so a click inside must not dismiss it.
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .height(crate::panels::FAMILY_POPUP_H)
                     .selected_text(head)
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);

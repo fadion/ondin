@@ -429,8 +429,12 @@ fn seg_cell_of(track: f32, n: usize) -> f32 {
 /// Height of one row in the family list. Fixed because `ScrollArea::show_rows`
 /// virtualizes by dividing the scroll offset by it.
 const FAMILY_ROW_H: f32 = ui::MENU_ROW_H;
-/// The family list's tallest, before it scrolls.
+/// The family list's height, which its rows scroll past.
 const FAMILY_LIST_H: f32 = 320.0;
+/// The most a family dropdown's popup holds: the search field, a reset row and
+/// the whole list, so only the list scrolls. Every combo around
+/// `family_list` passes it as its `height`.
+pub(crate) const FAMILY_POPUP_H: f32 = FAMILY_LIST_H + 80.0;
 
 /// Room a family row keeps at its right edge for the loading dot, reserved on every
 /// row so the name does not reflow when its face arrives.
@@ -1237,6 +1241,7 @@ impl OndinApp {
                 .width(width)
                 // The popup holds a search field, so a click inside must not dismiss it.
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .height(FAMILY_POPUP_H)
                 .selected_text(head)
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
@@ -1312,7 +1317,12 @@ impl OndinApp {
             ui.make_persistent_id("family-search"),
         );
         let total = self.fonts.match_count(&self.font_filter);
-        let mut area = egui::ScrollArea::vertical().max_height(FAMILY_LIST_H);
+        // One height whatever the search matches: egui's popup can shrink but
+        // never grows back, so a list that once matched little would stay short.
+        let mut area = egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .max_height(FAMILY_LIST_H)
+            .min_scrolled_height(FAMILY_LIST_H);
         if just_opened(ui)
             && let Some(i) = self.fonts.match_position(&self.font_filter, current)
         {
@@ -9678,6 +9688,36 @@ mod family_list_scroll_tests {
             centred_row_offset(10, pitch),
             "reopened, it finds the new current family"
         );
+    }
+
+    /// The family list is one height whether its search matches every family or
+    /// none, so a popup measured on a short list is never left short.
+    /// flip: `family_list` dropping `auto_shrink([false, false])` → fails at "matching
+    /// one". Dropping `min_scrolled_height` does not bite here: it holds the height
+    /// only in a popup with less room than the list.
+    #[test]
+    fn the_family_list_keeps_one_height_whatever_it_matches() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let names: Vec<String> = (0..200).map(|i| format!("Family {i:03}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        app.fonts.list_for_test(&names);
+        let height = |app: &mut OndinApp, filter: &str| {
+            app.font_filter = filter.to_owned();
+            let mut h = 0.0;
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                app.family_list(ui, "");
+                h = ui.min_rect().height();
+            });
+            h
+        };
+        let full = height(&mut app, "");
+        assert!(
+            full > FAMILY_LIST_H,
+            "fixture: the list is laid out, {full}"
+        );
+        assert_eq!(height(&mut app, "Family 007"), full, "matching one");
+        assert_eq!(height(&mut app, "zzz"), full, "matching nothing");
     }
 }
 

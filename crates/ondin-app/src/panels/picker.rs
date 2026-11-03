@@ -1223,14 +1223,18 @@ impl OndinApp {
             _ => ui.available_width() - pct_w - ROW_GAP,
         };
         let font = egui::FontId::proportional(ui::CONTROL_PT);
-        let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
+        // Centred by the edit rather than padded by `ui::edit_frame`: whole-point
+        // padding puts the line half a point above the labels and numbers beside
+        // it, which centre on the row exactly.
         #[expect(
             clippy::disallowed_methods,
             reason = "the entry inside a composed field row, which paints the ground and ui::typing_edge itself"
         )]
         let resp = ui.add(
             egui::TextEdit::singleline(&mut text)
-                .frame(pad)
+                .frame(egui::Frame::NONE)
+                .min_size(egui::vec2(0.0, ROW_H - ui::FIELD_BORDER_H))
+                .vertical_align(egui::Align::Center)
                 .desired_width(width)
                 .char_limit(ui::COLOUR_CHAR_LIMIT)
                 .font(font),
@@ -2829,6 +2833,32 @@ mod mixed_hex_tests {
         }
         assert_eq!(app.prefs.recent_colours.len(), SWATCHES);
         assert_eq!(first(&app), Some(c(29).components[..3].try_into().unwrap()));
+    }
+
+    /// The hex text sits on the line of the format chooser and the opacity beside it.
+    ///
+    /// flip: `colour_text_field` padded by `ui::edit_frame` again → fails, half a
+    /// point high.
+    #[test]
+    fn the_hex_text_shares_the_rows_line() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _b) = on_b(&ctx, Format::Hex);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        let rects = text_rects(&ctx, &mut app);
+        let top = |s: &str| {
+            rects
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("the row draws {s:?}"))
+                .1
+                .min
+                .y
+        };
+        assert_eq!(top("0000FF"), top("Hex"));
+        assert_eq!(top("0000FF"), top("40"));
     }
 }
 

@@ -205,7 +205,7 @@ impl OndinApp {
             return;
         };
         const ITEM_H: f32 = 26.0;
-        let at = head + egui::vec2(-8.0, crate::ui::MENU_GAP + 6.0);
+        let at = head + egui::vec2(0.0, crate::ui::MENU_GAP);
         let current = Deficiency::from_key(&self.prefs.vision);
         let mut chosen = None;
         let menu = egui::Area::new(egui::Id::new("vision-menu"))
@@ -415,6 +415,64 @@ mod tests {
             device_region(Rect::new(150.25, 75.0, 160.5, 80.0), view, size),
             [100, 50, 121, 60],
             "edge pixels a frame partly covers are its"
+        );
+    }
+
+    /// The deficiency menu hangs `MENU_GAP` under its head, as every dropdown
+    /// hangs under its control.
+    ///
+    /// flip: `vision_menu` placing it 6 lower again → fails at the menu's top.
+    #[test]
+    fn the_menu_hangs_a_menu_gap_under_its_head() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _n, _f, _d) = fixture(&ctx);
+        app.canvas_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        app.toggle_vision();
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.vision_chrome(ui.ctx()),
+            );
+        };
+        run(&mut app, Vec::new());
+        run(&mut app, Vec::new());
+        let bar = ctx
+            .memory(|m| m.area_rect(egui::Id::new("vision-bar")))
+            .expect("the bar is drawn");
+        // The head sits right of the bar's centre: the eye, the scope and a
+        // separator come before it.
+        let p = egui::pos2(bar.center().x + 40.0, bar.center().y);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(&mut app, vec![egui::Event::PointerMoved(p)]);
+        run(&mut app, vec![press(true)]);
+        run(&mut app, vec![press(false)]);
+        let v = app.vision.as_ref().expect("the mode is on");
+        assert!(v.menu, "fixture: the press landed on the head");
+        let head = v.menu_at;
+        for _ in 0..3 {
+            run(&mut app, Vec::new());
+        }
+        let menu = ctx
+            .memory(|m| m.area_rect(egui::Id::new("vision-menu")))
+            .expect("the menu is drawn");
+        // An area lands on whole points.
+        let want = head + egui::vec2(0.0, crate::ui::MENU_GAP);
+        assert!(
+            (menu.min - want).length() <= 0.5,
+            "{menu:?} against {want:?}"
         );
     }
 }

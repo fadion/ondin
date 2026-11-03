@@ -895,7 +895,7 @@ impl OndinApp {
             return;
         };
         const ITEM_H: f32 = crate::ui::MENU_ROW_H;
-        let at = head + egui::vec2(-8.0, crate::ui::MENU_GAP + 6.0);
+        let at = head + egui::vec2(0.0, crate::ui::MENU_GAP);
         let level = self.prefs.contrast.options().level;
         let mut prefs = self.prefs.contrast.clone();
         let menu = egui::Area::new(egui::Id::new("contrast-level-menu"))

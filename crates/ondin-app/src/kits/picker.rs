@@ -39,8 +39,11 @@ const GAP_X: f32 = 8.0;
 const GAP_Y: f32 = 10.0;
 /// A list row's height — a kit header, a search result.
 const ROW_H: f32 = 28.0;
-/// A result row with its description's first sentence under the name.
+/// A result row with its description's first line under the name.
 const ROW_H2: f32 = 42.0;
+/// How far the hover card's *Alt+click to open* sits below centre, to share the
+/// link host's baseline.
+const HINT_NUDGE: f32 = 1.0;
 /// How long the pointer rests on a tile or a result before its card shows.
 const CARD_DELAY: f64 = 0.5;
 /// The hover card's width, and its gap from the panel's edge.
@@ -1686,7 +1689,7 @@ fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
 fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut Out<'_>) {
     for (i, item) in items.iter().enumerate() {
         // A description takes a second line; without one the row stays one line.
-        let about = first_sentence(&item.about);
+        let about = first_line(&item.about);
         let h = if about.is_empty() { ROW_H } else { ROW_H2 };
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
@@ -1755,7 +1758,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
             );
         }
         if !about.is_empty() {
-            // Dim and cut to the row, under the name.
+            // Dim and cut to the row with an ellipsis, under the name.
             let x = rect.left() + 56.0;
             let line = egui::text::LayoutJob {
                 wrap: egui::text::TextWrapping::truncate_at_width(rect.right() - 6.0 - x),
@@ -1859,20 +1862,23 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                                     .font(theme::icon_font(13.0))
                                     .color(theme::text::faint()),
                             );
-                            ui.label(
+                            let host = ui.label(
                                 egui::RichText::new(ondin_core::link_host(&item.docs))
                                     .size(11.0)
                                     .color(theme::text::dim()),
                             );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new("Alt+click to open")
-                                            .size(10.5)
-                                            .color(theme::text::faint()),
-                                    );
-                                },
+                            // Painted against the host rather than laid out: the
+                            // card's width is fixed, and centred the smaller
+                            // hint's baseline sits above the host's.
+                            ui.painter().text(
+                                egui::pos2(
+                                    ui.max_rect().right(),
+                                    host.rect.center().y + HINT_NUDGE,
+                                ),
+                                egui::Align2::RIGHT_CENTER,
+                                "Alt+click to open",
+                                egui::FontId::proportional(10.5),
+                                theme::text::faint(),
                             );
                         });
                     }
@@ -1880,14 +1886,11 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
         });
 }
 
-/// A description's first sentence, for a result's second line: up to and with
-/// the first full stop that ends a sentence, or the first line.
-fn first_sentence(text: &str) -> &str {
-    let line = text.lines().next().unwrap_or_default().trim();
-    match line.find(". ") {
-        Some(i) => &line[..=i],
-        None => line,
-    }
+/// A description's first line, for a result's second line, which cuts it to the
+/// row with an ellipsis. A sentence stopped at its full stop reads as the whole
+/// description.
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or_default().trim()
 }
 
 /// A section's label and its count (*This document · 2*).
@@ -3725,8 +3728,11 @@ pub(crate) mod tests {
             ],
             "ranked, a description's match under every name's"
         );
-        assert_eq!(first_sentence("One call. Use it once."), "One call.");
-        assert_eq!(first_sentence("v1.2 ships\nnext line"), "v1.2 ships");
+        assert_eq!(
+            first_line("One call. Use it once."),
+            "One call. Use it once."
+        );
+        assert_eq!(first_line("v1.2 ships\nnext line"), "v1.2 ships");
 
         let many = shown(
             (0..45)

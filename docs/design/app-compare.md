@@ -103,7 +103,9 @@ matched by id, so a renamed or moved layer is one change.
   With two versions Now draws the newer through a third (`now_canvas`) over the open document's
   drawing, and the frame labels, which are the open document's, are not drawn.
   Swipe clips the version left of a draggable handle (a 2pt accent line, a 24×36 accent grip with
-  a left-right arrow), with *THEN* and *NOW* pills in the bottom corners.
+  a left-right arrow), with *THEN* and *NOW* pills in the bottom corners. A right-click during
+  the handle's drag puts it back where the drag began (`Compare::split_from`, through
+  `OndinApp::cancel_gesture`), and the held press moves nothing until it is let go.
 - **The card** (`compare_card`): *CHANGES* and *n layers · n pages · n more*; per page a heading
   (file glyph, name, row count, dimmed for a removed page); each row a
   16pt status tag, the dim trail then the name (*· n inside* for an added or removed layer with

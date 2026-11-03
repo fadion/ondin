@@ -2539,6 +2539,15 @@ impl OndinApp {
         if self.pencil.take().is_some() {
             return true;
         }
+        // The compare's Swipe handle goes back to where its drag began.
+        if let Some(c) = self.session.compare.as_mut()
+            && let Some(from) = c.split_from.take()
+        {
+            c.split = from;
+            self.gesture_cancelled = true;
+            ctx.stop_dragging();
+            return true;
+        }
         if self.drag.is_none() && self.layer_drag.is_none() && !self.pages.dragging() && !field {
             return false;
         }

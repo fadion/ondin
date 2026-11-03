@@ -206,7 +206,9 @@ pub(crate) struct Compare {
     pub(crate) side: Side,
     /// Where Swipe splits the canvas, as a fraction of its width.
     pub(crate) split: f32,
-    dragging_split: bool,
+    /// Where the split stood when its handle's drag began, while it is dragged; a
+    /// right-click puts it back there (`OndinApp::cancel_gesture`).
+    pub(crate) split_from: Option<f32>,
     /// A row stepped to on another page, revealed once its page is showing.
     reveal: Option<usize>,
     /// The page the compare opened on and its selection, given back when it closes
@@ -532,7 +534,7 @@ impl OndinApp {
             expanded: HashSet::new(),
             side: Side::Now,
             split: 0.5,
-            dragging_split: false,
+            split_from: None,
             reveal: None,
             selection,
             elsewhere,
@@ -784,22 +786,24 @@ impl OndinApp {
         let split_x = rect.left() + rect.width() * c.split;
         let swipe = c.side == Side::Swipe;
         let near = |p: egui::Pos2| swipe && (p.x - split_x).abs() <= HANDLE_REACH;
-        let dragging = c.dragging_split;
+        let dragging = c.split_from.is_some();
         let on_handle = resp.hover_pos().is_some_and(near);
-        if resp.drag_started() {
+        // A drag a right-click cancelled stays spent until the button is let go:
+        // neither the split nor the camera follows the hand meanwhile.
+        let spent = self.gesture_cancelled;
+        if resp.drag_started() && !spent {
             let origin = ui.input(|i| i.pointer.press_origin());
             let grab = origin.is_some_and(near) && resp.dragged_by(egui::PointerButton::Primary);
             if let Some(c) = self.session.compare.as_mut() {
-                c.dragging_split = grab;
+                c.split_from = grab.then_some(c.split);
             }
         }
-        if resp.dragged() {
-            if dragging
-                || self
-                    .session
-                    .compare
-                    .as_ref()
-                    .is_some_and(|c| c.dragging_split)
+        if resp.dragged() && !spent {
+            if self
+                .session
+                .compare
+                .as_ref()
+                .is_some_and(|c| c.split_from.is_some())
             {
                 if let Some(p) = resp.interact_pointer_pos()
                     && let Some(c) = self.session.compare.as_mut()
@@ -813,7 +817,7 @@ impl OndinApp {
         if resp.drag_stopped()
             && let Some(c) = self.session.compare.as_mut()
         {
-            c.dragging_split = false;
+            c.split_from = None;
         }
         let cursor = if dragging || on_handle {
             egui::CursorIcon::ResizeHorizontal
@@ -2111,6 +2115,56 @@ mod tests {
             view.contains(at.center()),
             "in view: {view:?} around {at:?}"
         );
+        let _ = std::fs::remove_file(&f.version);
+    }
+
+    /// A right-click during the Swipe handle's drag puts the split back where the
+    /// drag began, not at the centre, and the hand still held moves nothing after.
+    ///
+    /// flip: `cancel_gesture` ignoring `split_from` → fails at "back where it began".
+    #[test]
+    fn a_right_click_puts_the_swipe_handle_back() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx, "swipe-cancel");
+        for _ in 0..2 {
+            whole_frame(&ctx, &mut f.app, Vec::new());
+        }
+        open(&mut f);
+        let c = f.app.session.compare.as_mut().unwrap();
+        c.side = Side::Swipe;
+        c.split = 0.3;
+        whole_frame(&ctx, &mut f.app, Vec::new());
+        let rect = f.app.canvas_rect;
+        let at = |x: f32| egui::pos2(rect.left() + rect.width() * x, rect.center().y);
+        let button = |pos, button, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let primary = egui::PointerButton::Primary;
+        whole_frame(&ctx, &mut f.app, vec![egui::Event::PointerMoved(at(0.3))]);
+        whole_frame(&ctx, &mut f.app, vec![button(at(0.3), primary, true)]);
+        for x in [0.4, 0.5, 0.6] {
+            whole_frame(&ctx, &mut f.app, vec![egui::Event::PointerMoved(at(x))]);
+        }
+        let split = f.app.session.compare.as_ref().unwrap().split;
+        assert!(
+            (split - 0.6).abs() < 0.01,
+            "fixture: the drag moved it: {split}"
+        );
+        let secondary = egui::PointerButton::Secondary;
+        whole_frame(&ctx, &mut f.app, vec![button(at(0.6), secondary, true)]);
+        whole_frame(&ctx, &mut f.app, vec![button(at(0.6), secondary, false)]);
+        let split = f.app.session.compare.as_ref().unwrap().split;
+        assert!((split - 0.3).abs() < 1e-6, "back where it began: {split}");
+        for x in [0.7, 0.8] {
+            whole_frame(&ctx, &mut f.app, vec![egui::Event::PointerMoved(at(x))]);
+        }
+        whole_frame(&ctx, &mut f.app, vec![button(at(0.8), primary, false)]);
+        let c = f.app.session.compare.as_ref().unwrap();
+        assert!((c.split - 0.3).abs() < 1e-6, "the held hand moves nothing");
+        assert_eq!(c.split_from, None, "and the drag is over");
         let _ = std::fs::remove_file(&f.version);
     }
 }

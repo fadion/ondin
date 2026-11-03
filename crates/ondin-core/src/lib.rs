@@ -45,6 +45,7 @@ pub mod item;
 mod keyed_archive;
 pub mod kit;
 pub mod layout;
+pub mod matching;
 pub mod merge;
 pub mod meta;
 pub mod naming;
@@ -117,6 +118,7 @@ pub use layout::{
     DEFAULT_GRID_COLOR, GRID_COLORS, GridAlign, GridAxis, LayoutGrid, next_grid_color,
     tracks as grid_tracks,
 };
+pub use matching::matching_layers;
 pub use meta::DocumentMeta;
 pub use naming::{copy_name, free_name, is_boolean_label, numbered};
 pub use node::{

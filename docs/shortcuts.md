@@ -564,6 +564,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 
 - **Select same… and Select inverse** — no convention; built as palette verbs (*Select same fill /
   stroke / font / effects*), since the palette can enumerate *which* "same".
+- **Select matching layers** — a palette verb. Figma's `Ctrl+Alt+A` is free but not spent while
+  §12's `AltGr` question is open: on Polish and similar layouts it is `ą`.
 - **Paste to replace** — a layer-menu row (and so a palette row), no chord. `Ctrl+Shift+R` is not spent on it: it is
   batch rename, beside `Ctrl+R`'s rename.
 - **Outline shape** — built, in the context menu (§15 D230), no chord: a one-way structural

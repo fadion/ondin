@@ -672,6 +672,10 @@ impl OndinApp {
                 Cmd::verb(Item::SelectSame(same), self.select_same_source(same).err()),
             );
         }
+        push(
+            &mut out,
+            Cmd::verb(Item::SelectMatching, self.select_matching_sources().err()),
+        );
         push(&mut out, Cmd::verb(Item::SelectInverse, need_sel));
         for t in [
             ondin_export::code::Target::Html,

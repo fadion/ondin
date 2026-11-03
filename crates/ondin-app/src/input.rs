@@ -146,6 +146,9 @@ pub enum Action {
     /// Select every layer in the document that shares the key layer's `Same`
     /// (`OndinApp::select_same`). Unbound: the palette is its door.
     SelectSame(Same),
+    /// Select the same layer in each copy of the selection's repeated blocks
+    /// (`OndinApp::select_matching`). Unbound, as *Select same* is.
+    SelectMatching,
     /// Select the siblings of the selection that are not in it
     /// (`OndinApp::select_inverse`). Unbound.
     SelectInverse,

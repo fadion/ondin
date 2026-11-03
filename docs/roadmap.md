@@ -20,8 +20,6 @@ reads true.
   (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.
   Squiggles are edit chrome only, never exported; suggestions head the text context menu; the stored
   text is checked, not its case transform.
-- **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
-  together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
 - **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
   as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
   mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,

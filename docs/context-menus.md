@@ -426,7 +426,7 @@ project dropdown, and the caret's list.
   and the palette.
 - **Zoom to selection** — `Shift+2` (`Ctrl+2`) and the palette.
 - **Reveal in layers panel** — built and removed: selecting already scrolls the tree to the row.
-- **Select same… and Select inverse** — palette-only verbs (`app-selection.md`).
+- **Select same…, Select matching layers and Select inverse** — palette-only verbs (`app-selection.md`).
 - **Rotate 90°** — the inspector's quarter-turn buttons (`inspector::rotate_selection_quarter`); the
   palette entry is in `roadmap.md`.
 - **Keep proportions** — the inspector's chain link; a modifier, not a verb.

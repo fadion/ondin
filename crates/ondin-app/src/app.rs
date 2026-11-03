@@ -2252,6 +2252,7 @@ impl OndinApp {
             Action::Delete => self.delete_selection(),
             Action::SelectAll => self.select_all(),
             Action::SelectSame(same) => self.select_same(same),
+            Action::SelectMatching => self.select_matching(),
             Action::SelectInverse => self.select_inverse(),
             // The pen reads Enter itself in `pen_input`.
             Action::Enter if self.pen.is_some() => {}
@@ -2970,6 +2971,53 @@ impl OndinApp {
             (1, 0) => format!("Selected 1 layer with this {what}"),
             (n, 0) => format!("Selected {n} layers with the same {what}"),
             (n, l) => format!("Selected {n} of {counted} layers with the same {what} — {l} locked"),
+        });
+    }
+
+    /// The layers *Select matching layers* matches from: the selected ones inside a
+    /// frame or group, since a top-level layer has no place to match by — else the
+    /// sentence the palette dims the row with.
+    pub(crate) fn select_matching_sources(&self) -> Result<Vec<NodeId>, &'static str> {
+        let sel = &self.session.selection;
+        if sel.is_empty() {
+            return Err(crate::menu::NEEDS_SELECTION);
+        }
+        let doc = &self.session.doc;
+        let inside: Vec<NodeId> = sel
+            .ids()
+            .iter()
+            .copied()
+            .filter(|id| {
+                doc.get(*id)
+                    .and_then(|n| n.parent())
+                    .is_some_and(|p| !doc.is_page(p))
+            })
+            .collect();
+        if inside.is_empty() {
+            Err("Select a layer inside a frame or group")
+        } else {
+            Ok(inside)
+        }
+    }
+
+    /// Replace the selection with the same layer in each copy of its repeated
+    /// blocks on the current page (`ondin_core::matching_layers`), the sources
+    /// included. Locked layers are left out and counted, as `select_same` does.
+    pub(crate) fn select_matching(&mut self) {
+        let Ok(sources) = self.select_matching_sources() else {
+            return;
+        };
+        let mut found = ondin_core::matching_layers(&self.session.doc, self.session.page, &sources);
+        let counted = found.len();
+        found.retain(|id| self.may_select_in_bulk(*id));
+        let locked = counted - found.len();
+        let n = found.len();
+        self.entered_group = None;
+        self.session.selection.set(found);
+        self.session.info(match locked {
+            _ if counted <= sources.len() => "No other layer matches".to_string(),
+            0 => format!("Selected {n} matching layers"),
+            l => format!("Selected {n} of {counted} matching layers — {l} locked"),
         });
     }
 
@@ -19348,6 +19396,66 @@ mod select_same_tests {
             Err("This layer has no stroke")
         );
         assert_eq!(app.select_same_source(Same::Fill), Ok(r[0]));
+    }
+
+    /// *Select matching layers* takes the same rect in each copy of a group, leaves
+    /// a locked copy's out, and dims on a top-level layer with the reason.
+    /// flip: `select_matching` dropping its `may_select_in_bulk` filter → fails at
+    /// the selection holding the locked copy's rect.
+    #[test]
+    fn select_matching_takes_each_copys_layer_and_skips_the_locked() {
+        let F {
+            mut app,
+            ctx,
+            frame,
+            ..
+        } = fixture();
+        let mut ids = IdSource::new(0x3A7D);
+        let mut ops = Vec::new();
+        let mut dots = Vec::new();
+        for i in 0..3 {
+            let (card, dot) = (ids.mint(), ids.mint());
+            for (id, parent, kind) in [
+                (card, frame, NodeKind::Group),
+                (
+                    dot,
+                    card,
+                    NodeKind::Rect {
+                        size: Size::new(4.0, 4.0),
+                        corner_radii: Default::default(),
+                        corner_smoothing: 0.0,
+                    },
+                ),
+            ] {
+                ops.push(Operation::CreateNode {
+                    id,
+                    parent,
+                    index: 0,
+                    kind,
+                    transform: None,
+                    name: Some(if id == card { "Card" } else { "Dot" }.into()),
+                });
+            }
+            if i == 2 {
+                ops.push(Operation::SetLocked {
+                    id: card,
+                    locked: true,
+                });
+            }
+            dots.push(dot);
+        }
+        assert!(app.session.commit(Transaction(ops)));
+
+        app.session.selection.set_one(frame);
+        assert_eq!(
+            app.select_matching_sources(),
+            Err("Select a layer inside a frame or group")
+        );
+        app.session.selection.set_one(dots[1]);
+        app.dispatch(&ctx, Action::SelectMatching);
+        let mut want = dots[..2].to_vec();
+        want.sort();
+        assert_eq!(selected(&app), want);
     }
 
     /// *Select inverse* takes the selection's unselected siblings, not the whole

@@ -454,6 +454,8 @@ pub enum Item {
     RotateQuarter(bool),
     /// *Select same fill* and its siblings (`OndinApp::select_same`).
     SelectSame(crate::input::Same),
+    /// *Select matching layers* (`OndinApp::select_matching`).
+    SelectMatching,
     /// *Select inverse* (`OndinApp::select_inverse`).
     SelectInverse,
     /// One of the chords a live text session admits.
@@ -1264,6 +1266,12 @@ impl Item {
                 };
                 s(label, icon::SELECTION_ALL, None, Group::Clipboard)
             }
+            Item::SelectMatching => s(
+                "Select matching layers",
+                icon::SELECTION_ALL,
+                None,
+                Group::Clipboard,
+            ),
             Item::SelectInverse => s("Select inverse", icon::SELECTION, None, Group::Clipboard),
             Item::TextChord(chord) => {
                 use crate::input::TextChord;
@@ -1392,6 +1400,7 @@ impl Item {
             Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
             Item::ZoomFit => &["fit", "all"],
             Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
+            Item::SelectMatching => &["same", "copies", "repeated", "similar", "multi-edit"],
             Item::SelectInverse => &["invert", "others", "rest"],
             Item::CompareVersion => &["diff", "changes", "history", "before"],
             Item::ColourReview => &[
@@ -1482,6 +1491,7 @@ impl Item {
             Item::ColourReview => Action::ColourReview,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
             Item::SelectSame(same) => Action::SelectSame(same),
+            Item::SelectMatching => Action::SelectMatching,
             Item::SelectInverse => Action::SelectInverse,
             Item::TextChord(chord) => Action::TextStyle(chord),
             Item::Palette => Action::Palette,
@@ -3560,6 +3570,7 @@ impl OndinApp {
             | Item::ColourReview
             | Item::RotateQuarter(_)
             | Item::SelectSame(_)
+            | Item::SelectMatching
             | Item::SelectInverse
             | Item::TextChord(_)
             | Item::Palette

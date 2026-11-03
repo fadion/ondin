@@ -5950,6 +5950,8 @@ impl OndinApp {
         // A document opens with the contrast check and the simulation off.
         self.contrast = None;
         self.vision = None;
+        // Skips name the old document's colours.
+        self.colour_review.forget_skips();
         self.pen = None;
         self.pencil = None;
         self.pencil_last = None;

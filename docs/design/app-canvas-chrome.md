@@ -611,14 +611,29 @@ colour, one undo step each. The rule is `ondin_core::color_review`.
   kept in `prefs.colour_review` across documents. Caption: *N groups · M colours could be N · Δ ≤ x*.
 - **Groups**, most-used first, the first unfolded (again after a merge). A folded row: caret, a split
   patch with a slice per member, the target's name (hex, or the variable's capsule, a kit's after
-  the package glyph) and *N colours · M uses*. A member row: a check on the target, swatch, hex or
+  the package glyph) and *N colours · M uses*. A member row: the merge glyph (`icon::ARROWS_MERGE`, accent) on the
+  target, in the tick boxes' column, then swatch, hex or
   capsule (a kit's reads *Kit · name*, the kit masked in private mode as on every kit surface),
   *kept* on a bound member that is not the target, uses, *anchor* or *Δ x.x*, and a reticle
   selecting that colour's users on this page, else on the first one's page, through
   `select_by_color`. Rows wear `ui::list_row_ground`, hovered under the pointer and lit on the
-  target; a click anywhere on a member row but its reticle makes it the target.
+  target; a click anywhere on a member row but its box and reticle makes it the target. The row
+  says so through the foot rather than a tooltip: while the pointer is on another member's row
+  (not on its box or reticle), the foot's left reads *Click to merge into X instead*.
+- **Skips.** Every raw member but the target carries a tick box (`ui::paint_tick_box`), ticked
+  while it merges; unticked, the colour is skipped: its words fade by `ui::UNTICKED_FADE` (its
+  swatch keeps its true colour) and *skipped* replaces *anchor* or *Δ x.x*. A merge is handed the
+  group without its skipped members, so they keep their colour and the button and the foot count
+  only the rest. Skips are kept by colour (`ColourReview::skipped`) across merges and thresholds,
+  so a colour skipped beside the one it was near is not offered again once the merge lands; picking
+  a skipped colour as the target ticks it, and another document coming to the front forgets them
+  all (`reset_transient_state`). A group the skips left nothing to merge reads *N colours · all
+  skipped*, its merge disabled with *Every other colour is skipped*, and goes below the rest when
+  the census is taken again (not as the box is unticked, so it does not jump away); the caption
+  counts only the rest and adds *· K skipped*.
 - **Foot.** Batch rename's: below a divider, what the merge does on the left (*Rewrites U uses*,
-  *Binds U uses*, or *Unfold a group to merge it* beside a disabled *Merge*) and a `ui::split_button`
+  *Binds U uses*, or *Unfold a group to merge it* beside a disabled *Merge*; cut short with a `…`
+  before the buttons) and a `ui::split_button`
   *Merge N into X* on the right, merging the unfolded group; its caret holds *Merge into X* and
   *Merge into a new variable…*, the second disabled with *The group has a variable* when the target
   is bound. The button keeps the last choice. Naming a new variable turns the foot into *New colour variable ·

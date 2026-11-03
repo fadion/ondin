@@ -14,7 +14,7 @@ use eframe::egui;
 use ondin_core::color_review::{self, Group, NewVar, Swatch, Threshold};
 use ondin_core::peniko::Color;
 use ondin_core::{Document, NodeId, VarId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The card's width: room for a member row's name, uses, distance and reticle.
 const W: f32 = 420.0;
@@ -74,6 +74,11 @@ pub(crate) struct ColourReview {
     unfolded: Unfolded,
     /// The target picked in each group, by its anchor.
     targets: HashMap<Key, Key>,
+    /// The colours left out of every merge until ticked again, whatever group a
+    /// threshold puts them in. Kept across merges, or a colour skipped beside the
+    /// one it was near would be offered again the moment the merge lands;
+    /// forgotten when another document comes to the front.
+    skipped: HashSet<Key>,
     /// The merge button's last choice: into a new variable rather than the target.
     new_var: bool,
     /// The caret's menu is open.
@@ -113,6 +118,11 @@ impl ColourReview {
         self.seen.groups.len()
     }
 
+    /// Forget every skip: the colours belong to the document leaving the front.
+    pub(crate) fn forget_skips(&mut self) {
+        self.skipped.clear();
+    }
+
     fn target(&self, g: &Group) -> usize {
         let census = &self.seen.census;
         let anchor = key(&census[g.members[0]]);
@@ -120,6 +130,40 @@ impl ColourReview {
             .get(&anchor)
             .and_then(|t| g.members.iter().position(|&m| key(&census[m]) == *t))
             .unwrap_or_else(|| g.default_target(census))
+    }
+
+    /// Whether member `i` of `g` carries a tick box: a raw colour that is not the
+    /// target. A bound one is never merged away, so there is nothing to skip.
+    fn skippable(&self, g: &Group, i: usize) -> bool {
+        i != self.target(g) && self.seen.census[g.members[i]].is_raw()
+    }
+
+    fn is_skipped(&self, g: &Group, i: usize) -> bool {
+        self.skippable(g, i) && self.skipped.contains(&key(&self.seen.census[g.members[i]]))
+    }
+
+    /// `g` as a merge takes it: the skipped members left out, and where the
+    /// target sits among the rest. What `merge` and `merge_into_new` are handed.
+    fn to_merge(&self, g: &Group) -> (Group, usize) {
+        let target = self.target(g);
+        let members: Vec<usize> = (0..g.members.len())
+            .filter(|&i| !self.is_skipped(g, i))
+            .map(|i| g.members[i])
+            .collect();
+        let at = members
+            .iter()
+            .position(|&m| m == g.members[target])
+            .unwrap_or(0);
+        (Group { members }, at)
+    }
+
+    /// Whether the skips left `g` nothing to merge: every raw colour but the
+    /// target is skipped. A group whose others are all variables is not settled
+    /// by a skip, and keeps its own reason.
+    fn settled(&self, g: &Group) -> bool {
+        let (group, target) = self.to_merge(g);
+        (0..g.members.len()).any(|i| self.is_skipped(g, i))
+            && group.merged(&self.seen.census, target).is_empty()
     }
 
     fn unfolded(&self) -> Option<usize> {
@@ -181,6 +225,8 @@ enum Act {
     Threshold(Threshold),
     Fold(usize),
     Target(usize, usize),
+    /// Flip member `i` of group `g` between merged and skipped.
+    Skip(usize, usize),
     Select(Vec<NodeId>),
     Merge(usize),
     Menu,
@@ -225,8 +271,15 @@ impl OndinApp {
         let doc = &self.session.doc;
         seen.roots = color_review::roots(doc, on_selection.then_some(selection.as_slice()));
         seen.census = color_review::census(doc, &seen.roots);
-        seen.groups = color_review::groups(&seen.census, key.2);
+        let groups = color_review::groups(&seen.census, key.2);
         seen.key = Some(key);
+        // The settled groups last, so the list leads with what is left to do. Here
+        // only: a group a tick settles stays where it is until the census moves.
+        let r = &mut self.colour_review;
+        let (mut live, settled): (Vec<Group>, Vec<Group>) =
+            groups.into_iter().partition(|g| !r.settled(g));
+        live.extend(settled);
+        r.seen.groups = live;
     }
 
     /// Draw the card when it is open, and act on this frame's clicks.
@@ -273,9 +326,9 @@ impl OndinApp {
                 let list_h = ui::CANVAS_POPUP_LIST_H
                     .min(ui.available_height() - FOOT_H - 1.0)
                     .max(HEAD_H * 3.0);
-                list(ui, doc, r, list_h, &mut act);
+                let previewed = list(ui, doc, r, list_h, &mut act);
                 divider(ui);
-                foot(ui, doc, r, &mut act);
+                foot(ui, doc, r, previewed, &mut act);
             });
         });
         self.colour_review_act(ctx, act);
@@ -310,9 +363,17 @@ impl OndinApp {
                 let anchor = key(&r.seen.census[group.members[0]]);
                 let target = key(&r.seen.census[group.members[i]]);
                 r.targets.insert(anchor, target);
+                // The target is what the rest go into; it cannot also be left out.
+                r.skipped.remove(&target);
                 // A bound target has a variable already; the button says so again.
                 if !r.seen.census[group.members[i]].is_raw() {
                     r.naming = None;
+                }
+            }
+            Some(Act::Skip(g, i)) => {
+                let k = key(&r.seen.census[r.seen.groups[g].members[i]]);
+                if !r.skipped.remove(&k) {
+                    r.skipped.insert(k);
                 }
             }
             Some(Act::Select(ids)) => self.select_colour_users(ids),
@@ -352,15 +413,15 @@ impl OndinApp {
         ctx.request_repaint();
     }
 
-    /// Merge group `g` into its target, or into a new variable called `new`.
+    /// Merge group `g`'s ticked members into its target, or into a new variable
+    /// called `new`; the skipped ones are left as they are.
     fn merge_group(&mut self, g: usize, new: Option<String>) {
         let r = &self.colour_review;
-        let Some(group) = r.seen.groups.get(g).cloned() else {
+        let Some((group, target)) = r.seen.groups.get(g).map(|g| r.to_merge(g)) else {
             return;
         };
         let census = r.seen.census.clone();
         let roots = r.seen.roots.clone();
-        let target = r.target(&group);
         let doc = &self.session.doc;
         let (merged, colours, into) = match &new {
             Some(name) => {
@@ -548,16 +609,20 @@ fn caption(ui: &mut egui::Ui, r: &ColourReview, selected: bool, threshold: Thres
     if groups.is_empty() {
         return;
     }
-    let colours: usize = groups.iter().map(|g| g.members.len()).sum();
-    line(
-        ui,
-        format!(
-            "{} · {colours} colours could be {} · Δ ≤ {}",
-            plural(groups.len(), "group", "groups"),
-            groups.len(),
-            threshold.limit()
-        ),
+    // What the merges left to do would make of it; a settled group counts apart.
+    let live: Vec<&Group> = groups.iter().filter(|g| !r.settled(g)).collect();
+    let colours: usize = live.iter().map(|g| r.to_merge(g).0.members.len()).sum();
+    let mut text = format!(
+        "{} · {colours} colours could be {} · Δ ≤ {}",
+        plural(live.len(), "group", "groups"),
+        live.len(),
+        threshold.limit()
     );
+    let settled = groups.len() - live.len();
+    if settled > 0 {
+        text.push_str(&format!(" · {settled} skipped"));
+    }
+    line(ui, text);
 }
 
 /// No group: the threshold named and what was counted, so a looser one is the
@@ -602,8 +667,16 @@ fn empty(ui: &mut egui::Ui, r: &ColourReview, threshold: Threshold) {
 }
 
 /// The groups, the unfolded one with its members, scrolling past `max_h`.
-fn list(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, max_h: f32, act: &mut Option<Act>) {
+/// Returns the unfolded group's member a click would make the target.
+fn list(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    r: &ColourReview,
+    max_h: f32,
+    act: &mut Option<Act>,
+) -> Option<usize> {
     let unfolded = r.unfolded();
+    let mut previewed = None;
     egui::ScrollArea::vertical()
         .id_salt("colour-review-list")
         .auto_shrink([false, true])
@@ -620,12 +693,13 @@ fn list(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, max_h: f32, act: &m
                             *act = Some(Act::Fold(g));
                         }
                         if open {
-                            members(ui, doc, r, g, act);
+                            previewed = members(ui, doc, r, g, act);
                             ui.add_space(4.0);
                         }
                     }
                 });
         });
+    previewed
 }
 
 /// A row's ground: a list row's height at the row's middle.
@@ -740,7 +814,10 @@ fn group_head(
     let count = format!(
         "{} · {}",
         plural(group.members.len(), "colour", "colours"),
-        plural(group.uses(census), "use", "uses")
+        match r.settled(group) {
+            true => "all skipped".to_string(),
+            false => plural(group.uses(census), "use", "uses"),
+        }
     );
     let cg = p.layout_no_wrap(
         count,
@@ -765,24 +842,42 @@ fn group_head(
     resp
 }
 
-/// The unfolded group's members, one a click picks as the target, lit and
-/// checked as a picker's current row is: the swatch, the name, uses, the
-/// distance from the anchor and the reticle.
-fn members(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, g: usize, act: &mut Option<Act>) {
+/// The unfolded group's members, one a click picks as the target: lit, and
+/// marked with the merge glyph rather than a check, which would read as one more
+/// tick beside the boxes. Every other raw member carries a tick box, ticked
+/// while it is merged. Then the swatch, the name, uses, the distance from the
+/// anchor (or *skipped*) and the reticle. Returns the member under the pointer
+/// that a click would make the target, for the foot to say so.
+fn members(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    r: &ColourReview,
+    g: usize,
+    act: &mut Option<Act>,
+) -> Option<usize> {
     let group = &r.seen.groups[g];
     let census = &r.seen.census;
     let target = r.target(group);
     let anchor = census[group.members[0]].color;
+    let mut previewed = None;
     for (i, &m) in group.members.iter().enumerate() {
         let s = &census[m];
+        let skipped = r.is_skipped(group, i);
         let (row, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), MEMBER_H),
             egui::Sense::click(),
         );
-        // `contains_pointer`: the reticle on top takes the hover from the row.
+        // `contains_pointer`: the box and the reticle on top take the hover
+        // from the row.
         let hovered = resp.contains_pointer();
+        let row_id = resp.id;
         ui::list_row_ground(ui.painter(), ground(row), i == target, hovered);
-        if i != target && resp.on_hover_text("Merge into this colour").clicked() {
+        // `hovered`, not `contains_pointer`: over the box or the reticle a click
+        // does something else, and the foot must not promise this.
+        if i != target && resp.hovered() {
+            previewed = Some(i);
+        }
+        if i != target && resp.clicked() {
             *act = Some(Act::Target(g, i));
         }
         let rect = row.shrink2(egui::vec2(ROW_X, 0.0));
@@ -791,23 +886,41 @@ fn members(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, g: usize, act: &
         let cell = |x: f32, w: f32| {
             egui::Rect::from_min_size(egui::pos2(x, y - w / 2.0), egui::vec2(w, w))
         };
+        let lead = cell(x, SWATCH).center();
         if i == target {
             ui.painter().text(
-                cell(x, SWATCH).center(),
+                lead,
                 egui::Align2::CENTER_CENTER,
-                icon::CHECK,
+                icon::ARROWS_MERGE,
                 theme::icon_font(13.0),
                 color::accent(),
             );
+        } else if r.skippable(group, i) {
+            // The whole leading cell takes the click, not the box's 14 alone.
+            let hit = egui::Rect::from_center_size(lead, egui::vec2(SWATCH + COL_GAP, MEMBER_H));
+            let tick = ui.interact(hit, row_id.with("tick"), egui::Sense::click());
+            ui::paint_tick_box(ui.painter(), lead, !skipped, tick.hovered());
+            let tip = match skipped {
+                true => "Merge this colour too",
+                false => "Leave this colour as it is",
+            };
+            if tick.on_hover_text(tip).clicked() {
+                *act = Some(Act::Skip(g, i));
+            }
         }
         x += SWATCH + COL_GAP;
+        // The swatch keeps its true colour; only the words fade.
         paint_patch(ui.painter(), cell(x, SWATCH), &[s.color]);
         x += SWATCH + COL_GAP;
+        let mut ink = ui.new_child(egui::UiBuilder::new().max_rect(row));
+        if skipped {
+            ink.multiply_opacity(ui::UNTICKED_FADE);
+        }
         let reticle_x = rect.right() - BTN;
         let delta_x = reticle_x - COL_GAP - DELTA_W;
         let uses_x = delta_x - COL_GAP - USES_W;
-        let end = paint_name(ui, &name_of(doc, s), x, y, uses_x - COL_GAP, true);
-        let p = ui.painter();
+        let end = paint_name(&ink, &name_of(doc, s), x, y, uses_x - COL_GAP, true);
+        let p = ink.painter();
         // A bound colour the merge leaves as it is.
         if i != target && !s.is_raw() {
             p.text(
@@ -826,6 +939,7 @@ fn members(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, g: usize, act: &
             theme::text::faint(),
         );
         let delta = match i {
+            _ if skipped => "skipped".to_string(),
             0 => "anchor".to_string(),
             _ => format!("Δ {:.1}", color_review::delta(anchor, s.color)),
         };
@@ -848,20 +962,31 @@ fn members(ui: &mut egui::Ui, doc: &Document, r: &ColourReview, g: usize, act: &
             *act = Some(Act::Select(s.nodes.clone()));
         }
     }
+    previewed
 }
 
 /// The card's foot, batch rename's: what the merge writes on the left and a
 /// split button merging the unfolded group on the right, its caret holding the
-/// other merge; or, while a new variable is being named, the name field.
-fn foot(ui: &mut egui::Ui, doc: &Document, r: &mut ColourReview, act: &mut Option<Act>) {
+/// other merge; or, while a new variable is being named, the name field. With
+/// the pointer on member `previewed` of the unfolded group, the left says what
+/// a click on it would do instead.
+fn foot(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    r: &mut ColourReview,
+    previewed: Option<usize>,
+    act: &mut Option<Act>,
+) {
     let Some(g) = r.unfolded() else {
-        let mut buttons = foot_row(ui, "Unfold a group to merge it");
-        crate::settings::text_button(&mut buttons, "Merge", FieldButton::Disabled);
+        foot_row(ui, "Unfold a group to merge it", |b| {
+            crate::settings::text_button(b, "Merge", FieldButton::Disabled)
+        });
         return;
     };
-    let group = &r.seen.groups[g];
+    let settled = r.settled(&r.seen.groups[g]);
+    // The group as the merge takes it: without its skipped members.
+    let (group, target) = r.to_merge(&r.seen.groups[g]);
     let census = &r.seen.census;
-    let target = r.target(group);
     let t = &census[group.members[target]];
     let bound = !t.is_raw();
     let merged = group.merged(census, target).len();
@@ -899,8 +1024,17 @@ fn foot(ui: &mut egui::Ui, doc: &Document, r: &mut ColourReview, act: &mut Optio
         )
     };
     let live = if new_var { !raw.is_empty() } else { merged > 0 };
-    let mut buttons = foot_row(ui, if live { &hint } else { "" });
-    let button = ui::split_button(&mut buttons, &label, ui::CONTROL_H, live);
+    let hint = match previewed {
+        Some(i) => format!(
+            "Click to merge into {} instead",
+            short_name(doc, &census[r.seen.groups[g].members[i]])
+        ),
+        None if live => hint,
+        None => String::new(),
+    };
+    let button = foot_row(ui, &hint, |b| {
+        ui::split_button(b, &label, ui::CONTROL_H, live)
+    });
     if button.action && live {
         *act = Some(Act::Merge(g));
     }
@@ -915,6 +1049,7 @@ fn foot(ui: &mut egui::Ui, doc: &Document, r: &mut ColourReview, act: &mut Optio
     let resp = button.resp;
     let resp = match (on_caret, live) {
         (true, _) => resp.on_hover_text("More merge options"),
+        (false, false) if settled => resp.on_hover_text("Every other colour is skipped"),
         (false, false) => {
             resp.on_hover_text("The other colours are variables, which the merge keeps")
         }
@@ -963,21 +1098,28 @@ fn foot(ui: &mut egui::Ui, doc: &Document, r: &mut ColourReview, act: &mut Optio
     }
 }
 
-/// The foot's row: `hint` on the left, and the buttons' `Ui`, laid right to left.
-fn foot_row(ui: &mut egui::Ui, hint: &str) -> egui::Ui {
+/// The foot's row: `buttons` drawn into a `Ui` laid right to left, then `hint`
+/// on the left, cut short with a `…` before them.
+fn foot_row<R>(ui: &mut egui::Ui, hint: &str, buttons: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, FOOT_H), egui::Sense::hover());
-    ui.painter().text(
-        egui::pos2(rect.left() + PAD, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        hint,
-        egui::FontId::proportional(10.5),
-        theme::text::faint(),
-    );
-    ui.new_child(
+    let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(egui::vec2(PAD, 10.0)))
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
-    )
+    );
+    let out = buttons(&mut child);
+    // After the buttons, so a long variable name is cut short before them.
+    let room = child.min_rect().left() - COL_GAP - (rect.left() + PAD);
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        hint.to_owned(),
+        egui::FontId::proportional(10.5),
+        theme::text::faint(),
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let at = egui::pos2(rect.left() + PAD, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(at, galley, theme::text::faint());
+    out
 }
 
 /// Naming the new variable `t`'s colour goes into: the field, *Cancel* and
@@ -1351,11 +1493,29 @@ mod tests {
         assert!(rect.height() < 320.0, "as tall as its rows: {rect:?}");
 
         // Twenty pairs of greys a level apart, each pair ten levels from the next.
-        let page = f.app.session.page;
+        let greys: Vec<Color> = (0..40u8)
+            .map(|i| 20 + (i / 2) * 10 + i % 2)
+            .map(|v| Color::from_rgb8(v, v, v))
+            .collect();
+        add_rects(&mut f.app, &greys);
+        let rect = card(&mut f.app);
+        assert!(
+            f.app.colour_review.groups_shown() > 15,
+            "the fixture's pairs"
+        );
+        let most = 40.0 + 90.0 + ui::CANVAS_POPUP_LIST_H + FOOT_H + 12.0;
+        assert!(rect.height() <= most, "capped: {} > {most}", rect.height());
+        assert!(rect.height() > most - 60.0, "the list filled its cap");
+    }
+
+    /// A rect filled with each of `colours` on this page, in one commit.
+    fn add_rects(app: &mut OndinApp, colours: &[Color]) -> Vec<NodeId> {
+        let page = app.session.page;
         let mut ops = Vec::new();
-        for i in 0..40u8 {
-            let id = f.app.session.ids.mint();
-            let v = 20 + (i / 2) * 10 + i % 2;
+        let mut ids = Vec::new();
+        for &c in colours {
+            let id = app.session.ids.mint();
+            ids.push(id);
             ops.push(Operation::CreateNode {
                 id,
                 parent: page,
@@ -1371,19 +1531,182 @@ mod tests {
             ops.push(Operation::SetFills {
                 id,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgb8(v, v, v)).into(),
+                    brush: Brush::Solid(c).into(),
                     visible: true,
                 }]),
             });
         }
-        assert!(f.app.session.commit(Transaction(ops)));
-        let rect = card(&mut f.app);
+        assert!(app.session.commit(Transaction(ops)));
+        ids
+    }
+
+    /// Where the colour `c` sits: its group and its place in it.
+    fn member(app: &OndinApp, c: Color) -> (usize, usize) {
+        let r = &app.colour_review;
+        let k = c.to_rgba8().to_u8_array();
+        r.seen
+            .groups
+            .iter()
+            .enumerate()
+            .find_map(|(g, group)| {
+                let i = group
+                    .members
+                    .iter()
+                    .position(|&m| r.seen.census[m].color.to_rgba8().to_u8_array() == k)?;
+                Some((g, i))
+            })
+            .expect("the colour is listed")
+    }
+
+    /// Two hairs from A, so it groups with A and B at *Close*.
+    const C: Color = Color::from_rgb8(0x6F, 0x8E, 0xDB);
+
+    /// **A skipped colour is left as it is and the rest still merge**, in one
+    /// step; and the skip outlives the merge, so the colour is not offered again
+    /// beside the one it was skipped from.
+    ///
+    /// flip: `merge_group` merging the whole group rather than `to_merge`'s →
+    /// fails at "skipped".
+    #[test]
+    fn a_skipped_colour_is_left_and_the_rest_merge() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let c = add_rects(&mut f.app, &[C])[0];
+        f.app.prefs.colour_review = Threshold::Close;
+        f.app.open_colour_review();
+        run(&mut f.app, &ctx);
+        let (g, i) = member(&f.app, C);
+        assert_eq!(member(&f.app, B).0, g, "A, B and C are one group");
+        f.app.colour_review_act(&ctx, Some(Act::Skip(g, i)));
         assert!(
-            f.app.colour_review.groups_shown() > 15,
-            "the fixture's pairs"
+            !f.app
+                .colour_review
+                .settled(&f.app.colour_review.seen.groups[g])
         );
-        let most = 40.0 + 90.0 + ui::CANVAS_POPUP_LIST_H + FOOT_H + 12.0;
-        assert!(rect.height() <= most, "capped: {} > {most}", rect.height());
-        assert!(rect.height() > most - 60.0, "the list filled its cap");
+
+        f.app.colour_review_act(&ctx, Some(Act::Merge(g)));
+        assert_eq!(fill(&f.app, f.b), BrushSource::from(A), "B merged");
+        assert_eq!(fill(&f.app, c), BrushSource::from(C), "skipped");
+        assert!(
+            f.app
+                .session
+                .status()
+                .text
+                .starts_with("Merged 1 colour into")
+        );
+
+        run(&mut f.app, &ctx);
+        // Still beside A, with the locked B the merge could not write.
+        let (g, i) = member(&f.app, C);
+        let r = &f.app.colour_review;
+        assert!(r.is_skipped(&r.seen.groups[g], i), "C stays skipped");
+        assert!(f.app.session.undo());
+        assert_eq!(fill(&f.app, f.b), BrushSource::from(B), "one step");
+    }
+
+    /// Picking a skipped colour as the target ticks it again; a group the skips
+    /// left nothing to merge goes below the rest once the census is taken again,
+    /// and another document coming to the front forgets every skip.
+    #[test]
+    fn a_skip_yields_to_the_target_and_settles_its_group_last() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        // Two greys a level apart: a second, smaller group.
+        let grey = |v| Color::from_rgb8(v, v, v);
+        add_rects(&mut f.app, &[grey(40), grey(41)]);
+        f.app.open_colour_review();
+        run(&mut f.app, &ctx);
+        let (g, i) = member(&f.app, B);
+        assert_eq!(g, 0, "A's group has the most uses");
+
+        f.app.colour_review_act(&ctx, Some(Act::Skip(g, i)));
+        let r = &f.app.colour_review;
+        assert!(r.settled(&r.seen.groups[0]), "B was all there was to merge");
+        assert_eq!(member(&f.app, B).0, 0, "it stays put while the census does");
+        f.app.colour_review.seen.key = None;
+        run(&mut f.app, &ctx);
+        assert_eq!(member(&f.app, B).0, 1, "settled, it goes last");
+
+        let (g, i) = member(&f.app, B);
+        f.app.colour_review_act(&ctx, Some(Act::Target(g, i)));
+        // On the set, not `is_skipped`, which no target ever is: a skip left on
+        // the target would come back the moment another member is picked.
+        assert!(
+            f.app.colour_review.skipped.is_empty(),
+            "the target is ticked"
+        );
+
+        let (g, i) = member(&f.app, grey(41));
+        f.app.colour_review_act(&ctx, Some(Act::Skip(g, i)));
+        f.app.reset_transient_state();
+        let r = &f.app.colour_review;
+        assert!(r.skipped.is_empty(), "forgotten with the document");
+    }
+
+    /// A frame with the pointer at `at`; the texts it painted.
+    fn texts_at(app: &mut OndinApp, ctx: &egui::Context, at: Option<egui::Pos2>) -> Vec<String> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1400.0, 900.0),
+            )),
+            events: at.map(egui::Event::PointerMoved).into_iter().collect(),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |_| app.colour_review_ui(ctx));
+        out.shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **The foot says what a row click would do** while the pointer is on
+    /// another member's row, and not over its tick box, where a click skips.
+    ///
+    /// flip: `members` previewing on `contains_pointer` rather than `hovered` →
+    /// fails at "over the box".
+    #[test]
+    fn the_foot_previews_a_target_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.open_colour_review();
+        run(&mut f.app, &ctx);
+        let preview = format!("Click to merge into {} instead", ui::hex_of(B));
+        let hint = |texts: &[String]| texts.contains(&preview);
+        // Where B's name is painted: on its row, clear of the box and reticle.
+        let hex = ui::hex_of(B);
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |_| f.app.colour_review_ui(&ctx),
+        );
+        let name = out
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.job.text == hex => Some(t.visual_bounding_rect()),
+                _ => None,
+            })
+            .expect("B's row is unfolded");
+        assert!(!hint(&texts_at(&mut f.app, &ctx, None)), "nothing hovered");
+        let mut shown = Vec::new();
+        for _ in 0..4 {
+            shown = texts_at(&mut f.app, &ctx, Some(name.center()));
+        }
+        assert!(hint(&shown), "on the row: {shown:?}");
+        // The box's centre: the swatch and two gaps before the name.
+        let tick = egui::pos2(name.left() - SWATCH * 1.5 - COL_GAP * 2.0, name.center().y);
+        for _ in 0..4 {
+            shown = texts_at(&mut f.app, &ctx, Some(tick));
+        }
+        assert!(!hint(&shown), "over the box: {shown:?}");
     }
 }

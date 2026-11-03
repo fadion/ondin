@@ -1450,9 +1450,8 @@ fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
 /// The search field's id, which the result keys ask about.
 const SEARCH_ID: &str = "kit-picker-search";
 
-/// The search box, a [`ui::search_box`] with a clear button once it holds
-/// something. Takes the keyboard when `focus` asks, once. Answers whether it
-/// changed.
+/// The search box, a [`ui::search_box`]. Takes the keyboard when `focus` asks,
+/// once. Answers whether it changed.
 fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool {
     let edit = ui::search_box(
         ui,
@@ -1461,7 +1460,6 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
         "Search components",
         egui::Id::new(SEARCH_ID),
     );
-    let rect = edit.rect;
     // Focused once, when the picker opens — not whenever nothing else holds the
     // keyboard, which would keep the keymap dead for as long as the picker is
     // open: a tool letter after a placement would type into the search.
@@ -1475,30 +1473,7 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
     // would close it a second time beside whatever the ladder had closed instead
     // (an open dropdown, the colour picker): `D1014`'s fix (a) again, through a
     // narrower door.
-    let mut changed = edit.changed();
-    if !query.is_empty() {
-        let x = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 14.0, rect.center().y),
-            egui::vec2(20.0, 20.0),
-        );
-        let resp = ui.interact(x, egui::Id::new("kit-picker-clear"), egui::Sense::click());
-        ui.painter().text(
-            x.center(),
-            egui::Align2::CENTER_CENTER,
-            icon::X,
-            theme::icon_font(12.0),
-            if resp.hovered() {
-                color::text()
-            } else {
-                theme::text::dim()
-            },
-        );
-        if resp.on_hover_text("Clear").clicked() {
-            query.clear();
-            changed = true;
-        }
-    }
-    changed
+    edit.changed()
 }
 
 /// Browsing: this document's own mains first, then each kit, used ones first,

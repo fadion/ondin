@@ -1363,10 +1363,16 @@ pub fn combo_text(text: &str) -> egui::WidgetText {
         .into()
 }
 
-/// A search field that stands on its own (a panel's, a dialog's, the dashboard's),
-/// rather than heading a dropdown's list ([`search_field`]): [`text_field`]'s
-/// ground and [`typing_edge`], with a faint magnifier before the text. A press on
-/// the magnifier focuses the field too.
+/// The side of a [`search_box`]'s clear button, and its inset from the field's
+/// right edge.
+const SEARCH_CLEAR: f32 = 20.0;
+const SEARCH_CLEAR_INSET: f32 = 4.0;
+
+/// The one search field, in a panel, a dialog or at the head of a dropdown's
+/// list: [`text_field`]'s ground and [`typing_edge`], a faint magnifier before
+/// the text and, once it holds something, a clear button after it. A press on
+/// the magnifier focuses the field too; a press on the clear button empties it,
+/// keeps the keyboard in it and reports the edit as changed.
 pub fn search_box(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -1379,6 +1385,7 @@ pub fn search_box(
     let font = egui::FontId::proportional(pt);
     let mut frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
     frame.inner_margin.left = 0;
+    let clear_side = SEARCH_CLEAR.min(size.y - 8.0);
     // The row paints the typing edge (`framed_row`).
     field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
         // Registered first, so the edit above it wins its own area and this
@@ -1390,19 +1397,58 @@ pub fn search_box(
             scale.glyph_pt(),
             theme::text::faint(),
         ));
-        let edit = ui.add(
+        // The edit stops short of the clear button rather than lying under it, so
+        // the text never runs beneath the ✕ and the pointer there is an arrow.
+        // `desired_width` is the text's; the frame's padding comes on top.
+        let clearable = !text.is_empty();
+        let width = match clearable {
+            true => {
+                ui.available_width() - clear_side - SEARCH_CLEAR_INSET - frame.inner_margin.sum().x
+            }
+            false => f32::INFINITY,
+        };
+        let mut edit = ui.add(
             egui::TextEdit::singleline(text)
                 .id(id)
                 .frame(frame)
-                .desired_width(f32::INFINITY)
+                .desired_width(width)
                 .font(font)
                 .hint_text(egui::RichText::new(hint).size(pt)),
         );
         if row.clicked() {
             edit.request_focus();
         }
+        if clearable && search_clear(ui, clear_side, scale.glyph_pt() - 2.0) {
+            text.clear();
+            edit.mark_changed();
+            edit.request_focus();
+        }
         edit
     })
+}
+
+/// A [`search_box`]'s ✕: a hover ground and an arrow pointer, no tab stop.
+/// Whether it was pressed.
+fn search_clear(ui: &mut egui::Ui, side: f32, glyph: f32) -> bool {
+    ui.spacing_mut().item_spacing.x = 0.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::CLICK);
+    let hovered = resp.hovered();
+    if hovered {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(BUTTON_R), color::hover());
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon::X,
+        theme::icon_font(glyph),
+        match hovered {
+            true => color::text(),
+            false => theme::text::dim(),
+        },
+    );
+    resp.on_hover_text("Clear").clicked()
 }
 
 /// The inset of an [`inline_edit`]'s text from its rect's left edge; a caller
@@ -1555,30 +1601,6 @@ pub fn edit_frame(ui: &egui::Ui, font: &egui::FontId, h: f32, x: f32) -> egui::F
         top: top as i8,
         bottom: bottom as i8,
     })
-}
-
-/// Inner padding of a dropdown's search field ([`search_field`]), its own rather
-/// than `button_padding`, which suits controls a third this width.
-pub const SEARCH_PAD: egui::Margin = egui::Margin::symmetric(7, 5);
-
-/// The search field at the head of a dropdown list that filters as you type: the
-/// theme's borderless ground and [`SEARCH_PAD`] inside it.
-///
-/// `width` is the field's outer width; the padding comes out of it.
-pub fn search_field(
-    ui: &mut egui::Ui,
-    text: &mut String,
-    id: egui::Id,
-    hint: &str,
-    width: f32,
-) -> egui::Response {
-    ui.add(
-        egui::TextEdit::singleline(text)
-            .id(id)
-            .margin(SEARCH_PAD)
-            .desired_width(width - SEARCH_PAD.sum().x)
-            .hint_text(hint),
-    )
 }
 
 /// How far a value field's number travels per point of pointer movement,
@@ -5154,6 +5176,59 @@ mod tests {
         pass(vec![button(false)]);
         let (_, focused, _) = pass(Vec::new());
         assert!(focused, "the press focused the field");
+    }
+
+    /// A search box holding text shows a clear button with an arrow pointer; a
+    /// press on it empties the field, reports a change and keeps the keyboard.
+    ///
+    /// flip: `search_box` giving its edit the whole row again (`desired_width`
+    /// infinite while clearable) → fails at the arrow pointer.
+    #[test]
+    fn a_search_box_clears_from_its_button() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let id = egui::Id::new("search-clear-test");
+        let mut text = "card".to_owned();
+        let mut pass = |events: Vec<egui::Event>| {
+            let mut seen = None;
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let resp = search_box(ui, egui::vec2(200.0, CONTROL_H), &mut text, "Find", id);
+                    seen = Some((resp.changed(), resp.has_focus(), text.clone()));
+                },
+            );
+            let (changed, focused, now) = seen.expect("drawn");
+            (changed, focused, now, out.platform_output.cursor_icon)
+        };
+        pass(Vec::new());
+        ctx.memory_mut(|m| m.request_focus(id));
+        pass(Vec::new());
+        // The ✕ sits at the field's right, its inset in from the edge.
+        let at = egui::pos2(
+            200.0 - SEARCH_CLEAR_INSET - SEARCH_CLEAR / 2.0,
+            CONTROL_H / 2.0,
+        );
+        for _ in 0..3 {
+            pass(vec![egui::Event::PointerMoved(at)]);
+        }
+        let (.., icon) = pass(vec![egui::Event::PointerMoved(at)]);
+        assert_eq!(icon, egui::CursorIcon::Default, "an arrow over the ✕");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        pass(vec![button(true)]);
+        let (changed, _, now, _) = pass(vec![button(false)]);
+        assert_eq!(now, "", "the press emptied the field");
+        assert!(changed, "and the caller heard it");
+        let (_, focused, ..) = pass(Vec::new());
+        assert!(focused, "the keyboard stays in the field");
     }
 
     /// A colour typed into a hex field replaces the one there; driven with real events.

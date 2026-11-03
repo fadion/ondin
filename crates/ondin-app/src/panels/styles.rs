@@ -1022,12 +1022,12 @@ impl OndinApp {
                 ui::menu_frame(4.0).show(ui, |ui| {
                     ui.set_width(PICKER_W - 8.0);
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let search = ui::search_field(
+                    let search = ui::search_box(
                         ui,
+                        egui::vec2(PICKER_W - 8.0, ui::CONTROL_H),
                         &mut pk.query,
-                        egui::Id::new("style-picker-search"),
                         &format!("Search {slot_word} styles"),
-                        PICKER_W - 8.0,
+                        egui::Id::new("style-picker-search"),
                     );
                     if pk.focus {
                         search.request_focus();

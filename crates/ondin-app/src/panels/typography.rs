@@ -1304,12 +1304,12 @@ impl OndinApp {
     pub(crate) fn family_list(&mut self, ui: &mut egui::Ui, current: &str) -> Option<String> {
         let mut chosen = None;
         let width = ui.available_width();
-        ui::search_field(
+        ui::search_box(
             ui,
+            egui::vec2(width, ui::CONTROL_H),
             &mut self.font_filter,
+            "Search fonts",
             ui.make_persistent_id("family-search"),
-            "Search…",
-            width,
         );
         let total = self.fonts.match_count(&self.font_filter);
         let mut area = egui::ScrollArea::vertical().max_height(FAMILY_LIST_H);

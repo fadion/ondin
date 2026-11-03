@@ -398,16 +398,16 @@ fn swap_picker(
                 // The family list's search field.
                 let private = crate::private::on();
                 ui::disable_unless(ui, !private, |ui| {
-                    ui::search_field(
+                    ui::search_box(
                         ui,
+                        egui::vec2(width.max(160.0), ui::CONTROL_H),
                         &mut search,
-                        search_id.with("field"),
                         if private {
                             crate::private::DECLINE_SEARCH
                         } else {
                             "Search…"
                         },
-                        width.max(160.0),
+                        search_id.with("field"),
                     );
                 });
                 ui.data_mut(|d| d.insert_temp(search_id, search.clone()));

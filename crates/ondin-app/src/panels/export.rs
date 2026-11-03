@@ -995,12 +995,12 @@ impl OndinApp {
                             ui.spacing_mut().interact_size.y = POP_CELL;
                             ui.spacing_mut().button_padding.y = 0.0;
                             let mut bg = spec.background;
-                            let swatch = self.background_swatch(spec, sizing);
+                            let (glyph, swatch) = self.background_swatch(spec, sizing);
                             egui::ComboBox::from_id_salt(("export-bg", index))
                                 .icon(ui::combo_chevron)
                                 .width(POP_INNER)
                                 .selected_text(ui::glyph_and_text_tinted(
-                                    icon::SQUARE,
+                                    glyph,
                                     self.background_label(spec),
                                     swatch,
                                 ))
@@ -1077,7 +1077,7 @@ impl OndinApp {
                         }
                         let pad = ui::toggle_row(
                             ui,
-                            icon::SQUARE,
+                            icon::PAD_SQUARE,
                             "Pad out to a square",
                             pad_button_state(spec),
                             size,
@@ -1272,19 +1272,22 @@ impl OndinApp {
         }
     }
 
-    /// The colour of the chip in front of that label — the colour that will
-    /// actually be behind the export.
+    /// The glyph in front of that label and its ink: a chip in the colour that
+    /// will actually be behind the export, or the checkerboard when nothing will.
     ///
     /// Resolved through `plan::background_color`, not read off the setting: *Frame's
-    /// own* differs per layer and is nothing outside a frame. A transparent export
-    /// gets the muted ink. It is a chip, not the checkerboard, because a
+    /// own* differs per layer and is nothing outside a frame. Glyphs, because a
     /// `ComboBox`'s selected text can carry a glyph but not a painter.
-    fn background_swatch(&self, spec: &ExportSpec, sizing: Option<NodeId>) -> egui::Color32 {
-        // Blank over a multi-selection rather than a guess (§15 D657). Only `Frame`
-        // varies per layer, so this is a `match` and not a gate on `sizing`:
-        // `Solid` and `Transparent` hold for any number of layers.
+    fn background_swatch(
+        &self,
+        spec: &ExportSpec,
+        sizing: Option<NodeId>,
+    ) -> (&'static str, egui::Color32) {
+        // A muted chip over a multi-selection rather than a guess (§15 D657). Only
+        // `Frame` varies per layer, so this is a `match` and not a gate on
+        // `sizing`: `Solid` and `Transparent` hold for any number of layers.
         let resolved = match (spec.background, sizing) {
-            (ExportBackground::Frame, None) => None,
+            (ExportBackground::Frame, None) => return (icon::SQUARE_FILL, theme::text::dim()),
             (_, subject) => subject
                 .or_else(|| self.export_subjects().first().copied())
                 .and_then(|id| ondin_export::plan::background_color(&self.session.doc, id, spec)),
@@ -1292,9 +1295,10 @@ impl OndinApp {
         match resolved {
             Some(c) => {
                 let [r, g, b, a] = c.to_rgba8().to_u8_array();
-                egui::Color32::from_rgba_unmultiplied(r, g, b, a)
+                let ink = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                (icon::SQUARE_FILL, ink)
             }
-            None => theme::text::dim(),
+            None => (icon::CHECKERBOARD, theme::text::dim()),
         }
     }
 
@@ -3044,9 +3048,9 @@ mod tests {
 
     /// The background chip goes muted over a multi-selection of differing frames
     /// rather than painting one member's, but keeps showing a `Solid` colour (§15
-    /// D657).
+    /// D657); nothing behind the export wears the checkerboard.
     ///
-    /// flip: delete the `(Frame, None) => None` arm of `background_swatch` → fails at
+    /// flip: delete the `(Frame, None)` arm of `background_swatch` → fails at
     /// the multi-selection assertion; gate the whole resolution on `sizing` → fails
     /// at the `Solid` assertion.
     #[test]
@@ -3107,11 +3111,15 @@ mod tests {
             a, b,
             "fixture: two frames of different grounds must disagree"
         );
-        assert_eq!(a, egui::Color32::WHITE, "fixture: the first frame is white");
+        assert_eq!(
+            a,
+            (icon::SQUARE_FILL, egui::Color32::WHITE),
+            "fixture: the first frame is white"
+        );
 
         assert_eq!(
             app.background_swatch(&framed, None),
-            theme::text::dim(),
+            (icon::SQUARE_FILL, theme::text::dim()),
             "and over both of them the chip says nothing rather than picking one"
         );
 
@@ -3120,8 +3128,14 @@ mod tests {
         solid.background = ExportBackground::Solid(white);
         assert_eq!(
             app.background_swatch(&solid, None),
-            egui::Color32::WHITE,
+            (icon::SQUARE_FILL, egui::Color32::WHITE),
             "White is White on thirty layers as much as on one"
+        );
+        let clear = spec(ExportFormat::Png, ExportScale::Times(1.0));
+        assert_eq!(
+            app.background_swatch(&clear, None).0,
+            icon::CHECKERBOARD,
+            "fixture's default is transparent, which wears the checkerboard"
         );
     }
 

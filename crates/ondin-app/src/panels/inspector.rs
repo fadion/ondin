@@ -5727,7 +5727,7 @@ impl OndinApp {
                 ui::FieldButton::Disabled,
             )
             .on_hover_text("One stroke at a time: dash, cap and join");
-            ui::field_button(ui, icon::CORNERS_OUT, 28.0, ui::FieldButton::Disabled)
+            ui::field_button(ui, icon::SIDES_SEPARATE, 28.0, ui::FieldButton::Disabled)
                 .on_hover_text("One stroke at a time: which sides the stroke is on");
         });
         if let Some(a) = picked {
@@ -5817,7 +5817,7 @@ impl OndinApp {
                     out = Some(s);
                 }
                 let state = sides_button_state(sides_apply, shown, stroke.sides);
-                if ui::field_button(ui, icon::CORNERS_OUT, 28.0, state)
+                if ui::field_button(ui, icon::SIDES_SEPARATE, 28.0, state)
                     .on_hover_text(match state {
                         ui::FieldButton::Disabled => "Only a rectangle has four sides".into(),
                         ui::FieldButton::On => "Hide the sides selector".to_string(),
@@ -5867,10 +5867,7 @@ impl OndinApp {
             let combo = egui::ComboBox::from_id_salt(("stroke-sides", index))
                 .icon(ui::combo_chevron)
                 .width(ui.available_width())
-                .selected_text(ui::glyph_and_text(
-                    icon::SQUARE_SPLIT_HORIZONTAL,
-                    sides_label(sides),
-                ));
+                .selected_text(ui::glyph_and_text(sides_glyph(sides), sides_label(sides)));
             combo.show_ui(ui, |ui| {
                 ui::menu_rows(ui);
                 for option in [
@@ -5918,8 +5915,8 @@ impl OndinApp {
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
                 for pair in [
-                    [(0_usize, icon::ARROW_UP), (1, icon::ARROW_RIGHT)],
-                    [(3_usize, icon::ARROW_LEFT), (2, icon::ARROW_DOWN)],
+                    [(0_usize, icon::SIDE_TOP), (1, icon::SIDE_RIGHT)],
+                    [(3_usize, icon::SIDE_LEFT), (2, icon::SIDE_BOTTOM)],
                 ] {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -11427,6 +11424,18 @@ fn sides_label(s: StrokeSides) -> &'static str {
         StrokeSides::Custom { .. } => "Custom",
     }
 }
+/// The sides dropdown's face: the drawing of the side the stroke is on, the
+/// whole outline for all four, four apart for a width per side.
+fn sides_glyph(s: StrokeSides) -> &'static str {
+    match s {
+        StrokeSides::All => icon::SQUARE,
+        StrokeSides::Top => icon::SIDE_TOP,
+        StrokeSides::Right => icon::SIDE_RIGHT,
+        StrokeSides::Bottom => icon::SIDE_BOTTOM,
+        StrokeSides::Left => icon::SIDE_LEFT,
+        StrokeSides::Custom { .. } => icon::SIDES_SEPARATE,
+    }
+}
 /// What the sides button says about itself, given whether the kind takes per-side
 /// strokes at all, whether the row is open, and what the stroke is set to.
 /// [`ui::FieldButton::Set`] is reachable only when closed and not on every side.
@@ -12389,7 +12398,7 @@ mod stroke_row_tests {
                     ui.label("1");
                 });
                 ui::field_button(ui, icon::SLIDERS_HORIZONTAL, 28.0, ui::FieldButton::Off);
-                ui::field_button(ui, icon::CORNERS_OUT, 28.0, ui::FieldButton::Off);
+                ui::field_button(ui, icon::SIDES_SEPARATE, 28.0, ui::FieldButton::Off);
             });
             painted_rows(&out, 20.0..40.0)
         }
@@ -12538,8 +12547,8 @@ mod stroke_row_tests {
         let out = ctx.run_ui(Default::default(), |ui| {
             ui.set_max_width(CARD);
             for pair in [
-                [(0_usize, icon::ARROW_UP), (1, icon::ARROW_RIGHT)],
-                [(3_usize, icon::ARROW_LEFT), (2, icon::ARROW_DOWN)],
+                [(0_usize, icon::SIDE_TOP), (1, icon::SIDE_RIGHT)],
+                [(3_usize, icon::SIDE_LEFT), (2, icon::SIDE_BOTTOM)],
             ] {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;

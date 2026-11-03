@@ -613,6 +613,22 @@ pub mod icon {
     /// The **Private mode** pill's glyph: a hat and glasses, a browser's private
     /// window.
     pub const INCOGNITO: &str = "\u{f00b}";
+    // Per-side stroke: a box drawn in dots with the one side it sets solid, one
+    // drawing turned onto each side.
+    pub const SIDE_TOP: &str = "\u{f00d}";
+    pub const SIDE_RIGHT: &str = "\u{f00e}";
+    pub const SIDE_BOTTOM: &str = "\u{f00f}";
+    pub const SIDE_LEFT: &str = "\u{f010}";
+    /// Anything set per side (a stroke's sides, a container's padding): four
+    /// sides that do not meet, [`CORNERS_SEPARATE`]'s twin.
+    pub const SIDES_SEPARATE: &str = "\u{f011}";
+    /// *Pad out to a square*: a picture centred in a square drawn in dots.
+    pub const PAD_SQUARE: &str = "\u{f012}";
+    /// A transparent background: the checkerboard that stands for no colour.
+    pub const CHECKERBOARD: &str = "\u{f013}";
+    /// A colour chip in a dropdown's face, where a painter cannot reach: the
+    /// outline [`SQUARE`]'s solid twin.
+    pub const SQUARE_FILL: &str = "\u{f014}";
     /// A variable mode's *Inherit*: an arrow turning up to the level above.
     pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
@@ -986,6 +1002,14 @@ pub mod icon {
         ("squircle", SQUIRCLE),
         ("square-dots", SQUARE_DOTS),
         ("incognito", INCOGNITO),
+        ("side-top", SIDE_TOP),
+        ("side-right", SIDE_RIGHT),
+        ("side-bottom", SIDE_BOTTOM),
+        ("side-left", SIDE_LEFT),
+        ("sides-separate", SIDES_SEPARATE),
+        ("pad-square", PAD_SQUARE),
+        ("checkerboard", CHECKERBOARD),
+        ("square-fill", SQUARE_FILL),
         ("book-open", BOOK_OPEN),
         ("git-diff", GIT_DIFF),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),

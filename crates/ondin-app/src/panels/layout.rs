@@ -1671,7 +1671,7 @@ impl OndinApp {
             } else {
                 ui::FieldButton::on_if(open)
             };
-            if ui::field_button(ui, icon::SQUARE, side, state)
+            if ui::field_button(ui, icon::SIDES_SEPARATE, side, state)
                 .on_hover_text(if uneven {
                     "Padding per side — the sides differ, so they stay open"
                 } else if open {
@@ -1689,10 +1689,13 @@ impl OndinApp {
             return;
         }
         let half = egui::vec2((full - gap) / 2.0, side);
-        for pair in [[(LEFT, "L"), (RIGHT, "R")], [(TOP, "T"), (BOTTOM, "B")]] {
+        for pair in [
+            [(LEFT, icon::SIDE_LEFT), (RIGHT, icon::SIDE_RIGHT)],
+            [(TOP, icon::SIDE_TOP), (BOTTOM, icon::SIDE_BOTTOM)],
+        ] {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                for (s, letter) in pair {
+                for (s, glyph) in pair {
                     let key = super::binding::FieldKey::Spacing {
                         id: subjects[0],
                         slots: bit(s),
@@ -1716,7 +1719,7 @@ impl OndinApp {
                     let (resp, hit) = ui::value_field_marked(
                         ui,
                         half,
-                        Prefix::Text(letter),
+                        Prefix::Icon(glyph),
                         mark.as_ref().map(OverrideMark::field),
                         &mut v,
                         Scrub::whole(0.5).range(0.0..=f64::MAX),
@@ -1728,7 +1731,7 @@ impl OndinApp {
                     } else {
                         self.display_tx(subjects, |d| d.padding_mut()[s] = v.max(0.0))
                     };
-                    self.named_valve("Padding", icon::SQUARE, &resp, tx);
+                    self.named_valve("Padding", glyph, &resp, tx);
                     self.field_doors(ui, key, &resp);
                 }
             });
@@ -4480,21 +4483,27 @@ mod tests {
         let frame_id = s.frame;
         let mut p = Panel::new(s.app, OndinApp::inspector_container);
         p.app.session.selection.set(vec![frame_id]);
-        let sides = |p: &mut Panel| ["L", "R", "T", "B"].map(|l| p.runs(l).len());
+        let glyphs = [
+            icon::SIDE_LEFT,
+            icon::SIDE_RIGHT,
+            icon::SIDE_TOP,
+            icon::SIDE_BOTTOM,
+        ];
+        let sides = |p: &mut Panel| glyphs.map(|g| p.runs(g).len());
         assert_eq!(sides(&mut p), [0; 4], "even: closed");
         let tx = p
             .app
             .flex_tx(&[frame_id], |f| f.padding = [4.0, 8.0, 12.0, 16.0]);
         p.app.session.commit(tx);
         assert_eq!(sides(&mut p), [1; 4], "uneven: open by itself");
-        for (letter, value) in [("L", "16"), ("R", "8"), ("T", "4"), ("B", "12")] {
-            on_row(&mut p, letter, value);
+        for (glyph, value) in glyphs.into_iter().zip(["16", "8", "4", "12"]) {
+            on_row(&mut p, glyph, value);
         }
     }
 
     /// Each Container mark's ↺ resets its own field, through the production
-    /// closures: clicks on the Column gap's glyph, the Row gap's and the *L* side's
-    /// letter (`ui::value_field_marked`'s prefix strip) on an instance that differs
+    /// closures: clicks on the Column gap's glyph, the Row gap's and the left side's
+    /// (`ui::value_field_marked`'s prefix strip) on an instance that differs
     /// from its main. Grid's rows and the Item card have their own tests below.
     ///
     /// flip: `gap_row`'s put made `*(if is_column_gap { r } else { c }) = v` → fails
@@ -4567,12 +4576,12 @@ mod tests {
         assert_eq!(f.padding, [4.0, 8.0, 12.0, 16.0], "the padding untouched");
 
         // The side fields are open by themselves over uneven padding.
-        let at = p.run("L");
+        let at = p.run(icon::SIDE_LEFT);
         p.click(at);
         assert_eq!(
             flex(&p.app, inst).padding,
             [4.0, 8.0, 12.0, 20.0],
-            "L's ↺: the left side alone"
+            "the left side's ↺: the left side alone"
         );
     }
 

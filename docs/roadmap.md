@@ -30,7 +30,6 @@ reads true.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
   Scoping would also make a number's DTCG `dimension` or `number` explicit rather than read from its
   bindings (`export.md`, *Design tokens (DTCG)*).
-- **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).
 
 ## Illustrations
 
@@ -41,8 +40,8 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 - **A shape builder.** Drag across overlapping shapes to merge the regions crossed; `Alt`-drag removes
   them. With it, **Divide**, which cuts overlaps into separate paths. The faces come from the planar
   arrangement of the selection's outlines (`i_overlay` is already a dependency) and land as plain
-  paths. Weigh it, with the next two items, against vector networks (*Now*) before that
-  model change: for a designer they cover most of what a network offers.
+  paths. With the next two items, it covers for a designer most of what a vector network would
+  offer (`non-goals.md`).
 - **Snapping for points.** Pen anchors and dragged points snap to the pixel grid only
   (`app-snapping.md`, `snap_point`). Add anchors and segments of other paths, intersections, and,
   for node-tool handles, `Shift` angle steps (`canvas::handle_tx` reads `Alt` only; the pen already

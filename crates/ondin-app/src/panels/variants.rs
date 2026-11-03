@@ -349,6 +349,9 @@ fn dropdown(
     pick
 }
 
+/// The height of a swap list's rows, which scroll past it.
+const SWAP_LIST_H: f32 = 240.0;
+
 /// The **swap picker** (§15 D983): a dropdown of the mains `options` answers for
 /// the search typed at its top, showing `shown`, answering the main picked and
 /// whether the dropdown is open — the caller asks for the library's kits while it
@@ -382,6 +385,9 @@ fn swap_picker(
             // `CloseOnClick` would dismiss it on the click into the search field,
             // so a pick closes it by hand below.
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            // Room for the search field, a note and the whole list, so only the
+            // list scrolls.
+            .height(SWAP_LIST_H + 80.0)
             .selected_text(ui::combo_text(shown))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
@@ -415,8 +421,14 @@ fn swap_picker(
                             .color(theme::text::dim()),
                     );
                 }
+                // 🚨 **One height, whatever the list holds.** A popup is measured
+                // once, on its first frame, and can shrink but never grow back: a
+                // list that opened short (a kit still loading, a search matching
+                // little) would keep one row's room as rows arrive.
                 egui::ScrollArea::vertical()
-                    .max_height(240.0)
+                    .auto_shrink([false, false])
+                    .max_height(SWAP_LIST_H)
+                    .min_scrolled_height(SWAP_LIST_H)
                     .show(ui, |ui| {
                         for (heading, group) in swap_groups(found) {
                             if let Some(h) = &heading {

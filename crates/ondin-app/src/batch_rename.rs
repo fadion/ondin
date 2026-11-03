@@ -23,10 +23,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-/// The box's width, and the gap between the top of the canvas and the box: the
-/// palette's place.
+/// The box's width.
 const W: f32 = 520.0;
-const TOP_GAP: f32 = 56.0;
 /// The label column, and the gap after it.
 const LABEL_W: f32 = 72.0;
 const GAP: f32 = 10.0;
@@ -998,15 +996,7 @@ impl OndinApp {
         let enter = !popup && ctx.input(|i| i.key_pressed(egui::Key::Enter));
         b.take_parts();
 
-        let screen = ctx.content_rect();
-        let id = egui::Id::new("batch-rename");
-        let area = egui::Modal::default_area(id).anchor(
-            egui::Align2::CENTER_TOP,
-            egui::vec2(
-                canvas.center().x - screen.center().x,
-                canvas.top() - screen.top() + TOP_GAP,
-            ),
-        );
+        let area = ui::canvas_popup_area(ctx, egui::Id::new("batch-rename"), canvas);
         let why_not = match b.done {
             true => b.plan.why_not(&b.s.find),
             false => Some("Still matching…".to_string()),

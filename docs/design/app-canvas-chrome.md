@@ -395,8 +395,9 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **In a text session** the chord opens the palette too, with the text session's menu rows and
   styling chords first. The session stays open under it; the palette's field holds focus, so the
   canvas reads no keys, and Escape closes only the palette.
-- **Placement and keys.** An `egui::Modal` with a transparent backdrop, 560 wide, anchored
-  centre-top over the canvas column, its top 56pt below the canvas's top. Nothing dims, so selection
+- **Placement and keys.** An `egui::Modal` with a transparent backdrop, 560 wide, at
+  `ui::canvas_popup_area`: centre-top over the canvas column, its top `ui::CANVAS_POPUP_TOP` (56pt)
+  below the canvas's top, its list scrolling past `ui::CANVAS_POPUP_LIST_H`. Nothing dims, so selection
   outlines stay visible; the panels are unchanged. A backdrop click closes it and is swallowed. While
   open it owns the keyboard: `palette::read_keys` takes its keys at the top of the frame, before any
   panel draws, and `input::resolve` does not run. ↑↓ wrap, Page Up/Down move eight rows, Escape

@@ -399,6 +399,27 @@ pub fn dropdown_place(
     menu_place(ctx, egui::pos2(x, y), size)
 }
 
+/// Between the canvas's top edge and a [`canvas_popup_area`]'s card.
+pub const CANVAS_POPUP_TOP: f32 = 56.0;
+
+/// The most a [`canvas_popup_area`]'s scrolling list stands before it scrolls.
+pub const CANVAS_POPUP_LIST_H: f32 = 372.0;
+
+/// The place every popup over the canvas hangs from — the command palette, batch
+/// rename, tokens import, Colour review: centred on the canvas's width (not the
+/// window's), [`CANVAS_POPUP_TOP`] under its top edge. A modal passes it to
+/// `Modal::area`; a card that leaves the canvas live shows it directly.
+pub fn canvas_popup_area(ctx: &egui::Context, id: egui::Id, canvas: egui::Rect) -> egui::Area {
+    let screen = ctx.content_rect();
+    egui::Modal::default_area(id).anchor(
+        egui::Align2::CENTER_TOP,
+        egui::vec2(
+            canvas.center().x - screen.center().x,
+            canvas.top() - screen.top() + CANVAS_POPUP_TOP,
+        ),
+    )
+}
+
 /// Where a submenu `size` big, padded `pad`, opens beside the menu row `row`: its
 /// first row level with the row, to the right — or the left when the right has
 /// no room — then clamped by [`menu_place`]. Short of room below, it shifts up

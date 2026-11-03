@@ -20,7 +20,6 @@ use std::path::{Path, PathBuf};
 
 /// The box's width: a value column per mode needs more than batch rename's.
 const W: f32 = 620.0;
-const TOP_GAP: f32 = 56.0;
 const PAD: f32 = 16.0;
 /// The list scrolls past this height.
 const LIST_H: f32 = 380.0;
@@ -410,15 +409,7 @@ impl OndinApp {
             return;
         }
         let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
-        let screen = ctx.content_rect();
-        let id = egui::Id::new("tokens-import");
-        let area = egui::Modal::default_area(id).anchor(
-            egui::Align2::CENTER_TOP,
-            egui::vec2(
-                canvas.center().x - screen.center().x,
-                canvas.top() - screen.top() + TOP_GAP,
-            ),
-        );
+        let area = ui::canvas_popup_area(ctx, egui::Id::new("tokens-import"), canvas);
         let mut act = Act::None;
         let mut changed = false;
         // Batch rename's: the settings card without its backdrop or margin.

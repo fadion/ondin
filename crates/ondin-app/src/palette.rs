@@ -15,9 +15,8 @@ use eframe::egui;
 use ondin_core::{NodeId, build};
 use std::ops::Range;
 
-/// The card's width, and the gap between the top of the canvas and the card.
+/// The card's width.
 const W: f32 = 560.0;
-const TOP_GAP: f32 = 56.0;
 const FIELD_H: f32 = 42.0;
 const ROW_H: f32 = 30.0;
 const SECTION_H: f32 = 24.0;
@@ -25,8 +24,6 @@ const SECTION_H: f32 = 24.0;
 pub(crate) const FOOTER_H: f32 = 30.0;
 /// How far the footer's text sits above the footer's centre.
 const FOOTER_TEXT_LIFT: f32 = 1.0;
-/// The list scrolls past this; the field and the footer never do.
-const LIST_MAX_H: f32 = 372.0;
 /// The list's inset inside the card.
 const PAD: f32 = 6.0;
 /// The layer rows the mixed list shows before offering the rest behind `Tab`.
@@ -1025,14 +1022,7 @@ impl OndinApp {
         }
 
         let note = self.palette_target_note(target);
-        let screen = ctx.content_rect();
-        let area = egui::Modal::default_area(egui::Id::new("command-palette")).anchor(
-            egui::Align2::CENTER_TOP,
-            egui::vec2(
-                canvas.center().x - screen.center().x,
-                canvas.top() - screen.top() + TOP_GAP,
-            ),
-        );
+        let area = crate::ui::canvas_popup_area(ctx, egui::Id::new("command-palette"), canvas);
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
         let mut clicked: Option<usize> = None;
         let mut hovered: Option<usize> = None;
@@ -1059,7 +1049,8 @@ impl OndinApp {
                 let mut index = 0usize;
                 egui::ScrollArea::vertical()
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .max_height(LIST_MAX_H)
+                    // The field and the footer never scroll.
+                    .max_height(crate::ui::CANVAS_POPUP_LIST_H)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         egui::Frame::NONE

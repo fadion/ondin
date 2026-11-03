@@ -57,6 +57,52 @@ rule as the docs: state what is true now.
   next year. State the value or rule itself.
 - When you edit an item whose comment breaks this rule, trim it in the same change.
 
+## Building UI
+
+Every surface should look and behave as if one person built the whole app. This holds whether
+a feature comes with a design handoff or only a paragraph of directions: the handoff says
+*what* goes on screen, and the codebase says *how* it is built. When the two disagree on a
+control's look, the codebase wins unless the handoff is deliberately changing that control
+everywhere. Then say so and change it everywhere.
+
+- **Look before you build.** Before adding any control, row, list, menu, popover, dialog,
+  tooltip or empty state, find how the app already does that thing: grep `ui.rs` for a
+  primitive, find the nearest surface that shows the same kind of thing, and read
+  `docs/design/app-chrome.md` (*Shared rules*, *Value fields*). Mention what you found.
+- **Use the primitive, never a lookalike.** Fields are `ui::value_field*`, `ui::text_field`
+  and `ui::search_box`. Buttons are `ui::field_button*`, `ui::toggle_row`, `ui::switch_row*`
+  and `ui::segmented`. Dropdowns are a `ComboBox` with `ui::combo_chevron` and
+  `ui::menu_rows`. Popups use `ui::menu_frame`, `ui::menu_place` / `ui::dropdown_place` and
+  `ui::MENU_GAP`. Labels are `ui::labelled` and `ui::eyebrow`. Every control and row must
+  come from these, not be painted by hand to resemble them. `clippy.toml` refuses egui's raw
+  controls outside `ui.rs` for this reason. An `#[expect]` past it needs a reason that no
+  primitive fits.
+- **When nothing fits, extend what exists.** Add a variant, a parameter or a new primitive
+  in `ui.rs` built from the existing parts: the same grounds, hairlines, states, heights,
+  type sizes and hover. Then use it from every caller that needs it. Never write a
+  one-off at the call site, and never write a second version of something that exists.
+  If two places have drifted apart, bring them back to one.
+- **Take numbers from the system.** Colours come from `theme::color` and `theme::text`,
+  never literals. Sizes come from `ui::CONTROL_H`, `ui::MENU_ROW_H`, `ui::CONTROL_PT`,
+  `ui::CONTROL_GLYPH_PT`, `ui::CARD_COL_GAP` / `ui::CARD_ROW_GAP` and their neighbours. A new
+  constant needs a reason the existing one does not serve, written in its doc.
+- **Icons come from the icon font.** Reuse a glyph that already means the thing: the
+  same concept wears the same glyph everywhere, and one glyph never means two things. A new
+  glyph follows the *Drawing rules* in `app-chrome.md` and should be legible at the size it
+  is drawn. Then rebuild the font.
+- **Behave like the neighbours, too.** Match the existing hover and disabled states, the
+  cursors, the tooltips' wording, the focus and keyboard behaviour (Escape, Enter, arrows,
+  Tab), the undo step names, the status-line messages and the empty-state text. A control
+  that does not apply is shown disabled with its reason, not removed.
+- **Words follow the app's voice.** Write sentence case and the same verb for the same act.
+  Name a thing the way the rest of the UI already names it.
+- **Check it as a whole.** Compare the new surface with the closest existing one: heights,
+  insets, gaps, alignment of text across neighbouring controls, and how it looks at both
+  themes. A popup must not change size as its content changes: egui popups can shrink but
+  never grow back. If the surface has interactive grounds, it joins `control_audit`'s list.
+- **Record a new rule where the others live.** A new shared primitive or convention gets a
+  line in `app-chrome.md` *Shared rules*, so the next feature finds it.
+
 ## Editing files
 
 - **Edit with an exact-match editing tool. Never rewrite a source file with a script** — no

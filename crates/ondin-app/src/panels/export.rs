@@ -1272,40 +1272,32 @@ impl OndinApp {
         }
     }
 
-    /// The glyph in front of that label and its ink: a chip in the colour that
-    /// will actually be behind the export, or the checkerboard when nothing will.
-    /// *Frame's own* wears the frame glyph instead of the chip, in the same ink.
+    /// The glyph in front of that label and its ink: *Frame's own* is the frame
+    /// glyph in the row's dim ink, since it differs per layer; any other is a chip
+    /// in the colour that will actually be behind the export, or the checkerboard
+    /// when nothing will.
     ///
-    /// Resolved through `plan::background_color`, not read off the setting: *Frame's
-    /// own* differs per layer and is nothing outside a frame. Glyphs, because a
-    /// `ComboBox`'s selected text can carry a glyph but not a painter.
+    /// Resolved through `plan::background_color`, not read off the setting. Glyphs,
+    /// because a `ComboBox`'s selected text can carry a glyph but not a painter.
     fn background_swatch(
         &self,
         spec: &ExportSpec,
         sizing: Option<NodeId>,
     ) -> (&'static str, egui::Color32) {
-        // A muted chip over a multi-selection rather than a guess (§15 D657). Only
-        // `Frame` varies per layer, so this is a `match` and not a gate on
-        // `sizing`: `Solid` and `Transparent` hold for any number of layers.
-        let frame = spec.background == ExportBackground::Frame;
-        let resolved = match (frame, sizing) {
-            (true, None) => return (icon::FRAME, theme::text::dim()),
-            (_, subject) => subject
-                .or_else(|| self.export_subjects().first().copied())
-                .and_then(|id| ondin_export::plan::background_color(&self.session.doc, id, spec)),
-        };
-        match (resolved, frame) {
-            (Some(c), _) => {
+        if spec.background == ExportBackground::Frame {
+            return (icon::FRAME, theme::text::dim());
+        }
+        // `Solid` and `Transparent` hold for any number of layers.
+        let resolved = sizing
+            .or_else(|| self.export_subjects().first().copied())
+            .and_then(|id| ondin_export::plan::background_color(&self.session.doc, id, spec));
+        match resolved {
+            Some(c) => {
                 let [r, g, b, a] = c.to_rgba8().to_u8_array();
                 let ink = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
-                let glyph = match frame {
-                    true => icon::FRAME,
-                    false => icon::SQUARE_FILL,
-                };
-                (glyph, ink)
+                (icon::SQUARE_FILL, ink)
             }
-            (None, true) => (icon::FRAME, theme::text::dim()),
-            (None, false) => (icon::CHECKERBOARD, theme::text::dim()),
+            None => (icon::CHECKERBOARD, theme::text::dim()),
         }
     }
 
@@ -3053,15 +3045,15 @@ mod tests {
         );
     }
 
-    /// The background chip goes muted over a multi-selection of differing frames
-    /// rather than painting one member's, but keeps showing a `Solid` colour (§15
-    /// D657); nothing behind the export wears the checkerboard.
+    /// *Frame's own* wears the frame glyph in the dim ink on one layer or many;
+    /// a `Solid` colour is a chip in that colour on any number; nothing behind
+    /// the export wears the checkerboard.
     ///
-    /// flip: delete the `(Frame, None)` arm of `background_swatch` → fails at
-    /// the multi-selection assertion; gate the whole resolution on `sizing` → fails
-    /// at the `Solid` assertion.
+    /// flip: `background_swatch` resolving *Frame's own* like the others → fails
+    /// at "a white frame"; gating the resolution on `sizing` → fails at the `Solid`
+    /// assertion.
     #[test]
-    fn a_frame_background_chip_says_nothing_over_a_multi_selection() {
+    fn a_frame_background_wears_the_frame_glyph_and_a_solid_its_colour() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
@@ -3111,23 +3103,15 @@ mod tests {
         let mut framed = spec(ExportFormat::Png, ExportScale::Times(1.0));
         framed.background = ExportBackground::Frame;
 
-        // The two subjects really do resolve to different colours.
-        let a = app.background_swatch(&framed, Some(kids[0]));
-        let b = app.background_swatch(&framed, Some(kids[1]));
-        assert_ne!(
-            a, b,
-            "fixture: two frames of different grounds must disagree"
-        );
         assert_eq!(
-            a,
-            (icon::FRAME, egui::Color32::WHITE),
-            "fixture: the first frame is white"
+            app.background_swatch(&framed, Some(kids[0])),
+            (icon::FRAME, theme::text::dim()),
+            "a white frame"
         );
-
         assert_eq!(
             app.background_swatch(&framed, None),
             (icon::FRAME, theme::text::dim()),
-            "and over both of them the chip says nothing rather than picking one"
+            "and both frames at once"
         );
 
         // The other backgrounds are per-spec: the chip keeps showing them.

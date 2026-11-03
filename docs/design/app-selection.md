@@ -51,13 +51,18 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - *Select matching layers* (palette only, `OndinApp::select_matching`) selects the same layer in
   each copy of a repeated block on the current page, the selection included, locked ones left out
   and counted. A layer's place is its chain of kind and name from just below its top-level layer
-  down to itself, a numbered name read by its stem, since a duplicate renumbers ("Card 2" is
-  "Card"); two layers match when their places agree and the layers hold the same ordinal among
-  their same-named siblings, so a card's first "Text" pairs with each card's first
-  (`ondin_core::matching_layers`). The top-level layer's own name is not read, so the same layer
-  on another page frame matches, as in Figma. A sibling never matches. A top-level layer has no
-  place; with only those selected the row dims (`select_matching_sources`). Generated names pair
-  by position, so renaming a card's first text makes its second the first.
+  down to itself. An ancestor's numbered name is read by its stem, since duplicating a block
+  renumbers its root ("Card 2" is "Card"); the layer's own name is read whole, since a copy's
+  inner layers keep theirs and a design of generated names holds many unrelated "Rectangle N"s.
+  Two layers match when their places agree and the layers hold the same ordinal among their
+  siblings of that whole name (`ondin_core::matching_layers`). Layers whose chains of component
+  links end at the same layer match too, whatever their names and places, so a main's layer and
+  its counterpart in every instance on the page pair even after an instance renamed or moved
+  it. The top-level layer's own name is
+  not read, so the same layer on another page frame matches, as in Figma. A sibling never
+  matches. A top-level layer has no place; with only those selected the row dims
+  (`select_matching_sources`). It matches by place and name, not by look: layers that only
+  share a fill or stroke are *Select same*'s.
 - *Select inverse* (palette only, `OndinApp::select_inverse`): the unselected children of each
   selected outermost layer's parent, locked ones and slices skipped; it needs a selection. *Select
   same* skips slices too: every door here asks `may_select_in_bulk`.

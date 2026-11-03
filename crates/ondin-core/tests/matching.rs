@@ -3,7 +3,7 @@
 
 use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
 use ondin_core::{
-    Document, IdSource, NodeId, NodeKind, Operation, TextSizing, TextStyle, Transaction,
+    Document, IdSource, NodeId, NodeKind, Operation, Placement, TextSizing, TextStyle, Transaction,
     matching_layers,
 };
 
@@ -181,9 +181,7 @@ fn a_card_finds_its_counterpart_and_not_its_sibling() {
     );
 }
 
-/// A renamed layer leaves the set; the rest still match. Renaming a card's
-/// *first* text would make its second the first "Text": generated names pair by
-/// position.
+/// A renamed layer leaves the set; the rest still match.
 #[test]
 fn a_renamed_layer_does_not_match() {
     let mut s = screens();
@@ -202,6 +200,75 @@ fn a_renamed_layer_does_not_match() {
         s.titles,
         "the titles are untouched"
     );
+}
+
+/// In frames of loose layers that all carry generated names, a layer finds the
+/// layer of its own name in each frame wherever it sits, and never another
+/// rectangle that merely holds the same position among the rectangles.
+/// flip: `walk` reading the layer's own name by its stem → fails at the first
+/// assertion, pairing the first frame's button with a leading rectangle.
+#[test]
+fn a_generated_name_is_read_whole_on_the_layer_itself() {
+    let mut f = Fixture::new();
+    let page = f.page;
+    let (mut buttons, mut others) = (Vec::new(), Vec::new());
+    for leading in [0, 3] {
+        let s = f.add(page, frame(), None);
+        for i in 0..leading {
+            f.add(s, rect(), Some(&format!("Rectangle {}", 10 + i)));
+        }
+        others.push(f.add(s, rect(), Some("Rectangle 60")));
+        buttons.push(f.add(s, rect(), Some("Rectangle 2")));
+    }
+    assert_eq!(matching_layers(&f.doc, page, &[buttons[0]]), buttons);
+    assert_eq!(matching_layers(&f.doc, page, &[others[1]]), others);
+}
+
+/// A main's layer finds its counterpart in every instance on the page by the
+/// component link, in an instance that renamed it and in one placed deeper, and
+/// a counterpart finds the main's layer and the other counterparts.
+/// flip: `matching_layers` without the `origin` arm → fails at the first
+/// assertion, missing the renamed label and the deeper one.
+#[test]
+fn a_component_link_matches_past_a_rename_and_a_different_place() {
+    let mut f = Fixture::new();
+    let page = f.page;
+    let screen = f.add(page, frame(), Some("Screen"));
+    let button = f.add(screen, frame(), Some("Button"));
+    let label = f.add(button, text(), Some("Label"));
+    f.doc
+        .apply(&Transaction(vec![Operation::SetComponent {
+            id: button,
+            component: true,
+        }]))
+        .expect("a main");
+    let other = f.add(page, frame(), Some("Other"));
+    let deeper = f.add(other, NodeKind::Group, Some("Toolbar"));
+    let mut labels = vec![label];
+    for parent in [screen, deeper] {
+        let (tx, made) = ondin_core::insert_subtrees(
+            &f.doc,
+            &mut f.ids,
+            &[Placement {
+                nodes: f.doc.capture_subtree(button).expect("the main"),
+                parent,
+                index: None,
+            }],
+            Default::default(),
+        );
+        f.doc.apply(&tx).expect("an instance");
+        let copy = f.doc.get(made[0]).expect("made").children()[0];
+        assert_eq!(f.doc.get(copy).and_then(|n| n.link()), Some(label));
+        labels.push(copy);
+    }
+    f.doc
+        .apply(&Transaction(vec![Operation::SetName {
+            id: labels[1],
+            name: "Price".into(),
+        }]))
+        .expect("rename");
+    assert_eq!(matching_layers(&f.doc, page, &[label]), labels);
+    assert_eq!(matching_layers(&f.doc, page, &[labels[2]]), labels);
 }
 
 /// A top-level layer has no place, so it matches nothing — not even itself.

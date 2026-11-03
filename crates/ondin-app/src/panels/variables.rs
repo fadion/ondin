@@ -1508,8 +1508,9 @@ fn in_group(name: &str, path: &str) -> bool {
 }
 
 /// Why `name` cannot be a variable's (`except` the one being renamed), if it
-/// cannot — empty, an empty group part, or taken.
-fn name_refusal(
+/// cannot — empty, an empty group part, or taken. Colour review's new variable
+/// is refused the same way.
+pub(crate) fn name_refusal(
     table: &ondin_core::Variables,
     name: &str,
     except: Option<VarId>,

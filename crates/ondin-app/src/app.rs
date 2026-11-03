@@ -927,6 +927,8 @@ pub struct OndinApp {
     pub(crate) tokens_import: Option<crate::tokens_import::TokensImport>,
     /// The find and replace box, kept while closed so it reopens as it was left.
     pub(crate) find: crate::find::FindBox,
+    /// The Colour review card, at Find's place (`colour_review.rs`).
+    pub(crate) colour_review: crate::colour_review::ColourReview,
     pub(crate) show_toolbar: bool,
     /// *View ▸ Show messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
@@ -1544,6 +1546,7 @@ impl OndinApp {
             batch_rename: None,
             tokens_import: None,
             find: Default::default(),
+            colour_review: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
             focus: false,
@@ -1999,6 +2002,7 @@ impl eframe::App for OndinApp {
         self.tokens_import_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
+        self.colour_review_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
         self.compare_bar(&ctx);
         // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
@@ -2212,6 +2216,7 @@ impl OndinApp {
                 self.versions_compare = true;
             }
             Action::SaveNamedVersion => self.save_named_version(),
+            Action::ColourReview => self.open_colour_review(),
             Action::RotateQuarter(clockwise) => {
                 let turn = std::f64::consts::FRAC_PI_2;
                 self.rotate_selection_quarter(if clockwise { turn } else { -turn });
@@ -2651,6 +2656,9 @@ impl OndinApp {
         } else if self.find.open {
             // Below a text edit, which a row's double-click opens from the box.
             self.close_find();
+        } else if self.colour_review.open {
+            // Its open menu or the name being typed goes first, the card next press.
+            self.colour_review.escape();
         } else if self.session.compare.is_some() {
             self.leave_compare();
         } else if self.pen.is_some() {

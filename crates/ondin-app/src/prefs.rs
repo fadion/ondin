@@ -371,6 +371,9 @@ pub struct Prefs {
     pub vision: String,
     /// The batch rename box's last Find, template and numbering.
     pub batch_rename: BatchRenamePrefs,
+    /// Colour review's threshold (`crate::colour_review`), kept across documents:
+    /// how near counts as near is a habit, not a fact about one file.
+    pub colour_review: ondin_core::color_review::Threshold,
 }
 
 impl Default for Prefs {
@@ -427,6 +430,7 @@ impl Default for Prefs {
             contrast: ContrastPrefs::default(),
             vision: ondin_render::vision::Deficiency::default().key().into(),
             batch_rename: BatchRenamePrefs::default(),
+            colour_review: Default::default(),
         }
     }
 }

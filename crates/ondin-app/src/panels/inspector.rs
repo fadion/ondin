@@ -3063,7 +3063,7 @@ impl OndinApp {
     /// Resets `entered_group`, since the new members can be anywhere in the tree.
     /// Locked layers are counted and not selected, and the message says so; when
     /// every match is locked nothing moves but the message.
-    fn select_by_color(&mut self, ids: Vec<NodeId>) {
+    pub(crate) fn select_by_color(&mut self, ids: Vec<NodeId>) {
         if ids.is_empty() {
             return;
         }

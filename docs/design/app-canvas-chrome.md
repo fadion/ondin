@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, batch rename, find and replace, the cheatsheet, focus, private and present mode
+# Canvas chrome, the top bar's menus, the command palette, batch rename, find and replace, colour review, the cheatsheet, focus, private and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the minimap, the contrast check mode, the colour-blind simulation, the top bar's View/Snap menus and Settings button,
-the command palette, the batch rename box, the find and replace box, the shortcut cheatsheet, focus mode, private mode and
+the command palette, the batch rename box, the find and replace box, the colour review card, the shortcut cheatsheet, focus mode, private mode and
 present mode.
 Part of §9.4.
 
@@ -326,7 +326,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new file,
   close tab, next and previous tab, reopen closed tab (`Action::Tab`, which the keymap never
-  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate colour blindness*, tools, place image, zoom, align,
+  yields), the library, settings, *Export as …*, *Present*, *Check contrast*, *Simulate colour blindness*, *Colour review*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -572,6 +572,56 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   `TextEdit::range_quads`, cached per node per revision.
 - **Private mode** masks the layer and page names in the list. The text is the work, so it is
   searched and shown.
+
+## Colour review (`colour_review.rs`)
+
+Groups the near-identical colours of the selection or the document and merges a group into one
+colour, one undo step each. The rule is `ondin_core::color_review`.
+
+- **Census.** `census(doc, roots)` counts every raw colour under `roots` — solid fills and strokes,
+  gradient stops, drop and inner shadow colours, a text layer's `TextStyle::color` and its
+  `CharAttr::Color` runs — and each colour variable a fill or stroke is bound to, keyed by variable
+  and binding alpha and valued at the default mode. Hidden paints count: a merge that skipped them
+  would bring the old colour back when one is switched on. Decoration, layout-grid and guide colours
+  do not count. `roots` is the selection or every page's root, never the vault.
+- **Groups.** `groups(census, Threshold)` takes anchors most-used first, and every member sits within
+  `Threshold::limit()` of its anchor itself (`delta`, OKLab distance ×100: *Tight* 1, *Close* 2,
+  *Loose* 4), so A≈B≈C cannot chain; a colour taken is no anchor. Members share their alpha byte. A
+  group shows only with two members or more, one of them raw.
+- **Merging.** `Group::default_target` is the most-used bound member, else the anchor; `merged` is
+  the raw members but the target, so a bound member is never merged away, and a kit's variable may
+  be the target. `merge` is one transaction: into a raw target the merged places take its colour;
+  into a bound one fills and strokes bind to its variable (the binding alpha keeping the drawn alpha)
+  and stops, shadow and text colours take its default-mode value (`Merged::unbound`). Effectively
+  locked layers are never written (`Merged::locked`). `merge_into_new` adds *Mode 1* to a document
+  with no modes, a variable valued the target's colour in every mode, and binds every raw member's
+  users, the target's included.
+- **Doors and place.** The Document menu's *Colour review* row, after *Save named version…*, and the
+  palette (`Item::ColourReview`, unbound). Not a modal: it sits at Find and replace's place and width
+  (`canvas_card_place`, `card_frame`), and opening either closes the other. The census is taken again
+  when the revision, the scope or the threshold changes.
+- **Head.** Scope *Selection · Document*, opening on *Selection* when something is selected;
+  *Selection* is disabled with *Nothing is selected* when nothing is, and a card left on it says
+  *Nothing selected · reviewing the document*. Threshold *Tight · Close · Loose*, *Close* by default,
+  kept in `prefs.colour_review` across documents. Caption: *N groups · M colours could be N · Δ ≤ x*.
+- **Groups**, most-used first, the first unfolded (again after a merge). A folded row: caret, a split
+  patch with a slice per member, the target's name (hex, or the variable's capsule, a kit's after
+  the package glyph) and *N colours · M uses*. A member row: the target `ui::radio`, swatch, hex or
+  capsule (a kit's reads *Kit · name*, the kit masked in private mode as on every kit surface), *kept* on a bound member that is not the target, uses,
+  *anchor* or *Δ x.x*, and a reticle selecting that colour's users on this page, else on the first
+  one's page, through `select_by_color`.
+- **Footer.** A `ui::split_button` *Merge N into X*; its caret holds *Merge into X* and *Merge into a
+  new variable…*, the second disabled with *The group has a variable* when the target is bound. The
+  button keeps the last choice. Naming a new variable turns the footer into *New colour variable ·
+  value HEX in every mode*, a field seeded `color/` with the caret at its end, *Cancel* and *Create
+  and merge*; a name is refused as the variables browser refuses one
+  (`panels::variables::name_refusal`).
+- **Status.** Undo steps *Merge colours* and *Merge into a new variable*. *Merged N colours into X · U
+  uses on L layers*, then *· K took its value, as stops, shadows and text colours do not bind* and
+  *· K on locked layers left* when they apply. With no group: *No near-identical colours at
+  ‹threshold›* over how many colours the scope holds.
+- **Keys.** `Escape` is a rung of `OndinApp::escape` below Find's: the caret menu, then the naming,
+  then the card.
 
 ## The shortcut cheatsheet (`cheatsheet.rs`)
 

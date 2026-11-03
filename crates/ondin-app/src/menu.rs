@@ -448,6 +448,7 @@ pub enum Item {
     VersionHistory,
     CompareVersion,
     SaveNamedVersion,
+    ColourReview,
     /// A quarter turn of each selected layer about its own origin, as the Transform
     /// card's buttons do; `true` is clockwise.
     RotateQuarter(bool),
@@ -1240,6 +1241,7 @@ impl Item {
             Item::SaveNamedVersion => {
                 s("Save named version…", icon::FLOPPY_DISK, None, Group::File)
             }
+            Item::ColourReview => s("Colour review", icon::SWATCHES, None, Group::File),
             Item::RotateQuarter(false) => s(
                 "Rotate 90° counter-clockwise",
                 icon::ARROW_COUNTER_CLOCKWISE,
@@ -1392,6 +1394,16 @@ impl Item {
             Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
             Item::SelectInverse => &["invert", "others", "rest"],
             Item::CompareVersion => &["diff", "changes", "history", "before"],
+            Item::ColourReview => &[
+                "color",
+                "palette",
+                "merge",
+                "duplicate",
+                "near",
+                "similar",
+                "tidy",
+                "clean",
+            ],
             Item::TextChord(_) => &["text", "type"],
             Item::Tool(Tool::Rect) => &["square", "box"],
             Item::Tool(Tool::Node) => &["node", "direct"],
@@ -1467,6 +1479,7 @@ impl Item {
             Item::VersionHistory => Action::VersionHistory,
             Item::CompareVersion => Action::CompareVersion,
             Item::SaveNamedVersion => Action::SaveNamedVersion,
+            Item::ColourReview => Action::ColourReview,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
             Item::SelectSame(same) => Action::SelectSame(same),
             Item::SelectInverse => Action::SelectInverse,
@@ -3544,6 +3557,7 @@ impl OndinApp {
             | Item::VersionHistory
             | Item::CompareVersion
             | Item::SaveNamedVersion
+            | Item::ColourReview
             | Item::RotateQuarter(_)
             | Item::SelectSame(_)
             | Item::SelectInverse

@@ -19,8 +19,8 @@ use ondin_core::{NodeId, NodeKind, TextEdit, TextRef};
 use std::collections::HashMap;
 use std::ops::Range;
 
-/// The box's width.
-const W: f32 = 420.0;
+/// The box's width, which Colour review's card shares.
+pub(crate) const W: f32 = 420.0;
 const PAD: f32 = 12.0;
 /// Its gap from the canvas's top and right edges (or the inspector's left).
 const MARGIN: f32 = 16.0;
@@ -134,6 +134,8 @@ impl OndinApp {
             f.seeded = true;
             f.keep_case = true;
         }
+        // One card at the canvas's corner at a time.
+        self.colour_review.open = false;
         if !f.open {
             f.scope = match self.session.selection.ids().is_empty() {
                 true => In::Page,
@@ -147,6 +149,28 @@ impl OndinApp {
         if replace {
             f.replace_row = true;
         }
+    }
+
+    /// Where a card floating over the canvas hangs — its top-right corner, at the
+    /// canvas's top-right beside the inspector and under the rulers — and the
+    /// most height it may take. Find's place, which Colour review shares.
+    pub(crate) fn canvas_card_place(&self, ctx: &egui::Context) -> (egui::Pos2, f32) {
+        let right = if self.focus {
+            self.canvas_rect.right()
+        } else {
+            Self::inspector_column(ctx.content_rect()).left()
+        };
+        let top = self.canvas_rect.top()
+            + if self.rulers_on() {
+                crate::rulers::THICKNESS
+            } else {
+                0.0
+            };
+        let anchor = egui::pos2(right - MARGIN, top + MARGIN);
+        (
+            anchor,
+            (self.canvas_rect.bottom() - anchor.y - MARGIN).max(160.0),
+        )
     }
 
     /// Close the box; the selection is left as it was.
@@ -359,19 +383,7 @@ impl OndinApp {
             act = Some(Act::Replace);
         }
 
-        let right = if self.focus {
-            self.canvas_rect.right()
-        } else {
-            Self::inspector_column(ctx.content_rect()).left()
-        };
-        let top = self.canvas_rect.top()
-            + if self.rulers_on() {
-                crate::rulers::THICKNESS
-            } else {
-                0.0
-            };
-        let anchor = egui::pos2(right - MARGIN, top + MARGIN);
-        let max_h = (self.canvas_rect.bottom() - anchor.y - MARGIN).max(160.0);
+        let (anchor, max_h) = self.canvas_card_place(ctx);
         let selected = self.session.selection.ids().len();
         let names: Vec<(String, String)> = self
             .find
@@ -397,35 +409,25 @@ impl OndinApp {
             .pivot(egui::Align2::RIGHT_TOP)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(color::card())
-                    .corner_radius(8)
-                    .stroke(egui::Stroke::new(1.0, color::text_a(16)))
-                    .shadow(egui::Shadow {
-                        offset: [0, 10],
-                        blur: 24,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(82),
-                    })
-                    .show(ui, |ui| {
-                        ui.set_width(W);
-                        ui.set_max_height(max_h);
-                        ui.spacing_mut().item_spacing = egui::vec2(GAP_X, 8.0);
-                        egui::Frame::NONE
-                            .inner_margin(PAD)
-                            .show(ui, |ui| controls(ui, f, selected, &mut act));
-                        // Nothing under the fields until there is something to
-                        // list, so the folded box is as deep below as above.
-                        if f.find.is_empty() {
-                            return;
-                        }
+                card_frame().show(ui, |ui| {
+                    ui.set_width(W);
+                    ui.set_max_height(max_h);
+                    ui.spacing_mut().item_spacing = egui::vec2(GAP_X, 8.0);
+                    egui::Frame::NONE
+                        .inner_margin(PAD)
+                        .show(ui, |ui| controls(ui, f, selected, &mut act));
+                    // Nothing under the fields until there is something to
+                    // list, so the folded box is as deep below as above.
+                    if f.find.is_empty() {
+                        return;
+                    }
+                    rule(ui);
+                    list(ui, f, &names, &rows, &mut act);
+                    if !f.found.hits.is_empty() {
                         rule(ui);
-                        list(ui, f, &names, &rows, &mut act);
-                        if !f.found.hits.is_empty() {
-                            rule(ui);
-                            footer(ui, f);
-                        }
-                    });
+                        footer(ui, f);
+                    }
+                });
             });
 
         match act {
@@ -735,7 +737,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
 
 /// The width [`crate::settings::text_button`] gives `label`: its word at
 /// [`ui::CONTROL_PT`] and 14 either side.
-fn button_w(ui: &egui::Ui, label: &str) -> f32 {
+pub(crate) fn button_w(ui: &egui::Ui, label: &str) -> f32 {
     let g = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_string(),
@@ -1121,8 +1123,23 @@ fn field(
     (resp, rect)
 }
 
+/// The ground, hairline and shadow of a card floating over the canvas: Find's,
+/// and Colour review's.
+pub(crate) fn card_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(color::card())
+        .corner_radius(8)
+        .stroke(egui::Stroke::new(1.0, color::text_a(16)))
+        .shadow(egui::Shadow {
+            offset: [0, 10],
+            blur: 24,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(82),
+        })
+}
+
 /// A hairline across the box.
-fn rule(ui: &mut egui::Ui) {
+pub(crate) fn rule(ui: &mut egui::Ui) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, color::text_a(20));

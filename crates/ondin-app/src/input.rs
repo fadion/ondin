@@ -203,6 +203,9 @@ pub enum Action {
     CompareVersion,
     /// *Save named version…*: save, pin a version and ask for its name.
     SaveNamedVersion,
+    /// *Colour review*, unbound: the card that merges near-identical colours
+    /// (`crate::colour_review`).
+    ColourReview,
     /// A quarter turn of the selection, each layer about its own origin; `true` is
     /// clockwise. Unbound, as the Transform card's buttons are.
     RotateQuarter(bool),

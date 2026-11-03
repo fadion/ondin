@@ -24,7 +24,10 @@ use peniko::Color;
 use peniko::color::{DynamicColor, Oklab, Srgb};
 
 /// How far apart two colours may be and still be one group, in OKLab distance ×100.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Threshold {
     Tight,
     #[default]

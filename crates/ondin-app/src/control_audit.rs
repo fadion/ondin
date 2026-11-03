@@ -783,6 +783,47 @@ fn every_control_ground_is_on_the_standard() {
     let mut app = with_a_rect(&ctx);
     let found = opened(&ctx, &mut app, |c, a| a.open_batch_rename(c, None));
     check("batch rename", app, found);
+    let mut app = with_a_rect(&ctx);
+    let found = opened(&ctx, &mut app, |_, a| {
+        // A colour a hair from the rect's fill, so a group shows unfolded.
+        let id = a.session.selection.ids()[0];
+        let fill = |r, g, b| {
+            ondin_core::keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(r, g, b))
+                    .into(),
+                visible: true,
+            }])
+        };
+        let twin = a.session.ids.mint();
+        let page = a.session.page;
+        assert!(a.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id,
+                fills: fill(1, 1, 2),
+            },
+            Operation::CreateNode {
+                id: twin,
+                parent: page,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetFills {
+                id: twin,
+                fills: fill(1, 1, 1),
+            },
+        ])));
+        // On the document: nothing selected.
+        a.session.selection.set(Vec::new());
+        a.open_colour_review();
+    });
+    assert_eq!(app.colour_review.groups_shown(), 1, "a group unfolded");
+    check("colour review", app, found);
 
     for (name, at_rest, hovered) in &seen {
         assert!(

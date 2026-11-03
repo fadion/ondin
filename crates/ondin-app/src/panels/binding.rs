@@ -429,6 +429,27 @@ pub(crate) fn chip(
     out
 }
 
+/// A variable's name as [`chip`]'s resting capsule, for a row that names a
+/// variable without binding anything: left-centred at `at`, as wide as the name
+/// (to `max_w`, its groups elided). Returns where it was painted.
+pub(crate) fn capsule(ui: &egui::Ui, at: egui::Pos2, name: &str, max_w: f32) -> egui::Rect {
+    let font = egui::FontId::proportional(11.5);
+    let shown = elide_groups(ui, name, &font, max_w - 16.0);
+    let galley = ui.painter().layout_no_wrap(shown, font, color::text());
+    let cap = egui::Rect::from_min_size(
+        egui::pos2(at.x, at.y - CHIP_H / 2.0),
+        egui::vec2(galley.size().x + 16.0, CHIP_H),
+    );
+    let p = ui.painter();
+    p.rect_filled(cap, CHIP_H / 2.0, color::text_a(28));
+    p.galley(
+        egui::pos2(cap.left() + 8.0, cap.center().y - galley.size().y / 2.0),
+        galley,
+        color::text(),
+    );
+    cap
+}
+
 /// The rest of a [`ui::field_row`]'s content box, for a chip: allocated at
 /// exactly the room left, so the field keeps its plain size, and handed back
 /// 5 points wider so the capsule reaches into the row's end padding the way a

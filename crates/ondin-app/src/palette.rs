@@ -663,6 +663,7 @@ impl OndinApp {
             ),
         );
         push(&mut out, Cmd::verb(Item::SaveNamedVersion, None));
+        push(&mut out, Cmd::verb(Item::ColourReview, None));
         for clockwise in [false, true] {
             push(
                 &mut out,

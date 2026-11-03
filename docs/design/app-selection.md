@@ -40,7 +40,7 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   current page. With the candidate range empty it selects the page's frames themselves
   (`root_artboards`), filtered too. Emptiness is
   asked of the range **before** the lock filter (`marquee_range`).
-- `inspector::select_by_color` (Group Colors reticle, §9.2) excludes locked layers and reports
+- `inspector::select_by_color` (the Group Colors and Colour review reticles, §9.2) excludes locked layers and reports
   *"Selected 2 of 3 layers with this colour — 1 locked"*.
 - *Select same fill / stroke / font / effects* (palette only, `OndinApp::select_same`) does the
   same over the current page's whole tree, the source included. The source is the key layer, else a

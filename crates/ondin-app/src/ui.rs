@@ -3113,6 +3113,94 @@ pub fn button_face(
     (rect, resp, fg)
 }
 
+/// The caret end of a [`split_button`]: its width.
+pub const SPLIT_CARET_W: f32 = 24.0;
+
+/// What a [`split_button`] was asked.
+pub struct SplitButton {
+    /// The whole button, for its tooltip.
+    pub resp: egui::Response,
+    /// The word was clicked; meaningless while the action is unavailable.
+    pub action: bool,
+    /// The caret was clicked: open the other choices.
+    pub caret: bool,
+    /// Where the caret is, to hang its menu from.
+    pub caret_rect: egui::Rect,
+}
+
+/// An action with a caret at its end that opens the other ways to do it —
+/// Colour review's *Merge*. One [`button_face`] of `h`, [`FieldButton::Primary`]
+/// while `enabled`, with a hairline before the caret; which end a click landed
+/// on decides what it asks. Unavailable, the face is an ordinary button with the
+/// word dimmed, and the caret still opens the choices.
+pub fn split_button(ui: &mut egui::Ui, text: &str, h: f32, enabled: bool) -> SplitButton {
+    let font = egui::FontId::proportional(Scale::of(h).text_pt());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.into(), font, color::text());
+    let main_w = galley.size().x + 24.0;
+    let state = match enabled {
+        true => FieldButton::Primary,
+        false => FieldButton::Off,
+    };
+    let (rect, resp, ink) = button_face(ui, egui::vec2(main_w + SPLIT_CARET_W, h), state);
+    let caret_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.right() - SPLIT_CARET_W, rect.top()),
+        rect.max,
+    );
+    let on_caret = resp
+        .interact_pointer_pos()
+        .is_some_and(|p| caret_rect.contains(p));
+    let word_ink = if enabled { ink } else { resting_ink(ui, false) };
+    let p = ui.painter();
+    p.vline(
+        caret_rect.left(),
+        rect.y_range().shrink(6.0),
+        egui::Stroke::new(1.0, ink.gamma_multiply(0.35)),
+    );
+    let word = egui::Rect::from_min_max(rect.min, egui::pos2(caret_rect.left(), rect.bottom()));
+    p.galley(word.center() - galley.size() / 2.0, galley, word_ink);
+    p.text(
+        caret_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon::CARET_DOWN,
+        theme::icon_font(12.0),
+        ink,
+    );
+    SplitButton {
+        action: resp.clicked() && !on_caret,
+        caret: resp.clicked() && on_caret,
+        resp,
+        caret_rect,
+    }
+}
+
+/// A round choice of one among rows — Colour review's target. The field's ground
+/// and hairline, the accent and a dot in its ink when `on`; `size` square.
+pub fn radio(ui: &mut egui::Ui, size: f32, on: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    let p = ui.painter();
+    let c = rect.center();
+    let r = size / 2.0 - 1.0;
+    let hovered = resp.hovered();
+    if on {
+        p.circle_filled(c, r, color::accent());
+        p.circle_filled(c, r * 0.4, color::accent_ink());
+    } else {
+        p.circle(
+            c,
+            r - 0.5,
+            if hovered {
+                color::hover()
+            } else {
+                color::field()
+            },
+            egui::Stroke::new(1.0, color::field_border()),
+        );
+    }
+    resp
+}
+
 /// Between one labelled section and the next inside a popover: [`CARD_ROW_GAP`],
 /// the pitch the inspector stacks every row at. `popup_rule`'s 5 above plus 4
 /// below plus its hairline comes to the same.

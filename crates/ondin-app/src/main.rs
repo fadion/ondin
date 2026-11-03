@@ -81,6 +81,7 @@ mod batch_rename;
 mod canvas;
 mod cheatsheet;
 mod chrome;
+mod colour_review;
 mod colour_text;
 mod compare;
 mod contrast;

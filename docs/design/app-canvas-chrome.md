@@ -533,13 +533,13 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   State group) are also in the cheatsheet's Layer section. Opening again while open only takes the
   keyboard back.
 - **Placement.** Not a modal, so the canvas stays live and the matches are found again as the text
-  changes. An `Area` at the canvas's top right, 380 wide, 16 below the top (below the rulers when
+  changes. An `Area` at the canvas's top right, 420 wide, 16 below the top (below the rulers when
   they show) and 16 left of `inspector_column`, or of the canvas's right edge in focus mode, where it
   is drawn too. The list shows ten rows at most, fewer when the canvas is short, and scrolls without
   a bar. With Find empty there is no list and no rule under the fields. `OndinApp::find`
   (`FindBox`) is kept while closed, so the box reopens as it was left.
 - **Rows.** A caret folds the Replace row and the options under it; the fold is remembered. Find
-  shows *N of M*, a warm *No matches*, or *Not a pattern* with the reason under it, then ↑ ↓ ✕.
+  shows *N of M*, a warm *0* (a word took the field's room), or *Not a pattern* with the reason under it, then ↑ ↓ ✕.
   The Find field holds the switches *Aa*, *ab* (whole words) and *.\** inside it, and Replace's
   field holds *Keep case* (*Ab*, on the first time the box opens), all `ui::field_toggle`s as in
   Batch rename's fields; then *Replace* and a primary *All*. Then the scope *Selection · This page ·

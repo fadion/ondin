@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 /// The box's width.
-const W: f32 = 380.0;
+const W: f32 = 420.0;
 const PAD: f32 = 12.0;
 /// Its gap from the canvas's top and right edges (or the inspector's left).
 const MARGIN: f32 = 16.0;
@@ -594,7 +594,9 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         } else if f.found.error.is_some() {
             "Not a pattern".into()
         } else if n == 0 {
-            "No matches".into()
+            // A word here took the field's room; the warm ink and the line
+            // under the field already say it.
+            "0".into()
         } else {
             format!("{} of {n}", f.current + 1)
         };

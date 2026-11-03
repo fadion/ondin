@@ -193,7 +193,7 @@ comes from the committed document.
 
 | Kind | Rows |
 | --- | --- |
-| Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them |
+| Frame, rect | opacity and radius; the per-corner and smoothing disclosures open under them, above a frame's Clip content |
 | Polygon, star | opacity, radius (bindable, chip and doors as a rect's) and the smoothing button; the smoothing field opens under them, above the count row |
 | Ellipse | a 2 × 2 grid of equal fields: opacity and Sweep, then Start and Ratio; icons only (pie slice, arrow-clockwise, dashed circle), no labels, the polygon's pattern |
 | Group, text, line, boolean | opacity alone, the full width |

@@ -4910,6 +4910,67 @@ impl OndinApp {
             if let Some(arc) = arc0 {
                 app.arc_fields(ui, id, arc, &marks.arc);
             }
+            // The radius row's disclosures open under it, above the clip switch.
+            if corners0.is_some() && smoothing {
+                app.corner_smoothing_field(ui, id, &marks.smoothing);
+            }
+            // Laid out as the corners sit on the shape.
+            let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
+            if let Some(corners) = corners0.filter(|_| per_corner) {
+                for pair in [
+                    [
+                        (icon::CORNER_TOP_LEFT, Corner::TopLeft, "Top left"),
+                        (icon::CORNER_TOP_RIGHT, Corner::TopRight, "Top right"),
+                    ],
+                    [
+                        (icon::CORNER_BOTTOM_LEFT, Corner::BottomLeft, "Bottom left"),
+                        (
+                            icon::CORNER_BOTTOM_RIGHT,
+                            Corner::BottomRight,
+                            "Bottom right",
+                        ),
+                    ],
+                ] {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+                        for (glyph, corner, tip) in pair {
+                            let mark = &marks.corners[corner as usize];
+                            // A bound corner is a chip of its own, keyed by corner.
+                            let key = super::binding::FieldKey::Corner {
+                                id,
+                                slot: corner.var_slot(),
+                            };
+                            if app.bound_field_ui(ui, key, fw, mark) {
+                                continue;
+                            }
+                            let mut v = corner.get(&corners);
+                            let (resp, hit) = ui::value_field_marked(
+                                ui,
+                                egui::vec2(fw, 28.0),
+                                Prefix::Icon(glyph),
+                                mark.as_ref().map(Mark::field),
+                                &mut v,
+                                Scrub::whole(0.5).range(0.0..=f64::MAX),
+                                |d| d.custom_formatter(ui::number(2)),
+                            );
+                            let resp = tip_unless_marked(resp, mark, tip);
+                            app.reset_marked(hit, mark);
+                            let mut next = corners;
+                            corner.set(&mut next, v.max(0.0));
+                            app.named_valve(
+                                "Corner radius",
+                                glyph,
+                                &resp,
+                                Transaction(vec![Operation::SetGeometry {
+                                    id,
+                                    geometry: GeometryPatch::CornerRadii(next),
+                                }]),
+                            );
+                            app.field_doors(ui, key, &resp);
+                        }
+                    });
+                }
+            }
             // A frame's "clip content", as a switch. An overridden clip is reset by
             // the toggle itself, so its tooltip names the main's value.
             if let Some(clip) = clip0
@@ -4922,68 +4983,6 @@ impl OndinApp {
             {
                 app.session.name_step("Clip content", icon::CROP);
                 app.commit_edit(Transaction(vec![Operation::SetClip { id, clip: !clip }]));
-            }
-            let Some(corners) = corners0 else { return };
-            if smoothing {
-                app.corner_smoothing_field(ui, id, &marks.smoothing);
-            }
-            if !per_corner {
-                return;
-            }
-            // Laid out as the corners sit on the shape.
-            let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
-            for pair in [
-                [
-                    (icon::CORNER_TOP_LEFT, Corner::TopLeft, "Top left"),
-                    (icon::CORNER_TOP_RIGHT, Corner::TopRight, "Top right"),
-                ],
-                [
-                    (icon::CORNER_BOTTOM_LEFT, Corner::BottomLeft, "Bottom left"),
-                    (
-                        icon::CORNER_BOTTOM_RIGHT,
-                        Corner::BottomRight,
-                        "Bottom right",
-                    ),
-                ],
-            ] {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                    for (glyph, corner, tip) in pair {
-                        let mark = &marks.corners[corner as usize];
-                        // A bound corner is a chip of its own, keyed by corner.
-                        let key = super::binding::FieldKey::Corner {
-                            id,
-                            slot: corner.var_slot(),
-                        };
-                        if app.bound_field_ui(ui, key, fw, mark) {
-                            continue;
-                        }
-                        let mut v = corner.get(&corners);
-                        let (resp, hit) = ui::value_field_marked(
-                            ui,
-                            egui::vec2(fw, 28.0),
-                            Prefix::Icon(glyph),
-                            mark.as_ref().map(Mark::field),
-                            &mut v,
-                            Scrub::whole(0.5).range(0.0..=f64::MAX),
-                            |d| d.custom_formatter(ui::number(2)),
-                        );
-                        let resp = tip_unless_marked(resp, mark, tip);
-                        app.reset_marked(hit, mark);
-                        let mut next = corners;
-                        corner.set(&mut next, v.max(0.0));
-                        app.named_valve(
-                            "Corner radius",
-                            glyph,
-                            &resp,
-                            Transaction(vec![Operation::SetGeometry {
-                                id,
-                                geometry: GeometryPatch::CornerRadii(next),
-                            }]),
-                        );
-                        app.field_doors(ui, key, &resp);
-                    }
-                });
             }
         });
     }

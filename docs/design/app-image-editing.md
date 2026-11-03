@@ -123,6 +123,8 @@ window onto its picture. There is no crop tool, rail button or `C` key.
   (`replace_image_action`, `start_replace_image`), a clipboard picture (`paste_image`,
   `start_paste_image`) and pasted SVG markup (`paste_svg`, `start_paste_svg`) go through the same
   worker, each as its own `import::Door`: the frame only runs the dialog or reads the clipboard.
+  A lone dropped `.json` is not a picture: it opens the design-tokens review instead
+  (`styles-variables.md`, *Design tokens*), read on the frame since a tokens file is small.
 - **An import is read off the frame** (`start_reading`, a `crate::job::Job`), so a large PDF, SVG
   or picture never freezes the window. The worker reads the bytes, encodes a clipboard picture to PNG
   (`app::rgba_to_png`), decodes pictures (`app::read_picture`) and builds SVG and PDF layers

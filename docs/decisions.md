@@ -77,6 +77,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **Bound texts are re-measured rather than traced**: every bound text's layout memo is dropped on each `Resolved::update`, so a commit re-laying a chain re-measures every bound text in it (21 ms at 200 bound labels).
 - **A colour cell's preview patches every bound node each frame**, not only the variable's readers (3.7 ms a frame at 200 content-bound texts).
 - **A text style made over a live selection takes the layer's character defaults**, not the selection's shown attributes (`style::value_drawn`).
+- **A design-tokens import matches a token by the id the export wrote, then by path**, so a rename made in code keeps its bindings. It is reviewed row by row and applied as one transaction; a linked file offers only what it changed since it was last applied (`dtcg_in::review`, `Review::since`).
 
 ## Text and fonts
 

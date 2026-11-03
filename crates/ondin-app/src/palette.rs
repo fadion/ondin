@@ -609,9 +609,25 @@ impl OndinApp {
             cmd.checked = Some(self.view_switch(sw));
             push(&mut out, cmd);
         }
-        for item in [Item::InsertPicker, Item::VariablesBrowser] {
+        for item in [
+            Item::InsertPicker,
+            Item::VariablesBrowser,
+            Item::ImportTokens,
+            Item::ExportTokens,
+        ] {
             push(&mut out, Cmd::verb(item, None));
         }
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::UnlinkTokens,
+                self.session
+                    .doc
+                    .tokens_link()
+                    .is_none()
+                    .then_some("No tokens file is linked"),
+            ),
+        );
         push(&mut out, Cmd::verb(Item::PublishKit, pal.publish_why));
         // The Document menu's rows, each refused where the menu would not offer it.
         let shared = self.shared_kit().is_some();

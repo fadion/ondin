@@ -241,6 +241,11 @@ enum Act {
     KitMap(String, ModeId, Option<ModeId>),
     /// A kit header's *v8 → v9* clicked: the update summary opened.
     KitUpdates,
+    /// The `+` menu's tokens rows, and the linked file's line (its review).
+    ImportTokens,
+    ExportTokens,
+    UnlinkTokens,
+    LinkedTokens,
 }
 
 /// One row of the table as drawn: a group's header or a variable, or a kit's
@@ -427,6 +432,11 @@ impl OndinApp {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 10.0);
                         tabs(ui, &mut b.tab);
                         search_row(ui, &mut b, &mut acts);
+                        if let Some(link) = doc.tokens_link()
+                            && linked_line(ui, &link.path, self.tokens_watch.changes)
+                        {
+                            acts.push(Act::LinkedTokens);
+                        }
                         if let Some(line) = &selection_line {
                             // Two points further off the search row than it
                             // sat, at the maintainer's look (§15 D1086).
@@ -603,7 +613,7 @@ impl OndinApp {
             _ => 200.0,
         };
         let rows = match &menu {
-            Menu::Add => 3.0,
+            Menu::Add => 6.0,
             Menu::Var(_) => 5.0,
             Menu::Mode(_) if table.modes().len() > 1 => 6.5,
             Menu::Mode(_) => 3.0,
@@ -652,6 +662,26 @@ impl OndinApp {
                             if row(ui, icon::COLUMNS_PLUS_RIGHT, "New mode") {
                                 acts.push(Act::NewMode);
                                 close = true;
+                            }
+                            ui::menu_sep(ui);
+                            if row(ui, icon::ARROW_CIRCLE_DOWN, "Import tokens…") {
+                                acts.push(Act::ImportTokens);
+                                close = true;
+                            }
+                            if row(ui, icon::EXPORT, "Export tokens…") {
+                                acts.push(Act::ExportTokens);
+                                close = true;
+                            }
+                            if let Some(link) = doc.tokens_link() {
+                                let name =
+                                    std::path::Path::new(&link.path).file_name().map_or_else(
+                                        || "tokens file".to_string(),
+                                        |n| n.to_string_lossy().into_owned(),
+                                    );
+                                if row(ui, icon::LINK_SIMPLE_BREAK, &format!("Unlink {name}")) {
+                                    acts.push(Act::UnlinkTokens);
+                                    close = true;
+                                }
                             }
                         }
                         Menu::Var(v) => {
@@ -1142,6 +1172,10 @@ impl OndinApp {
                 }
             }
             Act::KitUpdates => self.open_kit_updates(),
+            Act::ImportTokens => self.import_tokens_action(),
+            Act::ExportTokens => self.export_tokens_action(),
+            Act::UnlinkTokens => self.unlink_tokens(),
+            Act::LinkedTokens => self.open_linked_tokens(),
             Act::Select(ids) => {
                 if !ids.is_empty() {
                     self.session.selection.set(ids);
@@ -1797,6 +1831,74 @@ fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
             ));
         }
     });
+}
+
+/// The linked tokens file under the search row: its path, and how many changes
+/// it holds since it was last applied. True when clicked, which opens their
+/// review.
+fn linked_line(ui: &mut egui::Ui, path: &str, changes: usize) -> bool {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, SEARCH_H), egui::Sense::click());
+    let p = ui.painter();
+    let ground = if resp.hovered() {
+        color::text_a(20)
+    } else {
+        color::text_a(13)
+    };
+    p.rect(
+        rect,
+        5,
+        ground,
+        egui::Stroke::new(1.0, color::text_a(20)),
+        egui::StrokeKind::Inside,
+    );
+    let y = rect.center().y;
+    p.text(
+        egui::pos2(rect.left() + 9.0, y),
+        egui::Align2::LEFT_CENTER,
+        icon::LINK_SIMPLE,
+        theme::icon_font(13.0),
+        theme::text::dim(),
+    );
+    let tail = match changes {
+        0 => String::new(),
+        1 => "1 change".to_string(),
+        n => format!("{n} changes"),
+    };
+    let tail_g = ui.fonts_mut(|f| {
+        f.layout_no_wrap(tail, egui::FontId::proportional(10.5), color::accent_300())
+    });
+    let tail_w = tail_g.size().x;
+    ui.painter().galley(
+        egui::pos2(rect.right() - 9.0 - tail_w, y - tail_g.size().y / 2.0),
+        tail_g,
+        color::accent_300(),
+    );
+    // The path elided from the left, so the file's own name stays.
+    let font = egui::FontId::proportional(11.5);
+    let room = rect.width() - 9.0 - 20.0 - 9.0 - tail_w - 8.0;
+    let mut shown = path.replace('\\', "/");
+    let width = |s: &str, ui: &egui::Ui| {
+        ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), color::text()))
+            .size()
+            .x
+    };
+    while width(&shown, ui) > room && shown.chars().count() > 2 {
+        let cut: String = shown.chars().skip(2).collect();
+        shown = format!("…{}", cut.trim_start_matches('…'));
+    }
+    ui.painter().text(
+        egui::pos2(rect.left() + 9.0 + 20.0, y),
+        egui::Align2::LEFT_CENTER,
+        shown,
+        font,
+        theme::text::strong(),
+    );
+    resp.on_hover_text(match changes {
+        0 => format!("{path} · linked, nothing new since it was applied"),
+        _ => format!("{path} · click to review what it changed"),
+    })
+    .clicked()
 }
 
 /// A 28×28 button in the search row, pressed while `on`.

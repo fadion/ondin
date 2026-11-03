@@ -436,6 +436,9 @@ pub enum Item {
     TidyUp,
     InsertPicker,
     VariablesBrowser,
+    ImportTokens,
+    ExportTokens,
+    UnlinkTokens,
     PublishKit,
     /// The Document menu's kit rows and its way back to the library.
     MakeKit,
@@ -1209,6 +1212,14 @@ impl Item {
                 Some("Shift+S"),
                 Group::Kits,
             ),
+            Item::ImportTokens => s("Import tokens…", icon::ARROW_CIRCLE_DOWN, None, Group::Kits),
+            Item::ExportTokens => s("Export tokens…", icon::EXPORT, None, Group::Kits),
+            Item::UnlinkTokens => s(
+                "Unlink tokens file",
+                icon::LINK_SIMPLE_BREAK,
+                None,
+                Group::Kits,
+            ),
             Item::PublishKit => s(
                 "Publish kit…",
                 icon::UPLOAD_SIMPLE,
@@ -1352,6 +1363,10 @@ impl Item {
             Item::CreateComponent => &["main", "symbol"],
             Item::InsertPicker => &["component", "kit", "asset"],
             Item::VariablesBrowser => &["tokens", "colours", "colors"],
+            Item::ImportTokens | Item::ExportTokens => {
+                &["tokens", "dtcg", "json", "variables", "design tokens"]
+            }
+            Item::UnlinkTokens => &["tokens", "dtcg", "json", "link"],
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
@@ -1441,6 +1456,9 @@ impl Item {
             Item::TidyUp => Action::TidyUp,
             Item::InsertPicker => Action::InsertPicker,
             Item::VariablesBrowser => Action::VariablesBrowser,
+            Item::ImportTokens => Action::ImportTokens,
+            Item::ExportTokens => Action::ExportTokens,
+            Item::UnlinkTokens => Action::UnlinkTokens,
             Item::PublishKit => Action::PublishKit,
             Item::MakeKit => Action::MakeKit,
             Item::KitsUsed => Action::KitsUsed,
@@ -3515,6 +3533,9 @@ impl OndinApp {
             | Item::TidyUp
             | Item::InsertPicker
             | Item::VariablesBrowser
+            | Item::ImportTokens
+            | Item::ExportTokens
+            | Item::UnlinkTokens
             | Item::PublishKit
             | Item::MakeKit
             | Item::KitsUsed

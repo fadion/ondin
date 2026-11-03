@@ -786,6 +786,8 @@ pub struct OndinApp {
     )>,
     /// When the kits this document uses were last looked at on disk (`kits::updates`).
     pub(crate) kit_watch: crate::kits::updates::KitWatch,
+    /// When the linked `tokens.json` was last looked at (`tokens_import.rs`).
+    pub(crate) tokens_watch: crate::tokens_import::TokensWatch,
     /// The *Stop sharing* dialog's count of the documents using the kit (`kits::users`).
     pub(crate) kit_users: Option<crate::kits::users::KitUsers>,
     /// Where the rail's insert button was drawn last frame; the picker hangs beside it.
@@ -921,6 +923,8 @@ pub struct OndinApp {
     pub(crate) vision: Option<crate::vision::Vision>,
     /// The batch rename box, while it is open (`batch_rename.rs`).
     pub(crate) batch_rename: Option<crate::batch_rename::BatchRename>,
+    /// The design tokens review, while it is open (`tokens_import.rs`).
+    pub(crate) tokens_import: Option<crate::tokens_import::TokensImport>,
     /// The find and replace box, kept while closed so it reopens as it was left.
     pub(crate) find: crate::find::FindBox,
     pub(crate) show_toolbar: bool,
@@ -1482,6 +1486,7 @@ impl OndinApp {
             kit_shelf: Default::default(),
             kit_summary: None,
             kit_watch: Default::default(),
+            tokens_watch: Default::default(),
             kit_users: None,
             kit_button: egui::Rect::NOTHING,
             pen_button: egui::Rect::NOTHING,
@@ -1537,6 +1542,7 @@ impl OndinApp {
             contrast: None,
             vision: None,
             batch_rename: None,
+            tokens_import: None,
             find: Default::default(),
             show_toolbar: view.toolbar,
             show_status: view.status,
@@ -1957,6 +1963,7 @@ impl eframe::App for OndinApp {
         self.vision_chrome(&ctx);
 
         self.watch_kits(&ctx);
+        self.watch_tokens(&ctx);
         self.poll_simplify();
         self.poll_imports();
         if !self.focus {
@@ -1989,6 +1996,7 @@ impl eframe::App for OndinApp {
         self.palette_ui(&ctx, canvas, palette_keys);
         // Unguarded: it is not in a panel, so it works in focus mode.
         self.batch_rename_ui(&ctx, canvas);
+        self.tokens_import_ui(&ctx, canvas);
         // Unguarded too: in focus mode it keeps to the canvas's own corner.
         self.find_ui(&ctx);
         // After the canvas, whose first visit to a page a step's reveal must follow.
@@ -2186,6 +2194,9 @@ impl OndinApp {
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
             Action::VariablesBrowser => self.toggle_var_browser(),
+            Action::ImportTokens => self.import_tokens_action(),
+            Action::ExportTokens => self.export_tokens_action(),
+            Action::UnlinkTokens => self.unlink_tokens(),
             Action::PublishKit => self.open_publish(),
             // The Document menu's own guards, so a palette row asks the same questions.
             Action::MakeKit if self.shared_kit().is_none() => self.make_kit(),
@@ -6267,6 +6278,28 @@ impl OndinApp {
         if dropped.is_empty() {
             return;
         }
+        // A lone `.json` is design tokens, opened in their review; no picture
+        // door reads one.
+        if let [file] = dropped.as_slice() {
+            let name = file
+                .path
+                .as_deref()
+                .and_then(|p| p.file_name())
+                .map_or_else(|| file.name.clone(), |n| n.to_string_lossy().into_owned());
+            if name.to_ascii_lowercase().ends_with(".json") {
+                match (&file.path, &file.bytes) {
+                    (Some(path), _) => self.open_tokens_import(path.clone(), false),
+                    (None, Some(bytes)) => self.open_tokens_text(
+                        std::path::PathBuf::from(&name),
+                        String::from_utf8_lossy(bytes).into_owned(),
+                        false,
+                        false,
+                    ),
+                    (None, None) => {}
+                }
+                return;
+            }
+        }
         let at = self.drop_point(ctx);
         let alone = dropped.len() == 1;
         let files = dropped
@@ -7045,6 +7078,7 @@ impl OndinApp {
                         ui.add_space(-2.0);
                         self.publish_button(ui);
                     }
+                    self.tokens_pill(ui);
                     self.kit_update_pill(ui);
                     // In a kit opened by *Go to main*, the way back.
                     self.kit_back_link(ui);
@@ -7478,6 +7512,7 @@ impl OndinApp {
             || self.unsharing_kit.is_some()
             || self.cheatsheet.is_some()
             || self.batch_rename.is_some()
+            || self.tokens_import.is_some()
     }
 
     /// Write the View and Snap switches and the rail's slots to `prefs` when one has

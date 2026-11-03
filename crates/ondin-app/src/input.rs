@@ -183,6 +183,11 @@ pub enum Action {
     /// Open or close the styles and variables browser (`Shift+S`, and the rail's
     /// swatches button — §5.3f).
     VariablesBrowser,
+    /// *Import tokens…*, *Export tokens…* and *Unlink tokens*, unbound: the
+    /// variables browser's `+` menu and the palette's.
+    ImportTokens,
+    ExportTokens,
+    UnlinkTokens,
     /// *Publish kit…* (`Ctrl+Alt+P` — §5.3e).
     PublishKit,
     /// The Document menu's rows, unbound: *Make this a kit*, *Kits used…*, *Stop

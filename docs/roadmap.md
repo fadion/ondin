@@ -18,12 +18,6 @@ reads true.
   text is checked, not its case transform.
 - **Select matching layers** by structure: the same layer in each copy of a repeated block, edited
   together. *Select same …* matches fill, stroke, font or effects only (`app-selection.md`).
-- **Design tokens import.** The export is built (`dtcg::tokens`, `ondin tokens export`; `export.md`).
-  Import of the same file matches by the id in `$extensions`, then by path, so a rename made in code
-  is not a delete plus a create. It shows what is added, changed, removed and renamed, and applies it
-  as one transaction. A `tokens.json` can also be linked like a kit, with `watch_kits`' pill offering
-  its changes. Scoping (*Variable collections and scoping*, below) would make a number's `dimension`
-  or `number` explicit rather than read from its bindings.
 - **Colour review.** A card (Document menu, palette) over the selection or the document that groups
   near-identical raw colours — fills, strokes, gradient stops, effect and text-run colours — by OKLab
   distance, alpha compared apart. Each group grows around its most-used colour so A≈B≈C cannot chain,
@@ -45,6 +39,8 @@ reads true.
   approximated. The prop stays either way, for forcing a state. Live hover in present mode is
   prototyping, a non-goal.
 - **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
+  Scoping would also make a number's DTCG `dimension` or `number` explicit rather than read from its
+  bindings (`export.md`, *Design tokens (DTCG)*).
 - **Pattern fills.** A layer or component tiled as a fill, with spacing, scale and offset. Today only
   an image fill tiles (`app-image-editing.md`, framing modes).
 - **Paths**: vector networks (`core-model.md`: every reader takes a `BezPath`).

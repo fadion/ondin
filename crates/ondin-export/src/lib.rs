@@ -41,6 +41,7 @@
 pub mod code;
 pub mod contrast;
 pub mod dtcg;
+pub mod dtcg_in;
 pub mod jpeg;
 pub mod pdf;
 pub mod pdf_in;

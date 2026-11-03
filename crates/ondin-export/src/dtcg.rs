@@ -91,6 +91,7 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
     }
 
     let styles = w.styles(doc);
+    let mut styles_key = None;
     if !styles.is_empty() {
         let key = std::iter::once("styles".to_string())
             .chain(std::iter::once("ondin-styles".to_string()))
@@ -102,10 +103,15 @@ pub fn tokens(doc: &Document, mode: Option<ModeId>) -> Tokens {
                 "The styles are under `{key}`: a variable group is already named `styles`."
             ));
         }
+        styles_key = Some(key.clone());
         root.insert(key, Json::Object(styles));
     }
 
     let mut ext = Map::new();
+    // Named so the import finds it, whatever it is called.
+    if let Some(key) = styles_key {
+        ext.insert("styles".to_string(), Json::String(key));
+    }
     ext.insert(
         "modes".to_string(),
         Json::Array(
@@ -704,7 +710,7 @@ fn number_reads(doc: &Document) -> BTreeMap<VarId, BTreeSet<Read>> {
 /// trimmed, empty segments dropped, and the characters the format reserves
 /// replaced — `.` (the reference separator) and the braces with `_`, a leading
 /// `$` with `_`.
-fn token_path(name: &str) -> Vec<String> {
+pub(crate) fn token_path(name: &str) -> Vec<String> {
     let mut out: Vec<String> = name
         .split('/')
         .map(str::trim)

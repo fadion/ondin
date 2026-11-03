@@ -629,6 +629,11 @@ pub mod icon {
     /// A colour chip in a dropdown's face, where a painter cannot reach: the
     /// outline [`SQUARE`]'s solid twin.
     pub const SQUARE_FILL: &str = "\u{f014}";
+    /// A variable collection, wherever one is named: the picker, its menu, a
+    /// search's and a list's collection headers, *Move to ▸*.
+    pub const DATABASE: &str = "\u{f015}";
+    /// A variable's scope — the fields it may bind: *Scope…* and the door to it.
+    pub const TARGET: &str = "\u{f016}";
     /// A variable mode's *Inherit*: an arrow turning up to the level above.
     pub const ARROW_ELBOW_LEFT_UP: &str = "\u{e04c}";
     // Z-order: one step vs all the way.
@@ -1010,6 +1015,8 @@ pub mod icon {
         ("pad-square", PAD_SQUARE),
         ("checkerboard", CHECKERBOARD),
         ("square-fill", SQUARE_FILL),
+        ("database", DATABASE),
+        ("target", TARGET),
         ("book-open", BOOK_OPEN),
         ("git-diff", GIT_DIFF),
         ("arrow-elbow-left-up", ARROW_ELBOW_LEFT_UP),

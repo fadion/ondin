@@ -1205,14 +1205,20 @@ impl OndinApp {
                         Menu::MoveTo(v) => {
                             let here = table.collection_of(*v).map(|c| c.id);
                             for c in table.collections() {
+                                // One with no mode has no column to move into.
+                                let open = Some(c.id) != here && !c.modes.is_empty();
                                 let r = ui::menu_row(
                                     ui,
                                     ui::MenuRow::new("", &c.name)
                                         .checked(Some(c.id) == here)
-                                        .enabled(Some(c.id) != here),
+                                        .enabled(open),
                                     MENU_ROW_H,
                                 );
-                                if r.clicked() && Some(c.id) != here {
+                                let r = match c.modes.is_empty() {
+                                    true => r.on_hover_text("It has no mode yet"),
+                                    false => r,
+                                };
+                                if r.clicked() && open {
                                     acts.push(Act::MoveTo(*v, Some(c.id)));
                                     close = true;
                                 }

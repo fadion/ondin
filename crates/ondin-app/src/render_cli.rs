@@ -297,11 +297,18 @@ fn render_modes(
     spec: &ExportSpec,
 ) -> Result<Vec<Rendered>, String> {
     // Every collection's modes, each set alone over the frame's own.
-    let modes: Vec<(ondin_core::variable::ModeId, String)> = s
-        .doc
-        .variables()
-        .modes()
-        .map(|m| (m.id, m.name.clone()))
+    // Named by collection too once there are two, so two collections' *Light*
+    // write two files.
+    let t = s.doc.variables();
+    let modes: Vec<(ondin_core::variable::ModeId, String)> = t
+        .collections()
+        .iter()
+        .flat_map(|c| {
+            c.modes.iter().map(|m| match t.has_collections() {
+                true => (m.id, format!("{} {}", c.name, m.name)),
+                false => (m.id, m.name.clone()),
+            })
+        })
         .collect();
     if modes.is_empty() {
         return Err(

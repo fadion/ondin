@@ -351,7 +351,19 @@ impl OndinApp {
                     } else {
                         ondin_core::PaintTarget::Fill
                     };
-                    // Snapped to a bound colour, the pick binds rather than copying.
+                    // Snapped to a bound colour, the pick binds rather than copying
+                    // — where that variable's scope takes the field.
+                    let field = match pick.stroke {
+                        true => ondin_core::variable::Field::Stroke,
+                        false => ondin_core::variable::Field::Fill,
+                    };
+                    let var = var.filter(|v| {
+                        self.session
+                            .doc
+                            .variables()
+                            .get(*v)
+                            .is_some_and(|x| x.binds(field))
+                    });
                     let tx = match var {
                         Some(var) => ondin_core::build::bind_top_paint_all(
                             &self.session.doc,

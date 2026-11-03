@@ -363,10 +363,13 @@ impl Walk<'_> {
         if !main_mode.is_empty() && doc.get(root)?.modes() != main_mode {
             return Some(OVERRIDES.into());
         }
-        let in_force = |id: NodeId| {
-            let mut m = doc.modes_at(id);
-            m.sort();
-            m
+        // Each of the document's collections' mode there, its default filled in.
+        let in_force = |id: NodeId| -> Vec<Option<ondin_core::ModeId>> {
+            doc.variables()
+                .collections()
+                .iter()
+                .map(|c| doc.mode_at(id, c.id))
+                .collect()
         };
         if in_force(root) != in_force(main) && self.varies_by_mode(main) {
             return Some(

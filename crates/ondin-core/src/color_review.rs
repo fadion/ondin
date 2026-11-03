@@ -443,16 +443,23 @@ fn rewrite(doc: &Document, roots: &[NodeId], from: &[Key], into: Into) -> Merged
                 }
             })
         };
-        let brush = |b: &BrushSource, literal: &mut dyn FnMut(Color) -> Option<Color>| match b {
+        // A field the target's scope refuses takes its colour, unbound. A
+        // variable the merge makes is not held yet, and binds every field.
+        let binds = |var: VarId, f: crate::variable::Field| {
+            doc.variables().get(var).is_none_or(|v| v.binds(f))
+        };
+        let brush = |b: &BrushSource,
+                     literal: &mut dyn FnMut(Color) -> Option<Color>,
+                     f: crate::variable::Field| match b {
             BrushSource::Literal(Brush::Solid(c)) => {
                 let c = *c;
                 let swapped = literal(c)?;
                 Some(match into {
-                    Into::Raw(_) => BrushSource::from(swapped),
-                    Into::Var { var, own, .. } => BrushSource::Bound {
+                    Into::Var { var, own, .. } if binds(var, f) => BrushSource::Bound {
                         var,
                         alpha: bind_alpha(c, own),
                     },
+                    Into::Raw(_) | Into::Var { .. } => BrushSource::from(swapped),
                 })
             }
             BrushSource::Literal(Brush::Gradient(g)) => {
@@ -476,7 +483,7 @@ fn rewrite(doc: &Document, roots: &[NodeId], from: &[Key], into: Into) -> Merged
             .iter()
             .map(|f| {
                 let solid = matches!(f.brush, BrushSource::Literal(Brush::Solid(_)));
-                match brush(&f.brush, &mut literal) {
+                match brush(&f.brush, &mut literal, crate::variable::Field::Fill) {
                     Some(b) => {
                         fills_changed = true;
                         solids_bound += usize::from(solid);
@@ -495,7 +502,7 @@ fn rewrite(doc: &Document, roots: &[NodeId], from: &[Key], into: Into) -> Merged
             .iter()
             .map(|s| {
                 let solid = matches!(s.brush, BrushSource::Literal(Brush::Solid(_)));
-                match brush(&s.brush, &mut literal) {
+                match brush(&s.brush, &mut literal, crate::variable::Field::Stroke) {
                     Some(b) => {
                         strokes_changed = true;
                         solids_bound += usize::from(solid);

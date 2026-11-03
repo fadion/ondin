@@ -424,6 +424,7 @@ pub(crate) fn plan<'a>(
 
     let t = doc.variables();
     let mut plan = Plan::default();
+    let mut scoped: Vec<(VarId, Option<crate::variable::Scope>)> = Vec::new();
     let mut records: BTreeMap<String, KitModes> = BTreeMap::new();
     let mut changed_records: Vec<String> = Vec::new();
 
@@ -642,6 +643,11 @@ pub(crate) fn plan<'a>(
                 if a != b {
                     plan.changed_vars.push(to);
                 }
+                // A scope the publish narrowed detaches what it drops here
+                // too, with the removals below.
+                if h.scope != next.scope {
+                    scoped.push((to, next.scope));
+                }
                 if *h != next {
                     plan.ops.push(Operation::SetVariable { var: next });
                 }
@@ -808,12 +814,18 @@ pub(crate) fn plan<'a>(
                 .filter(|op| !follows(op, &same)),
         );
     }
-    if !plan.removed_vars.is_empty() {
+    if !plan.removed_vars.is_empty() || !scoped.is_empty() {
         let gone = &plan.removed_vars;
+        // A copy reading a narrowed one only where its main does follows too.
+        let touched: Vec<VarId> = gone
+            .iter()
+            .copied()
+            .chain(scoped.iter().map(|(v, _)| *v))
+            .collect();
         let same = |n: &Node| {
             n.link
                 .and_then(|l| doc.get(l))
-                .is_some_and(|s| reads_as_its_source(n, s, gone, t, doc.in_vault(s.id)))
+                .is_some_and(|s| reads_as_its_source(n, s, &touched, t, doc.in_vault(s.id)))
         };
         // 🚨 **Not a style this removal also removes**: `remove_ops` detaches
         // every style reading a removed variable, and a style the kit dropped
@@ -822,7 +834,7 @@ pub(crate) fn plan<'a>(
         // good (`Incomplete`). Found by D1066's style test, not by a reading.
         let dropped = &plan.removed_styles;
         ops.extend(
-            crate::variable::remove_ops(doc, gone)
+            crate::variable::remove_and_scope_ops(doc, gone, &scoped)
                 .into_iter()
                 .filter(|op| !follows(op, &same))
                 .filter(
@@ -1205,16 +1217,15 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
         names.push(name.clone());
         // Into the document collection its kit collection maps from.
         let kc = modes.kit_collection_of(var).unwrap_or_default().to_string();
-        // One with no modes has no column to write: the first, which adoption
-        // gave modes above, takes it.
+        // One with no modes has no column to write: the first that has some
+        // takes it — there is one, adoption above having given the first its
+        // kit's modes when the document had none anywhere.
         let onto: Vec<crate::variable::ModeId> = modes
             .kit_onto(&kc)
             .filter(|c| !c.modes.is_empty())
-            .unwrap_or(modes.first_collection())
-            .modes
-            .iter()
-            .map(|m| m.id)
-            .collect();
+            .or_else(|| modes.collections().iter().find(|c| !c.modes.is_empty()))
+            .map(|c| c.modes.iter().map(|m| m.id).collect())
+            .unwrap_or_default();
         let cells = onto
             .iter()
             .filter_map(|m| {

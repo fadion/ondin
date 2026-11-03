@@ -599,3 +599,49 @@ fn a_paste_prefers_the_collection_of_the_same_name_and_respects_scope() {
     assert_eq!(landed[0].corner_vars(), [None; 4]);
     assert_eq!(landed[0].kind().corner_radii().unwrap().top_left, 4.0);
 }
+
+/// **Two variables sharing one node's list detach in one pass**: one corner
+/// bound to `radius` and three to `gap`, both narrowed off corners — two passes
+/// would each write the whole list and the second would rebind the first's.
+///
+/// flip: `remove_and_scope_ops` calling `detach_ops` once per scoped variable
+/// → fails at the commit, `OutOfScope`.
+#[test]
+fn narrowing_two_scopes_on_one_list_detaches_both() {
+    let mut f = fixture();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetCornerVars {
+            id: f.rect,
+            vars: [Some(f.radius), Some(f.gap), Some(f.gap), Some(f.gap)],
+        }]))
+        .unwrap();
+    let off = Some(Scope::of([Field::Spacing]));
+    let mut ops = variable::remove_and_scope_ops(&f.doc, &[], &[(f.radius, off), (f.gap, off)]);
+    for v in [f.radius, f.gap] {
+        let held = f.doc.variables().get(v).unwrap().clone();
+        ops.push(Operation::SetVariable {
+            var: Variable { scope: off, ..held },
+        });
+    }
+    f.doc.apply(&Transaction(ops)).expect("both detached");
+    assert_eq!(f.doc.get(f.rect).unwrap().corner_vars(), [None; 4]);
+}
+
+/// Nothing moves into a collection with no mode: it has no column for the
+/// cells, and the commit would refuse a variable with none.
+#[test]
+fn moving_into_a_modeless_collection_is_nothing() {
+    let mut f = fixture();
+    let empty = f.ids.mint_collection();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddCollection {
+            collection: Collection {
+                id: empty,
+                name: "Empty".into(),
+                modes: Vec::new(),
+            },
+            index: 2,
+        }]))
+        .unwrap();
+    assert_eq!(variable::move_ops(&f.doc, &[f.gap], empty), Ok(Vec::new()));
+}

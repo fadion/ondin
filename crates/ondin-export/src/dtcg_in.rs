@@ -2115,11 +2115,21 @@ impl Review {
             v
         };
         let mut ops = Vec::new();
-        if !removed.is_empty() {
-            ops.extend(variable::remove_ops(doc, &removed));
+        // Removals and every ticked scope that drops a field, detached in one
+        // pass so no node's list write brings back another's binding.
+        let scoped: Vec<(VarId, Option<variable::Scope>)> = vars_on
+            .iter()
+            .map(|p| &self.vars[*p])
+            .filter(|w| !w.new && t.get(w.var.id).is_some_and(|h| h.scope != w.var.scope))
+            .map(|w| (w.var.id, w.var.scope))
+            .collect();
+        if !removed.is_empty() || !scoped.is_empty() {
+            ops.extend(variable::remove_and_scope_ops(doc, &removed, &scoped));
         }
         let by_id: HashMap<VarId, &Wanted> = self.vars.iter().map(|w| (w.var.id, w)).collect();
-        // A new collection is made when one of its modes is ticked.
+        // A new collection is made when one of its modes is ticked, each after
+        // the last, in the file's order.
+        let mut index = t.collections().len();
         for c in &self.added_collections {
             let wanted = self
                 .added_modes
@@ -2129,8 +2139,9 @@ impl Review {
             if wanted {
                 ops.push(Operation::AddCollection {
                     collection: c.clone(),
-                    index: t.collections().len(),
+                    index,
                 });
+                index += 1;
             }
         }
         let mut index: HashMap<CollectionId, usize> = HashMap::new();
@@ -2177,14 +2188,6 @@ impl Review {
             let var = shaped(&w.var);
             if var.cells.is_empty() {
                 return Err("Tick a mode: a variable needs one to hold its value".to_string());
-            }
-            // A scope that drops a field detaches what it held there.
-            if !w.new && t.get(var.id).is_some_and(|h| h.scope != var.scope) {
-                ops.extend(
-                    variable::scope_ops(doc, var.id, var.scope)
-                        .into_iter()
-                        .filter(|op| !matches!(op, Operation::SetVariable { .. })),
-                );
             }
             ops.push(match w.new {
                 true => Operation::AddVariable { var },

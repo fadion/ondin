@@ -293,15 +293,26 @@ pub struct Prepared {
 }
 
 impl Prepared {
-    /// `doc`'s `page`, in each mode of every collection with two or more that
-    /// holds a variable — a colour, or a visibility or size that makes a layer
-    /// a subject in one mode only — one collection at a time, every other as
-    /// the page sets it, since colours rarely vary along two.
+    /// `doc`'s `page`, in each mode of every collection with two or more that a
+    /// variable reads — of its own, or a kit's mapping from it; a colour, or a
+    /// visibility or size that makes a layer a subject in one mode only — one
+    /// collection at a time, every other as the page sets it, since colours
+    /// rarely vary along two.
     pub fn new(doc: &Document, page: NodeId) -> Self {
         let t = doc.variables();
         let mut docs: Vec<(Option<CollectionId>, Document)> = Vec::new();
         for c in t.collections().iter().filter(|c| c.modes.len() > 1) {
-            if t.of_collection(c.id).next().is_none() {
+            // Its own variables, or a kit's that map from it.
+            let maps_here = |v: &&ondin_core::Variable| {
+                t.kit_onto(t.kit_collection_of(v).unwrap_or_default())
+                    .is_some_and(|o| o.id == c.id)
+            };
+            if t.of_collection(c.id).next().is_none()
+                && !t
+                    .iter()
+                    .filter(|v| v.kit().is_some())
+                    .any(|v| maps_here(&v))
+            {
                 continue;
             }
             for m in &c.modes {

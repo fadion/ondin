@@ -536,7 +536,11 @@ pub(crate) fn chip_tip(doc: &ondin_core::Document, at: NodeId, var: VarId) -> St
     };
     // The mode its own collection reads there, and that collection's name once
     // the document holds two.
-    let collection = t.collection_of(var);
+    // A kit's, the document's collection it maps from.
+    let collection = t.collection_of(var).or_else(|| {
+        let v = t.get(var)?;
+        t.kit_onto(t.kit_collection_of(v)?)
+    });
     let mode = collection
         .and_then(|c| doc.mode_at(at, c.id))
         .and_then(|m| t.mode(m));

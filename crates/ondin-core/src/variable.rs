@@ -639,9 +639,14 @@ impl Variables {
             None => first
                 .and_then(|m| self.collection_of_mode(m))
                 .map(|c| c.modes.iter().map(|m| m.id).collect()),
-            Some(kit) => self.kits.get(kit).and_then(|k| {
-                let c = &k.mode(first?)?.collection;
-                Some(k.modes_in(c).map(|m| m.id).collect())
+            // A first cell that is none of its kit's names the kit's first
+            // collection, so the check finds the stray and the missing cells.
+            Some(kit) => self.kits.get(kit).map(|k| {
+                let c = first
+                    .and_then(|m| k.mode(m))
+                    .or(k.modes.first())
+                    .map_or("", |m| m.collection.as_str());
+                k.modes_in(c).map(|m| m.id).collect()
             }),
         }
         .unwrap_or_else(|| v.cells.keys().copied().collect())
@@ -749,11 +754,46 @@ impl Variables {
     /// another collection's variable reads the mode in force for that one. The
     /// walk is bounded by the variable count: a loop is refused at the commit,
     /// and a read that met one anyway must end.
+    ///
+    /// **A kit's variable reads the mode its walk was started in**: a walk from
+    /// one of the document's own reads kits through the document's modes alone;
+    /// a walk from a kit's reads every kit step in the one mode that chose its
+    /// first column — that kit's own, or the document's it maps from — so a kit
+    /// mode set on a frame reaches another kit only along an alias, by name.
     pub fn resolve_at(&self, var: VarId, set: &[ModeId]) -> Option<Value> {
+        let from_local = self.vars.get(&var)?.kit().is_none();
+        let mut kit_set: Option<Vec<ModeId>> = None;
         let mut at = var;
         for _ in 0..=self.vars.len() {
             let v = self.vars.get(&at)?;
-            match v.cells.get(&self.column_at(v, set)?)? {
+            let col = match v.kit() {
+                None => self.column_at(v, set)?,
+                Some(kit) => {
+                    let kc = self.kit_collection_of(v)?;
+                    let ks = kit_set.get_or_insert_with(|| match from_local {
+                        true => set
+                            .iter()
+                            .copied()
+                            .filter(|m| self.mode(*m).is_some())
+                            .collect(),
+                        false => {
+                            let own = |m: ModeId| {
+                                self.kits
+                                    .get(kit)
+                                    .is_some_and(|k| k.modes_in(kc).any(|x| x.id == m))
+                            };
+                            let onto = self.kit_onto(kc);
+                            set.iter()
+                                .copied()
+                                .find(|m| own(*m) || onto.is_some_and(|c| c.has(*m)))
+                                .into_iter()
+                                .collect()
+                        }
+                    });
+                    self.kit_mode_at(kit, kc, ks)?
+                }
+            };
+            match v.cells.get(&col)? {
                 Cell::Color(c) => return Some(Value::Color(*c)),
                 Cell::Number(n) => return Some(Value::Number(*n)),
                 Cell::Boolean(b) => return Some(Value::Boolean(*b)),
@@ -1886,9 +1926,29 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
 /// a bare `RemoveVariable` of a variable in use (`check`), so this is the only
 /// shape a delete of one can take.
 pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation> {
+    remove_and_scope_ops(doc, vars, &[])
+}
+
+/// [`remove_ops`] for `removed`, and every `scoped` variable's fields of a
+/// family its new scope drops detached, **in one detach pass** — two passes
+/// would each write a node's whole list against the committed document, and
+/// the later would bring back what the earlier took off. The scopes
+/// themselves are the caller's to write (a `SetVariable`), after these.
+pub fn remove_and_scope_ops(
+    doc: &crate::Document,
+    removed: &[VarId],
+    scoped: &[(VarId, Option<Scope>)],
+) -> Vec<crate::Operation> {
     use crate::Operation as O;
     let t = doc.variables();
-    let mut ops = detach_ops(doc, vars, &|_| true);
+    let gone = |v: VarId, f: Field| {
+        removed.contains(&v)
+            || scoped
+                .iter()
+                .any(|(s, scope)| *s == v && scope.is_some_and(|x| !x.contains(f)))
+    };
+    let mut ops = detach_ops(doc, &gone);
+    let vars = removed;
     for v in t.iter().filter(|v| !vars.contains(&v.id)) {
         for (mode, cell) in &v.cells {
             if let Cell::Alias(target) = cell
@@ -1918,8 +1978,7 @@ pub fn scope_ops(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Vec
     let Some(v) = doc.variables().get(var).filter(|v| v.origin.is_none()) else {
         return Vec::new();
     };
-    let dropped = |f: Field| scope.is_some_and(|s| !s.contains(f));
-    let mut ops = detach_ops(doc, &[var], &dropped);
+    let mut ops = remove_and_scope_ops(doc, &[], &[(var, scope)]);
     ops.push(crate::Operation::SetVariable {
         var: Variable { scope, ..v.clone() },
     });
@@ -1964,15 +2023,11 @@ fn style_fields(value: &crate::style::StyleValue) -> &'static [Field] {
     }
 }
 
-/// The operations detaching every field of a family `on` answers for that is
-/// bound to one of `vars`, each to the value it drew — `remove_ops`' and
-/// `scope_ops`' first half. A style reading one detaches it too, a style's
+/// The operations detaching every field bound to a variable `gone` answers for
+/// in that field's family, each to the value it drew — the first half of
+/// [`remove_and_scope_ops`]. A style reading one detaches it too, a style's
 /// family being its slot's.
-fn detach_ops(
-    doc: &crate::Document,
-    vars: &[VarId],
-    on: &dyn Fn(Field) -> bool,
-) -> Vec<crate::Operation> {
+fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec<crate::Operation> {
     use crate::Operation as O;
     let t = doc.variables();
     let mut ops = Vec::new();
@@ -1982,17 +2037,16 @@ fn detach_ops(
         .filter(|n| {
             Field::ALL
                 .into_iter()
-                .any(|f| on(f) && binds_in(n, vars, f))
+                .any(|f| bound_in(n, f).any(|v| gone(v, f)))
         })
         .map(|n| n.id)
         .collect();
     ids.sort();
     for id in ids {
         let n = doc.get(id).expect("listed from the document");
-        let gone_as =
-            |b: &BrushSource, f: Field| on(f) && b.var().is_some_and(|v| vars.contains(&v));
+        let gone_as = |b: &BrushSource, f: Field| b.var().is_some_and(|v| gone(v, f));
         let gone_fill = |b: &BrushSource| gone_as(b, Field::Fill);
-        let gone = |b: &BrushSource| gone_as(b, Field::Stroke);
+        let gone_stroke = |b: &BrushSource| gone_as(b, Field::Stroke);
         if n.paint.fills.iter().any(|f| gone_fill(&f.brush)) {
             let fills = n
                 .paint
@@ -2013,14 +2067,14 @@ fn detach_ops(
         }
         // And a stroke's width bound to one, detached to its number against the
         // committed table (§15 D1073), in the same list write.
-        let width_gone = |s: &crate::Stroke| {
-            on(Field::StrokeWidth) && s.width_var.is_some_and(|v| vars.contains(&v))
-        };
-        let hit = |v: &Option<VarId>| v.is_some_and(|v| vars.contains(&v));
+        let width_gone =
+            |s: &crate::Stroke| s.width_var.is_some_and(|v| gone(v, Field::StrokeWidth));
+        // Whether slot `v` holds a variable gone in family `f`.
+        let hit = |v: &Option<VarId>, f: Field| v.is_some_and(|v| gone(v, f));
         if n.paint
             .strokes
             .iter()
-            .any(|s| gone(&s.brush) || width_gone(s))
+            .any(|s| gone_stroke(&s.brush) || width_gone(s))
         {
             let strokes = n
                 .paint
@@ -2033,7 +2087,7 @@ fn detach_ops(
                             other => (s.width, other),
                         };
                         crate::Stroke {
-                            brush: if gone(&s.brush) {
+                            brush: if gone_stroke(&s.brush) {
                                 doc.resolve_brush(id, &s.brush).into_owned().into()
                             } else {
                                 s.brush.clone()
@@ -2049,12 +2103,15 @@ fn detach_ops(
         }
         // And an effect's numbers bound to one, each detached to its number
         // against the committed table in one list write (§15 D1074).
-        if on(Field::Effect) && n.effects.iter().any(|e| e.vars.iter().any(hit)) {
+        if n.effects
+            .iter()
+            .any(|e| e.vars.iter().any(|v| hit(v, Field::Effect)))
+        {
             let mut effects = n.effects.clone();
             for e in effects.iter_mut() {
                 for slot in 0..4 {
                     if let Some(v) = e.vars[slot]
-                        && vars.contains(&v)
+                        && gone(v, Field::Effect)
                     {
                         let x = doc.effect_number_drawn_in(t, id, v, slot);
                         e.value.set_number(slot, x);
@@ -2065,20 +2122,19 @@ fn detach_ops(
             ops.push(O::SetEffects { id, effects });
         }
         // A size limit bound to one, detached to its px in one item write.
-        if on(Field::Limits) && n.item.limit_vars.iter().any(hit) {
+        if n.item.limit_vars.iter().any(|v| hit(v, Field::Limits)) {
             let drawn = doc.limits_drawn_in(t, id, n.item);
             let mut item = n.item;
             for k in 0..item.limit_vars.len() {
-                if item.limit_vars[k].is_some_and(|v| vars.contains(&v)) {
+                if hit(&item.limit_vars[k], Field::Limits) {
                     *item.limit_mut(k) = drawn.limit(k);
                     item.limit_vars[k] = None;
                 }
             }
             ops.push(O::SetLayoutItem { id, item });
         }
-        if on(Field::Corner)
-            && let Some(corner_radii) = n.kind.corner_radii()
-            && n.corner_vars.iter().any(hit)
+        if let Some(corner_radii) = n.kind.corner_radii()
+            && n.corner_vars.iter().any(|v| hit(v, Field::Corner))
             && let Some(drawn) = doc.resolve_corners(id, corner_radii)
         {
             let mut radii = corner_radii;
@@ -2090,7 +2146,7 @@ fn detach_ops(
                 (&mut radii.bottom_left, drawn.bottom_left),
             ];
             for (k, (slot, value)) in slots.into_iter().enumerate() {
-                if kept[k].is_some_and(|v| vars.contains(&v)) {
+                if hit(&kept[k], Field::Corner) {
                     *slot = value;
                     kept[k] = None;
                 }
@@ -2101,7 +2157,7 @@ fn detach_ops(
             });
             ops.push(O::SetCornerVars { id, vars: kept });
         }
-        let spacing = on(Field::Spacing) && n.spacing_vars.iter().any(hit);
+        let spacing = n.spacing_vars.iter().any(|v| hit(v, Field::Spacing));
         if let Some(d) = &n.display
             && spacing
         {
@@ -2109,7 +2165,7 @@ fn detach_ops(
             let mut s = d.spacing();
             let mut kept = n.spacing_vars;
             for k in 0..6 {
-                if kept[k].is_some_and(|v| vars.contains(&v)) {
+                if hit(&kept[k], Field::Spacing) {
                     s[k] = drawn[k];
                     kept[k] = None;
                 }
@@ -2126,15 +2182,14 @@ fn detach_ops(
             // binding goes, or the removal would leave it dangling.
             let mut kept = n.spacing_vars;
             for slot in &mut kept {
-                if slot.is_some_and(|v| vars.contains(&v)) {
+                if hit(slot, Field::Spacing) {
                     *slot = None;
                 }
             }
             ops.push(O::SetSpacingVars { id, vars: kept });
         }
-        if on(Field::Size)
-            && let Some(size) = n.kind.box_size()
-            && n.size_vars.iter().any(hit)
+        if let Some(size) = n.kind.box_size()
+            && n.size_vars.iter().any(|v| hit(v, Field::Size))
         {
             let drawn = doc
                 .size_drawn_in(t, id, &n.kind, n.size_vars)
@@ -2143,7 +2198,7 @@ fn detach_ops(
             let mut out = [size.width, size.height];
             let mut kept = n.size_vars;
             for k in 0..2 {
-                if kept[k].is_some_and(|v| vars.contains(&v)) {
+                if hit(&kept[k], Field::Size) {
                     out[k] = [drawn.width, drawn.height][k];
                     kept[k] = None;
                 }
@@ -2154,19 +2209,18 @@ fn detach_ops(
             });
             ops.push(O::SetSizeVars { id, vars: kept });
         }
-        let which: [bool; 7] =
-            std::array::from_fn(|k| on(text_slot_field(k)) && hit(&n.text_vars[k]));
+        let which: [bool; 7] = std::array::from_fn(|k| hit(&n.text_vars[k], text_slot_field(k)));
         if which.iter().any(|x| *x) {
             ops.extend(crate::build::detach_text_ops_in(doc, t, id, which));
         }
-        if on(Field::Visible) && hit(&n.visible_var) {
+        if hit(&n.visible_var, Field::Visible) {
             ops.push(O::SetVisible {
                 id,
                 visible: doc.shown_in(t, id),
             });
             ops.push(O::SetVisibleVar { id, var: None });
         }
-        if on(Field::Opacity) && hit(&n.opacity_var) {
+        if hit(&n.opacity_var, Field::Opacity) {
             ops.push(O::SetOpacity {
                 id,
                 opacity: doc.opacity_drawn_in(t, id, n.opacity, n.opacity_var),
@@ -2181,12 +2235,17 @@ fn detach_ops(
     // In a document with no modes of its own too: a kit's variable resolves in
     // its kit's default there (§15 D1064), and the style must not dangle.
     for s in doc.styles().iter() {
-        if style_fields(&s.value).iter().any(|f| on(*f))
-            && s.value.vars().iter().any(|v| vars.contains(v))
-        {
+        let fields = style_fields(&s.value);
+        let vars: Vec<VarId> = s
+            .value
+            .vars()
+            .into_iter()
+            .filter(|v| fields.iter().any(|f| gone(*v, *f)))
+            .collect();
+        if !vars.is_empty() {
             ops.push(O::SetStyleValue {
                 id: s.id,
-                value: crate::style::detach_vars(&s.value, t, t.default_mode(), vars),
+                value: crate::style::detach_vars(&s.value, t, t.default_mode(), &vars),
             });
         }
     }
@@ -2525,14 +2584,16 @@ pub fn duplicate_collection_ops(
 /// `to`'s modes taken from the source's mode of the same name, else from the
 /// source's default. The ids stay, so bindings and aliases keep pointing at
 /// them, and nothing draws differently in a frame whose modes match. `Err` with
-/// the first name `to` already holds; a variable already in `to` is passed by.
+/// the first name `to` already holds; a variable already in `to` is passed by,
+/// and nothing moves into a collection with no mode.
 pub fn move_ops(
     doc: &crate::Document,
     vars: &[VarId],
     to: CollectionId,
 ) -> Result<Vec<crate::Operation>, String> {
     let t = doc.variables();
-    let Some(target) = t.collection(to) else {
+    // A collection with no mode has no column to take the cells.
+    let Some(target) = t.collection(to).filter(|c| !c.modes.is_empty()) else {
         return Ok(Vec::new());
     };
     let mut ops = Vec::new();

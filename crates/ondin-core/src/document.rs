@@ -436,7 +436,15 @@ impl Document {
         let mut out: Vec<crate::variable::ModeId> = Vec::new();
         let mut at = self.nodes.get(&id);
         while let Some(n) = at {
-            for &m in &n.modes {
+            // One frame's kit modes before its document modes, so a kit main's
+            // own mode answers for its kit before the mapping does, whatever
+            // the ids' order.
+            let (kits, ours): (Vec<_>, Vec<_>) = n
+                .modes
+                .iter()
+                .copied()
+                .partition(|m| t.kit_mode_of(*m).is_some());
+            for m in kits.into_iter().chain(ours) {
                 if !out
                     .iter()
                     .any(|x| crate::variable::same_collection(t, *x, m))

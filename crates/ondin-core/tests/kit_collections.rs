@@ -199,3 +199,105 @@ fn a_kits_collections_map_by_name() {
     assert_eq!(fill(&d, inst), Brush::Solid(NAVY), "Night by name");
     assert_eq!(d.mode_at(inst, spacing), Some(comfortable));
 }
+
+/// **An update that narrows a kit variable's scope detaches what it drops**:
+/// a consumer's own frame binds the kit's `radius` as its width; the kit
+/// scopes `radius` to corners and republishes; the update commits, the width
+/// detached to what it drew.
+///
+/// flip: `tokens::plan` leaving `scoped` empty → fails at "the update
+/// commits", the commit refusing `OutOfScope`.
+#[test]
+fn an_update_narrowing_a_scope_detaches_the_consumers_binding() {
+    let mut ids = IdSource::new(0xB0);
+    let mut l = Document::new(ids.mint());
+    let m = ids.mint_mode();
+    let (radius, badge) = (ids.mint_var(), ids.mint());
+    let root = l.first_page();
+    l.apply(&Transaction(vec![
+        Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: mode(m, "Default"),
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: var(
+                radius,
+                "radius",
+                VarKind::Number,
+                vec![(m, Cell::Number(30.0))],
+            ),
+        },
+        Operation::CreateNode {
+            id: badge,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 16.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: Some("Badge".into()),
+        },
+        Operation::SetCornerVars {
+            id: badge,
+            vars: [Some(radius); 4],
+        },
+        Operation::SetComponent {
+            id: badge,
+            component: true,
+        },
+    ]))
+    .expect("the kit");
+    l.set_meta(DocumentMeta {
+        id: Some(L_ID.into()),
+        name: Some("Atlas".into()),
+        kit: Some(KitMark {
+            version: 0,
+            ..KitMark::default()
+        }),
+        ..DocumentMeta::default()
+    });
+    assert_eq!(kit::publish(&mut l, None, 1), Some(1));
+
+    let mut cids = IdSource::new(0xDD);
+    let mut d = Document::new(cids.mint());
+    let page = d.first_page();
+    let (tx, _) = kit::insert(&d, &mut cids, L_ID, 1, l.published().unwrap(), badge, page).unwrap();
+    d.apply(&tx).unwrap();
+    let held = d.variables().iter().next().unwrap().id;
+    let frame = cids.mint();
+    d.apply(&Transaction(vec![Operation::CreateNode {
+        id: frame,
+        parent: page,
+        index: 0,
+        kind: NodeKind::Artboard {
+            size: Size::new(10.0, 10.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: None,
+        name: None,
+    }]))
+    .unwrap();
+    let bind = ondin_core::build::bind_size_ops(&d, frame, [Some(held), None]);
+    d.apply(&Transaction(bind))
+        .expect("the consumer binds the width");
+
+    let mut v = l.variables().get(radius).unwrap().clone();
+    v.scope = Some(ondin_core::variable::Scope::of([
+        ondin_core::variable::Field::Corner,
+    ]));
+    l.apply(&Transaction(vec![Operation::SetVariable { var: v }]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut l, None, 2), Some(2));
+    let u = kit::update(&d, &mut cids, page, L_ID, 2, l.published().unwrap()).unwrap();
+    let mut tx = u.tx.clone();
+    ondin_core::propagate::owed(&d, &mut tx, &mut cids);
+    d.apply(&tx).expect("the update commits");
+    let f = d.get(frame).unwrap();
+    assert_eq!(f.size_vars(), [None, None]);
+    assert_eq!(f.kind().box_size().unwrap().width, 30.0);
+}

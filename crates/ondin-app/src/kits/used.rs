@@ -155,8 +155,7 @@ impl OndinApp {
                         let more = crate::ui::field_button(
                             ui,
                             icon::DOTS_THREE,
-                            24.0,
-                            14.0,
+                            crate::ui::CONTROL_H,
                             crate::ui::FieldButton::Off,
                         )
                         .on_hover_text("More");
@@ -212,8 +211,12 @@ impl OndinApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 if used.iter().any(|u| u.latest.is_some_and(|v| v > u.held))
-                    && crate::settings::text_button(ui, "Accept all", crate::ui::FieldButton::On)
-                        .clicked()
+                    && crate::settings::text_button(
+                        ui,
+                        "Accept all",
+                        crate::ui::FieldButton::Primary,
+                    )
+                    .clicked()
                 {
                     act = Some(Act::AcceptAll);
                 }
@@ -283,8 +286,12 @@ impl OndinApp {
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Make all local", crate::ui::FieldButton::On)
-                    .clicked()
+                if crate::settings::text_button(
+                    ui,
+                    "Make all local",
+                    crate::ui::FieldButton::Primary,
+                )
+                .clicked()
                 {
                     decision = Some(true);
                 }

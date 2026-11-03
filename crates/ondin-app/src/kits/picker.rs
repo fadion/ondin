@@ -13,6 +13,7 @@
 use super::index::{KitEntry, Load, Pixels, kits_in, raster_fit, tile_subject, tiles_of};
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
+use crate::ui;
 use eframe::egui;
 use ondin_core::kit::Published;
 use ondin_core::kurbo::{Affine, Rect, Vec2};
@@ -29,7 +30,7 @@ const RADIUS: u8 = 8;
 /// Shorter only when the canvas has less room above the button than this.
 const H: f32 = 460.0;
 /// The search box's height and the gap below it.
-const SEARCH_H: f32 = 30.0;
+const SEARCH_H: f32 = ui::CONTROL_H;
 const SEARCH_GAP: f32 = 8.0;
 /// A tile: three to a row, 52 tall, 8 apart across and 10 down.
 const COLS: usize = 3;
@@ -1449,50 +1450,21 @@ fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
 /// The search field's id, which the result keys ask about.
 const SEARCH_ID: &str = "kit-picker-search";
 
-/// The search box: a magnifier, the field, and a clear button once it holds
+/// The search box, a [`ui::search_box`] with a clear button once it holds
 /// something. Takes the keyboard when `focus` asks, once. Answers whether it
 /// changed.
 fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool {
-    let (rect, _) = ui.allocate_exact_size(
+    let edit = ui::search_box(
+        ui,
         egui::vec2(ui.available_width(), SEARCH_H),
-        egui::Sense::hover(),
+        query,
+        "Search components",
+        egui::Id::new(SEARCH_ID),
     );
-    let p = ui.painter();
-    p.rect_filled(rect, egui::CornerRadius::same(6), color::text_a(12));
-    p.rect_stroke(
-        rect,
-        egui::CornerRadius::same(6),
-        egui::Stroke::new(1.0, color::text_a(20)),
-        egui::StrokeKind::Inside,
-    );
-    p.text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        icon::MAGNIFYING_GLASS,
-        theme::icon_font(14.0),
-        theme::text::faint(),
-    );
-    let field = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 30.0, rect.top()),
-        egui::pos2(rect.right() - 28.0, rect.bottom()),
-    );
-    let edit = ui.put(
-        field,
-        egui::TextEdit::singleline(query)
-            .id(egui::Id::new(SEARCH_ID))
-            .frame(egui::Frame::NONE)
-            .hint_text(
-                egui::RichText::new("Search components")
-                    .size(12.0)
-                    .color(color::text_a(102)),
-            )
-            .font(egui::FontId::proportional(12.0))
-            .vertical_align(egui::Align::Center),
-    );
+    let rect = edit.rect;
     // Focused once, when the picker opens — not whenever nothing else holds the
-    // keyboard, which kept it focused and the keymap dead for as long as the
-    // picker was open: a tool letter after a placement typed into the search
-    // (`D1014`'s fix (b)).
+    // keyboard, which would keep the keymap dead for as long as the picker is
+    // open: a tool letter after a placement would type into the search.
     if *focus {
         *focus = false;
         edit.request_focus();

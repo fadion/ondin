@@ -105,6 +105,11 @@ pub mod color {
         /// stays near-white in either theme, where [`accent_100`] (the ink on a
         /// pale accent tint) turns dark in the light one.
         on_accent,
+        /// The word on a primary button's solid [`accent`] fill
+        /// ([`super::super::ui::FieldButton::Primary`]): near-black in dark, where
+        /// [`on_accent`]'s white would not reach a reading contrast on the lighter
+        /// accent, and white in light.
+        accent_ink,
 
         /// A layer the app cannot draw as the document describes it — today, one
         /// whose picture is missing (§15 D179).
@@ -179,6 +184,7 @@ pub mod color {
         accent_800: Color32::from_rgb(47, 63, 102),
         accent_900: Color32::from_rgb(33, 44, 70),
         on_accent: Color32::from_rgb(226, 233, 248),
+        accent_ink: Color32::from_rgb(16, 19, 27),
         warn: Color32::from_rgb(0xe0, 0xa0, 0x4a),
         star: Color32::from_rgb(0xe0, 0xa9, 0x3c),
         danger: Color32::from_rgb(0xe0, 0x73, 0x6b),
@@ -223,6 +229,7 @@ pub mod color {
         accent_800: Color32::from_rgb(205, 217, 245),
         accent_900: Color32::from_rgb(228, 235, 251),
         on_accent: Color32::from_rgb(255, 255, 255),
+        accent_ink: Color32::from_rgb(255, 255, 255),
         warn: Color32::from_rgb(0x96, 0x5f, 0x0a),
         star: Color32::from_rgb(0xaa, 0x73, 0x00),
         danger: Color32::from_rgb(0xc8, 0x3c, 0x34),
@@ -1222,16 +1229,17 @@ pub fn follow(ctx: &egui::Context, pref: crate::prefs::ThemePref) -> bool {
 fn install_style_into(style: &mut egui::Style) {
     use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
-    // Compact type scale: body is 13pt.
+    // Compact type scale: body is 12.5pt, a control's text 12.
     style.text_styles = [
         (
             TextStyle::Heading,
             FontId::new(13.0, FontFamily::Proportional),
         ),
         (TextStyle::Body, FontId::new(12.5, FontFamily::Proportional)),
+        // `ui::CONTROL_PT`: a button's word, a dropdown row, a `DragValue`'s number.
         (
             TextStyle::Button,
-            FontId::new(12.5, FontFamily::Proportional),
+            FontId::new(12.0, FontFamily::Proportional),
         ),
         (
             TextStyle::Small,
@@ -1277,23 +1285,18 @@ fn install_style_into(style: &mut egui::Style) {
     w.inactive.corner_radius = r5;
     w.inactive.expansion = 0.0;
 
-    // Hovered: a touch lighter, accent-tinted border.
-    w.hovered.bg_fill = color::hover();
-    w.hovered.weak_bg_fill = color::hover();
-    w.hovered.bg_stroke = Stroke::new(1.0, color::accent_700());
-    w.hovered.fg_stroke = Stroke::new(1.0, color::text());
-    w.hovered.corner_radius = r5;
-    w.hovered.expansion = 0.0;
-
-    // Active/pressed and open: accent-tinted ground.
-    for ws in [&mut w.active, &mut w.open] {
-        ws.bg_fill = color::accent_800();
-        ws.weak_bg_fill = color::accent_800();
-        ws.bg_stroke = Stroke::new(1.0, color::accent());
-        ws.fg_stroke = Stroke::new(1.0, color::accent_100());
+    // Hovered and pressed: the hover ground, the hairline unchanged, as
+    // `ui::button_face` hovers. Open (a dropdown's list is up) keeps that face and
+    // takes the accent_700 hairline that ties the list to its field.
+    for ws in [&mut w.hovered, &mut w.active, &mut w.open] {
+        ws.bg_fill = color::hover();
+        ws.weak_bg_fill = color::hover();
+        ws.bg_stroke = Stroke::new(1.0, color::field_border());
+        ws.fg_stroke = Stroke::new(1.0, color::text());
         ws.corner_radius = r5;
         ws.expansion = 0.0;
     }
+    w.open.bg_stroke = Stroke::new(1.0, color::accent_700());
 
     // egui's "this rect changed id" warning is off: it paints a red outline for a
     // frame whenever a Fill or Stroke list gets shorter, because paint rows are
@@ -1785,6 +1788,8 @@ mod tests {
                 ("accent_300/800", color::accent_300(), color::accent_800()),
                 ("danger_200/900", color::danger_200(), color::danger_900()),
                 ("saved_100/900", color::saved_100(), color::saved_900()),
+                ("accent_ink/accent", color::accent_ink(), color::accent()),
+                ("accent_ink/400", color::accent_ink(), color::accent_400()),
                 ("on_accent/accent", color::on_accent(), color::accent()),
                 (
                     "on_accent/accent_600",

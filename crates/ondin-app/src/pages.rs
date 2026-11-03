@@ -10,7 +10,7 @@
 use crate::app::OndinApp;
 use crate::preview::Drag;
 use crate::theme::{self, color, icon};
-use crate::ui::{FOLD_HEAD_H, baseline_in, fold_head, icon_button};
+use crate::ui::{self, FOLD_HEAD_H, baseline_in, fold_head, icon_button};
 use eframe::egui;
 use ondin_core::{NodeId, Operation, Transaction, build};
 
@@ -1004,30 +1004,15 @@ impl OndinApp {
             return;
         };
         let id = egui::Id::new(("page-rename", page));
+        // The text lands where the row's name was drawn.
         let field = egui::Rect::from_min_max(
-            egui::pos2(row.left() + NAME_X - 4.0, row.top() + 3.0),
+            egui::pos2(row.left() + NAME_X - ui::INLINE_EDIT_PAD_X, row.top() + 3.0),
             egui::pos2(row.right() - 6.0, row.bottom() - 3.0),
         );
-        ui.painter().rect(
-            field,
-            egui::CornerRadius::same(4),
-            color::field(),
-            egui::Stroke::new(1.0, color::accent()),
-            egui::StrokeKind::Inside,
-        );
-        // `place`, not `put`: the field is shorter than its row, and `put` would
-        // pull the rows below up to the field's bottom.
-        let resp = ui.place(
-            field.shrink2(egui::vec2(4.0, 0.0)),
-            egui::TextEdit::singleline(&mut r.text)
-                .id(id)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .vertical_align(egui::Align::Center)
-                .desired_width(field.width() - 8.0)
-                .font(egui::FontId::proportional(12.5))
-                .text_color(color::text()),
-        );
+        // In a child: `inline_edit` places with `Ui::put`, which here would pull the
+        // rows below up to the field's bottom.
+        let mut child = ui.new_child(egui::UiBuilder::new().id(id.with("ui")).max_rect(field));
+        let resp = ui::inline_edit(&mut child, field, &mut r.text, id);
         // Focus once, on the field's first frame (the layer rename's rule), and
         // bring the row into a list scrolled or dragged short.
         if !r.focused {
@@ -1356,7 +1341,8 @@ mod tests {
     /// The Pages section stands still while a row is renamed: the divider under
     /// it stays put.
     ///
-    /// flip: the field laid with `ui.put` → fails at "nothing below moves".
+    /// flip: `page_rename_field` handing `inline_edit` the section's `Ui` rather
+    /// than a child → fails at "nothing below moves".
     #[test]
     fn renaming_a_page_moves_nothing_below_it() {
         let ctx = egui::Context::default();

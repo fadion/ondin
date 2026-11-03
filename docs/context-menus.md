@@ -456,9 +456,9 @@ project dropdown, and the caret's list.
 |---|---|
 | Card | `ui::menu_frame`: `color::card()`, 1pt `text_a(15)` hairline, shadow `[0,10]` blur 24 α 82, corner 5, padding 5 |
 | Width | 210pt painted, border included (`MENU_W`) |
-| Row | `ui::MENU_ITEM_H` 24pt, 1pt gap; 11.5pt label; hover ground `text_a(20)`; glyph `text::dim()` |
+| Row | `ui::MENU_ROW_H` 24pt, 1pt gap; 11.5pt label; hover ground `text_a(20)`; glyph `text::dim()` |
 | Accelerator | right-aligned, 10.5pt, `text::faint()`; label cut with `…` at `MENU_ACCEL_GAP` (2pt) from it, the full label in the tooltip |
-| Separator | 1pt `text_a(20)`, 3pt air either side |
+| Separator | `ui::menu_sep`: 1pt `ui::sep_ink()` (`text_a(26)`), 5pt air above and 4pt below, as in every list |
 | Checkable row | no tick column; the glyph goes `accent()` when on, the label full strength on and muted off |
 | Disabled row | glyph / label / accelerator inks 79 / 65 / 49; the reason in the row's tooltip |
 | Destructive row | `color::danger()` (`#e0736b` dark, `#c83c34` light) on glyph and label, accelerator at 55%; neutral hover |
@@ -468,8 +468,7 @@ project dropdown, and the caret's list.
 | Submenu, pointer | hovering a live submenu row opens it when none is open. With one open, a row the pointer has just moved onto takes over at once, unless the move heads into the submenu (`heads_into`: the new position lies in the triangle from the previous one to the submenu's near edge). Only a move heading in starts the `AIM_GRACE` wait (0.25 s, `ContextMenu::leaving`), so a diagonal run can cross a row; reaching the submenu cancels it, and resting on the row past it takes over. So a move straight down the card switches submenus without waiting (`submenu_tests::a_move_down_the_card_switches_submenus_at_once`, `a_crossed_row_waits_out_the_grace_before_it_takes_over`). A submenu's row stays lit for as long as it is open, wherever the pointer is — across the gap to the submenu too — while the other rows still light on hover (`menu_row_of`'s `held`; `submenu_tests::a_submenus_row_stays_lit_across_the_gap`). A click outside both card and submenu closes the menu |
 | Keyboard | `↑`/`↓` move, `Home`/`End` jump, `Enter` runs; on a submenu row `→` or `Enter` opens it with its first live row highlighted, inside it the same keys walk and run its rows, and `←` closes it back to its row (`submenu_tests::the_keys_walk_into_a_submenu_and_back`). `Escape` closes an open submenu first and the menu on the next press (R3). Only enabled rows are reachable; keyboard and pointer share one highlight. `read_nav` reads `→`/`←` for every menu; the tab and library menus have no submenus and ignore them |
 
-The inspector field menu (§6.7) is drawn with the same row and frame functions at 220pt wide and
-26pt rows.
+The inspector field menu (§6.7) is drawn with the same row and frame functions, 220pt wide.
 
 ---
 

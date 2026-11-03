@@ -9,7 +9,6 @@
 //! file changed since it was last applied.
 
 use crate::app::OndinApp;
-use crate::batch_rename::tick_box;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -422,39 +421,30 @@ impl OndinApp {
         );
         let mut act = Act::None;
         let mut changed = false;
-        let modal = egui::Modal::new(id)
+        // Batch rename's: the settings card without its backdrop or margin.
+        let mut modal = crate::settings::card_modal(ctx, "tokens-import")
             .area(area)
-            .backdrop_color(egui::Color32::TRANSPARENT)
-            .frame(
-                egui::Frame::NONE
-                    .fill(color::card())
-                    .stroke(egui::Stroke::new(1.0, color::divider()))
-                    .corner_radius(egui::CornerRadius::same(8))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 14],
-                        blur: 30,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(102),
-                    }),
-            )
-            .show(ctx, |ui| {
-                ui.set_width(W);
-                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                if head(ui, &t.path) {
-                    act = Act::Cancel;
-                }
-                filters(ui, &t.review, &mut t.filter);
+            .backdrop_color(egui::Color32::TRANSPARENT);
+        modal.frame = modal.frame.map(|f| f.inner_margin(egui::Margin::ZERO));
+        let modal = modal.show(ctx, |ui| {
+            ui.set_width(W);
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            if head(ui, &t.path) {
+                act = Act::Cancel;
+            }
+            filters(ui, &t.review, &mut t.filter);
+            divider(ui);
+            changed |= list(ui, &t.review, &mut t.ticked, t.filter, &mut t.collapsed);
+            if let Some(note) = note(&t.review) {
                 divider(ui);
-                changed |= list(ui, &t.review, &mut t.ticked, t.filter, &mut t.collapsed);
-                if let Some(note) = note(&t.review) {
-                    divider(ui);
-                    note_row(ui, &note);
-                }
-                divider(ui);
-                if let Some(a) = foot(ui, &mut t) {
-                    act = a;
-                }
-            });
+                note_row(ui, &note);
+            }
+            divider(ui);
+            if let Some(a) = foot(ui, &mut t) {
+                act = a;
+            }
+            ui::focus_ring(ui);
+        });
         if modal.backdrop_response.clicked() {
             return;
         }
@@ -520,25 +510,18 @@ fn divider(ui: &mut egui::Ui) {
     ui.painter().rect_filled(rect, 0.0, color::divider());
 }
 
-/// The title row: the glyph, *Import tokens*, where the file is, and a close
-/// button; true when that is clicked.
+/// The title row: *Import tokens* in the settings card's title type, where the
+/// file is, and the card's close button; true when that is clicked.
 fn head(ui: &mut egui::Ui, path: &Path) -> bool {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 40.0), egui::Sense::hover());
     let p = ui.painter();
     let y = rect.center().y;
-    p.text(
+    let title = p.text(
         egui::pos2(rect.left() + PAD, y),
         egui::Align2::LEFT_CENTER,
-        icon::BRACKETS_CURLY,
-        theme::icon_font(16.0),
-        color::accent_400(),
-    );
-    let title = p.text(
-        egui::pos2(rect.left() + PAD + 24.0, y),
-        egui::Align2::LEFT_CENTER,
         "Import tokens",
-        egui::FontId::proportional(13.5),
-        color::text(),
+        egui::FontId::proportional(14.0),
+        theme::text::strong(),
     );
     let (name, dirs) = where_label(path);
     let place = match dirs.is_empty() {
@@ -559,18 +542,20 @@ fn head(ui: &mut egui::Ui, path: &Path) -> bool {
         theme::text::dim(),
     );
     let close = egui::Rect::from_center_size(
-        egui::pos2(rect.right() - 8.0 - 13.0, y),
-        egui::vec2(26.0, 26.0),
+        egui::pos2(rect.right() - PAD - 9.0, y),
+        egui::vec2(18.0, 18.0),
     );
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(close));
-    ui::icon_button(&mut child, icon::X, 26.0, 13.0, false, true)
+    ui::icon_button(&mut child, icon::X, 18.0, 14.0, false, true)
         .on_hover_text("Cancel")
         .clicked()
 }
 
-/// The chips that filter the list and carry the counts; *All* first.
+/// The buttons that filter the list and carry the counts, *All* first: each a
+/// [`ui::button_face`], `On` while it is the filter.
 fn filters(ui: &mut egui::Ui, r: &Review, filter: &mut Option<Change>) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 34.0), egui::Sense::hover());
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(W, ui::CONTROL_H + 10.0), egui::Sense::hover());
     let count = |c: Change| r.rows.iter().filter(|x| x.change == c).count();
     let chips = [
         (None, "All".to_string(), r.rows.len()),
@@ -602,35 +587,26 @@ fn filters(ui: &mut egui::Ui, r: &Review, filter: &mut Option<Change>) {
     ];
     let mut x = rect.left() + PAD;
     let y = rect.top() + 2.0;
-    let font = egui::FontId::proportional(11.0);
+    let font = egui::FontId::proportional(ui::CONTROL_PT);
     for (which, label, n) in chips {
         if which.is_some() && n == 0 {
             continue;
         }
         let on = *filter == which;
         let text = format!("{label} {n}");
-        let g = ui.fonts_mut(|f| f.layout_no_wrap(text, font.clone(), color::text()));
+        // Placeholder ink, so the galley takes the face's at paint.
+        let g = ui.fonts_mut(|f| f.layout_no_wrap(text, font.clone(), egui::Color32::PLACEHOLDER));
         let sign = which.map(tag);
         let sign_w = if sign.is_some() { 12.0 } else { 0.0 };
-        let w = 9.0 + sign_w + g.size().x + 9.0;
-        let chip = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, 24.0));
-        let resp = ui.interact(
-            chip,
-            ui.id().with(("tokens-chip", label.as_str())),
-            egui::Sense::click(),
+        let w = ui::FIELD_PAD_X + sign_w + g.size().x + ui::FIELD_PAD_X;
+        let chip = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, ui::CONTROL_H));
+        let mut slot = ui.new_child(
+            egui::UiBuilder::new()
+                .id(ui.id().with(("tokens-chip", label.as_str())))
+                .max_rect(chip),
         );
+        let (_, resp, ink) = ui::button_face(&mut slot, chip.size(), FieldButton::on_if(on));
         let p = ui.painter();
-        let ground = match (on, resp.hovered()) {
-            (true, _) => color::text_a(36),
-            (false, true) => color::text_a(22),
-            (false, false) => color::text_a(13),
-        };
-        p.rect_filled(chip, 12.0, ground);
-        let ink = if on {
-            color::text()
-        } else {
-            theme::text::muted()
-        };
         if let Some((s, bg, _)) = sign {
             let dot = if which == Some(Change::Renamed) {
                 color::text()
@@ -786,9 +762,7 @@ fn group_head(ui: &mut egui::Ui, name: &str, count: usize, open: bool) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(W - 2.0 * GAP, GROUP_H), egui::Sense::click());
     let p = ui.painter();
-    if resp.hovered() {
-        p.rect_filled(rect, 5.0, color::text_a(10));
-    }
+    ui::list_row_ground(p, rect, false, resp.hovered());
     let y = rect.center().y;
     p.text(
         egui::pos2(rect.left() + 8.0, y),
@@ -835,9 +809,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
         (false, true) => c,
     };
     let p = ui.painter();
-    if resp.hovered() && !kit {
-        p.rect_filled(rect, 5.0, color::text_a(10));
-    }
+    ui::list_row_ground(p, rect, false, resp.hovered() && !kit);
     let y = rect.center().y;
     // The box.
     let bx = egui::Rect::from_center_size(
@@ -858,7 +830,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
             egui::Align2::CENTER_CENTER,
             icon::CHECK,
             theme::icon_font(10.0),
-            egui::Color32::WHITE,
+            color::accent_ink(),
         );
     } else {
         p.rect_stroke(
@@ -1077,7 +1049,7 @@ fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
                 ))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        tick_box(&mut child, "Keep this file linked", "", &mut t.link);
+        ui::tick_box(&mut child, "Keep this file linked", "", &mut t.link);
     }
     let n = ticked_count(t);
     let go = match n {
@@ -1091,7 +1063,7 @@ fn foot(ui: &mut egui::Ui, t: &mut TokensImport) -> Option<Act> {
     );
     child.spacing_mut().item_spacing.x = 8.0;
     let state = match &t.why_not {
-        None => FieldButton::On,
+        None => FieldButton::Primary,
         Some(_) => FieldButton::Disabled,
     };
     let primary = crate::settings::text_button(&mut child, &go, state);

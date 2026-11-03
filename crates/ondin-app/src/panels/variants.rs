@@ -32,10 +32,8 @@ use ondin_core::{Keyed, NodeId, Transaction, component, swap};
 /// A row's label column, the width the Component card's dropdowns sit after.
 const LABEL_W: f32 = 76.0;
 /// The capsule's ground around a bound boolean property's switch, each side
-/// (§15 D1060): 38×22 around the 26×16 switch, a chip's height.
+/// (§15 D1060): 38×22 around the 26×16 switch.
 const BOUND_SWITCH_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
-/// A value chip's height.
-const CHIP_H: f32 = 22.0;
 /// A text property's binding: the content's slot of `variable::TextVars` alone.
 const CONTENT_ONLY: [bool; 7] = [true, false, false, false, false, false, false];
 /// The inner width of a value chip's menu — the top bar's View and Snap menus'
@@ -232,7 +230,6 @@ fn committed_field(
     id: egui::Id,
     current: &str,
     size: egui::Vec2,
-    pt: f32,
     rules: Rules,
 ) -> (egui::Response, Option<String>) {
     let seed = if rules.mixed { "" } else { current };
@@ -245,7 +242,7 @@ fn committed_field(
         rules.hint
     };
     let resp = ui
-        .push_id(id, |ui| ui::text_field(ui, size, &mut buf, hint, pt))
+        .push_id(id, |ui| ui::text_field(ui, size, &mut buf, hint))
         .inner;
     let focused = resp.has_focus();
     ui.data_mut(|d| {
@@ -279,14 +276,8 @@ pub(crate) fn hold_id() -> egui::Id {
 }
 
 /// [`committed_field`] by name rules.
-fn name_field(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    current: &str,
-    size: egui::Vec2,
-    pt: f32,
-) -> Option<String> {
-    committed_field(ui, id, current, size, pt, Rules::NAME).1
+fn name_field(ui: &mut egui::Ui, id: egui::Id, current: &str, size: egui::Vec2) -> Option<String> {
+    committed_field(ui, id, current, size, Rules::NAME).1
 }
 
 /// What a [`committed_field`] was holding when it stopped being drawn with the
@@ -335,7 +326,7 @@ fn dropdown(
         let resp = egui::ComboBox::from_id_salt(salt)
             .icon(ui::combo_chevron)
             .width(width)
-            .selected_text(egui::RichText::new(shown).size(12.0))
+            .selected_text(ui::combo_text(shown))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
                 for (i, c) in choices.iter().enumerate() {
@@ -391,7 +382,7 @@ fn swap_picker(
             // `CloseOnClick` would dismiss it on the click into the search field,
             // so a pick closes it by hand below.
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .selected_text(egui::RichText::new(shown).size(12.0))
+            .selected_text(ui::combo_text(shown))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
                 ui.spacing_mut().item_spacing.y = 3.0;
@@ -400,17 +391,19 @@ fn swap_picker(
                     .unwrap_or_default();
                 // The family list's search field.
                 let private = crate::private::on();
-                ui.add_enabled(
-                    !private,
-                    egui::TextEdit::singleline(&mut search)
-                        .margin(ui::SEARCH_PAD)
-                        .desired_width(width.max(160.0))
-                        .hint_text(if private {
+                ui::disable_unless(ui, !private, |ui| {
+                    ui::search_field(
+                        ui,
+                        &mut search,
+                        search_id.with("field"),
+                        if private {
                             crate::private::DECLINE_SEARCH
                         } else {
                             "Search…"
-                        }),
-                );
+                        },
+                        width.max(160.0),
+                    );
+                });
                 ui.data_mut(|d| d.insert_temp(search_id, search.clone()));
                 // Private mode lists every row: a search over hidden names would
                 // say what they hold.
@@ -873,7 +866,7 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
                 let id = ui.id().with(("variant-prop", set, pi));
-                if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H), 12.0) {
+                if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H)) {
                     let drawn = p.name.clone();
                     edits.push(defer(move |cx| {
                         let Some(pi) = cx.prop_at(set, &drawn) else {
@@ -892,13 +885,12 @@ impl OndinApp {
                 } else {
                     FieldButton::Off
                 };
-                let resp = ui::field_button(ui, icon::X, ui::CONTROL_H, 13.0, state).on_hover_text(
-                    if last {
+                let resp =
+                    ui::field_button(ui, icon::X, ui::CONTROL_H, state).on_hover_text(if last {
                         "A set needs at least one property"
                     } else {
                         "Delete this property"
-                    },
-                );
+                    });
                 if resp.clicked() && !last {
                     let drawn = p.name.clone();
                     edits.push(defer(move |cx| {
@@ -911,9 +903,21 @@ impl OndinApp {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
                 for (vi, v) in p.values.iter().enumerate() {
-                    let chip = ui.add(
-                        egui::Button::new(egui::RichText::new(v).size(12.0))
-                            .min_size(egui::vec2(0.0, CHIP_H)),
+                    let word = ui.fonts_mut(|f| {
+                        f.layout_no_wrap(
+                            v.clone(),
+                            egui::FontId::proportional(ui::CONTROL_PT),
+                            egui::Color32::PLACEHOLDER,
+                        )
+                    });
+                    let chip = ui::label_button(
+                        ui,
+                        v,
+                        egui::vec2(
+                            (word.size().x + ui::FIELD_PAD_X * 2.0).ceil(),
+                            ui::CONTROL_H,
+                        ),
+                        FieldButton::Off,
                     );
                     // The rename field's id is the value's place, and the menu
                     // closes on a move so a place never names another value
@@ -936,7 +940,6 @@ impl OndinApp {
                                 field,
                                 v,
                                 egui::vec2(CHIP_MENU_W, ui::CONTROL_H),
-                                12.0,
                                 Rules::NAME,
                             );
                             if resp.has_focus() {
@@ -1025,14 +1028,7 @@ impl OndinApp {
                         edits.push(rename_value_edit(set, p.name.clone(), v.clone(), n));
                     }
                 }
-                let add = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(icon::PLUS)
-                            .font(theme::icon_font(12.0))
-                            .color(theme::text::muted()),
-                    )
-                    .min_size(egui::vec2(CHIP_H, CHIP_H)),
-                );
+                let add = ui::field_button(ui, icon::PLUS, ui::CONTROL_H, FieldButton::Off);
                 if add.on_hover_text("Add a value").clicked() {
                     let drawn = p.name.clone();
                     edits.push(defer(move |cx| {
@@ -1949,14 +1945,8 @@ impl OndinApp {
                             mixed: mixed && retype.is_none(),
                         };
                         let seed = retype.clone().unwrap_or(text);
-                        let (resp, committed) = committed_field(
-                            ui,
-                            id,
-                            &seed,
-                            egui::vec2(w, ui::CONTROL_H),
-                            12.0,
-                            rules,
-                        );
+                        let (resp, committed) =
+                            committed_field(ui, id, &seed, egui::vec2(w, ui::CONTROL_H), rules);
                         if retype.is_some() {
                             if !resp.has_focus() && !resp.lost_focus() {
                                 resp.request_focus();
@@ -2269,15 +2259,9 @@ impl OndinApp {
                             .color(theme::text::dim()),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui::field_button(
-                                ui,
-                                icon::MINUS,
-                                ui::CONTROL_H,
-                                13.0,
-                                FieldButton::Off,
-                            )
-                            .on_hover_text("Stop showing its properties on instances")
-                            .clicked()
+                            if ui::field_button(ui, icon::MINUS, ui::CONTROL_H, FieldButton::Off)
+                                .on_hover_text("Stop showing its properties on instances")
+                                .clicked()
                             {
                                 let slot = *slot;
                                 edits.push(defer(move |cx| {
@@ -2639,7 +2623,7 @@ fn property_row(
         );
         let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
         let id = ui.id().with(("prop-name", owner, p.id));
-        if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H), 12.0) {
+        if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H)) {
             edits.push(defer(move |cx| {
                 // Another property's name, or one of a set's variant properties
                 // — `variant::check`'s `PropertyName`, asked before the commit is.
@@ -2658,7 +2642,7 @@ fn property_row(
                 }))
             }));
         }
-        if ui::field_button(ui, icon::X, ui::CONTROL_H, 13.0, FieldButton::Off)
+        if ui::field_button(ui, icon::X, ui::CONTROL_H, FieldButton::Off)
             .on_hover_text("Delete this property — its layers keep their values")
             .clicked()
         {
@@ -2798,7 +2782,7 @@ fn preferred_rows(
                 egui::vec2(w, ui::CONTROL_H),
                 egui::Label::new(egui::RichText::new(name).size(12.0).color(ink)).truncate(),
             );
-            if ui::field_button(ui, icon::X, ui::CONTROL_H, 12.0, ui::FieldButton::Off)
+            if ui::field_button(ui, icon::X, ui::CONTROL_H, ui::FieldButton::Off)
                 .on_hover_text("No longer preferred")
                 .clicked()
             {
@@ -2902,7 +2886,7 @@ fn filter_field(
         name: false,
         mixed: false,
     };
-    let (resp, typed) = committed_field(ui, id, current, size, 12.0, rules);
+    let (resp, typed) = committed_field(ui, id, current, size, rules);
     resp.on_hover_text("The picker offers the mains whose name starts with this");
     typed.map(|t| t.trim().to_string()).filter(|t| t != current)
 }

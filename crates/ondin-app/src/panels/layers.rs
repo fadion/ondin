@@ -591,14 +591,13 @@ fn row_id(id: NodeId) -> egui::Id {
     egui::Id::new(("layer-row", id))
 }
 
-/// Where the rename field goes on a row whose name is painted from `left`: the
-/// full row height, starting at the name's own left edge, so the text does not
-/// shift when the rename opens. The field's `margin` must be zero and its
-/// `vertical_align` centred for this rect to land the text where
-/// `Align2::LEFT_CENTER` had it.
+/// Where the [`crate::ui::inline_edit`] rename field goes on a row whose name is
+/// painted from `left`: the full row height, starting
+/// [`crate::ui::INLINE_EDIT_PAD_X`] left of the name, so the text does not shift
+/// when the rename opens.
 fn rename_field_rect(row: egui::Rect, left: f32) -> egui::Rect {
     egui::Rect::from_min_max(
-        egui::pos2(left, row.top()),
+        egui::pos2(left - crate::ui::INLINE_EDIT_PAD_X, row.top()),
         egui::pos2(row.right() - 8.0, row.bottom()),
     )
 }
@@ -1499,8 +1498,8 @@ impl OndinApp {
             return;
         };
         let mut buf = text.clone();
-        // Focus is requested here, once, on the frame the field first draws (§15
-        // D332): requesting it when a door opens the rename hands AccessKit a
+        // Focus is requested here, once, on the frame the field first draws:
+        // requesting it when a door opens the rename hands AccessKit a
         // focused id with no node, and `accesskit_consumer` panics. It must stay a
         // one-shot; re-requesting whenever focus is absent would regrab it on the
         // frame Enter or Escape takes it away.
@@ -1510,18 +1509,7 @@ impl OndinApp {
         }
         // Sits where the painted name sat — see `rename_field_rect`.
         let field = rename_field_rect(row, left);
-        let resp = ui.put(
-            field,
-            egui::TextEdit::singleline(&mut buf)
-                .id(rename_field_id(id))
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                // `TextEdit` defaults to `LEFT_TOP`, which would ride the name up.
-                .vertical_align(egui::Align::Center)
-                .desired_width(field.width())
-                .font(egui::FontId::proportional(12.5))
-                .text_color(color::text()),
-        );
+        let resp = crate::ui::inline_edit(ui, field, &mut buf, fid);
         if let Some((_, stored)) = &mut self.renaming_layer {
             *stored = buf.clone();
         }
@@ -2984,8 +2972,9 @@ mod rename_layout_tests {
         );
     }
 
-    /// The rename field lands exactly on the name it replaces (measured against a
-    /// real `Align2::LEFT_CENTER` galley).
+    /// The rename field's text lands exactly on the name it replaces, the rect
+    /// starting `INLINE_EDIT_PAD_X` left of it (measured against a real
+    /// `Align2::LEFT_CENTER` galley).
     #[test]
     fn the_rename_field_sits_where_the_painted_name_sits() {
         let ctx = egui::Context::default();
@@ -3001,10 +2990,10 @@ mod rename_layout_tests {
             );
             let field = rename_field_rect(row, left);
 
+            let text_left = field.left() + crate::ui::INLINE_EDIT_PAD_X;
             assert!(
-                (field.left() - painted.left()).abs() < 0.01,
-                "the field starts at {} but the name starts at {}",
-                field.left(),
+                (text_left - painted.left()).abs() < 0.01,
+                "the field's text starts at {text_left} but the name starts at {}",
                 painted.left()
             );
             assert!(

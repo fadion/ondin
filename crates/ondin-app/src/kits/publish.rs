@@ -10,6 +10,7 @@
 
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
+use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::kit::Changes;
 use ondin_core::{Document, NodeId};
@@ -45,10 +46,10 @@ impl OndinApp {
     /// *Publish N* in a kit's top bar, with the count; hovering gives the
     /// breakdown, and at 0 it stays, disabled, saying why.
     ///
-    /// **The accent button the library's *New file* is** (§15 D1025), not a
-    /// neutral one: publishing is the one thing a kit's
-    /// bar is for. Disabled, it falls back to the neutral ground, so a kit with
-    /// nothing to send does not wear the colour of an action.
+    /// A [`FieldButton::Primary`] pill at the toolbar scale, as the library's *New
+    /// file* is: publishing is the one thing a kit's bar is for. Disabled, it falls
+    /// back to the neutral ground, so a kit with nothing to send does not wear the
+    /// colour of an action.
     pub(crate) fn publish_button(&mut self, ui: &mut egui::Ui) {
         let Some(c) = self.kit_changes() else {
             return;
@@ -69,79 +70,79 @@ impl OndinApp {
             )
         };
         let enabled = c.any();
-        let ink = if enabled {
-            color::accent_100()
-        } else {
-            theme::text::disabled()
-        };
-        let label = ui.ctx().fonts_mut(|f| {
-            f.layout_no_wrap("Publish".into(), egui::FontId::proportional(11.5), ink)
-        });
-        let count = ui
+        let scale = ui::Scale::Toolbar;
+        let glyph_pt = scale.glyph_pt();
+        let label_w = ui
             .ctx()
-            .fonts_mut(|f| f.layout_no_wrap(n.to_string(), egui::FontId::proportional(10.5), ink));
-        let chip_w = (count.size().x + 10.0).max(18.0);
+            .fonts_mut(|f| {
+                f.layout_no_wrap(
+                    "Publish".into(),
+                    egui::FontId::proportional(scale.text_pt()),
+                    color::text(),
+                )
+            })
+            .size()
+            .x;
+        let count_w = ui
+            .ctx()
+            .fonts_mut(|f| {
+                f.layout_no_wrap(
+                    n.to_string(),
+                    egui::FontId::proportional(10.5),
+                    color::text(),
+                )
+            })
+            .size()
+            .x;
+        let chip_w = (count_w + 10.0).max(16.0);
         // The count's chip only when it counts something: a rename alone is
         // publishable with no component changed, and *Publish 0* would say there
         // is nothing to send.
         let chip = enabled && n > 0;
         let w = 10.0
-            + 13.0
+            + glyph_pt
             + 7.0
-            + label.size().x
+            + label_w
             + if chip { 7.0 + chip_w } else { 0.0 }
             + 4.0
             + if chip { 0.0 } else { 6.0 };
-        let (rect, resp) = ui.allocate_exact_size(
-            egui::vec2(w, 26.0),
-            if enabled {
-                egui::Sense::click()
-            } else {
-                egui::Sense::hover()
-            },
-        );
-        let p = ui.painter();
-        let ground = match (enabled, resp.hovered()) {
-            (true, true) => color::accent_700(),
-            (true, false) => color::accent_800(),
-            (false, _) => color::text_a(18),
+        let state = match enabled {
+            true => FieldButton::Primary,
+            false => FieldButton::Disabled,
         };
-        p.rect_filled(rect, egui::CornerRadius::same(6), ground);
-        if enabled {
-            p.rect_stroke(
-                rect,
-                egui::CornerRadius::same(6),
-                egui::Stroke::new(1.0, color::accent()),
-                egui::StrokeKind::Inside,
-            );
-        }
+        let (rect, resp, fg) = ui::button_face(ui, egui::vec2(w, ui::TOOLBAR_H), state);
+        let p = ui.painter();
         let y = rect.center().y;
         let mut x = rect.left() + 10.0;
         p.text(
             egui::pos2(x, y),
             egui::Align2::LEFT_CENTER,
             icon::UPLOAD_SIMPLE,
-            theme::icon_font(13.0),
-            if enabled {
-                color::accent_200()
-            } else {
-                theme::text::disabled()
-            },
+            theme::icon_font(glyph_pt),
+            fg,
         );
-        x += 13.0 + 7.0;
-        p.galley(egui::pos2(x, y - label.size().y / 2.0), label.clone(), ink);
-        x += label.size().x + 7.0;
+        x += glyph_pt + 7.0;
+        p.text(
+            egui::pos2(x, y),
+            egui::Align2::LEFT_CENTER,
+            "Publish",
+            egui::FontId::proportional(scale.text_pt()),
+            fg,
+        );
+        x += label_w + 7.0;
         if chip {
-            let chip = egui::Rect::from_min_size(egui::pos2(x, y - 9.0), egui::vec2(chip_w, 18.0));
+            let chip = egui::Rect::from_min_size(egui::pos2(x, y - 8.0), egui::vec2(chip_w, 16.0));
             p.rect_filled(chip, egui::CornerRadius::same(4), color::accent_600());
-            p.galley(
-                chip.center() - count.size() / 2.0,
-                count,
+            p.text(
+                chip.center(),
+                egui::Align2::CENTER_CENTER,
+                n.to_string(),
+                egui::FontId::proportional(10.5),
                 color::accent_100(),
             );
         }
         let resp = resp.on_hover_text(tip);
-        if resp.clicked() {
+        if resp.clicked() && enabled {
             self.open_publish();
         }
     }
@@ -273,7 +274,6 @@ impl OndinApp {
                 egui::vec2(ui.available_width(), crate::settings::FIELD_H),
                 &mut draft.note,
                 "What changed, in a line. Shown with the update.",
-                12.5,
             );
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -283,7 +283,9 @@ impl OndinApp {
                 } else {
                     "Publish".to_string()
                 };
-                if crate::settings::text_button(ui, &verb, crate::ui::FieldButton::On).clicked() {
+                if crate::settings::text_button(ui, &verb, crate::ui::FieldButton::Primary)
+                    .clicked()
+                {
                     decision = Some(true);
                 }
                 if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()

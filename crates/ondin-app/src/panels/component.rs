@@ -781,7 +781,9 @@ impl OndinApp {
                 )
             });
         let resp = framed.inner;
-        focus_edge(ui, framed.response.rect, resp.has_focus());
+        if resp.has_focus() {
+            ui::typing_edge(ui, framed.response.rect);
+        }
         if resp.gained_focus() || resp.changed() {
             self.desc_edit = Some((id, text.clone()));
         }
@@ -852,13 +854,13 @@ impl OndinApp {
         let framed = frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(ui::CONTROL_H - ui::FIELD_BORDER_H);
-                ui.spacing_mut().item_spacing.x = 6.0;
-                ui.label(
-                    egui::RichText::new(icon::LINK_SIMPLE)
-                        .font(theme::icon_font(13.0))
-                        .color(theme::text::dim()),
-                );
-                let button = if open { LINK_H + 6.0 } else { 0.0 };
+                ui.spacing_mut().item_spacing.x = 7.0;
+                ui.label(theme::icon_text(
+                    icon::LINK_SIMPLE,
+                    ui::CONTROL_GLYPH_PT,
+                    theme::text::faint(),
+                ));
+                let button = if open { LINK_H + 7.0 } else { 0.0 };
                 let room = ui.available_width() - button;
                 let font = egui::FontId::proportional(FIELD_PT);
                 let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
@@ -884,7 +886,9 @@ impl OndinApp {
             .inner
         });
         let resp = framed.inner;
-        focus_edge(ui, framed.response.rect, resp.has_focus() && ring.is_none());
+        if resp.has_focus() && ring.is_none() {
+            ui::typing_edge(ui, framed.response.rect);
+        }
         if opened {
             open_doc_link(ui.ctx(), &inherited);
         }
@@ -1163,7 +1167,7 @@ pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> 
             egui::FontId::proportional(12.0),
             theme::text::faint(),
         );
-        ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, 14.0, FieldButton::Off)
+        ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, FieldButton::Off)
             .on_hover_text("Restore — put the main's item back")
             .clicked()
     })
@@ -1733,8 +1737,8 @@ fn reset_row(
             *act = Some(Act::Detach);
         }
         if overflow {
-            let more = ui::field_button(ui, icon::DOTS_THREE, h, 15.0, FieldButton::Off)
-                .on_hover_text("More");
+            let more =
+                ui::field_button(ui, icon::DOTS_THREE, h, FieldButton::Off).on_hover_text("More");
             egui::Popup::menu(&more)
                 .align(egui::RectAlign::BOTTOM_END)
                 .gap(ui::MENU_GAP)
@@ -1922,22 +1926,10 @@ const NAME_PT: f32 = 13.0;
 /// A description note's text size, and the air above it on a card.
 const DESC_PT: f32 = 11.5;
 const DESC_GAP: f32 = 2.0;
-/// The description and link fields' text size, the inspector's text fields'.
-const FIELD_PT: f32 = 12.0;
+/// The description and link fields' text size, every control's.
+const FIELD_PT: f32 = ui::CONTROL_PT;
 /// The side of the buttons on a heading and in the link field.
 const LINK_H: f32 = 22.0;
-
-/// The accent edge a focused description or link field takes, a value field's.
-fn focus_edge(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
-    if focused {
-        ui.painter().rect_stroke(
-            rect,
-            egui::CornerRadius::same(5),
-            egui::Stroke::new(1.0, theme::color::accent_700()),
-            egui::StrokeKind::Inside,
-        );
-    }
-}
 
 /// An in-progress edit of a main's link field (`OndinApp::link_field`); `refused`
 /// is set once a commit was turned down, and keeps the typed text on show.

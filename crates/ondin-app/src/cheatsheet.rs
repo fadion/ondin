@@ -455,13 +455,13 @@ impl OndinApp {
                         closed = true;
                     }
                     ui.add_space(12.0);
-                    let field = crate::ui::search_field(
+                    let field = crate::ui::search_box(
                         ui,
-                        &mut sheet.filter,
-                        egui::Id::new("cheatsheet-filter"),
-                        "Filter by name or key",
                         // What the title and ✕ leave of a narrow card.
-                        FILTER_W.min(inner - 170.0),
+                        egui::vec2(FILTER_W.min(inner - 170.0), crate::ui::CONTROL_H),
+                        &mut sheet.filter,
+                        "Filter by name or key",
+                        egui::Id::new("cheatsheet-filter"),
                     );
                     // Focused once, on open; a click elsewhere on the sheet may take it.
                     if opening {
@@ -514,6 +514,8 @@ impl OndinApp {
                     });
                 });
             footer(ui);
+            // Last, as `settings::card` paints it: this card keeps its own margin.
+            crate::ui::focus_ring(ui);
         });
         if closed || modal.should_close() {
             self.cheatsheet = None;

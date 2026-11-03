@@ -49,20 +49,20 @@ pub(crate) const TITLE_GAP: f32 = 26.0;
 /// Above the footer's two buttons — the same standoff the title gets, and the whole
 /// of it, since nothing below adds air of its own.
 pub(crate) const FOOTER_GAP: f32 = TITLE_GAP;
-/// Between two rows inside one section.
-pub(crate) const ROW_GAP: f32 = 11.0;
+/// Between two rows inside one section: the inspector's row pitch.
+pub(crate) const ROW_GAP: f32 = ui::CARD_ROW_GAP;
 /// A switch row. [`crate::panels`]' feature lists use the same height, and these
 /// are the same control in a column.
 pub(crate) const SWITCH_H: f32 = 22.0;
 /// A value field, and so also the buttons beside one — the app's control height.
-pub(crate) const FIELD_H: f32 = 28.0;
+pub(crate) const FIELD_H: f32 = ui::CONTROL_H;
 /// The footer's buttons, and the *Clear* button in the web-fonts section: the field
 /// height they sit among.
 const BUTTON_H: f32 = FIELD_H;
 /// What a button's label keeps clear of its own corners, per side.
 const BUTTON_PAD_X: f32 = 14.0;
-/// Between two controls on one row.
-pub(crate) const COL_GAP: f32 = 10.0;
+/// Between two controls on one row: the inspector's.
+pub(crate) const COL_GAP: f32 = ui::CARD_COL_GAP;
 /// The *Default font* dropdown: room for a long family name beside its label.
 const DEFAULT_FONT_W: f32 = 200.0;
 
@@ -71,8 +71,8 @@ const DEFAULT_FONT_W: f32 = 200.0;
 pub(crate) const LABEL_PT: f32 = ui::SWITCH_ROW_LABEL_PT;
 /// Type size of the sentence under a row that needs one.
 pub(crate) const CAPTION_PT: f32 = 10.5;
-/// Type size of a button's word — [`ui::label_button`]'s.
-const BUTTON_PT: f32 = 11.5;
+/// Type size of a button's word — [`ui::label_button`]'s at [`BUTTON_H`].
+const BUTTON_PT: f32 = ui::CONTROL_PT;
 
 /// What the Settings modal has been edited to, before *Save changes* is pressed.
 ///
@@ -515,8 +515,9 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
 }
 
 /// The *Cancel* / commit pair, right-aligned — `commit` is the commit's label,
-/// *Save changes* or *Create project* — with the commit lit only when `enabled`:
-/// there is something to commit. Returns the [`Decision`] a press made.
+/// *Save changes* or *Create project* — with the commit
+/// [`FieldButton::Primary`] only when `enabled`: there is something to commit.
+/// Returns the [`Decision`] a press made.
 ///
 /// Shared so every card's commit lights on the same rule for *edited*.
 pub(crate) fn modal_footer(
@@ -525,7 +526,7 @@ pub(crate) fn modal_footer(
     enabled: bool,
 ) -> Option<Decision> {
     let state = if enabled {
-        FieldButton::On
+        FieldButton::Primary
     } else {
         FieldButton::Disabled
     };
@@ -899,7 +900,7 @@ mod tests {
     /// `FieldButton::Off` and `Disabled` share a ground, so this measures the accent
     /// wash against *Cancel* in the same frame rather than the enum.
     ///
-    /// flip: hand `text_button` `FieldButton::On` unconditionally → the clean case
+    /// flip: hand `text_button` `FieldButton::Primary` unconditionally → the clean case
     /// fails with the two grounds unequal.
     #[test]
     fn save_changes_is_dim_until_the_form_is_edited() {

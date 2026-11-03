@@ -410,15 +410,18 @@ impl Updater {
     }
 }
 
-/// **The top bar's update chip**: a small outlined pill — a clockwise arrow and
-/// the state's [`UpdateState::label`] in capitals — or nothing at all for a state
-/// with no label. Clickable only when an update is staged, and then it is the
-/// restart. Returns whether it was clicked so; the caller applies.
+/// **The top bar's update chip**: a top-bar pill at [`crate::ui::TOOLBAR_H`] — a
+/// clockwise arrow and the state's [`UpdateState::label`] in capitals — or nothing at all for
+/// a state with no label. Only a staged update is a button
+/// ([`crate::ui::button_face`], `Off`), and then it is the restart; a download in
+/// flight wears the same ground and is no tab stop. Returns whether it was
+/// clicked so; the caller applies.
 ///
 /// Both screens draw it, in the `right_to_left` cluster beside Settings, so an
 /// update staged while the library is open is offered there too.
 pub(crate) fn chip(ui: &mut egui::Ui, state: &UpdateState) -> bool {
     use crate::theme::{self, color, icon};
+    use crate::ui::{self, FieldButton, Scale};
     let Some(label) = state.label() else {
         return false;
     };
@@ -428,37 +431,34 @@ pub(crate) fn chip(ui: &mut egui::Ui, state: &UpdateState) -> bool {
         job.append(
             icon::ARROW_CLOCKWISE,
             0.0,
-            egui::TextFormat::simple(theme::icon_font(13.0), color),
+            egui::TextFormat::simple(theme::icon_font(Scale::Toolbar.glyph_pt()), color),
         );
         job.append(
             &label.to_uppercase(),
             5.0,
-            egui::TextFormat::simple(egui::FontId::proportional(11.0), color),
+            egui::TextFormat::simple(egui::FontId::proportional(Scale::Toolbar.text_pt()), color),
         );
         ui.fonts_mut(|f| f.layout_job(job))
     };
-    let size = galley(ui, color::text()).size() + egui::vec2(18.0, 6.0);
-    let sense = if actionable {
-        egui::Sense::click()
+    let w = galley(ui, color::text()).size().x + ui::FIELD_PAD_X * 2.0;
+    let size = egui::vec2(w, ui::TOOLBAR_H);
+    let (rect, resp, fg) = if actionable {
+        ui::button_face(ui, size, FieldButton::Off)
     } else {
-        egui::Sense::hover()
+        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let r = egui::CornerRadius::same(ui::BUTTON_R);
+        let p = ui.painter();
+        p.rect_filled(rect, r, color::field());
+        p.rect_stroke(
+            rect,
+            r,
+            egui::Stroke::new(1.0, color::field_border()),
+            egui::StrokeKind::Inside,
+        );
+        (rect, resp, theme::text::muted())
     };
-    let (rect, resp) = ui.allocate_exact_size(size, sense);
-    let lit = actionable && resp.hovered();
-    let fg = if lit {
-        color::text()
-    } else {
-        theme::text::muted()
-    };
-    let p = ui.painter();
-    p.rect_stroke(
-        rect,
-        egui::CornerRadius::same(5),
-        egui::Stroke::new(1.0, fg),
-        egui::StrokeKind::Inside,
-    );
     let g = galley(ui, fg);
-    p.galley(rect.center() - g.size() / 2.0, g, fg);
+    ui.painter().galley(rect.center() - g.size() / 2.0, g, fg);
     let resp = match state {
         UpdateState::Ready { version } => {
             resp.on_hover_text(format!("Restart Ondin to install version {version}"))

@@ -66,8 +66,8 @@ const PREVIEW_INSET: f32 = 10.0;
 
 // --- the settings popover ---------------------------------------------------
 //
-// The shared popover language: 272 wide, 11 of padding, 26pt controls, 9.5pt
-// small-caps section labels, as in `typography.rs` and `stroke_menu_popup`.
+// The shared popover language: 272 wide, 11 of padding, `ui::CONTROL_H` controls,
+// `ui::labelled` sections, as in `typography.rs` and `stroke_menu_popup`.
 
 /// The card's width, shared with every other popover in the inspector.
 const POP_W: f32 = crate::app::POPOVER_W;
@@ -75,29 +75,12 @@ const POP_PAD: f32 = 11.0;
 /// The room inside the padding and the border — `POP_W` is the width the card
 /// paints, not the room in it (§15 D307).
 const POP_INNER: f32 = ui::menu_inner_w(POP_W, POP_PAD);
-/// A control inside the popover — 26, against the card's 28, so a popover of four
-/// sections does not tower over a card of three rows (as `typography::CELL`).
-const POP_CELL: f32 = 26.0;
+/// A control inside the popover: every control's height.
+const POP_CELL: f32 = ui::CONTROL_H;
 /// Between one labelled section and the next — the shared one.
 const SECTION_GAP: f32 = ui::POPOVER_SECTION_GAP;
-/// Between a section's label and its control, in both popovers.
-const LABEL_GAP: f32 = 5.0;
 /// The ✕ beside the card's eyebrow, shared with the type popup's.
 const CLOSE_W: f32 = 18.0;
-
-/// One labelled block of the popover: a small-caps eyebrow, then its control.
-///
-/// A `scope`, so the card's two vertical gaps are two numbers: with a single
-/// spacing the label floats equidistant between its own control and the section
-/// above. Copied from `typography::section`, whose constants are private.
-fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    ui.scope(|ui| {
-        ui.spacing_mut().item_spacing.y = LABEL_GAP;
-        ui.label(ui::eyebrow(label));
-        add(ui)
-    })
-    .inner
-}
 
 /// What one row asked for.
 #[derive(Default)]
@@ -732,11 +715,10 @@ impl OndinApp {
                         .icon(ui::combo_chevron)
                         .width(SCALE_W)
                         .height(260.0)
-                        .selected_text(spec.scale.label());
+                        .selected_text(ui::combo_text(&spec.scale.label()));
                     if live {
                         combo.show_ui(ui, |ui| {
                             ui::menu_rows(ui);
-                            ui.spacing_mut().button_padding.y = 2.0;
                             for n in ExportScale::COMMON {
                                 let s = ExportScale::Times(n);
                                 ui.selectable_value(&mut scale, s, s.label());
@@ -782,7 +764,6 @@ impl OndinApp {
                         .selected_text(ui::glyph_and_text(icon::FILE_IMAGE, spec.format.label()))
                         .show_ui(ui, |ui| {
                             ui::menu_rows(ui);
-                            ui.spacing_mut().button_padding.y = 2.0;
                             for f in ExportFormat::ALL {
                                 ui.selectable_value(&mut format, f, f.label());
                             }
@@ -799,7 +780,6 @@ impl OndinApp {
                     ui,
                     icon::SLIDERS_HORIZONTAL,
                     CELL,
-                    14.0,
                     settings_button_state(spec, open),
                 )
                 .on_hover_text(match open {
@@ -820,7 +800,7 @@ impl OndinApp {
                 }
                 // An ✕, not a minus: `MINUS` is the off mark in this app's switches, so
                 // it would read as a state rather than a verb.
-                if ui::field_button(ui, icon::X, CELL, 14.0, ui::FieldButton::Off)
+                if ui::field_button(ui, icon::X, CELL, ui::FieldButton::Off)
                     .on_hover_text("Remove this export")
                     .clicked()
                 {
@@ -963,7 +943,7 @@ impl OndinApp {
 
                     // --- quality, JPEG only (labelled for its format) ----------
                     if spec.format == ExportFormat::Jpeg {
-                        section(ui, "JPEG quality", |ui| {
+                        ui::labelled(ui, "JPEG quality", |ui| {
                             if let Some(q) = self.export_quality_field(ui, index, spec) {
                                 edit(&mut out, spec).quality = q;
                             }
@@ -972,7 +952,7 @@ impl OndinApp {
 
                     // --- text, vector only ---------------------------------------
                     if !spec.format.is_raster() {
-                        section(ui, "Text", |ui| {
+                        ui::labelled(ui, "Text", |ui| {
                             ui.scope(|ui| {
                                 ui.spacing_mut().interact_size.y = POP_CELL;
                                 ui.spacing_mut().button_padding.y = 0.0;
@@ -986,7 +966,6 @@ impl OndinApp {
                                     ))
                                     .show_ui(ui, |ui| {
                                         ui::menu_rows(ui);
-                                        ui.spacing_mut().button_padding.y = 2.0;
                                         for t in [ExportText::Live, ExportText::Outlines] {
                                             ui.selectable_value(&mut text, t, t.label(spec.format));
                                         }
@@ -1011,7 +990,7 @@ impl OndinApp {
                     //
                     // The row says what the setting is, not what it resolves to; the
                     // JPEG substitution is stated in the tooltip.
-                    section(ui, "Background", |ui| {
+                    ui::labelled(ui, "Background", |ui| {
                         ui.scope(|ui| {
                             ui.spacing_mut().interact_size.y = POP_CELL;
                             ui.spacing_mut().button_padding.y = 0.0;
@@ -1027,7 +1006,6 @@ impl OndinApp {
                                 ))
                                 .show_ui(ui, |ui| {
                                     ui::menu_rows(ui);
-                                    ui.spacing_mut().button_padding.y = 2.0;
                                     ui.selectable_value(
                                         &mut bg,
                                         ExportBackground::Transparent,
@@ -1229,21 +1207,32 @@ impl OndinApp {
             _ => current.to_string(),
         };
         let mut out = None;
-        section(ui, part.label(), |ui| {
-            let resp = ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
-                ui.spacing_mut().item_spacing.x = 7.0;
-                ui.label(theme::icon_text(icon::TEXT_T, 13.0, theme::text::faint()));
-                let font = egui::FontId::proportional(11.5);
-                let pad = ui::edit_frame(ui, &font, POP_CELL - ui::FIELD_BORDER_H, 0.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .id(egui::Id::new((part.id_salt(), index)))
-                        .desired_width(ui.available_width())
-                        .frame(pad)
-                        .hint_text(hint)
-                        .font(font),
-                )
+        ui::labelled(ui, part.label(), |ui| {
+            // `ui::text_field` has no leading glyph, so its numbers are kept here.
+            let row = ui.scope(|ui| {
+                ui::field_row(ui, egui::vec2(POP_INNER, POP_CELL), |ui| {
+                    ui.spacing_mut().item_spacing.x = 7.0;
+                    ui.label(theme::icon_text(
+                        icon::TEXT_T,
+                        ui::CONTROL_GLYPH_PT,
+                        theme::text::faint(),
+                    ));
+                    let font = egui::FontId::proportional(ui::CONTROL_PT);
+                    let pad = ui::edit_frame(ui, &font, POP_CELL - ui::FIELD_BORDER_H, 0.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(egui::Id::new((part.id_salt(), index)))
+                            .desired_width(ui.available_width())
+                            .frame(pad)
+                            .hint_text(egui::RichText::new(hint).size(ui::CONTROL_PT))
+                            .font(font),
+                    )
+                })
             });
+            let resp = row.inner;
+            if resp.has_focus() {
+                ui::typing_edge(ui, row.response.rect);
+            }
             if resp.gained_focus() || resp.changed() {
                 *match part {
                     NamePart::Prefix => &mut self.export_prefix_text,
@@ -1353,7 +1342,6 @@ impl OndinApp {
                 ui,
                 icon::DOTS_THREE,
                 CELL,
-                15.0,
                 ui::FieldButton::on_if(self.export_menu),
             )
             .on_hover_text("Presets, and what an export does");
@@ -2945,32 +2933,20 @@ mod tests {
         // (`combo_box_dyn`): the text fits its cell when `galley + icon_spacing +
         // icon_width ≤ width - 2·padding`, else the combo comes out wider than asked.
         // Measuring by laying one out does not work: with no `.width()` a combo takes
-        // `max(content, spacing.combo_width)`, and its text uses `TextStyle::Button`.
+        // `max(content, spacing.combo_width)`.
         let style = ctx.style_of(egui::Theme::Dark);
         let overhead = style.spacing.icon_spacing
             + style.spacing.icon_width
             + style.spacing.button_padding.x * 2.0;
-        let button_font = style
-            .text_styles
-            .get(&egui::TextStyle::Button)
-            .cloned()
-            .expect("a Button text style");
-        let combo_text = |s: &str| {
-            ctx.fonts_mut(|f| {
-                f.layout_no_wrap(s.to_string(), button_font.clone(), egui::Color32::WHITE)
-                    .size()
-                    .x
-            })
-        };
 
         // Taken from the dropdown, so a new `ExportScale::COMMON` entry re-runs this.
         // A typed value can be wider (`1024h` wants 70.9); what a click produces
-        // must fit.
+        // must fit. The face is `ui::combo_text`, at `ui::CONTROL_PT`.
         let widest_scale = ExportScale::COMMON
             .iter()
             .map(|n| ExportScale::Times(*n))
             .chain([ExportScale::Width(512), ExportScale::Height(512)])
-            .map(|s| combo_text(&s.label()))
+            .map(|s| text_w(&s.label(), ui::CONTROL_PT))
             .fold(0.0_f32, f32::max);
         // The format cell's text is not in `TextStyle::Button`: `ui::glyph_and_text`
         // builds its own `LayoutJob` (15pt icon, 7pt lead, word at `proportional(12)`).

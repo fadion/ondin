@@ -1080,7 +1080,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     if let Some(i) = crate::ui::segmented_tipped(
         ui,
         130.0,
-        20.0,
+        crate::ui::TOOLBAR_CELL_H,
         SIDES.len(),
         lit,
         |_| true,
@@ -1094,8 +1094,8 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
         false => crate::ui::FieldButton::Off,
     };
     // The marks are boxes round the changed layers, so the glyph is one. As tall as
-    // the segmented track beside it: its 20pt cells plus 2pt padding each side.
-    if crate::ui::field_button(ui, icon::BOUNDING_BOX, 24.0, 14.0, state)
+    // the segmented track beside it.
+    if crate::ui::field_button(ui, icon::BOUNDING_BOX, crate::ui::TOOLBAR_H, state)
         .on_hover_text("Overlay: the change marks on the canvas · O")
         .clicked()
     {
@@ -1428,11 +1428,7 @@ fn row_ui(
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
     let p = ui.painter();
-    if current {
-        p.rect_filled(rect, 5.0, color::text_a(26));
-    } else if resp.hovered() {
-        p.rect_filled(rect, 5.0, color::text_a(12));
-    }
+    crate::ui::list_row_ground(p, rect, current, resp.hovered());
     let (hue, ink, sign) = look(row.status);
     let tag =
         egui::Rect::from_min_size(rect.min + egui::vec2(ROW_PAD, 5.0), egui::vec2(16.0, 16.0));

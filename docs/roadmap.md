@@ -11,6 +11,10 @@ reads true.
 
 ## Now
 
+- **Tab reaches every control.** The inspector, the popovers and the panels are a mix today: some
+  controls are tab stops and some are painted rects that sense the pointer only. Every control and
+  field joins the Tab order in reading order, with `ui::focus_ring` showing where focus is, and
+  Return/Space acting on a focused button as a click does (`app-chrome.md`, *Two kinds of focus*).
 - **Spell check while editing text.** Each run's language tag (the Character tab's *Language*) picks
   the dictionary, untagged text falls back to the system's input languages. The OS checker
   (`ISpellChecker`, `NSSpellChecker`, Hunspell/Enchant) keeps it offline and adds no download.
@@ -187,7 +191,6 @@ Ideas worth weighing, not yet decided or scheduled.
   copied; a linked node moved into a nested instance losing its link; instance roots exempt from
   membership (§15 D978); a moved-out layer previewed on copies (§15 D979 (xiv)).
 - **`Ctrl+Alt` is `AltGr`** on many European layouts (`shortcuts.md` §12, §15 D987).
-- **Is the chrome meant to be keyboard-traversable?** (§15 D747) — deferred by the maintainer.
 - **One font-availability question for panel and snapshot** — only worth it if the snapshot ever
   reads a live `FontService`.
 

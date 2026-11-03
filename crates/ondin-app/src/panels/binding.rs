@@ -307,7 +307,6 @@ pub(crate) struct ChipOut {
 
 /// The chip's capsule: 20 tall, fully round (D1038).
 const CHIP_H: f32 = 20.0;
-const LIST_ROW_H: f32 = 26.0;
 const LIST_W: f32 = 256.0;
 
 /// Draw a bound field's chip in `rect` — the field's value area — and read what
@@ -334,13 +333,22 @@ pub(crate) fn chip(
     let hovered = resp.hovered();
     let p = ui.painter();
     let (fill, ink) = if focused {
-        (color::accent().gamma_multiply(0.28), color::accent_100())
+        (color::accent_900(), color::accent_100())
     } else if hovered {
         (color::text_a(43), color::text())
     } else {
         (color::text_a(28), color::text())
     };
     p.rect_filled(cap, CHIP_H / 2.0, fill);
+    // Focused, the chip takes typing: the text entries' `accent_700` hairline.
+    if focused {
+        p.rect_stroke(
+            cap,
+            CHIP_H / 2.0,
+            egui::Stroke::new(1.0, color::accent_700()),
+            egui::StrokeKind::Inside,
+        );
+    }
     // The hover ×, in the chip's last 14 points.
     let xr = egui::Rect::from_center_size(
         egui::pos2(cap.right() - 3.0 - 7.0, cap.center().y),
@@ -1115,7 +1123,10 @@ impl OndinApp {
         let pos = ui::dropdown_place(
             ctx,
             c.under,
-            egui::vec2(LIST_W, (list.len().clamp(1, 8) as f32) * LIST_ROW_H + 40.0),
+            egui::vec2(
+                LIST_W,
+                (list.len().clamp(1, 8) as f32) * ui::MENU_ROW_H + 40.0,
+            ),
             6.0,
         );
         let rect = egui::Area::new(egui::Id::new("var-complete"))
@@ -1197,7 +1208,7 @@ impl OndinApp {
                         );
                     }
                     egui::ScrollArea::vertical()
-                        .max_height(8.0 * (LIST_ROW_H + 1.0))
+                        .max_height(8.0 * (ui::MENU_ROW_H + 1.0))
                         .show(ui, |ui| {
                             for (i, v) in list.iter().enumerate() {
                                 // What the binding would draw at the field's layer —
@@ -1336,7 +1347,7 @@ impl OndinApp {
         };
         let bound = self.field_var(key).is_some();
         let mut close = false;
-        let size = egui::vec2(220.0, if bound { 3.0 } else { 2.0 } * 26.0 + 8.0);
+        let size = egui::vec2(220.0, if bound { 3.0 } else { 2.0 } * ui::MENU_ROW_H + 8.0);
         let pos = ui::menu_place(ctx, at, size);
         let mut act: Option<u8> = None;
         let rect = egui::Area::new(egui::Id::new("field-menu"))
@@ -1351,19 +1362,19 @@ impl OndinApp {
                     let typed = key.typed();
                     let r = ui::MenuRow::new(icon::LINK_SIMPLE, "Bind to variable…")
                         .accel(typed.then_some("--"));
-                    if ui::menu_row(ui, r, 26.0).clicked() {
+                    if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
                         act = Some(0);
                     }
                     let r =
                         ui::MenuRow::new(icon::EXPORT, "Extract into variable…").enabled(!bound);
-                    if ui::menu_row(ui, r, 26.0).clicked() {
+                    if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
                         act = Some(1);
                     }
                     // Omitted unbound — §3's one exception, a row that only undoes.
                     if bound {
                         let r = ui::MenuRow::new(icon::LINK_BREAK, "Detach variable")
                             .accel(typed.then_some("Backspace"));
-                        if ui::menu_row(ui, r, 26.0).clicked() {
+                        if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
                             act = Some(2);
                         }
                     }
@@ -1953,10 +1964,9 @@ pub(crate) fn caret_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     state.store(ctx, id);
 }
 
-/// The colour picker's *Variables* face: a row's height and a group header's
-/// (D1038).
-const FACE_ROW_H: f32 = 24.0;
-const FACE_HEAD_H: f32 = 20.0;
+/// A group header's height in the colour picker's *Variables* face and the style
+/// picker, whose rows are [`ui::MENU_ROW_H`].
+pub(crate) const FACE_HEAD_H: f32 = 20.0;
 
 impl OndinApp {
     /// The colour picker's *Variables* face (§15 D1038, D1043): a search, then
@@ -1978,22 +1988,14 @@ impl OndinApp {
         };
         let mut search = std::mem::take(&mut p.search);
         let mut scrolled = p.scrolled;
-        ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
-            ui.label(theme::icon_text(
-                icon::MAGNIFYING_GLASS,
-                13.0,
-                theme::text::dim(),
-            ));
-            ui.add(
-                egui::TextEdit::singleline(&mut search)
-                    .id(egui::Id::new("picker-vars-search"))
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    .font(egui::FontId::proportional(11.5))
-                    .hint_text(egui::RichText::new("Search colours").size(11.5)),
-            )
-        });
-        let list_h = (h - ui::CONTROL_H - ui.spacing().item_spacing.y).max(4.0 * FACE_ROW_H);
+        ui::search_box(
+            ui,
+            egui::vec2(w, ui::CONTROL_H),
+            &mut search,
+            "Search colours",
+            egui::Id::new("picker-vars-search"),
+        );
+        let list_h = (h - ui::CONTROL_H - ui.spacing().item_spacing.y).max(4.0 * ui::MENU_ROW_H);
         let doc = &self.session.doc;
         let table = doc.variables();
         let list = matches(table, VarKind::Color, &search);
@@ -2095,9 +2097,9 @@ pub(crate) enum FaceTarget {
     Cell(VarId, ondin_core::ModeId),
 }
 
-/// A group's header in the picker's *Variables* face: its path, uppercase and
-/// tracked, like a card's title.
-fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
+/// A group's header in the picker's *Variables* face and the style picker: its
+/// path, uppercase and tracked, like a card's title.
+pub(crate) fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FACE_HEAD_H), egui::Sense::hover());
     ui.painter().text(
         egui::pos2(rect.left() + 3.0, rect.center().y + 1.0),
@@ -2139,13 +2141,9 @@ fn face_row(
     w: f32,
     refusal: Option<&str>,
 ) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, FACE_ROW_H), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ui::MENU_ROW_H), egui::Sense::click());
     let p = ui.painter();
-    if on {
-        p.rect_filled(rect, 4, color::text_a(26));
-    } else if resp.hovered() && refusal.is_none() {
-        p.rect_filled(rect, 4, color::text_a(15));
-    }
+    ui::list_row_ground(p, rect, on, resp.hovered() && refusal.is_none());
     let y = rect.center().y;
     let sw = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 3.0 + 6.0, y),
@@ -2228,11 +2226,9 @@ fn list_row(
     lit: bool,
 ) -> egui::Response {
     let w = LIST_W - 8.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, LIST_ROW_H), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ui::MENU_ROW_H), egui::Sense::click());
     let p = ui.painter();
-    if lit || resp.hovered() {
-        p.rect_filled(rect, 4, color::text_a(23));
-    }
+    ui::list_row_ground(p, rect, lit, resp.hovered());
     let mut x = rect.left() + 8.0;
     let y = rect.center().y;
     if let Some(Value::Color(c)) = value {
@@ -3719,8 +3715,8 @@ mod tests {
     /// measured as the bounds of everything the popup paints, shadow included,
     /// on each tab in turn.
     ///
-    /// Flip, run: the gradient plane back at 84 fails on *Gradient*, 8 points
-    /// taller than *Solid*.
+    /// Flip, run: the gradient plane at 96 fails on *Gradient*, 6 points
+    /// shorter than *Solid*.
     #[test]
     fn every_face_of_the_colour_popup_is_one_height() {
         let (ctx, mut app, rect, _, _) = fixture();

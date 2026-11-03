@@ -894,7 +894,7 @@ impl OndinApp {
         else {
             return;
         };
-        const ITEM_H: f32 = 26.0;
+        const ITEM_H: f32 = crate::ui::MENU_ROW_H;
         let at = head + egui::vec2(-8.0, crate::ui::MENU_GAP + 6.0);
         let level = self.prefs.contrast.options().level;
         let mut prefs = self.prefs.contrast.clone();
@@ -1576,36 +1576,36 @@ pub(crate) fn separator(ui: &mut egui::Ui) {
     ui.painter().rect_filled(line, 0.0, color::text_a(30));
 }
 
-/// The bar's scope chip: a pill naming what is checked, clear of the bar's edges.
-/// A click checks again, on the selection when there is one (`selected`), else on
-/// the frame in view, and the tooltip says which; answers whether it was clicked.
+/// The bar's scope button, naming what is checked: a [`crate::ui::button_face`] at
+/// [`crate::ui::TOOLBAR_H`], the frame glyph in the face's ink and the name in the
+/// value ink. A click checks again, on the selection when there is one
+/// (`selected`), else on the frame in view, and the tooltip says which; answers
+/// whether it was clicked.
 pub(crate) fn scope_chip(ui: &mut egui::Ui, name: &str, selected: bool) -> bool {
-    const H: f32 = 20.0;
-    const PAD: f32 = 8.0;
+    use crate::ui::{FIELD_PAD_X, Scale};
     const GAP: f32 = 5.0;
-    let font = egui::FontId::proportional(12.0);
+    let glyph_pt = Scale::Toolbar.glyph_pt();
+    let font = egui::FontId::proportional(Scale::Toolbar.text_pt());
     let galley = ui
         .painter()
         .layout_no_wrap(name.to_string(), font, color::text());
-    let w = PAD + 12.0 + GAP + galley.size().x + PAD + 2.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, H), egui::Sense::click());
+    let w = FIELD_PAD_X + glyph_pt + GAP + galley.size().x + FIELD_PAD_X;
+    let (rect, resp, fg) = crate::ui::button_face(
+        ui,
+        egui::vec2(w, crate::ui::TOOLBAR_H),
+        crate::ui::FieldButton::Off,
+    );
     let p = ui.painter();
-    let ground = if resp.hovered() {
-        color::text_a(32)
-    } else {
-        color::text_a(20)
-    };
-    p.rect_filled(rect, H / 2.0, ground);
     p.text(
-        egui::pos2(rect.left() + PAD + 6.0, rect.center().y),
+        egui::pos2(rect.left() + FIELD_PAD_X + glyph_pt / 2.0, rect.center().y),
         egui::Align2::CENTER_CENTER,
         icon::FRAME,
-        theme::icon_font(12.0),
-        color::accent_400(),
+        theme::icon_font(glyph_pt),
+        fg,
     );
     p.galley(
         egui::pos2(
-            rect.left() + PAD + 12.0 + GAP,
+            rect.left() + FIELD_PAD_X + glyph_pt + GAP,
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
@@ -1800,9 +1800,7 @@ fn fix_row(ui: &mut egui::Ui, swatch: Color, name: &str, score: &str) -> egui::R
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
     let p = ui.painter();
-    if resp.hovered() {
-        p.rect_filled(rect, 4.0, color::text_a(20));
-    }
+    crate::ui::list_row_ground(p, rect, false, resp.hovered());
     let sw = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 8.0 + 7.0, rect.center().y),
         egui::vec2(14.0, 14.0),

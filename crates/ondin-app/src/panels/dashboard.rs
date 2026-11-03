@@ -92,15 +92,8 @@ fn search_rect(centre_x: f32, centre_y: f32, left: f32, right: f32) -> egui::Rec
     // Centred if it fits there; else as near the centre as the room allows —
     // and on a window too narrow even for the minimum, against the brand.
     let x = centre_x.min(hi - w / 2.0).max(lo + w / 2.0);
-    egui::Rect::from_center_size(egui::pos2(x, centre_y), egui::vec2(w, 28.0))
+    egui::Rect::from_center_size(egui::pos2(x, centre_y), egui::vec2(w, ui::CONTROL_H))
 }
-/// A row in the search dropdown.
-const SEARCH_ROW_H: f32 = 30.0;
-/// Where the search field's text starts from its left edge: the painted placeholder
-/// and the live `TextEdit` share it, so the words do not move when the field opens.
-const SEARCH_TEXT_X: f32 = 30.0;
-/// Type size of the search field's text and its placeholder, in both states.
-const SEARCH_PT: f32 = 11.5;
 /// The row a [`field_label`] is allocated: its galley and nothing else.
 const FIELD_LABEL_H: f32 = 12.0;
 /// What the project filter says when nothing is filtered, and the first row of
@@ -110,9 +103,6 @@ const ALL_PROJECTS: &str = "All projects";
 const FILTER_W: f32 = 132.0;
 /// The filter's dropdown, wider than the button.
 const FILTER_MENU_W: f32 = 190.0;
-/// A row of either floating menu on this screen; one constant so the two menus'
-/// rows cannot come apart.
-const FILTER_ROW_H: f32 = 28.0;
 /// A project's colour chip, in the filter and its menu: 7×7.
 const DOT: f32 = 7.0;
 
@@ -135,8 +125,9 @@ struct MenuOutcome {
 
 /// A floating menu hung under `anchor`, right edges together, or opened at it
 /// when `anchor` is a point (a right-click's press, flipped off the screen's
-/// edges): the panel, its rows, their hover ground and the click-away test. `paint`
-/// draws a row's contents into the rect it is given. Escape is handled in
+/// edges): a [`ui::menu_frame`] card of [`ui::MENU_ROW_H`] rows, their hover ground
+/// (a menu row's) and the click-away test. `paint` draws a row's contents into the
+/// rect it is given, told whether the row is lit. Escape is handled in
 /// `dashboard_keys` behind `library_menu_open()`, since a keyboard rule in a
 /// drawing helper only runs on frames the menu is drawn.
 ///
@@ -150,8 +141,9 @@ fn anchored_menu(
     w: f32,
     rows: usize,
     keys: &mut MenuKeys,
-    paint: impl Fn(&egui::Painter, usize, egui::Rect),
+    paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
 ) -> MenuOutcome {
+    const PAD: f32 = 4.0;
     let mut chosen = None;
     match keys.nav.take() {
         Some(MenuNav::Move(step)) => {
@@ -164,53 +156,45 @@ fn anchored_menu(
         None => {}
     }
     let highlight = keys.highlight;
-    let h = rows as f32 * FILTER_ROW_H + 10.0;
+    let h = rows as f32 * ui::MENU_ROW_H + 2.0 * PAD + 2.0 * ui::MENU_BORDER;
     let pos = if anchor.size() == egui::Vec2::ZERO {
         ui::menu_place(ui.ctx(), anchor.min, egui::vec2(w, h))
     } else {
-        egui::pos2(anchor.right() - w, anchor.bottom() + 4.0)
+        egui::pos2(anchor.right() - w, anchor.bottom() + ui::MENU_GAP)
     };
     let area = egui::Area::new(id)
         .order(egui::Order::Foreground)
         .fixed_pos(pos);
     let inner = area.show(ui.ctx(), |ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::empty());
-        let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(8), color::field());
-        p.rect_stroke(
-            rect,
-            egui::CornerRadius::same(8),
-            egui::Stroke::new(1.0, color::field_border()),
-            egui::StrokeKind::Inside,
-        );
-        let mut clicked = None;
-        for i in 0..rows {
-            let row = egui::Rect::from_min_size(
-                egui::pos2(
-                    rect.left() + 4.0,
-                    rect.top() + 5.0 + i as f32 * FILTER_ROW_H,
-                ),
-                egui::vec2(w - 8.0, FILTER_ROW_H),
-            );
-            let r = ui.interact(row, ui.id().with(i), egui::Sense::click());
-            // One ground: the keyboard's while it holds a highlight, else the hover.
-            let lit = match highlight {
-                Some(hl) => hl == i,
-                None => r.hovered(),
-            };
-            if lit {
-                ui.painter().rect_filled(
-                    row,
-                    egui::CornerRadius::same(6),
-                    theme::color::text_a(14),
+        let card = ui::menu_frame(PAD).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let mut clicked = None;
+            for i in 0..rows {
+                let (row, _) = ui.allocate_exact_size(
+                    egui::vec2(ui::menu_inner_w(w, PAD), ui::MENU_ROW_H),
+                    egui::Sense::hover(),
                 );
+                let r = ui.interact(row, ui.id().with(i), egui::Sense::click());
+                // One ground: the keyboard's while it holds a highlight, else the hover.
+                let lit = match highlight {
+                    Some(hl) => hl == i,
+                    None => r.hovered(),
+                };
+                if lit {
+                    ui.painter().rect_filled(
+                        row,
+                        egui::CornerRadius::same(4),
+                        theme::color::text_a(20),
+                    );
+                }
+                paint(ui.painter(), i, row, lit);
+                if r.clicked() {
+                    clicked = Some(i);
+                }
             }
-            paint(ui.painter(), i, row);
-            if r.clicked() {
-                clicked = Some(i);
-            }
-        }
-        (rect, clicked)
+            clicked
+        });
+        (card.response.rect, card.inner)
     });
     let (rect, clicked) = inner.inner;
     let chosen = chosen.or(clicked);
@@ -237,8 +221,8 @@ const SEARCH_MAX: usize = 6;
 /// How many past queries the empty search offers.
 const SEARCH_RECENTS: usize = 5;
 /// Every control on the body header's right-hand cluster — the sort button, the
-/// view track and *Delete project*; the app's control height, `settings::FIELD_H`.
-const HEADER_CONTROL_H: f32 = 28.0;
+/// view track and *Delete project*.
+const HEADER_CONTROL_H: f32 = ui::CONTROL_H;
 /// A cell of the grid/list track: [`HEADER_CONTROL_H`] less the two points
 /// [`ui::segmented`] pads its track by on each side.
 const VIEW_CELL_H: f32 = HEADER_CONTROL_H - 4.0;
@@ -726,52 +710,33 @@ impl OndinApp {
             self.dash.search_row = None;
         }
 
-        let open = self.dash.search.is_some();
-        let resp = ui.interact(rect, egui::Id::new("library-search"), egui::Sense::click());
-        let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(7), theme::color::text_a(12));
-        p.rect_stroke(
-            rect,
-            egui::CornerRadius::same(7),
-            egui::Stroke::new(
-                1.0,
-                if open {
-                    color::accent()
-                } else {
-                    theme::color::text_a(20)
-                },
-            ),
-            egui::StrokeKind::Inside,
-        );
-        p.text(
-            egui::pos2(rect.left() + 10.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            icon::MAGNIFYING_GLASS,
-            theme::icon_font(14.0),
-            theme::text::faint(),
-        );
+        let id = egui::Id::new("library-search-edit");
+        let hint = "Search files and projects";
+        // One field in both states, so the placeholder cannot move when it opens.
+        let field = |ui: &mut egui::Ui, text: &mut String| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui::search_box(ui, rect.size(), text, hint, id)
+            })
+            .inner
+        };
 
-        if !open {
-            p.text(
-                egui::pos2(rect.left() + SEARCH_TEXT_X, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                "Search files and projects",
-                egui::FontId::proportional(SEARCH_PT),
-                theme::text::faint(),
-            );
-            p.text(
-                egui::pos2(rect.right() - 10.0, rect.center().y),
+        if self.dash.search.is_none() {
+            let mut idle = String::new();
+            let edit = field(ui, &mut idle);
+            ui.painter().text(
+                egui::pos2(rect.right() - ui::FIELD_PAD_X, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 "Ctrl + K",
                 egui::FontId::proportional(10.0),
                 theme::text::faint(),
             );
-            if resp.clicked() && !self.dash.menu_was_up {
-                self.dash.search = Some(String::new());
+            // A click or a Tab into the field opens the overlay; focus left over from
+            // a close, or taken while a menu was up, is handed back.
+            if (edit.gained_focus() || edit.clicked()) && !self.dash.menu_was_up {
+                self.dash.search = Some(idle);
                 self.dash.search_row = None;
-            }
-            if resp.hovered() {
-                ctx.set_cursor_icon(egui::CursorIcon::Text);
+            } else if edit.has_focus() {
+                ctx.memory_mut(|m| m.surrender_focus(id));
             }
             return;
         }
@@ -790,30 +755,7 @@ impl OndinApp {
         let Some(query) = self.dash.search.as_mut() else {
             return;
         };
-        // One text row tall and centred by hand: `Ui::put` justifies its widget, so a
-        // taller rect would draw the galley at the top. egui ignores `TextEdit::margin`
-        // once a frame is supplied, so the inset is the rect's.
-        let row_h = ui
-            .ctx()
-            .fonts_mut(|f| f.row_height(&egui::FontId::proportional(SEARCH_PT)));
-        let inner = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + SEARCH_TEXT_X, rect.center().y - row_h / 2.0),
-            egui::pos2(rect.right() - 10.0, rect.center().y + row_h / 2.0),
-        );
-        let edit = ui.put(
-            inner,
-            egui::TextEdit::singleline(query)
-                .id(egui::Id::new("library-search-edit"))
-                // The box is painted above; `Frame::NONE` also suppresses egui's
-                // focus ring (`ui::text_field`).
-                .frame(egui::Frame::NONE)
-                .font(egui::FontId::proportional(SEARCH_PT))
-                .hint_text(
-                    egui::RichText::new("Search files and projects")
-                        .size(SEARCH_PT)
-                        .color(theme::text::faint()),
-                ),
-        );
+        let edit = field(ui, query);
         // Requested every frame, for `rename_field`'s reason; the dismissal below makes that safe.
         if !edit.has_focus() {
             edit.request_focus();
@@ -894,7 +836,7 @@ impl OndinApp {
         };
         let rows = recents.len() + projects.len() + files.len();
         if rows == 0 && (!needle.is_empty() || (private && typed)) {
-            return Some(Self::search_panel(ui, anchor, 46.0, |ui, rect| {
+            return Some(Self::search_panel(ui, anchor, 36.0, |ui, rect| {
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -929,9 +871,9 @@ impl OndinApp {
         let mut chosen: Option<Act> = None;
         let mut nav_to: Option<Nav> = None;
         let mut refill: Option<String> = None;
-        let h = rows as f32 * SEARCH_ROW_H + 10.0;
+        let h = rows as f32 * ui::MENU_ROW_H;
         let panel = Self::search_panel(ui, anchor, h, |ui, rect| {
-            let mut y = rect.top() + 5.0;
+            let mut y = rect.top();
             let mut row = |ui: &mut egui::Ui,
                            i: usize,
                            glyph: &str,
@@ -940,22 +882,14 @@ impl OndinApp {
                            meta: &str|
              -> bool {
                 let r = egui::Rect::from_min_size(
-                    egui::pos2(rect.left() + 4.0, y),
-                    egui::vec2(rect.width() - 8.0, SEARCH_ROW_H),
+                    egui::pos2(rect.left(), y),
+                    egui::vec2(rect.width(), ui::MENU_ROW_H),
                 );
-                y += SEARCH_ROW_H;
+                y += ui::MENU_ROW_H;
                 let resp = ui.interact(r, ui.id().with(("search-row", i)), egui::Sense::click());
-                // Pointer and keyboard can be on different rows; the `Enter` row is the louder.
-                let ground = match (i == sel, resp.hovered()) {
-                    (true, _) => Some(theme::color::text_a(20)),
-                    (false, true) => Some(theme::color::text_a(14)),
-                    (false, false) => None,
-                };
-                if let Some(ground) = ground {
-                    ui.painter()
-                        .rect_filled(r, egui::CornerRadius::same(6), ground);
-                }
+                // Pointer and keyboard can be on different rows; the `Enter` row is lit.
                 let p = ui.painter();
+                ui::list_row_ground(p, r, i == sel, resp.hovered());
                 p.text(
                     egui::pos2(r.left() + 10.0, r.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -1035,31 +969,34 @@ impl OndinApp {
         Some(panel)
     }
 
-    /// The panel the results are drawn into: its ground, border and position under
-    /// the field. Returns its rect, so the field can tell a press on a result row
-    /// from one that means *shut this*.
+    /// The [`ui::menu_frame`] card the results are drawn into, the field's width and
+    /// a dropdown's gap under it; `body` gets the `height`-tall content rect. Returns
+    /// the card's rect, so the field can tell a press on a result row from one that
+    /// means *shut this*.
     fn search_panel(
         ui: &mut egui::Ui,
         anchor: egui::Rect,
         height: f32,
         body: impl FnOnce(&mut egui::Ui, egui::Rect),
     ) -> egui::Rect {
+        const PAD: f32 = 4.0;
         egui::Area::new(egui::Id::new("library-search-results"))
             .order(egui::Order::Foreground)
-            .fixed_pos(egui::pos2(anchor.left(), anchor.bottom() + 6.0))
+            .fixed_pos(egui::pos2(
+                anchor.left(),
+                anchor.bottom() + ui::DROPDOWN_GAP,
+            ))
             .show(ui.ctx(), |ui| {
-                let (rect, _) = ui
-                    .allocate_exact_size(egui::vec2(anchor.width(), height), egui::Sense::empty());
-                let p = ui.painter();
-                p.rect_filled(rect, egui::CornerRadius::same(9), color::field());
-                p.rect_stroke(
-                    rect,
-                    egui::CornerRadius::same(9),
-                    egui::Stroke::new(1.0, color::field_border()),
-                    egui::StrokeKind::Inside,
-                );
-                body(ui, rect);
-                rect
+                ui::menu_frame(PAD)
+                    .show(ui, |ui| {
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui::menu_inner_w(anchor.width(), PAD), height),
+                            egui::Sense::empty(),
+                        );
+                        body(ui, rect);
+                    })
+                    .response
+                    .rect
             })
             .inner
     }
@@ -1082,49 +1019,14 @@ impl OndinApp {
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.add_space(2.0);
 
-        let (rect, resp) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
-        let lit = resp.hovered();
-        let p = ui.painter();
-        p.rect_filled(
-            rect,
-            egui::CornerRadius::same(7),
-            if lit {
-                color::accent_700()
-            } else {
-                color::accent_800()
-            },
-        );
-        p.rect_stroke(
-            rect,
-            egui::CornerRadius::same(7),
-            egui::Stroke::new(1.0, color::accent()),
-            egui::StrokeKind::Inside,
-        );
-        // The glyph is a separate icon-font `p.text`, as the bundled Inter has no
-        // fullwidth plus; `ui::action_button` paints a recessed ground, so is not reused.
-        const GLYPH_PT: f32 = 15.0;
-        const GAP: f32 = 7.0;
-        let font = egui::FontId::proportional(12.5);
-        let word = ui.ctx().fonts_mut(|f| {
-            f.layout_no_wrap("New file".to_owned(), font.clone(), color::accent_100())
-        });
-        let total = GLYPH_PT + GAP + word.size().x;
-        let left = rect.center().x - total / 2.0;
-        let p = ui.painter();
-        p.text(
-            egui::pos2(left + GLYPH_PT / 2.0, rect.center().y),
-            egui::Align2::CENTER_CENTER,
+        let resp = ui::action_button(
+            ui,
             icon::PLUS,
-            theme::icon_font(GLYPH_PT),
-            color::accent_100(),
+            "New file",
+            FieldButton::Primary,
+            egui::vec2(ui.available_width(), ui::CONTROL_H),
         );
-        p.galley(
-            egui::pos2(left + GLYPH_PT + GAP, rect.center().y - word.size().y / 2.0),
-            word,
-            color::accent_100(),
-        );
-        // Hand-rolled, so `nav_row`'s menu gate does not reach it.
+        // Not a `nav_row`, so that row's menu gate does not reach it.
         if resp.clicked() && !self.dash.menu_was_up {
             *act = Some(Act::NewFile);
         }
@@ -1670,18 +1572,18 @@ impl OndinApp {
             elide(
                 ui,
                 &label,
-                11.5,
-                w - FILTER_PAD_X * 2.0 - DOT - 7.0 - 12.0 - 5.0,
+                ui::CONTROL_PT,
+                w - FILTER_PAD_X * 2.0 - DOT - 7.0 - ui::COMBO_CHEVRON_PT - 5.0,
             ),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(ui::CONTROL_PT),
             fg,
         );
         ui.painter().text(
             egui::pos2(rect.right() - FILTER_PAD_X, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             icon::CARET_DOWN,
-            theme::icon_font(12.0),
-            theme::text::dim(),
+            theme::icon_font(ui::COMBO_CHEVRON_PT),
+            ui::combo_chevron_ink(),
         );
         if resp.clicked() {
             self.dash.filter_open = !self.dash.filter_open;
@@ -1711,7 +1613,7 @@ impl OndinApp {
             w,
             rows.len(),
             &mut self.dash.menu_keys,
-            |p, i, row| {
+            |p, i, row, lit| {
                 let (id, name, dot) = &rows[i];
                 let on = &current == id;
                 p.rect_filled(
@@ -1727,7 +1629,7 @@ impl OndinApp {
                     egui::Align2::LEFT_CENTER,
                     elide(p.ctx(), name, 11.5, w - 60.0),
                     egui::FontId::proportional(11.5),
-                    if on {
+                    if on || lit {
                         color::text()
                     } else {
                         theme::text::muted()
@@ -2199,11 +2101,16 @@ impl OndinApp {
             ));
             p.add(star_shape(at, STAR_R, theme::color::star()));
         }
+        // The field's text lands on the painted name: the inset to its left, and half
+        // a point down, since the field floors the odd point of air above its line.
         let name_box = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 8.0, thumb.bottom() + 5.0),
+            egui::pos2(
+                rect.left() + 12.0 - ui::INLINE_EDIT_PAD_X,
+                thumb.bottom() + 5.5,
+            ),
             egui::vec2(w - 42.0, 20.0),
         );
-        if !self.rename_field(ui, entry, name_box, 12.5, act) {
+        if !self.rename_field(ui, entry, name_box, act) {
             ui.painter().text(
                 egui::pos2(rect.left() + 12.0, thumb.bottom() + 15.0),
                 egui::Align2::LEFT_CENTER,
@@ -2606,11 +2513,15 @@ impl OndinApp {
                 .unwrap_or_else(|| "—".into()),
             crate::settings::human_bytes(entry.size),
         ];
+        // The field's text lands where the painted name starts.
         let name_box = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 6.0, rect.center().y - 11.0),
+            egui::pos2(
+                rect.left() + 10.0 - ui::INLINE_EDIT_PAD_X,
+                rect.center().y - 11.0,
+            ),
             egui::vec2(cols[0] - 20.0, 22.0),
         );
-        let renaming = self.rename_field(ui, entry, name_box, 12.0, act);
+        let renaming = self.rename_field(ui, entry, name_box, act);
         // The chips take their width out of the *Name* column before the name is elided.
         let chip = self.mark_of(entry).filter(|_| !renaming);
         let open = self.state_chip(entry).filter(|_| !renaming);
@@ -2678,7 +2589,6 @@ impl OndinApp {
         ui: &mut egui::Ui,
         entry: &Entry,
         rect: egui::Rect,
-        size: f32,
         act: &mut Option<Act>,
     ) -> bool {
         let Some((path, buffer, focused)) = self.rename_entry.as_mut() else {
@@ -2692,38 +2602,10 @@ impl OndinApp {
             return false;
         }
         let id = egui::Id::new(("rename", &entry.path));
-        // The app's field ground, painted here rather than left to egui's focus ring
-        // (`ui::text_field` does not fit a reserved rect). `color::field_border()`, not
-        // the accent: the field is only on screen while focused.
-        let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(ui::BUTTON_R), color::field());
-        p.rect_stroke(
-            rect,
-            egui::CornerRadius::same(ui::BUTTON_R),
-            egui::Stroke::new(1.0, color::field_border()),
-            egui::StrokeKind::Inside,
-        );
-        // The inset is 4 on the frame, where the painted name sits 4pt right of the box
-        // in both callers. One row tall and centred, for [`search_field`]'s reason.
-        let font = egui::FontId::proportional(size);
-        let row = ui.ctx().fonts_mut(|f| f.row_height(&font));
-        let line = egui::Rect::from_center_size(rect.center(), egui::vec2(rect.width(), row));
-        // `new_child`, not `Ui::put`, which advances the parent's cursor to this rect's
-        // right edge and lays the next card on top of this one.
-        let mut child = ui.new_child(
-            egui::UiBuilder::new()
-                .id(id.with("ui"))
-                .max_rect(line)
-                .layout(egui::Layout::centered_and_justified(
-                    egui::Direction::TopDown,
-                )),
-        );
-        let resp = child.add(
-            egui::TextEdit::singleline(buffer)
-                .id(id)
-                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 0)))
-                .font(font),
-        );
+        // In a child, since `inline_edit` places with `Ui::put`, which would advance this
+        // `Ui`'s cursor to the rect's right edge and lay the next card on top of this one.
+        let mut child = ui.new_child(egui::UiBuilder::new().id(id.with("ui")).max_rect(rect));
+        let resp = ui::inline_edit(&mut child, rect, buffer, id);
         // Once, through the latch: requesting focus every pass re-takes the caret in the
         // frame that surrendered it, so `lost_focus()` would never be true.
         if !*focused {
@@ -2841,19 +2723,19 @@ impl OndinApp {
             w,
             rows.len(),
             &mut self.dash.menu_keys,
-            |p, i, row| {
+            |p, i, row, lit| {
                 let label = rows[i].0;
                 // *Delete* alone is not the ordinary ink: it cannot be undone.
                 let danger = label.starts_with("Delete");
                 p.text(
-                    egui::pos2(row.left() + 10.0, row.center().y),
+                    egui::pos2(row.left() + 8.0, row.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
-                    egui::FontId::proportional(12.0),
-                    if danger {
-                        theme::color::danger()
-                    } else {
-                        theme::text::strong()
+                    egui::FontId::proportional(11.5),
+                    match () {
+                        _ if danger => theme::color::danger(),
+                        _ if lit => color::text(),
+                        _ => theme::text::muted(),
                     },
                 );
             },
@@ -3438,7 +3320,6 @@ impl OndinApp {
                 egui::vec2(ui.available_width(), settings::FIELD_H),
                 &mut np.name,
                 "Your awesome project",
-                12.5,
             );
             // Once, when the modal opens: a per-frame `request_focus` would keep the caret
             // from ever leaving. Not guarded on `Memory::focused()` being empty, as
@@ -3549,7 +3430,6 @@ impl OndinApp {
                 egui::vec2(ui.available_width(), settings::FIELD_H),
                 &mut ep.name,
                 "Your awesome project",
-                12.5,
             );
             // The latch, for `NewProject::name_focused`'s reason.
             if !ep.name_focused {
@@ -3884,7 +3764,6 @@ impl OndinApp {
                         ui,
                         icon::FOLDER_OPEN,
                         settings::FIELD_H,
-                        15.0,
                         FieldButton::enabled_if(can_open),
                     )
                     .on_hover_text("Open the library folder")
@@ -3898,7 +3777,6 @@ impl OndinApp {
                         egui::vec2(ui.available_width(), settings::FIELD_H),
                         &mut d.base_folder,
                         &resolved_now,
-                        12.5,
                     );
                 });
             });
@@ -3956,14 +3834,9 @@ impl OndinApp {
                 ui.add_space(settings::ROW_GAP);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        retry = ui::label_button(
-                            ui,
-                            "Try again",
-                            egui::vec2(88.0, settings::FIELD_H),
-                            FieldButton::Off,
-                        )
-                        .on_hover_text("Move what is left of the old library across")
-                        .clicked();
+                        retry = settings::text_button(ui, "Try again", FieldButton::Off)
+                            .on_hover_text("Move what is left of the old library across")
+                            .clicked();
                     });
                 });
             }
@@ -4324,7 +4197,7 @@ impl OndinApp {
             );
             ui.add_space(settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                done |= settings::text_button(ui, "OK", FieldButton::On).clicked();
+                done |= settings::text_button(ui, "OK", FieldButton::Primary).clicked();
             });
         });
         if done || modal.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -4406,15 +4279,14 @@ fn picker_row(
         ui.spacing_mut().item_spacing.x = settings::COL_GAP;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.scope(|ui| {
-                ui.spacing_mut().interact_size.y = settings::FIELD_H;
+                ui.spacing_mut().interact_size.y = ui::CONTROL_H;
                 ui.spacing_mut().button_padding.y = 0.0;
                 egui::ComboBox::from_id_salt(id)
                     .icon(ui::combo_chevron)
                     .width(PICKER_W)
-                    .selected_text(selected)
+                    .selected_text(ui::combo_text(selected))
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);
-                        ui.spacing_mut().button_padding.y = 2.0;
                         options(ui);
                     });
             });
@@ -4422,7 +4294,7 @@ fn picker_row(
                 ui.label(
                     egui::RichText::new(label)
                         .size(settings::LABEL_PT)
-                        .color(theme::text::muted()),
+                        .color(ui::switch_row_ink(true)),
                 );
             });
         });
@@ -4637,31 +4509,16 @@ fn star_shape(centre: egui::Pos2, r: f32, fill: egui::Color32) -> egui::Shape {
 /// *Delete project* — an icon button; its click removes something with no trash.
 ///
 /// The tooltip is attached here so a caller cannot drop it: it is the only thing
-/// saying *project* rather than *file*. The face is [`ui::button_face`]'s, with a
-/// [`color::danger()`] hover wash between face and glyph, rounded to [`ui::BUTTON_R`].
+/// saying *project* rather than *file*. An ordinary [`FieldButton::Off`] face: the
+/// click only opens the confirm card, whose footer carries the danger.
 fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
-    let (rect, resp, fg) =
-        ui::button_face(ui, egui::vec2(DELETE_W, HEADER_CONTROL_H), FieldButton::Off);
-    let lit = resp.hovered();
-    if lit {
-        let r = egui::CornerRadius::same(ui::BUTTON_R);
-        let p = ui.painter();
-        p.rect_filled(rect, r, color::danger().gamma_multiply(0.14));
-        p.rect_stroke(
-            rect,
-            r,
-            egui::Stroke::new(1.0, color::danger().gamma_multiply(0.4)),
-            egui::StrokeKind::Inside,
-        );
-    }
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
+    ui::field_button_sized(
+        ui,
         icon::TRASH,
-        theme::icon_font(14.0),
-        if lit { color::danger() } else { fg },
-    );
-    resp.on_hover_text("Delete project")
+        egui::vec2(DELETE_W, HEADER_CONTROL_H),
+        FieldButton::Off,
+    )
+    .on_hover_text("Delete project")
 }
 
 /// The pill a [`Mark`] wears on a card or row, drawn rather than a tooltip so it is
@@ -5070,9 +4927,8 @@ mod tests {
         (pos.x, pos.y + size.y / 2.0)
     }
 
-    /// The search field's placeholder sits at the same spot painted and as a live
-    /// `TextEdit`. flip: give the `TextEdit` the whole field rect → fails at the y
-    /// assertion (`TextEdit::margin` is dead under `Frame::NONE`, so it is no flip).
+    /// The search field's placeholder sits at the same spot at rest and once the
+    /// field is open.
     #[test]
     fn the_search_placeholder_does_not_move_when_the_field_takes_focus() {
         let ctx = egui::Context::default();
@@ -8531,9 +8387,8 @@ mod tests {
     }
 
     /// The rename field draws where the name it replaces did, and leaves the card
-    /// beside it alone. flip: justify into the whole 20pt box instead of a one-row
-    /// rect → fails the y
-    /// assertion; go back to `Ui::put` → fails the neighbour assertion.
+    /// beside it alone. flip: `rename_field` handing `inline_edit` the card's own
+    /// `Ui` rather than a child → fails the neighbour assertion.
     #[test]
     fn the_rename_field_lands_on_the_name_and_moves_no_card() {
         let ctx = egui::Context::default();

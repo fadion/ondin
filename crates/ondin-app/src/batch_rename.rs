@@ -34,6 +34,7 @@ const PAD: f32 = 14.0;
 /// The fields and the numbering controls, as tall as every other control.
 const FIELD_H: f32 = ui::CONTROL_H;
 const NUM_H: f32 = ui::CONTROL_H;
+/// A preview row: a line of a list, not a control.
 const ROW_H: f32 = 26.0;
 /// The preview scrolls past this many rows.
 const ROWS_SHOWN: f32 = 8.0;
@@ -826,7 +827,7 @@ fn pill_fill() -> egui::Color32 {
 /// padding so the caret still steps through real characters. The pill keeps the
 /// text's size: a smaller font sits on the line's baseline, low against its words.
 fn template_galley(ui: &egui::Ui, text: &str) -> std::sync::Arc<egui::Galley> {
-    let font = egui::FontId::proportional(12.0);
+    let font = egui::FontId::proportional(ui::CONTROL_PT);
     let plain = egui::TextFormat::simple(font.clone(), color::text());
     let mut job = egui::text::LayoutJob::default();
     let mut at = 0;
@@ -1015,55 +1016,48 @@ impl OndinApp {
         // call that reports it.
         let numbering = b.s.numbering;
         let mut scrubbing = false;
-        let modal = egui::Modal::new(id)
+        // The settings card's ground, hairline, corner and shadow, placed under the
+        // canvas's top edge and without its backdrop or margin: the rows below run
+        // their dividers edge to edge.
+        let mut modal = crate::settings::card_modal(ctx, "batch-rename")
             .area(area)
-            .backdrop_color(egui::Color32::TRANSPARENT)
-            .frame(
-                egui::Frame::NONE
-                    .fill(color::card())
-                    .stroke(egui::Stroke::new(1.0, color::divider()))
-                    .corner_radius(egui::CornerRadius::same(8))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 14],
-                        blur: 30,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(102),
-                    }),
-            )
-            .show(ctx, |ui| {
-                ui.set_width(W);
-                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                if head(ui) {
-                    act = Act::Cancel;
-                }
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: PAD as i8,
-                        right: PAD as i8,
-                        top: PAD as i8,
-                        bottom: 4,
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = GAP;
-                        scope_row(ui, &mut b.s, b.selected);
-                        find_row(ui, &mut b.s, b.plan.error.as_deref());
-                        template_row(ui, &mut b);
-                        if Template::parse(&b.s.template).has_number() {
-                            scrubbing = number_row(ui, &mut b.s.numbering);
-                            order_row(ui, &mut b.s.order);
-                        }
-                        checks(ui, &mut b.s, b.plan.skipped);
-                    });
-                ui.add_space(8.0);
-                divider(ui);
-                // Labelled by the scope it was made for: until the new plan's first
-                // part lands, the shown plan is the previous scope's.
-                preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
-                divider(ui);
-                if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
-                    act = a;
-                }
-            });
+            .backdrop_color(egui::Color32::TRANSPARENT);
+        modal.frame = modal.frame.map(|f| f.inner_margin(egui::Margin::ZERO));
+        let modal = modal.show(ctx, |ui| {
+            ui.set_width(W);
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            if head(ui) {
+                act = Act::Cancel;
+            }
+            egui::Frame::NONE
+                .inner_margin(egui::Margin {
+                    left: PAD as i8,
+                    right: PAD as i8,
+                    top: PAD as i8,
+                    bottom: 4,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = GAP;
+                    scope_row(ui, &mut b.s, b.selected);
+                    find_row(ui, &mut b.s, b.plan.error.as_deref());
+                    template_row(ui, &mut b);
+                    if Template::parse(&b.s.template).has_number() {
+                        scrubbing = number_row(ui, &mut b.s.numbering);
+                        order_row(ui, &mut b.s.order);
+                    }
+                    checks(ui, &mut b.s, b.plan.skipped);
+                });
+            ui.add_space(8.0);
+            divider(ui);
+            // Labelled by the scope it was made for: until the new plan's first
+            // part lands, the shown plan is the previous scope's.
+            preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
+            divider(ui);
+            if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
+                act = a;
+            }
+            ui::focus_ring(ui);
+        });
         // Armed after a right-click's cancel is answered, so the frame it lands on
         // cannot re-arm it.
         if scrubbing && !self.gesture_cancelled && self.in_flight.rename_scrub.is_none() {
@@ -1097,33 +1091,16 @@ fn divider(ui: &mut egui::Ui) {
     ui.painter().rect_filled(rect, 0.0, color::divider());
 }
 
-/// The title row; true when its close button is clicked.
+/// The title row, the settings card's ([`crate::settings::modal_title`]) inside
+/// [`PAD`]; true when its close button is clicked.
 fn head(ui: &mut egui::Ui) -> bool {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 40.0), egui::Sense::hover());
-    let p = ui.painter();
-    let y = rect.center().y;
-    p.text(
-        egui::pos2(rect.left() + PAD, y),
-        egui::Align2::LEFT_CENTER,
-        icon::TEXT_AA,
-        theme::icon_font(15.0),
-        theme::text::dim(),
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(PAD, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    p.text(
-        egui::pos2(rect.left() + PAD + 23.0, y),
-        egui::Align2::LEFT_CENTER,
-        "Batch rename",
-        egui::FontId::proportional(13.0),
-        color::text(),
-    );
-    let close = egui::Rect::from_center_size(
-        egui::pos2(rect.right() - 8.0 - 13.0, y),
-        egui::vec2(26.0, 26.0),
-    );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(close));
-    ui::icon_button(&mut child, icon::X, 26.0, 13.0, false, true)
-        .on_hover_text("Cancel")
-        .clicked()
+    crate::settings::modal_title(&mut child, "Batch rename")
 }
 
 /// A grid row: the label in its column, then `add` in the rest.
@@ -1208,9 +1185,9 @@ pub(crate) fn scope_segments(
 
 fn scope_row(ui: &mut egui::Ui, s: &mut Settings, selected: usize) {
     const SCOPES: [Scope; 3] = [Scope::Selection, Scope::Page, Scope::Document];
-    row(ui, "In", ROW_H, |ui| {
+    row(ui, "In", FIELD_H, |ui| {
         let lit = SCOPES.iter().position(|x| *x == s.scope).unwrap_or(1);
-        if let Some(i) = scope_segments(ui, lit, selected, ROW_H - 4.0)
+        if let Some(i) = scope_segments(ui, lit, selected, ui::SEGMENT_CELL_H)
             && s.scope != SCOPES[i]
         {
             s.set_scope(SCOPES[i]);
@@ -1218,53 +1195,50 @@ fn scope_row(ui: &mut egui::Ui, s: &mut Settings, selected: usize) {
     });
 }
 
-/// A toggle inside a field: `Aa`, `.*`, `Ab`.
-pub(crate) fn field_toggle(ui: &mut egui::Ui, text: &str, tip: &str, on: &mut bool, mono: bool) {
-    let font = match mono {
-        true => egui::FontId::monospace(11.0),
-        false => egui::FontId::proportional(11.0),
-    };
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 22.0), egui::Sense::click());
-    let p = ui.painter();
-    if *on {
-        p.rect_filled(rect, 4.0, pill_fill());
-    } else if resp.hovered() {
-        p.rect_filled(rect, 4.0, color::text_a(15));
-    }
-    let ink = if *on {
-        color::accent_200()
-    } else {
-        theme::text::dim()
-    };
-    p.text(rect.center(), egui::Align2::CENTER_CENTER, text, font, ink);
-    if resp.on_hover_text(tip).clicked() {
-        *on = !*on;
-    }
-}
-
-/// A field's well and ring, lit while `focused`.
+/// A hand-laid field's ground, [`ui::field_frame`]'s, wearing [`ui::typing_edge`]
+/// while `focused`; Find's fields too.
 pub(crate) fn field_ground(ui: &egui::Ui, rect: egui::Rect, focused: bool) {
     let p = ui.painter();
-    p.rect_filled(rect, 5.0, color::field());
-    let ring = if focused {
-        egui::Stroke::new(1.0, color::accent_400())
-    } else {
-        egui::Stroke::new(1.0, color::field_border())
-    };
-    p.rect_stroke(rect, 5.0, ring, egui::StrokeKind::Inside);
+    let r = egui::CornerRadius::same(ui::BUTTON_R);
+    p.rect_filled(rect, r, color::field());
+    p.rect_stroke(
+        rect,
+        r,
+        egui::Stroke::new(1.0, color::field_border()),
+        egui::StrokeKind::Inside,
+    );
+    if focused {
+        ui::typing_edge(ui, rect);
+    }
 }
 
+/// A frameless edit laid at `rect` inside a hand-laid field, `right` short of the
+/// field's end for the toggles there: its padding makes the whole height and the
+/// field's left inset part of the edit, so a press anywhere there focuses it.
+pub(crate) fn field_edit<'t>(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    right: f32,
+    text: &'t mut dyn egui::TextBuffer,
+) -> (egui::Rect, egui::TextEdit<'t>) {
+    let font = egui::FontId::proportional(ui::CONTROL_PT);
+    let mut frame = ui::edit_frame(ui, &font, rect.height(), ui::FIELD_PAD_X);
+    frame.inner_margin.right = 0;
+    let at = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right() - 4.0 - right, rect.bottom()),
+    );
+    let edit = egui::TextEdit::singleline(text)
+        .frame(frame)
+        .desired_width(at.width() - ui::FIELD_PAD_X)
+        .font(font);
+    (at, edit)
+}
+
+/// Two [`ui::field_toggle`]s and the 4 between them ([`toggles`]' spacing).
+const TWO_TOGGLES_W: f32 = ui::FIELD_TOGGLE.x * 2.0 + 4.0;
 const FIND_ID: &str = "batch-rename-find";
 const TEMPLATE_ID: &str = "batch-rename-template";
-
-/// The part of a field `rect` its text takes, `right` short of its right edge for
-/// the toggles there.
-fn text_rect(rect: egui::Rect, right: f32) -> egui::Rect {
-    egui::Rect::from_min_max(
-        rect.min + egui::vec2(9.0, 0.0),
-        egui::pos2(rect.right() - 4.0 - right, rect.bottom()),
-    )
-}
 
 /// The toggles at a field's right end, `w` wide.
 pub(crate) fn toggles(ui: &mut egui::Ui, rect: egui::Rect, w: f32) -> egui::Ui {
@@ -1288,26 +1262,18 @@ fn find_row(ui: &mut egui::Ui, s: &mut Settings, error: Option<&str>) {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FIELD_H), egui::Sense::hover());
             let id = egui::Id::new(FIND_ID);
             field_ground(ui, rect, ui.memory(|m| m.has_focus(id)));
-            let text = text_rect(rect, 52.0);
+            let (at, edit) = field_edit(ui, rect, TWO_TOGGLES_W, &mut s.find);
             ui.put(
-                text,
-                egui::TextEdit::singleline(&mut s.find)
-                    .id(id)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin::ZERO)
-                    .vertical_align(egui::Align::Center)
-                    .desired_width(text.width())
-                    .font(egui::FontId::proportional(12.0))
-                    .text_color(color::text())
-                    .hint_text(
-                        egui::RichText::new("Whole name")
-                            .size(12.0)
-                            .color(theme::text::faint()),
-                    ),
+                at,
+                edit.id(id).text_color(color::text()).hint_text(
+                    egui::RichText::new("Whole name")
+                        .size(ui::CONTROL_PT)
+                        .color(theme::text::faint()),
+                ),
             );
-            let mut child = toggles(ui, rect, 52.0);
-            field_toggle(&mut child, "Aa", "Match case", &mut s.match_case, false);
-            field_toggle(&mut child, ".*", "Find as a pattern", &mut s.pattern, true);
+            let mut child = toggles(ui, rect, TWO_TOGGLES_W);
+            ui::field_toggle(&mut child, "Aa", "Match case", &mut s.match_case, false);
+            ui::field_toggle(&mut child, ".*", "Find as a pattern", &mut s.pattern, true);
             if let Some(e) = error {
                 ui.label(egui::RichText::new(e).size(10.5).color(color::warn()));
             }
@@ -1336,23 +1302,13 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
             // Which way the keys move the caret this frame, read before the field
             // moves it, so a caret landing inside a pill leaves it on that side.
             let leftward = focused && ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
-            let text = text_rect(rect, 24.0);
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 template_galley(ui, buf.as_str())
             };
             // `put` into the field's whole height, as Find is: shown in a child Ui,
             // the edit takes one line's height and its text rides at the top.
-            let resp = ui.put(
-                text,
-                egui::TextEdit::singleline(&mut b.s.template)
-                    .id(id)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin::ZERO)
-                    .vertical_align(egui::Align::Center)
-                    .desired_width(text.width())
-                    .font(egui::FontId::proportional(12.0))
-                    .layouter(&mut layouter),
-            );
+            let (at, edit) = field_edit(ui, rect, ui::FIELD_TOGGLE.x, &mut b.s.template);
+            let resp = ui.put(at, edit.id(id).layouter(&mut layouter));
             let cursor =
                 egui::TextEdit::load_state(ui.ctx(), id).and_then(|s| s.cursor.char_range());
             let caret = cursor.map(|c| c.primary.index.0);
@@ -1388,8 +1344,8 @@ fn template_row(ui: &mut egui::Ui, b: &mut BatchRename) {
                 state.store(ui.ctx(), id);
                 ui.memory_mut(|m| m.request_focus(id));
             }
-            let mut child = toggles(ui, rect, 24.0);
-            field_toggle(
+            let mut child = toggles(ui, rect, ui::FIELD_TOGGLE.x);
+            ui::field_toggle(
                 &mut child,
                 "Ab",
                 "Keep each match’s case",
@@ -1467,35 +1423,11 @@ fn take_pill(ui: &egui::Ui, id: egui::Id, text: &mut String) {
     }
 }
 
+/// *+ Name*, *+ Number*, *+ Group n*: an [`ui::action_button`] sized to its word.
 fn insert_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let font = egui::FontId::proportional(11.0);
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font, theme::text::muted()));
-    let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + 7.0 * 2.0 + 14.0, 22.0),
-        egui::Sense::click(),
-    );
-    let p = ui.painter();
-    p.rect_filled(
-        rect,
-        4.0,
-        color::text_a(if resp.hovered() { 26 } else { 15 }),
-    );
-    p.text(
-        egui::pos2(rect.left() + 7.0 + 5.0, rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        icon::PLUS,
-        theme::icon_font(10.0),
-        theme::text::muted(),
-    );
-    p.galley(
-        egui::pos2(
-            rect.left() + 7.0 + 14.0,
-            rect.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        theme::text::muted(),
-    );
-    resp.on_hover_text(format!("Insert {label} at the caret"))
+    let size = egui::vec2(ui::action_button_w(ui.ctx(), label), ui::CONTROL_H);
+    ui::action_button(ui, icon::PLUS, label, FieldButton::Off, size)
+        .on_hover_text(format!("Insert {label} at the caret"))
 }
 
 /// *From*, *Step* and *Pad* as the inspector's scrubbable fields, sharing the row.
@@ -1553,7 +1485,6 @@ fn order_row(ui: &mut egui::Ui, order: &mut Order) {
             .selected_text(ui::glyph_and_text(order.glyph(), order.label()))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
-                ui.spacing_mut().button_padding.y = 2.0;
                 for o in Order::ALL {
                     ui.selectable_value(order, o, ui::glyph_and_text(o.glyph(), o.label()));
                 }
@@ -1566,62 +1497,8 @@ fn order_row(ui: &mut egui::Ui, order: &mut Order) {
 fn checkbox(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
     ui.horizontal(|ui| {
         ui.add_space(LABEL_W + GAP);
-        tick_box(ui, label, note, on);
+        ui::tick_box(ui, label, note, on);
     });
-}
-
-/// A tick box, its label and a faint note after it; the find box's too.
-pub(crate) fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) {
-    let font = egui::FontId::proportional(12.0);
-    let galley =
-        ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), theme::text::strong()));
-    let note_g = ui.fonts_mut(|f| f.layout_no_wrap(note.to_string(), font, theme::text::faint()));
-    let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(14.0 + 7.0 + galley.size().x + 5.0 + note_g.size().x, 24.0),
-        egui::Sense::click(),
-    );
-    let p = ui.painter();
-    let tick = egui::Rect::from_min_size(
-        egui::pos2(rect.left(), rect.center().y - 7.0),
-        egui::vec2(14.0, 14.0),
-    );
-    if *on {
-        p.rect_filled(tick, 3.0, color::accent());
-        p.text(
-            tick.center(),
-            egui::Align2::CENTER_CENTER,
-            icon::CHECK,
-            theme::icon_font(10.0),
-            egui::Color32::WHITE,
-        );
-    } else {
-        let ring = if resp.hovered() {
-            color::text_a(140)
-        } else {
-            color::text_a(90)
-        };
-        p.rect_stroke(
-            tick,
-            3.0,
-            egui::Stroke::new(1.0, ring),
-            egui::StrokeKind::Inside,
-        );
-    }
-    let x = tick.right() + 7.0;
-    let w = galley.size().x;
-    p.galley(
-        egui::pos2(x, rect.center().y - galley.size().y / 2.0),
-        galley,
-        theme::text::strong(),
-    );
-    p.galley(
-        egui::pos2(x + w + 5.0, rect.center().y - note_g.size().y / 2.0),
-        note_g,
-        theme::text::faint(),
-    );
-    if resp.clicked() {
-        *on = !*on;
-    }
 }
 
 fn checks(ui: &mut egui::Ui, s: &mut Settings, skipped: usize) {
@@ -1836,7 +1713,7 @@ fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act>
     );
     child.spacing_mut().item_spacing.x = 8.0;
     let state = match why_not {
-        None => FieldButton::On,
+        None => FieldButton::Primary,
         Some(_) => FieldButton::Disabled,
     };
     let primary = crate::settings::text_button(&mut child, &go, state);

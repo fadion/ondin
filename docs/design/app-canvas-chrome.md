@@ -228,7 +228,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 - Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held
   while its own menu is open.
-- Rows are `ui::menu_check`, `ui::MENU_ITEM_H` (24) tall, in `ui::menu_frame`; width 160pt or the
+- Rows are `ui::menu_check`, `ui::MENU_ROW_H` (24) tall, in `ui::menu_frame`; width 160pt or the
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View** (`OndinApp::view_and_snap_menus`) reads in four groups between separators, so each kind of
@@ -540,13 +540,12 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   (`FindBox`) is kept while closed, so the box reopens as it was left.
 - **Rows.** A caret folds the Replace row and the options under it; the fold is remembered. Find
   shows *N of M*, a warm *No matches*, or *Not a pattern* with the reason under it, then ↑ ↓ ✕.
-  Replace has its field with *Keep case* (*Ab*, on the first time the box opens) inside it, as Batch
-  rename's, then *Replace* and an accent *All* as field-row buttons. Then the scope *Selection · This
-  page · All pages*, and right of it the switches *Aa*, *ab* (whole words) and *.\**: the scope opens
-  on *Selection* when something is selected, else *This page*, and *Selection* is disabled with
-  nothing selected. Last, *Include text inside instances*. The fields, the scope
-  (`batch_rename::scope_segments`) and the tick box are Batch rename's; the switches are
-  `ui::segmented_toggles`, the segmented track with each cell lit on its own.
+  The Find field holds the switches *Aa*, *ab* (whole words) and *.\** inside it, and Replace's
+  field holds *Keep case* (*Ab*, on the first time the box opens), all `ui::field_toggle`s as in
+  Batch rename's fields; then *Replace* and a primary *All*. Then the scope *Selection · This page ·
+  All pages*: it opens on *Selection* when something is selected, else *This page*, and *Selection*
+  is disabled with nothing selected. Last, *Include text inside instances*. The fields, the scope
+  (`batch_rename::scope_segments`) and the tick box (`ui::tick_box`) are Batch rename's.
 - **The list**, grouped under page headings with their counts. A row has the kind glyph (text, an
   outlined hexagon inside an instance, a filled accent hexagon in a main), the text around the match
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when

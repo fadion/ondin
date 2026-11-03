@@ -1224,7 +1224,7 @@ impl OndinApp {
         self.tabs.menu_highlight = highlight;
 
         // Four rows and a rule, the 1 pt gaps between the five, the padding and border.
-        let h = 4.0 * crate::ui::MENU_ITEM_H + crate::ui::MENU_SEP_H + 4.0 + 2.0 * PAD + 2.0;
+        let h = 4.0 * crate::ui::MENU_ROW_H + crate::ui::MENU_SEP_H + 4.0 + 2.0 * PAD + 2.0;
         let pos = crate::ui::menu_place(ctx, at, egui::vec2(W, h));
         let menu = egui::Area::new(egui::Id::new("tab-menu"))
             .order(egui::Order::Foreground)
@@ -1242,7 +1242,7 @@ impl OndinApp {
                         if let Some(hl) = highlight {
                             row = row.highlight(i == hl);
                         }
-                        let resp = menu_row(ui, row, crate::ui::MENU_ITEM_H);
+                        let resp = menu_row(ui, row, crate::ui::MENU_ROW_H);
                         match why {
                             Some(why) => {
                                 resp.on_hover_text(why);
@@ -1499,7 +1499,7 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for info in infos {
                         let (rect, resp) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), crate::ui::MENU_ITEM_H),
+                            egui::vec2(ui.available_width(), crate::ui::MENU_ROW_H),
                             egui::Sense::click(),
                         );
                         let on = front == Some(info.id);
@@ -1671,7 +1671,7 @@ impl OndinApp {
                         retry = crate::settings::text_button(
                             ui,
                             "Try again",
-                            crate::ui::FieldButton::On,
+                            crate::ui::FieldButton::Primary,
                         )
                         .clicked();
                         close = crate::settings::text_button(

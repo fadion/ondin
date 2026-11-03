@@ -55,40 +55,45 @@ pub(crate) fn io_error(e: &std::io::Error) -> String {
     }
 }
 
-/// The accent *Private mode* pill a top bar shows while names are masked, so
-/// whoever is sharing the screen can see it is on; `true` when it was clicked,
-/// which turns private mode off. Draws nothing while it is off. Worded as the
-/// mode, with a browser's incognito glyph: a bare "Private" read as a document
-/// not shared with a team, which this personal app has no notion of.
+/// The *Private mode* pill a top bar shows while names are masked, latched
+/// ([`FieldButton::On`]) so whoever is sharing the screen can see it is on; `true`
+/// when it was clicked, which turns private mode off. Draws nothing while it is
+/// off. Worded as the mode, with a browser's incognito glyph: a bare "Private"
+/// read as a document not shared with a team, which this personal app has no
+/// notion of.
+///
+/// [`FieldButton::On`]: crate::ui::FieldButton::On
 pub(crate) fn pill(ui: &mut egui::Ui) -> bool {
     use crate::theme::{self, color, icon};
+    use crate::ui::{self, FieldButton};
     if !on() {
         return false;
     }
-    let galley = ui.ctx().fonts_mut(|f| {
-        f.layout_no_wrap(
-            "Private mode".into(),
-            egui::FontId::proportional(11.5),
-            color::accent_100(),
-        )
-    });
-    let w = 9.0 + 13.0 + 6.0 + galley.size().x + 9.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::click());
+    let scale = ui::Scale::Toolbar;
+    let glyph_pt = scale.glyph_pt();
+    let font = egui::FontId::proportional(scale.text_pt());
+    let text_w = ui
+        .ctx()
+        .fonts_mut(|f| f.layout_no_wrap("Private mode".into(), font.clone(), color::text()))
+        .size()
+        .x;
+    let w = 9.0 + glyph_pt + 6.0 + text_w + 9.0;
+    let (rect, resp, fg) = ui::button_face(ui, egui::vec2(w, ui::TOOLBAR_H), FieldButton::On);
     let p = ui.painter();
-    let ground = color::accent_a(if resp.hovered() { 96 } else { 64 });
-    p.rect_filled(rect, egui::CornerRadius::same(6), ground);
     let y = rect.center().y;
     p.text(
         egui::pos2(rect.left() + 9.0, y),
         egui::Align2::LEFT_CENTER,
         icon::INCOGNITO,
-        theme::icon_font(13.0),
-        color::accent_100(),
+        theme::icon_font(glyph_pt),
+        fg,
     );
-    p.galley(
-        egui::pos2(rect.left() + 28.0, y - galley.size().y / 2.0),
-        galley,
-        color::accent_100(),
+    p.text(
+        egui::pos2(rect.left() + 9.0 + glyph_pt + 6.0, y),
+        egui::Align2::LEFT_CENTER,
+        "Private mode",
+        font,
+        fg,
     );
     resp.on_hover_text("Names are hidden · click to leave private mode (Ctrl+Shift+N)")
         .clicked()

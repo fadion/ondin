@@ -2612,7 +2612,7 @@ use ondin_core::{Operation, Transaction};
 /// border and padding back off for the rows.
 const MENU_W: f32 = 210.0;
 /// The row height, shared with the View menu.
-const ROW_H: f32 = crate::ui::MENU_ITEM_H;
+const ROW_H: f32 = crate::ui::MENU_ROW_H;
 /// `menu_frame`'s inner margin, the same 5pt the dropdowns use.
 const MENU_PAD: f32 = 5.0;
 /// One separator as `ui::menu_sep` allocates it; agreeing with it keeps [`height`] exact.
@@ -5837,7 +5837,7 @@ mod label_fit_tests {
         let out = ctx.run_ui(Default::default(), |ui| {
             ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
             let row = crate::ui::MenuRow::new(icon::ARROW_COUNTER_CLOCKWISE, label).accel(accel);
-            row_right = crate::ui::menu_row(ui, row, crate::ui::MENU_ITEM_H)
+            row_right = crate::ui::menu_row(ui, row, crate::ui::MENU_ROW_H)
                 .rect
                 .right();
         });

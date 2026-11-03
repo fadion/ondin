@@ -151,7 +151,7 @@ press, the flag is cleared and the press pays out its rung.
 
 ### Menu chrome
 
-- **One row type.** `ui::MenuRow` serves top-bar dropdowns and context menus (accelerator column, checked state, destructive tint, dimmed-but-hoverable state); `menu_item` is the same row with the options off. Both allocate `ui::MENU_ITEM_H` (24). Dimmed rows sense `hover()`, not `click()`, so the tooltip saying why can show.
+- **One row type.** `ui::MenuRow` serves top-bar dropdowns and context menus (accelerator column, checked state, destructive tint, dimmed-but-hoverable state); `menu_item` is the same row with the options off. Both allocate `ui::MENU_ROW_H` (24). Dimmed rows sense `hover()`, not `click()`, so the tooltip saying why can show.
 - **Separators.** `ui::menu_sep`: a nominal 1pt `text_a(20)` rule with `SEP_AIR` (3) either side, `ui::MENU_SEP_H` (7); the rule is `round(ppp).max(1.0)` device pixels for crispness.
 - **Placement.** `ui::menu_place` flips, rounds, then clamps (last, because rounding a clamped value can push it out by a fraction of a point) against `content_rect()`. Height is computed from the row and separator constants, not measured, because placement precedes the `Area`. `ui::dropdown_place` (a list anchored on a field) puts the left edge on the field's (right if that overflows), above the field when there is no room below, then `menu_place` clamps.
 - **Border and width.** A computed height includes `ui::MENU_BORDER` on every side (a `Frame` stroke grows its outer rect). `ui::menu_inner_w(card, pad)` subtracts padding and border before `set_width`: context menu 210, top-bar menus 150 and 160, `app::POPOVER_W` 272.

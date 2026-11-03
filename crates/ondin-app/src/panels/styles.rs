@@ -28,7 +28,6 @@ const CAPSULE_H: f32 = 28.0;
 /// The menu's and the picker's widths.
 const MENU_W: f32 = 210.0;
 const PICKER_W: f32 = 256.0;
-const ROW_H: f32 = 26.0;
 /// Greyed rows' opacity under a read-only capsule.
 const GREYED: f32 = 0.42;
 
@@ -336,7 +335,7 @@ fn capsule(
         p.rect_stroke(
             rect,
             CAPSULE_H / 2.0,
-            egui::Stroke::new(1.0, color::accent().gamma_multiply(0.65)),
+            egui::Stroke::new(1.0, color::accent_700()),
             egui::StrokeKind::Inside,
         );
     }
@@ -637,8 +636,8 @@ impl OndinApp {
         }
     }
 
-    /// The naming capsule: the new style's name being typed, the capsule ringed in
-    /// the accent; `Enter` keeps the name, `Escape` undoes the create.
+    /// The naming capsule: the new style's name being typed, the capsule wearing
+    /// the typing edge; `Enter` keeps the name, `Escape` undoes the create.
     fn naming_capsule(&mut self, ui: &mut egui::Ui, style: &Style) {
         let Some(mut n) = self.style_naming.take() else {
             return;
@@ -646,10 +645,12 @@ impl OndinApp {
         let (rect, _) = capsule_ground(ui, ui.id().with("style-naming"), egui::Sense::hover());
         let p = ui.painter();
         p.rect_filled(rect, CAPSULE_H / 2.0, color::text_a(26));
+        // `ui::typing_edge`'s ink at the capsule's own round corner, which
+        // `typing_edge` (a field's corner) would not follow.
         p.rect_stroke(
             rect,
             CAPSULE_H / 2.0,
-            egui::Stroke::new(1.0, color::accent().gamma_multiply(0.65)),
+            egui::Stroke::new(1.0, color::accent_700()),
             egui::StrokeKind::Inside,
         );
         let mid = rect.center().y;
@@ -869,7 +870,7 @@ impl OndinApp {
             (1, _) | (_, 0) => "Detach style".to_string(),
             (_, k) => format!("Detach style from {k} layers"),
         };
-        let size = egui::vec2(MENU_W, 3.0 * ROW_H + 10.0);
+        let size = egui::vec2(MENU_W, 3.0 * ui::MENU_ROW_H + 10.0);
         let pos = ui::menu_place(
             ctx,
             egui::pos2(menu.under.right() - MENU_W + 8.0, menu.under.bottom() + 6.0),
@@ -883,13 +884,15 @@ impl OndinApp {
                 ui::menu_frame(4.0).show(ui, |ui| {
                     ui.set_width(MENU_W - 8.0);
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    if ui::menu_row(ui, ui::MenuRow::new(icon::SWATCHES, &apply), ROW_H).clicked() {
+                    let a =
+                        ui::menu_row(ui, ui::MenuRow::new(icon::SWATCHES, &apply), ui::MENU_ROW_H);
+                    if a.clicked() {
                         act = Some(0);
                     }
                     let c = ui::menu_row(
                         ui,
                         ui::MenuRow::new(icon::PLUS_SQUARE, &create).enabled(can_create),
-                        ROW_H,
+                        ui::MENU_ROW_H,
                     );
                     if c.clicked() && can_create {
                         act = Some(1);
@@ -897,7 +900,7 @@ impl OndinApp {
                     let d = ui::menu_row(
                         ui,
                         ui::MenuRow::new(icon::LINK_BREAK, &detach).enabled(styled > 0),
-                        ROW_H,
+                        ui::MENU_ROW_H,
                     );
                     if d.clicked() && styled > 0 {
                         act = Some(2);
@@ -997,7 +1000,11 @@ impl OndinApp {
             })
             .filter(|(_, s)| s.name.contains('/'))
             .count();
-        let h = 40.0 + (rows.len().max(1) as f32) * ROW_H + (groups + kit_heads) as f32 * 22.0;
+        let head = super::binding::FACE_HEAD_H;
+        let h = 40.0
+            + (rows.len().max(1) as f32) * ui::MENU_ROW_H
+            + groups as f32 * head
+            + kit_heads as f32 * (head + 4.0);
         let pos = ui::menu_place(
             ctx,
             egui::pos2(menu_left(pk.under), pk.under.bottom() + 6.0),
@@ -1059,21 +1066,12 @@ impl OndinApp {
                                 if last_group != Some((s.kit(), group)) {
                                     last_group = Some((s.kit(), group));
                                     if let Some(g) = group {
-                                        let (r, _) = ui.allocate_exact_size(
-                                            egui::vec2(ui.available_width(), 22.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        ui.painter().text(
-                                            egui::pos2(r.left() + 8.0, r.center().y),
-                                            egui::Align2::LEFT_CENTER,
-                                            g.to_uppercase(),
-                                            egui::FontId::proportional(9.5),
-                                            theme::text::faint(),
-                                        );
+                                        let w = ui.available_width();
+                                        super::binding::face_header(ui, g, w);
                                     }
                                 }
                                 let (r, resp) = ui.allocate_exact_size(
-                                    egui::vec2(ui.available_width(), ROW_H),
+                                    egui::vec2(ui.available_width(), ui::MENU_ROW_H),
                                     egui::Sense::click(),
                                 );
                                 if resp.hovered()
@@ -1082,9 +1080,7 @@ impl OndinApp {
                                     pk.highlight = i;
                                 }
                                 let p = ui.painter();
-                                if i == pk.highlight {
-                                    p.rect_filled(r, 4, color::text_a(23));
-                                }
+                                ui::list_row_ground(p, r, i == pk.highlight, resp.hovered());
                                 let sw = egui::Rect::from_min_size(
                                     egui::pos2(r.left() + 8.0, r.center().y - 7.0),
                                     egui::vec2(14.0, 14.0),

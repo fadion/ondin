@@ -14,6 +14,7 @@
 use super::index::{KitEntry, Load, kits_in};
 use crate::app::{OndinApp, TopMenu};
 use crate::theme::{self, color, icon};
+use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::kurbo::{Affine, Rect, Vec2};
 use ondin_core::{NodeId, Operation};
@@ -256,32 +257,34 @@ impl OndinApp {
         } else {
             format!("{n} kit update{}", if n == 1 { "" } else { "s" })
         };
-        let galley = ui
+        let scale = ui::Scale::Toolbar;
+        let glyph_pt = scale.glyph_pt();
+        let font = egui::FontId::proportional(scale.text_pt());
+        let text_w = ui
             .ctx()
-            .fonts_mut(|f| f.layout_no_wrap(text, egui::FontId::proportional(11.5), color::text()));
-        let w = 9.0 + 13.0 + 6.0 + galley.size().x + 9.0;
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::click());
+            .fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), color::text()))
+            .size()
+            .x;
+        let w = 9.0 + glyph_pt + 6.0 + text_w + 9.0;
+        // Latched while updates wait unreviewed or the popover is open; at rest once
+        // they were put off with *Later*.
+        let state = FieldButton::on_if(open || !quiet);
+        let (rect, resp, fg) = ui::button_face(ui, egui::vec2(w, ui::TOOLBAR_H), state);
         let p = ui.painter();
-        let ground = if open || resp.hovered() {
-            color::text_a(48)
-        } else if quiet {
-            color::text_a(18)
-        } else {
-            color::text_a(36)
-        };
-        p.rect_filled(rect, egui::CornerRadius::same(6), ground);
         let y = rect.center().y;
         p.text(
             egui::pos2(rect.left() + 9.0, y),
             egui::Align2::LEFT_CENTER,
             icon::ARROW_CIRCLE_DOWN,
-            theme::icon_font(13.0),
-            color::text_a(191),
+            theme::icon_font(glyph_pt),
+            fg,
         );
-        p.galley(
-            egui::pos2(rect.left() + 28.0, y - galley.size().y / 2.0),
-            galley,
-            color::text(),
+        p.text(
+            egui::pos2(rect.left() + 9.0 + glyph_pt + 6.0, y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            font,
+            fg,
         );
         let resp = resp.on_hover_text(if quiet {
             format!(
@@ -365,7 +368,7 @@ impl OndinApp {
                     ui,
                     if ready { "Accept all" } else { "Loading…" },
                     if ready {
-                        crate::ui::FieldButton::On
+                        crate::ui::FieldButton::Primary
                     } else {
                         crate::ui::FieldButton::Disabled
                     },

@@ -8,7 +8,7 @@
 //! the zoom kept — and never selects it.
 
 use crate::app::OndinApp;
-use crate::batch_rename::{field_ground, field_toggle, scope_segments, tick_box, toggles};
+use crate::batch_rename::{field_ground, scope_segments, toggles};
 use crate::theme::{self, color, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -35,9 +35,10 @@ const CARET_W: f32 = 20.0;
 const GAP_X: f32 = 6.0;
 /// The indent under the caret, so the second rows line up with Find.
 const INDENT: f32 = CARET_W + GAP_X;
-/// The switches' track: three 24-point cells 2 apart, inside its 2-point pad and
-/// 1-point hairline.
-const SWITCHES_W: f32 = 24.0 * 3.0 + 2.0 * 2.0 + 3.0 * 2.0;
+/// Find's three switches inside its field, [`toggles`]' 4 apart.
+const SWITCHES_W: f32 = ui::FIELD_TOGGLE.x * 3.0 + 4.0 * 2.0;
+/// Between a field's leading glyph and its text.
+const GLYPH_GAP: f32 = 7.0;
 /// The ids of the two fields, which the keys ask about.
 const FIND_ID: &str = "find-box-find";
 const WITH_ID: &str = "find-box-with";
@@ -555,8 +556,8 @@ enum Act {
     Close,
 }
 
-/// The rows above the list: Find with its count and arrows, then — unfolded —
-/// Replace, the switches, the scope and the instances checkbox.
+/// The rows above the list: Find with its count, switches and arrows, then —
+/// unfolded — Replace, the scope and the instances checkbox.
 fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Option<Act>) {
     let n = f.found.hits.len();
     ui.horizontal(|ui| {
@@ -599,7 +600,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         };
         // Warm when nothing was found; after *All* emptied the list it is news.
         let warm = n == 0 && !f.find.is_empty() && f.done.is_none();
-        let (resp, _) = field(
+        let (resp, rect) = field(
             ui,
             FIND_ID,
             &mut f.find,
@@ -608,8 +609,13 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             w,
             &count,
             warm,
-            0.0,
+            SWITCHES_W,
         );
+        // Inside the field, as Batch rename's are.
+        let mut child = toggles(ui, rect, SWITCHES_W);
+        ui::field_toggle(&mut child, "Aa", "Match case", &mut f.match_case, false);
+        ui::field_toggle(&mut child, "ab", "Whole words", &mut f.whole_words, false);
+        ui::field_toggle(&mut child, ".*", "Regular expression", &mut f.pattern, true);
         if f.focus {
             f.focus = false;
             resp.request_focus();
@@ -664,12 +670,12 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         let live = n > 0 && f.found.error.is_none();
         let state = |primary| match (live, primary) {
             (false, _) => FieldButton::Disabled,
-            (true, true) => FieldButton::On,
+            (true, true) => FieldButton::Primary,
             (true, false) => FieldButton::Off,
         };
         let (replace_w, all_w) = (button_w(ui, "Replace"), button_w(ui, "All"));
         let w = ui.available_width() - replace_w - all_w - GAP_X * 2.0;
-        let keep_case_w = 24.0;
+        let keep_case_w = ui::FIELD_TOGGLE.x;
         let (_, rect) = field(
             ui,
             WITH_ID,
@@ -682,19 +688,17 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             keep_case_w,
         );
         let mut child = toggles(ui, rect, keep_case_w);
-        field_toggle(
+        ui::field_toggle(
             &mut child,
             "Ab",
             "Keep each match’s case",
             &mut f.keep_case,
             false,
         );
-        if ui::label_button(ui, "Replace", egui::vec2(replace_w, FIELD_H), state(false)).clicked()
-            && live
-        {
+        if crate::settings::text_button(ui, "Replace", state(false)).clicked() && live {
             *act = Some(Act::Replace);
         }
-        if ui::label_button(ui, "All", egui::vec2(all_w, FIELD_H), state(true))
+        if crate::settings::text_button(ui, "All", state(true))
             .on_hover_text("Replace every match in scope")
             .clicked()
             && live
@@ -702,8 +706,6 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             *act = Some(Act::All);
         }
     });
-    // The scope, then the switches pushed to the right edge: a right-to-left
-    // layout would reverse the segments inside each well.
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(INDENT);
@@ -713,33 +715,14 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             In::Selection if selected == 0 => 1,
             scope => SCOPES.iter().position(|x| *x == scope).unwrap_or(1),
         };
-        if let Some(i) = scope_segments(ui, lit, selected, 22.0) {
+        if let Some(i) = scope_segments(ui, lit, selected, ui::SEGMENT_CELL_H) {
             f.scope = SCOPES[i];
-        }
-        ui.add_space((ui.available_width() - SWITCHES_W).max(GAP_X));
-        const SWITCHES: [(&str, &str); 3] = [
-            ("Aa", "Match case"),
-            ("ab", "Whole words"),
-            (".*", "Regular expression"),
-        ];
-        let state = [f.match_case, f.whole_words, f.pattern];
-        if let Some(i) = ui::segmented_toggles(
-            ui,
-            SWITCHES_W,
-            22.0,
-            SWITCHES.len(),
-            |i| state[i],
-            |i| SWITCHES[i].1,
-            |p, i, rect, on| ui::segment_label(p, rect, SWITCHES[i].0, on),
-        ) {
-            let flip = [&mut f.match_case, &mut f.whole_words, &mut f.pattern];
-            *flip[i] = !*flip[i];
         }
     });
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(INDENT);
-        tick_box(
+        ui::tick_box(
             ui,
             "Include text inside instances",
             "",
@@ -748,16 +731,17 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
     });
 }
 
-/// A labelled button's width: its word and the Settings buttons' side padding.
+/// The width [`crate::settings::text_button`] gives `label`: its word at
+/// [`ui::CONTROL_PT`] and 14 either side.
 fn button_w(ui: &egui::Ui, label: &str) -> f32 {
     let g = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_string(),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(ui::CONTROL_PT),
             color::text(),
         )
     });
-    g.size().x + 24.0
+    g.size().x + 28.0
 }
 
 /// The list: matches grouped by page, a long list scrolling inside the box. With
@@ -927,11 +911,7 @@ fn result_row(
     if !h.writable(inside) {
         p.multiply_opacity(0.45);
     }
-    if current {
-        p.rect_filled(rect, 5.0, color::text_a(31));
-    } else if resp.hovered() {
-        p.rect_filled(rect, 5.0, color::text_a(15));
-    }
+    ui::list_row_ground(&p, rect, current, resp.hovered());
     let y = rect.center().y;
     let gx = rect.left() + 13.0;
     if h.main.is_some() {
@@ -1078,16 +1058,16 @@ fn field(
     field_ground(ui, rect, ui.memory(|m| m.has_focus(id)));
     let p = ui.painter();
     p.text(
-        rect.left_center() + egui::vec2(16.0, 0.0),
+        rect.left_center() + egui::vec2(ui::FIELD_PAD_X + ui::CONTROL_GLYPH_PT / 2.0, 0.0),
         egui::Align2::CENTER_CENTER,
         glyph,
-        theme::icon_font(14.0),
-        theme::text::dim(),
+        theme::icon_font(ui::CONTROL_GLYPH_PT),
+        theme::text::faint(),
     );
     let end = if toggles_w > 0.0 {
         rect.right() - 8.0 - toggles_w
     } else {
-        rect.right() - 9.0
+        rect.right() - ui::FIELD_PAD_X
     };
     let note_w = if note.is_empty() {
         0.0
@@ -1108,26 +1088,27 @@ fn field(
         );
         w + 8.0
     };
-    let inner = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 30.0, rect.top()),
-        egui::pos2(end - note_w, rect.bottom()),
-    );
+    // From the field's left edge, the glyph's band in the edit's padding, so a
+    // press anywhere left of the note focuses it.
+    let lead = ui::FIELD_PAD_X + ui::CONTROL_GLYPH_PT + GLYPH_GAP;
+    let inner = egui::Rect::from_min_max(rect.min, egui::pos2(end - note_w, rect.bottom()));
+    let font = egui::FontId::proportional(ui::CONTROL_PT);
+    let mut frame = ui::edit_frame(ui, &font, rect.height(), 0.0);
+    frame.inner_margin.left = lead as i8;
     // `place`, not `put`: in a row, `put` leaves the cursor at the text's end,
     // short of the note, and the buttons after the field land on it.
     let resp = ui.place(
         inner,
         egui::TextEdit::singleline(text)
             .id(id)
-            .frame(egui::Frame::NONE)
-            .margin(egui::Margin::ZERO)
-            .vertical_align(egui::Align::Center)
-            .desired_width(inner.width())
+            .frame(frame)
+            .desired_width(inner.width() - lead)
             .return_key(None)
-            .font(egui::FontId::proportional(12.0))
+            .font(font)
             .text_color(color::text())
             .hint_text(
                 egui::RichText::new(hint)
-                    .size(12.0)
+                    .size(ui::CONTROL_PT)
                     .color(theme::text::faint()),
             ),
     );

@@ -158,6 +158,8 @@ Decided non-goals are in `docs/non-goals.md`.
 ## Interface
 
 - **D134** A control that does not apply is shown disabled, never removed.
+- **Every form control follows one standard, held by the shared primitives in `ui.rs`** (`app-chrome.md`, *Shared rules*): one height (28, with one named toolbar scale of 24), one ground, one hover that never lights the hairline, one row height for every list, sizes the primitive picks rather than the caller. A primary action is a state of its own, separate from a latched On.
+- **D747** The panels are keyboard-traversable: Tab is meant to reach every control and field, not only a dialog's.
 - **The chrome has a dark and a light palette; the canvas marks are theme-independent.** Chrome colours are read through functions of the current theme; selection, key, component, measure and point marks stay constants, since they sit on artwork.
 - **The app ships its own icon set** (`OndinIcons.ttf`, built from `assets/icons/glyphs.json`) rather than a third-party one: each icon is drawn for the size it is shown at, so no picture is a compromise forced by what another set happens to contain.
 - **D345** Dropping in the layers panel chooses the parent level by horizontal travel.

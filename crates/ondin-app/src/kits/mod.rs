@@ -94,10 +94,10 @@ impl OndinApp {
         // Labels and glyphs from the registry the palette reads too.
         let item = |ui: &mut egui::Ui, item: Item| {
             let spec = item.spec();
-            crate::ui::menu_item(ui, spec.glyph, spec.label, crate::ui::MENU_ITEM_H)
+            crate::ui::menu_item(ui, spec.glyph, spec.label, crate::ui::MENU_ROW_H)
         };
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
-            const H: f32 = crate::ui::MENU_ITEM_H;
+            const H: f32 = crate::ui::MENU_ROW_H;
             // The document's own verbs, above the kit's.
             if item(ui, Item::VersionHistory).clicked() {
                 app.open_menu = TopMenu::None;
@@ -403,7 +403,7 @@ impl OndinApp {
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Stop sharing", crate::ui::FieldButton::On)
+                if crate::settings::text_button(ui, "Stop sharing", crate::ui::FieldButton::Primary)
                     .clicked()
                 {
                     decision = Some(true);
@@ -440,28 +440,37 @@ impl OndinApp {
 /// rather than the component violet, which belongs to selection (§15 D1001,
 /// D1011 (1)).
 ///
-/// **Publish's box exactly** (§15 D1025): 26 tall, 10 in from each end, 7
-/// between glyph and word, the same corner — the two sit side by side and a
-/// 20-tall chip against a 26-tall button read as two different sizes of one
-/// thing.
+/// Publish's box exactly: [`crate::ui::TOOLBAR_H`] tall, 10 in from each end, 7
+/// between glyph and word, the same corner and type — the two sit side by side,
+/// and two heights would read as two sizes of one thing.
 pub(crate) fn kit_tag(ui: &mut egui::Ui) {
-    const H: f32 = 26.0;
     const PAD: f32 = 10.0;
     const GAP: f32 = 7.0;
+    let scale = crate::ui::Scale::Toolbar;
     let ink = color::text_a(191);
-    let glyph = egui::WidgetText::from(theme::icon_text(icon::PACKAGE, 13.0, ink)).into_galley(
-        ui,
-        Some(egui::TextWrapMode::Extend),
-        f32::INFINITY,
-        egui::TextStyle::Body,
-    );
-    let word = ui
-        .ctx()
-        .fonts_mut(|f| f.layout_no_wrap("Kit".into(), egui::FontId::proportional(11.5), ink));
+    let glyph = egui::WidgetText::from(theme::icon_text(icon::PACKAGE, scale.glyph_pt(), ink))
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        );
+    let word = ui.ctx().fonts_mut(|f| {
+        f.layout_no_wrap(
+            "Kit".into(),
+            egui::FontId::proportional(scale.text_pt()),
+            ink,
+        )
+    });
     let w = PAD + glyph.size().x + GAP + word.size().x + PAD;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, H), egui::Sense::hover());
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(w, crate::ui::TOOLBAR_H), egui::Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, egui::CornerRadius::same(6), color::text_a(20));
+    p.rect_filled(
+        rect,
+        egui::CornerRadius::same(crate::ui::BUTTON_R),
+        color::text_a(20),
+    );
     let mid = rect.center().y;
     p.galley(
         egui::pos2(rect.left() + PAD, mid - glyph.size().y / 2.0),

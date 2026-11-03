@@ -231,7 +231,7 @@ impl OndinApp {
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Make local", crate::ui::FieldButton::On)
+                if crate::settings::text_button(ui, "Make local", crate::ui::FieldButton::Primary)
                     .clicked()
                 {
                     decision = Some(true);

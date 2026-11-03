@@ -871,7 +871,6 @@ fn glyph_combo<T: Copy + PartialEq>(
                 .selected_text(job)
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
-                    ui.spacing_mut().button_padding.y = 2.0;
                     if let Some(m) = mark {
                         reset = super::component::menu_reset_row(ui, m);
                     }
@@ -1672,7 +1671,7 @@ impl OndinApp {
             } else {
                 ui::FieldButton::on_if(open)
             };
-            if ui::field_button(ui, icon::SQUARE, side, 15.0, state)
+            if ui::field_button(ui, icon::SQUARE, side, state)
                 .on_hover_text(if uneven {
                     "Padding per side — the sides differ, so they stay open"
                 } else if open {
@@ -2210,15 +2209,21 @@ impl OndinApp {
                             .wrap(),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            undo = ui
-                                .add(
-                                    egui::Label::new(
-                                        egui::RichText::new("Undo")
-                                            .size(11.0)
-                                            .color(color::accent_300()),
-                                    )
-                                    .sense(egui::Sense::click()),
-                                )
+                            // Painted after the press is known, so the word brightens
+                            // under the pointer.
+                            let word = ui.painter().layout_no_wrap(
+                                "Undo".to_owned(),
+                                egui::FontId::proportional(11.0),
+                                egui::Color32::PLACEHOLDER,
+                            );
+                            let (rect, resp) =
+                                ui.allocate_exact_size(word.size(), egui::Sense::click());
+                            let ink = match resp.hovered() {
+                                true => color::accent_200(),
+                                false => color::accent_300(),
+                            };
+                            ui.painter().galley(rect.min, word, ink);
+                            undo = resp
                                 .on_hover_text("Undo the resize — the flips are what made it hold")
                                 .clicked();
                         });
@@ -2253,7 +2258,7 @@ impl OndinApp {
                 ui.painter().rect_stroke(
                     rect,
                     egui::CornerRadius::same(ui::BUTTON_R),
-                    egui::Stroke::new(1.0, color::accent()),
+                    egui::Stroke::new(1.0, color::accent_700()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -2380,21 +2385,19 @@ impl OndinApp {
         let set = shared(items, pattern).map(|p| p.iter().filter(|s| **s).count());
         let key = egui::Id::new("flex-item-limits");
         let open = ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false));
-        let row = ui.horizontal(|ui| {
-            ui.label(theme::icon_text(
-                if open {
-                    icon::CARET_DOWN
-                } else {
-                    icon::CARET_RIGHT
-                },
-                12.0,
-                theme::text::dim(),
-            ));
-            ui.label(
-                egui::RichText::new("Min / max")
-                    .size(11.0)
-                    .color(theme::text::dim()),
-            );
+        // The whole row toggles; registered before the fold head, which wins its own
+        // caret and word and brightens them.
+        let hit = ui.interact(
+            egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(ui.available_width(), ui::FOLD_HEAD_H),
+            ),
+            egui::Id::new("flex-item-limits-row"),
+            egui::Sense::click(),
+        );
+        let mut head_clicked = false;
+        ui.horizontal(|ui| {
+            head_clicked = ui::fold_head(ui, "Min / max", open).0.clicked();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
                     egui::RichText::new(match set {
@@ -2407,12 +2410,7 @@ impl OndinApp {
                 );
             });
         });
-        let hit = ui.interact(
-            row.response.rect,
-            egui::Id::new("flex-item-limits-row"),
-            egui::Sense::click(),
-        );
-        if hit.clicked() {
+        if hit.clicked() || head_clicked {
             ui.ctx().data_mut(|d| d.insert_temp(key, !open));
         }
         if open {
@@ -4415,7 +4413,7 @@ mod tests {
         let a = s.a;
         let mut p = Panel::new(s.app, OndinApp::inspector_item);
         p.app.session.selection.set(vec![a]);
-        let at = p.run("Min / max");
+        let at = p.run("MIN / MAX");
         p.click(at);
         for (label, typed) in [
             ("Min width", "30"),
@@ -5425,7 +5423,7 @@ mod tests {
                 matches!(
                     &cs.shape,
                     egui::epaint::Shape::Rect(r)
-                        if r.stroke.color == color::accent() && r.rect.contains(at)
+                        if r.stroke.color == color::accent_700() && r.rect.contains(at)
                 )
             })
         };

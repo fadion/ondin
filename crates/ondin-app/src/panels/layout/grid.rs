@@ -402,7 +402,6 @@ fn css_field(
         size,
         &mut text,
         if shown.is_none() { ui::MIXED_WORD } else { "" },
-        11.0,
     )
     .on_hover_text(tip);
     ui::select_all_on_focus(ui, &resp, &text);
@@ -878,10 +877,11 @@ impl OndinApp {
             let mut picked = None;
             ui.scope(|ui| {
                 ui.spacing_mut().interact_size.y = side;
+                ui.spacing_mut().button_padding.y = 0.0;
                 egui::ComboBox::from_id_salt(("grid-track-kind", rows, i))
                     .icon(ui::combo_chevron)
                     .width(74.0)
-                    .selected_text(egui::RichText::new(kind.word()).size(11.5))
+                    .selected_text(ui::combo_text(kind.word()))
                     .show_ui(ui, |ui| {
                         ui::menu_rows(ui);
                         for k in KINDS {
@@ -1266,7 +1266,7 @@ impl OndinApp {
                 ui.painter().rect_stroke(
                     at,
                     egui::CornerRadius::same(ui::BUTTON_R),
-                    egui::Stroke::new(1.0, color::accent()),
+                    egui::Stroke::new(1.0, color::accent_700()),
                     egui::StrokeKind::Inside,
                 );
             }

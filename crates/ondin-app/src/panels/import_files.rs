@@ -24,10 +24,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// The card's width, border and padding included: room for a page name and its
 /// count on one line.
 const CARD_W: f32 = 480.0;
-/// The file field and the buttons beside it.
-const FIELD_H: f32 = 32.0;
-/// A tick box's side.
-const TICK: f32 = 14.0;
+/// Where a [`ui::tick_box`]'s label starts from its left edge: its 14pt box and 7pt
+/// gap, so a sentence under the label lines up with it.
+const TICK_TEXT_X: f32 = 14.0 + 7.0;
 /// The tallest the page list grows before it scrolls.
 const PAGES_MAX_H: f32 = 150.0;
 /// The tallest the report's rows grow before they scroll, so a big document's
@@ -1729,7 +1728,7 @@ fn form(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             let state = if ready {
-                FieldButton::On
+                FieldButton::Primary
             } else {
                 FieldButton::Disabled
             };
@@ -1778,10 +1777,9 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                 let before = card.typed.chars().count();
                 let resp = ui::text_field(
                     ui,
-                    egui::vec2(w, FIELD_H),
+                    egui::vec2(w, ui::CONTROL_H),
                     &mut card.typed,
                     "Choose a file, or paste a Figma link",
-                    12.0,
                 );
                 let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let grew = card.typed.chars().count().saturating_sub(before);
@@ -1794,14 +1792,14 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                 }
             }
             Some(((badge, tint), name)) => {
-                ui::field_row_inset(ui, egui::vec2(w, FIELD_H), 6.0, 4.0, |ui| {
+                ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     badge_chip(ui, &badge, tint);
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(name)
-                                .size(12.0)
-                                .color(theme::text::strong()),
+                                .size(ui::CONTROL_PT)
+                                .color(color::text()),
                         )
                         .truncate(),
                     );
@@ -1819,7 +1817,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
         if ui::label_button(
             ui,
             "Browse…",
-            egui::vec2(browse_w, FIELD_H),
+            egui::vec2(browse_w, ui::CONTROL_H),
             FieldButton::Off,
         )
         .clicked()
@@ -1923,46 +1921,52 @@ fn fig_notice(ui: &mut egui::Ui, act: &mut Option<CardAct>) {
 fn token_row(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct>) {
     ui.add_space(GROUP_GAP);
     super::dashboard::field_label(ui, "Personal access token");
-    let fetch_w = 84.0;
+    // Right to left, so *Fetch* is sized to its word and the field takes the rest.
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        let w = ui.available_width() - fetch_w - 8.0;
-        ui::field_row_inset(ui, egui::vec2(w, FIELD_H), 8.0, 4.0, |ui| {
-            let eye_w = 26.0;
-            let font = egui::FontId::proportional(12.0);
-            let pad = ui::edit_frame(ui, &font, FIELD_H - ui::FIELD_BORDER_H, 0.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut card.token)
-                    .password(!card.show_token)
-                    .frame(pad)
-                    .desired_width(ui.available_width() - eye_w)
-                    .font(font)
-                    .hint_text(egui::RichText::new("figd_…").size(12.0)),
-            );
-            let glyph = if card.show_token {
-                icon::EYE_SLASH
-            } else {
-                icon::EYE
-            };
-            if ui::icon_button(ui, glyph, 22.0, 14.0, false, true)
-                .on_hover_text(if card.show_token {
-                    "Hide token"
-                } else {
-                    "Show token"
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Lit only while there is a link to fetch, not once its file is in.
+            let linked = matches!(card.field, Field::Link { .. });
+            let state = FieldButton::enabled_if(linked && !card.token.trim().is_empty());
+            if settings::text_button(ui, "Fetch", state).clicked() && state.is_enabled() {
+                *act = Some(CardAct::Fetch);
+            }
+            let w = ui.available_width();
+            let row = ui.scope(|ui| {
+                ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
+                    let eye_w = 26.0;
+                    let font = egui::FontId::proportional(ui::CONTROL_PT);
+                    let pad = ui::edit_frame(ui, &font, ui::CONTROL_H - ui::FIELD_BORDER_H, 0.0);
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut card.token)
+                            .password(!card.show_token)
+                            .frame(pad)
+                            .desired_width(ui.available_width() - eye_w)
+                            .font(font)
+                            .hint_text(egui::RichText::new("figd_…").size(ui::CONTROL_PT)),
+                    );
+                    let glyph = if card.show_token {
+                        icon::EYE_SLASH
+                    } else {
+                        icon::EYE
+                    };
+                    if ui::icon_button(ui, glyph, 22.0, 14.0, false, true)
+                        .on_hover_text(if card.show_token {
+                            "Hide token"
+                        } else {
+                            "Show token"
+                        })
+                        .clicked()
+                    {
+                        card.show_token = !card.show_token;
+                    }
+                    edit
                 })
-                .clicked()
-            {
-                card.show_token = !card.show_token;
+            });
+            if row.inner.has_focus() {
+                ui::typing_edge(ui, row.response.rect);
             }
         });
-        // Lit only while there is a link to fetch, not once its file is in.
-        let linked = matches!(card.field, Field::Link { .. });
-        let state = FieldButton::enabled_if(linked && !card.token.trim().is_empty());
-        if ui::label_button(ui, "Fetch", egui::vec2(fetch_w, FIELD_H), state).clicked()
-            && state.is_enabled()
-        {
-            *act = Some(CardAct::Fetch);
-        }
     });
     settings::caption(
         ui,
@@ -2100,7 +2104,6 @@ fn name_and_project(
                     egui::vec2(half, settings::FIELD_H),
                     &mut o.name,
                     "Document name",
-                    12.0,
                 );
             });
         }
@@ -2132,7 +2135,6 @@ fn project_picker(ui: &mut egui::Ui, o: &mut Options, projects: &[project::Proje
             .selected_text(selected)
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
-                ui.spacing_mut().button_padding.y = 2.0;
                 ui.selectable_value(&mut o.project, None, dotted("No project", None));
                 for p in projects {
                     ui.selectable_value(
@@ -2260,7 +2262,7 @@ fn counted(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// A tick box, its label, a count against the right margin and, when given, a
+/// A [`ui::tick_box`], a count against the right margin and, when given, a
 /// sentence under the label. Answers whether it was clicked; a row that is not
 /// `enabled` is dimmed and never is.
 fn check_row(
@@ -2271,79 +2273,41 @@ fn check_row(
     on: bool,
     enabled: bool,
 ) -> bool {
-    let w = ui.available_width();
-    let text_x = TICK + 9.0;
-    let fade = if enabled { 1.0 } else { 0.4 };
-    let sub_g = (!sub.is_empty()).then(|| {
-        ui.fonts_mut(|f| {
-            f.layout(
-                sub.to_owned(),
-                egui::FontId::proportional(settings::CAPTION_PT),
-                theme::text::faint().gamma_multiply(fade),
-                w - text_x,
-            )
-        })
-    });
-    let h = 22.0 + sub_g.as_ref().map_or(0.0, |g| g.size().y + 1.0);
-    let sense = if enabled {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), sense);
-    let p = ui.painter();
-    let line = rect.top() + 11.0;
-    // Centred on its line box a label sits low beside the tick; this lifts the ink
-    // to the box's middle.
-    let text_line = line - 1.0;
-    let tick = egui::Rect::from_min_size(
-        egui::pos2(rect.left(), line - TICK / 2.0),
-        egui::vec2(TICK, TICK),
-    );
-    if on {
-        p.rect_filled(tick, 3.0, color::accent().gamma_multiply(fade));
-        p.text(
-            tick.center(),
-            egui::Align2::CENTER_CENTER,
-            icon::CHECK,
-            theme::icon_font(10.0),
-            egui::Color32::WHITE.gamma_multiply(fade),
+    let clicked = ui::disable_unless(ui, enabled, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let mut ticked = on;
+        let w = ui.available_width();
+        let row = ui.allocate_ui_with_layout(
+            egui::vec2(w, ui::MENU_ROW_H),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| ui::tick_box(ui, label, "", &mut ticked).clicked(),
         );
-    } else {
-        let ring = if enabled && resp.hovered() {
-            color::text_a(140)
-        } else {
-            color::text_a(90)
-        };
-        p.rect_stroke(
-            tick,
-            3.0,
-            egui::Stroke::new(1.0, ring.gamma_multiply(fade)),
-            egui::StrokeKind::Inside,
-        );
-    }
-    p.text(
-        egui::pos2(rect.left() + text_x, text_line),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(12.0),
-        theme::text::strong().gamma_multiply(fade),
-    );
-    p.text(
-        egui::pos2(rect.right(), text_line),
-        egui::Align2::RIGHT_CENTER,
-        meta,
-        egui::FontId::proportional(11.0),
-        theme::text::faint(),
-    );
-    if let Some(g) = sub_g {
-        p.galley(
-            egui::pos2(rect.left() + text_x, text_line + 8.0),
-            g,
+        let clicked = row.inner;
+        ui.painter().text(
+            egui::pos2(row.response.rect.left() + w, row.response.rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            meta,
+            egui::FontId::proportional(11.0),
             theme::text::faint(),
         );
-    }
-    enabled && resp.clicked()
+        if !sub.is_empty() {
+            ui.horizontal(|ui| {
+                // Under the label: the tick box's side and its gap.
+                ui.add_space(TICK_TEXT_X);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(sub)
+                            .size(settings::CAPTION_PT)
+                            .color(theme::text::faint()),
+                    )
+                    .wrap(),
+                );
+            });
+        }
+        clicked
+    })
+    .inner;
+    enabled && clicked
 }
 
 /// The copy in progress, in place of the options.
@@ -2438,7 +2402,7 @@ fn done(ui: &mut egui::Ui, o: &Overview, act: &mut Option<CardAct>) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             if o.open.is_some()
-                && settings::text_button(ui, "Open document", FieldButton::On).clicked()
+                && settings::text_button(ui, "Open document", FieldButton::Primary).clicked()
             {
                 *act = Some(CardAct::Open);
             }

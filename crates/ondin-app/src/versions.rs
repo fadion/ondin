@@ -208,31 +208,26 @@ struct RowOut {
     named: bool,
 }
 
-/// The name field over a version's first line, `rect`. Answers `true` once the
-/// field lets go of focus, by Enter, Escape or a press elsewhere; the caller tells
-/// Escape apart.
+/// The name field over a version's first line, `rect` ([`crate::ui::inline_edit`]).
+/// Answers `true` once the field lets go of focus, by Enter, Escape or a press
+/// elsewhere; the caller tells Escape apart.
 fn name_field(ui: &mut egui::Ui, rect: egui::Rect, n: &mut Naming) -> bool {
     let id = egui::Id::new(("version-name", &n.path));
-    let font = egui::FontId::proportional(12.5);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    let pad = crate::ui::edit_frame(
-        &child,
-        &font,
-        rect.height() - crate::ui::FIELD_BORDER_H,
-        0.0,
-    );
-    let resp = crate::ui::field_row_active(&mut child, rect.size(), true, |ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut n.text)
-                .id(id)
-                .hint_text(egui::RichText::new("Name this version").size(12.5))
-                .char_limit(store::LABEL_MAX)
-                // The row is the frame.
-                .frame(pad)
-                .desired_width(f32::INFINITY)
-                .font(font),
-        )
-    });
+    let resp = crate::ui::inline_edit(&mut child, rect, &mut n.text, id);
+    // The store's cap, which `inline_edit` has no `char_limit` for.
+    if let Some((at, _)) = n.text.char_indices().nth(store::LABEL_MAX) {
+        n.text.truncate(at);
+    }
+    if n.text.is_empty() {
+        child.painter().text(
+            egui::pos2(rect.left() + crate::ui::INLINE_EDIT_PAD_X, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Name this version",
+            egui::FontId::proportional(crate::ui::CONTROL_PT),
+            theme::text::faint(),
+        );
+    }
     // Once, through the latch: requesting focus every frame would re-take the caret
     // on the frame that surrendered it, and `lost_focus` would never be true.
     if !n.focused {
@@ -320,14 +315,6 @@ fn summary_runs(s: &Stop, private: bool) -> Option<Vec<(String, egui::Color32)>>
     Some(runs)
 }
 
-/// The *Restore* button's width.
-fn restore_w(ui: &egui::Ui) -> f32 {
-    let text = ui.fonts_mut(|f| {
-        f.layout_no_wrap("Restore".into(), egui::FontId::proportional(11.5), ink(62))
-    });
-    10.0 + 12.0 + 5.0 + text.size().x + 10.0
-}
-
 /// `add` at `rect`, over what `ui` has laid out. Not `Ui::put`, which moves the
 /// cursor to below `rect` — above the row's bottom, so the row would shrink.
 fn placed(
@@ -338,28 +325,23 @@ fn placed(
     add(&mut ui.new_child(egui::UiBuilder::new().max_rect(rect)))
 }
 
-/// A small button with a glyph and a word on the app's button face.
-fn word_button(ui: &mut egui::Ui, rect: egui::Rect, glyph: &str, word: &str) -> egui::Response {
+/// A [`crate::ui::action_button`] with `glyph` and `word`, [`crate::ui::CONTROL_H`]
+/// tall and sized to the word, its left edge at `x` and centred on `cy`.
+fn word_button(ui: &mut egui::Ui, x: f32, cy: f32, glyph: &str, word: &str) -> egui::Response {
+    let rect = word_button_rect(ui, x, cy, word);
     placed(ui, rect, move |ui: &mut egui::Ui| {
-        let (rect, resp, fg) = crate::ui::button_face(ui, rect.size(), crate::ui::FieldButton::Off);
-        let p = ui.painter();
-        let cy = rect.center().y;
-        p.text(
-            egui::pos2(rect.left() + 10.0, cy),
-            egui::Align2::LEFT_CENTER,
-            glyph,
-            theme::icon_font(12.0),
-            fg,
-        );
-        p.text(
-            egui::pos2(rect.left() + 10.0 + 12.0 + 5.0, cy),
-            egui::Align2::LEFT_CENTER,
-            word,
-            egui::FontId::proportional(11.5),
-            fg,
-        );
-        resp
+        let off = crate::ui::FieldButton::Off;
+        crate::ui::action_button(ui, glyph, word, off, rect.size())
     })
+}
+
+/// Where [`word_button`] lays a button for `word` from `x`, centred on `cy`.
+fn word_button_rect(ui: &egui::Ui, x: f32, cy: f32, word: &str) -> egui::Rect {
+    let w = crate::ui::action_button_w(ui.ctx(), word);
+    egui::Rect::from_min_size(
+        egui::pos2(x, cy - crate::ui::CONTROL_H / 2.0),
+        egui::vec2(w, crate::ui::CONTROL_H),
+    )
 }
 
 /// One stop of the timeline: the time, the rail and the stop, the name and the
@@ -466,9 +448,8 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
     let mut right = rect.right();
     let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
     if buttons {
-        let rw = restore_w(ui);
-        let restore =
-            egui::Rect::from_min_size(egui::pos2(right - rw, mid - 12.0), egui::vec2(rw, 24.0));
+        let rw = crate::ui::action_button_w(ui.ctx(), "Restore");
+        let restore = word_button_rect(ui, right - rw, mid, "Restore");
         let pencil = egui::Rect::from_min_size(
             egui::pos2(restore.left() - 6.0 - 24.0, mid - 12.0),
             egui::vec2(24.0, 24.0),
@@ -497,10 +478,14 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
             crate::ui::icon_button(ui, icon::PENCIL_SIMPLE, 24.0, 13.0, editing, !look.private)
         })
         .on_hover_text(tip);
-        let back = word_button(ui, restore, icon::ARROW_COUNTER_CLOCKWISE, "Restore")
-            .on_hover_text(
-                "Make this the document — the current state is kept as the newest version",
-            );
+        let back = word_button(
+            ui,
+            restore.left(),
+            mid,
+            icon::ARROW_COUNTER_CLOCKWISE,
+            "Restore",
+        )
+        .on_hover_text("Make this the document — the current state is kept as the newest version");
         if compare.clicked() && !s.unreadable() {
             out.press = Some(Press::Compare(ui.input(|i| i.modifiers.shift)));
         } else if name.clicked() && !look.private && !editing {
@@ -533,9 +518,11 @@ fn stop_row(ui: &mut egui::Ui, s: &Stop, look: Look) -> RowOut {
     let label_w = right - x0;
     match look.naming {
         Some(n) => {
+            // The text where the name was drawn, the field's inset to its left.
+            let pad = crate::ui::INLINE_EDIT_PAD_X;
             let at = egui::Rect::from_min_size(
-                egui::pos2(x0, rect.top() + 4.0),
-                egui::vec2(label_w, 23.0),
+                egui::pos2(x0 - pad, rect.top() + 4.0),
+                egui::vec2(label_w + pad, 23.0),
             );
             out.named = name_field(ui, at, n);
         }
@@ -702,7 +689,7 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
         }
         None => LIST_LINE_H + 3.0 * (3.0 + LIST_LINE_H),
     };
-    let h = 6.0 + body + 10.0 + 26.0 + 10.0;
+    let h = 6.0 + body + 10.0 + crate::ui::CONTROL_H + 10.0;
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
     let p = ui.painter().clone();
@@ -822,18 +809,10 @@ fn opened_rows(ui: &mut egui::Ui, s: &Stop, private: bool, time: f64, last: bool
     }
     // The footer: the pair as a compare, and which pair it is.
     y += 10.0;
-    let words = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            "Show on canvas".into(),
-            egui::FontId::proportional(11.5),
-            ink(62),
-        )
-    });
-    let bw = 10.0 + 13.0 + 6.0 + words.size().x + 10.0;
-    let button = egui::Rect::from_min_size(egui::pos2(x0, y), egui::vec2(bw, 26.0));
-    let show = word_button(ui, button, icon::GIT_DIFF, "Show on canvas");
+    let cy = y + crate::ui::CONTROL_H / 2.0;
+    let show = word_button(ui, x0, cy, icon::GIT_DIFF, "Show on canvas");
     p.text(
-        egui::pos2(button.right() + 8.0, button.center().y),
+        egui::pos2(show.rect.right() + 8.0, cy),
         egui::Align2::LEFT_CENTER,
         format!("{} against {before}", s.time),
         egui::FontId::proportional(10.5),
@@ -939,14 +918,15 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
             ));
             ui.label(
                 egui::RichText::new("Version history")
-                    .size(13.5)
+                    .size(14.0)
                     .color(theme::text::strong()),
             );
             ui.add(
                 egui::Label::new(egui::RichText::new(title).size(11.5).color(ink(45))).truncate(),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close = crate::ui::icon_button(ui, icon::X, 22.0, 13.0, false, true).clicked();
+                // The settings card's ✕ (`settings::modal_title`).
+                let close = crate::ui::icon_button(ui, icon::X, 18.0, 14.0, false, true).clicked();
                 if let Some((done, all)) = progress {
                     ui.label(
                         egui::RichText::new(format!("Comparing {done} of {all}"))

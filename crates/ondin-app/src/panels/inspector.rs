@@ -712,8 +712,8 @@ const BOOL_ROW_H: f32 = 28.0;
 const BOOL_ROW_GAP: f32 = ui::CARD_COL_GAP;
 /// Glyph size inside the identity row's 28×28 actions.
 const ACTION_GLYPH: f32 = 16.0;
-/// Outer height of the boolean dropdown's menu: the rows come to 166, the rest is
-/// headroom so a retuned row height does not add a scroll area.
+/// Outer height of the boolean dropdown's menu: its rows with headroom, so a
+/// retuned row height does not add a scroll area.
 const BOOL_MENU_H: f32 = 220.0;
 
 /// A full-width hairline parting one group of rows in a dropdown from the next.
@@ -721,9 +721,10 @@ const BOOL_MENU_H: f32 = 220.0;
 /// [`ui::rule`] transposed, including the device-pixel snap. The gaps subtract
 /// `item_spacing.y` back out so they stay absolute.
 pub(super) fn popup_rule(ui: &mut egui::Ui) {
-    /// Clear space above the hairline and below it, measured from the neighbouring row.
-    const ABOVE: f32 = 5.0;
-    const BELOW: f32 = 4.0;
+    // `ui::menu_sep`'s air and ink, measured from the neighbouring row, for a
+    // column whose `item_spacing.y` is not zero.
+    const ABOVE: f32 = ui::SEP_ABOVE;
+    const BELOW: f32 = ui::SEP_BELOW;
     let spacing = ui.spacing().item_spacing.y;
     ui.add_space(ABOVE - spacing);
     let (rect, _) =
@@ -732,7 +733,7 @@ pub(super) fn popup_rule(ui: &mut egui::Ui) {
     let y = ui::hairline_in_column(rect.center().y, ppp, 1.0);
     ui.painter().line_segment(
         [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-        egui::Stroke::new(1.0, theme::color::text_a(26)),
+        egui::Stroke::new(1.0, ui::sep_ink()),
     );
     ui.add_space(BELOW - spacing);
 }
@@ -1289,7 +1290,6 @@ impl OndinApp {
                     ui,
                     icon::ARROW_COUNTER_CLOCKWISE,
                     28.0,
-                    15.0,
                     ui::FieldButton::enabled_if(card.resettable),
                 )
                 .on_hover_text(if card.resettable { live } else { dead })
@@ -1695,7 +1695,6 @@ impl OndinApp {
                     ui,
                     icon::SQUARE_SPLIT_HORIZONTAL,
                     28.0,
-                    15.0,
                     ui::FieldButton::enabled_if(false),
                 )
                 .on_hover_text("Per-corner radii: select the points you want and set each");
@@ -1908,7 +1907,7 @@ impl OndinApp {
                 Some(_) => ui::FieldButton::Off,
                 None => ui::FieldButton::Disabled,
             };
-            let resp = ui::field_button(ui, icon::CORNERS_IN, BOOL_ROW_H, 15.0, state);
+            let resp = ui::field_button(ui, icon::CORNERS_IN, BOOL_ROW_H, state);
             let tip = if fit.is_some() {
                 "Resize to fit content"
             } else {
@@ -2271,7 +2270,6 @@ impl OndinApp {
                 .selected_text(ui::glyph_and_text(icon::CIRCLE_HALF, label))
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
-                    ui.spacing_mut().button_padding.y = 2.0;
                     if let Some(m) = &mark {
                         reset = super::component::menu_reset_row(ui, m);
                     }
@@ -2969,15 +2967,9 @@ impl OndinApp {
                 }
                 // Present and inert: the disclosures are keyed by node, and a
                 // vanishing button would move the fields.
-                ui::field_button(
-                    ui,
-                    icon::CORNERS_SEPARATE,
-                    28.0,
-                    15.0,
-                    ui::FieldButton::Disabled,
-                )
-                .on_hover_text("One rectangle at a time: each corner is set on its own layer");
-                ui::field_button(ui, icon::SQUIRCLE, 28.0, 15.0, ui::FieldButton::Disabled)
+                ui::field_button(ui, icon::CORNERS_SEPARATE, 28.0, ui::FieldButton::Disabled)
+                    .on_hover_text("One rectangle at a time: each corner is set on its own layer");
+                ui::field_button(ui, icon::SQUIRCLE, 28.0, ui::FieldButton::Disabled)
                     .on_hover_text("One rectangle at a time: smoothing is set on its own layer");
             });
         });
@@ -3315,7 +3307,7 @@ impl OndinApp {
                 } else {
                     icon::LINK_SIMPLE_BREAK
                 };
-                if ui::field_button(ui, glyph, 28.0, 15.0, ui::FieldButton::on_if(all_locked))
+                if ui::field_button(ui, glyph, 28.0, ui::FieldButton::on_if(all_locked))
                     .on_hover_text(if all_locked {
                         "Unlock proportions on every selected layer"
                     } else {
@@ -3406,7 +3398,7 @@ impl OndinApp {
             .into_iter()
             .enumerate()
             {
-                if ui::field_button_sized(ui, glyph, bw, 15.0, ui::FieldButton::Off)
+                if ui::field_button_sized(ui, glyph, bw, ui::FieldButton::Off)
                     .on_hover_text(turn_tips[i])
                     .clicked()
                 {
@@ -3424,7 +3416,7 @@ impl OndinApp {
             .into_iter()
             .enumerate()
             {
-                if ui::field_button_sized(ui, glyph, bw, 15.0, ui::FieldButton::Off)
+                if ui::field_button_sized(ui, glyph, bw, ui::FieldButton::Off)
                     .on_hover_text(flip_tips[i])
                     .clicked()
                 {
@@ -4253,7 +4245,7 @@ impl OndinApp {
                     } else {
                         ui::FieldButton::Disabled
                     };
-                    if ui::field_button(ui, glyph, 28.0, 15.0, state)
+                    if ui::field_button(ui, glyph, 28.0, state)
                         .on_hover_text(if !both_px {
                             "Proportions do not lock while a side is sized by a keyword or %"
                         } else if locked {
@@ -4881,7 +4873,6 @@ impl OndinApp {
                     ui,
                     icon::CORNERS_SEPARATE,
                     28.0,
-                    15.0,
                     ui::FieldButton::on_if(per_corner),
                 )
                 .on_hover_text("Set each corner separately")
@@ -4992,7 +4983,7 @@ impl OndinApp {
     }
     /// The button beside a radius that opens the corner smoothing field.
     fn smoothing_toggle(&mut self, ui: &mut egui::Ui, id: NodeId, open: bool) {
-        if ui::field_button(ui, icon::SQUIRCLE, 28.0, 15.0, ui::FieldButton::on_if(open))
+        if ui::field_button(ui, icon::SQUIRCLE, 28.0, ui::FieldButton::on_if(open))
             .on_hover_text("Corner smoothing")
             .clicked()
         {
@@ -5636,7 +5627,6 @@ impl OndinApp {
             if aligns {
                 combo.show_ui(ui, |ui| {
                     ui::menu_rows(ui);
-                    ui.spacing_mut().button_padding.y = 2.0;
                     for a in [
                         StrokeAlign::Center,
                         StrokeAlign::Inside,
@@ -5716,11 +5706,10 @@ impl OndinApp {
                 ui,
                 icon::SLIDERS_HORIZONTAL,
                 28.0,
-                15.0,
                 ui::FieldButton::Disabled,
             )
             .on_hover_text("One stroke at a time: dash, cap and join");
-            ui::field_button(ui, icon::CORNERS_OUT, 28.0, 15.0, ui::FieldButton::Disabled)
+            ui::field_button(ui, icon::CORNERS_OUT, 28.0, ui::FieldButton::Disabled)
                 .on_hover_text("One stroke at a time: which sides the stroke is on");
         });
         if let Some(a) = picked {
@@ -5800,7 +5789,6 @@ impl OndinApp {
                     ui,
                     icon::SLIDERS_HORIZONTAL,
                     28.0,
-                    15.0,
                     ui::FieldButton::on_if(open),
                 )
                 .on_hover_text("Dash, cap and join");
@@ -5811,15 +5799,16 @@ impl OndinApp {
                     out = Some(s);
                 }
                 let state = sides_button_state(sides_apply, shown, stroke.sides);
-                if ui::field_button(ui, icon::CORNERS_OUT, 28.0, 15.0, state)
+                if ui::field_button(ui, icon::CORNERS_OUT, 28.0, state)
                     .on_hover_text(match state {
                         ui::FieldButton::Disabled => "Only a rectangle has four sides".into(),
                         ui::FieldButton::On => "Hide the sides selector".to_string(),
                         ui::FieldButton::Set => format!("Stroke on: {}", sides_label(stroke.sides)),
-                        // `Danger` is unreachable; the arm keeps the match exhaustive.
-                        ui::FieldButton::Off | ui::FieldButton::Danger => {
-                            "Which sides the stroke is on".into()
-                        }
+                        // `Danger` and `Primary` are unreachable; the arm keeps the
+                        // match exhaustive.
+                        ui::FieldButton::Off
+                        | ui::FieldButton::Danger
+                        | ui::FieldButton::Primary => "Which sides the stroke is on".into(),
                     })
                     .clicked()
                     && sides_apply
@@ -5866,7 +5855,6 @@ impl OndinApp {
                 ));
             combo.show_ui(ui, |ui| {
                 ui::menu_rows(ui);
-                ui.spacing_mut().button_padding.y = 2.0;
                 for option in [
                     StrokeSides::All,
                     StrokeSides::Top,
@@ -6245,7 +6233,6 @@ impl OndinApp {
                             .selected_text(ui::glyph_and_text(icon::LINE_SEGMENT, cap_label(cap)))
                             .show_ui(ui, |ui| {
                                 ui::menu_rows(ui);
-                                ui.spacing_mut().button_padding.y = 2.0;
                                 for c in [Cap::Butt, Cap::Round, Cap::Square] {
                                     ui.selectable_value(&mut cap, c, cap_label(c));
                                 }
@@ -6367,7 +6354,6 @@ impl OndinApp {
             ui,
             icon::BOUNDING_BOX,
             cell,
-            14.0,
             ui::FieldButton::on_if(s.dash_fit),
         )
         .on_hover_text("Stretch the pattern so it lands on the corners");
@@ -6394,24 +6380,31 @@ impl OndinApp {
             _ => dash_list_text(&s.dashes),
         };
         let mut out = None;
-        let resp = ui::field_row(ui, egui::vec2(width, cell), |ui| {
-            ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-            ui.label(theme::icon_text(
-                icon::LIST_DASHES,
-                14.0,
-                theme::text::faint(),
-            ));
-            let font = egui::FontId::proportional(11.5);
-            let pad = ui::edit_frame(ui, &font, cell - ui::FIELD_BORDER_H, 0.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut text)
-                    .id(egui::Id::new(("stroke-dash-list", index)))
-                    .desired_width(ui.available_width())
-                    .frame(pad)
-                    .hint_text("5, 10")
-                    .font(font),
-            )
+        // `ui::text_field` has no leading glyph, so its numbers are kept here.
+        let row = ui.scope(|ui| {
+            ui::field_row(ui, egui::vec2(width, cell), |ui| {
+                ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+                ui.label(theme::icon_text(
+                    icon::LIST_DASHES,
+                    ui::CONTROL_GLYPH_PT,
+                    theme::text::faint(),
+                ));
+                let font = egui::FontId::proportional(ui::CONTROL_PT);
+                let pad = ui::edit_frame(ui, &font, cell - ui::FIELD_BORDER_H, 0.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(egui::Id::new(("stroke-dash-list", index)))
+                        .desired_width(ui.available_width())
+                        .frame(pad)
+                        .hint_text(egui::RichText::new("5, 10").size(ui::CONTROL_PT))
+                        .font(font),
+                )
+            })
         });
+        let resp = row.inner;
+        if resp.has_focus() {
+            ui::typing_edge(ui, row.response.rect);
+        }
         // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() parses.
         if resp.gained_focus() || resp.changed() {
             self.stroke_dash_text = Some((index, text.clone()));
@@ -6912,7 +6905,6 @@ impl OndinApp {
                         ui,
                         glyph,
                         button,
-                        15.0,
                         state,
                         mark.as_ref().map(Mark::field),
                     );
@@ -7266,13 +7258,11 @@ impl OndinApp {
                  Type or drag to pin it",
             )
         } else {
-            // The pinned accent, painted after because the field's ground is opaque.
-            ui.painter()
-                .rect_filled(at, 5.0, color::accent().gamma_multiply(0.09));
+            // Pinned: `ui::field_row_active`'s accent border, painted over the field.
             ui.painter().rect_stroke(
                 at,
-                5.0,
-                egui::Stroke::new(1.0, color::accent().gamma_multiply(0.55)),
+                egui::CornerRadius::same(ui::BUTTON_R),
+                egui::Stroke::new(1.0, color::accent_700()),
                 egui::StrokeKind::Inside,
             );
             resp
@@ -7550,7 +7540,7 @@ impl OndinApp {
                 true => icon::EYE,
                 false => icon::EYE_SLASH,
             };
-            if ui::field_button(ui, eye, GRID_CELL, 15.0, ui::FieldButton::Off)
+            if ui::field_button(ui, eye, GRID_CELL, ui::FieldButton::Off)
                 .on_hover_text(match grid.visible {
                     true => "Hide this grid",
                     false => "Show this grid",
@@ -7563,7 +7553,7 @@ impl OndinApp {
             if let Some(state) = item {
                 out.reset = super::component::item_slot(ui, state, hot);
             }
-            if ui::field_button(ui, icon::X, GRID_CELL, 13.0, ui::FieldButton::Off)
+            if ui::field_button(ui, icon::X, GRID_CELL, ui::FieldButton::Off)
                 .on_hover_text("Remove this grid")
                 .clicked()
             {
@@ -8071,7 +8061,7 @@ impl OndinApp {
                     } else {
                         (icon::EYE_SLASH, "Show this paint")
                     };
-                    if ui::field_button(ui, glyph, 28.0, 14.0, ui::FieldButton::Off)
+                    if ui::field_button(ui, glyph, 28.0, ui::FieldButton::Off)
                         .on_hover_text(tip)
                         .clicked()
                     {
@@ -8083,7 +8073,6 @@ impl OndinApp {
                         ui,
                         icon::SCAN,
                         28.0,
-                        14.0,
                         ui::FieldButton::enabled_if(layers > 0),
                     )
                     .on_hover_text(match layers {
@@ -9206,10 +9195,19 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                     let size = egui::vec2(ui.available_width() - 28.0 - ui::CARD_COL_GAP, 28.0);
-                    let hot =
-                        ui.rect_contains_pointer(egui::Rect::from_min_size(ui.cursor().min, size));
+                    let ground = egui::Rect::from_min_size(ui.cursor().min, size);
+                    let hot = ui.rect_contains_pointer(ground);
                     let field = ui.scope(|ui| {
                         field_row_active(ui, size, open, |ui| {
+                            // The row opens its popover, so it takes a button's hover:
+                            // the fill, inside the hairline, under the row's contents.
+                            if hot {
+                                ui.painter().rect_filled(
+                                    ground.shrink(1.0),
+                                    egui::CornerRadius::same(ui::BUTTON_R - 1),
+                                    color::hover(),
+                                );
+                            }
                             ui.spacing_mut().item_spacing.x = 9.0;
                             // The paint rows' grip; only the start is read, since a
                             // carried row's responses are empty.
@@ -9271,7 +9269,7 @@ impl OndinApp {
                     } else {
                         (icon::EYE_SLASH, "Show this effect")
                     };
-                    if ui::field_button(ui, glyph, 28.0, 14.0, ui::FieldButton::Off)
+                    if ui::field_button(ui, glyph, 28.0, ui::FieldButton::Off)
                         .on_hover_text(tip)
                         .clicked()
                     {
@@ -9354,7 +9352,6 @@ impl OndinApp {
                                 ))
                                 .show_ui(ui, |ui| {
                                     ui::menu_rows(ui);
-                                    ui.spacing_mut().button_padding.y = 2.0;
                                     for kind in EffectKind::all_defaults() {
                                         let on = effect.kind.same_kind(&kind);
                                         let row = ui.selectable_label(
@@ -9447,7 +9444,6 @@ impl OndinApp {
                                     ))
                                     .show_ui(ui, |ui| {
                                         ui::menu_rows(ui);
-                                        ui.spacing_mut().button_padding.y = 2.0;
                                         // A shadow is no container: no Pass through.
                                         for mode in &BlendMode::ALL[1..] {
                                             let on = s.blend == *mode;
@@ -9455,8 +9451,9 @@ impl OndinApp {
                                             {
                                                 shadow_blend = Some(*mode);
                                             }
+                                            // An item-spaced list, so not `ui::menu_sep`.
                                             if BlendMode::FAMILY_ENDS.contains(mode) {
-                                                ui::menu_sep(ui);
+                                                popup_rule(ui);
                                             }
                                         }
                                     })
@@ -12365,14 +12362,8 @@ mod stroke_row_tests {
                 ui::field_row(ui, egui::vec2(80.0, 28.0), |ui| {
                     ui.label("1");
                 });
-                ui::field_button(
-                    ui,
-                    icon::SLIDERS_HORIZONTAL,
-                    28.0,
-                    15.0,
-                    ui::FieldButton::Off,
-                );
-                ui::field_button(ui, icon::CORNERS_OUT, 28.0, 15.0, ui::FieldButton::Off);
+                ui::field_button(ui, icon::SLIDERS_HORIZONTAL, 28.0, ui::FieldButton::Off);
+                ui::field_button(ui, icon::CORNERS_OUT, 28.0, ui::FieldButton::Off);
             });
             painted_rows(&out, 20.0..40.0)
         }
@@ -21142,9 +21133,9 @@ mod paint_write_tests {
         assert_eq!(
             popup_rows(&mut app),
             vec![
-                ("Centre".to_string(), egui::pos2(15.0, 40.5)),
-                ("Inside".to_string(), egui::pos2(15.0, 68.5)),
-                ("Outside".to_string(), egui::pos2(15.0, 96.5)),
+                ("Centre".to_string(), egui::pos2(15.0, 41.5)),
+                ("Inside".to_string(), egui::pos2(15.0, 71.5)),
+                ("Outside".to_string(), egui::pos2(15.0, 101.5)),
             ],
             "three real answers, no Mixed, at the mixed row's own coordinates"
         );

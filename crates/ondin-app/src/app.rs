@@ -13,7 +13,7 @@ use crate::preview::{Drag, PenState, PointSet, TextSession};
 use crate::session::{EditorSession, StatusKind};
 use crate::theme::{self, color, icon};
 use crate::tools::Tool;
-use crate::ui::{field_row, icon_button, panel_frame};
+use crate::ui::{icon_button, panel_frame};
 use eframe::egui;
 use ondin_core::kurbo::{Point, Rect, Vec2};
 use ondin_core::{
@@ -6069,8 +6069,12 @@ impl OndinApp {
                 {
                     decision = Some(CloseChoice::Discard);
                 }
-                if crate::settings::text_button(ui, "Save and close", crate::ui::FieldButton::On)
-                    .clicked()
+                if crate::settings::text_button(
+                    ui,
+                    "Save and close",
+                    crate::ui::FieldButton::Primary,
+                )
+                .clicked()
                 {
                     decision = Some(CloseChoice::Save);
                 }
@@ -7142,7 +7146,7 @@ impl OndinApp {
     /// The zoom readout (`62% ⌄`) and the menu it opens; the actions are all on the
     /// keyboard, so the bar only makes them discoverable.
     fn zoom_control(&mut self, ui: &mut egui::Ui) {
-        const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
+        const ITEM_H: f32 = crate::ui::MENU_ROW_H;
         const MENU_W: f32 = 150.0;
 
         let ctx = ui.ctx().clone();
@@ -7191,7 +7195,6 @@ impl OndinApp {
                 egui::vec2(ui.available_width(), ITEM_H),
                 &mut text,
                 "Zoom",
-                11.5,
             );
             if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 // Untouched, it reads the rounded zoom: applying it would nudge the camera.
@@ -7319,7 +7322,7 @@ impl OndinApp {
     /// mode* as a verb last), *Panels ▸* opening the panes beside it on hover, and
     /// *Check contrast*.
     fn view_and_snap_menus(&mut self, ui: &mut egui::Ui) {
-        const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
+        const ITEM_H: f32 = crate::ui::MENU_ROW_H;
         const MENU_W: f32 = 160.0;
 
         let ctx = ui.ctx().clone();
@@ -7462,7 +7465,7 @@ impl OndinApp {
     /// The View menu's *Panels ▸* list beside `row`: a switch per pane, labelled
     /// without the "Show" the palette and the cheatsheet need out of this context.
     fn panels_flyout(&mut self, ctx: &egui::Context, id: egui::Id, row: egui::Rect) {
-        const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
+        const ITEM_H: f32 = crate::ui::MENU_ROW_H;
         let label = |sw: ViewSwitch| match sw {
             ViewSwitch::Layers => "Layers",
             ViewSwitch::History => "History",
@@ -7886,13 +7889,22 @@ impl OndinApp {
                                         .size(11.5)
                                         .color(theme::text::muted()),
                                 );
-                                let button = egui::Button::new(
-                                    egui::RichText::new("Cancel")
-                                        .size(11.5)
-                                        .color(color::accent_300()),
-                                )
-                                .frame(false);
-                                cancel = ui.add(button).clicked();
+                                // A bare word, lit a ramp step under the pointer.
+                                let word = ui.fonts_mut(|f| {
+                                    f.layout_no_wrap(
+                                        "Cancel".into(),
+                                        egui::FontId::proportional(11.5),
+                                        egui::Color32::PLACEHOLDER,
+                                    )
+                                });
+                                let (rect, resp) =
+                                    ui.allocate_exact_size(word.size(), egui::Sense::click());
+                                let ink = match resp.hovered() {
+                                    true => color::accent_200(),
+                                    false => color::accent_300(),
+                                };
+                                ui.painter().galley(rect.min, word, ink);
+                                cancel = resp.clicked();
                             }
                         });
                     });
@@ -8136,17 +8148,13 @@ impl OndinApp {
 
                             if !folded && let Some(filter) = &mut self.layer_filter {
                                 ui.add_space(4.0);
-                                field_row(ui, egui::vec2(ui.available_width(), 28.0), |ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(filter)
-                                            .id(field)
-                                            .hint_text("Name…")
-                                            // The row is the frame.
-                                            .frame(egui::Frame::NONE)
-                                            .desired_width(f32::INFINITY)
-                                            .font(egui::FontId::proportional(12.0)),
-                                    );
-                                });
+                                crate::ui::search_box(
+                                    ui,
+                                    egui::vec2(ui.available_width(), crate::ui::CONTROL_H),
+                                    filter,
+                                    "Name…",
+                                    field,
+                                );
                                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                     self.layer_filter = None;
                                 }
@@ -13925,7 +13933,7 @@ mod library_wiring_tests {
             .filter_map(|s| match &s.shape {
                 egui::Shape::Rect(r)
                     if r.fill == crate::theme::color::text_a(20)
-                        || r.fill == crate::theme::color::accent_800() =>
+                        || r.fill == crate::theme::color::accent() =>
                 {
                     Some(r.rect)
                 }
@@ -14109,7 +14117,7 @@ mod library_wiring_tests {
         let lit = |shapes: &[egui::epaint::ClippedShape], at: egui::Pos2| {
             shapes.iter().any(|s| {
                 matches!(&s.shape, egui::Shape::Rect(r)
-                    if r.rect.height() == crate::ui::MENU_ITEM_H && r.rect.contains(at))
+                    if r.rect.height() == crate::ui::MENU_ROW_H && r.rect.contains(at))
             })
         };
         frame(&mut app, Vec::new());
@@ -16908,11 +16916,16 @@ mod close_confirmation_tests {
         found
     }
 
-    /// Every stroked rect painted in the accent: the card's focus-visible ring.
+    /// Every rect stroked in the accent outside its edge: the card's focus-visible
+    /// ring. The edge separates it from the Primary confirm's own accent hairline.
     fn accent_rings(app: &mut OndinApp, ctx: &egui::Context, events: Vec<egui::Event>) -> usize {
         rects(app, ctx, events)
             .iter()
-            .filter(|r| r.stroke.color == color::accent() && r.stroke.width > 0.0)
+            .filter(|r| {
+                r.stroke.color == color::accent()
+                    && r.stroke.width > 0.0
+                    && r.stroke_kind == egui::StrokeKind::Outside
+            })
             .count()
     }
 

@@ -18,7 +18,7 @@ use crate::app::OndinApp;
 use crate::panels::PaintSlot;
 use crate::panels::picker::Picker;
 use crate::theme::{self, color, icon};
-use crate::ui;
+use crate::ui::{self, MENU_ROW_H};
 use eframe::egui;
 use ondin_core::peniko::Color;
 use ondin_core::style::{self as sty, Style, StyleId, StyleSlot};
@@ -35,17 +35,12 @@ const MAX_COLS: usize = 3;
 /// The panel's height, as the insert picker's (the two swap in place, so neither
 /// jumps), shorter only when the canvas has less room above the button.
 const H: f32 = 460.0;
-const TAB_H: f32 = 22.0;
 const SEARCH_H: f32 = 28.0;
 const HEAD_H: f32 = 24.0;
 const GROUP_H: f32 = 26.0;
 const ROW_H: f32 = 28.0;
 /// A variable row's name indent past its group's caret.
 const INDENT: f32 = 23.0;
-/// An in-place field's text inset from its outline (§15 D1083) — so a field
-/// opened over a label puts the text where the label was.
-const EDIT_PAD_X: f32 = 6.0;
-const MENU_ROW_H: f32 = 26.0;
 const SEARCH_ID: &str = "var-browser-search";
 
 /// The panel's width for `modes` modes.
@@ -1742,40 +1737,21 @@ fn all_lines<'a>(
 
 /// The *Variables* / *Styles* strip.
 fn tabs(ui: &mut egui::Ui, tab: &mut Tab) {
+    const TABS: [(&str, Tab); 2] = [("Variables", Tab::Variables), ("Styles", Tab::Styles)];
     let w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, TAB_H + 4.0), egui::Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 5, color::text_a(13));
-    let cell_w = (rect.width() - 4.0 - 2.0) / 2.0;
-    for (i, (label, t)) in [("Variables", Tab::Variables), ("Styles", Tab::Styles)]
-        .into_iter()
-        .enumerate()
-    {
-        let cell = egui::Rect::from_min_size(
-            rect.min + egui::vec2(2.0 + i as f32 * (cell_w + 2.0), 2.0),
-            egui::vec2(cell_w, TAB_H),
-        );
-        let resp = ui.interact(cell, ui.id().with(("var-tab", i)), egui::Sense::click());
-        let on = *tab == t;
-        if on {
-            ui.painter().rect_filled(cell, 4, color::text_a(33));
-        } else if resp.hovered() {
-            ui.painter().rect_filled(cell, 4, color::text_a(18));
-        }
-        ui.painter().text(
-            cell.center() + egui::vec2(0.0, 0.5),
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(11.0),
-            if on {
-                color::text()
-            } else {
-                theme::text::muted()
-            },
-        );
-        if resp.clicked() {
-            *tab = t;
-        }
+    let selected = TABS.iter().position(|(_, t)| t == tab).unwrap_or(0);
+    let picked = ui::segmented(
+        ui,
+        w,
+        ui::SEGMENT_CELL_H,
+        TABS.len(),
+        selected,
+        |p, i, r, on| {
+            ui::segment_label(p, r, TABS[i].0, on);
+        },
+    );
+    if let Some(i) = picked {
+        *tab = TABS[i].1;
     }
 }
 
@@ -1788,35 +1764,38 @@ fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
             Tab::Variables => "Search variables",
             Tab::Styles => "Search styles",
         };
-        let resp = ui::field_row(ui, egui::vec2(w, SEARCH_H), |ui| {
-            ui.label(theme::icon_text(
-                icon::MAGNIFYING_GLASS,
-                13.0,
-                theme::text::dim(),
-            ));
-            ui.add(
-                egui::TextEdit::singleline(&mut b.query)
-                    .id(egui::Id::new(SEARCH_ID))
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    .font(egui::FontId::proportional(12.0))
-                    .hint_text(egui::RichText::new(hint).size(12.0)),
-            )
-        });
+        let resp = ui::search_box(
+            ui,
+            egui::vec2(w, SEARCH_H),
+            &mut b.query,
+            hint,
+            egui::Id::new(SEARCH_ID),
+        );
         if b.focus {
             b.focus = false;
             resp.request_focus();
         }
-        let toggle =
-            square_button(ui, icon::SELECTION, b.in_selection).on_hover_text(match b.tab {
-                Tab::Variables => "In selection: only the variables the selection uses",
-                Tab::Styles => "In selection: only the styles the selection uses",
-            });
+        let toggle = ui::field_button(
+            ui,
+            icon::SELECTION,
+            SEARCH_H,
+            ui::FieldButton::on_if(b.in_selection),
+        )
+        .on_hover_text(match b.tab {
+            Tab::Variables => "In selection: only the variables the selection uses",
+            Tab::Styles => "In selection: only the styles the selection uses",
+        });
         if toggle.clicked() {
             b.in_selection = !b.in_selection;
         }
-        let add = square_button(ui, icon::PLUS, matches!(b.menu, Some((Menu::Add, _))))
-            .on_hover_text(match b.tab {
+        // Open, the `+` wears an open dropdown's border.
+        let adding = matches!(b.menu, Some((Menu::Add, _)));
+        let add_state = match adding {
+            true => ui::FieldButton::Set,
+            false => ui::FieldButton::Off,
+        };
+        let add =
+            ui::field_button(ui, icon::PLUS, SEARCH_H, add_state).on_hover_text(match b.tab {
                 Tab::Variables => "New variable or mode",
                 // A style is made from a card's values, and the `+` takes
                 // the browser to the variables it can make (§15 D1063). The
@@ -1899,34 +1878,6 @@ fn linked_line(ui: &mut egui::Ui, path: &str, changes: usize) -> bool {
         _ => format!("{path} · click to review what it changed"),
     })
     .clicked()
-}
-
-/// A 28×28 button in the search row, pressed while `on`.
-fn square_button(ui: &mut egui::Ui, glyph: &str, on: bool) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(SEARCH_H, SEARCH_H), egui::Sense::click());
-    let p = ui.painter();
-    let (fill, border, ink) = if on {
-        (color::text_a(36), color::text_a(46), color::text())
-    } else if resp.hovered() {
-        (color::text_a(23), color::text_a(38), theme::text::strong())
-    } else {
-        (color::text_a(13), color::text_a(20), theme::text::muted())
-    };
-    p.rect(
-        rect,
-        5,
-        fill,
-        egui::Stroke::new(1.0, border),
-        egui::StrokeKind::Inside,
-    );
-    p.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        crate::theme::icon_font(14.0),
-        ink,
-    );
-    resp
 }
 
 /// The *Styles* tab (§15 D1063): one group per card, in the inspector's
@@ -2134,12 +2085,6 @@ fn style_group_row(
             egui::pos2(rect.right() - 40.0, rect.bottom() - 2.0),
         );
         let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
-        ui.painter().rect_stroke(
-            r,
-            4,
-            egui::Stroke::new(1.0, color::accent()),
-            egui::StrokeKind::Outside,
-        );
         if b.edit_focus {
             b.edit_focus = false;
             resp.request_focus();
@@ -2236,12 +2181,6 @@ fn describe_row(
     }
     let id = ui.id().with(("describe", of));
     let field = edit_field(ui, r, text, id, 11.5, Some("Description"), None);
-    ui.painter().rect_stroke(
-        r,
-        4,
-        egui::Stroke::new(1.0, color::accent()),
-        egui::StrokeKind::Outside,
-    );
     if b.edit_focus {
         b.edit_focus = false;
         field.request_focus();
@@ -2293,12 +2232,6 @@ fn style_row(
         && *style == s.id
     {
         let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
-        ui.painter().rect_stroke(
-            r,
-            4,
-            egui::Stroke::new(1.0, color::accent()),
-            egui::StrokeKind::Outside,
-        );
         if b.edit_focus {
             b.edit_focus = false;
             resp.request_focus();
@@ -2388,12 +2321,6 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
         {
             let r = cell.shrink2(egui::vec2(3.0, 2.0)).intersect(clip);
             let resp = edit_field(ui, r, text, id.with("edit"), 11.0, None, refused.as_deref());
-            ui.painter().rect_stroke(
-                r,
-                4,
-                egui::Stroke::new(1.0, color::accent()),
-                egui::StrokeKind::Outside,
-            );
             if b.edit_focus {
                 b.edit_focus = false;
                 resp.request_focus();
@@ -2462,12 +2389,6 @@ fn group_row(
             egui::vec2(NAME_W - 26.0, GROUP_H - 4.0),
         );
         let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
-        ui.painter().rect_stroke(
-            r,
-            4,
-            egui::Stroke::new(1.0, color::accent()),
-            egui::StrokeKind::Outside,
-        );
         if b.edit_focus {
             b.edit_focus = false;
             resp.request_focus();
@@ -2589,12 +2510,6 @@ fn var_row(
             Some("name, / to group"),
             refused.as_deref(),
         );
-        ui.painter().rect_stroke(
-            r,
-            4,
-            egui::Stroke::new(1.0, color::accent()),
-            egui::StrokeKind::Outside,
-        );
         if b.edit_focus {
             b.edit_focus = false;
             field.request_focus();
@@ -2696,7 +2611,6 @@ fn var_row(
                 unreachable!()
             };
             let r = cell.shrink2(egui::vec2(3.0, 3.0)).intersect(clip);
-            ui.painter().rect_filled(r, 4, color::text_a(13));
             let field = edit_field(
                 ui,
                 r,
@@ -2705,12 +2619,6 @@ fn var_row(
                 11.0,
                 None,
                 refused.as_deref(),
-            );
-            ui.painter().rect_stroke(
-                r,
-                4,
-                egui::Stroke::new(1.0, color::accent()),
-                egui::StrokeKind::Outside,
             );
             if b.edit_focus {
                 b.edit_focus = false;
@@ -3109,10 +3017,10 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
             let galley = p.layout_job(job);
             let w = (galley.size().x + 14.0).min(MODE_W - 12.0);
             let cap = egui::Rect::from_min_size(
-                egui::pos2(cell.left() + 6.0, y - 9.0),
-                egui::vec2(w, 18.0),
+                egui::pos2(cell.left() + 6.0, y - 10.0),
+                egui::vec2(w, 20.0),
             );
-            p.rect_filled(cap, 9, color::text_a(28));
+            p.rect_filled(cap, 10, color::text_a(28));
             p.with_clip_rect(cap.shrink2(egui::vec2(7.0, 0.0))).galley(
                 egui::pos2(cap.left() + 7.0, y - galley.size().y / 2.0 + 0.5),
                 galley,
@@ -3178,8 +3086,10 @@ fn scroll_bar(ctx: &egui::Context, panel: egui::Rect, modes: usize, b: &mut Brow
 /// `underline_refusal`), and the sentence above the table says why. A keystroke
 /// makes it ordinary text again.
 ///
-/// `r` is the field's outline; the text sits [`EDIT_PAD_X`] inside it, centred
-/// on its height.
+/// `r` is the field: [`ui::inline_edit`]'s ground, its text
+/// [`ui::INLINE_EDIT_PAD_X`] inside and centred on its height, and
+/// [`ui::typing_edge`] while it holds focus. Not `inline_edit` itself, which
+/// takes no layouter for the refusal or a hint.
 fn edit_field(
     ui: &mut egui::Ui,
     r: egui::Rect,
@@ -3200,15 +3110,15 @@ fn edit_field(
             ui,
             &egui::FontId::proportional(pt),
             r.height(),
-            EDIT_PAD_X,
+            ui::INLINE_EDIT_PAD_X,
         ))
         .font(egui::FontId::proportional(pt))
         .layouter(&mut layouter);
     if let Some(h) = hint {
         edit = edit.hint_text(h);
     }
-    // **Over the whole of `r`, which is the outline the caller strokes, its text
-    // inset and centred by the edit's own frame** (`ui::edit_frame`):
+    // **Over the whole of `r`, its text inset and centred by the edit's own
+    // frame** (`ui::edit_frame`):
     // `centered_and_justified` stretches the edit to the box with its row at the
     // top, so the padding is what centres it, and being the edit's, it takes a
     // press anywhere in the box.
@@ -3216,12 +3126,17 @@ fn edit_field(
     // advances the cursor past what it drew, and a field inside a row the
     // caller had already allocated put the cursor back *above* that row's
     // bottom — the table under a mode being renamed came up five points.
+    ui.painter()
+        .rect_filled(r, egui::CornerRadius::same(ui::BUTTON_R), color::field());
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(
         egui::Layout::centered_and_justified(egui::Direction::TopDown),
     ));
     let out = edit.show(&mut child);
     let at = (refused == Some(text.as_str())).then_some(0);
     super::binding::underline_refusal(ui, &out, at);
+    if out.response.response.has_focus() {
+        ui::typing_edge(ui, r);
+    }
     out.response.response
 }
 
@@ -3344,29 +3259,20 @@ impl OndinApp {
                 reset = lresp.on_hover_text(&m.tip).clicked();
             }
             let w = ui.available_width();
-            let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
-            let p = ui.painter();
-            let border = if open {
-                color::accent().gamma_multiply(0.65)
-            } else if resp.hovered() {
-                color::text_a(38)
-            } else {
-                color::text_a(20)
+            // A dropdown's face: open, it wears the `accent_700` border.
+            let state = match open {
+                true => ui::FieldButton::Set,
+                false => ui::FieldButton::Off,
             };
-            p.rect(
-                rect,
-                5,
-                color::text_a(13),
-                egui::Stroke::new(1.0, border),
-                egui::StrokeKind::Inside,
-            );
+            let (rect, resp, _) = ui::button_face(ui, egui::vec2(w, ui::CONTROL_H), state);
+            let p = ui.painter();
             let ink = if set {
                 color::text()
             } else {
-                color::text_a(128)
+                theme::text::muted()
             };
-            let galley = p.layout_no_wrap(value, egui::FontId::proportional(12.0), ink);
-            let x = rect.left() + 9.0;
+            let galley = p.layout_no_wrap(value, egui::FontId::proportional(ui::CONTROL_PT), ink);
+            let x = rect.left() + ui::FIELD_PAD_X;
             let gw = galley.size().x;
             p.galley(
                 egui::pos2(x, rect.center().y - galley.size().y / 2.0),
@@ -3379,15 +3285,15 @@ impl OndinApp {
                     egui::Align2::LEFT_CENTER,
                     s,
                     egui::FontId::proportional(10.5),
-                    color::text_a(89),
+                    theme::text::faint(),
                 );
             }
             p.text(
-                egui::pos2(rect.right() - 9.0, rect.center().y),
+                egui::pos2(rect.right() - ui::FIELD_PAD_X, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 icon::CARET_DOWN,
-                crate::theme::icon_font(12.0),
-                theme::text::dim(),
+                crate::theme::icon_font(ui::COMBO_CHEVRON_PT),
+                ui::combo_chevron_ink(),
             );
             let resp = resp.on_hover_text(match (page, set) {
                 (false, true) => "The mode this frame sets for itself and everything in it",

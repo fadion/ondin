@@ -297,7 +297,7 @@ const MENU_ACCEL_GAP: f32 = 2.0;
 ///
 /// [`menu_sep`] allocates it and `menu::height` sums it before the menu is shown;
 /// `a_menus_computed_height_is_the_height_it_paints` pins the two together.
-pub const MENU_SEP_H: f32 = 1.0 + SEP_AIR * 2.0;
+pub const MENU_SEP_H: f32 = SEP_ABOVE + 1.0 + SEP_BELOW;
 
 /// [`menu_frame`]'s border, on every side.
 ///
@@ -315,14 +315,22 @@ pub const fn menu_inner_w(card: f32, pad: f32) -> f32 {
     card - pad * 2.0 - MENU_BORDER * 2.0
 }
 
-/// The air above and below a separator's rule.
-const SEP_AIR: f32 = 3.0;
+/// The air above a separator's rule.
+pub const SEP_ABOVE: f32 = 5.0;
+/// The air below it.
+pub const SEP_BELOW: f32 = 4.0;
+/// A separator's ink.
+pub fn sep_ink() -> egui::Color32 {
+    theme::color::text_a(26)
+}
 
-/// The hairline between two groups of a menu (`docs/context-menus.md` §8).
+/// The hairline between two groups of any list: a menu (`docs/context-menus.md`
+/// §8) or a dropdown's.
 ///
-/// One point of `text_a(20)` with [`SEP_AIR`] either side, snapped to whole device
-/// pixels and inside [`MENU_SEP_H`]
-/// (`the_rule_still_fits_the_height_the_menu_reserved_for_it`).
+/// One point of [`sep_ink`] with [`SEP_ABOVE`] and [`SEP_BELOW`] around it, snapped
+/// to whole device pixels and inside [`MENU_SEP_H`]
+/// (`the_rule_still_fits_the_height_the_menu_reserved_for_it`). It allocates
+/// exactly, so call it with `item_spacing.y` zero (a menu's rows are).
 pub fn menu_sep(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), MENU_SEP_H),
@@ -331,14 +339,14 @@ pub fn menu_sep(ui: &mut egui::Ui) {
     let ppp = ui.ctx().pixels_per_point();
     // A point, in whole device pixels, never thinner than one.
     let weight = (1.0 * ppp).round().max(1.0) / ppp;
-    let y = (rect.center().y * ppp).round() / ppp;
+    let y = ((rect.top() + SEP_ABOVE) * ppp).round() / ppp;
     ui.painter().rect_filled(
         egui::Rect::from_min_max(
             egui::pos2(rect.left(), y),
             egui::pos2(rect.right(), y + weight),
         ),
         0,
-        theme::color::text_a(20),
+        sep_ink(),
     );
 }
 
@@ -693,6 +701,61 @@ pub const CONTROL_H: f32 = 28.0;
 /// The track adds two points of padding above and below; its hairline comes out
 /// of the cells ([`SEGMENT_BORDER`]).
 pub const SEGMENT_CELL_H: f32 = CONTROL_H - 4.0;
+
+/// Type size of the text in a control: a button's word, a field's value, a
+/// dropdown's choice and its list rows (egui's `TextStyle::Button`).
+pub const CONTROL_PT: f32 = 12.0;
+
+/// Size of a glyph in a [`CONTROL_H`] control: a field button's, a prefix's, a
+/// segment's, a dropdown's leading glyph. The dropdown chevron is
+/// [`COMBO_CHEVRON_PT`].
+pub const CONTROL_GLYPH_PT: f32 = 15.0;
+
+/// How tall a control is in a bar laid over the canvas (Compare, Contrast) or a
+/// top-bar pill: [`Scale::Toolbar`].
+pub const TOOLBAR_H: f32 = 24.0;
+
+/// [`SEGMENT_CELL_H`]'s twin for a [`TOOLBAR_H`] track.
+pub const TOOLBAR_CELL_H: f32 = TOOLBAR_H - 4.0;
+
+/// The two control scales. Everything is [`Scale::Card`] but the bars over the
+/// canvas; a primitive reads its glyph and type sizes off the height it is given,
+/// so a caller cannot pick a size of its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scale {
+    /// [`CONTROL_H`]: cards, popovers, dialogs, the dashboard.
+    Card,
+    /// [`TOOLBAR_H`]: the bars over the canvas and the top bar's pills.
+    Toolbar,
+}
+
+impl Scale {
+    /// The scale a control `h` tall belongs to: anything shorter than
+    /// [`CONTROL_H`] is drawn at the toolbar's sizes.
+    pub fn of(h: f32) -> Self {
+        if h < CONTROL_H - 0.5 {
+            Self::Toolbar
+        } else {
+            Self::Card
+        }
+    }
+
+    /// A glyph's size at this scale.
+    pub fn glyph_pt(self) -> f32 {
+        match self {
+            Self::Card => CONTROL_GLYPH_PT,
+            Self::Toolbar => 14.0,
+        }
+    }
+
+    /// A control's text size at this scale.
+    pub fn text_pt(self) -> f32 {
+        match self {
+            Self::Card => CONTROL_PT,
+            Self::Toolbar => 11.5,
+        }
+    }
+}
 
 /// The gap between two controls side by side in one row — [`CARD_ROW_GAP`]'s
 /// horizontal twin, set by the gap between the Transform card's X and Y.
@@ -1233,25 +1296,231 @@ pub fn field_row_active<R>(
 /// else draws. A custom frame turns the ring off but also drops `TextEdit::margin`
 /// (read only when no frame was passed), so padding goes in the frame
 /// ([`edit_frame`]), which covers the whole row.
-/// `size.y` is the painted ground, hairline included — see [`field_row`].
+/// `size.y` is the painted ground, hairline included — see [`field_row`]. Its type
+/// is the row's [`Scale`]'s, and it wears [`typing_edge`] while it holds focus.
 pub fn text_field(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     text: &mut String,
     hint: &str,
-    pt: f32,
 ) -> egui::Response {
+    let pt = Scale::of(size.y).text_pt();
     let font = egui::FontId::proportional(pt);
     let frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
-    field_row_inset(ui, size, 0.0, 0.0, |ui| {
-        ui.add(
-            egui::TextEdit::singleline(text)
-                .frame(frame)
-                .desired_width(f32::INFINITY)
-                .font(font)
-                .hint_text(egui::RichText::new(hint).size(pt)),
-        )
-    })
+    let scope = ui.scope(|ui| {
+        field_row_inset(ui, size, 0.0, 0.0, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(text)
+                    .frame(frame)
+                    .desired_width(f32::INFINITY)
+                    .font(font)
+                    .hint_text(egui::RichText::new(hint).size(pt)),
+            )
+        })
+    });
+    if scope.inner.has_focus() {
+        typing_edge(ui, scope.response.rect);
+    }
+    scope.inner
+}
+
+/// Typing focus: the `accent_700` hairline on a text entry's own edge while it
+/// holds focus, however it got it. Every field a person types in wears it —
+/// value, text, search, rename — painted after the field, over its own hairline.
+pub fn typing_edge(ui: &egui::Ui, rect: egui::Rect) {
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(BUTTON_R),
+        egui::Stroke::new(1.0, color::accent_700()),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// A dropdown's closed face when its choice has no glyph: the word at
+/// [`CONTROL_PT`] in the value ink, [`glyph_and_text`]'s glyphless twin.
+pub fn combo_text(text: &str) -> egui::WidgetText {
+    egui::RichText::new(text)
+        .size(CONTROL_PT)
+        .color(color::text())
+        .into()
+}
+
+/// A search field that stands on its own (a panel's, a dialog's, the dashboard's),
+/// rather than heading a dropdown's list ([`search_field`]): [`text_field`]'s
+/// ground and [`typing_edge`], with a faint magnifier before the text. A press on
+/// the magnifier focuses the field too.
+pub fn search_box(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    text: &mut String,
+    hint: &str,
+    id: egui::Id,
+) -> egui::Response {
+    let scale = Scale::of(size.y);
+    let pt = scale.text_pt();
+    let font = egui::FontId::proportional(pt);
+    let mut frame = edit_frame(ui, &font, size.y - FIELD_BORDER_H, FIELD_PAD_X);
+    frame.inner_margin.left = 0;
+    let scope = ui.scope(|ui| {
+        field_row_inset(ui, size, FIELD_PAD_X, 0.0, |ui| {
+            // Registered first, so the edit above it wins its own area and this
+            // takes only the magnifier's.
+            let row = ui.interact(ui.max_rect(), id.with("row"), egui::Sense::click());
+            ui.label(theme::icon_text(
+                icon::MAGNIFYING_GLASS,
+                scale.glyph_pt(),
+                theme::text::faint(),
+            ));
+            let edit = ui.add(
+                egui::TextEdit::singleline(text)
+                    .id(id)
+                    .frame(frame)
+                    .desired_width(f32::INFINITY)
+                    .font(font)
+                    .hint_text(egui::RichText::new(hint).size(pt)),
+            );
+            if row.clicked() {
+                edit.request_focus();
+            }
+            edit
+        })
+    });
+    if scope.inner.has_focus() {
+        typing_edge(ui, scope.response.rect);
+    }
+    scope.inner
+}
+
+/// The inset of an [`inline_edit`]'s text from its rect's left edge; a caller
+/// places the rect this far left of where the label it replaces was drawn.
+pub const INLINE_EDIT_PAD_X: f32 = 6.0;
+
+/// A rename field laid over a list row (a layer, a page, a document card): the
+/// field ground filling `rect`, the row's own height rather than [`CONTROL_H`],
+/// text at [`CONTROL_PT`], and [`typing_edge`] while it holds focus.
+pub fn inline_edit(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    text: &mut String,
+    id: egui::Id,
+) -> egui::Response {
+    let font = egui::FontId::proportional(CONTROL_PT);
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(BUTTON_R), color::field());
+    let frame = edit_frame(ui, &font, rect.height(), INLINE_EDIT_PAD_X);
+    let resp = ui.put(
+        rect,
+        egui::TextEdit::singleline(text)
+            .id(id)
+            .frame(frame)
+            .desired_width(rect.width() - INLINE_EDIT_PAD_X * 2.0)
+            .font(font),
+    );
+    if resp.has_focus() {
+        typing_edge(ui, rect);
+    }
+    resp
+}
+
+/// A tick box, its label and an optional faint note after it, one
+/// [`MENU_ROW_H`] row whose whole width is the target and a tab stop.
+pub fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) -> egui::Response {
+    /// The box, and the gaps after it and after the label.
+    const BOX: f32 = 14.0;
+    const GAP: f32 = 7.0;
+    const NOTE_GAP: f32 = 5.0;
+    let font = egui::FontId::proportional(CONTROL_PT);
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), color::text()));
+    let note_g = ui.fonts_mut(|f| f.layout_no_wrap(note.to_owned(), font, theme::text::faint()));
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(
+            BOX + GAP + galley.size().x + NOTE_GAP + note_g.size().x,
+            MENU_ROW_H,
+        ),
+        egui::Sense::click(),
+    );
+    let p = ui.painter();
+    let tick = egui::Rect::from_min_size(
+        egui::pos2(rect.left(), rect.center().y - BOX / 2.0),
+        egui::vec2(BOX, BOX),
+    );
+    if *on {
+        p.rect_filled(tick, 3.0, color::accent());
+        p.text(
+            tick.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::CHECK,
+            theme::icon_font(10.0),
+            color::accent_ink(),
+        );
+    } else {
+        let ring = match resp.hovered() {
+            true => color::text_a(140),
+            false => color::text_a(90),
+        };
+        p.rect_stroke(
+            tick,
+            3.0,
+            egui::Stroke::new(1.0, ring),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let x = tick.right() + GAP;
+    let w = galley.size().x;
+    p.galley(
+        egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        color::text(),
+    );
+    p.galley(
+        egui::pos2(x + w + NOTE_GAP, rect.center().y - note_g.size().y / 2.0),
+        note_g,
+        theme::text::faint(),
+    );
+    if resp.clicked() {
+        *on = !*on;
+    }
+    resp
+}
+
+/// The side of a [`field_toggle`]: a segment cell's height, so a toggle inside a
+/// field lights as a [`segmented`] cell does.
+pub const FIELD_TOGGLE: egui::Vec2 = egui::vec2(24.0, CONTROL_H - 6.0);
+
+/// A switch that lives inside a text field (Find's and Batch rename's `Aa`, `.*`,
+/// `Ab`): lit as a [`segmented`] cell is, with `text` at 11pt (`mono` for the
+/// regex dot-star). Flips `on` on a click; `tip` says what it matches.
+pub fn field_toggle(
+    ui: &mut egui::Ui,
+    text: &str,
+    tip: &str,
+    on: &mut bool,
+    mono: bool,
+) -> egui::Response {
+    let font = match mono {
+        true => egui::FontId::monospace(11.0),
+        false => egui::FontId::proportional(11.0),
+    };
+    let (rect, resp) = ui.allocate_exact_size(FIELD_TOGGLE, egui::Sense::click());
+    segment_ground(ui.painter(), rect, *on, resp.hovered());
+    let ink = match *on {
+        true => color::text(),
+        false => theme::text::dim(),
+    };
+    ui.painter()
+        .text(rect.center(), egui::Align2::CENTER_CENTER, text, font, ink);
+    let resp = resp.on_hover_text(tip);
+    if resp.clicked() {
+        *on = !*on;
+    }
+    resp
+}
+
+/// A selectable row's ground in a list that is not a dropdown (Find's results,
+/// the compare list, a picker's faces): lit as a [`segmented`] cell is when it is
+/// the current one, [`color::hover`] under the pointer, at a menu row's radius.
+pub fn list_row_ground(painter: &egui::Painter, rect: egui::Rect, lit: bool, hovered: bool) {
+    segment_ground(painter, rect, lit, hovered);
 }
 
 /// The frame a frameless `TextEdit` in a field row takes: padding that makes the
@@ -1699,28 +1968,23 @@ pub const DROPDOWN_GAP: f32 = 2.0;
 /// egui 0.35 sizes a `Button`'s margin as `button_padding − bg_stroke.width` and
 /// puts the stroke back on a hovered row, so rows would shift on hover. Zeroing
 /// `bg_stroke` on all four states makes both branches identical; the fill is the
-/// hover cue. [`MENU_ROW_H`] is the height floor.
+/// hover cue. [`MENU_ROW_H`] is the height floor, and the padding is set here
+/// because a `ComboBox` list is built from the global style, not from the scope
+/// its face was drawn in.
 pub fn popup_rows(ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size.y = MENU_ROW_H;
+    ui.spacing_mut().button_padding.y = 2.0;
     let w = &mut ui.visuals_mut().widgets;
     for state in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
         state.bg_stroke = egui::Stroke::NONE;
+        state.corner_radius = egui::CornerRadius::same(4);
     }
 }
 
-/// Height of one row in a dropdown's menu: a floor over the natural height.
-///
-/// A floor only raises: a `selectable_label` is 23 at the theme's `button_padding.y`
-/// of 4, which would ignore 22. Every dropdown sets that padding to 0 or 2 first; a
-/// new caller that does not gets a 23pt row with no error
-/// (`a_menu_rows_height_does_not_depend_on_its_state`).
-pub const MENU_ROW_H: f32 = 22.0;
-
-/// Height of one row in a menu that allocates its rows exactly: the context menus
-/// (`docs/context-menus.md` §8) and the top bar's View and Snap menus. Two points
-/// taller than a dropdown row ([`MENU_ROW_H`]) for the glyph and accelerator
-/// column; unlike that floor, an argument to [`menu_row`] and [`menu_item`].
-pub const MENU_ITEM_H: f32 = 24.0;
+/// Height of every list row: a dropdown's (a floor over the natural height, set by
+/// [`popup_rows`]) and a menu's that allocates its rows exactly (the context menus,
+/// `docs/context-menus.md` §8, and the top bar's menus), glyph column or not.
+pub const MENU_ROW_H: f32 = 24.0;
 
 /// The air between a button and the menu it opens (the top bar's menus and the
 /// inspector's popup menus), which `egui::Popup::menu` leaves at none.
@@ -1797,7 +2061,7 @@ pub fn glyph_and_text_tinted(
         glyph,
         0.0,
         egui::TextFormat {
-            font_id: theme::icon_font(15.0),
+            font_id: theme::icon_font(CONTROL_GLYPH_PT),
             color: glyph_col,
             valign: egui::Align::Center,
             ..Default::default()
@@ -1807,7 +2071,7 @@ pub fn glyph_and_text_tinted(
         text,
         7.0,
         egui::TextFormat {
-            font_id: egui::FontId::proportional(12.0),
+            font_id: egui::FontId::proportional(CONTROL_PT),
             color: color::text(),
             valign: egui::Align::Center,
             ..Default::default()
@@ -2379,12 +2643,7 @@ fn value_field_f64_marked(
 
     // Painted after the row, on top of the field's own hairline.
     if scope.inner.0.has_focus() {
-        ui.painter().rect_stroke(
-            scope.response.rect,
-            egui::CornerRadius::same(5),
-            egui::Stroke::new(1.0, color::accent_700()),
-            egui::StrokeKind::Inside,
-        );
+        typing_edge(ui, scope.response.rect);
     }
     let (resp, unit) = scope.inner;
     (resp, unit, reset)
@@ -2558,8 +2817,13 @@ pub enum FieldButton {
     /// ignore the click; this only draws the state.
     Disabled,
     /// [`FieldButton::On`] in red, on [`theme::color`]'s danger ramp: the
-    /// confirming button of a card that destroys something. Loud at rest.
+    /// confirming button of a card that destroys something. Quieter than
+    /// [`FieldButton::Primary`], so a destructive confirm is never the loudest.
     Danger,
+    /// A surface's one main action (a dialog's confirm, *New file*, *Publish*):
+    /// the solid accent and [`theme::color::accent_ink`]. An action, where
+    /// [`FieldButton::On`] is a state, so the two look different.
+    Primary,
 }
 
 impl FieldButton {
@@ -2650,15 +2914,15 @@ fn is_tab(event: &egui::Event) -> bool {
 
 /// A square button that sits *in* a field row rather than floating on the card:
 /// the recessed ground and hairline of [`field_frame`], sized to match the value
-/// fields beside it (the flip and per-corner buttons, 28×28).
+/// fields beside it (the flip and per-corner buttons, 28×28). The glyph's size is
+/// the box's [`Scale`]'s, never the caller's.
 pub fn field_button(
     ui: &mut egui::Ui,
     glyph: &str,
     box_size: f32,
-    glyph_size: f32,
     state: FieldButton,
 ) -> egui::Response {
-    field_button_sized(ui, glyph, egui::vec2(box_size, box_size), glyph_size, state)
+    field_button_sized(ui, glyph, egui::vec2(box_size, box_size), state)
 }
 
 /// [`field_button`] on a box that need not be square — the Transform panel's row
@@ -2667,7 +2931,6 @@ pub fn field_button_sized(
     ui: &mut egui::Ui,
     glyph: &str,
     box_size: egui::Vec2,
-    glyph_size: f32,
     state: FieldButton,
 ) -> egui::Response {
     let (rect, resp, fg) = button_face(ui, box_size, state);
@@ -2675,7 +2938,7 @@ pub fn field_button_sized(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         glyph,
-        theme::icon_font(glyph_size),
+        theme::icon_font(Scale::of(box_size.y).glyph_pt()),
         fg,
     );
     resp
@@ -2689,10 +2952,10 @@ pub fn field_button_marked(
     ui: &mut egui::Ui,
     glyph: &str,
     box_size: egui::Vec2,
-    glyph_size: f32,
     state: FieldButton,
     mark: Option<FieldMark<'_>>,
 ) -> (egui::Response, bool) {
+    let glyph_size = Scale::of(box_size.y).glyph_pt();
     let (rect, resp, fg) = button_face(ui, box_size, state);
     let Some(m) = mark else {
         ui.painter().text(
@@ -2743,7 +3006,7 @@ pub fn label_button(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         text,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(Scale::of(box_size.y).text_pt()),
         fg,
     );
     resp
@@ -2761,8 +3024,8 @@ fn resting_ink(ui: &egui::Ui, enabled: bool) -> egui::Color32 {
 
 /// The ground, hairline and hover treatment every field-row button shares, and
 /// the colour its content should be drawn in. Its corner is [`BUTTON_R`], which a
-/// caller repainting over the face (the dashboard's *Delete project* wash) must
-/// match. `pub` for callers whose content is neither a glyph nor a word.
+/// caller painting over the face must match. `pub` for callers whose content is
+/// neither a glyph nor a word.
 pub fn button_face(
     ui: &mut egui::Ui,
     box_size: egui::Vec2,
@@ -2780,6 +3043,8 @@ pub fn button_face(
         (FieldButton::On, true) => (color::accent_800(), color::accent_200()),
         (FieldButton::Danger, false) => (color::danger_900(), color::danger_200()),
         (FieldButton::Danger, true) => (color::danger_800(), color::danger_200()),
+        (FieldButton::Primary, false) => (color::accent(), color::accent_ink()),
+        (FieldButton::Primary, true) => (color::accent_400(), color::accent_ink()),
         (_, true) => (color::hover(), color::text()),
         (FieldButton::Disabled, false) => (color::field(), dead),
         (_, false) => (color::field(), theme::text::muted()),
@@ -2793,6 +3058,10 @@ pub fn button_face(
             match state {
                 FieldButton::On | FieldButton::Set => color::accent_700(),
                 FieldButton::Danger => color::danger_700(),
+                FieldButton::Primary => match hovered {
+                    true => color::accent_400(),
+                    false => color::accent(),
+                },
                 FieldButton::Off | FieldButton::Disabled => color::field_border(),
             },
         ),
@@ -2834,12 +3103,12 @@ pub fn labelled<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::U
 /// fields use at both ends of their number.
 const ACTION_GAP: f32 = 7.0;
 /// An [`action_button`]'s leading glyph.
-const ACTION_GLYPH_PT: f32 = 15.0;
+const ACTION_GLYPH_PT: f32 = CONTROL_GLYPH_PT;
 /// What an [`action_button`]'s pair keeps clear of its own corners, so an elided
 /// name ends in a `…` with air after it.
 const ACTION_PAD: f32 = 10.0;
 /// An [`action_button`]'s word.
-const ACTION_LABEL_PT: f32 = 12.0;
+const ACTION_LABEL_PT: f32 = CONTROL_PT;
 
 /// The width an [`action_button`] needs to show `label` without eliding it,
 /// measured off the constants the button lays itself out with.
@@ -2911,21 +3180,22 @@ pub fn toggle_row(
     /// The inset, and the gap after the leading glyph.
     const PAD_X: f32 = 8.0;
     const GAP: f32 = 8.0;
-    const GLYPH_PT: f32 = 14.0;
+    let scale = Scale::of(size.y);
+    let glyph_pt = scale.glyph_pt();
     let (rect, resp, fg) = button_face(ui, size, state);
     let p = ui.painter();
     p.text(
-        egui::pos2(rect.left() + PAD_X + GLYPH_PT / 2.0, rect.center().y),
+        egui::pos2(rect.left() + PAD_X + glyph_pt / 2.0, rect.center().y),
         egui::Align2::CENTER_CENTER,
         glyph,
-        theme::icon_font(GLYPH_PT),
+        theme::icon_font(glyph_pt),
         fg,
     );
     p.text(
-        egui::pos2(rect.left() + PAD_X + GLYPH_PT + GAP, rect.center().y),
+        egui::pos2(rect.left() + PAD_X + glyph_pt + GAP, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(scale.text_pt()),
         fg,
     );
     p.text(
@@ -2935,7 +3205,7 @@ pub fn toggle_row(
             FieldButton::On => icon::CHECK,
             _ => icon::MINUS,
         },
-        theme::icon_font(GLYPH_PT),
+        theme::icon_font(glyph_pt),
         fg,
     );
     resp
@@ -3253,38 +3523,6 @@ pub fn segmented_marked(
     (clicked, reset)
 }
 
-/// [`segmented`]'s track and cells as independent switches: cell `i` is lit while
-/// `on(i)`, any number at once (Find's *Aa · ab · .\**). Returns the clicked index,
-/// for the caller to flip.
-pub fn segmented_toggles(
-    ui: &mut egui::Ui,
-    width: f32,
-    cell_h: f32,
-    n: usize,
-    on: impl Fn(usize) -> bool,
-    tip: impl Fn(usize) -> &'static str,
-    paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
-) -> Option<usize> {
-    let (track, cell) = segment_track(ui, width, cell_h, n);
-    let mut clicked = None;
-    for i in 0..n {
-        let rect = cell(i);
-        let resp = ui.interact(
-            rect,
-            ui.id()
-                .with(("seg", i, n, track.min.x as i32, track.min.y as i32)),
-            egui::Sense::click(),
-        );
-        let lit = on(i);
-        segment_ground(ui.painter(), rect, lit, resp.hovered());
-        paint(ui.painter(), i, rect, lit);
-        if resp.on_hover_text(tip(i)).clicked() {
-            clicked = Some(i);
-        }
-    }
-    clicked
-}
-
 /// A segmented track `width` wide around cells `cell_h` tall: allocates and paints
 /// it, and returns it with the rect of each of its `n` cells.
 fn segment_track(
@@ -3299,12 +3537,12 @@ fn segment_track(
         ui.allocate_exact_size(egui::vec2(width, cell_h + PAD * 2.0), egui::Sense::empty());
     let r5 = egui::CornerRadius::same(5);
     let p = ui.painter();
-    p.rect_filled(track, r5, theme::color::text_a(13));
-    // Translucent rather than the solid `field_border()`: the track sits on several grounds.
+    // The ground every control has: a track beside a field reads as one family.
+    p.rect_filled(track, r5, color::field());
     p.rect_stroke(
         track,
         r5,
-        egui::Stroke::new(SEGMENT_BORDER, theme::color::text_a(20)),
+        egui::Stroke::new(SEGMENT_BORDER, color::field_border()),
         egui::StrokeKind::Inside,
     );
     // The hairline comes out of the cells: a 28pt control is `1 + 2 + 22 + 2 + 1`.
@@ -3324,7 +3562,7 @@ fn segment_ground(painter: &egui::Painter, rect: egui::Rect, on: bool, hovered: 
     if on {
         painter.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(33));
     } else if hovered {
-        painter.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(18));
+        painter.rect_filled(rect, egui::CornerRadius::same(4), color::hover());
     }
 }
 
@@ -4873,8 +5111,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let resp =
-                        text_field(ui, egui::vec2(200.0, CONTROL_H), &mut text, "Name", 12.0);
+                    let resp = text_field(ui, egui::vec2(200.0, CONTROL_H), &mut text, "Name");
                     field = Some((resp.rect, resp.has_focus()));
                 },
             );
@@ -5413,7 +5650,7 @@ mod head_tests {
                     Scrub::whole(0.5),
                     |d| d,
                 );
-                field_button(ui, icon::CORNERS_SEPARATE, H, 15.0, FieldButton::Off);
+                field_button(ui, icon::CORNERS_SEPARATE, H, FieldButton::Off);
             });
         });
 
@@ -5873,9 +6110,9 @@ mod segment_border_tests {
         );
         assert_eq!(
             hairline.stroke.color,
-            theme::color::text_a(20),
-            "a translucent text ink, so it works on a card, in a \
-             popover and in the dashboard header alike"
+            theme::color::field_border(),
+            "the hairline every other control wears, so a track beside a field \
+             reads as one family"
         );
 
         // The raised cell is `1 + 2` in from the track at both ends.
@@ -6100,7 +6337,7 @@ mod transform_row_tests {
                     Scrub::whole(0.5),
                     |d| d,
                 );
-                field_button(ui, icon::LINK_SIMPLE, H, 15.0, FieldButton::Off);
+                field_button(ui, icon::LINK_SIMPLE, H, FieldButton::Off);
             });
         });
 
@@ -6129,7 +6366,7 @@ mod transform_row_tests {
                     icon::FLIP_HORIZONTAL,
                     icon::FLIP_VERTICAL,
                 ] {
-                    field_button_sized(ui, g, egui::vec2(quarter, H), 15.0, FieldButton::Off);
+                    field_button_sized(ui, g, egui::vec2(quarter, H), FieldButton::Off);
                 }
             });
         });
@@ -6161,7 +6398,7 @@ mod transform_row_tests {
                         ui.label("100%");
                     });
                 });
-                field_button(ui, icon::EYE, H, 14.0, FieldButton::Off);
+                field_button(ui, icon::EYE, H, FieldButton::Off);
             });
         });
         assert_eq!(bs.len(), 2, "the row and its eye: {bs:?}");

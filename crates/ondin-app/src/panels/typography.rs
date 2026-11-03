@@ -428,7 +428,7 @@ fn seg_cell_of(track: f32, n: usize) -> f32 {
 }
 /// Height of one row in the family list. Fixed because `ScrollArea::show_rows`
 /// virtualizes by dividing the scroll offset by it.
-const FAMILY_ROW_H: f32 = 24.0;
+const FAMILY_ROW_H: f32 = ui::MENU_ROW_H;
 /// The family list's tallest, before it scrolls.
 const FAMILY_LIST_H: f32 = 320.0;
 
@@ -477,10 +477,6 @@ const AXIS_FIELD_W: f32 = 74.0;
 const FEATURE_ROW_H: f32 = 22.0;
 /// The ✕ beside the tab strip, and so the width the strip gives up to it.
 const CLOSE_BUTTON_W: f32 = 18.0;
-/// The magnifier in the feature search field, and the gap after it — the field
-/// gap the value fields use at both ends of their number.
-const SEARCH_ICON_PT: f32 = 14.0;
-const SEARCH_GAP: f32 = 7.0;
 /// The tab strip's own height — the segmented track, which paints 2px larger than
 /// its cells on every side.
 const TAB_STRIP_H: f32 = SEG_H + 4.0;
@@ -1303,10 +1299,13 @@ impl OndinApp {
     /// area's remembered offset would only find a family picked from this list.
     pub(crate) fn family_list(&mut self, ui: &mut egui::Ui, current: &str) -> Option<String> {
         let mut chosen = None;
-        ui.add(
-            egui::TextEdit::singleline(&mut self.font_filter)
-                .margin(ui::SEARCH_PAD)
-                .hint_text("Search…"),
+        let width = ui.available_width();
+        ui::search_field(
+            ui,
+            &mut self.font_filter,
+            ui.make_persistent_id("family-search"),
+            "Search…",
+            width,
         );
         let total = self.fonts.match_count(&self.font_filter);
         let mut area = egui::ScrollArea::vertical().max_height(FAMILY_LIST_H);
@@ -1338,13 +1337,7 @@ impl OndinApp {
             egui::Sense::click(),
         );
         let selected = family == current;
-        let p = ui.painter();
-        let r5 = egui::CornerRadius::same(5);
-        if selected {
-            p.rect_filled(rect, r5, theme::color::SELECT_ROW);
-        } else if resp.hovered() {
-            p.rect_filled(rect, r5, theme::color::text_a(12));
-        }
+        ui::list_row_ground(ui.painter(), rect, selected, resp.hovered());
 
         let ink = if selected {
             theme::color::text()
@@ -1433,7 +1426,6 @@ impl OndinApp {
                 .selected_text(ui::glyph_and_text(icon::TEXT_BOLD, &label))
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
-                    ui.spacing_mut().button_padding.y = 2.0;
                     if let Some(m) = mark {
                         reset = super::component::menu_reset_row(ui, m);
                     }
@@ -1444,7 +1436,7 @@ impl OndinApp {
                     }
                     // Inert: a readout of "none of the above", not a choice.
                     if current.is_none() && !faces_differ {
-                        ui.add_enabled(false, egui::Button::new("Custom"));
+                        ui.add_enabled(false, egui::Button::selectable(false, "Custom"));
                     }
                 })
                 .response;
@@ -1561,7 +1553,6 @@ impl OndinApp {
                 ui,
                 icon::TEXT_BOLD,
                 side,
-                14.0,
                 ui::FieldButton::on_if(bold_on),
                 bold_mark.as_ref().map(OverrideMark::field),
             );
@@ -1575,7 +1566,6 @@ impl OndinApp {
                 ui,
                 icon::TEXT_ITALIC,
                 side,
-                14.0,
                 ui::FieldButton::on_if(italic_on),
                 italic_mark.as_ref().map(OverrideMark::field),
             );
@@ -1995,7 +1985,6 @@ impl OndinApp {
                 ui,
                 icon::SLIDERS_HORIZONTAL,
                 ROW_H,
-                14.0,
                 ui::FieldButton::on_if(open),
             )
             .on_hover_text("Typography options");
@@ -2360,7 +2349,6 @@ impl OndinApp {
                         ui,
                         icon::LINK_SIMPLE_HORIZONTAL_BREAK,
                         CELL,
-                        14.0,
                         ui::FieldButton::on_if(d.skip_ink),
                     )
                     .on_hover_text(
@@ -2433,7 +2421,7 @@ impl OndinApp {
                         Some((s, buf)) if *s == slot => buf.clone(),
                         _ => ui::hex_of(shown),
                     };
-                    let font = egui::FontId::proportional(11.5);
+                    let font = egui::FontId::proportional(ui::CONTROL_PT);
                     let pad = ui::edit_frame(ui, &font, CELL - ui::FIELD_BORDER_H, 0.0);
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut text)
@@ -2860,23 +2848,13 @@ impl OndinApp {
             },
         );
         let (_, hit) = section_marked(ui, "OpenType", mark.as_ref(), |ui| {
-            field_row(ui, egui::vec2(MENU_INNER, CELL), |ui| {
-                ui.spacing_mut().item_spacing.x = SEARCH_GAP;
-                ui.label(theme::icon_text(
-                    icon::MAGNIFYING_GLASS,
-                    SEARCH_ICON_PT,
-                    theme::text::faint(),
-                ));
-                // A `TextEdit` asking for more than its row grows the row, pinning the card's width.
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.feature_filter)
-                        .frame(egui::Frame::NONE)
-                        .desired_width(
-                            MENU_INNER - ui::FIELD_PAD_X * 2.0 - SEARCH_ICON_PT - SEARCH_GAP * 2.0,
-                        )
-                        .hint_text("Search features"),
-                );
-            });
+            ui::search_box(
+                ui,
+                egui::vec2(MENU_INNER, CELL),
+                &mut self.feature_filter,
+                "Search features",
+                egui::Id::new("type-feature-search"),
+            );
             let needle = self.feature_filter.to_lowercase();
             // Written once: the row loop and the reveal's count must agree.
             let matches = |tag: &Tag, l: &FeatureLabel| {
@@ -2934,17 +2912,7 @@ impl OndinApp {
                 });
             // Under the list, not beside the search, so it does not read as a filter.
             if let Some(text) = features_reveal(self.show_all_features, hidden)
-                && ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(text)
-                                .size(ui::SEGMENT_LABEL_PT)
-                                .color(theme::text::faint()),
-                        )
-                        .sense(egui::Sense::click())
-                        // A selectable `Label` reports the I-beam cursor.
-                        .selectable(false),
-                    )
+                && reveal_link(ui, text)
                     .on_hover_text(
                         "The rest are required, applied per script by the shaper, or belong to \
                          vertical writing — switching one by hand mis-shapes text",
@@ -3256,7 +3224,6 @@ impl OndinApp {
                         ui,
                         glyph,
                         CELL,
-                        14.0,
                         ui::FieldButton::on_if(!hanging_mixed && shown.hanging == hanging),
                     )
                     .on_hover_text(tip)
@@ -4331,7 +4298,6 @@ fn reset_slot(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
         ui,
         icon::ARROW_COUNTER_CLOCKWISE,
         CELL,
-        14.0,
         ui::FieldButton::enabled_if(active),
     );
     if !active {
@@ -4887,7 +4853,6 @@ fn enum_combo<T: Copy + PartialEq>(
             .selected_text(ui::glyph_and_text(glyph, label(current)))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
-                ui.spacing_mut().button_padding.y = 2.0;
                 for v in all {
                     if ui.selectable_label(*v == current, label(*v)).clicked() {
                         pick = Some(*v);
@@ -5536,6 +5501,21 @@ fn features_reveal(show_all: bool, hidden: usize) -> Option<String> {
     }
 }
 
+/// The [`features_reveal`] text as a clickable line: a command's muted ink at
+/// rest, the value ink under the pointer.
+fn reveal_link(ui: &mut egui::Ui, text: String) -> egui::Response {
+    let font = egui::FontId::proportional(ui::SEGMENT_LABEL_PT);
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text, font, theme::text::muted()));
+    let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
+    let ink = match resp.hovered() {
+        true => theme::color::text(),
+        false => theme::text::muted(),
+    };
+    ui.painter()
+        .galley_with_override_text_color(rect.min, galley, ink);
+    resp
+}
+
 /// One row of the feature list for a feature that offers more than one named
 /// value (a `cvXX` choice). Returns the value to write when the user picked a
 /// different one.
@@ -5573,7 +5553,7 @@ fn feature_choice_row(
         egui::ComboBox::from_id_salt(("type-feature-value", tag.to_string()))
             .icon(ui::combo_chevron)
             .width(rect.width())
-            .selected_text(feature_value_label(label, value))
+            .selected_text(ui::combo_text(&feature_value_label(label, value)))
             .show_ui(ui, |ui| {
                 ui::menu_rows(ui);
                 if ui.selectable_label(value == 0, FEATURE_OFF).clicked() {
@@ -6660,7 +6640,6 @@ mod tests {
                 ui,
                 crate::theme::icon::SLIDERS_HORIZONTAL,
                 26.0,
-                14.0,
                 crate::ui::FieldButton::Off,
             );
             got = Some(head.rect);
@@ -6702,13 +6681,7 @@ mod tests {
                 // Cell 0 selected, so `segmented` paints a rect.
                 segmented(ui, horizontal_w, SEG_CELL_H, 4, 0, |_, _, _, _| {});
                 segmented(ui, vertical_w, SEG_CELL_H, 3, 0, |_, _, _, _| {});
-                ui::field_button(
-                    ui,
-                    icon::SLIDERS_HORIZONTAL,
-                    ROW_H,
-                    14.0,
-                    ui::FieldButton::Off,
-                );
+                ui::field_button(ui, icon::SLIDERS_HORIZONTAL, ROW_H, ui::FieldButton::Off);
             });
         });
         for c in &out.shapes {
@@ -7222,22 +7195,13 @@ mod tests {
             ui.set_width(MENU_INNER);
 
             let mut needle = String::new();
-            field_row(ui, egui::vec2(MENU_INNER, CELL), |ui| {
-                ui.spacing_mut().item_spacing.x = SEARCH_GAP;
-                ui.label(theme::icon_text(
-                    icon::MAGNIFYING_GLASS,
-                    SEARCH_ICON_PT,
-                    theme::text::faint(),
-                ));
-                ui.add(
-                    egui::TextEdit::singleline(&mut needle)
-                        .frame(egui::Frame::NONE)
-                        .desired_width(
-                            MENU_INNER - ui::FIELD_PAD_X * 2.0 - SEARCH_ICON_PT - SEARCH_GAP * 2.0,
-                        )
-                        .hint_text("Search features"),
-                );
-            });
+            ui::search_box(
+                ui,
+                egui::vec2(MENU_INNER, CELL),
+                &mut needle,
+                "Search features",
+                egui::Id::new("type-feature-search"),
+            );
 
             let mut hex = "9184D9".to_string();
             ui.horizontal(|ui| {
@@ -7255,7 +7219,7 @@ mod tests {
                             .frame(egui::Frame::NONE)
                             .desired_width(62.0)
                             .char_limit(ui::COLOUR_CHAR_LIMIT)
-                            .font(egui::FontId::proportional(11.5)),
+                            .font(egui::FontId::proportional(ui::CONTROL_PT)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut pct = 100.0_f64;

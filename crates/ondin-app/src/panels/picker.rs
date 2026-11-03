@@ -150,8 +150,8 @@ const SWATCHES: usize = 6;
 /// How many colours the recent row remembers: as many as it shows.
 const RECENT_COLOURS: usize = SWATCHES;
 /// The value row's spacing, and its format button's and opacity field's widths.
-const ROW_GAP: f32 = 5.0;
-const CHOOSER_W: f32 = 44.0;
+const ROW_GAP: f32 = ui::CARD_COL_GAP;
+const CHOOSER_W: f32 = 52.0;
 const PCT_W: f32 = 40.0;
 /// The value row's right inset, under a text field's 9 so the opacity sits nearer
 /// the edge and leaves the channels their room.
@@ -649,7 +649,7 @@ impl OndinApp {
         let plane_h = if kind == PaintKind::Solid {
             104.0
         } else {
-            96.0
+            102.0
         };
         self.sv_plane(ui, node, slot, brush, index, current, inner_w, plane_h);
         self.hue_slider(ui, node, slot, brush, index, current, inner_w);
@@ -696,7 +696,7 @@ impl OndinApp {
             );
             let next = paint::with_linear_angle(brush, deg % 360.0, box_size);
             self.valve_slot(&resp, node, slot, next);
-            if ui::field_button(ui, icon::FLIP_HORIZONTAL, unit, 15.0, ui::FieldButton::Off)
+            if ui::field_button(ui, icon::FLIP_HORIZONTAL, unit, ui::FieldButton::Off)
                 .on_hover_text("Flip 180°")
                 .clicked()
             {
@@ -704,7 +704,7 @@ impl OndinApp {
                 let next = paint::with_linear_angle(brush, (deg + 180.0) % 360.0, box_size);
                 self.write_slot(node, slot, next);
             }
-            if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, 15.0, ui::FieldButton::Off)
+            if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, ui::FieldButton::Off)
                 .on_hover_text("Reverse the stops")
                 .clicked()
             {
@@ -744,7 +744,7 @@ impl OndinApp {
             let resp = resp.on_hover_text("Where the sweep starts");
             let next = paint::with_sweep_geom(brush, centre, deg % 360.0);
             self.valve_slot(&resp, node, slot, next);
-            if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, 15.0, ui::FieldButton::Off)
+            if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, ui::FieldButton::Off)
                 .on_hover_text("Reverse the stops")
                 .clicked()
             {
@@ -798,9 +798,10 @@ impl OndinApp {
             }
         });
     }
-    /// The 34px gradient thumbnail, which is also the kind button: a click opens a
-    /// menu of the gradient kinds, and picking one converts the paint (its stops
-    /// kept, its geometry reframed on the box). A caret badge on its corner says so.
+    /// The kind button: a field button holding the gradient's thumbnail. A click
+    /// opens a menu of the gradient kinds, and picking one converts the paint (its
+    /// stops kept, its geometry reframed on the box). A caret badge on the
+    /// thumbnail's corner says so; open, the button wears the `accent_700` border.
     fn kind_chip(
         &mut self,
         ui: &mut egui::Ui,
@@ -809,32 +810,37 @@ impl OndinApp {
         brush: &Brush,
         box_size: Size,
     ) {
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click());
-        let p = ui.painter();
-        ui::paint_checkerboard(p, rect, 5.0);
-        ui::paint_ramp(p, rect, &ramp(brush));
-        mask_corners(p, rect, 5.0, color::card());
+        /// The thumbnail's inset from the button's edge, and its corner.
+        const INSET: f32 = 5.0;
+        const THUMB_R: f32 = 3.0;
+        let (rect, resp, _) = ui::button_face(ui, egui::vec2(ROW_H, ROW_H), ui::FieldButton::Off);
         let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
-        let rim = match (open, resp.hovered()) {
-            (true, _) => egui::Stroke::new(1.5, theme::color::text_a(200)),
-            (false, true) => egui::Stroke::new(1.0, theme::color::text_a(110)),
-            _ => egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)),
+        let ground = match resp.hovered() {
+            true => color::hover(),
+            false => color::field(),
         };
-        p.rect_stroke(
-            rect,
-            egui::CornerRadius::same(5),
-            rim,
-            egui::StrokeKind::Inside,
-        );
-        // The badge hangs off the corner, ringed in the card's colour.
-        let badge = egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0);
-        p.circle_filled(badge, 7.0, color::card());
-        p.circle_filled(badge, 5.5, theme::color::text_a(60));
+        let thumb = rect.shrink(INSET);
+        let p = ui.painter();
+        if open {
+            p.rect_stroke(
+                rect,
+                egui::CornerRadius::same(ui::BUTTON_R),
+                egui::Stroke::new(1.0, color::accent_700()),
+                egui::StrokeKind::Inside,
+            );
+        }
+        ui::paint_checkerboard(p, thumb, 4.0);
+        ui::paint_ramp(p, thumb, &ramp(brush));
+        mask_corners(p, thumb, THUMB_R, ground);
+        // The badge hangs off the thumbnail's corner, ringed in the button's ground.
+        let badge = egui::pos2(thumb.right(), thumb.bottom());
+        p.circle_filled(badge, 5.5, ground);
+        p.circle_filled(badge, 4.5, theme::color::text_a(60));
         p.text(
             badge,
             egui::Align2::CENTER_CENTER,
             icon::CARET_DOWN,
-            theme::icon_font(8.0),
+            theme::icon_font(7.0),
             theme::text::strong(),
         );
         let kind = paint::kind_of(brush);
@@ -845,7 +851,7 @@ impl OndinApp {
             ui.set_width(MENU_W);
             for k in PaintKind::GRADIENTS {
                 let row = ui::MenuRow::new("", k.label()).checked(k == kind);
-                if ui::menu_row(ui, row, ui::MENU_ITEM_H).clicked() {
+                if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
                     picked = Some(k);
                 }
             }
@@ -1212,7 +1218,7 @@ impl OndinApp {
             Format::Hex => 60.0,
             _ => ui.available_width() - pct_w - ROW_GAP,
         };
-        let font = egui::FontId::proportional(11.5);
+        let font = egui::FontId::proportional(ui::CONTROL_PT);
         let pad = ui::edit_frame(ui, &font, ROW_H - ui::FIELD_BORDER_H, 0.0);
         let resp = ui.add(
             egui::TextEdit::singleline(&mut text)
@@ -1412,7 +1418,9 @@ impl OndinApp {
     }
     /// The value row's format button, and its menu, whose rows each read the
     /// colour in their format, so the menu doubles as a read-out. `was` is the
-    /// edited colour while the eyedropper shows another, as a chip.
+    /// edited colour while the eyedropper shows another, as a chip. It sits inside
+    /// the value row's field, so it is a cell there (a [`ui::field_toggle`]'s
+    /// height and hover) rather than a dropdown field of its own.
     fn format_chooser(
         &mut self,
         ui: &mut egui::Ui,
@@ -1420,11 +1428,13 @@ impl OndinApp {
         current: Color,
         was: Option<Color>,
     ) {
-        let (rect, resp) =
-            ui.allocate_exact_size(egui::vec2(CHOOSER_W, 20.0), egui::Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(CHOOSER_W, ui::FIELD_TOGGLE.y),
+            egui::Sense::click(),
+        );
+        let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
         let p = ui.painter();
-        let ground = theme::color::text_a(if resp.hovered() { 32 } else { 15 });
-        p.rect_filled(rect, egui::CornerRadius::same(4), ground);
+        ui::list_row_ground(p, rect, false, open || resp.hovered());
         let mut x = rect.left() + 6.0;
         if let Some(was) = was {
             let chip = egui::Rect::from_center_size(
@@ -1438,15 +1448,15 @@ impl OndinApp {
             egui::pos2(x, rect.center().y),
             egui::Align2::LEFT_CENTER,
             format.label(),
-            egui::FontId::proportional(10.5),
-            theme::text::muted(),
+            egui::FontId::proportional(ui::CONTROL_PT),
+            theme::color::text(),
         );
         p.text(
-            egui::pos2(rect.right() - 5.0, rect.center().y),
+            egui::pos2(rect.right() - 4.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             icon::CARET_DOWN,
-            theme::icon_font(9.0),
-            theme::text::muted(),
+            theme::icon_font(ui::COMBO_CHEVRON_PT),
+            ui::combo_chevron_ink(),
         );
         let resp = resp.on_hover_text("Colour format");
         let hsv = self.hsv_of(current);
@@ -1459,7 +1469,7 @@ impl OndinApp {
                 let row = ui::MenuRow::new("", f.label())
                     .accel(Some(&preview))
                     .checked(f == format);
-                if ui::menu_row(ui, row, ui::MENU_ITEM_H).clicked() {
+                if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
                     picked = Some(f);
                 }
             }
@@ -2250,7 +2260,7 @@ mod mixed_hex_tests {
     /// Inside the hex field's hit band (past the pick button and the format
     /// chooser, y 512…537) with the picker spawned at `(400, 300)`, in points at
     /// any `pixels_per_point`.
-    const HEX_FIELD: egui::Pos2 = egui::pos2(500.0, 524.0);
+    const HEX_FIELD: egui::Pos2 = egui::pos2(520.0, 524.0);
 
     /// Two rects, one solid fill each, at the two given alphas.
     fn two_rects(ctx: &egui::Context, alphas: (f32, f32)) -> (OndinApp, NodeId, NodeId) {
@@ -3159,7 +3169,7 @@ mod grid_orphan_tests {
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
     /// `mixed_hex_tests`' hit band for the hex field, at the same spawn; repeated
     /// because the two modules are independent fixtures.
-    const HEX_FIELD: egui::Pos2 = egui::pos2(500.0, 524.0);
+    const HEX_FIELD: egui::Pos2 = egui::pos2(520.0, 524.0);
 
     fn grid(count: u32, color: Color) -> LayoutGrid {
         LayoutGrid {

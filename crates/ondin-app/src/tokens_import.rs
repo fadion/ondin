@@ -796,40 +796,23 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, on: &mut bool, cw: f32, cols_x: f32) -> 
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(W - 2.0 * GAP, h), sense);
     let fade = |c: egui::Color32| match (kit, *on) {
         (true, _) => c.gamma_multiply(0.5),
-        (false, false) => c.gamma_multiply(0.7),
+        (false, false) => c.gamma_multiply(ui::UNTICKED_FADE),
         (false, true) => c,
     };
     let p = ui.painter();
     ui::list_row_ground(p, rect, false, resp.hovered() && !kit);
     let y = rect.center().y;
-    // The box.
-    let bx = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 8.0 + 7.0, y),
-        egui::vec2(14.0, 14.0),
-    );
+    // The box; a kit's row has a dead one, which the shared box has no state for.
+    let at = egui::pos2(rect.left() + 8.0 + ui::TICK_BOX / 2.0, y);
     if kit {
         p.rect_stroke(
-            bx,
+            egui::Rect::from_center_size(at, egui::vec2(ui::TICK_BOX, ui::TICK_BOX)),
             3.0,
             egui::Stroke::new(1.0, color::text_a(40)),
             egui::StrokeKind::Inside,
         );
-    } else if *on {
-        p.rect_filled(bx, 3.0, color::accent());
-        p.text(
-            bx.center(),
-            egui::Align2::CENTER_CENTER,
-            icon::CHECK,
-            theme::icon_font(10.0),
-            color::accent_ink(),
-        );
     } else {
-        p.rect_stroke(
-            bx,
-            3.0,
-            egui::Stroke::new(1.0, color::text_a(90)),
-            egui::StrokeKind::Inside,
-        );
+        ui::paint_tick_box(p, at, *on, resp.hovered());
     }
     // The tag, the name and its second line.
     let x = rect.left() + 8.0 + BOX_W + GAP;

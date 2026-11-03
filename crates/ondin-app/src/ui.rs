@@ -1516,11 +1516,46 @@ pub fn inline_edit(
     resp
 }
 
+/// The side of a [`paint_tick_box`].
+pub const TICK_BOX: f32 = 14.0;
+
+/// How a list row whose box is unticked fades its ink: still legible, plainly
+/// left out (tokens import's rows, Colour review's skipped members).
+pub const UNTICKED_FADE: f32 = 0.7;
+
+/// The box of a [`tick_box`], centred on `at`, for a list row that carries one
+/// (tokens import's, Colour review's): the accent with a check when `on`, else a
+/// ring that brightens under the pointer.
+pub fn paint_tick_box(p: &egui::Painter, at: egui::Pos2, on: bool, hovered: bool) {
+    let tick = egui::Rect::from_center_size(at, egui::vec2(TICK_BOX, TICK_BOX));
+    if on {
+        p.rect_filled(tick, 3.0, color::accent());
+        p.text(
+            tick.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::CHECK,
+            theme::icon_font(10.0),
+            color::accent_ink(),
+        );
+    } else {
+        let ring = match hovered {
+            true => color::text_a(140),
+            false => color::text_a(90),
+        };
+        p.rect_stroke(
+            tick,
+            3.0,
+            egui::Stroke::new(1.0, ring),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
 /// A tick box, its label and an optional faint note after it, one
 /// [`MENU_ROW_H`] row whose whole width is the target and a tab stop.
 pub fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) -> egui::Response {
     /// The box, and the gaps after it and after the label.
-    const BOX: f32 = 14.0;
+    const BOX: f32 = TICK_BOX;
     const GAP: f32 = 7.0;
     const NOTE_GAP: f32 = 5.0;
     let font = egui::FontId::proportional(CONTROL_PT);
@@ -1538,27 +1573,7 @@ pub fn tick_box(ui: &mut egui::Ui, label: &str, note: &str, on: &mut bool) -> eg
         egui::pos2(rect.left(), rect.center().y - BOX / 2.0),
         egui::vec2(BOX, BOX),
     );
-    if *on {
-        p.rect_filled(tick, 3.0, color::accent());
-        p.text(
-            tick.center(),
-            egui::Align2::CENTER_CENTER,
-            icon::CHECK,
-            theme::icon_font(10.0),
-            color::accent_ink(),
-        );
-    } else {
-        let ring = match resp.hovered() {
-            true => color::text_a(140),
-            false => color::text_a(90),
-        };
-        p.rect_stroke(
-            tick,
-            3.0,
-            egui::Stroke::new(1.0, ring),
-            egui::StrokeKind::Inside,
-        );
-    }
+    paint_tick_box(p, tick.center(), *on, resp.hovered());
     let x = tick.right() + GAP;
     let w = galley.size().x;
     p.galley(

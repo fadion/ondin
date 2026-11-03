@@ -1399,29 +1399,36 @@ pub fn search_box(
         ));
         // The edit stops short of the clear button rather than lying under it, so
         // the text never runs beneath the ✕ and the pointer there is an arrow.
-        // `desired_width` is the text's; the frame's padding comes on top.
+        // Laid out from the right, the ✕ first, so the edit fills what is left
+        // and the row is as wide with the ✕ as without it.
         let clearable = !text.is_empty();
-        let width = match clearable {
-            true => {
-                ui.available_width() - clear_side - SEARCH_CLEAR_INSET - frame.inner_margin.sum().x
-            }
-            false => f32::INFINITY,
-        };
-        let mut edit = ui.add(
-            egui::TextEdit::singleline(text)
-                .id(id)
-                .frame(frame)
-                .desired_width(width)
-                .font(font)
-                .hint_text(egui::RichText::new(hint).size(pt)),
-        );
+        let (mut edit, cleared) = ui
+            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let cleared = clearable && {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(SEARCH_CLEAR_INSET);
+                    search_clear(ui, clear_side, scale.glyph_pt() - 2.0)
+                };
+                let edit = ui.add(
+                    egui::TextEdit::singleline(text)
+                        .id(id)
+                        .frame(frame)
+                        .desired_width(f32::INFINITY)
+                        .font(font)
+                        .hint_text(egui::RichText::new(hint).size(pt)),
+                );
+                (edit, cleared)
+            })
+            .inner;
         if row.clicked() {
             edit.request_focus();
         }
-        if clearable && search_clear(ui, clear_side, scale.glyph_pt() - 2.0) {
+        if cleared {
             text.clear();
             edit.mark_changed();
             edit.request_focus();
+            // The edit was drawn holding the old text.
+            ui.ctx().request_repaint();
         }
         edit
     })
@@ -5181,8 +5188,8 @@ mod tests {
     /// A search box holding text shows a clear button with an arrow pointer; a
     /// press on it empties the field, reports a change and keeps the keyboard.
     ///
-    /// flip: `search_box` giving its edit the whole row again (`desired_width`
-    /// infinite while clearable) → fails at the arrow pointer.
+    /// flip: `search_box` laying its row out left to right, so the edit takes the
+    /// whole row before the ✕ → fails at the arrow pointer.
     #[test]
     fn a_search_box_clears_from_its_button() {
         let ctx = egui::Context::default();
@@ -5229,6 +5236,43 @@ mod tests {
         assert!(changed, "and the caller heard it");
         let (_, focused, ..) = pass(Vec::new());
         assert!(focused, "the keyboard stays in the field");
+    }
+
+    /// A search box is as wide holding text, ✕ and all, as it is empty.
+    ///
+    /// flip: `search_box` laying its row out left to right, the edit sized short of
+    /// the ✕ → fails at the width. Sizing the edit wrong inside the right-to-left
+    /// row does not bite: the row spans the magnifier to the ✕ either way.
+    #[test]
+    fn a_search_box_keeps_its_width_when_the_clear_button_shows() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        // The painted ground: the row's allocation is `size` whatever its frame does.
+        let width = |text: &str| {
+            let mut text = text.to_owned();
+            let mut out = None;
+            for _ in 0..2 {
+                out = Some(ctx.run_ui(Default::default(), |ui| {
+                    let id = egui::Id::new("search-width-test");
+                    search_box(ui, egui::vec2(200.0, CONTROL_H), &mut text, "Find", id);
+                }));
+            }
+            let field = color::field();
+            out.expect("ran")
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Rect(r) if r.fill == field => Some(r.rect.width()),
+                    _ => None,
+                })
+                .fold(0.0, f32::max)
+        };
+        let empty = width("");
+        assert!(
+            empty > 190.0,
+            "fixture: the empty field fills its row, {empty}"
+        );
+        assert_eq!(width("card"), empty, "the ✕ costs the field no width");
     }
 
     /// A colour typed into a hex field replaces the one there; driven with real events.

@@ -979,6 +979,19 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
     close
 }
 
+/// A key's name on a faint chip, set a point low: centred on the row, the chip's
+/// small caps-height text reads high against the words beside it.
+fn key_chip(ui: &mut egui::Ui, key: &str) {
+    let text =
+        ui.fonts_mut(|f| f.layout_no_wrap(key.into(), egui::FontId::proportional(10.5), ink(72)));
+    let size = text.size() + egui::vec2(10.0, 2.0);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let rect = rect.translate(egui::vec2(0.0, 1.0));
+    let p = ui.painter();
+    p.rect_filled(rect, 3.0, ink(8));
+    p.galley(rect.center() - text.size() / 2.0, text, ink(72));
+}
+
 /// The card's foot: how a version is saved — said only while `Ctrl+S` pins one
 /// (`pins`) — *Save named version…* and *Close*. Answers which was pressed:
 /// `Some(true)` to save a named version, `Some(false)` to close.
@@ -994,13 +1007,9 @@ fn card_foot(ui: &mut egui::Ui, pins: bool) -> Option<bool> {
     );
     ui.add_space(12.0);
     ui.horizontal(|ui| {
-        let chip = egui::RichText::new(" Ctrl+S ")
-            .size(10.5)
-            .color(ink(72))
-            .background_color(ink(8));
         ui.spacing_mut().item_spacing.x = 4.0;
         if pins {
-            ui.label(chip);
+            key_chip(ui, "Ctrl+S");
             ui.label(
                 egui::RichText::new("saves a version")
                     .size(11.0)

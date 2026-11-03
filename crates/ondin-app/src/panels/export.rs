@@ -1274,6 +1274,7 @@ impl OndinApp {
 
     /// The glyph in front of that label and its ink: a chip in the colour that
     /// will actually be behind the export, or the checkerboard when nothing will.
+    /// *Frame's own* wears the frame glyph instead of the chip, in the same ink.
     ///
     /// Resolved through `plan::background_color`, not read off the setting: *Frame's
     /// own* differs per layer and is nothing outside a frame. Glyphs, because a
@@ -1286,19 +1287,25 @@ impl OndinApp {
         // A muted chip over a multi-selection rather than a guess (§15 D657). Only
         // `Frame` varies per layer, so this is a `match` and not a gate on
         // `sizing`: `Solid` and `Transparent` hold for any number of layers.
-        let resolved = match (spec.background, sizing) {
-            (ExportBackground::Frame, None) => return (icon::SQUARE_FILL, theme::text::dim()),
+        let frame = spec.background == ExportBackground::Frame;
+        let resolved = match (frame, sizing) {
+            (true, None) => return (icon::FRAME, theme::text::dim()),
             (_, subject) => subject
                 .or_else(|| self.export_subjects().first().copied())
                 .and_then(|id| ondin_export::plan::background_color(&self.session.doc, id, spec)),
         };
-        match resolved {
-            Some(c) => {
+        match (resolved, frame) {
+            (Some(c), _) => {
                 let [r, g, b, a] = c.to_rgba8().to_u8_array();
                 let ink = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
-                (icon::SQUARE_FILL, ink)
+                let glyph = match frame {
+                    true => icon::FRAME,
+                    false => icon::SQUARE_FILL,
+                };
+                (glyph, ink)
             }
-            None => (icon::CHECKERBOARD, theme::text::dim()),
+            (None, true) => (icon::FRAME, theme::text::dim()),
+            (None, false) => (icon::CHECKERBOARD, theme::text::dim()),
         }
     }
 
@@ -3113,13 +3120,13 @@ mod tests {
         );
         assert_eq!(
             a,
-            (icon::SQUARE_FILL, egui::Color32::WHITE),
+            (icon::FRAME, egui::Color32::WHITE),
             "fixture: the first frame is white"
         );
 
         assert_eq!(
             app.background_swatch(&framed, None),
-            (icon::SQUARE_FILL, theme::text::dim()),
+            (icon::FRAME, theme::text::dim()),
             "and over both of them the chip says nothing rather than picking one"
         );
 

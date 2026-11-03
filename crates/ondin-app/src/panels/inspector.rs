@@ -6603,7 +6603,7 @@ impl OndinApp {
     /// The frame templates — a panel of named sizes, each drawn at its own
     /// proportions, that fills in W and H.
     ///
-    /// The template matching
+    /// The scroll box is capped at [`TEMPLATE_LIST_H`] and draws no bar. The template matching
     /// [`Self::shared_frame_size`] lights, orientation-sensitively, so a landscape
     /// frame lights nothing rather than a template applying would rotate.
     fn inspector_frame_templates(&mut self, ui: &mut egui::Ui) {
@@ -6623,32 +6623,37 @@ impl OndinApp {
         let size = self.shared_frame_size(&subjects);
         let current = size.and_then(preset_named);
         let mut pick: Option<Size> = None;
-        // The whole table, in the inspector's own scroll: a box of its own put a
-        // second scrollbar inside the panel.
         self.panel(ui, "Frame templates", None, |_app, ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            // Measured outside the loop: inside a `horizontal` it shrinks per cell.
-            let cell = (ui.available_width() - TEMPLATE_CELL_GAP) / 2.0;
-            for (gi, (group, entries)) in FRAME_PRESETS.iter().enumerate() {
-                if gi > 0 {
-                    ui.add_space(ui::CARD_ROW_GAP);
-                }
-                ui.label(ui::eyebrow(group));
-                ui.add_space(ui::SECTION_LABEL_GAP);
-                for (ri, pair) in entries.chunks(2).enumerate() {
-                    if ri > 0 {
-                        ui.add_space(TEMPLATE_CELL_GAP);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = TEMPLATE_CELL_GAP;
-                        for (name, w, h) in pair {
-                            if template_cell(ui, cell, name, *w, *h, current == Some(*name)) {
-                                pick = Some(Size::new(*w, *h));
-                            }
+            egui::ScrollArea::vertical()
+                .max_height(TEMPLATE_LIST_H)
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    // Measured outside the loop: inside a `horizontal` it shrinks per cell.
+                    let cell = (ui.available_width() - TEMPLATE_CELL_GAP) / 2.0;
+                    for (gi, (group, entries)) in FRAME_PRESETS.iter().enumerate() {
+                        if gi > 0 {
+                            ui.add_space(ui::CARD_ROW_GAP);
                         }
-                    });
-                }
-            }
+                        ui.label(ui::eyebrow(group));
+                        ui.add_space(ui::SECTION_LABEL_GAP);
+                        for (ri, pair) in entries.chunks(2).enumerate() {
+                            if ri > 0 {
+                                ui.add_space(TEMPLATE_CELL_GAP);
+                            }
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = TEMPLATE_CELL_GAP;
+                                for (name, w, h) in pair {
+                                    if template_cell(ui, cell, name, *w, *h, current == Some(*name))
+                                    {
+                                        pick = Some(Size::new(*w, *h));
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
         });
         // A click on the lit cell writes nothing, so it is not an empty undo step.
         if let Some(next) = pick.filter(|next| Some(*next) != size) {
@@ -10844,6 +10849,11 @@ const FRAME_PRESETS: &[PresetGroup] = &[
     ),
 ];
 
+/// How tall the Frame templates panel's scroll box may grow.
+///
+/// A cap, not a height: the full table would push Transform below the fold. It
+/// lands between rows on purpose, so a cut-off cell says there is more.
+const TEMPLATE_LIST_H: f32 = 184.0;
 /// One template cell's height, and the gap between two of them.
 ///
 /// Not [`ui::CARD_ROW_GAP`]: cells of one group are one control, and the card's

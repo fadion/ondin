@@ -135,7 +135,7 @@ Neither card has a header badge.
 **Frame templates.** Second card, above Align and Transform, collapsed by default. Not shown when
 any selected frame is a main, variant, set or instance root.
 
-- Five groups (Phone/Tablet/Desktop/Print/Social), two cells across, the whole table in the inspector's own scroll: a box of its own put a second scrollbar inside the card. Each cell draws the template at its proportions in a 20×28 slot, floored at 5pt a side, beside its name and size. Cells are hand-painted with no resting ground; lit and hovered inks are `button_face`'s.
+- Five groups (Phone/Tablet/Desktop/Print/Social) in a scroll box capped at `TEMPLATE_LIST_H` (184pt) that draws no scrollbar, two cells across. Each cell draws the template at its proportions in a 20×28 slot, floored at 5pt a side, beside its name and size. Cells are hand-painted with no resting ground; lit and hovered inks are `button_face`'s.
 - **It reads as well as writes.** The size every selected frame agrees on, from the committed document, lights a cell; a match is exact and orientation-sensitive. Two entries may not share a box, because `preset_named` returns the first match. Print sizes are points at 72/inch (A4 = 595×842).
 - **The write.** Picking one writes `GeometryPatch::Size`, the patch W/H write. Clicking the lit cell writes nothing. Over a multi-selection it writes each frame's own size and leaves children alone, unlike multi W/H, which resizes the union as a rigid body. Disagreement lights nothing.
 

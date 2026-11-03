@@ -4372,6 +4372,24 @@ impl TextEdit {
             .collect()
     }
 
+    /// Where a spelling squiggle under the bytes `r` runs: quads whose bottom edge
+    /// sits two fifths of the line's descent below its baseline. The line box's
+    /// foot is no guide, since line height and a fixed box move it away from the ink.
+    pub fn squiggle_quads(&self, r: Range<usize>) -> Vec<[Point; 4]> {
+        let layout = &self.shaped.layout;
+        self.range_selection(r)
+            .geometry(layout)
+            .into_iter()
+            .filter_map(|(mut b, line)| {
+                let m = *layout.get(line)?.metrics();
+                b.y0 = f64::from(m.baseline);
+                b.y1 = f64::from(m.baseline + m.descent * 0.4);
+                Some(self.to_local_rect(b, line))
+            })
+            .flat_map(|rect| self.warped(rect))
+            .collect()
+    }
+
     /// The byte index a click at text-local `p` would put the caret at, without
     /// moving it — what a right-click on a word asks.
     pub fn index_at(&self, p: Point) -> usize {

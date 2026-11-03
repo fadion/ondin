@@ -9208,13 +9208,13 @@ impl OndinApp {
                     egui::Stroke::NONE,
                 ));
             }
-            // Misspelled words, along the foot of each word's line box.
+            // Misspelled words, just under each word's baseline.
             if self.prefs.spell_check {
                 let editor = &session.editor;
                 let caret = (!editor.has_selection()).then(|| editor.selected_range().start);
                 let runs = editor.locale_runs();
                 for r in self.spell.misspelled(editor.content(), &runs, caret) {
-                    for q in editor.range_quads(r) {
+                    for q in editor.squiggle_quads(r) {
                         let p = self.poly(&q, world, rect, ppp);
                         paint_squiggle(painter, p[3], p[2]);
                     }

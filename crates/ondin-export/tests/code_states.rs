@@ -342,6 +342,51 @@ fn vue_writes_the_same_states() {
     assert!(style.contains(":hover:not([data-state])"), "{style}");
 }
 
+/// A focus state that changes only a layer inside still turns the browser's
+/// focus ring off on the root: the state draws its own.
+///
+/// flip: `states::write` adding `outline: none` only to a root that changed →
+/// fails at "the root's focus rule".
+#[test]
+fn a_focus_state_always_turns_the_browsers_ring_off() {
+    let mut f = fixture();
+    let tx = variant::add_value(&f.doc, f.set, 1, "Focus").unwrap();
+    f.doc.apply(&tx).unwrap();
+    let rest = variant::find_variant(&f.doc, f.set, &["Small".into(), "Default".into()]).unwrap();
+    let mut ids = IdSource::new(0x58);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, focus) = variant::add_variant(&f.doc, &res, &mut ids, f.set, Some(rest)).unwrap();
+    f.doc.apply(&tx).unwrap();
+    f.doc
+        .apply(&variant::set_values(&f.doc, focus, vec!["Small".into(), "Focus".into()]).unwrap())
+        .unwrap();
+    let bg = f.doc.get(focus).unwrap().children()[0];
+    f.doc
+        .apply(&Transaction(vec![paint(bg, (240, 200, 0))]))
+        .unwrap();
+    f.doc
+        .apply(
+            &variant::tie_state(
+                &f.doc,
+                f.set,
+                1,
+                3,
+                Some(variant::Interaction::FocusVisible),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let out = Target::React.export(&f.doc, &res, &[f.inst]);
+    let css = file(&out, "components/Button.module.css");
+    assert!(
+        css.contains(":focus-visible:not([data-state]),\n")
+            && css.contains("[data-state=\"Focus\"] {\n  outline: none;\n}"),
+        "the root's focus rule: {css}"
+    );
+    assert!(css.contains("#f0c800"), "and the layer's: {css}");
+}
+
 /// Plain HTML has no components and draws the page as it is; it says so.
 #[test]
 fn plain_html_says_it_writes_no_states() {

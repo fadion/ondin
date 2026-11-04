@@ -1893,6 +1893,10 @@ fn a_tie_follows_its_value() {
         variant::tie_state(&f.doc, f.s, 1, 2, Some(Hover)).is_none(),
         "Hover is Hovered's"
     );
+    assert!(
+        variant::tie_state(&f.doc, f.s, 1, 0, Some(Disabled)).is_none(),
+        "rest's value is tied to none"
+    );
     let tx = variant::tie_state(&f.doc, f.s, 1, 2, None).unwrap();
     f.commit(tx.0);
     assert!(!ties(&f).iter().any(|(v, _)| v == "Pressed"));

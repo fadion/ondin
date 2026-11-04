@@ -141,6 +141,10 @@ pub(crate) fn write(
         let value = s.values[m.at].clone();
         let mut found = Vec::new();
         diff(&one, &s.tree, r, &mut Vec::new(), &mut found);
+        // The root always gets a focus rule, whatever else the state changes.
+        if *state == Interaction::FocusVisible && !found.iter().any(|(p, _)| p.is_empty()) {
+            found.insert(0, (Vec::new(), Vec::new()));
+        }
         for (path, mut style) in found {
             if path.is_empty() {
                 let moved: Vec<&str> = style

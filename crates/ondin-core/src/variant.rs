@@ -1393,7 +1393,7 @@ pub fn mark_interaction(doc: &Document, set: NodeId, prop: usize, on: bool) -> O
 }
 
 /// Tie value `value` of the interaction-state property `prop` to `state`, or to
-/// none. A state another value holds is refused.
+/// none. A state another value holds, or a state for rest's value, is refused.
 pub fn tie_state(
     doc: &Document,
     set: NodeId,
@@ -1402,8 +1402,13 @@ pub fn tie_state(
     state: Option<Interaction>,
 ) -> Option<Transaction> {
     let mut next = doc.get(set)?.set.clone()?;
+    let rest = rest_value(doc, set, prop);
     let p = next.props.get_mut(prop)?;
     let name = p.values.get(value)?.clone();
+    // Rest's value follows the default variant and is tied to none.
+    if state.is_some() && rest.as_ref() == Some(&name) {
+        return None;
+    }
     let ties = p.states.as_mut()?;
     if ties.get(&name).copied() == state {
         return None;

@@ -682,10 +682,16 @@ pub mod icon {
     pub const ARROW_LINE_UP: &str = "\u{e066}";
     /// *Send to back*; see [`ARROW_LINE_UP`].
     pub const ARROW_LINE_DOWN: &str = "\u{e05c}";
-    // Distribute: equal gaps along an axis. Not the column/row glyphs, which read
-    // as "even columns" rather than "push apart".
+    // A gap along an axis: the column and row gap fields and their badges.
     pub const ARROWS_OUT_LINE_HORIZONTAL: &str = "\u{e534}";
     pub const ARROWS_OUT_LINE_VERTICAL: &str = "\u{e536}";
+    /// *Distribute horizontally*, on the Align card and in the menu: two boxes
+    /// spaced evenly between two walls. [`DISTRIBUTE_V`] is the same drawing turned.
+    pub const DISTRIBUTE_H: &str = "\u{f030}";
+    /// *Distribute vertically*: [`DISTRIBUTE_H`] turned.
+    pub const DISTRIBUTE_V: &str = "\u{f031}";
+    /// A flex layout, added or switched to: three boxes in a row.
+    pub const FLEX_LAYOUT: &str = "\u{f032}";
     /// *Tidy up*: a row of three boxes over a rule with an arrowhead at each end.
     pub const TIDY_UP: &str = "\u{f02c}";
     /// Fold and unfold the whole layer tree. The pair reads as "gather these
@@ -760,7 +766,8 @@ pub mod icon {
     pub const EXCLUDE_SQUARE: &str = "\u{e880}";
     /// Colour review's merge target: the row the others fold into.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
-    /// Dot and dash *spacing*: the gap between two things.
+    /// Compare's grip between the two states, and dot and dash *spacing*: the gap
+    /// between two things.
     pub const ARROWS_LEFT_RIGHT: &str = "\u{e0a0}";
     /// Fit the dash pattern to the shape's corners.
     pub const BOUNDING_BOX: &str = "\u{e6ce}";
@@ -776,14 +783,12 @@ pub mod icon {
     pub const TEXT_ALIGN_CENTER: &str = "\u{e480}";
     pub const TEXT_ALIGN_RIGHT: &str = "\u{e486}";
     pub const TEXT_ALIGN_JUSTIFY: &str = "\u{e482}";
-    /// Letter spacing — the `Aa` glyph, which is what tracking is *of*.
+    /// A font family — the `Aa` glyph: the family face, *Replace font*, a missing
+    /// font, the default font.
     pub const TEXT_AA: &str = "\u{e6ee}";
-    /// Line height: the vertical arrow pair, matching `ARROWS_LEFT_RIGHT`'s use
-    /// for dot spacing.
+    /// Line height: the vertical arrow pair. [`ARROWS_HORIZONTAL`] is its twin.
     pub const ARROWS_VERTICAL: &str = "\u{eb04}";
-    /// The horizontal twin of [`ARROWS_VERTICAL`] (line height). Nothing draws it:
-    /// letter spacing took [`TEXT_AA`].
-    #[allow(dead_code)]
+    /// Letter spacing, the horizontal twin of [`ARROWS_VERTICAL`] (line height).
     pub const ARROWS_HORIZONTAL: &str = "\u{eb06}";
     /// The **B** toggle and its chord, against [`STROKE_WEIGHT`]'s weight picker.
     pub const TEXT_BOLD: &str = "\u{e5be}";
@@ -1100,6 +1105,9 @@ pub mod icon {
         ("arrows-out-line-horizontal", ARROWS_OUT_LINE_HORIZONTAL),
         ("arrows-out-line-vertical", ARROWS_OUT_LINE_VERTICAL),
         ("tidy-up", TIDY_UP),
+        ("distribute-h", DISTRIBUTE_H),
+        ("distribute-v", DISTRIBUTE_V),
+        ("flex-layout", FLEX_LAYOUT),
         ("arrows-in-line-vertical", ARROWS_IN_LINE_VERTICAL),
         ("columns", COLUMNS),
         ("rows", ROWS),

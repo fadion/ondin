@@ -207,7 +207,7 @@ impl FieldKey {
                 ondin_core::variable::TEXT_SIZE => icon::TEXT_T,
                 ondin_core::variable::TEXT_WEIGHT => icon::STROKE_WEIGHT,
                 ondin_core::variable::TEXT_LINE_HEIGHT => icon::ARROWS_VERTICAL,
-                ondin_core::variable::TEXT_LETTER_SPACING => icon::TEXT_AA,
+                ondin_core::variable::TEXT_LETTER_SPACING => icon::ARROWS_HORIZONTAL,
                 _ => icon::PARAGRAPH,
             },
             // The row's own label.
@@ -231,8 +231,7 @@ impl FieldKey {
                 PAD_RIGHT => icon::SIDE_RIGHT,
                 PAD_BOTTOM => icon::SIDE_BOTTOM,
                 PAD_LEFT => icon::SIDE_LEFT,
-                s if s == PAD_TOP | PAD_BOTTOM => icon::ARROWS_IN_LINE_VERTICAL,
-                _ => icon::ARROWS_IN_LINE_HORIZONTAL,
+                _ => icon::SIDES_SEPARATE,
             },
         }
     }

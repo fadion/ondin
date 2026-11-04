@@ -1220,14 +1220,12 @@ impl OndinApp {
                 _ => {}
             }
         }
-        self.session.name_step(
-            match to {
-                1 => "Flex layout",
-                2 => "Grid layout",
-                _ => "Remove layout",
-            },
-            icon::ARROWS_OUT_LINE_HORIZONTAL,
-        );
+        let (label, glyph) = match to {
+            1 => ("Flex layout", icon::FLEX_LAYOUT),
+            2 => ("Grid layout", icon::GRID_LAYOUT),
+            _ => ("Remove layout", icon::ARROWS_OUT_LINE_HORIZONTAL),
+        };
+        self.session.name_step(label, glyph);
         self.commit_edit(Transaction(ops));
     }
 
@@ -1659,12 +1657,12 @@ impl OndinApp {
             for (sides, glyph, word) in [
                 (
                     [LEFT, RIGHT],
-                    icon::ARROWS_IN_LINE_HORIZONTAL,
+                    icon::SIDES_SEPARATE,
                     "Left and right padding",
                 ),
                 (
                     [TOP, BOTTOM],
-                    icon::ARROWS_IN_LINE_VERTICAL,
+                    icon::SIDES_SEPARATE,
                     "Top and bottom padding",
                 ),
             ] {

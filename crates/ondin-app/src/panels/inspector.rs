@@ -2601,7 +2601,7 @@ impl OndinApp {
                     AlignCell::To(icon::ALIGN_BOTTOM, Axis::Y, Edge::Max, "Align bottom"),
                     AlignCell::Rule,
                     AlignCell::Spread(
-                        icon::COLUMNS,
+                        icon::DISTRIBUTE_H,
                         Axis::X,
                         if on_points {
                             "Distribute horizontally — needs three points"
@@ -2610,7 +2610,7 @@ impl OndinApp {
                         },
                     ),
                     AlignCell::Spread(
-                        icon::ROWS,
+                        icon::DISTRIBUTE_V,
                         Axis::Y,
                         if on_points {
                             "Distribute vertically — needs three points"
@@ -2683,7 +2683,7 @@ impl OndinApp {
             for (axis, glyph, live, dimmed) in [
                 (
                     Axis::X,
-                    icon::COLUMNS,
+                    icon::ARROWS_OUT_LINE_HORIZONTAL,
                     if on_points {
                         "Gap between neighbouring points, left to right"
                     } else {
@@ -2697,7 +2697,7 @@ impl OndinApp {
                 ),
                 (
                     Axis::Y,
-                    icon::ROWS,
+                    icon::ARROWS_OUT_LINE_VERTICAL,
                     if on_points {
                         "Gap between neighbouring points, top to bottom"
                     } else {

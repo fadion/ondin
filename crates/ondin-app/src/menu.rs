@@ -760,7 +760,7 @@ impl Item {
             ),
             Item::AddLayout => s(
                 "Add flex layout",
-                icon::ARROWS_OUT_LINE_HORIZONTAL,
+                icon::FLEX_LAYOUT,
                 Some("Shift+A"),
                 Group::Structure,
             ),
@@ -1205,13 +1205,13 @@ impl Item {
             }
             Item::Distribute(build::Axis::X) => s(
                 "Distribute horizontally",
-                icon::ARROWS_HORIZONTAL,
+                icon::DISTRIBUTE_H,
                 Some("Alt+Shift+H"),
                 Group::Transform,
             ),
             Item::Distribute(_) => s(
                 "Distribute vertically",
-                icon::ARROWS_VERTICAL,
+                icon::DISTRIBUTE_V,
                 Some("Alt+Shift+V"),
                 Group::Transform,
             ),

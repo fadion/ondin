@@ -20,13 +20,6 @@ reads true.
   mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,
   sizes, radius, visibility, type numbers); a direction change needs an enum binding for flex
   direction. Per-node overrides keyed by breakpoint are not the plan: every reader would take them.
-- **Interaction states in code export.** A variant property marked as an interaction state, its values
-  tied to `:hover`, `:active`, `:focus-visible` and `:disabled`; the exporter diffs each state's
-  variant against the default and writes only what changed. That needs a key pairing each state's
-  layers with the default's; layer names are fragile, so settle one before building. A state whose
-  layers do not pair falls back to the prop and is reported
-  approximated. The prop stays either way, for forcing a state. Live hover in present mode is
-  prototyping, a non-goal.
 
 ## Illustrations
 
@@ -72,6 +65,10 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).
+- **Pairing a state's layer with rest's by hand** — *Pair with rest layer…* and *Unpair* on a
+  layer inside a state variant, for a layer the lineage key and name path both miss. Today the
+  Variants card's unpaired note and its *Select it* lead to fixing the layer itself
+  (`variant::unpaired_states`). Trigger: a set whose states cannot be made to pair that way.
 - **A verb that un-makes a component** — owes a detach of its instances, as a delete does (§15 D979).
 - **CSS layout properties §5.3c defers** — non-`auto` margin, `order`, named grid areas,
   `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float.

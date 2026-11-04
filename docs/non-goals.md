@@ -102,7 +102,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Tailwind and CSS-in-JS in v1** (§15 D1098).
 - **Code layers, and importing HTML/CSS or framework code as layers** — too complex fully, messy partly; SVG import is untouched (§15 D1099).
 - **The code fidelity check in the app** — it needs an external browser and cannot check React or Vue; `ondin check code` stays the way to run it.
-
+- **Live interaction states in present mode** — hover and press on the canvas are prototyping; the states exist for code export.
 ## Tests and goldens
 
 - **`f32_pipeline` for `OptimizeQuality`, and keeping strokes out of the PNG fixture** (§15 D304).

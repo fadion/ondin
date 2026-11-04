@@ -549,8 +549,18 @@ variant* is the verb that takes the next free combination; an instance's name is
 
 **A component set is a frame around mains, never a main; a variant is a main whose parent is a set.**
 
-- `Node::set: Option<VariantSet>` — the set's variant properties, each `VariantProp { name, values }`.
+- `Node::set: Option<VariantSet>` — the set's variant properties, each `VariantProp { name, values,
+  states }`, and `element: RootElement` (*Interaction states*, below).
 - `Node::variant: Vec<String>` — a variant's values, one per property in the set's order.
+- `Node::lineage: Option<NodeId>` — the **lineage key** a variant's layer shares with its counterparts
+  in the other variants; `Node::lineage()` is the recorded key, else the layer's own id. Only
+  `build::insert_subtrees_as` writes one, when a variant is copied into its own set as a new main
+  (*Add variant*, *Duplicate as component* on a variant): each copied layer takes its source's key, so
+  a chain of copies shares one. `remap_subtree` remaps a key pointing inside the template (a whole set
+  copied or vendored keeps its variants' keys consistent) and drops one pointing outside (a copy
+  within one variant gets a fresh key), so a key is unique within a variant. A shared key rather than
+  a pointer to the source, because a pointer breaks on a chain of copies and when the source is
+  deleted. Never shown, never an override (`reset::state_ops` ignores it).
 - `Node::props: Vec<Keyed<Property>>` — component properties of a main or set:
   `Property { name, kind: PropKind::{Boolean, Text, Swap, Nested}, bound: Vec<NodeId>, filter: String, preferred: Vec<NodeId> }`.
 - `Node::description: String` (`description()`) — what a main or set is for, in the user's words; empty
@@ -567,9 +577,11 @@ variant* is the verb that takes the next free combination; an instance's name is
 - Ops `SetVariantSet`, `SetVariant`, `SetProperties`, `SetDescription`, `SetDocLink`, each inverting to
   the old value; no ink, no-ops in `absorb`, `overwrites` none, skipped by `propagate::mode`, never
   written by `reset::state_ops` — **never followed or overridden**. `description` and
-  `Property::preferred` are new in v9, `doc_link` in v13.
+  `Property::preferred` are new in v9; `doc_link`, `VariantProp::states`, `VariantSet::element` and
+  `lineage` in v13.
 - `Node::make_copy_of` is the one place a node becomes a linked copy (linked; swap, flag, values,
-  properties, description and link cleared); every door that makes an instance node goes through it.
+  properties, description, link and lineage key cleared); every door that makes an instance node goes
+  through it.
 
 **`variant::check`** (as `LinkRule::Variant`):
 
@@ -581,6 +593,7 @@ variant* is the verb that takes the next free combination; an instance's name is
 | `PropertyOwner` | properties only on a main not in a set, or a set |
 | `PropertyName` | unique, non-empty, not a variant property's name (the nameless showing exempt; a second showing refused) |
 | `Binding` | a bound layer exists strictly inside the owner's main (for a set, inside a variant, never a variant's root); text for a text property; a nested instance for a swap or showing; bound once per field |
+| `States` | at most one property of a set marked as the interaction state; it ties only its own values, each state once |
 
 **`variant::settle`** — after `settle_links` and **before `propagate`** (load-bearing: a renamed value
 renames its variants here, and `propagate` carries the new name onto every instance still holding the
@@ -618,8 +631,10 @@ an empty set fits either kind. The loader never refuses a mixed set.
 **The variant switch is made in place** (`variant::switch`), so matched ids, the selection and a nested
 copy's own copies survive:
 
-- layers below the two mains match by name path — k-th same-named sibling to k-th, within one kind,
-  only under a matched parent;
+- layers below the two mains match only under a matched parent and within one kind: between two
+  variants of one set, first by lineage key (the one child of the matched parent holding it), else by
+  name path — k-th same-named sibling to k-th. The key keeps overrides across a rename on either side,
+  which a name path loses silently (*Icon copy* after a paste);
 - a matched counterpart is relinked and each field goes through `propagate::follow` as if the old main
   had become the new one — **overrides carry, nothing else does**; keyed list items match by id, else
   by position;
@@ -637,14 +652,35 @@ property their content. Nothing stores its value on an instance; the default is 
 an overridden property is a bound field differing from its source; resetting it resets that field. So
 a switch carries properties with other overrides, and undo, preview and propagation need nothing new.
 
+**Interaction states.** One variant property of a set may be marked as its interaction state, for code
+export (`export.md`, *Code export*). `VariantProp::states` ties values by name to
+`Interaction::{Hover, FocusVisible, Active, Disabled}` (*Hover*, *Focus*, *Pressed*, *Disabled* in the
+app). **Rest is not stored**: it is the default variant's value (`variant::rest_value`, through
+`kit::default_variant`), so it follows the default; a value tied to none stays a plain prop value.
+`VariantSet::element` (`RootElement::{Button, Link, Plain}`, Button by default) says what the root is
+written as, read only while a property is marked.
+
+- `mark_interaction` marks or unmarks, guessing ties from value names (`Interaction::guess`: *hover*;
+  *pressed*/*active*; *focus*; *disabled*), never rest's value and each state once;
+  `why_not_interaction` refuses a second marked property or a property of one value. `tie_state`
+  refuses a state another value holds. `set_element` sets the element. `rename_value` keeps a tie;
+  `delete_value` drops it.
+- `unpaired_states(doc, set) -> Vec<Unpaired { variant, why, layer }>` lists each state variant whose
+  layers do not line up with its rest variant (the one with the same values of every other property):
+  no rest variant, another kind of layer, other text, or another order (*“Label” moves before “Bg”*,
+  naming the layer moved ahead). Layers pair by recorded lineage key, else name path. A layer only one
+  side draws is a show or hide, not a failure.
+- A set saved before lineage keys is not stamped when marked: its layers pair by name path until a
+  variant is copied again.
+
 ### Instance swap — `swap.rs`
 
 **The link keeps the slot, the swap brings the contents.** `Node::swap` names the main a nested copy
 inside an outer instance shows instead of its link's; `link` keeps the slot's identity (what places,
 orders and scopes its resets). Only a nested copy can swap (`swap::can_swap`); a root linked straight
 to a main changes main by relinking (`swap::can_relink`, `can_relink_to`: a main of its kind that
-would not put a main inside itself), through `variant::switch`'s rewrite, so overrides carry by name
-path. The Component card gives such a root a **Main** row in the Swap row's place: the same picker
+would not put a main inside itself), through `variant::switch`'s rewrite, so overrides carry as a
+switch's do. The Component card gives such a root a **Main** row in the Swap row's place: the same picker
 over `swap::options` (which lists relink targets too), no override mark, since a relink is not an
 override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offers` requires
 `can_swap`).
@@ -705,17 +741,29 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
 - **A set** gets a *Variants* card in the Component card's place (`OndinApp::set_body`): glyph and name
   via `component::name_line` with its instances' count as the select link; variant count in the title
   (`OndinApp::panel_head`'s `size`); the clash note with a warning glyph; each variant property as a
-  name field with a × (disabled for the last) and its values as chips, a hairline
+  name field, a menu button and a × (disabled for the last), and its values as chips, a hairline
   (`variants::card_rule`) between properties. A chip's popup renames, moves and deletes its value;
   deleting a used value confirms in a modal (`OndinApp::value_delete_confirmation`: *N variants use it
   and are deleted with it. M instances will detach.*; a value changed meanwhile deletes nothing).
+- **Interaction state on the Variants card.** The property's menu button (`icon::DOTS_THREE`; once
+  marked `icon::HAND_POINTING`, latched `FieldButton::On`) holds one checkable row, *Interaction
+  state*, disabled with `why_not_interaction`'s reason; undo step *Interaction state*. Marked, each
+  value chip is `ui::label_button_noted`, its note `rest` or the tied selector, and its popup gains a
+  *State* eyebrow over checkable rows *Rest* (always greyed: rest follows the default variant), *None*,
+  *Hover*, *Pressed*, *Focus*, *Disabled*, the selector in the accel column; a state another value
+  holds shows that value's name there and is greyed. An *Element* dropdown (Button, Link, Plain; undo
+  step *Element*) shows while a property is marked. Each `unpaired_states` entry is a warning note
+  (*Large, Focus does not pair*, the sentence in its tooltip) with *Select it* (the layer, else the
+  variant), as the clash note is.
 - **A variant** gets the Component card with *Variant in* and the set as a link, its derived read-only
   name, a dropdown per property — a taken combination noted as *Variant clash* with *Select it* — and
   *Duplicate*.
 - **An instance's card** gains a dropdown per variant property (no dot for a root linked to a main; a
   dot on a nested copy, whose choice is a swap), switching via `variant::switch` — *Mixed* across a
   disagreeing selection, a missing combination greyed, disabled where any root fails `can_switch` —
-  then each component property (boolean as switch row, text as field) with its mark. Several
+  then each component property (boolean as switch row, text as field) with its mark. The interaction
+  state's label hovers *In code the browser sets <property>. Pick one here to draw it, and to force it
+  in the export; <rest> leaves it to the browser.* Several
   instances get the rows when they share one owner. Label cut with `…` and a tooltip only when cut
   (`component::fitted_label` asks `Galley::elided`; `component::label_mark_in`, `MARK_ROOM`); a boolean
   row is `variants::toggle_row`. Bound to boolean variables the switch sits in a variable's capsule; a

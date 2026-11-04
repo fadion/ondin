@@ -4464,7 +4464,15 @@ pub fn kept_flow(
 
 /// The two-half rule for a flex direction's and wrap's bindings, which ride in
 /// the layout: every `SetDisplay` rewritten by [`kept_flow`].
+///
+/// Then a binding to a string that names no direction or wrap in some mode
+/// ([`crate::variable::names_one_everywhere`]) detaches to what it draws — judged on the
+/// tree the transaction leaves, for every flex it writes or brings in, and every
+/// bound one when it writes a cell. Rewritten in the transaction's last write of
+/// that layout, else appended.
 pub fn keep_flow_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    use crate::container::Display;
+    use crate::variable::{self, Field};
     for op in tx.0.iter_mut() {
         if let Operation::SetDisplay {
             id,
@@ -4472,6 +4480,70 @@ pub fn keep_flow_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
         } = op
         {
             *display = kept_flow(doc, *id, display);
+        }
+    }
+    let bound = |n: &Node| matches!(n.display(), Some(Display::Flex(f)) if f.flow_vars().iter().any(Option::is_some));
+    let mut judged: Vec<NodeId> = Vec::new();
+    for op in &tx.0 {
+        match op {
+            Operation::SetDisplay {
+                id,
+                display: Some(Display::Flex(f)),
+            } if f.flow_vars().iter().any(Option::is_some) => judged.push(*id),
+            Operation::InsertSubtree { nodes, .. } => {
+                judged.extend(nodes.iter().filter(|n| bound(n)).map(|n| n.id));
+            }
+            Operation::SetVariableCell { .. }
+            | Operation::SetVariable { .. }
+            | Operation::AddMode { .. } => {
+                judged.extend(doc.node_map().values().filter(|n| bound(n)).map(|n| n.id));
+            }
+            _ => {}
+        }
+    }
+    if judged.is_empty() {
+        return tx;
+    }
+    judged.sort();
+    judged.dedup();
+    let mut after = doc.clone();
+    // Unchecked: a link the commit's later passes cut fails `component::check` until then.
+    if after.apply_unchecked(&tx).is_err() {
+        return tx;
+    }
+    let t = after.variables();
+    for id in judged {
+        let Some(Display::Flex(mut f)) = after.get(id).and_then(Node::display).cloned() else {
+            continue;
+        };
+        let drawn = match after.spacing_drawn_in(t, id, &Display::Flex(f), [None; 6]) {
+            Display::Flex(d) => d,
+            _ => f,
+        };
+        let names = |v: Option<crate::VarId>, field| {
+            v.is_none_or(|v| variable::names_one_everywhere(t, v, field))
+        };
+        if names(f.direction_var, Field::FlexDirection) && names(f.wrap_var, Field::FlexWrap) {
+            continue;
+        }
+        if !names(f.direction_var, Field::FlexDirection) {
+            f.direction = drawn.direction;
+            f.direction_var = None;
+        }
+        if !names(f.wrap_var, Field::FlexWrap) {
+            f.wrap = drawn.wrap;
+            f.wrap_var = None;
+        }
+        let last = tx.0.iter_mut().rev().find_map(|op| match op {
+            Operation::SetDisplay { id: n, display } if *n == id => Some(display),
+            _ => None,
+        });
+        match last {
+            Some(display) => *display = Some(Display::Flex(f)),
+            None => tx.0.push(Operation::SetDisplay {
+                id,
+                display: Some(Display::Flex(f)),
+            }),
         }
     }
     tx
@@ -4956,7 +5028,50 @@ pub fn keep_stroke_width_bindings(doc: &Document, mut tx: Transaction) -> Transa
 /// an edit leaves ([`keep_size_bindings`]). Not a measurement of the laid-out box:
 /// shrink and `min-`/`max-` can squeeze an authored axis, and the binding keeps its
 /// number (the CSS reading of `width`).
+///
+/// Judged in the mode in force; [`size_axes_authored_everywhere`] asks every
+/// direction a bound parent can draw.
 pub fn size_axes_authored(view: &dyn crate::container::LayoutView, id: NodeId) -> [bool; 2] {
+    size_axes_authored_as(view, id, None)
+}
+
+/// [`size_axes_authored`] in every mode: an axis is authored only when it is under
+/// each direction the parent's bound direction can take, since a frame set to
+/// another mode lays it out that way.
+pub fn size_axes_authored_everywhere(doc: &Document, id: NodeId) -> [bool; 2] {
+    let view = crate::resolve::DocView(doc);
+    let mut out = size_axes_authored(&view, id);
+    let parent = doc.get(id).and_then(Node::parent);
+    for d in parent.map_or_else(Vec::new, |p| directions_bound(doc, p)) {
+        let a = size_axes_authored_as(&view, id, Some(d));
+        out = [out[0] && a[0], out[1] && a[1]];
+    }
+    out
+}
+
+/// The directions flex container `id`'s bound direction names across every mode;
+/// empty when it is not bound.
+fn directions_bound(doc: &Document, id: NodeId) -> Vec<crate::container::FlexDirection> {
+    use crate::container::{Display, FlexDirection};
+    let Some(Display::Flex(f)) = doc.get(id).and_then(Node::display) else {
+        return Vec::new();
+    };
+    let Some(v) = f.direction_var else {
+        return Vec::new();
+    };
+    doc.variables()
+        .every_value(v)
+        .iter()
+        .filter_map(|x| x.as_str().and_then(FlexDirection::from_word))
+        .collect()
+}
+
+/// [`size_axes_authored`] with the parent's flex direction read as `direction`.
+fn size_axes_authored_as(
+    view: &dyn crate::container::LayoutView,
+    id: NodeId,
+    direction: Option<crate::container::FlexDirection>,
+) -> [bool; 2] {
     use crate::container::{AlignItems, Dimension, Display};
     let Some(kind) = view.kind(id) else {
         return [false; 2];
@@ -4983,11 +5098,15 @@ pub fn size_axes_authored(view: &dyn crate::container::LayoutView, id: NodeId) -
         let parent = view.parent(id).and_then(|p| view.display(p));
         match parent.as_deref() {
             Some(Display::Flex(flex)) => {
+                let flex = crate::container::Flex {
+                    direction: direction.unwrap_or(flex.direction),
+                    ..*flex
+                };
                 let main = if flex.direction.is_row() { 0 } else { 1 };
                 if item.grow > 0.0 || item.basis != Dimension::Auto {
                     out[main] = false;
                 }
-                if stretched_across(flex, &item, &kind, false) {
+                if stretched_across(&flex, &item, &kind, false) {
                     out[1 - main] = false;
                 }
             }
@@ -5012,15 +5131,16 @@ pub fn size_axes_authored(view: &dyn crate::container::LayoutView, id: NodeId) -
     out
 }
 
-/// [`size_axes_authored`] of `doc` as committed — asked before offering a chip.
+/// [`size_axes_authored_everywhere`] of `doc` as committed — asked before offering
+/// a chip.
 pub fn bindable_size_axes(doc: &Document, id: NodeId) -> [bool; 2] {
-    size_axes_authored(&crate::resolve::DocView(doc), id)
+    size_axes_authored_everywhere(doc, id)
 }
 
 /// Bind layer `id`'s width and height to `vars` — `None` leaving an axis as it
 /// is, [`bind_corners_ops`]' shape: a bound axis's literal is written 0. Empty for
 /// a kind with no stored size, an axis something else sizes
-/// ([`size_axes_authored`]), or when nothing would change.
+/// ([`size_axes_authored_everywhere`]), or when nothing would change.
 pub fn bind_size_ops(doc: &Document, id: NodeId, vars: crate::SizeVars) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -5028,7 +5148,7 @@ pub fn bind_size_ops(doc: &Document, id: NodeId, vars: crate::SizeVars) -> Vec<O
     let Some(size) = node.kind().box_size() else {
         return Vec::new();
     };
-    let authored = size_axes_authored(&crate::resolve::DocView(doc), id);
+    let authored = size_axes_authored_everywhere(doc, id);
     let mut next = node.size_vars();
     for k in 0..2 {
         if vars[k].is_some() && authored[k] {
@@ -5128,9 +5248,11 @@ pub fn kept_size_vars(
 /// An axis an edit makes computed is detached too (only a hand-set size is
 /// bindable): a keyword set to `%`/`fit-content`, a second pin, growth, a basis or
 /// stretch, a reparent into a layout, a layer shown or unmasked into the flow, a
-/// bound layer pasted into a layout. Asked of the tree the transaction leaves
-/// ([`size_axes_authored`] on a scratch copy), and only when the transaction
-/// touches the layout of a bound layer or its parent; the literal it detaches to
+/// bound layer pasted into a layout, a parent's direction bound or its variable's
+/// cell written so that some mode lays the axis out. Asked of the tree the
+/// transaction leaves ([`size_axes_authored_everywhere`] on a scratch copy), and
+/// only when the transaction touches the layout of a bound layer or its parent, or
+/// a cell; the literal it detaches to
 /// is the size drawn before the edit. `res` is the layout `doc` was resolved to,
 /// for [`kept_size_vars`]' used size.
 pub fn keep_size_bindings(
@@ -5201,6 +5323,16 @@ pub fn keep_size_bindings(
                     touched.extend(n.children().iter().copied());
                 }
             }
+            // A cell can turn a bound direction in some mode.
+            Operation::SetVariableCell { .. }
+            | Operation::SetVariable { .. }
+            | Operation::AddMode { .. } => {
+                for n in doc.node_map().values() {
+                    if !directions_bound(doc, n.id).is_empty() {
+                        touched.extend(n.children().iter().copied());
+                    }
+                }
+            }
             Operation::InsertSubtree { nodes, .. } => {
                 for n in nodes {
                     if !sets_vars.contains(&n.id) && n.size_vars.iter().any(Option::is_some) {
@@ -5220,7 +5352,6 @@ pub fn keep_size_bindings(
         let mut after = doc.clone();
         // Unchecked: a link the commit's later passes cut fails `component::check` until then.
         if after.apply_unchecked(&tx).is_ok() {
-            let view = crate::resolve::DocView(&after);
             for id in touched {
                 // Gone by the end of the edit: a write to it would fail the commit.
                 let Some(kept) = after.get(id) else {
@@ -5230,7 +5361,7 @@ pub fn keep_size_bindings(
                 let Some(start) = before.or_else(|| arrived.get(&id).copied()) else {
                     continue;
                 };
-                let authored = size_axes_authored(&view, id);
+                let authored = size_axes_authored_everywhere(&after, id);
                 let v = vars.entry(id).or_insert(start);
                 let which = [
                     v[0].is_some() && !authored[0],

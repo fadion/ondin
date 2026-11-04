@@ -1480,8 +1480,9 @@ impl EditorSession {
         // A flex direction or wrap written over its binding, which rides in the
         // layout and so is rewritten in place: the cut ones are read around it.
         let flows = flows_bound(&tx);
+        let flows_from = tx.0.len();
         let tx = ondin_core::build::keep_flow_bindings(&self.doc, tx);
-        let flows_cut = flows_cut(&self.doc, &tx, &flows);
+        let flows_cut = flows_cut(&self.doc, &tx, &flows, flows_from);
         // A visibility written over a bound layer.
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
         // An opacity written over a bound layer.
@@ -2221,25 +2222,47 @@ fn flows_bound(tx: &Transaction) -> Vec<(NodeId, usize, ondin_core::VarId)> {
 }
 
 /// The variables `bound`'s directions and wraps lost in `tx`, the pass run —
-/// [`stroke_widths_cut`]'s twin.
+/// [`stroke_widths_cut`]'s twin — and those the pass's own writes from op `from`
+/// on cut from the stored layout.
 fn flows_cut(
     doc: &Document,
     tx: &Transaction,
     bound: &[(NodeId, usize, ondin_core::VarId)],
+    from: usize,
 ) -> Vec<String> {
+    use ondin_core::container::Display;
     let table = doc.variables();
+    let appended = tx.0.get(from..).unwrap_or_default().iter().flat_map(|op| {
+        let (id, now) = match op {
+            Operation::SetDisplay {
+                id,
+                display: Some(Display::Flex(f)),
+            } => (*id, f.flow_vars()),
+            _ => return Vec::new(),
+        };
+        let had = match doc.get(id).and_then(|n| n.display()) {
+            Some(Display::Flex(f)) => f.flow_vars(),
+            _ => [None; 2],
+        };
+        (0..2)
+            .filter(|k| now[*k].is_none())
+            .filter_map(|k| had[k])
+            .collect()
+    });
     let mut names: Vec<String> = bound
         .iter()
         .filter(|(id, k, _)| {
             tx.0.iter().any(|op| match op {
                 Operation::SetDisplay {
                     id: n,
-                    display: Some(ondin_core::container::Display::Flex(f)),
+                    display: Some(Display::Flex(f)),
                 } if n == id => f.flow_vars()[*k].is_none(),
                 _ => false,
             })
         })
-        .filter_map(|(_, _, v)| table.get(*v).map(|x| x.name.clone()))
+        .map(|(_, _, v)| *v)
+        .chain(appended)
+        .filter_map(|v| table.get(v).map(|x| x.name.clone()))
         .collect();
     names.sort();
     names.dedup();
@@ -2620,6 +2643,56 @@ mod tests {
         assert!(s.commit(Transaction(ops)));
         assert_eq!(s.doc.get(id).unwrap().size_vars(), [None, Some(h)]);
         assert_eq!(s.status().text, "", "the chip's detach says nothing");
+    }
+
+    /// A cell edit that leaves a bound direction's string naming none cuts the
+    /// binding, and the status names it.
+    /// flip: `flows_cut` without the pass's appended writes → fails at "said".
+    #[test]
+    fn a_cell_cutting_a_direction_is_said() {
+        use ondin_core::container::{Display, Flex};
+        use ondin_core::variable::{Field, Scope};
+        use ondin_core::{Cell, Mode, VarKind, Variable};
+        let mut s = EditorSession::new();
+        let frame = first_artboard(&s);
+        let (mode, v) = (s.ids.mint_mode(), s.ids.mint_var());
+        assert!(s.commit(Transaction(vec![
+            Operation::AddMode {
+                collection: ondin_core::variable::CollectionId::FIRST,
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: v,
+                    name: "label".into(),
+                    kind: VarKind::String,
+                    cells: [(mode, Cell::String("Column".into()))].into(),
+                    scope: Some(Scope::of([Field::FlexDirection, Field::Content])),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Flex(Flex::default())),
+            },
+        ])));
+        let ops = ondin_core::build::bind_flow_ops(&s.doc, frame, 0, Some(v));
+        assert!(s.commit(Transaction(ops)));
+        s.info("");
+        assert!(s.commit(Transaction(vec![Operation::SetVariableCell {
+            id: v,
+            mode,
+            cell: Cell::String("Go".into()),
+        }])));
+        assert_eq!(s.doc.get(frame).unwrap().flow_vars()[0], None);
+        assert_eq!(s.status().text, "Detached label", "said");
     }
 
     #[test]

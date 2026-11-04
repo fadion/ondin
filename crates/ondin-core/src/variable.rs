@@ -3074,6 +3074,17 @@ pub fn holds_its_words(v: &Variable) -> bool {
     })
 }
 
+/// Whether every value `var` can take, through its aliases, is a word `field`
+/// takes ([`Field::takes`]) — what a flex direction or wrap stays bound to. A
+/// string scoped wider than them may hold a label in some mode. True for any
+/// other field.
+pub fn names_one_everywhere(t: &Variables, var: VarId, field: Field) -> bool {
+    !field.needs_scope()
+        || t.every_value(var)
+            .iter()
+            .all(|v| v.as_str().is_some_and(|s| field.takes(s)))
+}
+
 /// The table's own rules, without the bindings.
 ///
 /// A kit's variable (§15 D1064) has a cell in every mode **of its kit** and no

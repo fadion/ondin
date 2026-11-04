@@ -611,14 +611,18 @@ pub(crate) fn matches<'a>(
 }
 
 /// [`matches()`] for a field of family `field`: only the variables whose scope
-/// takes it, each collection's together, in collection order — kits last.
+/// takes it, each collection's together, in collection order — kits last. A
+/// string naming no direction or wrap in some mode is left out, as the commit
+/// would cut the binding (`build::keep_flow_bindings`).
 pub(crate) fn matches_for<'a>(
     table: &'a ondin_core::Variables,
     field: Field,
     query: &str,
 ) -> Vec<&'a Variable> {
     let mut out = matches(table, field.kind(), query);
-    out.retain(|v| v.binds(field));
+    out.retain(|v| {
+        v.binds(field) && ondin_core::variable::names_one_everywhere(table, v.id, field)
+    });
     let rank = |v: &Variable| {
         table
             .collection_of(v.id)

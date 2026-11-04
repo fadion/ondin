@@ -12,14 +12,19 @@ use ondin_core::{
 };
 
 /// Breakpoint (Mobile, Tablet ≥ 768) picked by width; *Home* a top-level frame
-/// 1024 wide holding *cards*, a flex row; `flow` a string scoped to flex
-/// direction reading Column, then Row.
+/// 1024 wide holding *cards*, a flex row, holding *tile*, a rectangle; `flow` a
+/// string scoped to flex direction reading Column, then Row; `width` a number
+/// reading 60.
 struct F {
     doc: Document,
     home: NodeId,
     cards: NodeId,
+    tile: NodeId,
     flow: VarId,
     loose: VarId,
+    width: VarId,
+    mobile: ModeId,
+    tablet: ModeId,
 }
 
 fn frame(id: NodeId, parent: NodeId, w: f64) -> Operation {
@@ -57,13 +62,25 @@ fn fixture() -> F {
     let mut ids = IdSource::new(0xF1);
     let page = ids.mint();
     let mut doc = Document::new(page);
-    let (home, cards) = (ids.mint(), ids.mint());
+    let (home, cards, tile) = (ids.mint(), ids.mint(), ids.mint());
     let (mobile, tablet) = (ids.mint_mode(), ids.mint_mode());
     let bp = ids.mint_collection();
-    let (flow, loose) = (ids.mint_var(), ids.mint_var());
+    let (flow, loose, width) = (ids.mint_var(), ids.mint_var(), ids.mint_var());
     doc.apply(&Transaction(vec![
         frame(home, page, 1024.0),
         frame(cards, home, 400.0),
+        Operation::CreateNode {
+            id: tile,
+            parent: cards,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 20.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
         Operation::SetDisplay {
             id: cards,
             display: Some(Display::Flex(Flex::default())),
@@ -97,14 +114,46 @@ fn fixture() -> F {
         Operation::AddVariable {
             var: string(loose, "label", [(mobile, "Column"), (tablet, "Go")], None),
         },
+        Operation::AddVariable {
+            var: Variable {
+                id: width,
+                name: "tile/width".into(),
+                kind: VarKind::Number,
+                cells: [(mobile, Cell::Number(60.0)), (tablet, Cell::Number(60.0))].into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
     ]))
     .expect("a page, a by-width collection and a flex frame");
     F {
         doc,
         home,
         cards,
+        tile,
         flow,
         loose,
+        width,
+        mobile,
+        tablet,
+    }
+}
+
+/// `doc` with `ops` committed through the flow and size passes, in the
+/// session's order.
+fn commit(doc: &mut Document, ops: Vec<Operation>) {
+    let tx = build::keep_flow_bindings(doc, Transaction(ops));
+    let tx = build::keep_size_bindings(doc, None, tx);
+    doc.apply(&tx).expect("committed");
+}
+
+fn cell(id: VarId, mode: ModeId, s: &str) -> Operation {
+    Operation::SetVariableCell {
+        id,
+        mode,
+        cell: Cell::String(s.into()),
     }
 }
 
@@ -237,4 +286,81 @@ fn the_binding_round_trips() {
     let back = ondin_core::io::load(&bytes).unwrap();
     assert_eq!(back.get(f.cards).unwrap().flow_vars()[0], Some(f.flow));
     assert_eq!(ondin_core::io::save(&back).unwrap(), bytes);
+}
+
+/// A bound width some mode's direction stretches: binding the direction detaches
+/// it, though the mode in force draws a row where the width is the tile's own;
+/// and no width binds back while the direction is bound.
+/// flip: `keep_size_bindings` judging with `size_axes_authored` (the mode in
+/// force) → fails at "detached by the Column mode".
+#[test]
+fn binding_a_direction_detaches_a_width_another_mode_stretches() {
+    let mut f = fixture();
+    let ops = build::bind_size_ops(&f.doc, f.tile, [Some(f.width), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(f.tile).unwrap().size_vars()[0], Some(f.width));
+    let ops = build::bind_flow_ops(&f.doc, f.cards, 0, Some(f.flow));
+    commit(&mut f.doc, ops);
+    assert_eq!(f.doc.get(f.cards).unwrap().flow_vars()[0], Some(f.flow));
+    assert_eq!(direction(&f.doc, f.cards), FlexDirection::Row);
+    assert_eq!(
+        f.doc.get(f.tile).unwrap().size_vars()[0],
+        None,
+        "detached by the Column mode"
+    );
+    assert_eq!(build::bindable_size_axes(&f.doc, f.tile), [false, false]);
+}
+
+/// A cell turning a bound direction in a mode not in force detaches a width that
+/// direction stretches.
+/// flip: the `SetVariableCell` arm out of `keep_size_bindings`' layout half →
+/// fails at "detached by the cell".
+#[test]
+fn a_cell_turning_a_direction_detaches_a_width() {
+    let mut f = fixture();
+    commit(&mut f.doc, vec![cell(f.flow, f.mobile, "Row")]);
+    let ops = build::bind_flow_ops(&f.doc, f.cards, 0, Some(f.flow));
+    commit(&mut f.doc, ops);
+    let ops = build::bind_size_ops(&f.doc, f.tile, [Some(f.width), None]);
+    commit(&mut f.doc, ops);
+    assert_eq!(
+        f.doc.get(f.tile).unwrap().size_vars()[0],
+        Some(f.width),
+        "a row in every mode leaves the width the tile's"
+    );
+    commit(&mut f.doc, vec![cell(f.flow, f.mobile, "Column")]);
+    assert_eq!(
+        f.doc.get(f.tile).unwrap().size_vars()[0],
+        None,
+        "detached by the cell"
+    );
+    assert_eq!(f.doc.get(f.cards).unwrap().flow_vars()[0], Some(f.flow));
+}
+
+/// A string scoped wider than flex direction stays bound while every cell names
+/// one; a cell naming none detaches it at the commit to the direction drawn.
+/// flip: `keep_flow_bindings` without its every-mode judgement → fails at
+/// "a label detaches it".
+#[test]
+fn a_string_naming_no_direction_detaches_at_the_commit() {
+    let mut f = fixture();
+    let wide = Some(Scope::of([Field::FlexDirection, Field::Content]));
+    let mut ops = variable::scope_ops(&f.doc, f.loose, wide);
+    ops.push(cell(f.loose, f.tablet, "Row"));
+    commit(&mut f.doc, ops);
+    assert!(variable::names_one_everywhere(
+        f.doc.variables(),
+        f.loose,
+        Field::FlexDirection
+    ));
+    let ops = build::bind_flow_ops(&f.doc, f.cards, 0, Some(f.loose));
+    commit(&mut f.doc, ops);
+    assert_eq!(f.doc.get(f.cards).unwrap().flow_vars()[0], Some(f.loose));
+    commit(&mut f.doc, vec![cell(f.loose, f.tablet, "Go")]);
+    assert_eq!(
+        f.doc.get(f.cards).unwrap().flow_vars()[0],
+        None,
+        "a label detaches it"
+    );
+    assert_eq!(direction(&f.doc, f.cards), FlexDirection::Row);
 }

@@ -195,6 +195,29 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         root.set("isolation", "isolate");
     }
     let offset = Affine::translate(-view.origin().to_vec2());
+    // A frame that picks its mode by width is the window: written alone, it
+    // fills it, and the media blocks read the window's width as the canvas
+    // reads the frame's. Beside others it stays at its own width.
+    let window = match origins {
+        [id] => doc.width_pick(*id).is_some().then_some(*id),
+        _ => {
+            for id in origins.iter().filter(|id| doc.width_pick(**id).is_some()) {
+                if let Some(node) = doc.get(*id) {
+                    walk.report.approximate(format!(
+                        "frame {}: it picks its mode by width, which the page reads from \
+                         the window; export it alone to write it filling the window",
+                        label(node)
+                    ));
+                }
+            }
+            None
+        }
+    };
+    if window.is_some() {
+        root.set("width", "100%");
+        root.set("min-height", px(view.height()));
+        root.style.retain(|(p, _)| *p != "height");
+    }
     for id in origins {
         let Some(node) = doc.get(*id) else { continue };
         // An origin's parent is not in the export: it is placed where it is drawn.
@@ -211,6 +234,10 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
             },
         ) {
             let mut el = el;
+            if window == Some(*id) {
+                el.set("left", "0px");
+                el.set("width", "100%");
+            }
             // The modes its ancestors set, which the export does not hold.
             let t = doc.variables();
             let inherited = node
@@ -313,10 +340,15 @@ impl Walk<'_> {
             .get(&id)
             .filter(|b| b.kind == PropKind::Boolean)
             .map(|b| b.name.clone());
+        // A visibility bound to a variable that varies is a token, so the layer
+        // is written whatever it shows here, and shown or hidden by the mode.
+        let shown_var = node
+            .visible_var()
+            .filter(|v| shown_by.is_none() && tokens::varies(doc, *v));
         // A slice is an export region, never part of the page's code.
         if node.mask()
             || matches!(node.kind(), NodeKind::Slice { .. })
-            || (shown_by.is_none() && !doc.shown(id))
+            || (shown_by.is_none() && shown_var.is_none() && !doc.shown(id))
         {
             return None;
         }
@@ -339,6 +371,14 @@ impl Walk<'_> {
                 Some(why) => self.picture(node, place, &why)?,
             },
         };
+        if let Some(var) = shown_var {
+            let own = el
+                .style
+                .iter()
+                .find(|(p, _)| *p == "display")
+                .map_or_else(|| "block".to_string(), |(_, v)| v.clone());
+            el.set("display", self.tokens.shown(var, &own));
+        }
         el.shown_by = shown_by;
         el.key = Some(name_step(doc, node));
         el.lineage = Some((node.lineage(), node.lineage_recorded()));
@@ -1361,16 +1401,6 @@ impl Walk<'_> {
         if let Some(mode) = self.tokens.modes_attr(node.modes().iter().copied()) {
             el.attrs.push(("data-mode", mode));
         }
-        if let Some(var) = node.visible_var()
-            && tokens::varies(doc, var)
-        {
-            self.report.approximate(format!(
-                "{} {}: its visibility is bound to a variable and written for one mode",
-                kind_word(node),
-                label(node)
-            ));
-        }
-
         if let Some(var) = node.opacity_var() {
             el.set("opacity", self.tokens.opacity(var));
         } else {

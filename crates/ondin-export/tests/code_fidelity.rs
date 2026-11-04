@@ -1761,6 +1761,132 @@ fn variables_match_the_canvas_in_every_mode() {
     }
 }
 
+/// **A frame that picks its mode by width draws in the browser as on the
+/// canvas at each width**: written alone it fills the window, which the media
+/// blocks read as the canvas reads the frame — 600 wide is Mobile, 900 Tablet.
+/// A bound gap, colour and visibility each differ between the two, the hidden
+/// rect written with a `none`/`initial` token.
+///
+/// flip: `Tokens::css` writing the by-width collection's modes as `[data-mode]`
+/// blocks → 136.7 at the 900 page, which draws Mobile's colour and gap.
+#[test]
+fn a_frame_picked_by_width_matches_the_canvas_at_each_width() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, CollectionId, Mode, VarKind, Variable};
+    for (w, name) in [(900.0, "tablet"), (600.0, "mobile")] {
+        let mut d = Doc::new();
+        let (mobile, tablet) = (d.ids.mint_mode(), d.ids.mint_mode());
+        let mode = |id, name: &str, index| Operation::AddMode {
+            collection: CollectionId::FIRST,
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        };
+        d.apply(vec![
+            mode(mobile, "Mobile", 0),
+            mode(tablet, "Tablet", 1),
+            Operation::SetBreakpoints {
+                id: CollectionId::FIRST,
+                breakpoints: Some([(mobile, 0.0), (tablet, 768.0)].into()),
+            },
+        ]);
+        let var = |d: &mut Doc, name: &str, kind, a: Cell, b: Cell| {
+            let id = d.ids.mint_var();
+            d.apply(vec![Operation::AddVariable {
+                var: Variable {
+                    id,
+                    name: name.into(),
+                    kind,
+                    cells: [(mobile, a), (tablet, b)].into_iter().collect(),
+                    scope: None,
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            }]);
+            id
+        };
+        let gap = var(
+            &mut d,
+            "gap",
+            VarKind::Number,
+            Cell::Number(8.0),
+            Cell::Number(40.0),
+        );
+        let ink = var(
+            &mut d,
+            "ink",
+            VarKind::Color,
+            Cell::Color(Color::from_rgba8(230, 70, 50, 255)),
+            Cell::Color(Color::from_rgba8(60, 120, 240, 255)),
+        );
+        let wide = var(
+            &mut d,
+            "show-wide",
+            VarKind::Boolean,
+            Cell::Boolean(false),
+            Cell::Boolean(true),
+        );
+        let f = d.frame(None, 0.0, 0.0, w, 120.0, "Home");
+        d.fill(f, solid(250, 250, 250, 255));
+        d.apply(vec![
+            Operation::SetDisplay {
+                id: f,
+                display: Some(Display::Flex(Flex {
+                    align_items: AlignItems::Center,
+                    padding: [10.0; 4],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetSpacingVars {
+                id: f,
+                vars: [Some(gap), None, None, None, None, None],
+            },
+        ]);
+        for j in 0..3 {
+            let r = d.rect(f, 0.0, 0.0, 60.0, 60.0, 0.0);
+            d.apply(vec![Operation::SetFills {
+                id: r,
+                fills: keyed_by_position([Fill {
+                    brush: BrushSource::Bound {
+                        var: ink,
+                        alpha: 1.0,
+                    },
+                    visible: true,
+                }]),
+            }]);
+            if j == 1 {
+                d.apply(vec![Operation::SetVisibleVar {
+                    id: r,
+                    var: Some(wide),
+                }]);
+            }
+        }
+        let (doc, res) = d.done();
+        holds(&format!("breakpoint-{name}"), &doc, &res);
+        let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
+        let tokens =
+            String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+        assert!(
+            tokens.contains("@media (min-width: 768px) {\n  :root {\n    --gap: 40;"),
+            "{name}: tokens.css lacks the media block:\n{tokens}"
+        );
+        assert!(
+            tokens.contains("[data-mode=\"mobile\"] {"),
+            "{name}: a pin's block:\n{tokens}"
+        );
+        let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+        assert!(
+            css.contains("display: var(--show-wide, block)"),
+            "{name}: the visibility token:\n{css}"
+        );
+        holds(&format!("breakpoint-{name}"), &doc, &res);
+    }
+}
+
 /// A text's bound type numbers write their variables in the unit each literal
 /// holds — a size and a paragraph spacing in px, a weight bare, a `%` line height
 /// as a multiple and a `%` letter spacing in hundredths of an em — and draw as

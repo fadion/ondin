@@ -12,6 +12,10 @@
 //! `var()` is substituted on the element that declares it, so an alias declared
 //! only on `:root` keeps the default mode's value inside a `[data-mode]` subtree
 //! (measured in Chrome).
+//!
+//! A collection picked by width is the window's instead: its default on `:root`,
+//! each other mode in an `@media (min-width: …)` block, and each mode's
+//! `[data-mode]` block after them all, so a frame pinned to a mode wins.
 
 use super::dom::slug;
 use crate::svg::fmt;
@@ -123,6 +127,13 @@ impl Tokens {
         format!("calc({} / 100)", self.var(id))
     }
 
+    /// A boolean variable read as a `display`: hidden where it is false, the
+    /// layer's own display `own` where it is true.
+    pub fn shown(&mut self, id: VarId, own: &str) -> String {
+        self.used.insert(id);
+        format!("var(--{}, {own})", self.name(id))
+    }
+
     /// A colour variable times a fill's `%`.
     pub fn color(&mut self, id: VarId, alpha: f32) -> String {
         let v = self.var(id);
@@ -169,6 +180,28 @@ impl Tokens {
         // collections a block matches one word of it.
         let eq = if t.has_collections() { "~=" } else { "=" };
         for c in t.collections() {
+            // Picked by width: the default on `:root`, every other mode in a
+            // media block of its minimum, then each mode's pin, after every
+            // media block, so a frame set to a mode wins over the window.
+            if c.by_width() && !c.modes.is_empty() {
+                let default = c.modes[0].id;
+                self.mode_block(t, &shaken, c, ":root".into(), Some(default), &mut out);
+                for m in &c.modes[1..] {
+                    let mut inner = String::new();
+                    self.mode_block(t, &shaken, c, ":root".into(), Some(m.id), &mut inner);
+                    let min = c.min_width(m.id).unwrap_or_default();
+                    out.push_str(&format!("@media (min-width: {}px) {{\n", fmt(min)));
+                    for line in inner.lines() {
+                        out.push_str(&format!("  {line}\n"));
+                    }
+                    out.push_str("}\n");
+                }
+                for m in &c.modes {
+                    let pin = format!("[data-mode{eq}\"{}\"]", self.mode(m.id).unwrap_or_default());
+                    self.mode_block(t, &shaken, c, pin, Some(m.id), &mut out);
+                }
+                continue;
+            }
             let modes: Vec<Option<ModeId>> = if c.modes.is_empty() {
                 vec![None]
             } else {
@@ -179,7 +212,19 @@ impl Tokens {
                 continue;
             }
             for (i, mode) in modes.iter().enumerate() {
-                self.mode_block(t, &shaken, c, i == 0, *mode, eq, &mut out);
+                // The default is a mode a frame can set too, inside one set to
+                // another, so it matches `:root` and its name.
+                let selector = match mode {
+                    Some(m) if i > 0 => {
+                        format!("[data-mode{eq}\"{}\"]", self.mode(*m).unwrap_or_default())
+                    }
+                    Some(m) => format!(
+                        ":root, [data-mode{eq}\"{}\"]",
+                        self.mode(*m).unwrap_or_default()
+                    ),
+                    None => ":root".to_string(),
+                };
+                self.mode_block(t, &shaken, c, selector, *mode, &mut out);
             }
         }
         for km in t.kits().values() {
@@ -212,31 +257,17 @@ impl Tokens {
         Some(out)
     }
 
-    /// One mode's block of collection `c`: its variables, and a kit's that map
-    /// from it, in the column that mode maps to. The default is a mode a frame
-    /// can set too, inside one set to another, so it matches `:root` and its
-    /// name.
-    #[allow(clippy::too_many_arguments)]
+    /// One mode's block of collection `c` under `selector`: its variables, and a
+    /// kit's that map from it, in the column that mode maps to.
     fn mode_block(
         &self,
         t: &Variables,
         shaken: &BTreeSet<VarId>,
         c: &variable::Collection,
-        default: bool,
+        selector: String,
         mode: Option<ModeId>,
-        eq: &str,
         out: &mut String,
     ) {
-        let selector = match mode {
-            Some(m) if !default => {
-                format!("[data-mode{eq}\"{}\"]", self.mode(m).unwrap_or_default())
-            }
-            Some(m) => format!(
-                ":root, [data-mode{eq}\"{}\"]",
-                self.mode(m).unwrap_or_default()
-            ),
-            None => ":root".to_string(),
-        };
         out.push_str(&selector);
         out.push_str(" {\n");
         for id in shaken {
@@ -281,8 +312,9 @@ impl Tokens {
         out
     }
 
-    /// One cell as a custom property's value. Booleans are never read through a
-    /// token: they are written resolved.
+    /// One cell as a custom property's value. A boolean is a visibility:
+    /// `none` hides, and `initial` — the guaranteed-invalid value — makes
+    /// [`Self::shown`]'s fallback, the layer's own `display`, win.
     fn value(&self, cell: &Cell) -> Option<String> {
         match cell {
             Cell::Color(c) => Some(super::css::color(*c, 1.0)),
@@ -291,7 +323,7 @@ impl Tokens {
                 "\"{}\"",
                 s.replace('\\', "\\\\").replace('"', "\\\"")
             )),
-            Cell::Boolean(_) => None,
+            Cell::Boolean(b) => Some(if *b { "initial" } else { "none" }.into()),
             Cell::Alias(to) => Some(format!("var(--{})", self.name(*to))),
         }
     }

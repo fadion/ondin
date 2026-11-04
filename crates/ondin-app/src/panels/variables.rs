@@ -146,6 +146,8 @@ enum Menu {
     ConfirmCollection(CollectionId),
     /// A variable's scope: the field families it may bind, ticked.
     Scope(VarId),
+    /// The words a flex direction's or wrap's string may hold, for one cell.
+    Words(VarId, ModeId),
 }
 
 /// The browser's own state while it is open.
@@ -760,6 +762,7 @@ impl OndinApp {
             Menu::Style(_) => 5.0,
             Menu::StyleGroup(..) => 3.0,
             Menu::KitMap(kit, _) => table.kits().get(kit).map_or(0, |k| k.modes.len()) as f32 + 1.5,
+            Menu::Words(v, _) => table.get(*v).map_or(0, |v| flex_words(v).len()) as f32,
         };
         let size = egui::vec2(menu_w, rows * MENU_ROW_H + 24.0);
         let pos = ui::menu_place(ctx, at, size);
@@ -1307,6 +1310,26 @@ impl OndinApp {
                                 return;
                             };
                             scope_popover(ui, doc, v, users, acts);
+                        }
+                        Menu::Words(v, m) => {
+                            let Some(v) = table.get(*v) else {
+                                close = true;
+                                return;
+                            };
+                            let held = match v.cells.get(m) {
+                                Some(Cell::String(s)) => s.clone(),
+                                _ => String::new(),
+                            };
+                            for word in flex_words(v) {
+                                let r = ui::MenuRow::new(
+                                    if held == word { icon::CHECK } else { "" },
+                                    word,
+                                );
+                                if ui::menu_row(ui, r, MENU_ROW_H).clicked() {
+                                    acts.push(Act::Cell(v.id, *m, word.to_string(), None));
+                                    close = true;
+                                }
+                            }
                         }
                         Menu::ConfirmMode(m) => {
                             let Some(mode) = table.mode(*m) else {
@@ -2008,7 +2031,22 @@ impl OndinApp {
     fn var_cell(&mut self, id: VarId, mode: ModeId, text: String) -> bool {
         let table = self.session.doc.variables();
         let Some(v) = table.get(id) else { return false };
-        let parsed = parse_cell(table, v, mode, &text);
+        // A string of flex words takes only those words, read as the word.
+        let words = flex_words(v);
+        let parsed = match parse_cell(table, v, mode, &text) {
+            Ok(Cell::String(s)) if !words.is_empty() => words
+                .iter()
+                .find(|w| {
+                    w.eq_ignore_ascii_case(s.trim())
+                        || ondin_core::container::FlexDirection::from_word(&s)
+                            .is_some_and(|d| d.word() == **w)
+                        || ondin_core::container::FlexWrap::from_word(&s)
+                            .is_some_and(|x| x.word() == **w)
+                })
+                .map(|w| Cell::String(w.to_string()))
+                .ok_or_else(|| format!("{} holds {}.", v.name, words.join(", "))),
+            other => other,
+        };
         let same = parsed.as_ref().is_ok_and(|c| v.cells.get(&mode) == Some(c));
         let cell = match parsed {
             Ok(cell) => cell,
@@ -2072,8 +2110,31 @@ pub(crate) fn field_label(f: Field) -> &'static str {
         Field::Stroke => "Stroke",
         Field::Content => "Text content",
         Field::Family => "Font family",
+        Field::FlexDirection => "Flex direction",
+        Field::FlexWrap => "Flex wrap",
         Field::Visible => "Visibility",
     }
+}
+
+/// The words a string scoped to flex directions or wraps alone may hold, in
+/// order; empty for any other variable, whose cells are typed.
+fn flex_words(v: &Variable) -> Vec<&'static str> {
+    match v.scope {
+        Some(s) if v.kind == VarKind::String && var::holds_its_words(v) && !s.is_empty() => {
+            if s.fields().all(Field::needs_scope) {
+                s.fields().flat_map(Field::words).collect()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The families *Every … field* binds: every one of `kind`'s but those only a
+/// scope naming them binds ([`Field::needs_scope`]).
+fn every_field(kind: VarKind) -> Scope {
+    Scope::of(Field::of_kind(kind).filter(|f| !f.needs_scope()))
 }
 
 /// The inspector card a number family sits under in the scope popover; `None`
@@ -2252,13 +2313,13 @@ fn scope_popover(
     if switch.inner.clicked() {
         // Off leaves every box ticked to start from.
         let next = match every {
-            true => Some(Scope::of(Field::of_kind(v.kind))),
+            true => Some(every_field(v.kind)),
             false => None,
         };
         acts.push(Act::Scope(v.id, next));
     }
     ui::menu_sep(ui);
-    let scope = v.scope.unwrap_or_else(|| Scope::of(Field::of_kind(v.kind)));
+    let scope = v.scope.unwrap_or_else(|| every_field(v.kind));
     let mut warn: Option<String> = None;
     let mut group: Option<&str> = None;
     for f in Field::of_kind(v.kind) {
@@ -3791,6 +3852,17 @@ fn var_row(
                 m.id,
                 super::binding::bool_word(!b).into(),
                 None,
+            ));
+        } else if !flex_words(v).is_empty()
+            && matches!(c, Cell::String(_))
+            && !ui::double_clicked(ui, &cell_resp)
+            && cell_resp.clicked()
+        {
+            // **A string of flex words picks one from a menu**; a double-click
+            // still types, for an alias.
+            acts.push(Act::OpenMenu(
+                Menu::Words(v.id, m.id),
+                cell.left_bottom() + egui::vec2(0.0, 2.0),
             ));
         } else if !colour && cell_resp.clicked() {
             acts.push(Act::StartEdit(start));
@@ -6299,6 +6371,84 @@ mod tests {
         app.var_act(Act::NewMode);
         let t = app.session.doc.variables();
         assert_eq!(mode_rows(t), vec![t.collections()[1].id]);
+    }
+
+    /// **A string scoped to flex direction holds its words and binds a
+    /// container's direction**: scoping it turns *Text* into *Row*, a typed
+    /// `column` lands as *Column* and *Sideways* is refused naming the words; bound
+    /// through the field, the layout draws Column, and a detach keeps it.
+    ///
+    /// flip: `var_cell` without its `flex_words` arm → fails at "a word typed
+    /// lowercase lands as the word".
+    #[test]
+    fn a_flex_direction_string_through_the_browser_and_the_field() {
+        use ondin_core::container::{Display, Flex, FlexDirection};
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::String));
+        let v = the_only_var(&app);
+        let mode = *v.cells.keys().next().unwrap();
+        app.var_act(Act::Scope(v.id, Some(Scope::of([Field::FlexDirection]))));
+        assert_eq!(
+            the_only_var(&app).cells[&mode],
+            Cell::String("Row".into()),
+            "scoping it makes its cells words"
+        );
+        app.var_act(Act::Cell(v.id, mode, "column".into(), None));
+        assert_eq!(
+            the_only_var(&app).cells[&mode],
+            Cell::String("Column".into()),
+            "a word typed lowercase lands as the word"
+        );
+        app.var_act(Act::StartEdit(Edit::Cell {
+            var: v.id,
+            mode,
+            text: "Sideways".into(),
+        }));
+        app.var_act(Act::Cell(v.id, mode, "Sideways".into(), None));
+        let refusal = app.var_browser.as_ref().unwrap().refusal.clone();
+        assert!(
+            refusal
+                .as_deref()
+                .is_some_and(|r| r.contains("Row, Column")),
+            "{refusal:?}"
+        );
+
+        let id = app.session.ids.mint();
+        let root = app.session.doc.first_page();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id,
+                parent: root,
+                index: 0,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: Size::new(200.0, 100.0),
+                    corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
+                    corner_smoothing: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id,
+                display: Some(Display::Flex(Flex::default())),
+            },
+        ])));
+        let key = super::super::binding::FieldKey::Flow { id, slot: 0 };
+        app.bind_field(key, v.id);
+        assert_eq!(app.field_var(key), Some(v.id));
+        let drawn = |app: &OndinApp| match app.session.doc.resolved_display(id).as_deref() {
+            Some(Display::Flex(f)) => f.direction,
+            _ => unreachable!(),
+        };
+        assert_eq!(drawn(&app), FlexDirection::Column);
+        app.detach_field(key);
+        assert_eq!(app.field_var(key), None);
+        assert_eq!(
+            drawn(&app),
+            FlexDirection::Column,
+            "detached to what it drew"
+        );
     }
 
     /// **A collection picked by width, through the browser and the mode row**:

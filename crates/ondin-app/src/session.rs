@@ -1477,6 +1477,9 @@ impl EditorSession {
         let tx = ondin_core::build::keep_corner_bindings(&self.doc, tx);
         // A gap or a padding written over a bound slot, the same way.
         let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
+        // A flex direction or wrap written over its binding, which rides in the
+        // layout and so is rewritten in place.
+        let tx = ondin_core::build::keep_flow_bindings(&self.doc, tx);
         // A visibility written over a bound layer.
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
         // An opacity written over a bound layer.

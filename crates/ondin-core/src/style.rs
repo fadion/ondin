@@ -300,8 +300,15 @@ impl StyleValue {
                 .flat_map(|e| e.vars.iter().flatten().copied())
                 .collect(),
             StyleValue::Text(_) => Vec::new(),
-            // And a layout's gaps and padding (§15 D1075).
-            StyleValue::Layout(l) => l.spacing_vars.iter().flatten().copied().collect(),
+            // And a layout's gaps and padding (§15 D1075), its direction and
+            // wrap.
+            StyleValue::Layout(l) => l
+                .spacing_vars
+                .iter()
+                .flatten()
+                .copied()
+                .chain(flow_vars(&l.display).into_iter().flatten())
+                .collect(),
         }
     }
 
@@ -607,8 +614,14 @@ pub(crate) fn check<'a>(
                     .any(|(x, n)| bad(*x, VarKind::Number) || (x.is_some() && n.is_none()))
             }),
             StyleValue::Text(_) => false,
-            // A layout's gaps and padding a number each (§15 D1075).
-            StyleValue::Layout(l) => l.spacing_vars.iter().any(|x| bad(*x, VarKind::Number)),
+            // A layout's gaps and padding a number each (§15 D1075), its
+            // direction and wrap a string.
+            StyleValue::Layout(l) => {
+                l.spacing_vars.iter().any(|x| bad(*x, VarKind::Number))
+                    || flow_vars(&l.display)
+                        .iter()
+                        .any(|x| bad(*x, VarKind::String))
+            }
         };
         if wrong {
             return Err(StyleRule::BadVariable(s.id));
@@ -858,6 +871,9 @@ pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transact
                     },
                     Some(b),
                 ) => {
+                    // A direction's or wrap's binding rides in the display, judged
+                    // as `keep_flow_bindings` would.
+                    d = crate::build::kept_flow(doc, id, &d);
                     let kept = crate::build::kept_spacing_vars(doc, id, &d);
                     let literal = b.display.spacing();
                     let mut s = d.spacing();
@@ -1144,11 +1160,44 @@ pub(crate) fn detach_vars(
             }
             let mut display = l.display.clone();
             display.set_spacing(spacing);
+            // A direction or wrap bound to one of them, its word in `mode`.
+            if let crate::container::Display::Flex(f) = &mut display {
+                let word = |v: Option<crate::variable::VarId>| -> Option<String> {
+                    match v.map(|v| t.resolve_opt(v, mode)) {
+                        Some(Some(Value::String(s))) => Some(s),
+                        _ => None,
+                    }
+                };
+                if f.direction_var.is_some_and(|v| vars.contains(&v)) {
+                    if let Some(d) = word(f.direction_var)
+                        .and_then(|s| crate::container::FlexDirection::from_word(&s))
+                    {
+                        f.direction = d;
+                    }
+                    f.direction_var = None;
+                }
+                if f.wrap_var.is_some_and(|v| vars.contains(&v)) {
+                    if let Some(w) =
+                        word(f.wrap_var).and_then(|s| crate::container::FlexWrap::from_word(&s))
+                    {
+                        f.wrap = w;
+                    }
+                    f.wrap_var = None;
+                }
+            }
             StyleValue::Layout(Box::new(LayoutStyle {
                 display,
                 spacing_vars: kept,
             }))
         }
+    }
+}
+
+/// A layout's direction's and wrap's bindings, none for a grid's.
+fn flow_vars(d: &crate::container::Display) -> [Option<crate::variable::VarId>; 2] {
+    match d {
+        crate::container::Display::Flex(f) => f.flow_vars(),
+        _ => [None, None],
     }
 }
 

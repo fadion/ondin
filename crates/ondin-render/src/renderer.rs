@@ -1147,6 +1147,8 @@ impl RenderOverrides {
                 if self.ghost(*id).is_none() {
                     let pending = self.get(*id).and_then(|o| o.spacing_vars);
                     let drawn = display.as_ref().map(|d| {
+                        // Its direction and wrap where `keep_flow_bindings` puts them.
+                        let d = &ondin_core::build::kept_flow(doc, *id, d);
                         let vars = pending
                             .unwrap_or_else(|| ondin_core::build::kept_spacing_vars(doc, *id, d));
                         doc.spacing_drawn_in(doc.variables(), *id, d, vars)
@@ -1654,10 +1656,12 @@ impl RenderOverrides {
                 let drawn = doc.opacity_drawn_in(t, n, node.opacity(), node.opacity_var());
                 self.entry(n).opacity = Some(drawn);
             }
-            // A bound gap or padding the same way; the layout pass lays the
-            // chain again.
+            // A bound gap or padding, direction or wrap the same way; the layout
+            // pass lays the chain again. The pending layout keeps its flow
+            // bindings (`spacing_drawn_in` draws them and leaves them).
             if let Some(node) = doc.get(n)
-                && node.spacing_vars().iter().any(Option::is_some)
+                && (node.spacing_vars().iter().any(Option::is_some)
+                    || node.flow_vars().iter().any(Option::is_some))
             {
                 let pending = self.get(n).and_then(|o| o.display.clone()).flatten();
                 if let Some(base) = pending.or_else(|| node.display().cloned()) {

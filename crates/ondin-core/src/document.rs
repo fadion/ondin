@@ -775,8 +775,14 @@ impl Document {
 
     /// `display` with the slots `vars` binds read from table `t`, in the mode in
     /// force at `id` — each a variable's number, never below 0 (the layout
-    /// engine's floor on a literal), the other slots as they are. `vars` is named
-    /// so a preview can resolve a binding it has not committed.
+    /// engine's floor on a literal), the other slots as they are — and a flex
+    /// layout's bound direction and wrap read too. `vars` is named so a preview
+    /// can resolve a binding it has not committed.
+    ///
+    /// **The direction's and wrap's bindings stay in what is drawn**: the layout
+    /// reads only the literals, and a door writing the drawn layout back keeps
+    /// them by the two-half rule (`build::kept_flow`), where a binding cleared
+    /// here would read as a detach. A bound string naming none draws the literal.
     pub fn spacing_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -784,7 +790,22 @@ impl Document {
         display: &crate::container::Display,
         vars: crate::variable::SpacingVars,
     ) -> crate::container::Display {
+        use crate::container::{Display, FlexDirection, FlexWrap};
         let mut out = display.clone();
+        if let Display::Flex(f) = &mut out {
+            let word = |v: Option<crate::variable::VarId>| match v
+                .and_then(|v| self.resolve_var_in(t, id, v))
+            {
+                Some(crate::variable::Value::String(s)) => Some(s),
+                _ => None,
+            };
+            if let Some(d) = word(f.direction_var).and_then(|s| FlexDirection::from_word(&s)) {
+                f.direction = d;
+            }
+            if let Some(w) = word(f.wrap_var).and_then(|s| FlexWrap::from_word(&s)) {
+                f.wrap = w;
+            }
+        }
         if vars.iter().all(Option::is_none) {
             return out;
         }
@@ -812,7 +833,7 @@ impl Document {
     ) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
         let n = self.nodes.get(&id)?;
         let d = n.display.as_ref()?;
-        if n.spacing_vars.iter().all(Option::is_none) {
+        if n.spacing_vars.iter().all(Option::is_none) && n.flow_vars().iter().all(Option::is_none) {
             return Some(std::borrow::Cow::Borrowed(d));
         }
         Some(std::borrow::Cow::Owned(self.spacing_drawn_in(

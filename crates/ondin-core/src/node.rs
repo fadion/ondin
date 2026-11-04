@@ -249,6 +249,14 @@ impl Node {
     pub fn spacing_vars(&self) -> crate::variable::SpacingVars {
         self.spacing_vars
     }
+    /// The string variables its flex layout's direction and wrap are bound to,
+    /// held in the layout itself ([`crate::container::Flex::flow_vars`]).
+    pub fn flow_vars(&self) -> [Option<crate::variable::VarId>; 2] {
+        match &self.display {
+            Some(crate::container::Display::Flex(f)) => f.flow_vars(),
+            _ => [None, None],
+        }
+    }
     /// The boolean variable this layer's visibility is bound to; whether it is
     /// shown is [`crate::Document::shown`], not [`Self::visible`].
     pub fn visible_var(&self) -> Option<crate::variable::VarId> {
@@ -284,6 +292,7 @@ impl Node {
                 .any(|s| s.brush.is_bound() || s.width_var.is_some())
             || self.corner_vars.iter().any(Option::is_some)
             || self.spacing_vars.iter().any(Option::is_some)
+            || self.flow_vars().iter().any(Option::is_some)
             || self.visible_var.is_some()
             || self.size_vars.iter().any(Option::is_some)
             || self.text_vars.iter().any(Option::is_some)

@@ -4419,6 +4419,102 @@ pub fn keep_spacing_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
+/// `written`, container `id`'s new layout, with its direction's and wrap's
+/// bindings where the commit leaves them — [`keep_flow_bindings`]' judgement,
+/// shared with the preview. A binding the write keeps (the same variable as the
+/// stored one) stays when the write states what it draws or its literal, the
+/// literal put back; any other literal detaches it. A binding the write
+/// changes or clears is left as written.
+pub fn kept_flow(
+    doc: &Document,
+    id: NodeId,
+    written: &crate::container::Display,
+) -> crate::container::Display {
+    use crate::container::Display;
+    let mut out = written.clone();
+    let (Some(node), Display::Flex(w)) = (doc.get(id), &mut out) else {
+        return out;
+    };
+    let Some(Display::Flex(was)) = node.display() else {
+        return out;
+    };
+    if was.direction_var.is_none() && was.wrap_var.is_none() {
+        return out;
+    }
+    let drawn = match doc.spacing_drawn_in(doc.variables(), id, &Display::Flex(*was), [None; 6]) {
+        Display::Flex(f) => f,
+        _ => *was,
+    };
+    if w.direction_var.is_some() && w.direction_var == was.direction_var {
+        if w.direction == drawn.direction || w.direction == was.direction {
+            w.direction = was.direction;
+        } else {
+            w.direction_var = None;
+        }
+    }
+    if w.wrap_var.is_some() && w.wrap_var == was.wrap_var {
+        if w.wrap == drawn.wrap || w.wrap == was.wrap {
+            w.wrap = was.wrap;
+        } else {
+            w.wrap_var = None;
+        }
+    }
+    out
+}
+
+/// The two-half rule for a flex direction's and wrap's bindings, which ride in
+/// the layout: every `SetDisplay` rewritten by [`kept_flow`].
+pub fn keep_flow_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    for op in tx.0.iter_mut() {
+        if let Operation::SetDisplay {
+            id,
+            display: Some(display),
+        } = op
+        {
+            *display = kept_flow(doc, *id, display);
+        }
+    }
+    tx
+}
+
+/// Bind container `id`'s flex direction (`slot` 0) or wrap (`slot` 1) to
+/// string variable `var`, or detach it with `None` to what it draws. Empty on a
+/// layer with no flex layout, or when nothing would change.
+pub fn bind_flow_ops(
+    doc: &Document,
+    id: NodeId,
+    slot: usize,
+    var: Option<crate::VarId>,
+) -> Vec<Operation> {
+    use crate::container::Display;
+    let Some(Display::Flex(was)) = doc.get(id).and_then(Node::display) else {
+        return Vec::new();
+    };
+    let Display::Flex(drawn) =
+        doc.spacing_drawn_in(doc.variables(), id, &Display::Flex(*was), [None; 6])
+    else {
+        return Vec::new();
+    };
+    let mut f = *was;
+    match slot {
+        0 => {
+            f.direction = drawn.direction;
+            f.direction_var = var;
+        }
+        _ => {
+            f.wrap = drawn.wrap;
+            f.wrap_var = var;
+        }
+    }
+    if f == *was {
+        return Vec::new();
+    }
+    vec![Operation::SetDisplay {
+        id,
+        display: Some(Display::Flex(f)),
+    }]
+}
+
 /// Bind layer `id`'s visibility to boolean variable `var`; the literal is written
 /// true. Empty when nothing would change.
 pub fn bind_visible_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Operation> {

@@ -32,6 +32,7 @@
 //! **An in-flow item's X and Y are inert**: its container places it and a typed
 //! position would be dropped at the commit door (`build::keep_flex_sizes`).
 
+use super::binding::FieldKey;
 use super::component::OverrideMark;
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
@@ -1230,6 +1231,27 @@ impl OndinApp {
         self.commit_edit(Transaction(ops));
     }
 
+    /// A right-click on the unbound direction or wrap control `rect` opens its
+    /// field menu, the door to a binding, as a picker's is. On one container
+    /// only (`key`), and not under a layout style.
+    fn flow_menu_door(&mut self, ui: &egui::Ui, key: Option<FieldKey>, rect: egui::Rect) {
+        let Some(key) = key else { return };
+        let styled = self
+            .session
+            .doc
+            .get(key.at())
+            .is_some_and(|n| n.styles().layout.is_some());
+        let at = ui.input(|i| {
+            i.pointer
+                .secondary_clicked()
+                .then(|| i.pointer.interact_pos())
+                .flatten()
+        });
+        if let Some(at) = at.filter(|p| rect.contains(*p) && !styled) {
+            self.field_menu = Some((key, at, rect));
+        }
+    }
+
     /// Every subject's flex layout with `f` applied, as the ops that change one —
     /// **from the committed document**, as a transaction a valve both previews and
     /// commits must be.
@@ -1314,6 +1336,13 @@ impl OndinApp {
         );
 
         // --- direction and wrap ---------------------------------------------
+        // On one container each binds a string scoped to it: bound, its chip
+        // takes the control's place; the field menu is the door, as the eye's.
+        let one = match subjects {
+            [id] => Some(*id),
+            _ => None,
+        };
+        let flow_key = |slot| one.map(|id| FieldKey::Flow { id, slot });
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             let cell = (full - gap) / 7.0;
@@ -1326,25 +1355,44 @@ impl OndinApp {
             let at = direction
                 .and_then(|d| DIRECTIONS.iter().position(|x| *x == d))
                 .unwrap_or(DIRECTIONS.len());
-            let (pick, reset) = ui::segmented_marked(
-                ui,
-                cell * 4.0,
-                ui::SEGMENT_CELL_H,
-                4,
-                at,
-                |_| true,
-                |i| DIRECTION_TIPS[i],
-                direction_mark.as_ref().map(OverrideMark::field),
-                |p, i, r, on| match direction {
-                    None if i == 0 => ui::segment_mixed(p, r),
-                    _ => ui::segment_glyph(p, r, arrows[i], on),
-                },
-            );
-            self.reset_marked(reset, &direction_mark);
-            if let Some(i) = pick {
-                let tx = self.flex_tx(subjects, |f| f.direction = DIRECTIONS[i]);
-                self.session.name_step("Direction", arrows[i]);
-                self.commit_edit(tx);
+            let key = flow_key(0);
+            let from = ui.cursor().min;
+            if let Some(key) = key
+                && let Some(var) = self.field_var(key)
+            {
+                if self.number_chip(ui, key, var, cell * 4.0, direction_mark.as_ref())
+                    && let Some(m) = &direction_mark
+                {
+                    self.commit_reset(m.tx.clone());
+                }
+            } else {
+                let (pick, reset) = ui::segmented_marked(
+                    ui,
+                    cell * 4.0,
+                    ui::SEGMENT_CELL_H,
+                    4,
+                    at,
+                    |_| true,
+                    |i| DIRECTION_TIPS[i],
+                    direction_mark.as_ref().map(OverrideMark::field),
+                    |p, i, r, on| match direction {
+                        None if i == 0 => ui::segment_mixed(p, r),
+                        _ => ui::segment_glyph(p, r, arrows[i], on),
+                    },
+                );
+                self.reset_marked(reset, &direction_mark);
+                if let Some(i) = pick {
+                    // A picked direction is a literal, the binding gone.
+                    let tx = self.flex_tx(subjects, |f| {
+                        f.direction = DIRECTIONS[i];
+                        f.direction_var = None;
+                    });
+                    self.session.name_step("Direction", arrows[i]);
+                    self.commit_edit(tx);
+                }
+                let rect =
+                    egui::Rect::from_min_size(from, egui::vec2(cell * 4.0, ui::SEGMENT_CELL_H));
+                self.flow_menu_door(ui, key, rect);
             }
             let turns = [
                 icon::ARROW_LINE_RIGHT,
@@ -1354,25 +1402,43 @@ impl OndinApp {
             let at = wrap
                 .and_then(|w| WRAPS.iter().position(|x| *x == w))
                 .unwrap_or(WRAPS.len());
-            let (pick, reset) = ui::segmented_marked(
-                ui,
-                cell * 3.0,
-                ui::SEGMENT_CELL_H,
-                3,
-                at,
-                |_| true,
-                |i| WRAP_TIPS[i],
-                wrap_mark.as_ref().map(OverrideMark::field),
-                |p, i, r, on| match wrap {
-                    None if i == 0 => ui::segment_mixed(p, r),
-                    _ => ui::segment_glyph(p, r, turns[i], on),
-                },
-            );
-            self.reset_marked(reset, &wrap_mark);
-            if let Some(i) = pick {
-                let tx = self.flex_tx(subjects, |f| f.wrap = WRAPS[i]);
-                self.session.name_step("Wrap", turns[i]);
-                self.commit_edit(tx);
+            let key = flow_key(1);
+            let from = ui.cursor().min;
+            if let Some(key) = key
+                && let Some(var) = self.field_var(key)
+            {
+                if self.number_chip(ui, key, var, cell * 3.0, wrap_mark.as_ref())
+                    && let Some(m) = &wrap_mark
+                {
+                    self.commit_reset(m.tx.clone());
+                }
+            } else {
+                let (pick, reset) = ui::segmented_marked(
+                    ui,
+                    cell * 3.0,
+                    ui::SEGMENT_CELL_H,
+                    3,
+                    at,
+                    |_| true,
+                    |i| WRAP_TIPS[i],
+                    wrap_mark.as_ref().map(OverrideMark::field),
+                    |p, i, r, on| match wrap {
+                        None if i == 0 => ui::segment_mixed(p, r),
+                        _ => ui::segment_glyph(p, r, turns[i], on),
+                    },
+                );
+                self.reset_marked(reset, &wrap_mark);
+                if let Some(i) = pick {
+                    let tx = self.flex_tx(subjects, |f| {
+                        f.wrap = WRAPS[i];
+                        f.wrap_var = None;
+                    });
+                    self.session.name_step("Wrap", turns[i]);
+                    self.commit_edit(tx);
+                }
+                let rect =
+                    egui::Rect::from_min_size(from, egui::vec2(cell * 3.0, ui::SEGMENT_CELL_H));
+                self.flow_menu_door(ui, key, rect);
             }
         });
 
@@ -4328,6 +4394,65 @@ mod tests {
             )
             .count();
         assert_eq!(dashes, 1, "the direction row says it is mixed");
+    }
+
+    /// A bound direction draws its chip in the segmented control's place, naming
+    /// the variable, and the layout lays the word it holds.
+    ///
+    /// flip: `flex_rows` drawing the segmented control whatever is bound → fails
+    /// at "the chip names it".
+    #[test]
+    fn a_bound_direction_is_a_chip_in_the_controls_place() {
+        use ondin_core::variable::{Cell, CollectionId, Field, Mode, Scope, VarKind, Variable};
+        let mut s = scene();
+        let mut ids = IdSource::new(0xCC);
+        let (mode, var) = (ids.mint_mode(), ids.mint_var());
+        s.app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                collection: CollectionId::FIRST,
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "cards-flow".into(),
+                    kind: VarKind::String,
+                    cells: [(mode, Cell::String("Column".into()))].into(),
+                    scope: Some(Scope::of([Field::FlexDirection])),
+                    origin: None,
+                    forked: None,
+                    description: String::new(),
+                },
+            },
+        ]));
+        s.app.bind_field(
+            FieldKey::Flow {
+                id: s.frame,
+                slot: 0,
+            },
+            var,
+        );
+        assert!(matches!(
+            s.app.session.doc.resolved_display(s.frame).as_deref(),
+            Some(Display::Flex(f)) if f.direction == FlexDirection::Column
+        ));
+        s.app.session.selection.set(vec![s.frame]);
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_max_width(284.0);
+            s.app.inspector_container(ui);
+        });
+        let named = out.shapes.iter().any(
+            |cs| matches!(&cs.shape, egui::epaint::Shape::Text(t) if t.galley.text() == "cards-flow"),
+        );
+        assert!(named, "the chip names it");
     }
 
     /// Each card offers itself for what it describes and draws without panicking:

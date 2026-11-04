@@ -81,6 +81,7 @@ pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
         )
         .chain(n.corner_vars.iter().flatten().copied())
         .chain(n.spacing_vars.iter().flatten().copied())
+        .chain(n.flow_vars().into_iter().flatten())
         .chain(n.size_vars.iter().flatten().copied())
         .chain(n.text_vars.iter().flatten().copied())
         .chain(n.item.limit_vars.iter().flatten().copied())
@@ -283,6 +284,10 @@ impl Plan {
         }
         n.corner_vars.iter_mut().flatten().for_each(v);
         n.spacing_vars.iter_mut().flatten().for_each(v);
+        if let Some(crate::container::Display::Flex(f)) = &mut n.display {
+            f.direction_var.iter_mut().for_each(v);
+            f.wrap_var.iter_mut().for_each(v);
+        }
         n.size_vars.iter_mut().flatten().for_each(v);
         n.text_vars.iter_mut().flatten().for_each(v);
         n.item.limit_vars.iter_mut().flatten().for_each(v);
@@ -355,7 +360,16 @@ impl Plan {
             // A text style reads no variable (§15 D1067).
             StyleValue::Text(_) => value.clone(),
             StyleValue::Layout(l) => StyleValue::Layout(Box::new(crate::style::LayoutStyle {
-                display: l.display.clone(),
+                display: match &l.display {
+                    crate::container::Display::Flex(f) => {
+                        crate::container::Display::Flex(crate::container::Flex {
+                            direction_var: num(f.direction_var),
+                            wrap_var: num(f.wrap_var),
+                            ..*f
+                        })
+                    }
+                    d => d.clone(),
+                },
                 spacing_vars: l.spacing_vars.map(num),
             })),
         }
@@ -934,6 +948,7 @@ fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault:
         && effects
         && slots(&n.corner_vars, &s.corner_vars)
         && slots(&n.spacing_vars, &s.spacing_vars)
+        && slots(&n.flow_vars(), &s.flow_vars())
         && slots(&n.size_vars, &s.size_vars)
         && slots(&n.text_vars, &s.text_vars)
         && slots(&n.item.limit_vars, &s.item.limit_vars)
@@ -1043,6 +1058,8 @@ fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
     }
     vs.extend(slots(&n.corner_vars, src.map(|s| &s.corner_vars[..])));
     vs.extend(slots(&n.spacing_vars, src.map(|s| &s.spacing_vars[..])));
+    let src_flow = src.map(Node::flow_vars);
+    vs.extend(slots(&n.flow_vars(), src_flow.as_ref().map(|f| &f[..])));
     vs.extend(slots(&n.size_vars, src.map(|s| &s.size_vars[..])));
     vs.extend(slots(&n.text_vars, src.map(|s| &s.text_vars[..])));
     vs.extend(slots(
@@ -1383,6 +1400,18 @@ impl Fork {
         }
         if let Some(vars) = slots(n.spacing_vars, src.map(|s| s.spacing_vars), to) {
             ops.push(Operation::SetSpacingVars { id, vars });
+        }
+        if let Some([direction_var, wrap_var]) = slots(n.flow_vars(), src.map(Node::flow_vars), to)
+            && let Some(crate::container::Display::Flex(f)) = &n.display
+        {
+            ops.push(Operation::SetDisplay {
+                id,
+                display: Some(crate::container::Display::Flex(crate::container::Flex {
+                    direction_var,
+                    wrap_var,
+                    ..*f
+                })),
+            });
         }
         if let Some(vars) = slots(n.size_vars, src.map(|s| s.size_vars), to) {
             ops.push(Operation::SetSizeVars { id, vars });

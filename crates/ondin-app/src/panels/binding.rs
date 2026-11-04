@@ -82,6 +82,11 @@ pub(crate) enum FieldKey {
         item: ondin_core::ItemId,
         slot: usize,
     },
+    /// A flex container's direction (`slot` 0) or wrap (1) — the Container
+    /// card's segmented control and wrap toggle — bound to a string variable
+    /// scoped to it, on one layer. Not typed: the control is clicked, so the
+    /// binding is the field menu's, as the eye's is.
+    Flow { id: NodeId, slot: usize },
 }
 
 /// [`FieldKey::Limit`]'s rows' own labels, in `variable::LimitVars`' order.
@@ -117,7 +122,8 @@ impl FieldKey {
             | FieldKey::Limit { id, .. }
             | FieldKey::Opacity { id }
             | FieldKey::StrokeWidth { id, .. }
-            | FieldKey::EffectNumber { id, .. } => id,
+            | FieldKey::EffectNumber { id, .. }
+            | FieldKey::Flow { id, .. } => id,
         }
     }
 
@@ -146,6 +152,8 @@ impl FieldKey {
             FieldKey::Opacity { .. } => "Opacity",
             FieldKey::StrokeWidth { .. } => "Stroke weight",
             FieldKey::EffectNumber { .. } => "Effects",
+            FieldKey::Flow { slot: 0, .. } => "Direction",
+            FieldKey::Flow { .. } => "Wrap",
         }
     }
 
@@ -167,6 +175,7 @@ impl FieldKey {
         !matches!(
             self,
             FieldKey::Visible { .. }
+                | FieldKey::Flow { .. }
                 | FieldKey::Family { .. }
                 | FieldKey::Type {
                     slot: ondin_core::variable::TEXT_WEIGHT,
@@ -212,6 +221,9 @@ impl FieldKey {
             FieldKey::EffectNumber { slot: 1, .. } => "Y",
             FieldKey::EffectNumber { slot: 2, .. } => "Blur",
             FieldKey::EffectNumber { .. } => "Spread",
+            // The controls' own pictures: a row's arrow, a wrap's turn.
+            FieldKey::Flow { slot: 0, .. } => icon::ARROW_RIGHT,
+            FieldKey::Flow { .. } => icon::ARROW_U_DOWN_LEFT,
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -262,7 +274,9 @@ impl FieldKey {
             | FieldKey::Type { .. }
             | FieldKey::Limit { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
-            FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
+            FieldKey::Content { .. } | FieldKey::Family { .. } | FieldKey::Flow { .. } => {
+                VarKind::String
+            }
         }
     }
 
@@ -288,6 +302,8 @@ impl FieldKey {
             FieldKey::Visible { .. } => Field::Visible,
             FieldKey::Content { .. } => Field::Content,
             FieldKey::Family { .. } => Field::Family,
+            FieldKey::Flow { slot: 0, .. } => Field::FlexDirection,
+            FieldKey::Flow { .. } => Field::FlexWrap,
         }
     }
 }
@@ -820,7 +836,8 @@ impl OndinApp {
             | FieldKey::Limit { id, .. }
             | FieldKey::Opacity { id }
             | FieldKey::StrokeWidth { id, .. }
-            | FieldKey::EffectNumber { id, .. } => vec![id],
+            | FieldKey::EffectNumber { id, .. }
+            | FieldKey::Flow { id, .. } => vec![id],
         }
     }
 
@@ -878,6 +895,9 @@ impl OndinApp {
             FieldKey::EffectNumber { id, item, slot } => {
                 Transaction(ondin_core::bind_effect_ops(doc, id, item, slot, var))
             }
+            FieldKey::Flow { id, slot } => {
+                Transaction(ondin_core::build::bind_flow_ops(doc, id, slot, Some(var)))
+            }
         }
     }
 
@@ -921,6 +941,9 @@ impl OndinApp {
             }
             FieldKey::EffectNumber { id, item, slot } => {
                 Transaction(ondin_core::detach_effect_ops(doc, id, item, slot))
+            }
+            FieldKey::Flow { id, slot } => {
+                Transaction(ondin_core::build::bind_flow_ops(doc, id, slot, None))
             }
         }
     }
@@ -1075,6 +1098,7 @@ impl OndinApp {
             FieldKey::EffectNumber { id, item, slot } => {
                 doc.get(id)?.effects().iter().find(|e| e.id == item)?.vars[slot]
             }
+            FieldKey::Flow { id, slot } => doc.get(id)?.flow_vars()[slot],
         }
     }
 
@@ -1122,7 +1146,8 @@ impl OndinApp {
             | FieldKey::Limit { .. }
             | FieldKey::Opacity { .. }
             | FieldKey::StrokeWidth { .. }
-            | FieldKey::EffectNumber { .. } => {
+            | FieldKey::EffectNumber { .. }
+            | FieldKey::Flow { .. } => {
                 return None;
             }
         }
@@ -2003,12 +2028,13 @@ impl OndinApp {
                         item.limit_vars[slot] = None;
                         ops.push(Operation::SetLayoutItem { id, item });
                     }
-                    // The content is the text arm's above; the family and the
-                    // eye are never typed.
+                    // The content is the text arm's above; the family, the eye
+                    // and a flex direction or wrap are never typed.
                     FieldKey::Paint { .. }
                     | FieldKey::Visible { .. }
                     | FieldKey::Content { .. }
-                    | FieldKey::Family { .. } => return,
+                    | FieldKey::Family { .. }
+                    | FieldKey::Flow { .. } => return,
                 }
                 self.session.name_step(key.step_name(), "");
                 self.commit_edit(Transaction(ops));
@@ -2051,6 +2077,17 @@ impl OndinApp {
             }
             // Whether the layer shows.
             FieldKey::Visible { id } => Some(Cell::Boolean(doc.shown(id))),
+            // The direction's or wrap's word as the layout draws it.
+            FieldKey::Flow { id, slot } => match doc.resolved_display(id).as_deref() {
+                Some(ondin_core::container::Display::Flex(f)) => Some(Cell::String(
+                    match slot {
+                        0 => f.direction.word(),
+                        _ => f.wrap.word(),
+                    }
+                    .into(),
+                )),
+                _ => None,
+            },
             // The number the effect draws with.
             FieldKey::EffectNumber { id, item, slot } => {
                 let fx = doc

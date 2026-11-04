@@ -191,11 +191,15 @@ pub enum Field {
     Stroke,
     Content,
     Family,
+    /// A flex container's direction: a string naming one, *Row* or *Column*.
+    FlexDirection,
+    /// A flex container's wrap: *Wrap*, *No wrap*.
+    FlexWrap,
     Visible,
 }
 
 impl Field {
-    pub const ALL: [Field; 14] = [
+    pub const ALL: [Field; 16] = [
         Field::Size,
         Field::Limits,
         Field::Spacing,
@@ -209,6 +213,8 @@ impl Field {
         Field::Stroke,
         Field::Content,
         Field::Family,
+        Field::FlexDirection,
+        Field::FlexWrap,
         Field::Visible,
     ];
 
@@ -216,7 +222,9 @@ impl Field {
     pub fn kind(self) -> VarKind {
         match self {
             Field::Fill | Field::Stroke => VarKind::Color,
-            Field::Content | Field::Family => VarKind::String,
+            Field::Content | Field::Family | Field::FlexDirection | Field::FlexWrap => {
+                VarKind::String
+            }
             Field::Visible => VarKind::Boolean,
             _ => VarKind::Number,
         }
@@ -259,7 +267,39 @@ impl Field {
             Field::Stroke => "stroke",
             Field::Content => "content",
             Field::Family => "family",
+            Field::FlexDirection => "flexDirection",
+            Field::FlexWrap => "flexWrap",
             Field::Visible => "visible",
+        }
+    }
+
+    /// Whether only a variable scoped to it binds it — not one with no scope,
+    /// which binds every other field of its kind. A flex direction or wrap
+    /// takes only its own words, so an unscoped string (a label's *Continue*)
+    /// never lands on one.
+    pub fn needs_scope(self) -> bool {
+        matches!(self, Field::FlexDirection | Field::FlexWrap)
+    }
+
+    /// The words a string bound to it may hold, when it takes only its own (a
+    /// direction's, a wrap's); empty for any other field.
+    pub fn words(self) -> Vec<&'static str> {
+        use crate::container::{FlexDirection, FlexWrap};
+        match self {
+            Field::FlexDirection => FlexDirection::ALL.map(FlexDirection::word).to_vec(),
+            Field::FlexWrap => FlexWrap::ALL.map(FlexWrap::word).to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether `s` is one of [`Self::words`] (or its CSS keyword), for a field
+    /// that takes only its own.
+    pub fn takes(self, s: &str) -> bool {
+        use crate::container::{FlexDirection, FlexWrap};
+        match self {
+            Field::FlexDirection => FlexDirection::from_word(s).is_some(),
+            Field::FlexWrap => FlexWrap::from_word(s).is_some(),
+            _ => true,
         }
     }
 
@@ -438,7 +478,11 @@ impl Variable {
 
     /// Whether it may bind `field`: of the field's kind, and in its scope.
     pub fn binds(&self, field: Field) -> bool {
-        self.kind == field.kind() && self.scope.is_none_or(|s| s.contains(field))
+        self.kind == field.kind()
+            && match self.scope {
+                None => !field.needs_scope(),
+                Some(s) => s.contains(field),
+            }
     }
 }
 
@@ -1491,7 +1535,11 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
     }
     node.corner_vars = Default::default();
     if let Some(d) = &node.display {
-        node.display = Some(doc.spacing_drawn_in(doc.variables(), id, d, node.spacing_vars));
+        let mut drawn = doc.spacing_drawn_in(doc.variables(), id, d, node.spacing_vars);
+        if let crate::container::Display::Flex(f) = &mut drawn {
+            (f.direction_var, f.wrap_var) = (None, None);
+        }
+        node.display = Some(drawn);
     }
     node.spacing_vars = Default::default();
     node.kind = doc.size_drawn_in(doc.variables(), id, &node.kind, node.size_vars);
@@ -1591,6 +1639,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             )
             .chain(n.corner_vars.iter().flatten().copied())
             .chain(n.spacing_vars.iter().flatten().copied())
+            .chain(n.flow_vars().into_iter().flatten())
             .chain(n.size_vars.iter().flatten().copied())
             .chain(n.text_vars.iter().flatten().copied())
             .chain(n.item.limit_vars.iter().flatten().copied())
@@ -1851,6 +1900,26 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     }
                 }
             }
+            // A flex direction's or wrap's binding the same way, its fallback
+            // the twin's drawn one.
+            if let Some(crate::container::Display::Flex(f)) = n.display.as_mut() {
+                let drawn = match twin.and_then(|t| t.display.as_ref()) {
+                    Some(crate::container::Display::Flex(t)) => Some(*t),
+                    _ => None,
+                };
+                if let Some(v) = f.direction_var {
+                    f.direction_var = rebind(v, Field::FlexDirection);
+                    if f.direction_var.is_none() {
+                        f.direction = drawn.map_or(f.direction, |t| t.direction);
+                    }
+                }
+                if let Some(v) = f.wrap_var {
+                    f.wrap_var = rebind(v, Field::FlexWrap);
+                    if f.wrap_var.is_none() {
+                        f.wrap = drawn.map_or(f.wrap, |t| t.wrap);
+                    }
+                }
+            }
             // A width's or a height's binding the same way, axis by axis, its
             // fallback the twin's drawn size (§15 D1061).
             if n.size_vars.iter().any(Option::is_some) {
@@ -1965,6 +2034,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
         || n.item.limit_vars.iter().any(|v| hit(*v))
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
+        || n.flow_vars().iter().any(|v| hit(*v))
         || n.size_vars.iter().any(|v| hit(*v))
         || n.text_vars.iter().any(|v| hit(*v))
         || hit(n.visible_var)
@@ -2024,16 +2094,30 @@ pub fn remove_and_scope_ops(
 /// The operations narrowing `var`'s scope to `scope` (`None` every field):
 /// every field of a family it leaves that is bound to `var` detaches to the
 /// value it drew, then the variable takes the scope — one transaction, so a
-/// bound field never sits outside its variable's scope. Empty when `var` is
-/// not the document's own.
+/// bound field never sits outside its variable's scope. A string scoped to flex
+/// directions or wraps alone has each cell that names none set to the first
+/// family's first word ([`holds_its_words`]). Empty when `var` is not the
+/// document's own.
 pub fn scope_ops(doc: &crate::Document, var: VarId, scope: Option<Scope>) -> Vec<crate::Operation> {
     let Some(v) = doc.variables().get(var).filter(|v| v.origin.is_none()) else {
         return Vec::new();
     };
     let mut ops = remove_and_scope_ops(doc, &[], &[(var, scope)]);
-    ops.push(crate::Operation::SetVariable {
-        var: Variable { scope, ..v.clone() },
-    });
+    let mut next = Variable { scope, ..v.clone() };
+    if !holds_its_words(&next)
+        && let Some(word) = scope
+            .and_then(|s| s.fields().next())
+            .and_then(|f| f.words().first().copied())
+    {
+        for cell in next.cells.values_mut() {
+            if let Cell::String(s) = cell
+                && !scope.is_some_and(|sc| sc.fields().any(|f| f.takes(s)))
+            {
+                *cell = Cell::String(word.into());
+            }
+        }
+    }
+    ops.push(crate::Operation::SetVariable { var: next });
     ops
 }
 
@@ -2071,7 +2155,7 @@ fn style_fields(value: &crate::style::StyleValue) -> &'static [Field] {
         V::Strokes(_) => &[Field::Stroke, Field::StrokeWidth],
         V::Effects(_) => &[Field::Effect],
         V::Text(_) => &[],
-        V::Layout(_) => &[Field::Spacing],
+        V::Layout(_) => &[Field::Spacing, Field::FlexDirection, Field::FlexWrap],
     }
 }
 
@@ -2210,25 +2294,46 @@ fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec
             ops.push(O::SetCornerVars { id, vars: kept });
         }
         let spacing = n.spacing_vars.iter().any(|v| hit(v, Field::Spacing));
+        let [direction, wrap] = n.flow_vars();
+        let flow = hit(&direction, Field::FlexDirection) || hit(&wrap, Field::FlexWrap);
         if let Some(d) = &n.display
-            && spacing
+            && (spacing || flow)
         {
-            let drawn = doc.spacing_drawn_in(t, id, d, n.spacing_vars).spacing();
-            let mut s = d.spacing();
-            let mut kept = n.spacing_vars;
-            for k in 0..6 {
-                if hit(&kept[k], Field::Spacing) {
-                    s[k] = drawn[k];
-                    kept[k] = None;
+            let drawn = doc.spacing_drawn_in(t, id, d, n.spacing_vars);
+            let mut display = d.clone();
+            if spacing {
+                let mut s = d.spacing();
+                let mut kept = n.spacing_vars;
+                for k in 0..6 {
+                    if hit(&kept[k], Field::Spacing) {
+                        s[k] = drawn.spacing()[k];
+                        kept[k] = None;
+                    }
+                }
+                display.set_spacing(s);
+                ops.push(O::SetSpacingVars { id, vars: kept });
+            }
+            // A direction or wrap detaches to the one it drew, in the layout
+            // the binding rides in.
+            if let (crate::container::Display::Flex(f), crate::container::Display::Flex(drawn)) =
+                (&mut display, &drawn)
+            {
+                if hit(&direction, Field::FlexDirection) {
+                    (f.direction, f.direction_var) = (drawn.direction, None);
+                }
+                if hit(&wrap, Field::FlexWrap) {
+                    (f.wrap, f.wrap_var) = (drawn.wrap, None);
                 }
             }
-            let mut display = d.clone();
-            display.set_spacing(s);
-            ops.push(O::SetDisplay {
-                id,
-                display: Some(display),
-            });
-            ops.push(O::SetSpacingVars { id, vars: kept });
+            // Before the spacing's `SetSpacingVars`, as written before.
+            let at = ops.len() - usize::from(spacing);
+            ops.insert(
+                at,
+                O::SetDisplay {
+                    id,
+                    display: Some(display),
+                },
+            );
         } else if n.display.is_none() && spacing {
             // Inert on a node with no layout, and nothing to detach it to: the
             // binding goes, or the removal would leave it dangling.
@@ -2947,8 +3052,26 @@ pub enum VarRule {
     TwoModes(NodeId),
     #[error("two collections are picked by width")]
     TwoByWidth,
+    #[error("{0:?} is scoped to a flex direction or wrap and holds another word")]
+    NotAWord(VarId),
     #[error("collection {0:?}'s widths are not one per mode, from 0 and ascending")]
     BadBreakpoints(CollectionId),
+}
+
+/// Whether string `v`, when scoped to flex directions or wraps and nothing
+/// else, holds only their words in every literal cell (an alias is judged at
+/// its target). True for every other variable.
+pub fn holds_its_words(v: &Variable) -> bool {
+    let Some(scope) = v.scope.filter(|s| !s.is_empty()) else {
+        return true;
+    };
+    if v.kind != VarKind::String || !scope.fields().all(Field::needs_scope) {
+        return true;
+    }
+    v.cells.values().all(|c| match c {
+        Cell::String(s) => scope.fields().any(|f| f.takes(s)),
+        _ => true,
+    })
 }
 
 /// The table's own rules, without the bindings.
@@ -3011,6 +3134,9 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
     for v in t.vars.values() {
         if v.kind == VarKind::Boolean && v.scope.is_some() {
             return Err(VarRule::BooleanScope(v.id));
+        }
+        if !holds_its_words(v) {
+            return Err(VarRule::NotAWord(v.id));
         }
         let collection = match v.kit() {
             None => Some(t.collection_of(v.id).ok_or(VarRule::NoModes)?.id),
@@ -3099,6 +3225,7 @@ pub(crate) fn check<'a>(
                 )
                 .chain(n.corner_vars.iter().flatten().copied())
                 .chain(n.spacing_vars.iter().flatten().copied())
+                .chain(n.flow_vars().into_iter().flatten())
                 .chain(n.size_vars.iter().flatten().copied())
                 .chain(n.text_vars.iter().flatten().copied())
                 .chain(n.item.limit_vars.iter().flatten().copied())
@@ -3148,6 +3275,14 @@ pub(crate) fn check<'a>(
             .iter()
             .flatten()
             .any(|v| t.kind_of(*v) != Some(VarKind::Number))
+        {
+            return Err(VarRule::BadBinding(n.id));
+        }
+        // A flex direction or wrap binds a string.
+        if n.flow_vars()
+            .iter()
+            .flatten()
+            .any(|v| t.kind_of(*v) != Some(VarKind::String))
         {
             return Err(VarRule::BadBinding(n.id));
         }
@@ -3237,6 +3372,8 @@ pub fn bound_in(n: &crate::Node, f: Field) -> impl Iterator<Item = VarId> + '_ {
         Field::Limits => n.item.limit_vars.iter().flatten().copied().collect(),
         Field::Corner => n.corner_vars.iter().flatten().copied().collect(),
         Field::Spacing => n.spacing_vars.iter().flatten().copied().collect(),
+        Field::FlexDirection => n.flow_vars()[0].into_iter().collect(),
+        Field::FlexWrap => n.flow_vars()[1].into_iter().collect(),
         Field::Size => n.size_vars.iter().flatten().copied().collect(),
         Field::Visible => n.visible_var.into_iter().collect(),
         Field::Opacity => n.opacity_var.into_iter().collect(),

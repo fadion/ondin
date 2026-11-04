@@ -488,9 +488,44 @@ pub enum FlexDirection {
 }
 
 impl FlexDirection {
+    pub const ALL: [FlexDirection; 4] = [
+        FlexDirection::Row,
+        FlexDirection::Column,
+        FlexDirection::RowReverse,
+        FlexDirection::ColumnReverse,
+    ];
+
     /// Whether the main axis is horizontal.
     pub fn is_row(self) -> bool {
         matches!(self, FlexDirection::Row | FlexDirection::RowReverse)
+    }
+
+    /// The word a string variable holds for it — *Row*, *Column reverse*.
+    pub fn word(self) -> &'static str {
+        match self {
+            FlexDirection::Row => "Row",
+            FlexDirection::RowReverse => "Row reverse",
+            FlexDirection::Column => "Column",
+            FlexDirection::ColumnReverse => "Column reverse",
+        }
+    }
+
+    /// CSS's keyword.
+    pub fn css(self) -> &'static str {
+        match self {
+            FlexDirection::Row => "row",
+            FlexDirection::RowReverse => "row-reverse",
+            FlexDirection::Column => "column",
+            FlexDirection::ColumnReverse => "column-reverse",
+        }
+    }
+
+    /// The direction a string names: its word or its CSS keyword, any case.
+    pub fn from_word(s: &str) -> Option<FlexDirection> {
+        let s = s.trim();
+        Self::ALL
+            .into_iter()
+            .find(|d| d.word().eq_ignore_ascii_case(s) || d.css().eq_ignore_ascii_case(s))
     }
 }
 
@@ -501,6 +536,36 @@ pub enum FlexWrap {
     NoWrap,
     Wrap,
     WrapReverse,
+}
+
+impl FlexWrap {
+    pub const ALL: [FlexWrap; 3] = [FlexWrap::NoWrap, FlexWrap::Wrap, FlexWrap::WrapReverse];
+
+    /// The word a string variable holds for it — *No wrap*, *Wrap*.
+    pub fn word(self) -> &'static str {
+        match self {
+            FlexWrap::NoWrap => "No wrap",
+            FlexWrap::Wrap => "Wrap",
+            FlexWrap::WrapReverse => "Wrap reverse",
+        }
+    }
+
+    /// CSS's keyword.
+    pub fn css(self) -> &'static str {
+        match self {
+            FlexWrap::NoWrap => "nowrap",
+            FlexWrap::Wrap => "wrap",
+            FlexWrap::WrapReverse => "wrap-reverse",
+        }
+    }
+
+    /// The wrap a string names: its word or its CSS keyword, any case.
+    pub fn from_word(s: &str) -> Option<FlexWrap> {
+        let s = s.trim();
+        Self::ALL
+            .into_iter()
+            .find(|w| w.word().eq_ignore_ascii_case(s) || w.css().eq_ignore_ascii_case(s))
+    }
 }
 
 /// CSS `justify-content` — the subset a flex container reads.
@@ -580,9 +645,23 @@ pub struct Flex {
     /// Top, right, bottom, left — CSS's order.
     #[serde(default, skip_serializing_if = "is_zero4")]
     pub padding: [f64; 4],
+    /// The string variable `direction` is bound to, read where it is drawn
+    /// (`Document::flow_drawn_in`); `direction` is then a placeholder. Held
+    /// here, as an effect holds its bound numbers, so whatever writes the
+    /// layout carries the binding with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction_var: Option<crate::variable::VarId>,
+    /// The string variable `wrap` is bound to, as `direction_var`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap_var: Option<crate::variable::VarId>,
 }
 
 impl Flex {
+    /// The direction's and the wrap's bindings, in that order.
+    pub fn flow_vars(&self) -> [Option<crate::variable::VarId>; 2] {
+        [self.direction_var, self.wrap_var]
+    }
+
     fn is_finite(&self) -> bool {
         self.row_gap.is_finite()
             && self.column_gap.is_finite()

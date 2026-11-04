@@ -732,6 +732,9 @@ pub mod icon {
     pub const DISTRIBUTE_V: &str = "\u{f031}";
     /// A flex layout, added or switched to: three boxes in a row.
     pub const FLEX_LAYOUT: &str = "\u{f032}";
+    /// A layout removed: three boxes left where they fall, the Layout card's
+    /// *None* cell drawn in outline.
+    pub const NO_LAYOUT: &str = "\u{f043}";
     /// *Tidy up*: a row of three boxes over a rule with an arrowhead at each end.
     pub const TIDY_UP: &str = "\u{f02c}";
     pub const COLUMNS: &str = "\u{e546}";
@@ -1185,6 +1188,7 @@ pub mod icon {
         ("distribute-h", DISTRIBUTE_H),
         ("distribute-v", DISTRIBUTE_V),
         ("flex-layout", FLEX_LAYOUT),
+        ("no-layout", NO_LAYOUT),
         ("columns", COLUMNS),
         ("rows", ROWS),
         ("hand-grabbing", HAND_GRABBING),

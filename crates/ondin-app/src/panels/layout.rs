@@ -1223,7 +1223,7 @@ impl OndinApp {
         let (label, glyph) = match to {
             1 => ("Flex layout", icon::FLEX_LAYOUT),
             2 => ("Grid layout", icon::GRID_LAYOUT),
-            _ => ("Remove layout", icon::ARROWS_OUT_LINE_HORIZONTAL),
+            _ => ("Remove layout", icon::NO_LAYOUT),
         };
         self.session.name_step(label, glyph);
         self.commit_edit(Transaction(ops));

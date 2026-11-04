@@ -146,6 +146,40 @@ fn a_round_trip_is_no_change() {
     assert_eq!(r.changes(), 0, "{:#?}", r.rows);
 }
 
+/// **A collection picked by width keeps its widths through a file**: each
+/// mode's `minWidth` rides in the collection's mode list, and a file read into
+/// an empty document makes the collection picked by width again.
+///
+/// flip: `Review::breakpoint_ops` returning nothing → fails at "picked by width
+/// again".
+#[test]
+fn the_breakpoints_ride_in_the_mode_list_and_come_back() {
+    let (mut d, _, _, _) = doc();
+    let spacing = d.variables().collections()[1].id;
+    let ops = ondin_core::variable::by_width_ops(&d, spacing, true).unwrap();
+    d.apply(&Transaction(ops)).unwrap();
+    let json = tokens(&d, None).json;
+    let v: Value = serde_json::from_str(&json).unwrap();
+    let modes = &at(&v, "Spacing")["$extensions"][EXTENSION]["collection"]["modes"];
+    assert_eq!(modes[0]["minWidth"], 0.0);
+    assert_eq!(modes[1]["minWidth"], 768.0);
+
+    let mut ids = IdSource::new(0xD73);
+    let mut empty = Document::new(ids.mint());
+    let file = parse(&json).unwrap();
+    let r = review(&empty, &file, CollectionId::FIRST, &mut ids).unwrap();
+    let ops = r.ops(&empty, &vec![true; r.rows.len()]).unwrap();
+    empty.apply(&Transaction(ops)).expect("applies");
+    let t = empty.variables();
+    let back = t
+        .collections()
+        .iter()
+        .find(|c| c.name == "Spacing")
+        .unwrap();
+    assert!(back.by_width(), "picked by width again");
+    assert_eq!(back.min_width(back.modes[1].id), Some(768.0));
+}
+
 /// **A token's `$type` scopes a new number**, and the extension's scope wins
 /// over it; a file naming no collection lands in the one it is imported into.
 #[test]

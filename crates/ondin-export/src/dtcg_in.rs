@@ -83,6 +83,9 @@ struct FileCollection {
     /// The modes it names, in its order; empty for a file without Ondin's
     /// extension, whose `$value`s are one unnamed mode.
     modes: Vec<String>,
+    /// Each mode's minimum width, by name, when the collection is picked by
+    /// width.
+    widths: BTreeMap<String, f64>,
 }
 
 impl File {
@@ -306,8 +309,10 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
         key_to_name: HashMap<String, String>,
         value_mode: String,
     }
-    let read_modes = |at: &[String], e: Option<&J>| -> Result<(Vec<String>, ModesRead), Refusal> {
+    type Read = (Vec<String>, BTreeMap<String, f64>, ModesRead);
+    let read_modes = |at: &[String], e: Option<&J>| -> Result<Read, Refusal> {
         let mut modes = Vec::new();
+        let mut widths = BTreeMap::new();
         let mut key_to_name = HashMap::new();
         if let Some(J::Arr(list)) = e.and_then(|e| e.get("modes")) {
             for m in list {
@@ -317,6 +322,9 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
                 let key = m.get("key").and_then(J::str).unwrap_or(name);
                 key_to_name.insert(key.to_string(), name.to_string());
                 modes.push(name.to_string());
+                if let Some(w) = m.get("minWidth").and_then(J::num) {
+                    widths.insert(name.to_string(), w);
+                }
             }
         }
         let value_mode = e
@@ -327,6 +335,7 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
             .unwrap_or_default();
         Ok((
             modes,
+            widths,
             ModesRead {
                 key: None,
                 key_to_name,
@@ -334,11 +343,12 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
             },
         ))
     };
-    let (modes, first) = read_modes(&[], ext)?;
+    let (modes, widths, first) = read_modes(&[], ext)?;
     let mut collections = vec![FileCollection {
         name: None,
         key: None,
         modes,
+        widths,
     }];
     let mut reads = vec![first];
     let mut loose_lists: Vec<(usize, &J)> = Vec::new();
@@ -354,7 +364,7 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
             continue;
         };
         let at = [k.clone()];
-        let (modes, mut read) = read_modes(&at, Some(c))?;
+        let (modes, widths, mut read) = read_modes(&at, Some(c))?;
         read.key = Some(k.clone());
         let name = c.get("name").and_then(J::str).unwrap_or(k).to_string();
         if let Some(vars) = g
@@ -368,6 +378,7 @@ pub fn parse(text: &str) -> Result<File, Refusal> {
             name: Some(name),
             key: Some(k.clone()),
             modes,
+            widths,
         });
         reads.push(read);
     }
@@ -958,6 +969,9 @@ pub struct Review {
     /// The collections the file adds — one of the file's no collection here is
     /// named as — made when one of their modes is ticked.
     added_collections: Vec<Collection>,
+    /// The minimum widths the file gives a collection's modes, by mode name,
+    /// for each collection it lands in that it picks by width.
+    widths: Vec<(CollectionId, BTreeMap<String, f64>)>,
     /// Every variable the file reaches, changed or not: an unchanged one still
     /// takes its values for an added mode.
     vars: Vec<Wanted>,
@@ -1658,6 +1672,13 @@ pub fn review(
     if columns.is_empty() {
         columns.push("Value".to_string());
     }
+    let widths = file
+        .collections
+        .iter()
+        .zip(&landing)
+        .filter(|(fc, _)| !fc.widths.is_empty())
+        .map(|(fc, c)| (*c, fc.widths.clone()))
+        .collect();
     Ok(Review {
         columns,
         rows,
@@ -1665,6 +1686,7 @@ pub fn review(
         kept_modes,
         added_modes,
         added_collections,
+        widths,
         vars,
         styles,
         fresh,
@@ -2078,6 +2100,71 @@ impl Review {
         self.rows.iter().filter(|r| r.change != Change::Kit).count()
     }
 
+    /// The widths of each collection picked by width once the modes `on`
+    /// marks are added: the file's, by mode name, where they cover every mode
+    /// from 0 ascending and no other collection is picked by width; else, for
+    /// a collection already picked by width, its own, each added mode starting
+    /// [`variable::WIDTH_STEP`] past the one before. After the `AddMode`s.
+    fn breakpoint_ops(&self, doc: &Document, on: &[bool]) -> Vec<Operation> {
+        let t = doc.variables();
+        let mut out = Vec::new();
+        let mut landed: Vec<CollectionId> = self.widths.iter().map(|(c, _)| *c).collect();
+        landed.extend(t.by_width().map(|c| c.id));
+        landed.dedup();
+        for c in landed {
+            let modes: Vec<&Mode> = t
+                .collection(c)
+                .map(|x| x.modes.iter().collect::<Vec<_>>())
+                .unwrap_or_default()
+                .into_iter()
+                .chain(
+                    self.added_modes
+                        .iter()
+                        .zip(on)
+                        .filter(|((x, _), on)| *x == c && **on)
+                        .map(|((_, m), _)| m),
+                )
+                .collect();
+            let held = t.collection(c).and_then(|x| x.breakpoints.clone());
+            let file = self
+                .widths
+                .iter()
+                .find(|(x, _)| *x == c)
+                .and_then(|(_, w)| {
+                    modes
+                        .iter()
+                        .map(|m| Some((m.id, *w.get(&m.name)?)))
+                        .collect::<Option<variable::Breakpoints>>()
+                })
+                .filter(|b| {
+                    let w: Vec<f64> = modes.iter().map(|m| b[&m.id]).collect();
+                    w.first() == Some(&0.0) && w.windows(2).all(|p| p[0] < p[1])
+                })
+                .filter(|_| t.by_width().is_none_or(|o| o.id == c));
+            let next = file.or_else(|| {
+                let mut b = held.clone()?;
+                let mut last = modes
+                    .iter()
+                    .filter_map(|m| b.get(&m.id).copied())
+                    .fold(0.0, f64::max);
+                for m in &modes {
+                    b.entry(m.id).or_insert_with(|| {
+                        last += variable::WIDTH_STEP;
+                        last
+                    });
+                }
+                Some(b)
+            });
+            if next.is_some() && next != held {
+                out.push(Operation::SetBreakpoints {
+                    id: c,
+                    breakpoints: next,
+                });
+            }
+        }
+        out
+    }
+
     /// One transaction applying the rows `ticked` marks (one flag per row), or
     /// the sentence that says why it cannot be applied.
     pub fn ops(&self, doc: &Document, ticked: &[bool]) -> Result<Vec<Operation>, String> {
@@ -2184,6 +2271,7 @@ impl Review {
             });
             *at += 1;
         }
+        ops.extend(self.breakpoint_ops(doc, &modes_on));
         for p in &vars_on {
             let w = &self.vars[*p];
             let var = shaped(&w.var);

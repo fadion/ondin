@@ -249,8 +249,9 @@ impl Writer<'_> {
         }
     }
 
-    /// A collection's modes as an extension lists them: id, name, and the key
-    /// its values are under where that is not the name.
+    /// A collection's modes as an extension lists them: id, name, the key its
+    /// values are under where that is not the name, and in a collection picked
+    /// by width its minimum width.
     fn modes_list(&self, c: &variable::Collection) -> Json {
         Json::Array(
             c.modes
@@ -260,6 +261,9 @@ impl Writer<'_> {
                     let key = &self.mode_keys[&m.id];
                     if *key != m.name {
                         out["key"] = Json::String(key.clone());
+                    }
+                    if let Some(w) = c.min_width(m.id) {
+                        out["minWidth"] = json!(w);
                     }
                     out
                 })

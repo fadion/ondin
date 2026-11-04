@@ -228,9 +228,10 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
 
 - Each head (zoom readout's too) is `ui::menu_head`: `hover()` ground on its 26pt rect, radius 5, held
   while its own menu is open.
-- Rows are `ui::menu_check`, `ui::MENU_ROW_H` (24) tall, in `ui::menu_frame`; width 160pt or the
-  widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
-  off; "off" also dims the label.
+- Rows are `ui::menu_check`, a checkable `ui::menu_row` with no glyph, `ui::MENU_ROW_H` (24) tall,
+  in `ui::menu_frame`; width 160pt or the widest row (`ui::menu_check_width`: the label column
+  `ui::MENU_LABEL_X`, then 8pt). The accent tick sits in the glyph column and keeps it when off; "off"
+  also dims the label.
 - **View** (`OndinApp::view_and_snap_menus`) reads in four groups between separators, so each kind of
   row is found in one place:
   - what the canvas draws, `ViewSwitch::VIEW_CANVAS`: *Show rulers*, *Show guides*, *Lock guides*,

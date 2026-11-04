@@ -433,7 +433,8 @@ fn row_tint(dragged: bool, selected: bool, hovered: bool) -> Option<egui::Color3
     } else if selected {
         Some(color::SELECT_ROW)
     } else if hovered {
-        Some(theme::color::text_a(12))
+        // The list rows' one hover ground (`ui::list_row_ground`).
+        Some(color::hover())
     } else {
         None
     }
@@ -3481,8 +3482,7 @@ mod name_limit_tests {
         let hover_tint = |shapes: &[egui::Shape]| {
             shapes.iter().find_map(|s| match s {
                 egui::Shape::Rect(r)
-                    if r.fill == theme::color::text_a(12)
-                        && r.rect.y_range().contains(name.center().y) =>
+                    if r.fill == color::hover() && r.rect.y_range().contains(name.center().y) =>
                 {
                     Some(r.rect)
                 }

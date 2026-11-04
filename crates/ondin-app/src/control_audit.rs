@@ -729,10 +729,12 @@ fn swept(
 ) -> (Vec<Ground>, Vec<Ground>) {
     settle(ctx, app);
     let before: Vec<Rect> = controls(ctx).iter().map(|c| c.rect).collect();
-    // A row `open` left lit (the one a flyout opens from) is a list row too.
+    // A row `open` left lit (the one a flyout opens from) is a list row too. By
+    // its missing hairline as well as its fill: a control face hovered under the
+    // pointer that opened the popup wears the same hover ground.
     let (mut rows, resting): (Vec<Ground>, Vec<Ground>) = opened(ctx, app, open)
         .into_iter()
-        .partition(|g| g.fill == list_hover());
+        .partition(|g| g.fill == list_hover() && g.stroke == Stroke::NONE);
     let added: Vec<Control> = controls(ctx)
         .into_iter()
         .filter(|c| c.enabled && !c.drags && !before.contains(&c.rect))
@@ -753,9 +755,10 @@ fn swept(
     (resting, rows)
 }
 
-/// The fill `ui::menu_row` paints a list row under the pointer, its only ground.
+/// The fill `ui::menu_row` paints a list row under the pointer, its only ground:
+/// the one hover ground, as a dropdown's list rows and `ui::list_row_ground` use.
 fn list_hover() -> Color32 {
-    color::text_a(20)
+    color::hover()
 }
 
 /// What is wrong with a list row's ground under the pointer, if anything: it

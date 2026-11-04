@@ -460,8 +460,8 @@ project dropdown, and the caret's list.
 |---|---|
 | Card | `ui::menu_frame`: `color::card()`, 1pt `text_a(15)` hairline, shadow `[0,10]` blur 24 α 82, corner 5, padding 5 |
 | Width | 210pt painted, border included (`MENU_W`) |
-| Row | `ui::MENU_ROW_H` 24pt, 1pt gap; 11.5pt label; hover ground `text_a(20)`; glyph `text::dim()` |
-| Accelerator | right-aligned, 10.5pt, `text::faint()`; label cut with `…` at `MENU_ACCEL_GAP` (2pt) from it, the full label in the tooltip |
+| Row | `ui::MENU_ROW_H` 24pt, 1pt gap; `ui::SMALL_PT` label; hover ground `color::hover()`; glyph `text::dim()` |
+| Accelerator | right-aligned, `ui::CAPTION_PT`, `text::faint()`; label cut with `…` at `MENU_ACCEL_GAP` (2pt) from it, the full label in the tooltip |
 | Separator | `ui::menu_sep`: 1pt `ui::sep_ink()` (`text_a(26)`), 5pt air above and 4pt below, as in every list |
 | Checkable row | no tick column; the glyph goes `accent()` when on, the label full strength on and muted off |
 | Disabled row | glyph / label / accelerator inks 79 / 65 / 49; the reason in the row's tooltip |

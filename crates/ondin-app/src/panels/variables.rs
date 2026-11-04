@@ -1336,10 +1336,7 @@ impl OndinApp {
                                 _ => String::new(),
                             };
                             for word in flex_words(v) {
-                                let r = ui::MenuRow::new(
-                                    if held == word { icon::CHECK } else { "" },
-                                    word,
-                                );
+                                let r = ui::MenuRow::new("", word).checked(held == word);
                                 if ui::menu_row(ui, r, MENU_ROW_H).clicked() {
                                     acts.push(Act::Cell(v.id, *m, word.to_string(), None));
                                     close = true;
@@ -3109,9 +3106,7 @@ fn styles_tab(
                 let (rect, resp) =
                     ui.allocate_exact_size(egui::vec2(b.inner_w, GROUP_H), egui::Sense::click());
                 let p = ui.painter();
-                if resp.hovered() {
-                    p.rect_filled(rect, 4, color::text_a(16));
-                }
+                ui::list_row_ground(p, rect, false, resp.hovered());
                 p.text(
                     egui::pos2(rect.left() + 6.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -3258,11 +3253,7 @@ fn style_group_row(
     let menu_open =
         matches!(&b.menu, Some((Menu::StyleGroup(s, p), _)) if *s == g.slot && p == g.path);
     let p = ui.painter();
-    if menu_open {
-        p.rect_filled(rect, 4, color::text_a(23));
-    } else if resp.hovered() {
-        p.rect_filled(rect, 4, color::text_a(16));
-    }
+    ui::list_row_ground(p, rect, menu_open, resp.hovered());
     p.text(
         egui::pos2(left + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
@@ -3365,11 +3356,7 @@ fn style_row(
         resp = resp.on_hover_text(&s.description);
     }
     let menu_open = matches!(&b.menu, Some((Menu::Style(m), _)) if *m == s.id);
-    if menu_open {
-        ui.painter().rect_filled(rect, 4, color::text_a(23));
-    } else if resp.hovered() {
-        ui.painter().rect_filled(rect, 4, color::text_a(18));
-    }
+    ui::list_row_ground(ui.painter(), rect, menu_open, resp.hovered());
     let sw = egui::Rect::from_min_size(
         egui::pos2(rect.left() + INDENT + depth, rect.center().y - 7.0),
         egui::vec2(14.0, 14.0),
@@ -3601,9 +3588,7 @@ fn group_row(
         return;
     }
     let p = ui.painter();
-    if resp.hovered() {
-        p.rect_filled(rect, 4, color::text_a(16));
-    }
+    ui::list_row_ground(p, rect, false, resp.hovered());
     let open = !b.collapsed.contains(&key) || !b.query.trim().is_empty();
     p.text(
         egui::pos2(rect.left() + 6.0, rect.center().y),
@@ -3679,13 +3664,14 @@ fn var_row(
     let id = ui.id().with(("var-row", v.id));
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::click());
     let menu_open = matches!(&b.menu, Some((Menu::Var(m), _)) if *m == v.id);
-    if menu_open {
-        ui.painter().rect_filled(rect, 4, color::text_a(23));
-    } else if ui.rect_contains_pointer(rect) {
-        // Not the row's own response: the name's and the cells' hit areas lie
-        // over it and take the hover.
-        ui.painter().rect_filled(rect, 4, color::text_a(18));
-    }
+    // Not the row's own response for the hover: the name's and the cells' hit
+    // areas lie over it and take it.
+    ui::list_row_ground(
+        ui.painter(),
+        rect,
+        menu_open,
+        ui.rect_contains_pointer(rect),
+    );
     // From where the rename field starts, across the cells: a variable's name
     // column is too narrow for a sentence.
     let field = egui::Rect::from_min_max(
@@ -4088,9 +4074,7 @@ fn kit_var_row(
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::hover());
     // The pointer, not the row's response, which the count's and the cells' hit
     // areas lying over it take.
-    if ui.rect_contains_pointer(rect) {
-        ui.painter().rect_filled(rect, 4, color::text_a(10));
-    }
+    ui::list_row_ground(ui.painter(), rect, false, ui.rect_contains_pointer(rect));
     let name_rect = egui::Rect::from_min_size(rect.min, egui::vec2(NAME_W, ROW_H));
     let (_, leaf) = var::split_name(&v.name);
     let count = users.len();

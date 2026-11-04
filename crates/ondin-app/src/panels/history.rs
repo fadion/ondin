@@ -362,8 +362,8 @@ impl OndinApp {
         let r5 = egui::CornerRadius::same(5);
         if current {
             p.rect_filled(rect, r5, color::accent().gamma_multiply(0.22));
-        } else if hovered {
-            p.rect_filled(rect, r5, theme::color::text_a(12));
+        } else {
+            crate::ui::list_row_ground(p, rect, false, hovered);
         }
         let lit = current || hovered;
         let cy = rect.center().y;

@@ -792,16 +792,12 @@ impl OndinApp {
                 self.layer_drag.is_some() && !current && pointer.is_some_and(|p| rect.contains(p));
             let dragged = self.pages.drag.is_some_and(|(p, _)| p == *page);
             let p = ui.painter();
-            let r5 = egui::CornerRadius::same(5);
-            if current {
-                p.rect_filled(rect, r5, theme::color::text_a(20));
-            } else if resp.hovered() && self.layer_drag.is_none() {
-                p.rect_filled(rect, r5, theme::color::text_a(12));
-            }
+            let hovered = resp.hovered() && self.layer_drag.is_none();
+            ui::list_row_ground(p, rect, current, hovered);
             if dropping {
                 p.rect_stroke(
                     rect.shrink(0.75),
-                    r5,
+                    egui::CornerRadius::same(4),
                     egui::Stroke::new(1.5, color::accent()),
                     egui::StrokeKind::Inside,
                 );
@@ -916,11 +912,7 @@ impl OndinApp {
             );
             let p = ui.painter();
             let current = page == shown;
-            if current {
-                p.rect_filled(rect, 5.0, theme::color::text_a(20));
-            } else if resp.hovered() {
-                p.rect_filled(rect, 5.0, theme::color::text_a(12));
-            }
+            ui::list_row_ground(p, rect, current, resp.hovered());
             let cy = rect.center().y;
             if current {
                 p.text(

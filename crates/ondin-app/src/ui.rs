@@ -155,7 +155,8 @@ pub struct MenuRow<'a> {
     /// The chord this row answers to, right-aligned in [`theme::text::faint()`].
     pub accel: Option<&'a str>,
     /// `Some` makes this a checkable row. The glyph column carries the state (the
-    /// glyph turns [`color::accent()`], the label full strength); no tick column.
+    /// glyph turns [`color::accent()`], the label full strength); a row with no
+    /// glyph of its own shows [`icon::CHECK`] there when on. No tick column.
     pub checked: Option<bool>,
     /// A row that destroys something: [`theme::color::danger()`] on glyph and label
     /// over the ordinary neutral hover ground.
@@ -223,7 +224,7 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     let on = row.checked == Some(true);
     let p = ui.painter();
     if hovered {
-        p.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(20));
+        p.rect_filled(rect, egui::CornerRadius::same(4), color::hover());
     }
     // Three tiers: disabled, resting, on or hovered.
     let (glyph_col, label_col, accel_col) = match () {
@@ -245,14 +246,20 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
             theme::text::faint(),
         ),
     };
-    // A row handed `""` sets its label at the row's own inset; no menu mixes the two.
-    let bare = row.glyph.is_empty();
+    // A checkable row handed `""` carries the tick in the glyph column, so every
+    // row of its menu keeps one label column whether checked or not. Any other
+    // row handed `""` sets its label at the row's own inset; no menu mixes the two.
+    let glyph = match (row.glyph.is_empty(), on) {
+        (true, true) => icon::CHECK,
+        _ => row.glyph,
+    };
+    let bare = row.glyph.is_empty() && row.checked.is_none();
     let glyph_at = egui::pos2(rect.left() + 8.0 + 7.5, rect.center().y);
-    if !bare {
+    if !glyph.is_empty() {
         p.text(
             glyph_at,
             egui::Align2::CENTER_CENTER,
-            row.glyph,
+            glyph,
             theme::icon_font(15.0),
             glyph_col,
         );
@@ -658,10 +665,9 @@ pub fn menu_head_min(
     resp
 }
 
-/// A dropdown row that carries a checkmark, as in the View and Snap menus.
-///
-/// The tick keeps its 13pt column whether or not it shows, so labels stay in one
-/// line. Off is also a dimmer label (72%), so the state reads at a glance.
+/// A dropdown row that carries a checkmark, as in the View and Snap menus: a
+/// [`menu_row`] with no glyph, checkable, so its tick takes the glyph column and
+/// labels stay in one line whether or not it shows.
 pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool {
     menu_check_response(ui, label, on, height).clicked()
 }
@@ -686,52 +692,14 @@ fn menu_check_held(
     height: f32,
     held: bool,
 ) -> egui::Response {
-    use menu_check_row::{GAP, PAD_X, TICK_W};
-
-    let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::click(),
-    );
-    let hovered = held || resp.hovered();
-    let p = ui.painter();
-    if hovered {
-        p.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(20));
-    }
-    if on {
-        p.text(
-            egui::pos2(rect.left() + PAD_X + TICK_W / 2.0, rect.center().y),
-            egui::Align2::CENTER_CENTER,
-            icon::CHECK,
-            theme::icon_font(13.0),
-            color::accent(),
-        );
-    }
-    p.text(
-        egui::pos2(rect.left() + PAD_X + TICK_W + GAP, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(SMALL_PT),
-        if on || hovered {
-            color::text()
-        } else {
-            theme::text::muted()
-        },
-    );
-    resp
-}
-
-/// [`menu_check`]'s row geometry, shared with [`menu_check_width`].
-mod menu_check_row {
-    /// The row: an 8pt inset, a 13pt glyph column, 7pt to the label.
-    pub const PAD_X: f32 = 8.0;
-    pub const TICK_W: f32 = 13.0;
-    pub const GAP: f32 = 7.0;
+    let row = MenuRow::new("", label).checked(on);
+    let row = if held { row.highlight(true) } else { row };
+    menu_row(ui, row, height)
 }
 
 /// The painted width a dropdown of [`menu_check`] rows needs so its widest
 /// label fits — `floor` or more, the row's inset on the right as on the left.
 pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f32) -> f32 {
-    use menu_check_row::{GAP, PAD_X, TICK_W};
     let widest = labels
         .iter()
         .map(|l| {
@@ -746,7 +714,8 @@ pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f
             })
         })
         .fold(0.0, f32::max);
-    let row = PAD_X + TICK_W + GAP + widest + PAD_X;
+    // `menu_row`'s label column, then its 8pt right inset.
+    let row = MENU_LABEL_X + widest + 8.0;
     (row + 2.0 * pad + 2.0 * MENU_BORDER).ceil().max(floor)
 }
 
@@ -8067,15 +8036,44 @@ mod context_menu_chrome_tests {
         assert!(!clicked, "a dimmed row must not be clickable");
     }
 
-    /// How many rows painted the hover ground (the only `text_a(20)` rect a bare `menu_row` draws).
+    /// How many rows painted the hover ground (the only `hover()` rect a bare `menu_row` draws).
     fn grounds(out: &egui::FullOutput) -> usize {
         out.shapes
             .iter()
             .filter(|c| match &c.shape {
-                egui::Shape::Rect(r) => r.fill == theme::color::text_a(20),
+                egui::Shape::Rect(r) => r.fill == color::hover(),
                 _ => false,
             })
             .count()
+    }
+
+    /// A checkable row with no glyph ticks its glyph column when on, and on or off
+    /// sets its label in the one label column, so a menu of them stays aligned.
+    ///
+    /// flip: `bare` in `menu_row` ignoring `row.checked` → fails at "one column".
+    #[test]
+    fn a_checkable_row_without_a_glyph_keeps_the_label_column() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_width(200.0);
+            menu_row(ui, MenuRow::new("", "On").checked(true), MENU_ROW_H);
+            menu_row(ui, MenuRow::new("", "Off").checked(false), MENU_ROW_H);
+        });
+        let left = |s: &str| {
+            out.shapes.iter().find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == s => Some(t.pos.x),
+                _ => None,
+            })
+        };
+        let (on, off) = (left("On").expect("on"), left("Off").expect("off"));
+        assert_eq!(on, off, "one column");
+        assert_eq!(off, MENU_LABEL_X, "the label column");
+        assert!(
+            left(icon::CHECK).is_some(),
+            "the tick shows on the checked row"
+        );
     }
 
     /// A keyboard highlight paints exactly one ground even with the pointer resting on another row (`docs/context-menus.md` §8), a `submenu_row` included.

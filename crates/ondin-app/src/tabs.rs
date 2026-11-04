@@ -1483,7 +1483,7 @@ impl OndinApp {
         infos: &[TabInfo],
         front: Option<TabId>,
     ) {
-        use crate::theme::{color, icon};
+        use crate::theme::color;
         const PAD: f32 = 5.0;
         let anchor = egui::pos2(
             head.rect.right() - OVERFLOW_W,
@@ -1498,47 +1498,16 @@ impl OndinApp {
                     ui.set_width(crate::ui::menu_inner_w(OVERFLOW_W, PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for info in infos {
-                        let (rect, resp) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), crate::ui::MENU_ROW_H),
-                            egui::Sense::click(),
-                        );
                         let on = front == Some(info.id);
-                        let ink = if on || resp.hovered() {
-                            color::text()
-                        } else {
-                            crate::theme::text::muted()
-                        };
-                        let galley = ui.ctx().fonts_mut(|f| {
-                            let mut job = egui::text::LayoutJob::simple_singleline(
-                                info.name.clone(),
-                                egui::FontId::proportional(crate::ui::SMALL_PT),
-                                ink,
-                            );
-                            job.wrap =
-                                egui::text::TextWrapping::truncate_at_width(rect.width() - 50.0);
-                            f.layout_job(job)
-                        });
-                        let p = ui.painter();
-                        if resp.hovered() {
-                            p.rect_filled(rect, egui::CornerRadius::same(4), color::text_a(20));
-                        }
-                        if on {
-                            p.text(
-                                egui::pos2(rect.left() + 14.5, rect.center().y),
-                                egui::Align2::CENTER_CENTER,
-                                icon::CHECK,
-                                crate::theme::icon_font(13.0),
-                                color::accent(),
-                            );
-                        }
-                        p.galley(
-                            egui::pos2(rect.left() + 28.0, rect.center().y - galley.size().y / 2.0),
-                            galley,
-                            ink,
-                        );
+                        // An unsaved tab's dot sits in the accelerator's place; the
+                        // blank accelerator keeps the cut label clear of it.
+                        let row = crate::ui::MenuRow::new("", &info.name)
+                            .checked(on)
+                            .accel(info.dirty.then_some("\u{2003}"));
+                        let resp = crate::ui::menu_row(ui, row, crate::ui::MENU_ROW_H);
                         if info.dirty {
-                            p.circle_filled(
-                                egui::pos2(rect.right() - 11.0, rect.center().y),
+                            ui.painter().circle_filled(
+                                egui::pos2(resp.rect.right() - 11.0, resp.rect.center().y),
                                 3.0,
                                 color::text(),
                             );

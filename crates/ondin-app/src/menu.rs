@@ -6798,7 +6798,7 @@ mod submenu_tests {
         let shapes = frame(&ctx, &mut app, 0.2, None, Vec::new());
         let lit = shapes.iter().any(|s| {
             matches!(&s.shape, egui::Shape::Rect(r)
-                if r.fill == crate::theme::color::text_a(20) && r.rect == row)
+                if r.fill == crate::theme::color::hover() && r.rect == row)
         });
         assert!(lit, "lit in the gap");
     }

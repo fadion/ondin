@@ -1554,9 +1554,7 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
         egui::Sense::click(),
     );
     let p = ui.painter();
-    if resp.hovered() {
-        p.rect_filled(rect, egui::CornerRadius::same(5), color::text_a(12));
-    }
+    ui::list_row_ground(p, rect, false, resp.hovered());
     let y = rect.center().y;
     let ink = if s.used {
         color::text()
@@ -1705,9 +1703,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
         let mut p = ui.painter().clone();
         p.multiply_opacity(alpha);
         let p = &p;
-        if i == highlight || resp.hovered() {
-            p.rect_filled(rect, egui::CornerRadius::same(5), color::text_a(20));
-        }
+        ui::list_row_ground(p, rect, false, i == highlight || resp.hovered());
         // The first line's centre: the row's own, or its top line's.
         let gy = rect.top() + ROW_H / 2.0;
         let thumb = egui::Rect::from_min_size(

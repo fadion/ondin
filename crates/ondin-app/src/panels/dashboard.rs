@@ -180,13 +180,7 @@ fn anchored_menu(
                     Some(hl) => hl == i,
                     None => r.hovered(),
                 };
-                if lit {
-                    ui.painter().rect_filled(
-                        row,
-                        egui::CornerRadius::same(4),
-                        theme::color::text_a(20),
-                    );
-                }
+                ui::list_row_ground(ui.painter(), row, false, lit);
                 paint(ui.painter(), i, row, lit);
                 if r.clicked() {
                     clicked = Some(i);
@@ -2454,7 +2448,7 @@ impl OndinApp {
         };
         let p = ui.painter();
         if lit {
-            p.rect_filled(rect, egui::CornerRadius::same(6), theme::color::text_a(10));
+            p.rect_filled(rect, egui::CornerRadius::same(6), color::hover());
         }
         // The 20pt plate under the glyph keeps the left edge in line with the names.
         let badge = egui::Rect::from_center_size(
@@ -2503,7 +2497,7 @@ impl OndinApp {
                 if picked {
                     color::accent_900()
                 } else {
-                    theme::color::text_a(10)
+                    color::hover()
                 },
             );
         }

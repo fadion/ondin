@@ -75,7 +75,9 @@ enum Edit {
         mode: ModeId,
         text: String,
     },
+    /// A group's path, within its own collection.
     Group {
+        collection: CollectionId,
         path: String,
         text: String,
     },
@@ -126,7 +128,8 @@ enum Menu {
     Add,
     Var(VarId),
     Mode(ModeId),
-    Group(String),
+    /// A group of a collection: *Rename group*, *Select*, *Delete group*.
+    Group(CollectionId, String),
     /// *Delete mode…*'s confirmation, with the frames it returns to *Inherit*.
     ConfirmMode(ModeId),
     /// A style's row: *Rename*, *Edit*, *Select*, *Delete*.
@@ -220,7 +223,8 @@ enum Act {
     /// field instead of the next cell's taking it over in silence.
     Cell(VarId, ModeId, String, Option<Edit>),
     ModeName(ModeId, String),
-    GroupName(String, String),
+    /// A collection's group renamed, from one path to another.
+    GroupName(CollectionId, String, String),
     Duplicate(VarId),
     DuplicateMode(ModeId),
     /// A mode moved to an index of the list; index 0 makes it the default.
@@ -278,8 +282,7 @@ enum Line<'a> {
         path: &'a str,
         shown: usize,
         total: usize,
-        /// The kit the group is a group of, `None` for the document's own.
-        kit: Option<&'a str>,
+        of: GroupOf<'a>,
     },
     Var(&'a Variable),
     Kit(&'a str),
@@ -288,13 +291,31 @@ enum Line<'a> {
     Collection(&'a ondin_core::variable::Collection),
 }
 
-/// The key a group's collapse is kept under: its path for the document's own, a
-/// kit's prefixed by `\u{2}` and the kit id, so a kit's *brand* folds apart from
-/// the document's (§15 D1065, D1054's per-document set).
-fn group_key(kit: Option<&str>, path: &str) -> String {
-    match kit {
-        None => path.to_string(),
-        Some(k) => format!("\u{2}{k}\u{2}{path}"),
+/// Whose group a header is: one of the document's collections, or a kit's,
+/// which only folds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum GroupOf<'a> {
+    Own(CollectionId),
+    Kit(&'a str),
+}
+
+impl GroupOf<'_> {
+    /// The collection a group of the document's own is in; `None` for a kit's.
+    fn own(self) -> Option<CollectionId> {
+        match self {
+            GroupOf::Own(c) => Some(c),
+            GroupOf::Kit(_) => None,
+        }
+    }
+}
+
+/// The key a group's collapse is kept under: its path prefixed by its
+/// collection's id, or by `\u{2}` and a kit's id, so a *color* group folds
+/// apart in each collection and in each kit (§15 D1065, D1054's per-document set).
+fn group_key(of: GroupOf<'_>, path: &str) -> String {
+    match of {
+        GroupOf::Own(c) => format!("\u{3}{}\u{3}{path}", c.0.to_wire()),
+        GroupOf::Kit(k) => format!("\u{2}{k}\u{2}{path}"),
     }
 }
 
@@ -592,11 +613,11 @@ impl OndinApp {
                                                     path,
                                                     shown,
                                                     total,
-                                                    kit,
+                                                    of,
                                                 } => group_row(
                                                     ui,
                                                     path,
-                                                    *kit,
+                                                    *of,
                                                     *shown,
                                                     *total,
                                                     picked.is_some(),
@@ -718,7 +739,7 @@ impl OndinApp {
             Menu::Collection(_) => 4.5,
             Menu::ConfirmCollection(_) => 4.0,
             Menu::Scope(v) => scope_rows(table.get(*v)),
-            Menu::Group(_) => 3.0,
+            Menu::Group(..) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
             Menu::Style(_) => 5.0,
             Menu::StyleGroup(..) => 3.0,
@@ -937,15 +958,16 @@ impl OndinApp {
                                 b.menu = Some((Menu::ConfirmMode(mode.id), at));
                             }
                         }
-                        Menu::Group(path) => {
+                        Menu::Group(collection, path) => {
                             if row(ui, icon::PENCIL_SIMPLE, "Rename group") {
                                 acts.push(Act::StartEdit(Edit::Group {
+                                    collection: *collection,
                                     path: path.clone(),
                                     text: path.clone(),
                                 }));
                                 close = true;
                             }
-                            let members = group_members(table, self.shown_collection(), path);
+                            let members = group_members(table, *collection, path);
                             let mut who: Vec<NodeId> = members
                                 .iter()
                                 .flat_map(|v| users[&v.id].iter().copied())
@@ -1421,9 +1443,14 @@ impl OndinApp {
                 // before a `/`, so a nested group closes with its parent.
                 let mut all: HashSet<String> = HashSet::new();
                 for v in table.iter() {
+                    let of = match (v.kit(), table.collection_of(v.id)) {
+                        (Some(k), _) => GroupOf::Kit(k),
+                        (None, Some(c)) => GroupOf::Own(c.id),
+                        (None, None) => continue,
+                    };
                     let mut at = 0;
                     while let Some(i) = v.name[at..].find('/') {
-                        all.insert(group_key(v.kit(), &v.name[..at + i]));
+                        all.insert(group_key(of, &v.name[..at + i]));
                         at += i + 1;
                     }
                 }
@@ -1625,7 +1652,7 @@ impl OndinApp {
                     }
                 }
             }
-            Act::GroupName(from, to) => {
+            Act::GroupName(collection, from, to) => {
                 let to = to.trim().trim_matches('/').to_string();
                 if to == from {
                     self.var_edit_done();
@@ -1635,7 +1662,7 @@ impl OndinApp {
                     self.var_refuse("A group's name cannot have an empty part.".into());
                     return;
                 }
-                match var::rename_group_ops(doc, self.shown_collection(), &from, &to) {
+                match var::rename_group_ops(doc, collection, &from, &to) {
                     Err(clash) => self.var_refuse(format!("{clash} already exists.")),
                     Ok(ops) => {
                         self.var_edit_done();
@@ -2490,7 +2517,7 @@ fn cell_text(table: &ondin_core::Variables, cell: &Cell) -> String {
 /// its variables, by name, filtered by the search and by *In selection*.
 fn lines_of<'a>(
     vars: impl Iterator<Item = &'a Variable>,
-    kit: Option<&'a str>,
+    of: GroupOf<'a>,
     query: &str,
     picked: Option<&HashSet<VarId>>,
     collapsed: &HashSet<String>,
@@ -2517,11 +2544,11 @@ fn lines_of<'a>(
                 path,
                 shown: shown.len(),
                 total,
-                kit,
+                of,
             });
         }
         // A search opens the groups it matches (D1038 G).
-        if path.is_empty() || !query.is_empty() || !collapsed.contains(&group_key(kit, path)) {
+        if path.is_empty() || !query.is_empty() || !collapsed.contains(&group_key(of, path)) {
             out.extend(shown.into_iter().map(Line::Var));
         }
     }
@@ -2546,14 +2573,16 @@ fn all_lines<'a>(
     let mut out = Vec::new();
     if across {
         for c in table.collections() {
-            let lines = lines_of(table.of_collection(c.id), None, query, picked, collapsed);
+            let of = GroupOf::Own(c.id);
+            let lines = lines_of(table.of_collection(c.id), of, query, picked, collapsed);
             if !lines.is_empty() {
                 out.push(Line::Collection(c));
                 out.extend(lines);
             }
         }
     } else {
-        out = lines_of(table.of_collection(shown), None, query, picked, collapsed);
+        let of = GroupOf::Own(shown);
+        out = lines_of(table.of_collection(shown), of, query, picked, collapsed);
     }
     let mut kits: Vec<(String, &'a str)> = table
         .kits()
@@ -2570,7 +2599,7 @@ fn all_lines<'a>(
                     .is_some_and(|c| c.id == shown)
         };
         let vars = table.of_kit(k).filter(maps_here);
-        let lines = lines_of(vars, Some(k), query, picked, collapsed);
+        let lines = lines_of(vars, GroupOf::Kit(k), query, picked, collapsed);
         if !lines.is_empty() {
             out.push(Line::Kit(k));
             out.extend(lines);
@@ -3314,7 +3343,7 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
 fn group_row(
     ui: &mut egui::Ui,
     path: &str,
-    kit: Option<&str>,
+    of: GroupOf<'_>,
     shown: usize,
     total: usize,
     filtered: bool,
@@ -3323,13 +3352,17 @@ fn group_row(
 ) {
     ui.add_space(2.0);
     let w = b.inner_w;
-    let key = group_key(kit, path);
+    let key = group_key(of, path);
     let id = ui.id().with(("var-group", &key));
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, GROUP_H), egui::Sense::click());
     let refused = b.refused.clone();
-    if let Some(Edit::Group { path: p, text }) = b.edit.as_mut()
+    if let Some(Edit::Group {
+        collection,
+        path: p,
+        text,
+    }) = b.edit.as_mut()
         && p == path
-        && kit.is_none()
+        && of.own() == Some(*collection)
     {
         let r = egui::Rect::from_min_size(
             rect.min + egui::vec2(20.0, 2.0),
@@ -3342,7 +3375,7 @@ fn group_row(
         }
         ui::select_all_on_focus(ui, &resp, text);
         if ui::defocus_commits(&resp) {
-            acts.push(Act::GroupName(path.to_string(), text.clone()));
+            acts.push(Act::GroupName(*collection, path.to_string(), text.clone()));
         }
         return;
     }
@@ -3385,8 +3418,11 @@ fn group_row(
         egui::FontId::proportional(10.5),
         theme::text::faint(),
     );
-    if kit.is_none() && ui::double_clicked(ui, &resp) {
+    if let Some(collection) = of.own()
+        && ui::double_clicked(ui, &resp)
+    {
         acts.push(Act::StartEdit(Edit::Group {
+            collection,
             path: path.to_string(),
             text: path.to_string(),
         }));
@@ -3394,12 +3430,12 @@ fn group_row(
         acts.push(Act::ToggleAll(key));
     } else if resp.clicked() {
         acts.push(Act::Toggle(key));
-    } else if kit.is_none()
+    } else if let Some(collection) = of.own()
         && resp.secondary_clicked()
         && let Some(at) = resp.interact_pointer_pos()
     {
         acts.push(Act::OpenMenu(
-            Menu::Group(path.to_string()),
+            Menu::Group(collection, path.to_string()),
             at + egui::vec2(6.0, 8.0),
         ));
     }
@@ -4984,11 +5020,8 @@ mod tests {
     /// close on one `Alt`-click and both open on the next; closed, they stay closed
     /// through closing and reopening the browser.
     ///
-    /// Flip, run: without the write-through to `var_collapsed` fails *"kept for
-    /// the document"*. ⚠️ **Its first run failed there with the write-through in
-    /// place**: the browser loaded the document's set on its first *frame*, so the
-    /// toggles made before it were overwritten — the load moved to the open
-    /// (`toggle_var_browser`), the per-frame load kept for a document switch.
+    /// flip: without the write-through to `var_collapsed` → fails at "kept for
+    /// the document".
     #[test]
     fn alt_toggles_every_group_and_the_document_keeps_them() {
         let (ctx, mut app) = app();
@@ -5006,22 +5039,88 @@ mod tests {
         app.var_act(Act::Name(a, "brand/500".into()));
         app.var_act(Act::Name(b, "surface/base".into()));
         let collapsed = |app: &OndinApp| app.var_browser.as_ref().unwrap().collapsed.clone();
-        app.var_act(Act::ToggleAll("brand".into()));
-        assert!(
-            collapsed(&app).contains("brand") && collapsed(&app).contains("surface"),
-            "both closed: {:?}",
-            collapsed(&app)
-        );
-        app.var_act(Act::ToggleAll("brand".into()));
+        let key = |path: &str| group_key(GroupOf::Own(CollectionId::FIRST), path);
+        let both = |app: &OndinApp| {
+            collapsed(app).contains(&key("brand")) && collapsed(app).contains(&key("surface"))
+        };
+        app.var_act(Act::ToggleAll(key("brand")));
+        assert!(both(&app), "both closed: {:?}", collapsed(&app));
+        app.var_act(Act::ToggleAll(key("brand")));
         assert!(collapsed(&app).is_empty(), "both open again");
-        app.var_act(Act::ToggleAll("surface".into()));
+        app.var_act(Act::ToggleAll(key("surface")));
         frame(&mut app, &ctx);
         app.toggle_var_browser();
         app.toggle_var_browser();
         frame(&mut app, &ctx);
-        assert!(
-            collapsed(&app).contains("brand") && collapsed(&app).contains("surface"),
-            "kept for the document"
+        assert!(both(&app), "kept for the document");
+    }
+
+    /// **A group folds in its own collection only**, and its rename acts on its
+    /// own collection, not the one on show, as a search spanning them needs.
+    ///
+    /// flip: `group_key` keying `GroupOf::Own` by the path alone → fails at
+    /// "apart"; `Act::GroupName` renaming in `shown_collection` → fails at "its own".
+    #[test]
+    fn a_group_belongs_to_its_collection() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        let a = the_only_var(&app).id;
+        app.var_act(Act::Name(a, "color/a".into()));
+        app.var_act(Act::NewCollection);
+        app.var_act(Act::NewVar(VarKind::Color));
+        let second = app.shown_collection();
+        assert_ne!(
+            second,
+            CollectionId::FIRST,
+            "the fixture: a second collection on show"
+        );
+        let b = app
+            .session
+            .doc
+            .variables()
+            .of_collection(second)
+            .next()
+            .unwrap()
+            .id;
+        app.var_act(Act::Name(b, "color/b".into()));
+        assert_eq!(
+            app.session.doc.variables().collection_of(b).map(|c| c.id),
+            Some(second),
+            "the fixture: one `color` group in each"
+        );
+        app.var_act(Act::Toggle(group_key(
+            GroupOf::Own(CollectionId::FIRST),
+            "color",
+        )));
+        let doc = &app.session.doc;
+        let br = app.var_browser.as_ref().unwrap();
+        let lines = all_lines(doc, second, true, "", None, &br.collapsed);
+        let rows: Vec<String> = lines
+            .iter()
+            .filter_map(|l| match l {
+                Line::Var(v) => Some(v.name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            ["color/b"],
+            "apart: only the first collection's folds"
+        );
+        app.var_act(Act::GroupName(
+            CollectionId::FIRST,
+            "color".into(),
+            "tint".into(),
+        ));
+        let t = app.session.doc.variables();
+        assert_eq!(
+            (
+                t.get(a).unwrap().name.as_str(),
+                t.get(b).unwrap().name.as_str()
+            ),
+            ("tint/a", "color/b"),
+            "its own: the rename stays in the first collection"
         );
     }
 
@@ -5477,15 +5576,16 @@ mod tests {
             |app: &OndinApp, v: VarId| app.session.doc.variables().get(v).unwrap().name.clone();
         let refusal = |app: &OndinApp| app.var_browser.as_ref().unwrap().refusal.clone();
 
-        app.var_act(Act::GroupName("ui".into(), "theme".into()));
+        let first = CollectionId::FIRST;
+        app.var_act(Act::GroupName(first, "ui".into(), "theme".into()));
         assert_eq!(
             (name(&app, ids[0]), name(&app, ids[1])),
             ("theme/a".into(), "theme/b".into())
         );
-        app.var_act(Act::GroupName("theme".into(), "a//b".into()));
+        app.var_act(Act::GroupName(first, "theme".into(), "a//b".into()));
         assert!(refusal(&app).is_some(), "an empty part is refused");
         assert_eq!(name(&app, ids[0]), "theme/a");
-        app.var_act(Act::GroupName("theme".into(), "other".into()));
+        app.var_act(Act::GroupName(first, "theme".into(), "other".into()));
         assert_eq!(
             refusal(&app).as_deref(),
             Some("other/a already exists."),

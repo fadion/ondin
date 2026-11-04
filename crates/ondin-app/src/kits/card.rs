@@ -260,7 +260,7 @@ impl OndinApp {
         }
         let placed = super::updates::stack_local(doc, &tx, tops, content);
         tx.0.extend(placed);
-        self.session.name_step("Make local", icon::PACKAGE);
+        self.session.name_step("Make local", icon::LINK_BREAK);
         if !self.session.commit(tx) {
             return;
         }

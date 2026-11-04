@@ -789,7 +789,7 @@ impl OndinApp {
         let Some(ops) = style::create_ops(&self.session.doc, id, &name, from, slot, targets) else {
             return;
         };
-        self.session.name_step("Create style", icon::SWATCHES);
+        self.session.name_step("Create style", icon::PLUS_SQUARE);
         if self.commit_edit(Transaction(ops)) {
             // Open, or the name is typed in a card nobody can see.
             self.open_paint_panel(slot.title());

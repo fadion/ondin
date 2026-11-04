@@ -813,7 +813,7 @@ impl Item {
                 None,
                 Group::Structure,
             ),
-            Item::MakeLocal => s("Make local…", icon::PACKAGE, None, Group::Structure),
+            Item::MakeLocal => s("Make local…", icon::LINK_BREAK, None, Group::Structure),
             Item::ResetInstance => s(
                 "Reset all",
                 icon::ARROW_COUNTER_CLOCKWISE,
@@ -886,7 +886,7 @@ impl Item {
             // Deliberately unbound: a one-way conversion is not one keystroke away.
             Item::OutlineShape => s("Outline shape", icon::POLYGON, None, Group::Structure),
             Item::OutlineStroke => s("Outline stroke", icon::POLYGON, None, Group::Structure),
-            Item::JoinPaths => s("Join paths", icon::ARROWS_MERGE, None, Group::Structure),
+            Item::JoinPaths => s("Join paths", icon::PLUGS_CONNECTED, None, Group::Structure),
             // A verb whose whole result is a kind wears that kind's picture (§8):
             // `POLYGON` for the two that make a `Path`, `TEXT_T` for the two that keep text.
             Item::OutlineText => s("Convert to path", icon::POLYGON, None, Group::Structure),
@@ -995,7 +995,12 @@ impl Item {
             ),
 
             Item::SelectAll => s("Select all", icon::SCAN, Some("Ctrl+A"), Group::Clipboard),
-            Item::ZoomFit => s("Zoom to fit", icon::FRAME, Some("Ctrl+1"), Group::Navigate),
+            Item::ZoomFit => s(
+                "Zoom to fit",
+                icon::ZOOM_FIT,
+                Some("Ctrl+1"),
+                Group::Navigate,
+            ),
             Item::ViewSwitch(sw) => s(
                 sw.label(),
                 match sw {
@@ -1027,7 +1032,7 @@ impl Item {
             ),
 
             Item::RenamePage => s("Rename", icon::PENCIL_SIMPLE, None, Group::Pages),
-            Item::DuplicatePage => s("Duplicate page", icon::COPY, None, Group::Pages),
+            Item::DuplicatePage => s("Duplicate page", icon::COPY_SIMPLE, None, Group::Pages),
             Item::PageDraft => s("Draft", icon::FILE, None, Group::Pages),
             Item::DeletePage => Spec {
                 danger: true,
@@ -1050,11 +1055,11 @@ impl Item {
             Item::GoToPage(_) => s("Go to page", icon::FILE, None, Group::Pages),
             Item::DeleteGuide => Spec {
                 danger: true,
-                ..s("Delete guide", icon::TRASH, Some("Del"), Group::Clipboard)
+                ..s("Delete guide", icon::X, Some("Del"), Group::Clipboard)
             },
             Item::ClearGuides => Spec {
                 danger: true,
-                ..s("Clear all guides", icon::X, None, Group::Clipboard)
+                ..s("Clear all guides", icon::TRASH, None, Group::Clipboard)
             },
 
             // Head puts it above *Delete points* (§6.5): the point menu's own verb.
@@ -1064,8 +1069,8 @@ impl Item {
                 ..s("Delete points", icon::TRASH, Some("Del"), Group::Clipboard)
             },
             // Structure, not Clipboard: these change what the path is rather than removing part of it.
-            Item::SetSmooth(true) => s("Make smooth", icon::BEZIER_CURVE, None, Group::Structure),
-            Item::SetSmooth(false) => s("Make corner", icon::LINE_SEGMENT, None, Group::Structure),
+            Item::SetSmooth(true) => s("Make smooth", icon::NODE_SMOOTH, None, Group::Structure),
+            Item::SetSmooth(false) => s("Make corner", icon::NODE_CORNER, None, Group::Structure),
             // Label and accelerator are painted at fixed anchors, so a longer label overlaps the chord.
             Item::ReverseSubpaths => s(
                 "Reverse subpath",
@@ -1073,8 +1078,7 @@ impl Item {
                 Some("Shift+D"),
                 Group::Structure,
             ),
-            // Shares `ARROWS_MERGE` with the inspector's *Flatten*; never in the same menu.
-            Item::Join => s("Join", icon::ARROWS_MERGE, None, Group::Structure),
+            Item::Join => s("Join", icon::PLUGS_CONNECTED, None, Group::Structure),
 
             Item::Undo => s(
                 "Undo",
@@ -1094,7 +1098,7 @@ impl Item {
                 Some("Ctrl+S"),
                 Group::File,
             ),
-            Item::NewDocument => s("New file", icon::PLUS_SQUARE, Some("Ctrl+N"), Group::File),
+            Item::NewDocument => s("New file", icon::PLUS, Some("Ctrl+N"), Group::File),
             Item::CloseDocument => s("Close tab", icon::X, Some("Ctrl+W"), Group::File),
             Item::NextTab => s("Next tab", icon::BROWSERS, Some("Ctrl+Tab"), Group::File),
             Item::PreviousTab => s(

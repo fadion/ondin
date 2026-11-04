@@ -218,7 +218,7 @@ impl OndinApp {
             },
             E::Sep,
             E::Btn {
-                glyph: icon::ANGLE,
+                glyph: icon::NODE_CORNER,
                 tip: "Make corner",
                 dimmed: "Select points to make corners",
                 active: false,
@@ -226,7 +226,7 @@ impl OndinApp {
                 verb: Verb::Smooth(false),
             },
             E::Btn {
-                glyph: icon::WAVE_SINE,
+                glyph: icon::NODE_SMOOTH,
                 tip: "Make smooth",
                 dimmed: "Select points to make smooth",
                 active: false,

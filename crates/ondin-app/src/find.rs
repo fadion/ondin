@@ -627,7 +627,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         }
         let live = n > 0;
         ui.add_space(GAP_X);
-        if ui::icon_button(ui, icon::ARROW_UP, BTN, 14.0, false, live)
+        if ui::icon_button(ui, icon::CARET_LEFT, BTN, 14.0, false, live)
             .on_hover_text("Previous match (Shift+Enter)")
             .clicked()
             && live
@@ -635,17 +635,9 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
             *act = Some(Act::Step(-1));
         }
         ui.add_space(2.0);
-        // Its ink sits high in the em box; the button stays in line.
-        if ui::icon_button_nudged(
-            ui,
-            icon::ARROW_DOWN,
-            egui::vec2(BTN, BTN),
-            14.0,
-            live,
-            egui::vec2(0.0, 1.0),
-        )
-        .on_hover_text("Next match (Enter)")
-        .clicked()
+        if ui::icon_button(ui, icon::CARET_RIGHT, BTN, 14.0, false, live)
+            .on_hover_text("Next match (Enter)")
+            .clicked()
             && live
         {
             *act = Some(Act::Step(1));
@@ -1447,7 +1439,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{s}: {painted:?}"))
                 .1
         };
-        let (count, up) = (at("1 of 3"), at(icon::ARROW_UP));
+        let (count, up) = (at("1 of 3"), at(icon::CARET_LEFT));
         assert!(up.left() >= count.right() + 9.0, "{count:?} {up:?}");
 
         let page = f.app.session.page;

@@ -158,7 +158,7 @@ impl OndinApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let more = crate::ui::field_button(
                             ui,
-                            icon::DOTS_THREE,
+                            icon::DOTS_THREE_VERTICAL,
                             crate::ui::CONTROL_H,
                             crate::ui::FieldButton::Off,
                         )
@@ -191,7 +191,7 @@ impl OndinApp {
                                 {
                                     act = Some(Act::Accept(u.kit.clone()));
                                 }
-                                if crate::ui::menu_item(ui, icon::PACKAGE, "Make all local…", H)
+                                if crate::ui::menu_item(ui, icon::LINK_BREAK, "Make all local…", H)
                                     .clicked()
                                 {
                                     act = Some(Act::MakeAllLocal(u.kit.clone()));

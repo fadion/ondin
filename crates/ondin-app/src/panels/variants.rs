@@ -2487,7 +2487,7 @@ impl OndinApp {
                             .color(theme::text::dim()),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui::field_button(ui, icon::MINUS, ui::CONTROL_H, FieldButton::Off)
+                            if ui::field_button(ui, icon::X, ui::CONTROL_H, FieldButton::Off)
                                 .on_hover_text("Stop showing its properties on instances")
                                 .clicked()
                             {

@@ -1443,7 +1443,7 @@ impl OndinApp {
                     owner: d.owner,
                 };
                 self.session
-                    .name_step("Duplicate guide", crate::theme::icon::COPY);
+                    .name_step("Duplicate guide", crate::theme::icon::COPY_SIMPLE);
                 if self
                     .session
                     .commit(Transaction(vec![Operation::AddGuide { guide }]))

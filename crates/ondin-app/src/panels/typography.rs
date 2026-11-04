@@ -1432,7 +1432,7 @@ impl OndinApp {
             let face = egui::ComboBox::from_id_salt("font-variant")
                 .icon(ui::combo_chevron)
                 .width(size.x)
-                .selected_text(ui::glyph_and_text(icon::TEXT_BOLD, &label))
+                .selected_text(ui::glyph_and_text(icon::STROKE_WEIGHT, &label))
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     if let Some(m) = mark {
@@ -3343,7 +3343,7 @@ impl OndinApp {
                     })
                     && TextDirection::ALL[i] != p.direction
                 {
-                    self.session.name_step("Text direction", icon::PARAGRAPH);
+                    self.session.name_step("Text direction", icon::SWAP);
                     self.commit_paragraph(
                         subject.id,
                         ParagraphStyle {
@@ -3591,7 +3591,7 @@ impl OndinApp {
                 segment_label(painter, rect, WrapMode::ALL[i].label(), on)
             }) && WrapMode::ALL[i] != p.wrap
             {
-                self.session.name_step("Wrap", icon::PARAGRAPH);
+                self.session.name_step("Wrap", icon::ARROW_LINE_RIGHT);
                 self.commit_paragraph(
                     subject.id,
                     ParagraphStyle {
@@ -4224,7 +4224,7 @@ fn char_step_name(attr: &CharAttr) -> (&'static str, &'static str) {
     match attr {
         CharAttr::Family(_) => ("Font", icon::TEXT_AA),
         CharAttr::Size(_) => ("Font size", icon::TEXT_T),
-        CharAttr::Weight(_) => ("Font weight", icon::TEXT_BOLD),
+        CharAttr::Weight(_) => ("Font weight", icon::STROKE_WEIGHT),
         CharAttr::Italic(_) => ("Italic", icon::TEXT_ITALIC),
         CharAttr::Variations(_) => ("Axes", icon::SLIDERS_HORIZONTAL),
         CharAttr::Features(_) => ("OpenType", icon::TEXT_AA),

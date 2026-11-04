@@ -528,6 +528,11 @@ pub mod icon {
     pub const LINE_SEGMENT: &str = "\u{e6d2}";
     pub const PEN_NIB: &str = "\u{e3ac}";
     pub const BEZIER_CURVE: &str = "\u{eb00}"; // the node tool: a curve with its handles
+    /// *Make corner*, on the path bar and in the menu: a point where two straight
+    /// segments meet at an angle. [`NODE_SMOOTH`] is its pair.
+    pub const NODE_CORNER: &str = "\u{f026}";
+    /// *Make smooth*: a point on a curve, its handle line drawn through it.
+    pub const NODE_SMOOTH: &str = "\u{f027}";
     pub const EYEDROPPER: &str = "\u{e568}";
     /// Unused: a comment tool is a non-goal. Kept because dropping it means
     /// rebuilding the font (`assets/icons/build_font.py`).
@@ -544,15 +549,17 @@ pub mod icon {
     pub const CHART_PIE_SLICE: &str = "\u{e15a}";
     /// An ellipse's Ratio, the hole.
     pub const CIRCLE_DASHED: &str = "\u{e602}";
-    pub const CORNERS_OUT: &str = "\u{e1d0}"; // zoom to fit
+    pub const CORNERS_OUT: &str = "\u{e1d0}"; // corner radius
+    /// Zoom to fit, wherever it is offered: corner brackets around a magnifier.
+    pub const ZOOM_FIT: &str = "\u{f022}";
     pub const CORNERS_IN: &str = "\u{e1ce}"; // fit a frame to its content
     pub const NUMBER_SQUARE_ONE: &str = "\u{e36c}"; // actual size (1:1 / 100%)
     pub const PLUS: &str = "\u{e3d4}";
     pub const DOTS_THREE: &str = "\u{e1fe}";
-    /// The dashboard's per-file overflow menu.
+    /// A row's own overflow menu: a Library file's, a kit's in *Kits used…*.
     ///
-    /// Vertical where the editor's overflow is horizontal: a row's own menu reads
-    /// as belonging to the row.
+    /// Vertical where a head's overflow ([`DOTS_THREE`]) is horizontal: a row's
+    /// own menu reads as belonging to the row.
     pub const DOTS_THREE_VERTICAL: &str = "\u{e208}";
     /// The dashboard's *Recent*, and the picker's recent-colours row.
     pub const CLOCK_COUNTER_CLOCKWISE: &str = "\u{e1a0}";
@@ -564,6 +571,9 @@ pub mod icon {
     /// A document, apart from a page ([`FILE`]): a sheet with lines of text. A
     /// Library search's file result.
     pub const DOCUMENT: &str = "\u{f01e}";
+    /// A description, wherever one is written — a variable's, a main's: a card
+    /// with lines of writing on it.
+    pub const NOTE: &str = "\u{f023}";
     /// The dashboard's grid-view toggle, against `ROWS` for the list.
     pub const SQUARES_FOUR: &str = "\u{e464}";
     /// The dashboard's *Edit project*.
@@ -702,6 +712,9 @@ pub mod icon {
     /// describing it, and the fill says whether it is live.
     pub const CROSSHAIR_SIMPLE: &str = "\u{e1d8}";
     pub const CROSSHAIR: &str = "\u{e1d6}";
+    /// A layer pinned out of its parent's layout, and the Item card's *Unpin*: a
+    /// box held to its frame's edges by two pins.
+    pub const PIN: &str = "\u{f024}";
     /// A drag grip on a reorderable row — Fill's and Stroke's paint rows.
     pub const DOTS_SIX_VERTICAL: &str = "\u{eae2}";
     /// The rest of a stroke's properties, behind one button: dash, cap and join.
@@ -734,10 +747,7 @@ pub mod icon {
     /// A blend-mode step's History glyph.
     pub const INTERSECT_THREE: &str = "\u{ecc4}";
     pub const EXCLUDE_SQUARE: &str = "\u{e880}";
-    /// Flatten, at the foot of the same dropdown. Deliberately not a set diagram:
-    /// it happens once and discards the operands rather than being a fifth state.
-    /// Its ink box is narrower than the squares', but every icon glyph advances
-    /// the same, so the label beside it does not shift.
+    /// Colour review's merge target: the row the others fold into.
     pub const ARROWS_MERGE: &str = "\u{ed3e}";
     /// Dot and dash *spacing*: the gap between two things.
     pub const ARROWS_LEFT_RIGHT: &str = "\u{e0a0}";
@@ -764,7 +774,11 @@ pub mod icon {
     /// letter spacing took [`TEXT_AA`].
     #[allow(dead_code)]
     pub const ARROWS_HORIZONTAL: &str = "\u{eb06}";
+    /// The **B** toggle and its chord, against [`STROKE_WEIGHT`]'s weight picker.
     pub const TEXT_BOLD: &str = "\u{e5be}";
+    /// A font's weight, wherever it is picked or bound: three rules, each
+    /// heavier than the one above.
+    pub const STROKE_WEIGHT: &str = "\u{f025}";
     pub const TEXT_ITALIC: &str = "\u{e5c0}";
     pub const TEXT_UNDERLINE: &str = "\u{e5c4}";
     pub const TEXT_STRIKETHROUGH: &str = "\u{e5c2}";
@@ -875,7 +889,8 @@ pub mod icon {
     pub const CODE: &str = "\u{f01b}";
     /// A stack seen from the side: the context menu's *Arrange ▸*.
     pub const STACK: &str = "\u{e466}";
-    /// *Flatten* — the same stack pressed into one sheet.
+    /// *Flatten*, in the context menu and at the foot of the boolean dropdown —
+    /// the same stack pressed into one sheet.
     pub const STACK_SIMPLE: &str = "\u{e468}";
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
@@ -930,13 +945,12 @@ pub mod icon {
     /// crop*, `ARROWS_CLOCKWISE` is *reverse*, `ARROW_CLOCKWISE` is rotation. A
     /// fourth ring would be two verbs with one picture.
     pub const BROOM: &str = "\u{ec54}";
-    /// The path bar's *Join* — two ends plugged together. Not [`ARROWS_MERGE`],
-    /// which is *Flatten*.
+    /// *Join*, on the path bar and in the context menu — two ends plugged together.
     pub const PLUGS_CONNECTED: &str = "\u{eb5a}";
     /// The path bar's *Simplify*.
     pub const MAGIC_WAND: &str = "\u{e6b6}";
     /// The path bar's *Offset* — the outline pushed out on every side. Not
-    /// [`CORNERS_OUT`], which is *Zoom to fit*.
+    /// [`ZOOM_FIT`].
     pub const ARROWS_OUT_CARDINAL: &str = "\u{e0a4}";
     /// A History row's *Resize*.
     pub const ARROWS_OUT: &str = "\u{e0a2}";
@@ -998,6 +1012,8 @@ pub mod icon {
         ("line-segment", LINE_SEGMENT),
         ("pen-nib", PEN_NIB),
         ("bezier-curve", BEZIER_CURVE),
+        ("node-corner", NODE_CORNER),
+        ("node-smooth", NODE_SMOOTH),
         ("eyedropper", EYEDROPPER),
         ("chat", CHAT),
         ("align-left", ALIGN_LEFT),
@@ -1010,6 +1026,7 @@ pub mod icon {
         ("chart-pie-slice", CHART_PIE_SLICE),
         ("circle-dashed", CIRCLE_DASHED),
         ("corners-out", CORNERS_OUT),
+        ("zoom-fit", ZOOM_FIT),
         ("corners-in", CORNERS_IN),
         ("number-square-one", NUMBER_SQUARE_ONE),
         ("plus", PLUS),
@@ -1071,6 +1088,7 @@ pub mod icon {
         ("magnet", MAGNET),
         ("crosshair-simple", CROSSHAIR_SIMPLE),
         ("crosshair", CROSSHAIR),
+        ("pin", PIN),
         ("dots-six-vertical", DOTS_SIX_VERTICAL),
         ("sliders-horizontal", SLIDERS_HORIZONTAL),
         ("sliders", SLIDERS),
@@ -1079,6 +1097,7 @@ pub mod icon {
         ("file", FILE),
         ("files", FILES),
         ("document", DOCUMENT),
+        ("note", NOTE),
         ("squares-four", SQUARES_FOUR),
         ("pencil-simple", PENCIL_SIMPLE),
         ("knife", KNIFE),
@@ -1108,6 +1127,7 @@ pub mod icon {
         ("arrows-vertical", ARROWS_VERTICAL),
         ("arrows-horizontal", ARROWS_HORIZONTAL),
         ("text-bold", TEXT_BOLD),
+        ("stroke-weight", STROKE_WEIGHT),
         ("text-italic", TEXT_ITALIC),
         ("text-underline", TEXT_UNDERLINE),
         ("text-strikethrough", TEXT_STRIKETHROUGH),

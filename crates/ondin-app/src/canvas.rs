@@ -2642,7 +2642,7 @@ impl OndinApp {
                         Some(clone) => {
                             let roots: Vec<NodeId> = clone.copies.iter().map(|c| c.root).collect();
                             let tx = built;
-                            self.session.name_step("Duplicate", icon::COPY);
+                            self.session.name_step("Duplicate", icon::COPY_SIMPLE);
                             if self.session.commit(tx) {
                                 // The copy is what stays selected.
                                 self.session.selection.set(roots);

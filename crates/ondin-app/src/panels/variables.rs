@@ -784,7 +784,7 @@ impl OndinApp {
                             }
                             // Step 2's: a boolean binds a layer's visibility
                             // (D1038 (d), §15 D1059).
-                            if row(ui, icon::CHECK, "Boolean variable") {
+                            if row(ui, icon::TOGGLE, "Boolean variable") {
                                 acts.push(Act::NewVar(VarKind::Boolean));
                                 close = true;
                             }
@@ -843,13 +843,12 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
-                            if item(ui, ui::MenuRow::new(icon::COPY, "Duplicate")).clicked() {
+                            if item(ui, ui::MenuRow::new(icon::COPY_SIMPLE, "Duplicate")).clicked()
+                            {
                                 acts.push(Act::Duplicate(v.id));
                                 close = true;
                             }
-                            if item(ui, ui::MenuRow::new(icon::TEXT_ALIGN_LEFT, "Description"))
-                                .clicked()
-                            {
+                            if item(ui, ui::MenuRow::new(icon::NOTE, "Description")).clicked() {
                                 acts.push(Act::StartEdit(Edit::Describe {
                                     of: Described::Variable(v.id),
                                     text: v.description.clone(),
@@ -961,7 +960,7 @@ impl OndinApp {
                                     b.width_draft = Some((mode.id, w));
                                 }
                             }
-                            if row(ui, icon::COPY, "Duplicate mode") {
+                            if row(ui, icon::COPY_SIMPLE, "Duplicate mode") {
                                 acts.push(Act::DuplicateMode(mode.id));
                                 close = true;
                             }
@@ -972,7 +971,7 @@ impl OndinApp {
                             if n > 1 {
                                 ui::menu_sep(ui);
                                 let moves = [
-                                    (icon::STAR, "Make default", 0, i > 0),
+                                    (icon::ARROW_LINE_LEFT, "Make default", 0, i > 0),
                                     (icon::ARROW_LEFT, "Move left", i.saturating_sub(1), i > 0),
                                     (icon::ARROW_RIGHT, "Move right", i + 1, i + 1 < n),
                                 ];
@@ -1088,7 +1087,7 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
-                            if row(ui, icon::TEXT_ALIGN_LEFT, "Description") {
+                            if row(ui, icon::NOTE, "Description") {
                                 acts.push(Act::StartEdit(Edit::Describe {
                                     of: Described::Style(st.id),
                                     text: st.description.clone(),
@@ -1211,7 +1210,7 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
-                            if row(ui, icon::COPY, "Duplicate collection") {
+                            if row(ui, icon::COPY_SIMPLE, "Duplicate collection") {
                                 acts.push(Act::DuplicateCollection(col.id));
                                 close = true;
                             }
@@ -1397,7 +1396,7 @@ impl OndinApp {
                     ui::menu_sep(ui);
                     let new = ui::menu_row(
                         ui,
-                        ui::MenuRow::new(icon::PLUS, "New collection"),
+                        ui::MenuRow::new(icon::DATABASE, "New collection"),
                         MENU_ROW_H,
                     );
                     if new.clicked() {
@@ -1486,7 +1485,7 @@ impl OndinApp {
                 let same = op.changes_nothing(doc);
                 self.var_edit_done();
                 if !same {
-                    self.session.name_step("Description", icon::PENCIL_SIMPLE);
+                    self.session.name_step("Description", icon::NOTE);
                     self.commit_edit(Transaction(vec![op]));
                 }
             }
@@ -1663,7 +1662,7 @@ impl OndinApp {
                         cells: vec![],
                     }],
                 };
-                self.session.name_step("New mode", icon::PLUS);
+                self.session.name_step("New mode", icon::COLUMNS_PLUS_RIGHT);
                 if !ops.is_empty()
                     && self.commit_edit(Transaction(ops))
                     && let Some(b) = self.var_browser.as_mut()
@@ -1698,7 +1697,7 @@ impl OndinApp {
                 let id = self.session.ids.mint_mode();
                 let ops = var::copy_mode_ops(doc, from, id, &name, index + 1);
                 if !ops.is_empty() {
-                    self.session.name_step("Duplicate mode", icon::COPY);
+                    self.session.name_step("Duplicate mode", icon::COPY_SIMPLE);
                     self.commit_edit(Transaction(ops));
                 }
             }
@@ -1793,7 +1792,8 @@ impl OndinApp {
                     name,
                     ..v.clone()
                 };
-                self.session.name_step("Duplicate variable", icon::COPY);
+                self.session
+                    .name_step("Duplicate variable", icon::COPY_SIMPLE);
                 self.commit_edit(Transaction(vec![Operation::AddVariable { var: copy }]));
             }
             Act::Delete(ids, label) => {
@@ -1901,7 +1901,8 @@ impl OndinApp {
                 };
                 let ops = var::duplicate_collection_ops(doc, c, &name, &mut self.session.ids);
                 if !ops.is_empty() {
-                    self.session.name_step("Duplicate collection", icon::COPY);
+                    self.session
+                        .name_step("Duplicate collection", icon::COPY_SIMPLE);
                     self.commit_edit(Transaction(ops));
                 }
             }
@@ -2440,7 +2441,7 @@ fn kind_glyph(k: VarKind) -> &'static str {
     match k {
         VarKind::Color => icon::PALETTE,
         VarKind::Number => icon::HASH,
-        VarKind::Boolean => icon::CHECK,
+        VarKind::Boolean => icon::TOGGLE,
         VarKind::String => icon::TEXT_T,
     }
 }
@@ -2851,7 +2852,7 @@ fn collection_picker(
                     ui::menu_sep(ui);
                     if ui::menu_row(
                         ui,
-                        ui::MenuRow::new(icon::PLUS, "New collection"),
+                        ui::MenuRow::new(icon::DATABASE, "New collection"),
                         MENU_ROW_H,
                     )
                     .clicked()

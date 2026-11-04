@@ -155,9 +155,9 @@ impl Stop {
     }
 }
 
-/// *Compare with now*: the compare's own Then ⇄ Now grip, so it reads apart from
-/// *Show on canvas*'s git-diff glyph, which opens a different pair.
-const NOW_GLYPH: &str = icon::ARROWS_LEFT_RIGHT;
+/// *Compare with now*: the glyph every compare with a version wears, File's
+/// *Compare with version…* and *Show on canvas* included.
+const NOW_GLYPH: &str = icon::GIT_DIFF;
 
 /// What a press on a row asked for.
 enum Press {

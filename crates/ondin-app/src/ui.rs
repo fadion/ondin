@@ -3060,52 +3060,6 @@ pub fn icon_button_padded(
     enabled: bool,
     pad: egui::Margin,
 ) -> egui::Response {
-    icon_button_body(
-        ui,
-        glyph,
-        box_size,
-        glyph_size,
-        active,
-        enabled,
-        pad,
-        egui::Vec2::ZERO,
-    )
-}
-
-/// [`icon_button_sized`] with its glyph moved `nudge` off the box's centre, for a
-/// glyph whose ink sits off-centre in its em box.
-pub fn icon_button_nudged(
-    ui: &mut egui::Ui,
-    glyph: &str,
-    box_size: egui::Vec2,
-    glyph_size: f32,
-    enabled: bool,
-    nudge: egui::Vec2,
-) -> egui::Response {
-    icon_button_body(
-        ui,
-        glyph,
-        box_size,
-        glyph_size,
-        false,
-        enabled,
-        egui::Margin::ZERO,
-        nudge,
-    )
-}
-
-/// The body every icon button shares.
-#[allow(clippy::too_many_arguments)]
-fn icon_button_body(
-    ui: &mut egui::Ui,
-    glyph: &str,
-    box_size: egui::Vec2,
-    glyph_size: f32,
-    active: bool,
-    enabled: bool,
-    pad: egui::Margin,
-    nudge: egui::Vec2,
-) -> egui::Response {
     let sense = if pad == egui::Margin::ZERO {
         egui::Sense::click()
     } else {
@@ -3138,7 +3092,7 @@ fn icon_button_body(
         p.rect_filled(rect, r5, theme::color::hover());
     }
     p.text(
-        rect.center() + nudge,
+        rect.center(),
         egui::Align2::CENTER_CENTER,
         glyph,
         theme::icon_font(glyph_size),

@@ -1860,7 +1860,7 @@ impl OndinApp {
                     )
                 ),
                 "Unpin and return to the layout",
-                icon::X,
+                icon::PIN,
             ),
             OutOfFlow::Hidden => (
                 icon::EYE_SLASH,
@@ -1952,7 +1952,7 @@ impl OndinApp {
                 .collect(),
         };
         let (verb, glyph) = match why {
-            OutOfFlow::Absolute => ("Unpin", icon::CROSSHAIR_SIMPLE),
+            OutOfFlow::Absolute => ("Unpin", icon::PIN),
             OutOfFlow::Hidden => ("Show", icon::EYE),
             OutOfFlow::Mask => ("Release mask", icon::CIRCLE_HALF),
         };

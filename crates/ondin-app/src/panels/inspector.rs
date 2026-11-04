@@ -1043,16 +1043,9 @@ impl OndinApp {
                 })
                 .clicked();
             // Live even when every guide is selected, where it equals Remove.
-            remove_all = ui::icon_button(
-                ui,
-                icon::TRASH_SIMPLE,
-                BOOL_ROW_H,
-                ACTION_GLYPH,
-                false,
-                true,
-            )
-            .on_hover_text(format!("Remove all {total} guides on this page"))
-            .clicked();
+            remove_all = ui::icon_button(ui, icon::TRASH, BOOL_ROW_H, ACTION_GLYPH, false, true)
+                .on_hover_text(format!("Remove all {total} guides on this page"))
+                .clicked();
         });
         // After the row, so the borrow of `guides` is over first.
         if remove_all {
@@ -2002,7 +1995,7 @@ impl OndinApp {
                             }
                         }
                         popup_rule(ui);
-                        let row = ui::glyph_and_text(icon::ARROWS_MERGE, "Flatten");
+                        let row = ui::glyph_and_text(icon::STACK_SIMPLE, "Flatten");
                         flatten = ui
                             .selectable_label(false, row)
                             .on_hover_text(
@@ -5034,7 +5027,7 @@ impl OndinApp {
             self.reset_marked(hit, mark);
             self.named_valve(
                 "Corner smoothing",
-                icon::CIRCLE,
+                icon::SQUIRCLE,
                 &resp,
                 Transaction(vec![Operation::SetGeometry {
                     id,

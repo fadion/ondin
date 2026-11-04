@@ -7304,11 +7304,7 @@ impl OndinApp {
                     "Actual size",
                     crate::input::Action::ZoomReset,
                 ),
-                (
-                    icon::CORNERS_OUT,
-                    "Zoom to fit",
-                    crate::input::Action::ZoomFit,
-                ),
+                (icon::ZOOM_FIT, "Zoom to fit", crate::input::Action::ZoomFit),
                 // `SELECTION`, not `CORNERS_IN`, which is *Fit frame to content*.
                 (
                     icon::SELECTION,

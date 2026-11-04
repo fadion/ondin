@@ -186,9 +186,9 @@ impl FieldKey {
 
     /// The glyph a number field's badge carries: the corners icon for all four,
     /// the elbow pointing into its corner for one — the per-corner fields' own
-    /// (§15 D1049) — and a spacing field's own prefix, a side's letter included
-    /// (§15 D1058; [`Self::badge_is_icon`] says which). `CORNERS_OUT` for a
-    /// paint, which draws no badge.
+    /// (§15 D1049) — and a spacing field's own prefix, a side's glyph included
+    /// ([`Self::badge_is_icon`] says which badges are letters). `CORNERS_OUT` for
+    /// a paint, which draws no badge.
     pub(crate) fn badge(self) -> &'static str {
         match self {
             FieldKey::Corner { slot: 0, .. } => icon::CORNER_TOP_LEFT,
@@ -205,7 +205,7 @@ impl FieldKey {
             // Each type field's own prefix; the weight's is its picker's glyph.
             FieldKey::Type { slot, .. } => match slot {
                 ondin_core::variable::TEXT_SIZE => icon::TEXT_T,
-                ondin_core::variable::TEXT_WEIGHT => icon::TEXT_BOLD,
+                ondin_core::variable::TEXT_WEIGHT => icon::STROKE_WEIGHT,
                 ondin_core::variable::TEXT_LINE_HEIGHT => icon::ARROWS_VERTICAL,
                 ondin_core::variable::TEXT_LETTER_SPACING => icon::TEXT_AA,
                 _ => icon::PARAGRAPH,
@@ -227,10 +227,10 @@ impl FieldKey {
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
-                PAD_TOP => "T",
-                PAD_RIGHT => "R",
-                PAD_BOTTOM => "B",
-                PAD_LEFT => "L",
+                PAD_TOP => icon::SIDE_TOP,
+                PAD_RIGHT => icon::SIDE_RIGHT,
+                PAD_BOTTOM => icon::SIDE_BOTTOM,
+                PAD_LEFT => icon::SIDE_LEFT,
                 s if s == PAD_TOP | PAD_BOTTOM => icon::ARROWS_IN_LINE_VERTICAL,
                 _ => icon::ARROWS_IN_LINE_HORIZONTAL,
             },
@@ -241,12 +241,7 @@ impl FieldKey {
     pub(crate) fn badge_is_icon(self) -> bool {
         !matches!(
             self,
-            FieldKey::Spacing {
-                slots: PAD_TOP | PAD_RIGHT | PAD_BOTTOM | PAD_LEFT,
-                ..
-            } | FieldKey::Size { .. }
-                | FieldKey::EffectNumber { .. }
-                | FieldKey::Limit { .. }
+            FieldKey::Size { .. } | FieldKey::EffectNumber { .. } | FieldKey::Limit { .. }
         )
     }
 

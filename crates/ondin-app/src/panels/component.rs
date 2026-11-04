@@ -799,7 +799,7 @@ impl OndinApp {
         {
             let text = val.trim().to_string();
             if text != saved {
-                self.session.name_step("Description", icon::PENCIL_SIMPLE);
+                self.session.name_step("Description", icon::NOTE);
                 self.commit_edit(Transaction(vec![Operation::SetDescription {
                     of: ondin_core::Described::Node(id),
                     text,
@@ -1838,7 +1838,8 @@ fn reset_row(
                             *act = Some(Act::AcceptKitUpdate(k.kit.clone()));
                         }
                         ui::menu_sep(ui);
-                        if ui::menu_item(ui, icon::PACKAGE, "Make local…", ui::MENU_ROW_H).clicked()
+                        if ui::menu_item(ui, icon::LINK_BREAK, "Make local…", ui::MENU_ROW_H)
+                            .clicked()
                         {
                             *act = Some(Act::MakeLocal(k.top));
                         }
@@ -2045,7 +2046,7 @@ fn main_tail(ui: &mut egui::Ui, act: &mut Option<Act>) {
     let w = ui.available_width();
     if ui::action_button(
         ui,
-        icon::COPY,
+        icon::COPY_SIMPLE,
         "Duplicate",
         FieldButton::Off,
         egui::vec2(w, h),

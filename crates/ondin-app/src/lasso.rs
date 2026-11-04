@@ -14,9 +14,6 @@ use ondin_core::kurbo::Point;
 /// The least the pointer moves, in screen pt, before the loop takes another point.
 const STEP_PT: f64 = 2.0;
 
-/// The loop's fill: the selection blue at 6%.
-const FILL_ALPHA: u8 = 15;
-
 impl OndinApp {
     /// Take the pointer at `world` into a lasso marquee's loop; nothing for a box.
     pub(crate) fn extend_lasso(&mut self, world: Point) {
@@ -47,9 +44,7 @@ impl OndinApp {
             .map(|p| self.to_screen(*p, rect, ppp))
             .collect();
         pts.push(self.to_screen(end, rect, ppp));
-        let [r, g, b, _] = color::SELECT.to_srgba_unmultiplied();
-        let fill = egui::Color32::from_rgba_unmultiplied(r, g, b, FILL_ALPHA);
-        painter.add(egui::Shape::mesh(fill_spans(&pts, fill)));
+        painter.add(egui::Shape::mesh(fill_spans(&pts, color::MARQUEE_FILL)));
         let stroke = egui::Stroke::new(1.0, color::SELECT);
         painter.add(egui::Shape::line(pts.clone(), stroke));
         if let (Some(first), Some(last)) = (pts.first(), pts.last()) {

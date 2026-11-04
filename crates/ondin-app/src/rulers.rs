@@ -1040,9 +1040,9 @@ fn axis_cursor(axis: GuideAxis) -> egui::CursorIcon {
     }
 }
 
-/// Type on a guide chip: near-black, since the chrome's near-white would
-/// contrast too little with the guide's mid-dark default colour.
-const CHIP_INK: egui::Color32 = egui::Color32::from_rgb(0x0d, 0x1c, 0x26);
+/// Type on a guide chip: the badge's near-black ink, since the chrome's
+/// near-white would contrast too little with the guide's mid-dark default colour.
+const CHIP_INK: egui::Color32 = crate::theme::color::BADGE_INK;
 
 /// The pointer's mark on a ruler bar: full thickness, brighter than a tick and
 /// dimmer than an extent number.

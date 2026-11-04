@@ -467,13 +467,14 @@ impl OndinApp {
                     at,
                     DOT_R,
                     color::SELECT,
-                    egui::Stroke::new(1.5, egui::Color32::WHITE),
+                    egui::Stroke::new(1.5, color::POINT),
                 );
             } else {
+                // The node anchors' near-white, the canvas's one handle white.
                 painter.circle(
                     at,
                     DOT_R,
-                    egui::Color32::WHITE,
+                    color::POINT,
                     egui::Stroke::new(1.5, color::SELECT),
                 );
             }

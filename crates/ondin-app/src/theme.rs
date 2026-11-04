@@ -78,8 +78,8 @@ pub mod color {
         /// `inspector::template_cell` all use it, and they must agree or the hover
         /// splits into two greys.
         hover,
-        /// A ground a step above [`card`] — the variables browser, which floats
-        /// over the inspector's cards.
+        /// A ground a step above [`card`] — the insert picker's hover card, which
+        /// floats over the picker's own card.
         raised,
         /// The document tab strip's ground, a step below [`topbar`]; a tab behind
         /// keeps [`tab_behind`], a step above the strip, and hover lifts it to
@@ -169,6 +169,9 @@ pub mod color {
         field: Color32::from_rgb(47, 47, 48),
         field_border: Color32::from_rgb(62, 62, 63),
         card_border: Color32::from_rgb(53, 53, 54),
+        // One step from `card_border`, and not an alias: that is a hairline and this
+        // a fill, so they never read as one. It cannot rise: text over it would fall
+        // under the 10:1 floor (`every_ink_reads_on_every_ground_in_both_themes`).
         hover: Color32::from_rgb(52, 52, 54),
         raised: Color32::from_rgb(40, 40, 40),
         tab_strip: Color32::from_rgb(14, 14, 15),
@@ -217,6 +220,9 @@ pub mod color {
         hover: Color32::from_rgb(232, 232, 234),
         raised: Color32::from_rgb(255, 255, 255),
         tab_strip: Color32::from_rgb(226, 226, 228),
+        // Aliases on purpose, in light only: a tab behind is `hover`'s grey, one
+        // step off its strip as a hover is off its ground, and a lifted tab meets
+        // the page in `canvas`'s. Neither pair is ever drawn side by side.
         tab_behind: Color32::from_rgb(232, 232, 234),
         tab_lifted: Color32::from_rgb(238, 238, 240),
         accent: Color32::from_rgb(74, 108, 196),
@@ -351,6 +357,9 @@ pub mod color {
     pub const SELECT_DIM: Color32 = select_a(0x8c);
     /// The layer-row highlight in the layers tree, at panel strength.
     pub const SELECT_ROW: Color32 = select_a(43);
+    /// The ground inside a selection marquee, the box's and the lasso's loop
+    /// alike: faint, so the artwork it sweeps still reads.
+    pub const MARQUEE_FILL: Color32 = select_a(28);
     /// A selected grid container's **gaps** on the canvas (§15 D921), and the
     /// tint of every spacing band — a flex container's gaps and any container's
     /// padding — while the pointer is inside it. Faint enough that the artwork

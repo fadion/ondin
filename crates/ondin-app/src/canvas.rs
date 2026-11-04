@@ -9013,7 +9013,8 @@ impl OndinApp {
                 _ if self.pen.is_some() => self.pen_point(world, shift).1.into(),
                 _ => snap::Marks::default(),
             };
-            let guide_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(226, 108, 160));
+            // A snap's guide is a distance shown, so it wears the measure's hue.
+            let guide_stroke = egui::Stroke::new(1.0, color::MEASURE);
             for g in marks.guides {
                 let (a, b) = match g.axis {
                     Axis::Vertical => (Point::new(g.at, g.from), Point::new(g.at, g.to)),
@@ -9057,12 +9058,7 @@ impl OndinApp {
                 origin.y.max(end.y),
             );
             let r = self.world_rect_to_screen(area, rect, ppp);
-            let [sr, sg, sb, _] = color::SELECT.to_srgba_unmultiplied();
-            painter.rect_filled(
-                r,
-                egui::CornerRadius::ZERO,
-                egui::Color32::from_rgba_unmultiplied(sr, sg, sb, 28),
-            );
+            painter.rect_filled(r, egui::CornerRadius::ZERO, color::MARQUEE_FILL);
             painter.rect_stroke(
                 r,
                 egui::CornerRadius::ZERO,

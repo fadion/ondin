@@ -595,7 +595,7 @@ variant* is the verb that takes the next free combination; an instance's name is
 | `PropertyOwner` | properties only on a main not in a set, or a set |
 | `PropertyName` | unique, non-empty, not a variant property's name (the nameless showing exempt; a second showing refused) |
 | `Binding` | a bound layer exists strictly inside the owner's main (for a set, inside a variant, never a variant's root); text for a text property; a nested instance for a swap or showing; bound once per field |
-| `States` | at most one property of a set marked as the interaction state; it ties only its own values, each state once |
+| `States` | at most one property of a set holds ties; it ties only its own values, each state once |
 
 **`variant::settle`** — after `settle_links` and **before `propagate`** (load-bearing: a renamed value
 renames its variants here, and `propagate` carries the new name onto every instance still holding the
@@ -654,26 +654,30 @@ property their content. Nothing stores its value on an instance; the default is 
 an overridden property is a bound field differing from its source; resetting it resets that field. So
 a switch carries properties with other overrides, and undo, preview and propagation need nothing new.
 
-**Interaction states.** One variant property of a set may be marked as its interaction state, for code
-export (`export.md`, *Code export*). `VariantProp::states` ties values by name to
+**Interaction states.** A variant property's values may be tied to browser states, for code export
+(`export.md`, *Code export*): `VariantProp::states` ties values by name to
 `Interaction::{Hover, FocusVisible, Active, Disabled}` (*Hover*, *Focus*, *Pressed*, *Disabled* in the
-app). **Rest is not stored**: it is the default variant's value (`variant::rest_value`, through
+app). **A property with any tie is its set's interaction state** (`VariantProp::is_interaction`,
+`VariantSet::interaction`); there is no separate mark, so a set is never interactive with nothing tied.
+**Rest is not stored**: it is the default variant's value (`variant::rest_value`, through
 `kit::default_variant`), so it follows the default; a value tied to none stays a plain prop value.
 `VariantSet::element` (`RootElement::{Button, Link, Plain}`, Button by default) says what the root is
-written as, read only while a property is marked.
+written as, read only while a property holds ties.
 
-- `mark_interaction` marks or unmarks, guessing ties from value names (`Interaction::guess`: *hover*;
-  *pressed*/*active*; *focus*; *disabled*), never rest's value and each state once;
-  `why_not_interaction` refuses a second marked property or a property of one value. `tie_state`
-  refuses a state another value holds. `set_element` sets the element. `rename_value` keeps a tie;
-  `delete_value` drops it.
+- `tie_state` ties a value or unties it. **The first tie on a property also ties its other values as
+  their names suggest** (`Interaction::guess`: *hover*; *pressed*/*active*; *focus*; *disabled*), in
+  the same step, never rest's value and never a state already tied; untying the last makes the property
+  plain again. Guessing waits for that deliberate first tie, so a *Tab* set's *Active* value is never
+  written as `:active` unasked. `why_not_tie` refuses a tie while another property holds the states,
+  or on rest's value; `tie_state` also refuses a state another value holds. `set_element` sets the
+  element. `rename_value` keeps a tie; `delete_value` drops it.
 - `unpaired_states(doc, set) -> Vec<Unpaired { variant, why, layer }>` lists each state variant whose
   layers do not line up with its rest variant (the one with the same values of every other property):
   no rest variant, other text, or another order (*“Label” moves before “Bg”*, naming the layer moved
   ahead). Layers pair by lineage key, whichever side recorded it (rest may be the copy), else name
   path. A layer only one side draws is a show or hide, and one of another kind is a swap (rest's
   hidden, the state's shown), as the code export writes them; neither is a failure.
-- A set saved before lineage keys is not stamped when marked: its layers pair by name path until a
+- A set saved before lineage keys is not stamped when tied: its layers pair by name path until a
   variant is copied again.
 
 ### Instance swap — `swap.rs`
@@ -748,14 +752,13 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   (`variants::card_rule`) between properties. A chip's popup renames, moves and deletes its value;
   deleting a used value confirms in a modal (`OndinApp::value_delete_confirmation`: *N variants use it
   and are deleted with it. M instances will detach.*; a value changed meanwhile deletes nothing).
-- **Interaction state on the Variants card.** The property's menu button (`icon::DOTS_THREE`; once
-  marked `icon::HAND_POINTING`, latched `FieldButton::On`) holds one checkable row, *Interaction
-  state*, disabled with `why_not_interaction`'s reason; undo step *Interaction state*. Marked, each
-  value chip is `ui::label_button_noted`, its note `rest` or the tied selector, and its popup gains a
-  *State* eyebrow over checkable rows *Rest* (always greyed: rest follows the default variant), *None*,
-  *Hover*, *Pressed*, *Focus*, *Disabled*, the selector in the accel column; a state another value
-  holds shows that value's name there and is greyed. An *Element* dropdown (Button, Link, Plain; undo
-  step *Element*) shows while a property is marked. Each `unpaired_states` entry is a warning note
+- **Interaction state on the Variants card.** Every value chip's popup has a *State ▸* row
+  (`icon::HAND_POINTING`, `ui::submenu_row`), greyed with `why_not_tie`'s reason on rest's value and
+  on a second property's. It opens a flyout (`ui::flyout`) of checkable rows *None*, then *Hover*,
+  *Pressed*, *Focus*, *Disabled*, the selector in the accel column; a state another value holds shows
+  that value's name there and is greyed. Undo step *Interaction state*. Once the property holds a tie,
+  each value chip is `ui::label_button_noted`, its note `rest` or the tied selector, and an *Element*
+  dropdown (Button, Link, Plain; undo step *Element*) shows under its chips. Each `unpaired_states` entry is a warning note
   (*Large, Focus does not pair*, the sentence in its tooltip) with *Select it* (the layer, else the
   variant), as the clash note is.
 - **A variant** gets the Component card with *Variant in* and the set as a link, its derived read-only

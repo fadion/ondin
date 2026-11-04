@@ -1013,7 +1013,7 @@ impl Walk<'_> {
             let p = params
                 .iter()
                 .position(|p| matches!(p.kind, ParamKind::Choice(i) if i == at))?;
-            Some((at, rest, vs.props[at].states.clone()?, vs.element, p))
+            Some((at, rest, vs.props[at].states.clone(), vs.element, p))
         });
         let mut live = None;
         if let Some((_, rest, ties, element, p)) = &marked {

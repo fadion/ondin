@@ -1,4 +1,5 @@
-//! A marked set's interaction states as CSS: each state variant's tree diffed
+//! A marked set's interaction states as CSS — a marked set is one whose
+//! property ties values to browser states — each state variant's tree diffed
 //! against rest's — the variant with the same values of every other property —
 //! and written as rules under `:hover`, `:focus-visible`, `:active` and
 //! `:disabled`, each also forced by the state prop (`data-state`).

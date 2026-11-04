@@ -1821,22 +1821,24 @@ fn ties(f: &F) -> Vec<(String, variant::Interaction)> {
     f.doc.get(f.s).unwrap().set().unwrap().props[1]
         .states
         .clone()
-        .unwrap_or_default()
         .into_iter()
         .collect()
 }
 
-/// Marking ties each value as its name suggests and never rest's, and a file
-/// keeps the ties and the element.
+/// The first tie makes the property the interaction state and ties its other
+/// values as their names suggest, never rest's, in one step; a second property
+/// and rest's value are refused with why, and a file keeps the ties and the
+/// element.
 ///
-/// flip: `mark_interaction` guessing rest's value too → fails at "Default
-/// stays rest".
+/// flip: `tie_state` not guessing on the first tie → fails at "the others by
+/// their names".
 #[test]
-fn marking_a_property_guesses_its_states() {
+fn the_first_tie_guesses_the_others() {
     use variant::Interaction::*;
     let mut f = fixture();
     with_states(&mut f);
-    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    assert_eq!(f.doc.get(f.s).unwrap().set().unwrap().interaction(), None);
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(Hover)).unwrap();
     f.commit(tx.0);
     assert_eq!(
         ties(&f),
@@ -1845,16 +1847,25 @@ fn marking_a_property_guesses_its_states() {
             ("Hover".to_string(), Hover),
             ("Pressed".to_string(), Active)
         ],
-        "Default stays rest"
+        "the others by their names"
+    );
+    assert_eq!(
+        f.doc.get(f.s).unwrap().set().unwrap().interaction(),
+        Some(1)
     );
     assert_eq!(
         variant::rest_value(&f.doc, f.s, 1).as_deref(),
         Some("Default")
     );
-    assert!(
-        variant::why_not_interaction(&f.doc, f.s, 0)
-            .is_some_and(|w| w == "State is the interaction state"),
+    assert_eq!(
+        variant::why_not_tie(&f.doc, f.s, 0, 1).as_deref(),
+        Some("State holds the interaction states"),
         "a second is refused with the first's name"
+    );
+    assert!(variant::tie_state(&f.doc, f.s, 0, 1, Some(Disabled)).is_none());
+    assert!(
+        variant::why_not_tie(&f.doc, f.s, 1, 0).is_some_and(|w| w.starts_with("Rest is")),
+        "rest's value is refused"
     );
     let tx = variant::set_element(&f.doc, f.s, variant::RootElement::Link).unwrap();
     f.commit(tx.0);
@@ -1877,14 +1888,54 @@ fn an_unmarked_set_writes_no_state_keys() {
     assert!(!text.contains("\"lineage\""), "{text}");
 }
 
+/// Rest's value is never guessed, even when its name suggests a state.
+///
+/// flip: `tie_state` guessing rest's value too → fails at "Inactive stays
+/// rest".
+#[test]
+fn the_first_tie_never_guesses_rest() {
+    use variant::Interaction::*;
+    let mut f = fixture();
+    with_states(&mut f);
+    let tx = variant::rename_value(&f.doc, f.s, 1, 0, "Inactive").unwrap();
+    f.commit(tx.0);
+    assert_eq!(variant::Interaction::guess("Inactive"), Some(Disabled));
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(Hover)).unwrap();
+    f.commit(tx.0);
+    assert!(
+        !ties(&f).iter().any(|(v, _)| v == "Inactive"),
+        "Inactive stays rest: {:?}",
+        ties(&f)
+    );
+    assert!(ties(&f).contains(&("Disabled".to_string(), Disabled)));
+}
+
+/// The first tie keeps the state it names over a guess: a value whose name
+/// suggests that state stays untied.
+#[test]
+fn the_first_tie_wins_its_state() {
+    use variant::Interaction::*;
+    let mut f = fixture();
+    with_states(&mut f);
+    let tx = variant::tie_state(&f.doc, f.s, 1, 3, Some(Hover)).unwrap();
+    f.commit(tx.0);
+    assert_eq!(
+        ties(&f),
+        [
+            ("Disabled".to_string(), Hover),
+            ("Pressed".to_string(), Active)
+        ]
+    );
+}
+
 /// A tie follows its value's rename and goes with its delete; a state is tied
-/// once.
+/// once; untying the last makes the property plain again.
 #[test]
 fn a_tie_follows_its_value() {
     use variant::Interaction::*;
     let mut f = fixture();
     with_states(&mut f);
-    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(Hover)).unwrap();
     f.commit(tx.0);
     let tx = variant::rename_value(&f.doc, f.s, 1, 1, "Hovered").unwrap();
     f.commit(tx.0);
@@ -1903,7 +1954,7 @@ fn a_tie_follows_its_value() {
     let tx = variant::delete_value(&f.doc, f.s, 1, 3).unwrap();
     f.commit(tx.0);
     assert_eq!(ties(&f), [("Hovered".to_string(), Hover)]);
-    let tx = variant::mark_interaction(&f.doc, f.s, 1, false).unwrap();
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, None).unwrap();
     f.commit(tx.0);
     assert!(
         f.doc
@@ -1916,14 +1967,15 @@ fn a_tie_follows_its_value() {
     );
 }
 
-/// Two marked properties, or a tie naming no value, are refused.
+/// Ties on two properties, or a tie naming no value, are refused.
 #[test]
 fn the_state_rules_are_held() {
+    use variant::Interaction::*;
     let mut f = fixture();
     with_states(&mut f);
     let mut two = f.doc.get(f.s).unwrap().set().unwrap().clone();
-    two.props[0].states = Some(Default::default());
-    two.props[1].states = Some(Default::default());
+    two.props[0].states = [("Large".to_string(), Hover)].into();
+    two.props[1].states = [("Pressed".to_string(), Active)].into();
     let rule = refused(
         &mut f.doc,
         vec![Operation::SetVariantSet {
@@ -1933,7 +1985,7 @@ fn the_state_rules_are_held() {
     );
     assert_eq!(rule, VariantRule::States);
     let mut stray = f.doc.get(f.s).unwrap().set().unwrap().clone();
-    stray.props[0].states = Some([("Huge".to_string(), variant::Interaction::Hover)].into());
+    stray.props[0].states = [("Huge".to_string(), Hover)].into();
     let rule = refused(
         &mut f.doc,
         vec![Operation::SetVariantSet {
@@ -2031,7 +2083,7 @@ fn a_state_that_reorders_does_not_pair() {
             .unwrap()
             .0,
     );
-    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(variant::Interaction::Hover)).unwrap();
     f.commit(tx.0);
     let hbg = f.kids(hover)[0];
     f.commit(vec![Operation::SetName {
@@ -2085,7 +2137,7 @@ fn a_state_pairs_by_the_key_rest_recorded() {
             name: "Background".into(),
         },
     ]);
-    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(variant::Interaction::Hover)).unwrap();
     f.commit(tx.0);
     assert_eq!(
         variant::rest_value(&f.doc, f.s, 1).as_deref(),
@@ -2115,7 +2167,7 @@ fn a_state_layer_of_another_kind_is_a_swap() {
             .unwrap()
             .0,
     );
-    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    let tx = variant::tie_state(&f.doc, f.s, 1, 1, Some(variant::Interaction::Hover)).unwrap();
     f.commit(tx.0);
     let hbg = f.kids(hover)[0];
     let dot = f.ids.mint();

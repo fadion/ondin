@@ -789,23 +789,24 @@ fn note(ui: &mut egui::Ui, glyph: &str, text: &str) -> egui::Response {
     .response
 }
 
-/// The interaction states a marked property's value `vi` can be tied to, in its
-/// chip's menu: one checkable row each in the app's words, the selector the
-/// code writes on the right. A state another value holds names that value and
-/// is greyed, so each is tied once; rest's value is tied to none and follows
-/// the default variant, so its rows are greyed and *Rest* is its own.
+/// The rows and separators of [`state_rows`], for its flyout's size.
+const STATE_ROWS: (usize, usize) = (5, 1);
+
+/// The browser states value `vi` of property `p` can be tied to, in its chip's
+/// *State ▸* flyout: *None*, then one checkable row per state in the app's words,
+/// the selector the code writes on the right. A state another value holds names
+/// that value and is greyed, so each is tied once. Answers whether a row was
+/// picked.
 fn state_rows(
     ui: &mut egui::Ui,
     set: NodeId,
     p: &variant::VariantProp,
     vi: usize,
-    is_rest: bool,
     edits: &mut Vec<Deferred>,
-) {
+) -> bool {
     use variant::Interaction;
     let value = &p.values[vi];
-    let tie = p.state_of(value).filter(|_| !is_rest);
-    ui.label(ui::eyebrow("State"));
+    let tie = p.state_of(value);
     let row = |ui: &mut egui::Ui, on: bool, label: &str, right: Option<&str>, ok: bool| {
         let glyph = if on { icon::CHECK } else { " " };
         ui::menu_row(
@@ -817,16 +818,11 @@ fn state_rows(
             ui::MENU_ROW_H,
         )
     };
-    let rest_tip = "Rest is the default variant's value, and follows it";
-    let resp = row(ui, is_rest, "Rest", None, false);
-    if is_rest {
-        resp.on_disabled_hover_text(rest_tip);
-    }
     let mut pick = None;
-    let resp = row(ui, !is_rest && tie.is_none(), "None", None, !is_rest);
-    if resp.clicked() && !is_rest {
+    if row(ui, tie.is_none(), "None", None, true).clicked() {
         pick = Some(None);
     }
+    ui::menu_sep(ui);
     for s in [
         Interaction::Hover,
         Interaction::Active,
@@ -836,7 +832,6 @@ fn state_rows(
         let held = p
             .states
             .iter()
-            .flatten()
             .find(|(v, t)| **t == s && *v != value)
             .map(|(v, _)| v.as_str());
         let resp = row(
@@ -844,28 +839,25 @@ fn state_rows(
             tie == Some(s),
             s.label(),
             Some(held.unwrap_or(s.selector())),
-            !is_rest && held.is_none(),
+            held.is_none(),
         );
-        match (is_rest, held) {
-            (true, _) => {
-                resp.on_disabled_hover_text(rest_tip);
-            }
-            (false, Some(h)) => {
+        match held {
+            Some(h) => {
                 resp.on_disabled_hover_text(format!("{h} is {}", s.label()));
             }
-            (false, None) if resp.clicked() => pick = Some(Some(s)),
-            _ => {}
+            None if resp.clicked() => pick = Some(Some(s)),
+            None => {}
         }
     }
-    if let Some(state) = pick {
-        let (pname, vname) = (p.name.clone(), value.clone());
-        edits.push(defer(move |cx| {
-            cx.step = Some(("Interaction state", icon::HAND_POINTING));
-            Ok(cx
-                .value_at(set, &pname, &vname)
-                .and_then(|(pi, vi)| variant::tie_state(cx.doc, set, pi, vi, state)))
-        }));
-    }
+    let Some(state) = pick else { return false };
+    let (pname, vname) = (p.name.clone(), value.clone());
+    edits.push(defer(move |cx| {
+        cx.step = Some(("Interaction state", icon::HAND_POINTING));
+        Ok(cx
+            .value_at(set, &pname, &vname)
+            .and_then(|(pi, vi)| variant::tie_state(cx.doc, set, pi, vi, state)))
+    }));
+    true
 }
 
 /// `text` with its first letter capitalised, for a reason that opens a sentence.
@@ -1005,12 +997,11 @@ impl OndinApp {
                 card_rule(ui);
             }
             ui.add_space(2.0);
-            let marked = p.states.is_some();
-            // The property's name, renamed in place, with its menu and its
-            // delete beside it.
+            let marked = p.is_interaction();
+            // The property's name, renamed in place, with its delete beside it.
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                let w = ui.available_width() - (ui::CONTROL_H + ui::CARD_COL_GAP) * 2.0;
+                let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
                 let id = ui.id().with(("variant-prop", set, pi));
                 if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H)) {
                     let drawn = p.name.clone();
@@ -1025,47 +1016,6 @@ impl OndinApp {
                         Ok(Some(tx))
                     }));
                 }
-                // Marked, the menu's button wears the state's glyph, latched.
-                let (glyph, face, tip) = match marked {
-                    true => (
-                        icon::HAND_POINTING,
-                        FieldButton::On,
-                        "The interaction state: its values are the browser's states in code",
-                    ),
-                    false => (icon::DOTS_THREE, FieldButton::Off, "More for this property"),
-                };
-                let more = ui::field_button(ui, glyph, ui::CONTROL_H, face).on_hover_text(tip);
-                egui::Popup::menu(&more)
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                    .gap(ui::MENU_GAP)
-                    .show(|ui| {
-                        ui.set_width(CHIP_MENU_W);
-                        ui::popup_rows(ui);
-                        let why = variant::why_not_interaction(doc, set, pi).filter(|_| !marked);
-                        let row = ui::menu_row(
-                            ui,
-                            ui::MenuRow::new(icon::HAND_POINTING, "Interaction state")
-                                .checked(marked)
-                                .enabled(why.is_none()),
-                            ui::MENU_ROW_H,
-                        );
-                        match why {
-                            Some(why) => {
-                                row.on_hover_text(why);
-                            }
-                            None if row.clicked() => {
-                                let drawn = p.name.clone();
-                                edits.push(defer(move |cx| {
-                                    cx.step = Some(("Interaction state", icon::HAND_POINTING));
-                                    Ok(cx.prop_at(set, &drawn).and_then(|pi| {
-                                        variant::mark_interaction(cx.doc, set, pi, !marked)
-                                    }))
-                                }));
-                                ui.close();
-                            }
-                            None => {}
-                        }
-                    });
                 let last = vs.props.len() < 2;
                 let state = if last {
                     FieldButton::Disabled
@@ -1090,8 +1040,8 @@ impl OndinApp {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
                 for (vi, v) in p.values.iter().enumerate() {
-                    // Marked, each value names its state: rest, its selector,
-                    // or nothing for a plain value.
+                    // Holding ties, each value names its state: rest, its
+                    // selector, or nothing for a plain value.
                     let is_rest = marked && rest.as_ref() == Some(v);
                     let tie = p.state_of(v).filter(|_| !is_rest);
                     let tag = match (is_rest, tie) {
@@ -1105,6 +1055,8 @@ impl OndinApp {
                     // under an open menu (a second *Move later* moved the
                     // neighbour back, and *Delete* deleted it).
                     let field = egui::Id::new(("variant-value", set, pi, vi));
+                    // The *State ▸* row's rect while its flyout is open.
+                    let fly_at = field.with("state-flyout");
                     let shown = egui::Popup::menu(&chip)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .gap(ui::MENU_GAP)
@@ -1137,19 +1089,40 @@ impl OndinApp {
                             };
                             let (pname, vname) = (p.name.clone(), v.clone());
                             let n = p.values.len();
-                            let row = |ui: &mut egui::Ui, glyph: &str, label: &str, ok: bool| {
-                                ui::menu_row(
-                                    ui,
-                                    ui::MenuRow::new(glyph, label).enabled(ok),
-                                    ui::MENU_ROW_H,
-                                )
-                                .clicked()
-                                    && ok
-                            };
-                            if marked {
-                                state_rows(ui, set, p, vi, is_rest, &mut edits);
-                                ui::menu_sep(ui);
+                            // Any row but *State* hovered closes its flyout.
+                            let mut elsewhere = resp.hovered();
+                            let mut row =
+                                |ui: &mut egui::Ui, glyph: &str, label: &str, ok: bool| {
+                                    let r = ui::menu_row(
+                                        ui,
+                                        ui::MenuRow::new(glyph, label).enabled(ok),
+                                        ui::MENU_ROW_H,
+                                    );
+                                    elsewhere |= r.hovered();
+                                    r.clicked() && ok
+                                };
+                            // Tying a value here makes the property the
+                            // interaction state; rest's value and a second
+                            // property's are refused, with why.
+                            let mut open = ui.ctx().data(|d| d.get_temp::<egui::Rect>(fly_at));
+                            let why = variant::why_not_tie(doc, set, pi, vi);
+                            let state = ui::submenu_row(
+                                ui,
+                                ui::MenuRow::new(icon::HAND_POINTING, "State")
+                                    .enabled(why.is_none()),
+                                open.is_some(),
+                            );
+                            match &why {
+                                Some(why) => {
+                                    state.on_disabled_hover_text(why);
+                                    open = None;
+                                }
+                                None if state.hovered() || state.clicked() => {
+                                    open = Some(state.rect);
+                                }
+                                None => {}
                             }
+                            ui::menu_sep(ui);
                             for (glyph, label, ok, later) in [
                                 (icon::ARROW_LEFT, "Move earlier", vi > 0, false),
                                 (icon::ARROW_RIGHT, "Move later", vi + 1 < n, true),
@@ -1200,7 +1173,31 @@ impl OndinApp {
                                 }
                                 ui.close();
                             }
+                            if elsewhere {
+                                open = None;
+                            }
+                            if let Some(at) = open {
+                                let ctx = ui.ctx().clone();
+                                let mut picked = false;
+                                let area = fly_at.with("area");
+                                ui::flyout(&ctx, area, at, CHIP_MENU_W, STATE_ROWS, |ui| {
+                                    picked = state_rows(ui, set, p, vi, &mut edits);
+                                });
+                                if picked {
+                                    open = None;
+                                    ui.close();
+                                }
+                            }
+                            ui.ctx().data_mut(|d| match open {
+                                Some(at) => {
+                                    d.insert_temp(fly_at, at);
+                                }
+                                None => d.remove::<egui::Rect>(fly_at),
+                            });
                         });
+                    if shown.is_none() {
+                        ui.ctx().data_mut(|d| d.remove::<egui::Rect>(fly_at));
+                    }
                     // **A rename typed and left commits when the menu closes**
                     // (§15 D1003 (11)): a click on the canvas closes the popup
                     // before its field can see its focus go, and the inspector
@@ -1230,7 +1227,8 @@ impl OndinApp {
                     }));
                 }
             });
-            // What the code export writes the root as, while the set is marked.
+            // What the code export writes the root as, while the property
+            // holds ties.
             if marked {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -1947,7 +1945,7 @@ impl OndinApp {
                         out.extend(mark.as_ref().map(|m| m.tx.clone()));
                     }
                     // The interaction state's label says what a pick does in code.
-                    if p.states.is_some() {
+                    if p.is_interaction() {
                         let rest = variant::rest_value(doc, set, pi).unwrap_or_default();
                         ui.interact(label, ui.id().with(("state-tip", pi)), egui::Sense::hover())
                             .on_hover_text(format!(
@@ -4185,7 +4183,8 @@ mod tests {
         );
     }
 
-    /// A set of two variants, *State: Default, Hover*, Default the default.
+    /// A set of two variants, *State: Default, Hover*, Default the default, and
+    /// a third value *Pressed* no variant takes yet.
     fn state_set(app: &mut OndinApp) -> NodeId {
         use ondin_core::Operation;
         let root = app.session.doc.first_page();
@@ -4218,7 +4217,7 @@ mod tests {
             set: Some(variant::VariantSet {
                 props: vec![variant::VariantProp::new(
                     "State",
-                    vec!["Default".into(), "Hover".into()],
+                    vec!["Default".into(), "Hover".into(), "Pressed".into()],
                 )],
                 ..Default::default()
             }),
@@ -4233,14 +4232,38 @@ mod tests {
         set
     }
 
-    /// The property's menu marks it as the interaction state in one undo
-    /// step, and its chips then name their states: rest, and Hover's selector;
-    /// the Element row joins the card.
+    /// The chips' menu at `chip`, the painted frame with it open, and the
+    /// *State ▸* row's rect in it: below the chip, where the property's name
+    /// field is not.
+    fn chip_menu(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        painted: &[(String, egui::Rect)],
+        chip: &str,
+    ) -> (Vec<(String, egui::Rect)>, egui::Rect) {
+        let at = painted
+            .iter()
+            .find(|(t, _)| t == chip)
+            .map(|(_, r)| *r)
+            .unwrap_or_else(|| panic!("the {chip} chip: {painted:?}"));
+        let open = click_at(app, ctx, at.center());
+        let row = open
+            .iter()
+            .find(|(t, r)| t == "State" && r.top() > at.bottom())
+            .map(|(_, r)| *r)
+            .unwrap_or_else(|| panic!("the State row: {open:?}"));
+        (open, row)
+    }
+
+    /// Tying a value from its chip's *State ▸* flyout makes the property the
+    /// interaction state in one undo step, tying the other values their names
+    /// suggest; the chips then name their states and the Element row joins the
+    /// card.
     ///
-    /// flip: `set_body` drawing `label_button` with no note → fails at "Hover's
-    /// selector".
+    /// flip: `tie_state` not guessing on the first tie → fails at "Pressed by
+    /// its name".
     #[test]
-    fn the_property_menu_marks_the_interaction_state() {
+    fn a_value_is_tied_from_its_chips_state_flyout() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
@@ -4250,42 +4273,74 @@ mod tests {
         for _ in 0..4 {
             painted = drawn(&mut app, &ctx, vec![]);
         }
-        assert!(!painted.iter().any(|(t, _)| t == "Element"), "unmarked");
-        let name = painted
+        assert!(!painted.iter().any(|(t, _)| t == "Element"), "no state yet");
+        let (_, row) = chip_menu(&mut app, &ctx, &painted, "Hover");
+        // Hovered, the row opens its list beside it.
+        let mut fly = Vec::new();
+        for _ in 0..3 {
+            fly = drawn(
+                &mut app,
+                &ctx,
+                vec![egui::Event::PointerMoved(row.center())],
+            );
+        }
+        let pick = fly
             .iter()
-            .find(|(t, _)| t == "State")
-            .map(|(_, r)| *r)
-            .unwrap_or_else(|| panic!("the property's name: {painted:?}"));
-        let more = painted
-            .iter()
-            .find(|(t, r)| t == icon::DOTS_THREE && (r.center().y - name.center().y).abs() < 6.0)
+            .find(|(t, r)| t == "Hover" && r.left() > row.right())
             .map(|(_, r)| r.center())
-            .unwrap_or_else(|| panic!("the property's menu: {painted:?}"));
-        let open = click_at(&mut app, &ctx, more);
-        let row = open
-            .iter()
-            .find(|(t, _)| t == "Interaction state")
-            .map(|(_, r)| r.center())
-            .unwrap_or_else(|| panic!("the row: {open:?}"));
+            .unwrap_or_else(|| panic!("the flyout's Hover row: {fly:?}"));
+        assert!(fly.iter().any(|(t, _)| t == ":focus-visible"), "{fly:?}");
         let depth = app.session.history.undo_depth();
-        click_at(&mut app, &ctx, row);
+        click_at(&mut app, &ctx, pick);
         let vs = app.session.doc.get(set).unwrap().set().unwrap().clone();
         assert_eq!(vs.interaction(), Some(0));
         assert_eq!(
             vs.props[0].state_of("Hover"),
             Some(variant::Interaction::Hover)
         );
+        assert_eq!(
+            vs.props[0].state_of("Pressed"),
+            Some(variant::Interaction::Active),
+            "Pressed by its name"
+        );
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
         for _ in 0..3 {
             painted = drawn(&mut app, &ctx, vec![]);
         }
         let has = |s: &str| painted.iter().any(|(t, _)| t == s);
-        assert!(has(":hover"), "Hover's selector: {painted:?}");
+        assert!(
+            has(":hover") && has(":active"),
+            "the chips' selectors: {painted:?}"
+        );
         assert!(has("rest"), "{painted:?}");
         assert!(has("Element") && has("Button"), "{painted:?}");
-        assert!(
-            has(icon::HAND_POINTING),
-            "the menu's button wears the glyph"
-        );
+    }
+
+    /// Rest's value cannot be tied: its *State ▸* row is greyed with why, and
+    /// hovering it opens no list.
+    ///
+    /// flip: the chip menu ignoring `why_not_tie` → fails at "no list".
+    #[test]
+    fn rests_value_has_no_state_flyout() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let set = state_set(&mut app);
+        app.session.selection.set_one(set);
+        let mut painted = Vec::new();
+        for _ in 0..4 {
+            painted = drawn(&mut app, &ctx, vec![]);
+        }
+        let (_, row) = chip_menu(&mut app, &ctx, &painted, "Default");
+        let mut fly = Vec::new();
+        for _ in 0..3 {
+            fly = drawn(
+                &mut app,
+                &ctx,
+                vec![egui::Event::PointerMoved(row.center())],
+            );
+        }
+        assert!(!fly.iter().any(|(t, _)| t == ":hover"), "no list: {fly:?}");
+        assert!(variant::why_not_tie(&app.session.doc, set, 0, 0).is_some());
     }
 }

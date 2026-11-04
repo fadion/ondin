@@ -485,6 +485,58 @@ pub fn paint_submenu_caret(ui: &egui::Ui, row: egui::Rect) {
     );
 }
 
+/// A popup menu's row that opens a [`flyout`] beside it, `label ▸`: lit while
+/// `open`, so it stays lit across the gap to its list and inside it. The caller
+/// opens the list on the row's hover or click, and closes it when another row
+/// is hovered.
+pub fn submenu_row(ui: &mut egui::Ui, row: MenuRow<'_>, open: bool) -> egui::Response {
+    // The row about to be drawn: a highlighted row leaves its hover to the caller.
+    let next = egui::Rect::from_min_size(
+        ui.cursor().min,
+        egui::vec2(ui.available_width(), MENU_ROW_H),
+    );
+    let lit = row.enabled && (open || ui.rect_contains_pointer(next));
+    let resp = menu_row(ui, row.highlight(lit), MENU_ROW_H);
+    paint_submenu_caret(ui, resp.rect);
+    resp
+}
+
+/// The air inside a [`flyout`]'s card: a popup menu's own (`theme`'s
+/// `menu_margin`), so a list beside a popup's row matches it.
+pub const FLYOUT_PAD: f32 = 6.0;
+
+/// The list a [`submenu_row`] at `row` opens beside it: a [`menu_frame`] card
+/// `w` wide over the popup it hangs from, holding `rows` menu rows and `seps`
+/// separators that `add` draws. Answers the card's rect, for the caller's
+/// click-outside test.
+pub fn flyout(
+    ctx: &egui::Context,
+    id: egui::Id,
+    row: egui::Rect,
+    w: f32,
+    (rows, seps): (usize, usize),
+    add: impl FnOnce(&mut egui::Ui),
+) -> egui::Rect {
+    let items = (rows + seps) as f32;
+    let h = 2.0 * (MENU_BORDER + FLYOUT_PAD)
+        + rows as f32 * MENU_ROW_H
+        + seps as f32 * MENU_SEP_H
+        + (items - 1.0).max(0.0);
+    let pos = flyout_place(ctx, row, egui::vec2(w, h), FLYOUT_PAD);
+    egui::Area::new(id)
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pos)
+        .show(ctx, |ui| {
+            menu_frame(FLYOUT_PAD).show(ui, |ui| {
+                ui.set_width(menu_inner_w(w, FLYOUT_PAD));
+                ui.spacing_mut().item_spacing.y = 1.0;
+                add(ui);
+            });
+        })
+        .response
+        .rect
+}
+
 /// Height of a top-bar dropdown's head, and so of its hit target.
 const HEAD_H: f32 = 26.0;
 

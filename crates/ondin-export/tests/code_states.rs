@@ -1,5 +1,5 @@
-//! Code export's interaction states: a set whose property is marked as the
-//! interaction state writes each state as a diff against rest under its
+//! Code export's interaction states: a set whose property ties values to
+//! browser states writes each state as a diff against rest under its
 //! pseudo-class, forced by the state prop, and a state that does not line up
 //! with rest's tree falls back to the prop and is reported.
 
@@ -76,7 +76,7 @@ fn file(out: &CodeExport, path: &str) -> String {
 /// each variant a *Bg* rect under a *Label*, made by *Add variant* from Small ·
 /// Default so their layers share lineage keys. Hover paints Bg blue, and Small ·
 /// Hover's Bg is renamed *Background*; Small · Pressed paints it green and grows
-/// the root; Large · Pressed puts Label under Bg. State is marked, and an
+/// the root; Large · Pressed puts Label under Bg. State ties Hover and Pressed, and an
 /// instance of Large · Default sits on the page.
 struct Fixture {
     doc: Document,
@@ -176,8 +176,9 @@ fn fixture() -> Fixture {
         index: 0,
     });
     doc.apply(&Transaction(ops)).unwrap();
-    doc.apply(&variant::mark_interaction(&doc, set, 1, true).unwrap())
-        .unwrap();
+    // Tying Hover ties Pressed by its name too.
+    let tie = variant::tie_state(&doc, set, 1, 1, Some(variant::Interaction::Hover));
+    doc.apply(&tie.unwrap()).unwrap();
 
     let (tx, made) = ondin_core::insert_subtrees(
         &doc,
@@ -393,8 +394,8 @@ fn a_focus_state_always_turns_the_browsers_ring_off() {
 
 /// A *Chip* set of one property, *State* (Default, Hover), and an instance of
 /// it: Default holds a red *Bg* and a black star *Icon*, Hover is made from it
-/// by *Add variant*. `edit` runs on the doc, Default and Hover before the
-/// property is marked.
+/// by *Add variant*. `edit` runs on the doc, Default and Hover before Hover is
+/// tied.
 fn chip(edit: impl FnOnce(&mut Document, NodeId, NodeId)) -> (Document, NodeId) {
     let mut ids = IdSource::new(0x5A);
     let root = ids.mint();
@@ -457,8 +458,8 @@ fn chip(edit: impl FnOnce(&mut Document, NodeId, NodeId)) -> (Document, NodeId) 
     doc.apply(&variant::set_values(&doc, hover, vec!["Hover".into()]).unwrap())
         .unwrap();
     edit(&mut doc, rest, hover);
-    doc.apply(&variant::mark_interaction(&doc, set, 0, true).unwrap())
-        .unwrap();
+    let tie = variant::tie_state(&doc, set, 0, 1, Some(variant::Interaction::Hover));
+    doc.apply(&tie.unwrap()).unwrap();
     assert_eq!(
         variant::rest_value(&doc, set, 0).as_deref(),
         Some("Default"),

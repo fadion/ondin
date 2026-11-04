@@ -48,27 +48,32 @@ pub struct VariantSet {
 pub struct VariantProp {
     pub name: String,
     pub values: Vec<String>,
-    /// Set when this property is its set's **interaction state**: the values tied
-    /// to a browser state, by name. Rest is not stored — it is the default
+    /// The values tied to a browser state, by name; a property with any tie is
+    /// its set's **interaction state**. Rest is not stored — it is the default
     /// variant's value — and a value tied to none stays a plain prop value. At
-    /// most one property of a set carries it, and each state is tied at most once.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub states: Option<BTreeMap<String, Interaction>>,
+    /// most one property of a set holds ties, and each state is tied at most once.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub states: BTreeMap<String, Interaction>,
 }
 
 impl VariantProp {
-    /// A property of `values` that is no interaction state.
+    /// A property of `values` with no value tied to a state.
     pub fn new(name: impl Into<String>, values: Vec<String>) -> Self {
         Self {
             name: name.into(),
             values,
-            states: None,
+            states: BTreeMap::new(),
         }
     }
 
-    /// The state value `value` is tied to, when this is the interaction state.
+    /// The state value `value` is tied to.
     pub fn state_of(&self, value: &str) -> Option<Interaction> {
-        self.states.as_ref()?.get(value).copied()
+        self.states.get(value).copied()
+    }
+
+    /// Whether this is its set's interaction state: a value is tied.
+    pub fn is_interaction(&self) -> bool {
+        !self.states.is_empty()
     }
 }
 
@@ -135,7 +140,7 @@ impl Interaction {
     }
 }
 
-/// What a code export writes a marked set's root as.
+/// What a code export writes the root of a set with an interaction state as.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RootElement {
@@ -166,9 +171,9 @@ impl RootElement {
 }
 
 impl VariantSet {
-    /// The interaction-state property's place, when one is marked.
+    /// The interaction-state property's place: the one holding ties.
     pub fn interaction(&self) -> Option<usize> {
-        self.props.iter().position(|p| p.states.is_some())
+        self.props.iter().position(VariantProp::is_interaction)
     }
 }
 
@@ -454,17 +459,16 @@ pub(crate) fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, Vari
     Ok(())
 }
 
-/// Whether at most one property is the interaction state, tying only its own
-/// values, each state once.
+/// Whether at most one property holds ties, tying only its own values, each
+/// state once.
 fn states_ok(set: &VariantSet) -> bool {
-    let marked: Vec<&VariantProp> = set.props.iter().filter(|p| p.states.is_some()).collect();
+    let marked: Vec<&VariantProp> = set.props.iter().filter(|p| p.is_interaction()).collect();
     let Some(p) = marked.first() else {
         return true;
     };
-    let ties = p.states.as_ref().expect("marked");
     let mut seen = FxHashSet::default();
     marked.len() == 1
-        && ties
+        && p.states
             .iter()
             .all(|(v, s)| p.values.contains(v) && seen.insert(*s))
 }
@@ -1202,8 +1206,8 @@ pub fn rename_value(
     }
     p.values[value] = name.clone();
     // A renamed value keeps its tie.
-    if let Some(tie) = p.states.as_mut().and_then(|s| s.remove(&old)) {
-        p.states.as_mut().expect("marked").insert(name.clone(), tie);
+    if let Some(tie) = p.states.remove(&old) {
+        p.states.insert(name.clone(), tie);
     }
     Some(edit_set(doc, set, next, |v| {
         let mut v = v.to_vec();
@@ -1326,9 +1330,7 @@ pub fn delete_value(doc: &Document, set: NodeId, prop: usize, value: usize) -> O
         return None;
     }
     let name = p.values.remove(value);
-    if let Some(s) = p.states.as_mut() {
-        s.remove(&name);
-    }
+    p.states.remove(&name);
     let gone = using_value(doc, set, prop, value);
     let mut ops = crate::component::relink_for_delete(doc, &gone);
     ops.extend(gone.iter().map(|id| Operation::DeleteNode { id: *id }));
@@ -1348,52 +1350,27 @@ pub fn rest_value(doc: &Document, set: NodeId, prop: usize) -> Option<String> {
     doc.get(d)?.variant.get(prop).cloned()
 }
 
-/// Why property `prop` of `set` cannot be marked as the interaction state, or
-/// `None` when it can: another property already is, or it has one value.
-pub fn why_not_interaction(doc: &Document, set: NodeId, prop: usize) -> Option<String> {
+/// Why value `value` of property `prop` cannot be tied to a state, or `None`
+/// when it can: another property holds the interaction states, or the value is
+/// rest's, which follows the default variant.
+pub fn why_not_tie(doc: &Document, set: NodeId, prop: usize, value: usize) -> Option<String> {
     let vs = doc.get(set)?.set.as_ref()?;
-    let p = vs.props.get(prop)?;
+    let name = vs.props.get(prop)?.values.get(value)?;
     if let Some(other) = vs.interaction().filter(|i| *i != prop) {
-        return Some(format!("{} is the interaction state", vs.props[other].name));
+        return Some(format!(
+            "{} holds the interaction states",
+            vs.props[other].name
+        ));
     }
-    (p.values.len() < 2).then(|| "A property of one value has no states".to_string())
+    (rest_value(doc, set, prop).as_ref() == Some(name))
+        .then(|| "Rest is the default variant's value, and follows it".to_string())
 }
 
-/// Mark property `prop` as `set`'s interaction state, its values tied as their
-/// names suggest ([`Interaction::guess`]) — rest's value never, and each state
-/// once — or unmark it. `None` when [`why_not_interaction`] refuses or nothing
-/// changes.
-pub fn mark_interaction(doc: &Document, set: NodeId, prop: usize, on: bool) -> Option<Transaction> {
-    let mut next = doc.get(set)?.set.clone()?;
-    if on == next.props.get(prop)?.states.is_some() {
-        return None;
-    }
-    if on {
-        if why_not_interaction(doc, set, prop).is_some() {
-            return None;
-        }
-        let rest = rest_value(doc, set, prop);
-        let p = &mut next.props[prop];
-        let mut ties = BTreeMap::new();
-        for v in &p.values {
-            if Some(v) == rest.as_ref() {
-                continue;
-            }
-            if let Some(s) = Interaction::guess(v)
-                && !ties.values().any(|t| *t == s)
-            {
-                ties.insert(v.clone(), s);
-            }
-        }
-        p.states = Some(ties);
-    } else {
-        next.props[prop].states = None;
-    }
-    Some(edit_set(doc, set, next, |v| v.to_vec()))
-}
-
-/// Tie value `value` of the interaction-state property `prop` to `state`, or to
-/// none. A state another value holds, or a state for rest's value, is refused.
+/// Tie value `value` of property `prop` to `state`, or to none. The first tie
+/// makes the property the interaction state and ties its other values as their
+/// names suggest ([`Interaction::guess`]) in the same step — never rest's, and
+/// each state once; untying the last makes it a plain property again. `None`
+/// when [`why_not_tie`] refuses, another value holds `state`, or nothing changes.
 pub fn tie_state(
     doc: &Document,
     set: NodeId,
@@ -1402,24 +1379,35 @@ pub fn tie_state(
     state: Option<Interaction>,
 ) -> Option<Transaction> {
     let mut next = doc.get(set)?.set.clone()?;
+    if state.is_some() && why_not_tie(doc, set, prop, value).is_some() {
+        return None;
+    }
     let rest = rest_value(doc, set, prop);
     let p = next.props.get_mut(prop)?;
     let name = p.values.get(value)?.clone();
-    // Rest's value follows the default variant and is tied to none.
-    if state.is_some() && rest.as_ref() == Some(&name) {
+    if p.state_of(&name) == state {
         return None;
     }
-    let ties = p.states.as_mut()?;
-    if ties.get(&name).copied() == state {
-        return None;
-    }
+    let first = !p.is_interaction();
     match state {
-        Some(s) if ties.iter().any(|(v, t)| *t == s && *v != name) => return None,
+        Some(s) if p.states.iter().any(|(v, t)| *t == s && *v != name) => return None,
         Some(s) => {
-            ties.insert(name, s);
+            p.states.insert(name.clone(), s);
         }
         None => {
-            ties.remove(&name);
+            p.states.remove(&name);
+        }
+    }
+    if first {
+        for v in &p.values {
+            if *v == name || Some(v) == rest.as_ref() {
+                continue;
+            }
+            if let Some(g) = Interaction::guess(v)
+                && !p.states.values().any(|t| *t == g)
+            {
+                p.states.insert(v.clone(), g);
+            }
         }
     }
     Some(edit_set(doc, set, next, |v| v.to_vec()))
@@ -1435,7 +1423,7 @@ pub fn set_element(doc: &Document, set: NodeId, element: RootElement) -> Option<
     Some(edit_set(doc, set, next, |v| v.to_vec()))
 }
 
-/// A state variant of a marked set whose layers do not line up with its rest
+/// A state variant of a set with an interaction state whose layers do not line up with its rest
 /// variant's — the one with the same values of every other property — so a
 /// code export writes it only behind the state prop: the variant, why, and the
 /// layer that broke the pairing when one did.

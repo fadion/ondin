@@ -77,9 +77,7 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
   `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float.
 - **A per-component review table for kit updates** — deferred, not declined (§15 D1010 (3), D1011 5D).
 - **Binding the other users of an extracted value** after *Extract into variable…* (§15 D1037, D1038).
-- **Collection follow-ups** (`styles-variables.md`, *Collections and modes*): a kit's collection is not
-  in the browser's collection picker (its rows list under the document collection it maps from); and
-  a DTCG alias whose scope
+- **Collection follow-ups** (`styles-variables.md`, *Collections and modes*): a DTCG alias whose scope
   disagrees with its target's is not refused at the scope (the export types each from its own scope).
 - **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)) — trigger: a preset
   with a bindable field. The only one, `prefs::ExportPreset`, has none.

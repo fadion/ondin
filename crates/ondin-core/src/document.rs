@@ -3385,6 +3385,18 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
     }
     let set: FxHashSet<NodeId> = template.iter().map(|n| n.id).collect();
     let map: FxHashMap<NodeId, NodeId> = template.iter().map(|n| (n.id, ids.mint())).collect();
+    // A lineage key naming no copied layer — its layer deleted, or left behind —
+    // that several copied layers share stays shared, under a fresh key.
+    let mut outside: Vec<NodeId> = template
+        .iter()
+        .filter_map(|n| n.lineage.filter(|k| !map.contains_key(k)))
+        .collect();
+    outside.sort_unstable();
+    let shared: FxHashMap<NodeId, NodeId> = outside
+        .chunk_by(|a, b| a == b)
+        .filter(|run| run.len() > 1)
+        .map(|run| (run[0], ids.mint()))
+        .collect();
 
     let mut new_root = None;
     let mut out = Vec::with_capacity(template.len());
@@ -3448,10 +3460,12 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // (§15 D983).
             swap: n.swap.map(|s| map.get(&s).copied().unwrap_or(s)),
             // Remapped with a whole set, so its variants still share keys; a key
-            // naming a layer outside the template is dropped, so a copy within one
-            // variant gets a fresh key. `build::insert_subtrees_as` writes a
-            // variant copied into its set.
-            lineage: n.lineage.and_then(|k| map.get(&k).copied()),
+            // naming a layer outside the template that no other copy shares is
+            // dropped, so a copy within one variant gets a fresh key.
+            // `build::insert_subtrees_as` writes a variant copied into its set.
+            lineage: n
+                .lineage
+                .and_then(|k| map.get(&k).or_else(|| shared.get(&k)).copied()),
             // A copied set is a set and a copied variant keeps its values (§15
             // D982); a property's bound layers are remapped with the ids, and one
             // bound outside the template is kept for `variant::settle` to unbind

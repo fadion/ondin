@@ -1,7 +1,7 @@
 //! The plain HTML/CSS emitter: `index.html`, one `styles.css`, `assets/` and
 //! `report.txt`. No components — an instance is written out as its layers.
 
-use super::dom::{Arg, Child, Element, Show, Syntax, When};
+use super::dom::{self, Arg, Child, Element, Show, Syntax, When};
 use super::{BASE_CSS, CodeExport, CodeFile, walk};
 use ondin_core::{Document, NodeId, Resolved};
 use std::collections::HashMap;
@@ -30,6 +30,7 @@ pub fn html_of_components(doc: &Document, res: &Resolved, origins: &[NodeId]) ->
         for (_, body) in &mut bodies {
             prefix(body, &format!("{}--", c.name));
             body.css(&mut styles);
+            body.states_css(&mut styles);
         }
         let defaults: Env = c
             .props
@@ -70,8 +71,13 @@ fn prefix(el: &mut Element, prefix: &str) {
 
 /// Whether `when`'s values all hold in `env`.
 fn holds(when: &[(String, String)], env: &Env) -> bool {
-    when.iter()
-        .all(|(p, v)| matches!(env.get(p), Some(Arg::Text(t)) if t == v))
+    when.iter().all(|(p, v)| {
+        let passed = match env.get(dom::term_prop(p)) {
+            Some(Arg::Text(t)) => Some(t.as_str()),
+            _ => None,
+        };
+        dom::term_holds(p, v, passed)
+    })
 }
 
 /// `arg` read in `env`, `None` for a prop passed on that is unset there.
@@ -132,6 +138,15 @@ fn drawn(el: &Element, components: &Components, env: &Env) -> Option<Element> {
         shown_when: None,
         ..el.clone()
     };
+    // A marked set's root as this use draws it: forced, disabled.
+    if let Some(live) = &el.live {
+        let state = match env.get(&live.prop) {
+            Some(Arg::Text(t)) => Some(t.as_str()),
+            _ => None,
+        };
+        let disabled = matches!(env.get(&live.disabled), Some(Arg::Bool(true)));
+        out.attrs.extend(live.drawn_attrs(state, disabled));
+    }
     for c in &el.children {
         match c {
             Child::Element(e) => {

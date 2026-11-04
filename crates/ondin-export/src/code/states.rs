@@ -4,9 +4,11 @@
 //! `:disabled`, each also forced by the state prop (`data-state`).
 //!
 //! The variants that are not states merge as any set's do (`merge::merge`); a
-//! state is a diff against the merged tree as its rest draws it. A state whose
-//! layers do not line up with rest's — another kind, other text, another order
-//! — keeps a tree of its own behind the prop alone, and is reported.
+//! state is a diff against the merged tree as its rest draws it. A layer drawn
+//! another way than rest's counterpart — another kind, a picture that differs,
+//! another use — is swapped: rest's hidden, the state's shown. A state whose
+//! layers do not line up with rest's — other text, another order — keeps a tree
+//! of its own behind the prop alone, and is reported.
 
 use super::Report;
 use super::dom::{Alt, Child, Classes, Element, Show, StateStyle, When};
@@ -97,9 +99,16 @@ pub(crate) fn write(
     let merged = merge::merge(base.into_iter().map(|b| (b.when, b.tree)).collect());
     let mut out = merged.bodies;
     let mut one = out.pop().expect("the merged tree").1;
-    let joined: Vec<(When, Vec<String>)> = base_values
+    // The variants that merged, and those kept apart with why, by values.
+    let (joined, apart): (Vec<(When, Vec<String>)>, Vec<_>) = base_values
         .into_iter()
-        .filter(|(w, _)| !merged.apart.iter().any(|(a, _)| a == w))
+        .partition(|(w, _)| !merged.apart.iter().any(|(a, _)| a == w));
+    let apart: Vec<(Vec<String>, &str)> = apart
+        .into_iter()
+        .filter_map(|(w, v)| {
+            let why = merged.apart.iter().find(|(a, _)| *a == w)?;
+            Some((v, why.1.as_str()))
+        })
         .collect();
 
     // Line each state up with rest's tree, adding the layers only it draws.
@@ -110,11 +119,18 @@ pub(crate) fn write(
         let mut rest_values = s.values.clone();
         rest_values[m.at] = m.rest.to_string();
         let rest = joined.iter().find(|(_, v)| *v == rest_values);
+        let rest_name = ondin_core::variant::derived_name(&rest_values);
         let why = match rest {
-            None => Err(format!(
-                "no variant is {} at rest",
-                ondin_core::variant::derived_name(&rest_values)
-            )),
+            None => Err(
+                match apart
+                    .iter()
+                    .find(|(v, _)| *v == rest_values)
+                    .map(|(_, w)| w)
+                {
+                    Some(w) => format!("{rest_name} does not merge with the other variants ({w})"),
+                    None => format!("no variant is {rest_name} at rest"),
+                },
+            ),
             Some((r, _)) => line_up(&mut one, &s.tree, r, &joined, classes),
         };
         match why {
@@ -286,7 +302,12 @@ fn line_up(
 
 /// [`line_up`]'s check, changing nothing.
 fn check(m: &Element, s: &Element, r: &When) -> Result<(), String> {
-    merge::same_own(m, s)?;
+    if !merge::same_drawing(m, s) {
+        return Err(format!(
+            "“{}” is drawn as another kind of layer",
+            merge::layer_name(m)
+        ));
+    }
     let layers = s
         .children
         .iter()
@@ -334,12 +355,16 @@ fn check(m: &Element, s: &Element, r: &When) -> Result<(), String> {
     Ok(())
 }
 
-/// Where in `m`'s children the layer `x` is, among those `r` draws.
+/// Where in `m`'s children the layer `x` is, among those `r` draws. A
+/// counterpart drawn another way — another tag, picture, use or binding — is
+/// none: rest's is hidden and `x` is added in its place.
 fn paired(m: &Element, x: &Element, r: &When) -> Option<usize> {
     let key = x.key.as_ref()?;
-    m.children.iter().position(
-        |c| matches!(c, Child::Element(y) if y.key.as_ref() == Some(key) && shown_under(y, r)),
-    )
+    m.children.iter().position(|c| {
+        matches!(c, Child::Element(y) if y.key.as_ref() == Some(key)
+            && shown_under(y, r)
+            && merge::same_drawing(y, x))
+    })
 }
 
 /// [`line_up`]'s additions: each layer of `s` with no counterpart in `m`,
@@ -400,10 +425,18 @@ fn insert(
 }
 
 /// A layer copied from a state's tree into the merged one takes classes of
-/// its own in the component's file.
+/// its own in the component's file, its inline SVG's too.
 fn rename(el: &mut Element, classes: &mut Classes) {
+    let old = el.class.clone();
     for class in el.classes_mut() {
         *class = classes.mint(class, "layer");
+    }
+    if let Some(m) = &mut el.markup {
+        *m = m.replacen(
+            &format!("class=\"{old}\""),
+            &format!("class=\"{}\"", el.class),
+            1,
+        );
     }
     for c in &mut el.children {
         if let Child::Element(e) = c {

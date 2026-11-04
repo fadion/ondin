@@ -73,7 +73,7 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     // A marked set's root element, whose own props the component passes on.
     let live = bodies
         .iter()
-        .find_map(|(_, r)| r.live.as_ref().map(|_| r.tag));
+        .find_map(|(_, r)| r.live.as_ref().map(|l| (r.tag, l.spread.as_str())));
     let mut out = String::new();
     let types: Vec<&str> = [
         (
@@ -112,7 +112,7 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     } else {
         match live {
             // The element's own props, less those the component names.
-            Some(tag) => {
+            Some((tag, _)) => {
                 let mut named = vec![js_string("className")];
                 named.extend(props.iter().map(|(p, _, _)| js_string(p)));
                 let _ = writeln!(
@@ -155,8 +155,8 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
                 Some(Arg::Var { .. }) | None => bound,
             }
         }));
-        if live.is_some() {
-            params.push("...rest".to_string());
+        if let Some((_, spread)) = live {
+            params.push(format!("...{spread}"));
         }
         let _ = writeln!(
             out,

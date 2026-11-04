@@ -557,8 +557,10 @@ variant* is the verb that takes the next free combination; an instance's name is
   `build::insert_subtrees_as` writes one, when a variant is copied into its own set as a new main
   (*Add variant*, *Duplicate as component* on a variant): each copied layer takes its source's key, so
   a chain of copies shares one. `remap_subtree` remaps a key pointing inside the template (a whole set
-  copied or vendored keeps its variants' keys consistent) and drops one pointing outside (a copy
-  within one variant gets a fresh key), so a key is unique within a variant. A shared key rather than
+  copied or vendored keeps its variants' keys consistent), gives a key pointing outside that several
+  copied layers share one fresh key (its layer was deleted, and the copies still pair), and drops one
+  pointing outside that only one holds (a copy within one variant gets a fresh key), so a key is unique
+  within a variant. A shared key rather than
   a pointer to the source, because a pointer breaks on a chain of copies and when the source is
   deleted. Never shown, never an override (`reset::state_ops` ignores it).
 - `Node::props: Vec<Keyed<Property>>` — component properties of a main or set:
@@ -667,9 +669,10 @@ written as, read only while a property is marked.
   `delete_value` drops it.
 - `unpaired_states(doc, set) -> Vec<Unpaired { variant, why, layer }>` lists each state variant whose
   layers do not line up with its rest variant (the one with the same values of every other property):
-  no rest variant, another kind of layer, other text, or another order (*“Label” moves before “Bg”*,
-  naming the layer moved ahead). Layers pair by recorded lineage key, else name path. A layer only one
-  side draws is a show or hide, not a failure.
+  no rest variant, other text, or another order (*“Label” moves before “Bg”*, naming the layer moved
+  ahead). Layers pair by lineage key, whichever side recorded it (rest may be the copy), else name
+  path. A layer only one side draws is a show or hide, and one of another kind is a swap (rest's
+  hidden, the state's shown), as the code export writes them; neither is a failure.
 - A set saved before lineage keys is not stamped when marked: its layers pair by name path until a
   variant is copied again.
 

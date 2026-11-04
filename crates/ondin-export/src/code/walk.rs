@@ -1016,14 +1016,17 @@ impl Walk<'_> {
             Some((at, rest, vs.props[at].states.clone()?, vs.element, p))
         });
         let mut live = None;
-        if let Some((_, _, ties, element, p)) = &marked {
+        if let Some((_, rest, ties, element, p)) = &marked {
             props[*p].2 = None;
             let mut taken: HashSet<String> = props.iter().map(|(c, _, _)| c.clone()).collect();
             taken.extend(["className", "key", "ref", "children"].map(String::from));
             let disabled = unique("disabled".into(), &mut taken);
+            let spread = unique("rest".into(), &mut taken);
             props.push((disabled.clone(), Ty::Bool, Some(Arg::Bool(false))));
             live = Some(Live {
                 prop: params[*p].code.clone(),
+                rest: rest.clone(),
+                spread,
                 disabled,
                 disabled_value: ties
                     .iter()
@@ -2530,12 +2533,15 @@ fn as_element(root: &mut Element, live: &Live) {
             &[]
         }
     };
-    // First, so the root's own declarations override each.
+    // Ahead of all the root's own declarations, so each overrides a reset: a
+    // reset placed after a longhand (`font` after `font-size`) would win.
     let styles = std::iter::once(&mut root.style).chain(root.alts.iter_mut().map(|a| &mut a.style));
     for style in styles {
-        for (i, (p, v)) in reset.iter().enumerate() {
+        let mut at = 0;
+        for (p, v) in reset {
             if !style.iter().any(|(q, _)| q == p) {
-                style.insert(i.min(style.len()), (*p, (*v).to_string()));
+                style.insert(at, (*p, (*v).to_string()));
+                at += 1;
             }
         }
     }
@@ -2980,4 +2986,38 @@ fn face(s: &TextStyle, base: Option<&TextStyle>) -> Vec<(&'static str, String)> 
         out.push(("font-variation-settings", axes(s)));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A button's resets all come ahead of the root's own declarations, so a
+    /// longhand the root sets is never undone by a reset after it.
+    ///
+    /// flip: `as_element` inserting each reset at its place in the reset list →
+    /// fails at "font ahead of font-size".
+    #[test]
+    fn a_buttons_resets_come_first() {
+        let mut root = Element::new("div", "root".into());
+        root.set("font-size", "14px");
+        root.set("border", "1px solid red");
+        let live = Live {
+            prop: "state".into(),
+            rest: "Default".into(),
+            disabled: "disabled".into(),
+            disabled_value: None,
+            element: RootElement::Button,
+            spread: "rest".into(),
+        };
+        as_element(&mut root, &live);
+        let at = |p: &str| root.style.iter().position(|(q, _)| *q == p).unwrap();
+        assert!(
+            at("font") < at("font-size"),
+            "font ahead of font-size: {:?}",
+            root.style
+        );
+        assert_eq!(root.style.iter().filter(|(p, _)| *p == "border").count(), 1);
+        assert_eq!(root.style.last().map(|(p, _)| *p), Some("border"));
+    }
 }

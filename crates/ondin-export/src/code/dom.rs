@@ -70,17 +70,27 @@ pub(crate) struct StateStyle {
     pub style: Vec<(&'static str, String)>,
 }
 
-/// What a marked set's root is written with: the prop forcing a state, the
-/// `disabled` prop, the value tied to Disabled, and the element.
+/// What a marked set's root is written with: the prop forcing a state, its
+/// rest value, the `disabled` prop, the value tied to Disabled, the element,
+/// and the name the props the component does not name are gathered under.
 #[derive(Debug, Clone)]
 pub(crate) struct Live {
     pub prop: String,
+    pub rest: String,
     pub disabled: String,
     pub disabled_value: Option<String>,
     pub element: RootElement,
+    pub spread: String,
 }
 
 impl Live {
+    fn quote(v: &str, syntax: Syntax) -> String {
+        match syntax {
+            Syntax::Jsx => super::jsx::js_string(v),
+            _ => super::jsx::single_quoted(v),
+        }
+    }
+
     /// `disabled`, or forced Disabled, as an expression.
     fn disabled_expr(&self, syntax: Syntax) -> String {
         match &self.disabled_value {
@@ -88,42 +98,68 @@ impl Live {
                 "{} || {} === {}",
                 self.disabled,
                 self.prop,
-                match syntax {
-                    Syntax::Jsx => super::jsx::js_string(v),
-                    _ => super::jsx::single_quoted(v),
-                }
+                Self::quote(v, syntax)
             ),
             None => self.disabled.clone(),
         }
     }
 
+    /// The forced value as an expression: none at rest, which leaves the
+    /// states to the browser as an unset prop does.
+    fn state_expr(&self, syntax: Syntax) -> String {
+        format!(
+            "{p} === {} ? undefined : {p}",
+            Self::quote(&self.rest, syntax),
+            p = self.prop
+        )
+    }
+
     /// The root's state attributes: the forced value, and the behaviour of
     /// `disabled` — the attribute on a button, `aria-disabled` on anything else.
+    /// Plain HTML has no props: [`Self::drawn_attrs`] writes it for one use.
     fn attrs(&self, out: &mut String, syntax: Syntax) {
         let expr = self.disabled_expr(syntax);
+        let state = self.state_expr(syntax);
         let button = self.element == RootElement::Button;
         let _ = match syntax {
+            Syntax::Html => Ok(()),
             Syntax::Jsx if button => {
-                write!(out, " data-state={{{}}} disabled={{{expr}}}", self.prop)
+                write!(out, " data-state={{{state}}} disabled={{{expr}}}")
             }
             Syntax::Jsx => write!(
                 out,
-                " data-state={{{}}} aria-disabled={{{expr} || undefined}}",
-                self.prop
+                " data-state={{{state}}} aria-disabled={{{expr} || undefined}}"
             ),
-            _ if button => write!(
+            Syntax::Vue if button => write!(
                 out,
                 " :data-state=\"{}\" :disabled=\"{}\"",
-                self.prop,
+                escape(&state),
                 escape(&expr)
             ),
-            _ => write!(
+            Syntax::Vue => write!(
                 out,
                 " :data-state=\"{}\" :aria-disabled=\"{}\"",
-                self.prop,
+                escape(&state),
                 escape(&format!("{expr} || undefined"))
             ),
         };
+    }
+
+    /// The attributes one use draws its root with, as plain HTML: the forced
+    /// value when `state` is not rest, and `disabled` when it holds.
+    pub fn drawn_attrs(&self, state: Option<&str>, disabled: bool) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        let forced = state.filter(|s| *s != self.rest);
+        if let Some(s) = forced {
+            out.push(("data-state", s.to_string()));
+        }
+        if disabled || (forced.is_some() && forced == self.disabled_value.as_deref()) {
+            out.push(match self.element {
+                RootElement::Button => ("disabled", String::new()),
+                _ => ("aria-disabled", "true".to_string()),
+            });
+        }
+        out
     }
 
     /// The selector under which `state` applies live to a root of class
@@ -165,6 +201,21 @@ pub(crate) fn state_prop(prop: &str, rest: &str, plain: &[String]) -> String {
         out.push_str(p);
     }
     out
+}
+
+/// The prop a [`When`]'s term names, as code names it.
+pub(crate) fn term_prop(p: &str) -> &str {
+    p.split('\u{0}').next().unwrap_or(p)
+}
+
+/// Whether the term `(p, v)` holds when its prop is passed `passed`, as
+/// [`condition`] writes it.
+pub(crate) fn term_holds(p: &str, v: &str, passed: Option<&str>) -> bool {
+    let mut parts = p.split('\u{0}').skip(1);
+    match parts.next() {
+        Some(rest) if rest == v => passed.is_none_or(|x| !parts.any(|plain| plain == x)),
+        _ => passed == Some(v),
+    }
 }
 
 /// Which variants a merged tree's element is drawn under.
@@ -490,8 +541,10 @@ impl Element {
         let _ = write!(out, "<{}", self.tag);
         // What the component does not name reaches its root — `onClick`,
         // `href` — before its own attributes, which win.
-        if self.live.is_some() && syntax == Syntax::Jsx {
-            out.push_str(" {...rest}");
+        if let Some(live) = &self.live
+            && syntax == Syntax::Jsx
+        {
+            let _ = write!(out, " {{...{}}}", live.spread);
         }
         self.class_attr(out, syntax);
         for (k, v) in &self.attrs {

@@ -2050,3 +2050,119 @@ fn a_state_that_reorders_does_not_pair() {
     assert_eq!(found[0].why, "“Label” moves before “Background”");
     assert_eq!(found[0].layer, Some(f.kids(hover)[0]));
 }
+
+/// A state's layer pairs with rest's by the key either side recorded: here rest
+/// is the copy and the state the original, renamed, so its reorder is still
+/// caught.
+///
+/// flip: `line_up` matching only the state side's recorded key → fails at
+/// "paired through rest's key".
+#[test]
+fn a_state_pairs_by_the_key_rest_recorded() {
+    let mut f = fixture();
+    with_states(&mut f);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, copy) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+    f.commit(tx.0);
+    f.commit(
+        variant::set_values(&f.doc, f.small, strs(&["Small", "Hover"]))
+            .unwrap()
+            .0,
+    );
+    f.commit(
+        variant::set_values(&f.doc, copy, strs(&["Small", "Default"]))
+            .unwrap()
+            .0,
+    );
+    // The copy is the default variant, so rest; the original is Hover.
+    f.commit(vec![
+        Operation::SetTransform {
+            id: copy,
+            transform: Affine::translate((-200.0, -200.0)),
+        },
+        Operation::SetName {
+            id: f.bg,
+            name: "Background".into(),
+        },
+    ]);
+    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    f.commit(tx.0);
+    assert_eq!(
+        variant::rest_value(&f.doc, f.s, 1).as_deref(),
+        Some("Default")
+    );
+    assert!(f.doc.get(f.kids(copy)[0]).unwrap().lineage_recorded());
+    f.commit(vec![Operation::Reorder { id: f.bg, index: 1 }]);
+    let found = variant::unpaired_states(&f.doc, f.s);
+    assert_eq!(found.len(), 1, "paired through rest's key: {found:?}");
+    assert_eq!(found[0].variant, f.small);
+    assert_eq!(found[0].why, "“Label” moves before “Background”");
+}
+
+/// A state's layer drawn as another kind than rest's counterpart is a swap,
+/// rest's hidden and the state's shown, not a failure.
+///
+/// flip: `line_up` refusing another kind → fails at "a swap pairs".
+#[test]
+fn a_state_layer_of_another_kind_is_a_swap() {
+    let mut f = fixture();
+    with_states(&mut f);
+    let res = Resolved::rebuild(&f.doc);
+    let (tx, hover) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+    f.commit(tx.0);
+    f.commit(
+        variant::set_values(&f.doc, hover, strs(&["Small", "Hover"]))
+            .unwrap()
+            .0,
+    );
+    let tx = variant::mark_interaction(&f.doc, f.s, 1, true).unwrap();
+    f.commit(tx.0);
+    let hbg = f.kids(hover)[0];
+    let dot = f.ids.mint();
+    f.commit(vec![
+        Operation::DeleteNode { id: hbg },
+        create(
+            dot,
+            hover,
+            0,
+            NodeKind::Ellipse {
+                size: Size::new(10.0, 10.0),
+                arc: Default::default(),
+            },
+            "Bg",
+        ),
+    ]);
+    assert!(!variant::same_kind(&f.doc, f.bg, dot));
+    let found = variant::unpaired_states(&f.doc, f.s);
+    assert!(found.is_empty(), "a swap pairs: {found:?}");
+}
+
+/// Copying a whole set keeps its variants' layers paired even where the layer
+/// their shared key names was deleted.
+///
+/// flip: `remap_subtree` dropping every key that names no copied layer → fails
+/// at "still shared".
+#[test]
+fn a_copied_set_keeps_a_key_whose_layer_is_gone() {
+    let mut f = fixture();
+    with_states(&mut f);
+    let mut made = Vec::new();
+    for values in [["Small", "Hover"], ["Small", "Pressed"]] {
+        let res = Resolved::rebuild(&f.doc);
+        let (tx, v) = variant::add_variant(&f.doc, &res, &mut f.ids, f.s, Some(f.small)).unwrap();
+        f.commit(tx.0);
+        f.commit(variant::set_values(&f.doc, v, strs(&values)).unwrap().0);
+        made.push(f.kids(v)[0]);
+    }
+    f.commit(vec![Operation::DeleteNode { id: f.bg }]);
+    let template = f.doc.capture_subtree(f.s).unwrap();
+    let (copy, _) = ondin_core::remap_subtree(&template, &mut f.ids).unwrap();
+    let keys: Vec<(NodeId, bool)> = template
+        .iter()
+        .zip(&copy)
+        .filter(|(t, _)| made.contains(&t.id()))
+        .map(|(_, c)| (c.lineage(), c.lineage_recorded()))
+        .collect();
+    assert_eq!(keys.len(), 2);
+    assert!(keys[0] == keys[1] && keys[0].1, "still shared: {keys:?}");
+}

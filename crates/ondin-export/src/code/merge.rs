@@ -3,8 +3,8 @@
 //! variants draw shown under those.
 //!
 //! Layers match across the trees by `Element::key`, which [`pair`] first sets
-//! on every other tree to its counterpart's in the default's: by lineage key
-//! where one was recorded, else by name path.
+//! on every other tree to its counterpart's in the default's: by lineage key,
+//! else by name path.
 
 use super::dom::{Alt, Child, Element, Show, When};
 
@@ -71,10 +71,10 @@ pub(crate) fn layer_name(el: &Element) -> &str {
 }
 
 /// Set each layer's key in `other` to its counterpart's in `default`, under a
-/// paired parent: by lineage key where `other`'s layer recorded one, else by
-/// name path; a counterpart must be the only one found. A layer that pairs with
-/// nothing keeps a key of its own — its lineage's where it recorded one, so the
-/// same layer pairs across the other trees.
+/// paired parent: by lineage key, whichever side recorded it, else by name path;
+/// a counterpart must be the only one found and not yet taken. A layer that
+/// pairs with nothing keeps a key of its own — its lineage's where it recorded
+/// one, so the same layer pairs across the other trees.
 pub(crate) fn pair(default: &Element, other: &mut Element) {
     let layers = other
         .children
@@ -90,29 +90,47 @@ pub(crate) fn pair(default: &Element, other: &mut Element) {
         return;
     }
     let mut used: Vec<usize> = Vec::new();
+    let elements: Vec<(usize, &Element)> = default
+        .children
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| match d {
+            Child::Element(d) => Some((i, &**d)),
+            _ => None,
+        })
+        .collect();
     for c in &mut other.children {
         let Child::Element(o) = c else { continue };
         let Some(key) = o.key.clone() else { continue };
-        let found: Vec<(usize, &Element)> = default
-            .children
+        // Either side's lineage key, whichever was the copy; else the name path.
+        let lineage = o.lineage.map(|(k, _)| k);
+        let by_key: Vec<(usize, &Element)> = elements
             .iter()
-            .enumerate()
-            .filter_map(|(i, d)| match d {
-                Child::Element(d) => Some((i, &**d)),
-                _ => None,
-            })
-            .filter(|(_, d)| match o.lineage {
-                Some((k, true)) => d.lineage.is_some_and(|(dk, _)| dk == k),
-                _ => d.key.as_ref() == Some(&key),
-            })
+            .filter(|(_, d)| lineage.is_some() && d.lineage.map(|(k, _)| k) == lineage)
+            .copied()
             .collect();
+        let found = match by_key.is_empty() {
+            false => by_key,
+            true => elements
+                .iter()
+                .filter(|(_, d)| d.key.as_ref() == Some(&key))
+                .copied()
+                .collect(),
+        };
         match found.as_slice() {
             [(i, d)] if !used.contains(i) => {
                 used.push(*i);
                 o.key = d.key.clone();
                 pair(d, o);
             }
-            _ => {
+            // A counterpart taken or in doubt leaves `key` naming another
+            // layer's, so the layer gets one of its own.
+            [_, ..] => {
+                if let Some(k) = lineage {
+                    o.key = Some((format!("{}\u{0}{}", key.0, k.to_wire()), 0));
+                }
+            }
+            [] => {
                 if let Some((k, true)) = o.lineage {
                     o.key = Some((format!("{}\u{0}{}", key.0, k.to_wire()), 0));
                 }
@@ -154,7 +172,9 @@ pub(crate) fn same_own(a: &Element, b: &Element) -> Result<(), String> {
     if a.shown_by != b.shown_by {
         return Err(format!("“{}” is shown by another property", layer_name(a)));
     }
-    if !same_kind(a, b) {
+    // An inline SVG carries its class, so a merge keeps it one rule.
+    let one_rule = a.markup.is_none() || a.style == b.style;
+    if !one_rule || !same_kind(a, b) {
         return Err(format!(
             "“{}” is drawn as another kind of layer",
             layer_name(a)
@@ -163,13 +183,18 @@ pub(crate) fn same_own(a: &Element, b: &Element) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `b` draws what `a` does but for its declarations and its children:
+/// a state's rule can change those under `a`'s class, inline SVG or not.
+pub(crate) fn same_drawing(a: &Element, b: &Element) -> bool {
+    a.shown_by == b.shown_by && same_kind(a, b)
+}
+
 fn same_kind(a: &Element, b: &Element) -> bool {
     let markup = match (&a.markup, &b.markup) {
         (None, None) => true,
-        // An inline SVG carries its class, so it keeps one rule.
         (Some(x), Some(y)) => {
             let own = |e: &Element| format!("class=\"{}\"", e.class);
-            a.style == b.style && *x == y.replace(&own(b), &own(a))
+            *x == y.replace(&own(b), &own(a))
         }
         _ => false,
     };
@@ -470,5 +495,37 @@ mod tests {
             panic!("an element")
         };
         assert!(icon.shown_when.is_some(), "two layers, each shown alone");
+    }
+
+    /// A layer whose counterpart another layer took by its lineage key gets a
+    /// key of its own, never the taker's.
+    ///
+    /// flip: `pair` leaving such a layer its name-path key → fails at "one
+    /// key each".
+    #[test]
+    fn a_taken_counterpart_leaves_a_key_of_its_own() {
+        let id = |n: u64| ondin_core::NodeId::from_wire(&format!("1:{n}")).unwrap();
+        let icon = |step: usize, own: u64, recorded: Option<u64>| {
+            let mut e = Element::new("div", format!("icon-{own}"));
+            e.key = Some(("Icon".to_string(), step));
+            e.lineage = Some((id(recorded.unwrap_or(own)), recorded.is_some()));
+            Child::Element(Box::new(e))
+        };
+        let mut default = Element::new("div", "small".into());
+        default.children = vec![icon(0, 5, None), icon(1, 6, None)];
+        // The copy of the second icon comes first; a new icon follows it.
+        let mut other = Element::new("div", "large".into());
+        other.children = vec![icon(0, 8, Some(6)), icon(1, 9, None)];
+        pair(&default, &mut other);
+        let keys: Vec<_> = other
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                Child::Element(e) => e.key.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(keys[0], ("Icon".to_string(), 1), "paired by lineage");
+        assert_ne!(keys[0], keys[1], "one key each: {keys:?}");
     }
 }

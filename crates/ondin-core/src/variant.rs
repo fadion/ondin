@@ -1447,9 +1447,10 @@ pub struct Unpaired {
 }
 
 /// Every state variant of `set` that does not pair with its rest. Layers pair
-/// under a paired parent by lineage key where one was recorded, else by name
-/// path; one only a side draws is a show or a hide, which is not a failure.
-/// What fails is another kind of layer, other text, or another order.
+/// under a paired parent by lineage key, either side's, else by name path; one
+/// only a side draws is a show or a hide, and one drawn as another kind of layer
+/// is a swap, rest's hidden and the state's shown. What fails is other text or
+/// another order.
 pub fn unpaired_states(doc: &Document, set: NodeId) -> Vec<Unpaired> {
     let Some(vs) = doc.get(set).and_then(|s| s.set.as_ref()) else {
         return Vec::new();
@@ -1502,47 +1503,64 @@ fn line_up(doc: &Document, r: NodeId, s: NodeId) -> Result<(), (String, Option<N
         true => n.kind.default_name().to_lowercase(),
         false => format!("“{}”", n.name),
     };
-    let step = |parent: &Node, id: NodeId| {
-        let n = doc.get(id)?;
-        let k = parent
+    // Each child's step in the name path, in one pass over its siblings.
+    let steps = |parent: &Node| -> Vec<(NodeId, (String, usize))> {
+        let mut seen: FxHashMap<&str, usize> = FxHashMap::default();
+        parent
             .children
             .iter()
-            .take_while(|c| **c != id)
-            .filter(|c| doc.get(**c).is_some_and(|c| c.name == n.name))
-            .count();
-        Some((n.name.clone(), k))
-    };
-    let mut last: Option<(usize, NodeId)> = None;
-    for c in &sn.children {
-        let Some(cn) = doc.get(*c) else { continue };
-        let found: Vec<(usize, NodeId)> = rn
-            .children
-            .iter()
-            .enumerate()
-            .filter(|(_, x)| match cn.lineage {
-                Some(k) => doc.get(**x).is_some_and(|x| x.lineage() == k),
-                None => step(rn, **x) == step(sn, *c),
+            .filter_map(|c| {
+                let n = doc.get(*c)?;
+                let k = seen.entry(n.name.as_str()).or_default();
+                *k += 1;
+                Some((*c, (n.name.clone(), *k - 1)))
             })
-            .map(|(i, x)| (i, *x))
-            .collect();
-        let [(i, x)] = found.as_slice() else { continue };
-        if !same_kind(doc, *x, *c) {
-            return Err((format!("{} is another kind of layer", named(cn)), Some(*c)));
+            .collect()
+    };
+    let place: FxHashMap<NodeId, usize> = rn
+        .children
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (*c, i))
+        .collect();
+    let mut by_key: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
+    let mut by_step: FxHashMap<(String, usize), NodeId> = FxHashMap::default();
+    for (x, step) in steps(rn) {
+        if let Some(n) = doc.get(x) {
+            by_key.entry(n.lineage()).or_default().push(x);
         }
+        by_step.insert(step, x);
+    }
+    let mut last: Option<(usize, NodeId)> = None;
+    for (c, step) in steps(sn) {
+        let Some(cn) = doc.get(c) else { continue };
+        let x = match by_key.get(&cn.lineage()).map(Vec::as_slice) {
+            Some([one]) => *one,
+            Some(_) => continue,
+            None => match by_step.get(&step) {
+                Some(x) => *x,
+                None => continue,
+            },
+        };
+        // Another kind is a swap: rest's layer hidden, the state's shown.
+        if !same_kind(doc, x, c) {
+            continue;
+        }
+        let i = place[&x];
         if let (NodeKind::Text { content: a, .. }, NodeKind::Text { content: b, .. }) =
-            (&doc.get(*x).expect("found").kind, &cn.kind)
+            (&doc.get(x).expect("found").kind, &cn.kind)
             && a != b
         {
-            return Err((format!("the text of {} differs", named(cn)), Some(*c)));
+            return Err((format!("the text of {} differs", named(cn)), Some(c)));
         }
         if let Some((before, b)) = last
-            && *i < before
+            && i < before
         {
             let moved = doc.get(b).map(named).unwrap_or_default();
             return Err((format!("{moved} moves before {}", named(cn)), Some(b)));
         }
-        line_up(doc, *x, *c)?;
-        last = Some((*i, *c));
+        line_up(doc, x, c)?;
+        last = Some((i, c));
     }
     Ok(())
 }

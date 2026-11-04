@@ -246,7 +246,9 @@ fn react_writes_states_as_pseudo_class_rules() {
     );
     assert!(tsx.contains("<button {...rest} className="), "{tsx}");
     assert!(
-        tsx.contains("type=\"button\" data-state={state} disabled={disabled}>"),
+        tsx.contains(
+            "type=\"button\" data-state={state === \"Default\" ? undefined : state} disabled={disabled}>"
+        ),
         "{tsx}"
     );
     assert!(
@@ -332,7 +334,9 @@ fn vue_writes_the_same_states() {
     let out = Target::Vue.export(&f.doc, &res, &[f.inst]);
     let vue = file(&out, "components/Button.vue");
     assert!(
-        vue.contains(":data-state=\"state\" :disabled=\"disabled\""),
+        vue.contains(
+            ":data-state=\"state === 'Default' ? undefined : state\" :disabled=\"disabled\""
+        ),
         "{vue}"
     );
     assert!(vue.contains("<button class="), "{vue}");
@@ -385,6 +389,257 @@ fn a_focus_state_always_turns_the_browsers_ring_off() {
         "the root's focus rule: {css}"
     );
     assert!(css.contains("#f0c800"), "and the layer's: {css}");
+}
+
+/// A *Chip* set of one property, *State* (Default, Hover), and an instance of
+/// it: Default holds a red *Bg* and a black star *Icon*, Hover is made from it
+/// by *Add variant*. `edit` runs on the doc, Default and Hover before the
+/// property is marked.
+fn chip(edit: impl FnOnce(&mut Document, NodeId, NodeId)) -> (Document, NodeId) {
+    let mut ids = IdSource::new(0x5A);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [set, rest, bg, icon] = [(); 4].map(|_| ids.mint());
+    doc.apply(&Transaction(vec![
+        create(set, root, 0, frame(300.0, 200.0), (0.0, 0.0), "Chip"),
+        create(rest, set, 0, frame(80.0, 30.0), (10.0, 10.0), "Default"),
+        create(
+            bg,
+            rest,
+            0,
+            NodeKind::Rect {
+                size: Size::new(80.0, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            (0.0, 0.0),
+            "Bg",
+        ),
+        create(
+            icon,
+            rest,
+            1,
+            NodeKind::Star {
+                size: Size::new(10.0, 10.0),
+                points: 5,
+                inner_ratio: 0.5,
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
+            },
+            (4.0, 4.0),
+            "Icon",
+        ),
+        paint(bg, (200, 30, 40)),
+        paint(icon, (0, 0, 0)),
+        Operation::SetComponent {
+            id: rest,
+            component: true,
+        },
+        Operation::SetVariantSet {
+            id: set,
+            set: Some(VariantSet {
+                props: vec![VariantProp::new(
+                    "State",
+                    vec!["Default".into(), "Hover".into()],
+                )],
+                ..Default::default()
+            }),
+        },
+        Operation::SetVariant {
+            id: rest,
+            values: vec!["Default".into()],
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let (tx, hover) = variant::add_variant(&doc, &res, &mut ids, set, Some(rest)).unwrap();
+    doc.apply(&tx).unwrap();
+    doc.apply(&variant::set_values(&doc, hover, vec!["Hover".into()]).unwrap())
+        .unwrap();
+    edit(&mut doc, rest, hover);
+    doc.apply(&variant::mark_interaction(&doc, set, 0, true).unwrap())
+        .unwrap();
+    assert_eq!(
+        variant::rest_value(&doc, set, 0).as_deref(),
+        Some("Default"),
+        "the fixture's rest"
+    );
+    let (tx, made) = ondin_core::insert_subtrees(
+        &doc,
+        &mut ids,
+        &[Placement {
+            nodes: doc.capture_subtree(rest).unwrap(),
+            parent: root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    doc.apply(&tx).unwrap();
+    (doc, made[0])
+}
+
+/// A state whose star icon is recoloured draws a picture rest's cannot become
+/// by declarations: rest's is hidden and the state's shown, rather than the
+/// whole state falling back to the prop.
+///
+/// flip: `states::paired` accepting a counterpart `same_own` refuses → fails at
+/// "no fallback".
+#[test]
+fn a_state_swaps_a_picture_that_differs() {
+    let (doc, inst) = chip(|doc, _, hover| {
+        let icon = doc.get(hover).unwrap().children()[1];
+        doc.apply(&Transaction(vec![paint(icon, (255, 255, 255))]))
+            .unwrap();
+    });
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    assert!(
+        out.approximated.is_empty(),
+        "no fallback: {:?}",
+        out.approximated
+    );
+    let tsx = file(&out, "components/Chip.tsx");
+    assert_eq!(tsx.matches("<svg").count(), 2, "both pictures: {tsx}");
+    assert!(tsx.contains("fill=\"#ffffff\""), "{tsx}");
+    let css = file(&out, "components/Chip.module.css");
+    let hover = &css[css.find("[data-state=\"Hover\"]").expect(&css)..];
+    assert!(
+        hover.contains("display: none;") && hover.contains("display: revert;"),
+        "rest's hidden and the state's shown: {css}"
+    );
+}
+
+/// A state pairs with rest by the lineage key either recorded: here rest is the
+/// copy, and the state's renamed background is recoloured, not swapped.
+///
+/// flip: `merge::pair` matching only a key the other tree's layer recorded →
+/// fails at "a recolour".
+#[test]
+fn a_state_pairs_by_the_key_rest_recorded() {
+    let (doc, inst) = chip(|doc, rest, hover| {
+        let bg = doc.get(rest).unwrap().children()[0];
+        doc.apply(&Transaction(vec![
+            // Hover is the original from here: Default is its copy, at the top.
+            Operation::SetVariant {
+                id: rest,
+                values: vec!["Hover".into()],
+            },
+            Operation::SetVariant {
+                id: hover,
+                values: vec!["Default".into()],
+            },
+            Operation::SetTransform {
+                id: hover,
+                transform: Affine::translate((0.0, -100.0)),
+            },
+            paint(bg, (0, 90, 200)),
+            Operation::SetName {
+                id: bg,
+                name: "Background".into(),
+            },
+        ]))
+        .unwrap();
+    });
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    let css = file(&out, "components/Chip.module.css");
+    assert!(
+        css.contains(
+            "[data-state=\"Hover\"] .bg {\n  background: linear-gradient(#005ac8, #005ac8);\n}"
+        ),
+        "a recolour: {css}"
+    );
+}
+
+/// The page drawn as plain HTML through the components reads the state prop
+/// as the frameworks do: a use of Large draws Large's class, a forced state
+/// writes its value, and the sheet holds the states' rules.
+///
+/// flip: `html::holds` comparing the encoded prop name as passed → fails at
+/// "Large's class".
+#[test]
+fn html_of_components_reads_the_state_prop() {
+    let mut f = fixture();
+    let hover = variant::find_variant(&f.doc, f.set, &["Small".into(), "Hover".into()]).unwrap();
+    let mut ids = IdSource::new(0x59);
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(hover).unwrap(),
+            parent: f.doc.first_page(),
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let out = ondin_export::code::html::html_of_components(&f.doc, &res, &[f.inst, made[0]]);
+    let html = file(&out, "index.html");
+    assert!(
+        html.contains("<button class=\"Button--large-default "),
+        "Large's class: {html}"
+    );
+    assert!(html.contains("data-state=\"Hover\""), "{html}");
+    assert!(!html.contains(":data-state"), "no Vue in HTML: {html}");
+    let css = file(&out, "styles.css");
+    assert!(css.contains("[data-state=\"Hover\"]"), "{css}");
+}
+
+/// A component property whose code name is `rest` leaves the name the root's
+/// other props gather under to another.
+///
+/// flip: `walk` naming the spread `rest` unconditionally → fails at "two
+/// bindings".
+#[test]
+fn a_prop_named_rest_keeps_its_name() {
+    let mut f = fixture();
+    let mut vs = f.doc.get(f.set).unwrap().set().unwrap().clone();
+    vs.props[0].name = "Rest".into();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetVariantSet {
+            id: f.set,
+            set: Some(vs),
+        }]))
+        .unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let out = Target::React.export(&f.doc, &res, &[f.inst]);
+    let tsx = file(&out, "components/Button.tsx");
+    assert!(
+        tsx.contains("rest = \"Small\", state, disabled = false, ...rest2 }"),
+        "two bindings: {tsx}"
+    );
+    assert!(tsx.contains("<button {...rest2} "), "{tsx}");
+}
+
+/// A state whose rest variant did not merge with the others says so, rather
+/// than that no variant is at rest.
+///
+/// flip: `states::write` reporting every missing rest as absent → fails at the
+/// one assertion.
+#[test]
+fn a_state_names_a_rest_that_did_not_merge() {
+    let mut f = fixture();
+    let large = variant::find_variant(&f.doc, f.set, &["Large".into(), "Default".into()]).unwrap();
+    let label = f.doc.get(large).unwrap().children()[1];
+    let mut tx = Transaction(vec![Operation::SetText {
+        id: label,
+        content: "Stop".into(),
+        spans: Default::default(),
+        para_spans: Default::default(),
+    }]);
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut IdSource::new(0x5B));
+    f.doc.apply(&tx).unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let out = Target::React.export(&f.doc, &res, &[f.inst]);
+    assert!(
+        out.approximated
+            .iter()
+            .any(|a| a
+                .contains("Large, Hover: Large, Default does not merge with the other variants")),
+        "{:?}",
+        out.approximated
+    );
 }
 
 /// Plain HTML has no components and draws the page as it is; it says so.

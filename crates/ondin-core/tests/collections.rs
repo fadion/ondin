@@ -114,6 +114,7 @@ fn fixture() -> F {
                 id: spacing,
                 name: "Spacing".into(),
                 modes: vec![mode(compact, "Compact"), mode(comfortable, "Comfortable")],
+                breakpoints: None,
             },
             index: 1,
         },
@@ -560,6 +561,7 @@ fn a_paste_prefers_the_collection_of_the_same_name_and_respects_scope() {
                     id: sp,
                     name: "Spacing".into(),
                     modes: vec![mode(m2, "Compact")],
+                    breakpoints: None,
                 },
                 index: 1,
             },
@@ -639,6 +641,7 @@ fn moving_into_a_modeless_collection_is_nothing() {
                 id: empty,
                 name: "Empty".into(),
                 modes: Vec::new(),
+                breakpoints: None,
             },
             index: 2,
         }]))

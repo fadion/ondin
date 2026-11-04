@@ -67,6 +67,7 @@ fn doc() -> (Document, IdSource, ModeId, VarId) {
                 id: spacing,
                 name: "Spacing".into(),
                 modes: vec![mode(compact, "Compact"), mode(comfy, "Comfortable")],
+                breakpoints: None,
             },
             index: 1,
         },

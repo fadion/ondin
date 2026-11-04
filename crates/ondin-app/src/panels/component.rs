@@ -1337,6 +1337,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::AddCollection { .. }
         | O::RemoveCollection { .. }
         | O::SetCollectionName { .. }
+        | O::SetBreakpoints { .. }
         | O::AddVariable { .. }
         | O::RemoveVariable { .. }
         | O::SetVariableName { .. }

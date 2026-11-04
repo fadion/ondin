@@ -110,7 +110,17 @@ pub struct Collection {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modes: Vec<Mode>,
+    /// Each mode's minimum width in px when the collection is **picked by
+    /// width**, `None` when it is not ([`Breakpoints`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoints: Option<Breakpoints>,
 }
+
+/// A by-width collection's minimum width per mode, keyed by mode id so adding,
+/// removing or moving a mode leaves the other widths where they are. The first
+/// mode's is 0 and the widths ascend in mode order ([`check`]), so the default is
+/// always the narrowest.
+pub type Breakpoints = BTreeMap<ModeId, f64>;
 
 impl Collection {
     /// The collection every document starts with: [`CollectionId::FIRST`],
@@ -120,6 +130,7 @@ impl Collection {
             id: CollectionId::FIRST,
             name: FIRST_COLLECTION_NAME.into(),
             modes: Vec::new(),
+            breakpoints: None,
         }
     }
 
@@ -129,6 +140,29 @@ impl Collection {
 
     pub fn has(&self, mode: ModeId) -> bool {
         self.modes.iter().any(|m| m.id == mode)
+    }
+
+    /// Whether a top-level frame picks this collection's mode from its width.
+    pub fn by_width(&self) -> bool {
+        self.breakpoints.is_some()
+    }
+
+    /// `mode`'s minimum width, in a collection picked by width.
+    pub fn min_width(&self, mode: ModeId) -> Option<f64> {
+        self.breakpoints.as_ref()?.get(&mode).copied()
+    }
+
+    /// The mode a frame `width` wide picks: the one with the largest minimum it
+    /// reaches, else the first. `None` when the collection is not picked by
+    /// width or has no modes.
+    pub fn mode_for_width(&self, width: f64) -> Option<ModeId> {
+        let b = self.breakpoints.as_ref()?;
+        self.modes
+            .iter()
+            .rev()
+            .find(|m| b.get(&m.id).is_some_and(|min| width >= *min))
+            .or(self.modes.first())
+            .map(|m| m.id)
     }
 }
 
@@ -499,6 +533,9 @@ pub struct Variables {
     /// The modes of each kit whose variables this document holds, by kit id
     /// (§15 D1064).
     pub(crate) kits: BTreeMap<String, KitModes>,
+    /// A frame read as if it were this wide, for the mode it picks by width —
+    /// only in a preview's table ([`Self::with_width`]), never saved.
+    pub(crate) previewed_width: Option<(NodeId, f64)>,
 }
 
 impl Default for Variables {
@@ -507,6 +544,7 @@ impl Default for Variables {
             collections: vec![Collection::first()],
             vars: BTreeMap::new(),
             kits: BTreeMap::new(),
+            previewed_width: None,
         }
     }
 }
@@ -530,6 +568,10 @@ impl Variables {
     /// the frame's mode rows and the tooltips name them.
     pub fn has_collections(&self) -> bool {
         self.collections.len() > 1
+    }
+    /// The collection picked by width, if one is — at most one is ([`check`]).
+    pub fn by_width(&self) -> Option<&Collection> {
+        self.collections.iter().find(|c| c.by_width())
     }
     /// The document's collection holding `mode` — `None` for a kit's mode.
     pub fn collection_of_mode(&self, mode: ModeId) -> Option<&Collection> {
@@ -850,6 +892,16 @@ impl Variables {
         let mut t = self.clone();
         t.vars.get_mut(&var)?.cells.insert(mode, cell);
         Some(t)
+    }
+
+    /// This table with `frame` read as `width` wide wherever it picks a mode by
+    /// width — what a resize preview resolves its contents against, so the
+    /// mode changes under the drag as the edge crosses a breakpoint.
+    pub fn with_width(&self, frame: NodeId, width: f64) -> Variables {
+        Variables {
+            previewed_width: Some((frame, width)),
+            ..self.clone()
+        }
     }
 
     /// The kind `var` resolves to.
@@ -2256,7 +2308,23 @@ fn detach_ops(doc: &crate::Document, gone: &dyn Fn(VarId, Field) -> bool) -> Vec
 /// *Inherit*, then the mode and its column go. Refused at the commit when it is
 /// the last mode and variables remain.
 pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operation> {
+    let t = doc.variables();
     let mut ops = inherit_ops(doc, &[mode]);
+    // A by-width collection drops the mode's width; the next takes the first's
+    // 0 when the first goes.
+    if let Some(c) = t.collection_of_mode(mode)
+        && let Some(b) = &c.breakpoints
+    {
+        let mut next = b.clone();
+        next.remove(&mode);
+        if let Some(first) = c.modes.iter().find(|m| m.id != mode) {
+            next.insert(first.id, 0.0);
+        }
+        ops.push(crate::Operation::SetBreakpoints {
+            id: c.id,
+            breakpoints: Some(next),
+        });
+    }
     // And every kit mapping's entry for it (§15 D1064), which would name a mode
     // the document no longer has.
     for (kit, km) in doc.variables().kits() {
@@ -2299,12 +2367,16 @@ fn inherit_ops(doc: &crate::Document, modes: &[ModeId]) -> Vec<crate::Operation>
 /// Move document mode `mode` to `index` of its collection's list — index 0
 /// makes it the default every unset frame reads. The mode goes and comes back
 /// under its own id with its column, so frames set to it and kit mappings
-/// naming it hold. Empty when `mode` is not a mode or already sits there.
+/// naming it hold. Empty when `mode` is not a mode or already sits there, and
+/// in a collection picked by width, whose modes are ordered by their widths.
 pub fn move_mode_ops(doc: &crate::Document, mode: ModeId, index: usize) -> Vec<crate::Operation> {
     let t = doc.variables();
     let (Some(c), Some(at)) = (t.collection_of_mode(mode), t.mode_index(mode)) else {
         return Vec::new();
     };
+    if c.by_width() {
+        return Vec::new();
+    }
     let index = index.min(c.modes.len() - 1);
     if at == index {
         return Vec::new();
@@ -2335,8 +2407,9 @@ pub fn frames_set_to(doc: &crate::Document, mode: ModeId) -> usize {
 /// A copy of mode `from` with its every cell, added at `index` of the list —
 /// *Duplicate mode* (after its source) and *New mode* (which copies the first
 /// mode and goes last, D1038 G) — reading every kit's column `from` reads, a
-/// mapping entry written where the copy's name would match another. Empty when
-/// `from` is not a mode.
+/// mapping entry written where the copy's name would match another. In a
+/// collection picked by width the copy starts halfway to the next mode's width,
+/// or [`WIDTH_STEP`] past the last. Empty when `from` is not a mode.
 pub fn copy_mode_ops(
     doc: &crate::Document,
     from: ModeId,
@@ -2361,6 +2434,23 @@ pub fn copy_mode_ops(
         index,
         cells,
     }];
+    if let Some(b) = &c.breakpoints {
+        let width = |i: usize| c.modes.get(i).and_then(|m| b.get(&m.id)).copied();
+        let lo = index.checked_sub(1).and_then(width).unwrap_or(0.0);
+        let at = match width(index) {
+            // Whole px, unless the neighbours are too close for one between.
+            Some(hi) => Some(((lo + hi) / 2.0).round())
+                .filter(|w| lo < *w && *w < hi)
+                .unwrap_or((lo + hi) / 2.0),
+            None => lo + WIDTH_STEP,
+        };
+        let mut next = b.clone();
+        next.insert(id, at);
+        ops.push(crate::Operation::SetBreakpoints {
+            id: c.id,
+            breakpoints: Some(next),
+        });
+    }
     ops.extend(keep_kit_columns(t, c.id, id, name, |kit| {
         t.kit_mode(kit, Some(from))
     }));
@@ -2429,6 +2519,124 @@ fn keep_kit_columns(
     ops
 }
 
+/// The widths *Pick mode by width* gives the modes after the first, in order;
+/// each mode past these starts [`WIDTH_STEP`] past the one before.
+pub const FIRST_WIDTHS: [f64; 2] = [768.0, 1200.0];
+
+/// How far past the last mode's width a mode added at the end starts.
+pub const WIDTH_STEP: f64 = 400.0;
+
+/// *Pick mode by width* ticked (`on`) or unticked on collection `c`.
+///
+/// Ticked, each mode takes a starting width: 0, then [`FIRST_WIDTHS`], then
+/// [`WIDTH_STEP`] more each. Refused with a sentence when another collection is
+/// picked by width already. Unticked, the modes stay and the widths go, and
+/// every frame that picked a mode by width is set to the mode it drew, so
+/// nothing on the canvas changes. Empty when there is nothing to change.
+pub fn by_width_ops(
+    doc: &crate::Document,
+    c: CollectionId,
+    on: bool,
+) -> Result<Vec<crate::Operation>, String> {
+    let t = doc.variables();
+    let Some(col) = t.collection(c) else {
+        return Ok(Vec::new());
+    };
+    if col.by_width() == on {
+        return Ok(Vec::new());
+    }
+    if on {
+        if let Some(other) = t.by_width() {
+            return Err(format!("{} already picks its mode by width.", other.name));
+        }
+        let mut at = 0.0;
+        let breakpoints = col
+            .modes
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                at = match i {
+                    0 => 0.0,
+                    i => FIRST_WIDTHS.get(i - 1).copied().unwrap_or(at + WIDTH_STEP),
+                };
+                (m.id, at)
+            })
+            .collect();
+        return Ok(vec![crate::Operation::SetBreakpoints {
+            id: c,
+            breakpoints: Some(breakpoints),
+        }]);
+    }
+    let mut frames: Vec<(NodeId, ModeId)> = doc
+        .node_map()
+        .keys()
+        .filter_map(|id| Some((*id, doc.width_pick(*id)?)))
+        .collect();
+    frames.sort();
+    let mut ops: Vec<crate::Operation> = frames
+        .into_iter()
+        .filter_map(|(id, m)| {
+            let n = doc.get(id)?;
+            Some(crate::Operation::SetModes {
+                id,
+                modes: with_mode(t, n.modes(), ModeOwner::Collection(c), Some(m)),
+            })
+        })
+        .collect();
+    ops.push(crate::Operation::SetBreakpoints {
+        id: c,
+        breakpoints: None,
+    });
+    Ok(ops)
+}
+
+/// Mode `mode`'s minimum width typed as `width`, in a collection picked by
+/// width. Refused with a sentence for the first mode, whose 0 is fixed, and for
+/// a width at or past a neighbour's, naming where that neighbour starts. Empty
+/// when nothing changes.
+pub fn breakpoint_ops(
+    doc: &crate::Document,
+    mode: ModeId,
+    width: f64,
+) -> Result<Vec<crate::Operation>, String> {
+    let t = doc.variables();
+    let Some(c) = t.collection_of_mode(mode) else {
+        return Ok(Vec::new());
+    };
+    let (Some(b), Some(at)) = (&c.breakpoints, t.mode_index(mode)) else {
+        return Ok(Vec::new());
+    };
+    if at == 0 {
+        return Err(format!("{} starts at 0.", c.modes[0].name));
+    }
+    if !width.is_finite() {
+        return Err("A width is a number of px.".into());
+    }
+    if b.get(&mode) == Some(&width) {
+        return Ok(Vec::new());
+    }
+    let neighbour = |i: usize| c.modes.get(i).and_then(|m| Some((m, *b.get(&m.id)?)));
+    if let Some((m, w)) = neighbour(at - 1).filter(|(_, w)| width <= *w) {
+        return Err(format!("{} starts at {}.", m.name, px(w)));
+    }
+    if let Some((m, w)) = neighbour(at + 1).filter(|(_, w)| width >= *w) {
+        return Err(format!("{} starts at {}.", m.name, px(w)));
+    }
+    let mut next = b.clone();
+    next.insert(mode, width);
+    Ok(vec![crate::Operation::SetBreakpoints {
+        id: c.id,
+        breakpoints: Some(next),
+    }])
+}
+
+/// A width as the browser and the refusals write it: whole px bare, a fraction
+/// to two places at most.
+pub fn px(w: f64) -> String {
+    let s = format!("{:.2}", w);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// The name *New collection* gives a collection's first mode.
 pub const FIRST_MODE_NAME: &str = "Mode 1";
 
@@ -2443,8 +2651,8 @@ pub fn columns_for_new(
 ) -> (Vec<crate::Operation>, Vec<ModeId>) {
     match t.collection(c) {
         None => (Vec::new(), Vec::new()),
-        Some(col) if col.modes.is_empty() => (
-            vec![crate::Operation::AddMode {
+        Some(col) if col.modes.is_empty() => {
+            let mut ops = vec![crate::Operation::AddMode {
                 collection: c,
                 mode: Mode {
                     id: first_mode,
@@ -2452,9 +2660,15 @@ pub fn columns_for_new(
                 },
                 index: 0,
                 cells: Vec::new(),
-            }],
-            vec![first_mode],
-        ),
+            }];
+            if col.by_width() {
+                ops.push(crate::Operation::SetBreakpoints {
+                    id: c,
+                    breakpoints: Some(Breakpoints::from([(first_mode, 0.0)])),
+                });
+            }
+            (ops, vec![first_mode])
+        }
         Some(col) => (Vec::new(), col.modes.iter().map(|m| m.id).collect()),
     }
 }
@@ -2475,6 +2689,7 @@ pub fn new_collection_ops(
                 id: mode,
                 name: FIRST_MODE_NAME.into(),
             }],
+            breakpoints: None,
         },
         index,
     }]
@@ -2526,7 +2741,8 @@ pub fn collection_reach(doc: &crate::Document, c: CollectionId) -> (usize, usize
 /// *Duplicate collection*: a copy of `c` named `name` after it, its modes and
 /// variables under fresh ids from `ids`, each copy's cells its source's — an
 /// alias to a variable of `c` pointing at that one's copy, one elsewhere kept.
-/// Empty when `c` is not a collection.
+/// The copy is not picked by width, since only one collection may be. Empty
+/// when `c` is not a collection.
 pub fn duplicate_collection_ops(
     doc: &crate::Document,
     c: CollectionId,
@@ -2553,6 +2769,7 @@ pub fn duplicate_collection_ops(
                     name: m.name.clone(),
                 })
                 .collect(),
+            breakpoints: None,
         },
         index: at + 1,
     }];
@@ -2728,6 +2945,10 @@ pub enum VarRule {
     OutOfScope(NodeId),
     #[error("node {0:?} sets two modes of one collection")]
     TwoModes(NodeId),
+    #[error("two collections are picked by width")]
+    TwoByWidth,
+    #[error("collection {0:?}'s widths are not one per mode, from 0 and ascending")]
+    BadBreakpoints(CollectionId),
 }
 
 /// The table's own rules, without the bindings.
@@ -2752,6 +2973,19 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
         if !cnames.insert(c.name.as_str()) {
             return Err(VarRule::DuplicateCollectionName(c.name.clone()));
         }
+        if let Some(b) = &c.breakpoints {
+            let widths: Vec<Option<f64>> = c.modes.iter().map(|m| b.get(&m.id).copied()).collect();
+            let whole = b.len() == c.modes.len()
+                && widths.iter().all(|w| w.is_some_and(f64::is_finite))
+                && widths.first().is_none_or(|w| *w == Some(0.0))
+                && widths.windows(2).all(|p| p[0] < p[1]);
+            if !whole {
+                return Err(VarRule::BadBreakpoints(c.id));
+            }
+        }
+    }
+    if t.collections.iter().filter(|c| c.by_width()).count() > 1 {
+        return Err(VarRule::TwoByWidth);
     }
     let mut seen = std::collections::BTreeSet::new();
     let every = t
@@ -3042,9 +3276,11 @@ mod tests {
                         name: "Dark".into(),
                     },
                 ],
+                breakpoints: None,
             }],
             vars: BTreeMap::new(),
             kits: Default::default(),
+            previewed_width: None,
         };
         t.vars.insert(
             brand,

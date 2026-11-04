@@ -1025,6 +1025,7 @@ pub fn review(
                         id,
                         name: name.clone(),
                         modes: Vec::new(),
+                        breakpoints: None,
                     });
                     id
                 }

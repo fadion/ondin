@@ -5690,3 +5690,98 @@ fn an_effect_binding_previews_as_the_number_it_will_draw() {
         "a blur past the binding: preview diverged from commit"
     );
 }
+
+/// **A top-level frame dragged across a breakpoint previews in the mode its new
+/// width picks** (§5.3f): a rect inside it binds its corners to a number of the
+/// collection picked by width, so the resize to 700 draws Mobile's radius, as
+/// the commit does; a resize within Tablet changes nothing but the frame.
+///
+/// Flip, run: the `SetGeometry` arm's `redraw_reading` call removed fails
+/// *"dragged under 768: preview diverged from commit"*.
+#[test]
+fn a_frame_dragged_across_a_breakpoint_previews_in_its_new_mode() {
+    use ondin_core::variable::{Cell, Collection, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xBD);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (home, rect) = (ids.mint(), ids.mint());
+    let (mobile, tablet) = (ids.mint_mode(), ids.mint_mode());
+    let (bp, var) = (ids.mint_collection(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: home,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(1024.0, 300.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: rect,
+            parent: home,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(200.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+                corner_smoothing: 0.0,
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 10, 10, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddCollection {
+            collection: Collection {
+                id: bp,
+                name: "Breakpoint".into(),
+                modes: vec![
+                    Mode {
+                        id: mobile,
+                        name: "Mobile".into(),
+                    },
+                    Mode {
+                        id: tablet,
+                        name: "Tablet".into(),
+                    },
+                ],
+                breakpoints: Some([(mobile, 0.0), (tablet, 768.0)].into()),
+            },
+            index: 1,
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "radius".into(),
+                kind: VarKind::Number,
+                cells: [(mobile, Cell::Number(4.0)), (tablet, Cell::Number(30.0))].into(),
+                scope: None,
+                origin: None,
+                forked: None,
+                description: String::new(),
+            },
+        },
+        Operation::SetCornerVars {
+            id: rect,
+            vars: [Some(var); 4],
+        },
+    ]))
+    .unwrap();
+    assert_eq!(doc.mode_at(rect, bp), Some(tablet));
+    let resize = |w: f64| {
+        Transaction(vec![Operation::SetGeometry {
+            id: home,
+            geometry: GeometryPatch::Size(Size::new(w, 300.0)),
+        }])
+    };
+    assert_preview_matches_commit(&doc, &resize(700.0), "dragged under 768");
+    assert_preview_matches_commit(&doc, &resize(900.0), "dragged within Tablet");
+}

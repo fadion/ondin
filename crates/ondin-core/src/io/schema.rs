@@ -108,6 +108,9 @@ pub(crate) struct VariablesDto {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modes: Vec<crate::variable::Mode>,
+    /// The first collection's widths when it is picked by width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoints: Option<crate::variable::Breakpoints>,
     /// The collections after the first, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collections: Vec<crate::variable::Collection>,
@@ -124,6 +127,7 @@ impl VariablesDto {
         self.collection.is_none()
             && self.name.is_none()
             && self.modes.is_empty()
+            && self.breakpoints.is_none()
             && self.collections.is_empty()
             && self.vars.is_empty()
             && self.kits.is_empty()
@@ -137,6 +141,7 @@ impl VariablesDto {
             name: (first.name != crate::variable::FIRST_COLLECTION_NAME)
                 .then(|| first.name.clone()),
             modes: first.modes.clone(),
+            breakpoints: first.breakpoints.clone(),
             collections: t.collections()[1..].to_vec(),
             vars: t.iter().cloned().collect(),
             kits: t.kits().clone(),
@@ -161,11 +166,13 @@ impl VariablesDto {
                 .name
                 .unwrap_or_else(|| crate::variable::FIRST_COLLECTION_NAME.into()),
             modes: self.modes,
+            breakpoints: self.breakpoints,
         };
         Ok(crate::variable::Variables {
             collections: std::iter::once(first).chain(self.collections).collect(),
             vars,
             kits: self.kits,
+            previewed_width: None,
         })
     }
 }

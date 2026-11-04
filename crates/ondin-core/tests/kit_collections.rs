@@ -64,6 +64,7 @@ fn two_collections(ids: &mut IdSource, names: [&str; 4]) -> (Document, [ModeId; 
                 id: spacing,
                 name: "Spacing".into(),
                 modes: vec![mode(modes[2], names[2]), mode(modes[3], names[3])],
+                breakpoints: None,
             },
             index: 1,
         },

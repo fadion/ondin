@@ -425,6 +425,10 @@ impl Document {
     /// the document's or a kit's (§15 D1064), the nearer frame's winning. What
     /// [`crate::variable::Variables::resolve_at`] reads with; a collection with
     /// none here reads its default.
+    ///
+    /// **A top-level frame that sets no mode of the collection picked by width
+    /// picks one from its width** ([`Self::width_pick`]), unless its page sets
+    /// one: a pin on the frame beats the width, and so does one on the page.
     pub fn modes_at(&self, id: NodeId) -> Vec<crate::variable::ModeId> {
         self.modes_at_in(&self.variables, id)
     }
@@ -453,9 +457,91 @@ impl Document {
                     out.push(m);
                 }
             }
+            if let Some(m) = self.width_pick_in(t, n.id)
+                && !out
+                    .iter()
+                    .any(|x| crate::variable::same_collection(t, *x, m))
+            {
+                out.push(m);
+            }
             at = n.parent.and_then(|p| self.nodes.get(&p));
         }
         out
+    }
+
+    /// Whether `id` is a frame that may pick a mode by its width: a top-level
+    /// frame — the one CSS calls the viewport — that is no component main, set or
+    /// instance, none of which is a viewport.
+    pub fn picks_by_width(&self, id: NodeId) -> bool {
+        self.nodes.get(&id).is_some_and(|n| {
+            matches!(n.kind, NodeKind::Artboard { .. })
+                && n.parent.is_some_and(|p| self.is_page(p))
+                && !n.component
+                && n.set.is_none()
+                && n.link.is_none()
+        })
+    }
+
+    /// The mode of the collection picked by width that `id`'s width reaches,
+    /// whether or not a pin overrides it; `None` for a frame that does not pick
+    /// by width ([`Self::picks_by_width`]) or a document with no such collection.
+    pub fn width_mode(&self, id: NodeId) -> Option<crate::variable::ModeId> {
+        self.width_mode_in(&self.variables, id)
+    }
+
+    fn width_mode_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+    ) -> Option<crate::variable::ModeId> {
+        let c = t.by_width()?;
+        if !self.picks_by_width(id) {
+            return None;
+        }
+        let width = match t.previewed_width {
+            Some((frame, w)) if frame == id => w,
+            _ => self.frame_width(t, id)?,
+        };
+        c.mode_for_width(width)
+    }
+
+    /// A top-level frame's width, a bound one read in its page's modes — a
+    /// frame's own width cannot be read in the mode the width picks.
+    fn frame_width(&self, t: &crate::variable::Variables, id: NodeId) -> Option<f64> {
+        let n = self.nodes.get(&id)?;
+        let NodeKind::Artboard { size, .. } = &n.kind else {
+            return None;
+        };
+        let page = n.parent.and_then(|p| self.nodes.get(&p));
+        match n.size_vars[0] {
+            Some(v) => match t.resolve_at(v, page.map_or(&[][..], |p| &p.modes)) {
+                Some(crate::variable::Value::Number(w)) => Some(w),
+                _ => Some(size.width),
+            },
+            None => Some(size.width),
+        }
+    }
+
+    /// The mode `id` picks by its width now: [`Self::width_mode`] where neither
+    /// the frame nor its page sets a mode of that collection.
+    pub fn width_pick(&self, id: NodeId) -> Option<crate::variable::ModeId> {
+        self.width_pick_in(&self.variables, id)
+    }
+
+    /// [`Self::width_pick`] against table `t` — a resize preview's
+    /// ([`crate::variable::Variables::with_width`]).
+    pub fn width_pick_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+    ) -> Option<crate::variable::ModeId> {
+        let c = t.by_width()?;
+        let n = self.nodes.get(&id)?;
+        let page = self.nodes.get(&n.parent?)?;
+        if n.modes.iter().chain(&page.modes).any(|m| c.has(*m)) {
+            return None;
+        }
+        self.width_mode_in(t, id)
     }
 
     /// `var`'s value as `id` reads it — in the mode in force there.
@@ -1245,7 +1331,41 @@ impl Document {
     /// `numbering` carries the transaction's child names from one create to the
     /// next. An op may write before it refuses: [`Self::apply`] rolls back what
     /// was written, not what was meant.
+    ///
+    /// An edit that changes the mode a top-level frame picks by width — its
+    /// size, its move to or from the top level, its making into a component —
+    /// dirties every layer under it that reads a variable, as a `SetModes` does.
     fn apply_one(
+        &mut self,
+        op: &Operation,
+        dirty: &mut DirtySet,
+        numbering: &mut Numbering,
+    ) -> Result<Operation, OpError> {
+        let subject = match op {
+            Operation::Reparent { id, .. } => Some(*id),
+            _ => op.overwrites(),
+        };
+        let before = subject.and_then(|id| self.width_pick(id));
+        let undo = self.apply_op(op, dirty, numbering)?;
+        if let Some(id) = subject
+            && self.width_pick(id) != before
+        {
+            let mut stack = vec![id];
+            while let Some(at) = stack.pop() {
+                let Some(n) = self.nodes.get(&at) else {
+                    continue;
+                };
+                if n.reads_variables() {
+                    dirty.0.insert(at);
+                }
+                stack.extend(n.children().iter().copied());
+            }
+        }
+        Ok(undo)
+    }
+
+    /// [`Self::apply_one`]'s operation itself.
+    fn apply_op(
         &mut self,
         op: &Operation,
         dirty: &mut DirtySet,
@@ -1493,6 +1613,27 @@ impl Document {
                     dirty.0.extend(self.bound_nodes());
                 }
                 Ok(Operation::SetCollectionName { id: *id, name: old })
+            }
+            Operation::SetBreakpoints { id, breakpoints } => {
+                if breakpoints
+                    .as_ref()
+                    .is_some_and(|b| b.values().any(|w| !w.is_finite()))
+                {
+                    return Err(OpError::NonFinite);
+                }
+                let c = self
+                    .variables
+                    .collections
+                    .iter_mut()
+                    .find(|c| c.id == *id)
+                    .ok_or(OpError::NoSuchCollection(*id))?;
+                let old = std::mem::replace(&mut c.breakpoints, breakpoints.clone());
+                // Every top-level frame may now pick another mode.
+                dirty.0.extend(self.bound_nodes());
+                Ok(Operation::SetBreakpoints {
+                    id: *id,
+                    breakpoints: old,
+                })
             }
             Operation::SetModeName { id, name } => {
                 let m = self

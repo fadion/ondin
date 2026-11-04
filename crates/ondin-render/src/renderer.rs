@@ -1097,7 +1097,27 @@ impl RenderOverrides {
                     let kept = ondin_core::build::kept_size_vars(doc, Some(res), *id, written);
                     patched = doc.size_drawn_in(doc.variables(), *id, &patched, kept);
                 }
+                let width = patched.box_size().map(|s| s.width);
                 self.set_kind(doc, res, *id, patched);
+                // A top-level frame dragged across a breakpoint draws what it holds
+                // in the mode its new width picks — itself too, unless its size is
+                // bound, which the arm above has drawn already.
+                if let (Some(w), Some(now)) = (width, doc.width_pick(*id)) {
+                    let t = doc.variables().with_width(*id, w);
+                    if doc.width_pick_in(&t, *id) != Some(now) {
+                        let mut reading = Vec::new();
+                        let mut stack = vec![*id];
+                        while let Some(at) = stack.pop() {
+                            let Some(n) = doc.get(at) else { continue };
+                            let own_size = at == *id && n.size_vars().iter().any(Option::is_some);
+                            if n.reads_variables() && !own_size {
+                                reading.push(at);
+                            }
+                            stack.extend(n.children().iter().copied());
+                        }
+                        self.redraw_reading(doc, res, &t, reading);
+                    }
+                }
                 // Only the node's own painted area moves, not its children's frame.
                 self.moved.insert(*id);
             }
@@ -1425,87 +1445,7 @@ impl RenderOverrides {
             Operation::SetVariableCell { id: var, mode, cell } => {
                 let t = doc.variables().with_cell(*var, *mode, cell.clone())?;
                 let bound: Vec<NodeId> = doc.bound_nodes().collect();
-                for n in bound {
-                    if self.ghost(n).is_some() {
-                        continue;
-                    }
-                    let Some(paint) = self.current_paint(doc, n) else {
-                        continue;
-                    };
-                    // A bound stroke width too, which moves the ink, so the cull hears it.
-                    let widths = paint.strokes.iter().any(|s| s.width_var.is_some());
-                    let reads = paint.fills.iter().any(|f| f.brush.is_bound())
-                        || paint.strokes.iter().any(|s| s.brush.is_bound())
-                        || widths;
-                    if widths {
-                        self.mark_moved(doc, n);
-                    }
-                    if reads {
-                        let drawn = doc.resolved_paint_in(&t, n, &paint).into_owned();
-                        self.set_paint(n, drawn);
-                    }
-                    if let Some(mut kind) = self.current_kind(doc, n)
-                        && let Some(corner_radii) = kind.corner_radii()
-                        && let Some(radii) = doc.resolve_corners_in(&t, n, corner_radii)
-                    {
-                        kind.set_corner_radii(radii);
-                        self.set_kind(doc, res, n, kind);
-                        self.moved.insert(n);
-                    }
-                    // A bound width or height the same way, after the corners above,
-                    // whose kind it starts from; the layout pass lays the chain again.
-                    if let Some(node) = doc.get(n)
-                        && node.size_vars().iter().any(Option::is_some)
-                        && let Some(base) = self.current_kind(doc, n)
-                    {
-                        let drawn = doc.size_drawn_in(&t, n, &base, node.size_vars());
-                        self.set_kind(doc, res, n, drawn);
-                        self.mark_moved(doc, n);
-                    }
-                    // A bound content or family the same way.
-                    if let Some(node) = doc.get(n)
-                        && node.text_vars().iter().any(Option::is_some)
-                        && let Some(base) = self.current_kind(doc, n)
-                    {
-                        let drawn = doc.text_drawn_in(&t, n, &base, node.text_vars());
-                        self.set_kind(doc, res, n, drawn);
-                        self.mark_moved(doc, n);
-                    }
-                    // A bound visibility the same way.
-                    if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
-                        self.entry(n).visible = Some(doc.shown_in(&t, n));
-                    }
-                    // And an effect's bound numbers; the ink moves, so the cull hears it.
-                    if let Some(node) = doc.get(n)
-                        && node.effects().iter().any(|e| e.vars.iter().any(Option::is_some))
-                    {
-                        let pending = self.get(n).and_then(|o| o.effects.clone());
-                        let base = pending.unwrap_or_else(|| node.effects().to_vec());
-                        let drawn = doc.resolved_effects_in(&t, n, &base).into_owned();
-                        self.entry(n).effects = Some(drawn);
-                        self.mark_moved(doc, n);
-                    }
-                    // And a bound opacity.
-                    if let Some(node) = doc.get(n)
-                        && node.opacity_var().is_some()
-                    {
-                        let drawn =
-                            doc.opacity_drawn_in(&t, n, node.opacity(), node.opacity_var());
-                        self.entry(n).opacity = Some(drawn);
-                    }
-                    // A bound gap or padding the same way; the layout pass lays the
-                    // chain again.
-                    if let Some(node) = doc.get(n)
-                        && node.spacing_vars().iter().any(Option::is_some)
-                    {
-                        let pending = self.get(n).and_then(|o| o.display.clone()).flatten();
-                        if let Some(base) = pending.or_else(|| node.display().cloned()) {
-                            let drawn = doc.spacing_drawn_in(&t, n, &base, node.spacing_vars());
-                            self.entry(n).display = Some(Some(drawn));
-                            self.mark_moved(doc, n);
-                        }
-                    }
-                }
+                self.redraw_reading(doc, res, &t, bound);
             }
             // The rest of the table has no override: the walk reads it off the
             // document, so these draw as committed. None is dragged, and absorbing
@@ -1580,8 +1520,9 @@ impl RenderOverrides {
                 self.moved.insert(*id);
             }
             // A frame's modes change what a whole subtree resolves to, read through
-            // the document and `Resolved`, which no override patches.
-            Operation::SetModes { .. } => return None,
+            // the document and `Resolved`, which no override patches; so do the
+            // widths that pick them.
+            Operation::SetModes { .. } | Operation::SetBreakpoints { .. } => return None,
             // A mask changes which *other* nodes the walk clips, and an override
             // patches one node. Nothing sets these mid-gesture.
             Operation::SetClip { .. }
@@ -1631,6 +1572,101 @@ impl RenderOverrides {
 
     fn ghost_mut(&mut self, id: NodeId) -> Option<&mut GhostNode> {
         self.ghosts.iter_mut().find_map(|g| g.node.find_mut(id))
+    }
+
+    /// Patch each of `nodes` that reads a variable with what it draws against
+    /// table `t` — a previewed cell's, or a previewed width's — built on its
+    /// pending paint and kind.
+    fn redraw_reading(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        t: &ondin_core::variable::Variables,
+        nodes: Vec<NodeId>,
+    ) {
+        for n in nodes {
+            if self.ghost(n).is_some() {
+                continue;
+            }
+            let Some(paint) = self.current_paint(doc, n) else {
+                continue;
+            };
+            // A bound stroke width too, which moves the ink, so the cull hears it.
+            let widths = paint.strokes.iter().any(|s| s.width_var.is_some());
+            let reads = paint.fills.iter().any(|f| f.brush.is_bound())
+                || paint.strokes.iter().any(|s| s.brush.is_bound())
+                || widths;
+            if widths {
+                self.mark_moved(doc, n);
+            }
+            if reads {
+                let drawn = doc.resolved_paint_in(t, n, &paint).into_owned();
+                self.set_paint(n, drawn);
+            }
+            if let Some(mut kind) = self.current_kind(doc, n)
+                && let Some(corner_radii) = kind.corner_radii()
+                && let Some(radii) = doc.resolve_corners_in(t, n, corner_radii)
+            {
+                kind.set_corner_radii(radii);
+                self.set_kind(doc, res, n, kind);
+                self.moved.insert(n);
+            }
+            // A bound width or height the same way, after the corners above,
+            // whose kind it starts from; the layout pass lays the chain again.
+            if let Some(node) = doc.get(n)
+                && node.size_vars().iter().any(Option::is_some)
+                && let Some(base) = self.current_kind(doc, n)
+            {
+                let drawn = doc.size_drawn_in(t, n, &base, node.size_vars());
+                self.set_kind(doc, res, n, drawn);
+                self.mark_moved(doc, n);
+            }
+            // A bound content or family the same way.
+            if let Some(node) = doc.get(n)
+                && node.text_vars().iter().any(Option::is_some)
+                && let Some(base) = self.current_kind(doc, n)
+            {
+                let drawn = doc.text_drawn_in(t, n, &base, node.text_vars());
+                self.set_kind(doc, res, n, drawn);
+                self.mark_moved(doc, n);
+            }
+            // A bound visibility the same way.
+            if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
+                self.entry(n).visible = Some(doc.shown_in(t, n));
+            }
+            // And an effect's bound numbers; the ink moves, so the cull hears it.
+            if let Some(node) = doc.get(n)
+                && node
+                    .effects()
+                    .iter()
+                    .any(|e| e.vars.iter().any(Option::is_some))
+            {
+                let pending = self.get(n).and_then(|o| o.effects.clone());
+                let base = pending.unwrap_or_else(|| node.effects().to_vec());
+                let drawn = doc.resolved_effects_in(t, n, &base).into_owned();
+                self.entry(n).effects = Some(drawn);
+                self.mark_moved(doc, n);
+            }
+            // And a bound opacity.
+            if let Some(node) = doc.get(n)
+                && node.opacity_var().is_some()
+            {
+                let drawn = doc.opacity_drawn_in(t, n, node.opacity(), node.opacity_var());
+                self.entry(n).opacity = Some(drawn);
+            }
+            // A bound gap or padding the same way; the layout pass lays the
+            // chain again.
+            if let Some(node) = doc.get(n)
+                && node.spacing_vars().iter().any(Option::is_some)
+            {
+                let pending = self.get(n).and_then(|o| o.display.clone()).flatten();
+                if let Some(base) = pending.or_else(|| node.display().cloned()) {
+                    let drawn = doc.spacing_drawn_in(t, n, &base, node.spacing_vars());
+                    self.entry(n).display = Some(Some(drawn));
+                    self.mark_moved(doc, n);
+                }
+            }
+        }
     }
 
     /// The kind as the transaction has left it so far — later ops in the same

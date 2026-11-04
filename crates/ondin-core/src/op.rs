@@ -450,6 +450,13 @@ pub enum Operation {
         id: crate::variable::CollectionId,
         name: String,
     },
+    /// Whether a collection is picked by width, and each of its modes' minimum
+    /// width, whole: `None` for not picked by width. Inverts to what it
+    /// replaced; a mode added or removed beside it needs its own.
+    SetBreakpoints {
+        id: crate::variable::CollectionId,
+        breakpoints: Option<crate::variable::Breakpoints>,
+    },
     /// Remove a mode and its column. Inverts to [`Self::AddMode`] with the column
     /// it took; frames set to it must return to *Inherit* in the same
     /// transaction, or the commit refuses.
@@ -661,6 +668,7 @@ impl Operation {
             | Operation::AddCollection { .. }
             | Operation::RemoveCollection { .. }
             | Operation::SetCollectionName { .. }
+            | Operation::SetBreakpoints { .. }
             | Operation::SetKitModes { .. }
             // And the styles table (§15 D1062): these name a style.
             | Operation::AddStyle { .. }
@@ -918,6 +926,8 @@ impl Operation {
             | Operation::AddCollection { .. }
             | Operation::RemoveCollection { .. }
             | Operation::SetCollectionName { .. }
+            // The widths choose the mode every top-level frame draws in.
+            | Operation::SetBreakpoints { .. }
             | Operation::SetModes { .. }
             | Operation::SetCornerVars { .. }
             | Operation::SetSpacingVars { .. }
@@ -1033,6 +1043,10 @@ impl Operation {
                 .variables()
                 .collection(*id)
                 .is_some_and(|c| c.name == *name),
+            Operation::SetBreakpoints { id, breakpoints } => doc
+                .variables()
+                .collection(*id)
+                .is_some_and(|c| c.breakpoints == *breakpoints),
             Operation::SetModes { id, modes } => {
                 node(id).is_some_and(|n| n.modes() == modes.as_slice())
             }

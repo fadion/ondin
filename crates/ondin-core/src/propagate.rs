@@ -141,6 +141,7 @@ fn mode(op: &Operation) -> Mode {
         | Operation::AddCollection { .. }
         | Operation::RemoveCollection { .. }
         | Operation::SetCollectionName { .. }
+        | Operation::SetBreakpoints { .. }
         | Operation::RemoveMode { .. }
         | Operation::SetModeName { .. }
         | Operation::SetKitModes { .. }

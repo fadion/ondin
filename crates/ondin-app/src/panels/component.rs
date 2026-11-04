@@ -1822,8 +1822,7 @@ fn reset_row(
                     if let Some(k) = kit {
                         ui::menu_sep(ui);
                         let go = format!("Go to main in {}", k.kit_name);
-                        if ui::menu_item(ui, icon::ARROW_SQUARE_OUT, &go, ui::MENU_ROW_H).clicked()
-                        {
+                        if ui::menu_item(ui, icon::ARROW_UP_RIGHT, &go, ui::MENU_ROW_H).clicked() {
                             *act = Some(Act::GoToKitMain);
                         }
                         if k.waiting.is_some()

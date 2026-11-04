@@ -1564,8 +1564,8 @@ impl OndinApp {
                     if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
                         act = Some(0);
                     }
-                    let r =
-                        ui::MenuRow::new(icon::EXPORT, "Extract into variable…").enabled(!bound);
+                    let r = ui::MenuRow::new(icon::BRACKETS_CURLY, "Extract into variable…")
+                        .enabled(!bound);
                     if ui::menu_row(ui, r, ui::MENU_ROW_H).clicked() {
                         act = Some(1);
                     }

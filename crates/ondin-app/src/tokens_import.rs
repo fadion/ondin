@@ -264,8 +264,7 @@ impl OndinApp {
         let mut said = None;
         if !ops.is_empty() {
             self.finish_text_first();
-            self.session
-                .name_step("Import tokens", icon::BRACKETS_CURLY);
+            self.session.name_step("Import tokens", icon::IMPORT);
             if !self.session.commit(Transaction(ops)) {
                 self.session.info(format!("{name} could not be applied"));
                 return;
@@ -388,7 +387,7 @@ impl OndinApp {
         p.text(
             egui::pos2(rect.left() + 9.0, y),
             egui::Align2::LEFT_CENTER,
-            icon::BRACKETS_CURLY,
+            icon::IMPORT,
             theme::icon_font(13.0),
             color::accent_300(),
         );

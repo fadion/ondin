@@ -804,7 +804,7 @@ impl OndinApp {
                                 close = true;
                             }
                             ui::menu_sep(ui);
-                            if row(ui, icon::ARROW_CIRCLE_DOWN, "Import tokens…") {
+                            if row(ui, icon::IMPORT, "Import tokens…") {
                                 acts.push(Act::ImportTokens);
                                 close = true;
                             }

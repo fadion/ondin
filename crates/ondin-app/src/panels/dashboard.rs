@@ -1076,7 +1076,7 @@ impl OndinApp {
         }
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            if self.nav_row(ui, icon::FOLDER_OPEN, "Import files", None, false) {
+            if self.nav_row(ui, icon::IMPORT, "Import files", None, false) {
                 *act = Some(Act::Import);
             }
         });

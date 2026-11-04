@@ -1233,7 +1233,7 @@ impl Item {
                 Some("Shift+S"),
                 Group::Kits,
             ),
-            Item::ImportTokens => s("Import tokens…", icon::ARROW_CIRCLE_DOWN, None, Group::Kits),
+            Item::ImportTokens => s("Import tokens…", icon::IMPORT, None, Group::Kits),
             Item::ExportTokens => s("Export tokens…", icon::EXPORT, None, Group::Kits),
             Item::UnlinkTokens => s("Unlink tokens file", icon::LINK_BREAK, None, Group::Kits),
             Item::PublishKit => s(

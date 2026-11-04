@@ -593,6 +593,8 @@ pub mod icon {
     /// The Select button's glyph while the marquee is a lasso.
     pub const LASSO: &str = "\u{edc6}";
     pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{e038}"; // reset, restore, reopen
+    /// A folder opened or revealed: the library folder, *Show in library*, *Show
+    /// last export folder*, a project, History's *Opened*.
     pub const FOLDER_OPEN: &str = "\u{e256}";
     pub const FLOPPY_DISK: &str = "\u{e248}"; // save
     pub const MAGNIFYING_GLASS_MINUS: &str = "\u{e30e}";
@@ -892,17 +894,19 @@ pub mod icon {
     pub const MODE: &str = "\u{f02d}";
     /// *Publish* (§5.3e).
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
-    /// A kit update (§5.3e): waiting, the *Accept update* row, and the *Update
-    /// kit* step.
+    /// An update waiting to be taken: a kit's (§5.3e) — waiting, *Accept kit
+    /// updates* and the *Update kit* step — and the app's *Restart to update*.
     pub const ARROW_CIRCLE_DOWN: &str = "\u{e028}";
     /// Every detach, row and step — *Detach instance*, a variable or a style
     /// detached, *Detach from path*, *Make local*, *Unlink tokens file*: "no
     /// longer from" what it was tied to.
     pub const LINK_BREAK: &str = "\u{e2e4}";
     /// *Go to main component*, everywhere it is offered — the menu row, the
-    /// Component card's main link and its *Go to main* button (§15 D981).
+    /// Component card's main link and its *Go to main* button, *Go to main in*
+    /// a kit (§15 D981).
     pub const ARROW_UP_RIGHT: &str = "\u{e092}";
-    /// A variant clash's *Select it* — go to the other layer.
+    /// Open elsewhere: a main's documentation link in the browser, *Open kit*;
+    /// also a variant clash's *Select it* and *Move to page ▸*.
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
     /// A main's documentation link, opened in the browser.
     pub const BOOK_OPEN: &str = "\u{e0e6}";
@@ -913,8 +917,9 @@ pub mod icon {
     /// A variant clash — two variants on one combination (§15 D982): a
     /// warning glyph, in neutral ink, no new hue.
     pub const WARNING: &str = "\u{e4e0}";
-    /// A component property's binding mark — `{}`, used only inside mains (§15
-    /// D982).
+    /// A variable made or set — *Extract into variable…*, *New variable*, a
+    /// variable's value — and code: *Copy as CSS*, the code exports. Also a
+    /// component property's binding mark in the layers tree.
     pub const BRACKETS_CURLY: &str = "\u{e860}";
     /// A component set's root element, the tag it is written out as: angle
     /// brackets and a slash.
@@ -948,8 +953,9 @@ pub mod icon {
     /// `export` points up and out, so it contrasts by direction, and `download`
     /// adds a mark that is noise at icon size.
     pub const EXPORT: &str = "\u{eaf0}";
-    /// An import, a file brought into the document (*Import SVG*, *Import PDF*):
-    /// an arrow down into a tray, [`EXPORT`]'s opposite.
+    /// Every import, row and step — *Import SVG*, *Import PDF*, *Import tokens…*,
+    /// the Library's *Import files*: an arrow down into a tray, [`EXPORT`]'s
+    /// opposite.
     pub const IMPORT: &str = "\u{f01d}";
     /// The Export panel's format dropdown — a picture in a sheet, saying "this row
     /// makes a file" (§7).

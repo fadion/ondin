@@ -561,6 +561,9 @@ pub mod icon {
     /// The dashboard's *All files*, and the placeholder on a card with no
     /// thumbnail yet.
     pub const FILES: &str = "\u{e710}";
+    /// A document, apart from a page ([`FILE`]): a sheet with lines of text. A
+    /// Library search's file result.
+    pub const DOCUMENT: &str = "\u{f01e}";
     /// The dashboard's grid-view toggle, against `ROWS` for the list.
     pub const SQUARES_FOUR: &str = "\u{e464}";
     /// The dashboard's *Edit project*.
@@ -569,8 +572,7 @@ pub mod icon {
     pub const KNIFE: &str = "\u{e636}";
     /// The Select button's glyph while the marquee is a lasso.
     pub const LASSO: &str = "\u{edc6}";
-    pub const SHARE_NETWORK: &str = "\u{e408}";
-    pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{e038}"; // undo
+    pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{e038}"; // reset; rotate 90° counter-clockwise
     pub const FOLDER_OPEN: &str = "\u{e256}";
     pub const FLOPPY_DISK: &str = "\u{e248}"; // save
     pub const MAGNIFYING_GLASS_MINUS: &str = "\u{e30e}";
@@ -609,8 +611,9 @@ pub mod icon {
     pub const CORNER_TOP_RIGHT: &str = "\u{f005}";
     pub const CORNER_BOTTOM_LEFT: &str = "\u{f006}";
     pub const CORNER_BOTTOM_RIGHT: &str = "\u{f007}";
-    /// The toggle that opens the four corner fields: four tiles, each with its
-    /// outer corner rounded, so it does not repeat the radius field's brackets.
+    /// Radii set per corner: the toggle that opens the four corner fields, and
+    /// the point editor's per-corner button. Four tiles, each with its outer
+    /// corner rounded, so it does not repeat the radius field's brackets.
     pub const CORNERS_SEPARATE: &str = "\u{f009}";
     /// Corner smoothing: a squircle, the shape smoothing turns a rounded box into.
     pub const SQUIRCLE: &str = "\u{f008}";
@@ -709,22 +712,21 @@ pub mod icon {
     /// opens the rest of one control's properties where this opens the app's own.
     /// Not a `GEAR`: nothing else in the app wears one.
     pub const SLIDERS: &str = "\u{e432}";
-    // Undo/redo in the top bar: the U-turn arrows rather than
+    // Undo/redo, wherever offered: the U-turn arrows rather than
     // the circular ones (`ARROW_COUNTER_CLOCKWISE`), which read as "rotate".
     pub const ARROW_U_UP_LEFT: &str = "\u{e08a}";
     pub const ARROW_U_UP_RIGHT: &str = "\u{e08c}";
-    /// `flex-wrap: wrap` in the Container card — a line running on and turning back
-    /// under itself (§15 D878); `wrap-reverse` is
-    /// [`ARROW_U_UP_LEFT`], turning back over.
-    pub const ARROW_U_DOWN_LEFT: &str = "\u{e07e}";
+    /// `flex-wrap: wrap`: a line running into a wall and turning back under
+    /// itself. [`WRAP_REVERSE`] is the same drawing flipped.
+    pub const WRAP: &str = "\u{f01a}";
+    /// `flex-wrap: wrap-reverse`: [`WRAP`] flipped, the line turning back over.
+    pub const WRAP_REVERSE: &str = "\u{f019}";
     /// The Scale tool, in the rail and — rasterized by `cursor.rs` — as its
     /// cursor, so the button and the pointer are the same drawing.
     pub const RESIZE: &str = "\u{ed6e}";
     /// Select every layer using one Group Colors row's colour. A reticle rather
     /// than a cursor or a checkbox: the button *finds* things.
     pub const SCAN: &str = "\u{ebb6}";
-    /// Which sides of a shape a stroke occupies — a box divided.
-    pub const SQUARE_SPLIT_HORIZONTAL: &str = "\u{e870}";
     // The four boolean operations, in the order the dropdown lists them.
     pub const UNITE_SQUARE: &str = "\u{e878}";
     pub const SUBTRACT_SQUARE: &str = "\u{ebd4}";
@@ -821,6 +823,9 @@ pub mod icon {
     /// A main component's mark, and the *Create component* and *Duplicate as
     /// component* rows': [`HEXAGON`] filled, since fill marks the state.
     pub const HEXAGON_FILL: &str = "\u{f000}";
+    /// A variant set, a component set's mains taken as one: [`HEXAGON_FILL`]
+    /// inside corner brackets.
+    pub const VARIANT_SET: &str = "\u{f021}";
     /// A **kit** (§5.3e, §15 D1011): the top bar's *Kit* tag, the document menu's
     /// kit rows, and the insert and swap pickers' kit headings.
     pub const PACKAGE: &str = "\u{e390}";
@@ -837,11 +842,14 @@ pub mod icon {
     /// The browser's `+` menu: *Colour variable* and *Number variable*.
     pub const PALETTE: &str = "\u{e6c8}";
     pub const HASH: &str = "\u{e2a2}";
+    /// A boolean variable: a switch, its knob on.
+    pub const TOGGLE: &str = "\u{f01f}";
     /// The browser's *New mode*.
     pub const COLUMNS_PLUS_RIGHT: &str = "\u{e542}";
     /// *Publish* (§5.3e).
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
-    /// A kit update waiting (§5.3e).
+    /// A kit update (§5.3e): waiting, the *Accept update* row, and the *Update
+    /// kit* step.
     pub const ARROW_CIRCLE_DOWN: &str = "\u{e028}";
     /// *Detach instance* — "no longer from the main" (§15 D981).
     pub const LINK_BREAK: &str = "\u{e2e4}";
@@ -862,6 +870,9 @@ pub mod icon {
     /// A component property's binding mark — `{}`, used only inside mains (§15
     /// D982).
     pub const BRACKETS_CURLY: &str = "\u{e860}";
+    /// A component set's root element, the tag it is written out as: angle
+    /// brackets and a slash.
+    pub const CODE: &str = "\u{f01b}";
     /// A stack seen from the side: the context menu's *Arrange ▸*.
     pub const STACK: &str = "\u{e466}";
     /// *Flatten* — the same stack pressed into one sheet.
@@ -872,6 +883,8 @@ pub mod icon {
     /// *Show grid* — the one View switch with no glyph of its own until a menu
     /// needed one for it.
     pub const GRID_FOUR: &str = "\u{e296}";
+    /// *Pixel preview*: a square whose one corner is stepped into pixels.
+    pub const PIXEL_PREVIEW: &str = "\u{f020}";
     /// *Enter group* / *Enter boolean* — the one-level-in verbs (§5.2, §5.3).
     pub const SIGN_IN: &str = "\u{e428}";
     /// *Export original…* — the Asset row that writes a picture's stored bytes back
@@ -883,12 +896,17 @@ pub mod icon {
     /// `export` points up and out, so it contrasts by direction, and `download`
     /// adds a mark that is noise at icon size.
     pub const EXPORT: &str = "\u{eaf0}";
+    /// An import, a file brought into the document (*Import SVG*, *Import PDF*):
+    /// an arrow down into a tray, [`EXPORT`]'s opposite.
+    pub const IMPORT: &str = "\u{f01d}";
     /// The Export panel's format dropdown — a picture in a sheet, saying "this row
     /// makes a file" (§7).
     ///
     /// One glyph for all three formats: the word beside it already names the
     /// format, and a format written into the glyph is illegible at 15pt.
     pub const FILE_IMAGE: &str = "\u{ea24}";
+    /// *Copy as SVG*: a sheet with a curve on it, [`FILE_IMAGE`]'s vector twin.
+    pub const FILE_SVG: &str = "\u{f01c}";
     /// *Export as Zip* — the one button that produces an archive rather than
     /// files.
     pub const FILE_ZIP: &str = "\u{e958}";
@@ -996,7 +1014,6 @@ pub mod icon {
         ("number-square-one", NUMBER_SQUARE_ONE),
         ("plus", PLUS),
         ("dots-three", DOTS_THREE),
-        ("share-network", SHARE_NETWORK),
         ("arrow-counter-clockwise", ARROW_COUNTER_CLOCKWISE),
         ("folder-open", FOLDER_OPEN),
         ("floppy-disk", FLOPPY_DISK),
@@ -1061,16 +1078,17 @@ pub mod icon {
         ("clock-counter-clockwise", CLOCK_COUNTER_CLOCKWISE),
         ("file", FILE),
         ("files", FILES),
+        ("document", DOCUMENT),
         ("squares-four", SQUARES_FOUR),
         ("pencil-simple", PENCIL_SIMPLE),
         ("knife", KNIFE),
         ("lasso", LASSO),
         ("arrow-u-up-left", ARROW_U_UP_LEFT),
         ("arrow-u-up-right", ARROW_U_UP_RIGHT),
-        ("arrow-u-down-left", ARROW_U_DOWN_LEFT),
+        ("wrap", WRAP),
+        ("wrap-reverse", WRAP_REVERSE),
         ("resize", RESIZE),
         ("scan", SCAN),
-        ("square-split-horizontal", SQUARE_SPLIT_HORIZONTAL),
         ("unite-square", UNITE_SQUARE),
         ("subtract-square", SUBTRACT_SQUARE),
         ("intersect-square", INTERSECT_SQUARE),
@@ -1114,6 +1132,7 @@ pub mod icon {
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
         ("hexagon-fill", HEXAGON_FILL),
+        ("variant-set", VARIANT_SET),
         ("package", PACKAGE),
         ("browsers", BROWSERS),
         ("push-pin", PUSH_PIN),
@@ -1122,6 +1141,7 @@ pub mod icon {
         ("plus-square", PLUS_SQUARE),
         ("palette", PALETTE),
         ("hash", HASH),
+        ("toggle", TOGGLE),
         ("columns-plus-right", COLUMNS_PLUS_RIGHT),
         ("upload-simple", UPLOAD_SIMPLE),
         ("arrow-circle-down", ARROW_CIRCLE_DOWN),
@@ -1131,13 +1151,17 @@ pub mod icon {
         ("selection-all", SELECTION_ALL),
         ("warning", WARNING),
         ("brackets-curly", BRACKETS_CURLY),
+        ("code", CODE),
         ("stack", STACK),
         ("stack-simple", STACK_SIMPLE),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
+        ("pixel-preview", PIXEL_PREVIEW),
         ("sign-in", SIGN_IN),
         ("export", EXPORT),
+        ("import", IMPORT),
         ("file-image", FILE_IMAGE),
+        ("file-svg", FILE_SVG),
         ("gauge", GAUGE),
         ("cpu", CPU),
         ("memory", MEMORY),

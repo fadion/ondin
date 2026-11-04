@@ -932,7 +932,7 @@ impl OndinApp {
                 if row(
                     ui,
                     i,
-                    icon::FILES,
+                    icon::DOCUMENT,
                     theme::text::dim(),
                     &self.library.shown_entry(e),
                     "File",

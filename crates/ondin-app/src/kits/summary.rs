@@ -374,6 +374,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
             (TokenKind::Var(_), Some(Value::Color(c))) => Lead::Chip(*c),
             (TokenKind::Var(VarKind::Number), _) => Lead::Glyph(icon::HASH),
             (TokenKind::Var(VarKind::String), _) => Lead::Glyph(icon::TEXT_T),
+            (TokenKind::Var(VarKind::Boolean), _) => Lead::Glyph(icon::TOGGLE),
             (TokenKind::Var(_), _) => Lead::Glyph(icon::HASH),
             (TokenKind::Style(_), _) => Lead::Glyph(icon::SWATCHES),
         };
@@ -408,7 +409,7 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
         .components
         .iter()
         .map(|c| Row {
-            lead: Lead::Glyph(icon::HEXAGON),
+            lead: Lead::Glyph(icon::HEXAGON_FILL),
             name: c,
             tail: Tail::Text("component".into()),
         })

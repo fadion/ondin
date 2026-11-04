@@ -6284,7 +6284,7 @@ impl OndinApp {
         }
 
         if !self.session.has_step_name() {
-            self.session.name_step("Import SVG", icon::SHARE_NETWORK);
+            self.session.name_step("Import SVG", icon::IMPORT);
         }
         if !self.session.commit(out.tx) {
             return SvgImport::Unreadable;
@@ -6318,7 +6318,7 @@ impl OndinApp {
             mut approximated,
         } = read;
         if !self.session.has_step_name() {
-            self.session.name_step("Import PDF", icon::SHARE_NETWORK);
+            self.session.name_step("Import PDF", icon::IMPORT);
         }
         let (centre, _, _) = self.paste_placement(at);
         let corner = Vec2::new(centre.x - size.width / 2.0, centre.y - size.height / 2.0);

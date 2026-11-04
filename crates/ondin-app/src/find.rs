@@ -934,7 +934,7 @@ fn result_row(
         );
     }
     let tail = if h.locked {
-        Some(icon::LOCK_SIMPLE)
+        Some(icon::LOCK_SIMPLE_FILL)
     } else if h.hidden {
         Some(icon::EYE_SLASH)
     } else if t.cased {

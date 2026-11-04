@@ -1650,7 +1650,7 @@ fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
         p.text(
             egui::pos2(gx, y),
             egui::Align2::CENTER_CENTER,
-            icon::SQUARES_FOUR,
+            icon::VARIANT_SET,
             theme::icon_font(11.0),
             theme::text::muted(),
         );
@@ -1707,7 +1707,7 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut O
             p.text(
                 egui::pos2(rect.left() + 46.0, gy),
                 egui::Align2::CENTER_CENTER,
-                icon::SQUARES_FOUR,
+                icon::VARIANT_SET,
                 theme::icon_font(11.0),
                 theme::text::muted(),
             );
@@ -1792,9 +1792,9 @@ fn hover_card(ctx: &egui::Context, item: &Item, panel: egui::Rect, row: egui::Re
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 7.0;
                         let glyph = if item.set {
-                            icon::SQUARES_FOUR
+                            icon::VARIANT_SET
                         } else {
-                            icon::HEXAGON
+                            icon::HEXAGON_FILL
                         };
                         ui.label(
                             egui::RichText::new(glyph)

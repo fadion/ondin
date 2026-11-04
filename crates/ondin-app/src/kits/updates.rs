@@ -570,7 +570,8 @@ impl OndinApp {
         let mut tx = update.tx;
         let placed = stack_local(doc, &tx, &update.made_local, content);
         tx.0.extend(placed);
-        self.session.name_step("Update kit", icon::ARROWS_CLOCKWISE);
+        self.session
+            .name_step("Update kit", icon::ARROW_CIRCLE_DOWN);
         if !self.session.commit(tx) {
             return;
         }

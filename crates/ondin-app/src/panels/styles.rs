@@ -601,14 +601,14 @@ impl OndinApp {
                         1 => "Changes reach its 1 layer as you type".to_string(),
                         n => format!("Changes reach its {n} layers as you type"),
                     };
-                    footer(ui, icon::SLIDERS_HORIZONTAL, &what);
+                    footer(ui, icon::INFO, &what);
                 } else if live {
                     // Over a selection — under an *Edit* too: what the rows
                     // write there is the one layer's spans, which `edit_through`
                     // passes by, so the edit's footer would promise a reach
                     // they do not have.
                     body(app, ui);
-                    footer(ui, icon::TEXT_AA, "Styles the selection — the style stays");
+                    footer(ui, icon::INFO, "Styles the selection — the style stays");
                 } else {
                     // Greyed and inert — the inspector's read-only door (D1038
                     // (1)); a bound variable inside still draws its chip.

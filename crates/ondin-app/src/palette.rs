@@ -1361,7 +1361,7 @@ fn layer_row(ui: &mut egui::Ui, l: &LayerHit, lit: bool) -> egui::Response {
     let mark = if l.hidden {
         Some(icon::EYE_SLASH)
     } else if l.locked {
-        Some(icon::LOCK_SIMPLE)
+        Some(icon::LOCK_SIMPLE_FILL)
     } else {
         None
     };

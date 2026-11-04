@@ -1394,11 +1394,7 @@ impl OndinApp {
                     egui::Rect::from_min_size(from, egui::vec2(cell * 4.0, ui::SEGMENT_CELL_H));
                 self.flow_menu_door(ui, key, rect);
             }
-            let turns = [
-                icon::ARROW_LINE_RIGHT,
-                icon::ARROW_U_DOWN_LEFT,
-                icon::ARROW_U_UP_LEFT,
-            ];
+            let turns = [icon::ARROW_LINE_RIGHT, icon::WRAP, icon::WRAP_REVERSE];
             let at = wrap
                 .and_then(|w| WRAPS.iter().position(|x| *x == w))
                 .unwrap_or(WRAPS.len());

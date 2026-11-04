@@ -967,7 +967,7 @@ impl Item {
                 Group::Navigate,
             ),
 
-            Item::CopyAsSvg => s("Copy as SVG", icon::SHARE_NETWORK, None, Group::Export),
+            Item::CopyAsSvg => s("Copy as SVG", icon::FILE_SVG, None, Group::Export),
             Item::CopyAsCss => s("Copy as CSS", icon::BRACKETS_CURLY, None, Group::Export),
             // `FILE_IMAGE` is the Export panel's raster-format glyph.
             Item::CopyAsPng(2) => s("Copy as PNG 2×", icon::FILE_IMAGE, None, Group::Export),
@@ -1006,7 +1006,7 @@ impl Item {
                     // The glyph the Layout grid card already draws for columns.
                     ViewSwitch::LayoutGrid => icon::COLUMNS,
                     ViewSwitch::Outline => icon::SQUARE,
-                    ViewSwitch::PixelPreview => icon::GRID_FOUR,
+                    ViewSwitch::PixelPreview => icon::PIXEL_PREVIEW,
                     ViewSwitch::Lasso => icon::LASSO,
                     // Placeholders: no menu builds a row for these, and spelling
                     // them out makes a new switch a compile error here.
@@ -1078,13 +1078,13 @@ impl Item {
 
             Item::Undo => s(
                 "Undo",
-                icon::ARROW_COUNTER_CLOCKWISE,
+                icon::ARROW_U_UP_LEFT,
                 Some("Ctrl+Z"),
                 Group::History,
             ),
             Item::Redo => s(
                 "Redo",
-                icon::ARROW_CLOCKWISE,
+                icon::ARROW_U_UP_RIGHT,
                 Some("Ctrl+Shift+Z"),
                 Group::History,
             ),

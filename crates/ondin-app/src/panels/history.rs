@@ -239,9 +239,13 @@ impl OndinApp {
         let mut rows = vec![Row {
             depth: 0,
             serial: None,
-            glyph: match self.session.resumed_history() {
-                true => icon::CLOCK_COUNTER_CLOCKWISE.into(),
-                false => icon::FOLDER_OPEN.into(),
+            glyph: match (
+                self.session.resumed_history(),
+                self.session.opened_from_file(),
+            ) {
+                (true, _) => icon::CLOCK_COUNTER_CLOCKWISE.into(),
+                (false, true) => icon::FOLDER_OPEN.into(),
+                (false, false) => icon::PLUS.into(),
             },
             label: self.first_row_label().into(),
             subject: None,

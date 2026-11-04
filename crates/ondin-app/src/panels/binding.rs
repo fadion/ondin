@@ -223,7 +223,7 @@ impl FieldKey {
             FieldKey::EffectNumber { .. } => "Spread",
             // The controls' own pictures: a row's arrow, a wrap's turn.
             FieldKey::Flow { slot: 0, .. } => icon::ARROW_RIGHT,
-            FieldKey::Flow { .. } => icon::ARROW_U_DOWN_LEFT,
+            FieldKey::Flow { .. } => icon::WRAP,
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,

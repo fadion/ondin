@@ -1255,7 +1255,7 @@ impl OndinApp {
                     if let Some(i) = picked {
                         let element = variant::RootElement::ALL[i];
                         edits.push(defer(move |cx| {
-                            cx.step = Some(("Element", icon::HAND_POINTING));
+                            cx.step = Some(("Element", icon::CODE));
                             Ok(variant::set_element(cx.doc, set, element))
                         }));
                     }
@@ -1289,7 +1289,7 @@ impl OndinApp {
             }
             if ui::action_button(
                 ui,
-                icon::HEXAGON,
+                icon::PLUS,
                 "Add variant",
                 FieldButton::Off,
                 egui::vec2(half, ui::CONTROL_H),

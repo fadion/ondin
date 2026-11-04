@@ -435,7 +435,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
         p.text(
             egui::pos2(rect.left() + 8.0, y),
             egui::Align2::CENTER_CENTER,
-            icon::SQUARES_FOUR,
+            icon::VARIANT_SET,
             theme::icon_font(12.0),
             theme::text::muted(),
         );

@@ -1705,7 +1705,7 @@ impl OndinApp {
                 });
                 let _ = ui::field_button(
                     ui,
-                    icon::SQUARE_SPLIT_HORIZONTAL,
+                    icon::CORNERS_SEPARATE,
                     28.0,
                     ui::FieldButton::enabled_if(false),
                 )
@@ -6894,17 +6894,17 @@ impl OndinApp {
                     };
                     let (glyph, tip) = match (horizontal, on) {
                         (true, false) => (
-                            icon::ALIGN_CENTER_VERTICAL,
+                            icon::ALIGN_CENTER_HORIZONTAL,
                             "Centre in the container horizontally",
                         ),
-                        (true, true) => (icon::ALIGN_CENTER_VERTICAL, "Stop centring horizontally"),
+                        (true, true) => {
+                            (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring horizontally")
+                        }
                         (false, false) => (
-                            icon::ALIGN_CENTER_HORIZONTAL,
+                            icon::ALIGN_CENTER_VERTICAL,
                             "Centre in the container vertically",
                         ),
-                        (false, true) => {
-                            (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring vertically")
-                        }
+                        (false, true) => (icon::ALIGN_CENTER_VERTICAL, "Stop centring vertically"),
                     };
                     let state = if on {
                         ui::FieldButton::On

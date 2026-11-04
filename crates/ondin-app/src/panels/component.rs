@@ -3148,8 +3148,8 @@ mod tests {
                 .map(|(_, r, _)| *r)
                 .unwrap_or_else(|| panic!("no {g} glyph"))
         };
-        let h = glyph(icon::ALIGN_CENTER_VERTICAL);
-        let v = glyph(icon::ALIGN_CENTER_HORIZONTAL);
+        let h = glyph(icon::ALIGN_CENTER_HORIZONTAL);
+        let v = glyph(icon::ALIGN_CENTER_VERTICAL);
         let row: Vec<_> = dots(&out)
             .into_iter()
             .filter(|d| (d.y - h.center().y).abs() < 14.0)

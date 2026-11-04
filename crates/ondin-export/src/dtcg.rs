@@ -381,6 +381,31 @@ impl Writer<'_> {
                 v.name
             ));
         }
+        // A token has one type; aliases whose targets disagree across modes
+        // cannot all be honoured, and the first aliasing mode's wins (`type_of`).
+        let mut types: Vec<&'static str> = Vec::new();
+        for m in self.modes_of(v) {
+            if let Some(Cell::Alias(to)) = v.cells.get(&m)
+                && self.paths.contains_key(to)
+                && let Some(target) = self.t.get(*to)
+            {
+                let t = self.type_of(target);
+                if !types.contains(&t) {
+                    types.push(t);
+                }
+            }
+        }
+        if types.len() > 1 {
+            let all = types
+                .iter()
+                .map(|t| format!("`{t}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.note(format!(
+                "{}: its modes alias tokens of different types ({all}), so it is written as `{ty}`, the first aliasing mode's.",
+                v.name
+            ));
+        }
         let mut token = Map::new();
         token.insert("$type".to_string(), Json::String(ty.to_string()));
         let value = self

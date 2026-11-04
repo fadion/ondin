@@ -273,6 +273,66 @@ fn an_alias_scoped_apart_takes_its_targets_type() {
     );
 }
 
+/// An alias whose modes reference tokens of different types is written in the
+/// first aliasing mode's type, and the export names the clash.
+///
+/// flip: the mixed-target note's `types.len() > 1` made `> 2` → fails at "noted".
+#[test]
+fn an_alias_mixing_target_types_across_modes_is_noted() {
+    use ondin_core::variable::{Field, Scope};
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA3);
+    let (a, b) = (ids.mint_mode(), ids.mint_mode());
+    let [space, alpha, mix] = [(); 3].map(|_| ids.mint_var());
+    let scoped = |op: Operation, scope: Scope| match op {
+        Operation::AddVariable { mut var } => {
+            var.scope = Some(scope);
+            Operation::AddVariable { var }
+        }
+        other => other,
+    };
+    let both = |n: f64| vec![(a, Cell::Number(n)), (b, Cell::Number(n))];
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(a, "A", 0),
+            add_mode(b, "B", 1),
+            scoped(
+                add_var(space, "space/4", VarKind::Number, both(4.0)),
+                Scope::of([Field::Spacing]),
+            ),
+            scoped(
+                add_var(alpha, "alpha/50", VarKind::Number, both(50.0)),
+                Scope::of([Field::Opacity]),
+            ),
+            add_var(
+                mix,
+                "mix",
+                VarKind::Number,
+                vec![(a, Cell::Alias(space)), (b, Cell::Alias(alpha))],
+            ),
+        ]))
+        .unwrap();
+    let out = tokens(&f.doc, None);
+    let v = parse(&out.json);
+    assert_eq!(
+        (at(&v, "space.4.$type"), at(&v, "alpha.50.$type")),
+        (&Value::from("dimension"), &Value::from("number")),
+        "the fixture: targets of two types"
+    );
+    assert_eq!(
+        at(&v, "mix.$type"),
+        "dimension",
+        "the first aliasing mode's"
+    );
+    assert!(
+        out.notes
+            .iter()
+            .any(|n| n.starts_with("mix:") && n.contains("different types")),
+        "noted: {:?}",
+        out.notes
+    );
+}
+
 /// A token whose path is also a group becomes that group's `$root`; a name with a
 /// reserved character is renamed and the rename noted; strings and booleans ride
 /// in the root's extension.

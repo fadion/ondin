@@ -270,7 +270,7 @@ figure so the bar never shifts, 14pt between readouts; a tooltip gives the exact
   on every axis of a skewed or snapped layer. `RenderOverrides::set_outline` carries the ink, installed every frame
   by `draw_canvas` (present mode clears it). Hit testing and selection are unchanged. The eyedropper
   samples the canvas as drawn, so in outline view it picks up the ink.
-- **Pixel preview** (`OndinApp::pixel_preview`, `Ctrl+Alt+Y`, glyph `GRID_FOUR`) shows the anti-aliasing a viewer
+- **Pixel preview** (`OndinApp::pixel_preview`, `Ctrl+Alt+Y`, glyph `PIXEL_PREVIEW`) shows the anti-aliasing a viewer
   at 1x gets. The pixel grid (`grid.rs`) shows where pixels fall over artwork drawn at device
   resolution, where a half-pixel edge looks sharp; the preview shows it blur. `canvas::pixel_preview`
   takes whole world units from the unit at the view's corner, one more than the view spans so the

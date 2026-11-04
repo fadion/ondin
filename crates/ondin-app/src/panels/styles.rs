@@ -135,7 +135,7 @@ fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleVa
 
 /// A layout's glyph: *columns* for a row, the same picture
 /// turned, *rows*, for a column — the display glyph turned with the direction —
-/// and the four squares for a grid (§15 D1076).
+/// and [`icon::GRID_LAYOUT`] for a grid.
 pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static str {
     use ondin_core::container::{Display, FlexDirection};
     match display {
@@ -143,7 +143,7 @@ pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static
             FlexDirection::Row | FlexDirection::RowReverse => icon::COLUMNS,
             FlexDirection::Column | FlexDirection::ColumnReverse => icon::ROWS,
         },
-        Display::Grid(_) => icon::GRID_FOUR,
+        Display::Grid(_) => icon::GRID_LAYOUT,
     }
 }
 

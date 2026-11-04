@@ -6777,7 +6777,7 @@ impl OndinApp {
                 _ => None,
             };
             if let (Some(grids), [id]) = (list, subjects.as_slice()) {
-                app.session.name_step("Layout grid", icon::GRID_FOUR);
+                app.session.name_step("Layout grid", icon::COLUMNS);
                 app.commit_edit(Transaction(vec![Operation::SetLayoutGrids {
                     id: *id,
                     grids,
@@ -7420,7 +7420,7 @@ impl OndinApp {
     /// already named it more particularly.
     fn name_grid_step(&mut self, label: &'static str) {
         if !self.session.has_step_name() {
-            self.session.name_step(label, icon::GRID_FOUR);
+            self.session.name_step(label, icon::COLUMNS);
         }
     }
 
@@ -8326,7 +8326,7 @@ impl OndinApp {
                                     value_field(
                                         ui,
                                         half,
-                                        Prefix::Icon(icon::GRID_FOUR),
+                                        Prefix::Icon(icon::IMAGE_TILE),
                                         &mut tile_pct,
                                         Scrub::whole(0.5).range(1.0..=10_000.0),
                                         |d| d.suffix("%").custom_formatter(ui::number(2)),
@@ -10207,7 +10207,7 @@ impl OndinApp {
                 ("Group colors", icon::PALETTE)
             }
             PaintSlot::Effect(_) => ("Effects", icon::SPARKLE),
-            PaintSlot::Grid(_) => ("Layout grid", icon::GRID_FOUR),
+            PaintSlot::Grid(_) => ("Layout grid", icon::COLUMNS),
             PaintSlot::VarCell(..) => ("Variable", icon::BRACKETS_CURLY),
         };
         self.session.name_step(label, glyph);

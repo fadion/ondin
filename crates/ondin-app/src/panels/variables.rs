@@ -4673,7 +4673,7 @@ impl OndinApp {
                     }
                     ui::menu_sep(ui);
                     for (m, width) in modes.iter().zip(&widths) {
-                        let row = ui::MenuRow::new(icon::COLUMNS, &m.name)
+                        let row = ui::MenuRow::new(icon::MODE, &m.name)
                             .accel(width.as_deref())
                             .checked(current == Some(m.id));
                         if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
@@ -4688,7 +4688,7 @@ impl OndinApp {
             self.mode_menu = None;
             if mode != current {
                 let modes = var::with_mode(self.session.doc.variables(), &set, owner, mode);
-                self.session.name_step("Mode", icon::COLUMNS);
+                self.session.name_step("Mode", icon::MODE);
                 self.commit_edit(Transaction(vec![Operation::SetModes { id, modes }]));
             }
             return;

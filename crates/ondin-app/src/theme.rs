@@ -582,7 +582,8 @@ pub mod icon {
     /// A description, wherever one is written — a variable's, a main's: a card
     /// with lines of writing on it.
     pub const NOTE: &str = "\u{f023}";
-    /// The dashboard's grid-view toggle, against `ROWS` for the list.
+    /// The Library: its grid-view toggle (against `ROWS` for the list) and Ctrl+K's
+    /// *Go to the library*.
     pub const SQUARES_FOUR: &str = "\u{e464}";
     /// The dashboard's *Edit project*.
     pub const PENCIL_SIMPLE: &str = "\u{e3b4}";
@@ -685,6 +686,8 @@ pub mod icon {
     // as "even columns" rather than "push apart".
     pub const ARROWS_OUT_LINE_HORIZONTAL: &str = "\u{e534}";
     pub const ARROWS_OUT_LINE_VERTICAL: &str = "\u{e536}";
+    /// *Tidy up*: a row of three boxes over a rule with an arrowhead at each end.
+    pub const TIDY_UP: &str = "\u{f02c}";
     /// Fold and unfold the whole layer tree. The pair reads as "gather these
     /// together" and "push them apart", which is what the button does to the rows —
     /// where the caret it replaced said "this row is open", a claim about one row
@@ -868,6 +871,9 @@ pub mod icon {
     pub const TOGGLE: &str = "\u{f01f}";
     /// The browser's *New mode*.
     pub const COLUMNS_PLUS_RIGHT: &str = "\u{e542}";
+    /// A variable mode, wherever a frame picks one: two sheets, one behind the
+    /// other.
+    pub const MODE: &str = "\u{f02d}";
     /// *Publish* (§5.3e).
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
     /// A kit update (§5.3e): waiting, the *Accept update* row, and the *Update
@@ -903,9 +909,14 @@ pub mod icon {
     /// *Delete*, in [`super::color::danger()`]. The lidded bin rather than
     /// [`TRASH_SIMPLE`], which the layers panel's own row already spends.
     pub const TRASH: &str = "\u{e4a6}";
-    /// *Show grid* — the one View switch with no glyph of its own until a menu
-    /// needed one for it.
+    /// *Show grid*, the pixel grid. A layout grid is [`COLUMNS`] / [`ROWS`] and a
+    /// CSS grid [`GRID_LAYOUT`].
     pub const GRID_FOUR: &str = "\u{e296}";
+    /// A container laid out as a CSS grid (`display: grid`): a box split into one
+    /// tall cell and two short ones.
+    pub const GRID_LAYOUT: &str = "\u{f02e}";
+    /// An image fill's Tile scale: four tiles, the first one filled.
+    pub const IMAGE_TILE: &str = "\u{f02f}";
     /// *Pixel preview*: a square whose one corner is stepped into pixels.
     pub const PIXEL_PREVIEW: &str = "\u{f020}";
     /// *Enter group* / *Enter boolean* — the one-level-in verbs (§5.2, §5.3).
@@ -1088,6 +1099,7 @@ pub mod icon {
         ("arrow-line-down", ARROW_LINE_DOWN),
         ("arrows-out-line-horizontal", ARROWS_OUT_LINE_HORIZONTAL),
         ("arrows-out-line-vertical", ARROWS_OUT_LINE_VERTICAL),
+        ("tidy-up", TIDY_UP),
         ("arrows-in-line-vertical", ARROWS_IN_LINE_VERTICAL),
         ("columns", COLUMNS),
         ("rows", ROWS),
@@ -1176,6 +1188,7 @@ pub mod icon {
         ("hash", HASH),
         ("toggle", TOGGLE),
         ("columns-plus-right", COLUMNS_PLUS_RIGHT),
+        ("mode", MODE),
         ("upload-simple", UPLOAD_SIMPLE),
         ("arrow-circle-down", ARROW_CIRCLE_DOWN),
         ("link-break", LINK_BREAK),
@@ -1189,6 +1202,8 @@ pub mod icon {
         ("stack-simple", STACK_SIMPLE),
         ("trash", TRASH),
         ("grid-four", GRID_FOUR),
+        ("grid-layout", GRID_LAYOUT),
+        ("image-tile", IMAGE_TILE),
         ("pixel-preview", PIXEL_PREVIEW),
         ("sign-in", SIGN_IN),
         ("export", EXPORT),

@@ -7775,7 +7775,7 @@ impl OndinApp {
             }
         };
         if is_set {
-            glyph(&mut job, icon::SQUARES_FOUR, egui::Color32::PLACEHOLDER);
+            glyph(&mut job, icon::VARIANT_SET, egui::Color32::PLACEHOLDER);
             words(&mut job, &shown, 4.0, egui::Color32::PLACEHOLDER);
             mode_word(&mut job, theme::text::dim());
             if let Some(clash) = crate::panels::clash_text(doc, id) {

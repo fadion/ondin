@@ -843,7 +843,7 @@ impl Item {
             ),
             Item::CombineAsVariants => s(
                 "Combine as variants",
-                icon::SQUARES_FOUR,
+                icon::VARIANT_SET,
                 None,
                 Group::Structure,
             ),
@@ -1217,7 +1217,7 @@ impl Item {
             ),
             Item::TidyUp => s(
                 "Tidy up",
-                icon::SQUARES_FOUR,
+                icon::TIDY_UP,
                 Some("Alt+Shift+T"),
                 Group::Transform,
             ),

@@ -936,7 +936,7 @@ impl OndinApp {
         // them** (§15 D1007, the maintainer's look): the *N variants · M
         // instances* row under the name, with *Select all* beside it, made a
         // stepped row; the variant count went to the card's title.
-        if super::component::name_line(ui, Some(icon::SQUARES_FOUR), &name, Some(instances)) {
+        if super::component::name_line(ui, Some(icon::VARIANT_SET), &name, Some(instances)) {
             select_all = true;
         }
         self.description_field(ui, set);
@@ -1480,7 +1480,7 @@ impl OndinApp {
             });
         }
         if let Some(tx) = out {
-            self.session.name_step("Variant", icon::DIAMOND);
+            self.session.name_step("Variant", icon::VARIANT_SET);
             self.commit_edit(tx);
         }
         if let Some(o) = select {
@@ -2589,7 +2589,7 @@ impl OndinApp {
                 }
                 if lone_main {
                     ui::menu_sep(ui);
-                    if row(ui, icon::SQUARES_FOUR, "Variant", "makes a set", true)
+                    if row(ui, icon::VARIANT_SET, "Variant", "makes a set", true)
                         .on_hover_text("Make a set — this main becomes its first variant")
                         .clicked()
                     {

@@ -43,7 +43,7 @@ Part of §9.4.
   the dialog. Linked-source entries (*Embed/Link*, *Relink…*) are not built — no linking is authored.
 - **Mirror** eyebrow over two `ui::label_button`s, *Horizontal* and *Vertical* — actions, never lit;
   words, since on a symmetric shape the two flips look the same. No quarter turn here.
-- **Scale** (`icon::RESIZE`) and **Tile** (`icon::GRID_FOUR`) half-width fields, percent of source
+- **Scale** (`icon::RESIZE`) and **Tile** (`icon::IMAGE_TILE`) half-width fields, percent of source
   pixels (`1.0` = one unit per source pixel); each read by one mode and **dimmed, not hidden**,
   otherwise.
   - Scale is the crop zoom (no gesture can scale the picture). Floor `ImageRef::cover_scale`; ceiling

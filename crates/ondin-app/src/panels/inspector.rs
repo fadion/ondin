@@ -11850,6 +11850,75 @@ mod angle_tests {
     }
 }
 #[cfg(test)]
+mod effects_step_glyph_tests {
+    use super::*;
+    use ondin_core::{Effect, ItemId, Keyed, Shadow};
+
+    fn drop(i: usize) -> Keyed<Effect> {
+        Keyed::new(
+            ItemId::positional(i),
+            Effect::new(EffectKind::DropShadow(Shadow::default())),
+        )
+    }
+    fn inner(i: usize) -> Keyed<Effect> {
+        Keyed::new(
+            ItemId::positional(i),
+            Effect::new(EffectKind::InnerShadow(Shadow::default())),
+        )
+    }
+    fn blur(i: usize, radius: f64) -> Keyed<Effect> {
+        Keyed::new(
+            ItemId::positional(i),
+            Effect::new(EffectKind::LayerBlur { radius }),
+        )
+    }
+
+    /// An added or changed effect names the step, ahead of one removed.
+    #[test]
+    fn the_added_or_changed_effect_names_the_step() {
+        let added = effects_step_glyph(&[drop(0)], &[drop(0), blur(1, 4.0)]);
+        assert_eq!(added, icon::LAYER_BLUR, "added");
+        let changed = effects_step_glyph(&[drop(0), blur(1, 4.0)], &[drop(0), blur(1, 8.0)]);
+        assert_eq!(changed, icon::LAYER_BLUR, "changed");
+        let swapped = effects_step_glyph(&[inner(0)], &[blur(1, 4.0)]);
+        assert_eq!(swapped, icon::LAYER_BLUR, "added beats removed");
+    }
+    /// A removed effect names the step, not the one left first in the stack.
+    ///
+    /// flip: the removed fallback dropped from `effects_step_glyph` → fails at
+    /// "removed".
+    #[test]
+    fn a_removed_effect_names_the_step() {
+        let removed = effects_step_glyph(&[drop(0), blur(1, 4.0)], &[drop(0)]);
+        assert_eq!(removed, icon::LAYER_BLUR, "removed");
+    }
+    /// A reorder is named by the first effect that changed place, not the first in
+    /// the stack.
+    ///
+    /// flip: the reorder fallback dropped from `effects_step_glyph` → fails at
+    /// "moved".
+    #[test]
+    fn a_moved_effect_names_the_step() {
+        let moved = effects_step_glyph(
+            &[drop(0), inner(1), blur(2, 4.0)],
+            &[drop(0), blur(2, 4.0), inner(1)],
+        );
+        assert_eq!(moved, icon::LAYER_BLUR, "moved");
+    }
+    /// With nothing to tell apart, the step wears the stack's first effect, or a
+    /// drop shadow when the stack is empty.
+    #[test]
+    fn an_unchanged_stack_falls_back_to_its_first_effect() {
+        let same = effects_step_glyph(&[inner(0), blur(1, 4.0)], &[inner(0), blur(1, 4.0)]);
+        assert_eq!(same, icon::DROP_HALF, "unchanged");
+        assert_eq!(
+            effects_step_glyph(&[], &[]),
+            icon::DROP_HALF_BOTTOM,
+            "empty"
+        );
+    }
+}
+#[cfg(test)]
 mod carry_id_tests {
     use super::*;
     /// A row's widget ids follow the paint, not the slot: `carried_unit` salts the child `Ui` by entry, so a live reorder keeps focus.

@@ -732,14 +732,15 @@ pub mod icon {
     pub const LINK_SIMPLE_HORIZONTAL_BREAK: &str = "\u{e2ec}";
     pub const MAGNET: &str = "\u{e680}"; // the Snap menu
     /// The transform origin, in two states. `CROSSHAIR_SIMPLE` is the read-only
-    /// marker and the Transform panel's toggle; `CROSSHAIR`, the same reticle with
+    /// marker, the Transform panel's toggle, *Move pivot* and *Reset origin*; `CROSSHAIR`, the same reticle with
     /// a filled centre, is the marker while it can be dragged. One glyph in the
     /// panel and on the canvas, so the button names the thing it arms rather than
     /// describing it, and the fill says whether it is live.
     pub const CROSSHAIR_SIMPLE: &str = "\u{e1d8}";
     pub const CROSSHAIR: &str = "\u{e1d6}";
-    /// A layer pinned out of its parent's layout, and the Item card's *Unpin*: a
-    /// box held to its frame's edges by two pins.
+    /// Absolute position: a layer pinned out of its parent's layout, *Pin* /
+    /// *Unpin* and the Position steps. A box held to its frame's edges by two
+    /// pins.
     pub const PIN: &str = "\u{f024}";
     /// A drag grip on a reorderable row — Fill's and Stroke's paint rows.
     pub const DOTS_SIX_VERTICAL: &str = "\u{eae2}";
@@ -763,8 +764,9 @@ pub mod icon {
     /// The Scale tool, in the rail and — rasterized by `cursor.rs` — as its
     /// cursor, so the button and the pointer are the same drawing.
     pub const RESIZE: &str = "\u{ed6e}";
-    /// Select every layer using one Group Colors row's colour. A reticle rather
-    /// than a cursor or a checkbox: the button *finds* things.
+    /// Select what matches: *Select same…*, *Select matching layers*, every layer
+    /// using one Group Colors row's colour. A reticle rather than a cursor or a
+    /// checkbox: the button *finds* things.
     pub const SCAN: &str = "\u{ebb6}";
     // The four boolean operations, in the order the dropdown lists them.
     pub const UNITE_SQUARE: &str = "\u{e878}";
@@ -778,7 +780,9 @@ pub mod icon {
     /// Compare's grip between the two states, and dot and dash *spacing*: the gap
     /// between two things.
     pub const ARROWS_LEFT_RIGHT: &str = "\u{e0a0}";
-    /// Fit the dash pattern to the shape's corners.
+    /// A box around several things: a multi-selection's identity, Compare's
+    /// Overlay, a text's *Fixed size*, and fitting the dash pattern to the
+    /// shape's corners.
     pub const BOUNDING_BOX: &str = "\u{e6ce}";
     /// A custom dash pattern, typed as a list.
     pub const LIST_DASHES: &str = "\u{e2f4}";
@@ -832,8 +836,8 @@ pub mod icon {
     pub const TRANSLATE: &str = "\u{e4a2}";
     /// A line limit — a count, not a size.
     pub const LIST_NUMBERS: &str = "\u{e2f6}";
-    /// Two overlapping right angles. Box trim (the box cropped to the type), and
-    /// the crop tool on the rail — both callers, so neither name owns it.
+    /// Two overlapping right angles: cutting to a box. Box trim (the box cropped
+    /// to the type), *Clip content*, and the crop tool on the rail.
     pub const CROP: &str = "\u{e1d4}";
     /// A swap, one thing put in another's place: *Replace text* and its step, an
     /// instance swap property, *Use suggestion*, and the Text direction step.
@@ -910,13 +914,14 @@ pub mod icon {
     /// a kit (§15 D981).
     pub const ARROW_UP_RIGHT: &str = "\u{e092}";
     /// Open elsewhere: a main's documentation link in the browser, *Open kit*;
-    /// also a variant clash's *Select it* and *Move to page ▸*.
+    /// also *Move to page ▸*.
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
     /// A main's documentation link, opened in the browser.
     pub const BOOK_OPEN: &str = "\u{e0e6}";
     /// Comparing with a version: two states, each arrow carrying one into the other.
     pub const GIT_DIFF: &str = "\u{f00c}";
-    /// *Select all instances*.
+    /// Select a known set of layers: *Select all*, *Select all instances*, every
+    /// *Select N layers*, a variant clash's *Select it*.
     pub const SELECTION_ALL: &str = "\u{e746}";
     /// A variant clash — two variants on one combination (§15 D982): a
     /// warning glyph, in neutral ink, no new hue.

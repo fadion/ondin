@@ -883,7 +883,8 @@ impl OndinApp {
                             let n = users.get(&v.id).map_or(0, Vec::len);
                             let select = item(
                                 ui,
-                                ui::MenuRow::new(icon::SELECTION, &layers_label(n)).enabled(n > 0),
+                                ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(n))
+                                    .enabled(n > 0),
                             );
                             if select.clicked() {
                                 acts.push(Act::Select(users[&v.id].clone()));
@@ -1036,7 +1037,7 @@ impl OndinApp {
                             who.dedup();
                             let select = ui::menu_row(
                                 ui,
-                                ui::MenuRow::new(icon::SELECTION, &layers_label(who.len()))
+                                ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(who.len()))
                                     .enabled(!who.is_empty()),
                                 MENU_ROW_H,
                             );
@@ -1242,7 +1243,7 @@ impl OndinApp {
                             who.dedup();
                             let select = ui::menu_row(
                                 ui,
-                                ui::MenuRow::new(icon::SELECTION, &layers_label(who.len()))
+                                ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(who.len()))
                                     .enabled(!who.is_empty()),
                                 MENU_ROW_H,
                             );

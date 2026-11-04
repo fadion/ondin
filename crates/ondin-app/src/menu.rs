@@ -691,7 +691,7 @@ impl Item {
                 Group::Head,
             ),
             Item::MakeKeyLayer => s("Make this the key layer", icon::DIAMOND, None, Group::Head),
-            Item::ClipContent => s("Clip content", icon::BOUNDING_BOX, None, Group::Head),
+            Item::ClipContent => s("Clip content", icon::CROP, None, Group::Head),
             Item::EditText => s("Edit text", icon::TEXT_T, None, Group::Head),
             Item::TextSizing(0) => s(
                 "Auto width",
@@ -999,7 +999,12 @@ impl Item {
                 Group::Export,
             ),
 
-            Item::SelectAll => s("Select all", icon::SCAN, Some("Ctrl+A"), Group::Clipboard),
+            Item::SelectAll => s(
+                "Select all",
+                icon::SELECTION_ALL,
+                Some("Ctrl+A"),
+                Group::Clipboard,
+            ),
             Item::ZoomFit => s(
                 "Zoom to fit",
                 icon::ZOOM_FIT,
@@ -1277,14 +1282,9 @@ impl Item {
                     Same::Font => "Select same font",
                     Same::Effect => "Select same effects",
                 };
-                s(label, icon::SELECTION_ALL, None, Group::Clipboard)
+                s(label, icon::SCAN, None, Group::Clipboard)
             }
-            Item::SelectMatching => s(
-                "Select matching layers",
-                icon::SELECTION_ALL,
-                None,
-                Group::Clipboard,
-            ),
+            Item::SelectMatching => s("Select matching layers", icon::SCAN, None, Group::Clipboard),
             Item::SelectInverse => s("Select inverse", icon::SELECTION, None, Group::Clipboard),
             Item::TextChord(chord) => {
                 use crate::input::TextChord;

@@ -1944,9 +1944,9 @@ impl OndinApp {
         ) {
             Ok((tx, new)) => {
                 let (verb, glyph) = if to_frame {
-                    ("Turn into frame", icon::BOUNDING_BOX)
+                    ("Turn into frame", icon::FRAME)
                 } else {
-                    ("Turn into group", icon::SELECTION)
+                    ("Turn into group", icon::SELECTION_PLUS)
                 };
                 self.session.name_step(verb, glyph);
                 if self.commit_edit(tx) {
@@ -6975,7 +6975,7 @@ impl OndinApp {
             .collect();
         let ops = self.kept_in_place(ops, subjects);
         self.session
-            .name_step(if pin { "Pin" } else { "Unpin" }, icon::CROSSHAIR_SIMPLE);
+            .name_step(if pin { "Pin" } else { "Unpin" }, icon::PIN);
         self.commit_edit(Transaction(ops));
     }
 
@@ -7152,7 +7152,10 @@ impl OndinApp {
         let ops = self.kept_in_place(ops, subjects);
         self.session.name_step(
             if on { "Centre" } else { "Uncentre" },
-            icon::CROSSHAIR_SIMPLE,
+            match horizontal {
+                true => icon::ALIGN_CENTER_HORIZONTAL,
+                false => icon::ALIGN_CENTER_VERTICAL,
+            },
         );
         self.commit_edit(Transaction(ops));
     }
@@ -7271,7 +7274,7 @@ impl OndinApp {
         }
         if flip && let Some(was) = set {
             let ops = self.inset_flip_ops(subjects, edge, matches!(was, LengthPct::Px(_)));
-            self.session.name_step("Position", icon::CROSSHAIR_SIMPLE);
+            self.session.name_step("Position", icon::PIN);
             self.commit_edit(Transaction(ops));
             return;
         }
@@ -7285,7 +7288,7 @@ impl OndinApp {
             };
             self.typed_inset_ops(subjects, edge, value)
         };
-        self.named_valve("Position", icon::CROSSHAIR_SIMPLE, &resp, Transaction(ops));
+        self.named_valve("Position", icon::PIN, &resp, Transaction(ops));
     }
 
     /// The unit suffix's edit: every subject's pinned `edge` converted to `%` of

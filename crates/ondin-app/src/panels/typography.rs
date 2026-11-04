@@ -3450,7 +3450,7 @@ impl OndinApp {
                     })
                     && BoxTrim::ALL[i] != b.trim
                 {
-                    self.session.name_step("Box trim", icon::BOUNDING_BOX);
+                    self.session.name_step("Box trim", icon::CROP);
                     self.commit_trim(
                         subject.id,
                         BlockStyle {

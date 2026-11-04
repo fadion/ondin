@@ -972,7 +972,7 @@ impl OndinApp {
                     let w = ui::action_button_w(ui.ctx(), label);
                     if ui::action_button(
                         ui,
-                        icon::ARROW_SQUARE_OUT,
+                        icon::SELECTION_ALL,
                         label,
                         FieldButton::Off,
                         egui::vec2(w, ui::CONTROL_H),
@@ -1467,7 +1467,7 @@ impl OndinApp {
                     let w = ui::action_button_w(ui.ctx(), label);
                     if ui::action_button(
                         ui,
-                        icon::ARROW_SQUARE_OUT,
+                        icon::SELECTION_ALL,
                         label,
                         FieldButton::Off,
                         egui::vec2(w, ui::CONTROL_H),

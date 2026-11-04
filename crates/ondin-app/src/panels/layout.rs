@@ -1845,7 +1845,7 @@ impl OndinApp {
         // about it.
         let (glyph, title, body, button, button_glyph) = match why {
             OutOfFlow::Absolute => (
-                icon::CROSSHAIR_SIMPLE,
+                icon::PIN,
                 "Absolutely positioned".to_owned(),
                 format!(
                     "{}, so it sits outside the layout.",

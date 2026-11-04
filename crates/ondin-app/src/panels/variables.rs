@@ -141,9 +141,6 @@ enum Menu {
     Collection(CollectionId),
     /// *Delete collection…*'s confirmation, saying what goes.
     ConfirmCollection(CollectionId),
-    /// A variable row's *Move to ▸*: the other collections, then *New
-    /// collection*.
-    MoveTo(VarId),
     /// A variable's scope: the field families it may bind, ticked.
     Scope(VarId),
 }
@@ -166,6 +163,9 @@ pub(crate) struct Browser {
     /// Whether the field `edit` names still has to take the keyboard.
     edit_focus: bool,
     menu: Option<(Menu, egui::Pos2)>,
+    /// A variable menu's *Move to ▸* row while its list of collections is open
+    /// beside it.
+    move_to: Option<egui::Rect>,
     /// The sentence a refused edit is answered with, until the next edit.
     refusal: Option<String>,
     /// The text that refusal answered, which the field draws dim and dotted
@@ -673,8 +673,9 @@ impl OndinApp {
             b.bar_drag = None;
         }
 
-        if let Some((menu, at)) = b.menu.clone() {
-            self.var_menu(ctx, &mut b, menu, at, &users, &mut acts);
+        match b.menu.clone() {
+            Some((menu, at)) => self.var_menu(ctx, &mut b, menu, at, &users, &mut acts),
+            None => b.move_to = None,
         }
 
         self.var_browser = Some(b);
@@ -716,7 +717,6 @@ impl OndinApp {
             Menu::Mode(_) => 3.0,
             Menu::Collection(_) => 4.5,
             Menu::ConfirmCollection(_) => 4.0,
-            Menu::MoveTo(_) => table.collections().len() as f32 + 1.5,
             Menu::Scope(v) => scope_rows(table.get(*v)),
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
@@ -732,7 +732,7 @@ impl OndinApp {
             .fixed_pos(pos)
             .show(ctx, |ui| {
                 ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(menu_w - 8.0);
+                    ui.set_width(ui::menu_inner_w(menu_w, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let row = |ui: &mut egui::Ui, glyph: &str, label: &str| {
                         ui::menu_row(ui, ui::MenuRow::new(glyph, label), MENU_ROW_H).clicked()
@@ -794,18 +794,27 @@ impl OndinApp {
                                 close = true;
                                 return;
                             };
-                            if row(ui, icon::PENCIL_SIMPLE, "Rename") {
+                            // Any row but *Move to* hovered closes its list.
+                            let mut elsewhere = false;
+                            let mut item = |ui: &mut egui::Ui, row: ui::MenuRow<'_>| {
+                                let r = ui::menu_row(ui, row, MENU_ROW_H);
+                                elsewhere |= r.hovered();
+                                r
+                            };
+                            if item(ui, ui::MenuRow::new(icon::PENCIL_SIMPLE, "Rename")).clicked() {
                                 acts.push(Act::StartEdit(Edit::Name {
                                     var: v.id,
                                     text: v.name.clone(),
                                 }));
                                 close = true;
                             }
-                            if row(ui, icon::COPY, "Duplicate") {
+                            if item(ui, ui::MenuRow::new(icon::COPY, "Duplicate")).clicked() {
                                 acts.push(Act::Duplicate(v.id));
                                 close = true;
                             }
-                            if row(ui, icon::TEXT_ALIGN_LEFT, "Description") {
+                            if item(ui, ui::MenuRow::new(icon::TEXT_ALIGN_LEFT, "Description"))
+                                .clicked()
+                            {
                                 acts.push(Act::StartEdit(Edit::Describe {
                                     of: Described::Variable(v.id),
                                     text: v.description.clone(),
@@ -815,10 +824,9 @@ impl OndinApp {
                             // A boolean binds visibility and nothing else, so
                             // it has no scope to narrow.
                             let boolean = v.kind == VarKind::Boolean;
-                            let scope = ui::menu_row(
+                            let scope = item(
                                 ui,
                                 ui::MenuRow::new(icon::TARGET, "Scope…").enabled(!boolean),
-                                MENU_ROW_H,
                             );
                             let scope = match boolean {
                                 true => scope.on_hover_text("A boolean binds visibility only."),
@@ -828,35 +836,41 @@ impl OndinApp {
                             if scope.clicked() && !boolean {
                                 b.menu = Some((Menu::Scope(v.id), at));
                             }
+                            // Lit while its list is open, as the View menu's
+                            // *Panels ▸* is; hover or a click opens it.
+                            let held = b.move_to.is_some();
+                            // The row about to be drawn: a highlighted row leaves
+                            // its hover to the caller.
+                            let next = egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                egui::vec2(ui.available_width(), MENU_ROW_H),
+                            );
                             let move_to = ui::menu_row(
                                 ui,
-                                ui::MenuRow::new(icon::DATABASE, "Move to"),
+                                ui::MenuRow::new(icon::DATABASE, "Move to")
+                                    .highlight(held || ui.rect_contains_pointer(next)),
                                 MENU_ROW_H,
                             );
                             ui::paint_submenu_caret(ui, move_to.rect);
-                            if move_to.clicked() {
-                                b.menu = Some((Menu::MoveTo(v.id), at));
-                            }
+                            let move_row = (move_to.hovered() || move_to.clicked() || held)
+                                .then_some(move_to.rect);
                             let n = users.get(&v.id).map_or(0, Vec::len);
-                            let select = ui::menu_row(
+                            let select = item(
                                 ui,
                                 ui::MenuRow::new(icon::SELECTION, &layers_label(n)).enabled(n > 0),
-                                MENU_ROW_H,
                             );
                             if select.clicked() {
                                 acts.push(Act::Select(users[&v.id].clone()));
                                 close = true;
                             }
                             ui::menu_sep(ui);
-                            let del = ui::menu_row(
-                                ui,
-                                ui::MenuRow::new(icon::TRASH, "Delete").danger(true),
-                                MENU_ROW_H,
-                            );
+                            let del =
+                                item(ui, ui::MenuRow::new(icon::TRASH, "Delete").danger(true));
                             if del.clicked() {
                                 acts.push(Act::Delete(vec![v.id], v.name.clone()));
                                 close = true;
                             }
+                            b.move_to = move_row.filter(|_| !elsewhere);
                         }
                         Menu::Mode(m) => {
                             let Some(mode) = table.mode(*m) else {
@@ -1179,16 +1193,7 @@ impl OndinApp {
                                 1 => " 1 frame returns to Inherit.".to_string(),
                                 n => format!(" {n} frames return to Inherit."),
                             });
-                            ui.add_space(4.0);
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(what)
-                                        .size(11.5)
-                                        .color(theme::text::muted()),
-                                )
-                                .wrap(),
-                            );
-                            ui.add_space(4.0);
+                            ui::menu_note(ui, &what);
                             let del = ui::menu_row(
                                 ui,
                                 ui::MenuRow::new(icon::TRASH, "Delete collection").danger(true),
@@ -1199,33 +1204,6 @@ impl OndinApp {
                                 close = true;
                             }
                             if row(ui, icon::X, "Cancel") {
-                                close = true;
-                            }
-                        }
-                        Menu::MoveTo(v) => {
-                            let here = table.collection_of(*v).map(|c| c.id);
-                            for c in table.collections() {
-                                // One with no mode has no column to move into.
-                                let open = Some(c.id) != here && !c.modes.is_empty();
-                                let r = ui::menu_row(
-                                    ui,
-                                    ui::MenuRow::new("", &c.name)
-                                        .checked(Some(c.id) == here)
-                                        .enabled(open),
-                                    MENU_ROW_H,
-                                );
-                                let r = match c.modes.is_empty() {
-                                    true => r.on_hover_text("It has no mode yet"),
-                                    false => r,
-                                };
-                                if r.clicked() && open {
-                                    acts.push(Act::MoveTo(*v, Some(c.id)));
-                                    close = true;
-                                }
-                            }
-                            ui::menu_sep(ui);
-                            if row(ui, icon::PLUS, "New collection") {
-                                acts.push(Act::MoveTo(*v, None));
                                 close = true;
                             }
                         }
@@ -1247,16 +1225,7 @@ impl OndinApp {
                                 1 => format!("Delete {}? 1 frame returns to Inherit.", mode.name),
                                 n => format!("Delete {}? {n} frames return to Inherit.", mode.name),
                             };
-                            ui.add_space(4.0);
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(what)
-                                        .size(11.5)
-                                        .color(theme::text::muted()),
-                                )
-                                .wrap(),
-                            );
-                            ui.add_space(4.0);
+                            ui::menu_note(ui, &what);
                             let del = ui::menu_row(
                                 ui,
                                 ui::MenuRow::new(icon::TRASH, "Delete mode").danger(true),
@@ -1275,11 +1244,72 @@ impl OndinApp {
             })
             .response
             .rect;
+        // *Move to ▸*'s list beside its row: the collections, the variable's own
+        // checked, then *New collection*.
+        let mut fly = None;
+        if let (Menu::Var(v), Some(row_rect), false) = (&menu, b.move_to, close) {
+            let v = *v;
+            let n = table.collections().len() as f32 + 1.0;
+            let size = egui::vec2(
+                menu_w,
+                n * MENU_ROW_H + (n - 1.0) + ui::MENU_SEP_H + 2.0 * (4.0 + ui::MENU_BORDER),
+            );
+            let pos = ui::flyout_place(ctx, row_rect, size, 4.0);
+            fly = Some(
+                egui::Area::new(egui::Id::new("var-browser-menu").with("move-to"))
+                    .order(egui::Order::Tooltip)
+                    .fixed_pos(pos)
+                    .show(ctx, |ui| {
+                        ui::menu_frame(4.0).show(ui, |ui| {
+                            ui.set_width(ui::menu_inner_w(menu_w, 4.0));
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            let here = table.collection_of(v).map(|c| c.id);
+                            for c in table.collections() {
+                                // One with no mode has no column to move into.
+                                let open = Some(c.id) != here && !c.modes.is_empty();
+                                let r = ui::menu_row(
+                                    ui,
+                                    ui::MenuRow::new("", &c.name)
+                                        .checked(Some(c.id) == here)
+                                        .enabled(open),
+                                    MENU_ROW_H,
+                                );
+                                let r = match c.modes.is_empty() {
+                                    true => r.on_hover_text("It has no mode yet"),
+                                    false => r,
+                                };
+                                if r.clicked() && open {
+                                    acts.push(Act::MoveTo(v, Some(c.id)));
+                                    close = true;
+                                }
+                            }
+                            ui::menu_sep(ui);
+                            let new = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::PLUS, "New collection"),
+                                MENU_ROW_H,
+                            );
+                            if new.clicked() {
+                                acts.push(Act::MoveTo(v, None));
+                                close = true;
+                            }
+                        });
+                    })
+                    .response
+                    .rect,
+            );
+        }
         let pressed_elsewhere = ctx.input(|i| {
-            i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !rect.contains(p) && !fly.is_some_and(|f| f.contains(p)))
         });
         if close || pressed_elsewhere {
             b.menu = None;
+        }
+        if b.menu.is_none() || !matches!(menu, Menu::Var(_)) {
+            b.move_to = None;
         }
     }
 
@@ -1436,6 +1466,7 @@ impl OndinApp {
             Act::OpenMenu(menu, at) => {
                 if let Some(b) = self.var_browser.as_mut() {
                     b.menu = Some((menu, at));
+                    b.move_to = None;
                 }
             }
             Act::KitUpdates => self.open_kit_updates(),
@@ -2024,6 +2055,13 @@ fn collection_row(ui: &mut egui::Ui, c: &ondin_core::variable::Collection) {
 /// The scope popover's width.
 const SCOPE_W: f32 = 300.0;
 
+/// The scope popover's inset on both sides, a menu row's: its head's glyph, the
+/// switch's label, the boxes, the counts and the footer all keep it.
+const SCOPE_INSET: f32 = 8.0;
+
+/// Where a ticked row's label starts: a menu row's label column.
+const SCOPE_LABEL_X: f32 = ui::MENU_LABEL_X;
+
 /// The scope popover's height in menu rows for `v`'s kind — fixed per kind,
 /// so it never resizes while boxes are ticked.
 fn scope_rows(v: Option<&Variable>) -> f32 {
@@ -2063,7 +2101,7 @@ fn scope_popover(
     };
     // Head: its kind's glyph, its name, its collection.
     ui.horizontal(|ui| {
-        ui.add_space(6.0);
+        ui.add_space(SCOPE_INSET);
         ui.label(theme::icon_text(
             kind_glyph(v.kind),
             15.0,
@@ -2077,7 +2115,7 @@ fn scope_popover(
         );
         if let Some(c) = t.collection_of(v.id) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(6.0);
+                ui.add_space(SCOPE_INSET);
                 ui.label(
                     egui::RichText::new(&c.name)
                         .size(11.0)
@@ -2089,7 +2127,14 @@ fn scope_popover(
     ui::menu_sep(ui);
     let every = v.scope.is_none();
     let every_label = format!("Every {} field", kind_word(v.kind));
-    if ui::switch_row(ui, &every_label, every, MENU_ROW_H).clicked() {
+    // At the rows' inset: `switch_row` sets its label flush with its rect.
+    let inset = ui
+        .available_rect_before_wrap()
+        .shrink2(egui::vec2(SCOPE_INSET, 0.0));
+    let switch = ui.scope_builder(egui::UiBuilder::new().max_rect(inset), |ui| {
+        ui::switch_row(ui, &every_label, every, MENU_ROW_H)
+    });
+    if switch.inner.clicked() {
         // Off leaves every box ticked to start from.
         let next = match every {
             true => Some(Scope::of(Field::of_kind(v.kind))),
@@ -2108,7 +2153,7 @@ fn scope_popover(
             group = Some(g);
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                ui.add_space(8.0);
+                ui.add_space(SCOPE_INSET);
                 ui.label(ui::eyebrow(g));
             });
         }
@@ -2120,9 +2165,13 @@ fn scope_popover(
         );
         let p = ui.painter();
         ui::list_row_ground(p, rect, false, resp.hovered() && !every);
+        // `paint_tick_box` centres the box on the point it is handed.
         ui::paint_tick_box(
             p,
-            egui::pos2(rect.left() + 8.0, rect.center().y - ui::TICK_BOX / 2.0),
+            egui::pos2(
+                rect.left() + SCOPE_INSET + ui::TICK_BOX / 2.0,
+                rect.center().y,
+            ),
             on,
             resp.hovered(),
         );
@@ -2132,7 +2181,7 @@ fn scope_popover(
             (false, false) => theme::text::muted(),
         };
         p.text(
-            egui::pos2(rect.left() + 8.0 + ui::TICK_BOX + 8.0, rect.center().y),
+            egui::pos2(rect.left() + SCOPE_LABEL_X, rect.center().y),
             egui::Align2::LEFT_CENTER,
             field_label(f),
             egui::FontId::proportional(11.5),
@@ -2149,7 +2198,7 @@ fn scope_popover(
             );
             let hit = ui.interact(r, resp.id.with("count"), egui::Sense::click());
             ui.painter().text(
-                egui::pos2(rect.right() - 10.0, rect.center().y),
+                egui::pos2(rect.right() - SCOPE_INSET, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 n,
                 egui::FontId::proportional(11.0),
@@ -2181,7 +2230,7 @@ fn scope_popover(
     ui::menu_sep(ui);
     let foot = |ui: &mut egui::Ui, text: String, ink: egui::Color32| {
         ui.horizontal(|ui| {
-            ui.add_space(8.0);
+            ui.add_space(SCOPE_INSET);
             ui.label(egui::RichText::new(text).size(11.0).color(ink));
         });
     };
@@ -2214,13 +2263,12 @@ fn kind_glyph(k: VarKind) -> &'static str {
     }
 }
 
-/// What the picker says of a collection beside its name: its two modes, or
-/// how many.
+/// What the picker says of a collection beside its name: how many modes it has,
+/// never their names, which would crowd the collection's own out of the row.
 fn modes_summary(c: &ondin_core::variable::Collection) -> String {
-    match c.modes.as_slice() {
-        [a, b] => format!("{} · {}", a.name, b.name),
-        [_] => "1 mode".to_string(),
-        many => format!("{} modes", many.len()),
+    match c.modes.len() {
+        1 => "1 mode".to_string(),
+        n => format!("{n} modes"),
     }
 }
 
@@ -2595,34 +2643,43 @@ fn collection_picker(
     }
     ui.spacing_mut().interact_size.y = SEARCH_H;
     ui.spacing_mut().button_padding.y = 0.0;
-    let combo = egui::ComboBox::from_id_salt("var-collection")
-        .icon(ui::combo_chevron)
-        .width(PICKER_W)
-        .selected_text(ui::glyph_and_text(icon::DATABASE, &current.name))
-        .show_ui(ui, |ui| {
-            ui::menu_rows(ui);
-            for c in t.collections() {
-                let summary = modes_summary(c);
-                let row = ui::MenuRow::new("", &c.name)
-                    .checked(c.id == shown)
-                    .accel(Some(&summary));
-                if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
-                    acts.push(Act::ShowCollection(c.id));
-                }
-            }
-            ui::menu_sep(ui);
-            if ui::menu_row(
-                ui,
-                ui::MenuRow::new(icon::PLUS, "New collection"),
-                MENU_ROW_H,
-            )
-            .clicked()
-            {
-                acts.push(Act::NewCollection);
-            }
+    // A truncating face lays its text out against the room it is given, so the
+    // room is the picker's width: a long name ends in `…` instead of widening it.
+    let combo = ui
+        .scope(|ui| {
+            ui.set_max_width(PICKER_W);
+            egui::ComboBox::from_id_salt("var-collection")
+                .icon(ui::combo_chevron)
+                .width(PICKER_W)
+                .truncate()
+                .selected_text(ui::glyph_and_text(icon::DATABASE, &current.name))
+                .show_ui(ui, |ui| {
+                    ui::menu_rows(ui);
+                    for c in t.collections() {
+                        let summary = modes_summary(c);
+                        let row = ui::MenuRow::new("", &c.name)
+                            .checked(c.id == shown)
+                            .accel(Some(&summary));
+                        if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
+                            acts.push(Act::ShowCollection(c.id));
+                        }
+                    }
+                    ui::menu_sep(ui);
+                    if ui::menu_row(
+                        ui,
+                        ui::MenuRow::new(icon::PLUS, "New collection"),
+                        MENU_ROW_H,
+                    )
+                    .clicked()
+                    {
+                        acts.push(Act::NewCollection);
+                    }
+                })
+                .response
         })
-        .response
-        .on_hover_text("Collection · right-click for its menu");
+        .inner;
+    // The whole name, which a long one's face cuts.
+    let combo = combo.on_hover_text(format!("{} · right-click for its menu", current.name));
     if combo.secondary_clicked() {
         acts.push(Act::OpenMenu(
             Menu::Collection(shown),
@@ -4306,7 +4363,7 @@ impl OndinApp {
             .fixed_pos(pos)
             .show(ctx, |ui| {
                 ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(w - 8.0);
+                    ui.set_width(ui::menu_inner_w(w, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let inherit = ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit")
                         .accel(inherits.as_deref())
@@ -5791,6 +5848,149 @@ mod tests {
         assert!(t.collection(to).is_none());
         assert!(t.get(v).is_none());
         assert_eq!(app.session.doc.get(rect).unwrap().corner_vars(), [None; 4]);
+    }
+
+    /// **A variable's *Move to ▸* opens its list beside the row on hover**, with
+    /// the menu still up, and another row hovered closes the list.
+    ///
+    /// flip: `move_row` without `move_to.hovered()` → fails at "opens on hover".
+    #[test]
+    fn move_to_is_a_submenu_beside_its_row() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        let v = the_only_var(&app).id;
+        app.var_browser.as_mut().unwrap().edit = None;
+        app.var_act(Act::OpenMenu(Menu::Var(v), egui::pos2(400.0, 200.0)));
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        }
+        let row = last_text(&shapes, "Move to").expect("the row");
+        assert!(
+            last_text(&shapes, "New collection").is_none(),
+            "shut at first"
+        );
+        let hover = |at: egui::Pos2| vec![egui::Event::PointerMoved(at)];
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, hover(row), |app, ctx| {
+                app.var_browser_ui(ctx)
+            });
+        }
+        let new = last_text(&shapes, "New collection").expect("opens on hover");
+        assert!(
+            new.x > row.x + 150.0,
+            "beside the row: {new:?} against {row:?}"
+        );
+        assert!(
+            matches!(
+                app.var_browser.as_ref().unwrap().menu,
+                Some((Menu::Var(_), _))
+            ),
+            "the menu stays up under it"
+        );
+        let rename = last_text(&shapes, "Rename").expect("the menu's first row");
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, hover(rename), |app, ctx| {
+                app.var_browser_ui(ctx)
+            });
+        }
+        assert!(
+            last_text(&shapes, "New collection").is_none(),
+            "closed by another row"
+        );
+    }
+
+    /// **The scope popover's boxes sit level with their labels**, inset from the
+    /// card's edge as a menu row's glyph is.
+    ///
+    /// flip: `paint_tick_box` handed the box's top-left again → fails at "level".
+    #[test]
+    fn the_scope_boxes_line_up_with_their_labels() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        let v = the_only_var(&app).id;
+        app.var_browser.as_mut().unwrap().edit = None;
+        app.var_act(Act::Scope(
+            v,
+            Some(Scope::of(Field::of_kind(VarKind::Color))),
+        ));
+        app.var_act(Act::OpenMenu(Menu::Scope(v), egui::pos2(400.0, 200.0)));
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        }
+        let label = last_text(&shapes, "Fill").expect("the fill row");
+        fn tick(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(r) if r.rect.width() == ui::TICK_BOX => out.push(r.rect),
+                egui::Shape::Vec(v) => v.iter().for_each(|x| tick(x, out)),
+                _ => {}
+            }
+        }
+        let mut boxes = Vec::new();
+        shapes.iter().for_each(|s| tick(&s.shape, &mut boxes));
+        let row = boxes
+            .iter()
+            .find(|b| (b.center().y - label.y).abs() < MENU_ROW_H / 2.0)
+            .expect("a box in the fill row");
+        assert!(
+            (row.center().y - label.y).abs() < 1.0,
+            "level: {row:?} against {label:?}"
+        );
+        let card = 400.0 + 4.0 + ui::MENU_BORDER;
+        assert!(row.left() >= card + SCOPE_INSET - 0.5, "inset: {row:?}");
+    }
+
+    /// **The picker counts a collection's modes and never names them.**
+    #[test]
+    fn the_picker_counts_modes() {
+        let (_ctx, mut app) = app();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewMode);
+        let t = app.session.doc.variables();
+        assert_eq!(t.collections()[0].modes.len(), 2, "the fixture: two modes");
+        assert_eq!(modes_summary(&t.collections()[0]), "2 modes");
+    }
+
+    /// **A long collection name ends in `…` on the picker's face** instead of
+    /// widening it past [`PICKER_W`].
+    ///
+    /// flip: the picker's `ComboBox` without `.truncate()` → the face takes the
+    /// row's room and the search box after it panics on a negative size, before
+    /// "as wide" is reached.
+    #[test]
+    fn a_long_collection_name_is_cut_on_the_picker() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewCollection);
+        let c = app.session.doc.variables().collections()[1].id;
+        let long = "A very long collection name that has to be cut short";
+        app.var_act(Act::CollectionName(c, long.into()));
+        app.var_browser.as_mut().unwrap().edit = None;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        }
+        assert_eq!(
+            app.session.doc.variables().collection(c).unwrap().name,
+            long
+        );
+        fn face(shape: &egui::Shape, out: &mut Option<f32>) {
+            match shape {
+                egui::Shape::Text(t) if t.galley.job.text.contains("A very long") => {
+                    *out = Some(t.galley.size().x);
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|x| face(x, out)),
+                _ => {}
+            }
+        }
+        let mut w = None;
+        shapes.iter().for_each(|s| face(&s.shape, &mut w));
+        let w = w.expect("the face shows the collection");
+        assert!(w < PICKER_W, "as wide as the picker at most: {w}");
     }
 
     /// **A frame's card has a mode row per collection with two modes or more**,

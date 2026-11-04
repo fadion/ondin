@@ -257,7 +257,7 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
             glyph_col,
         );
     }
-    let label_x = if bare { 8.0 } else { 8.0 + 15.0 + 9.0 };
+    let label_x = if bare { 8.0 } else { MENU_LABEL_X };
     let accel_w = match row.accel {
         Some(accel) => {
             let r = p.text(
@@ -298,6 +298,10 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
     }
     resp
 }
+
+/// Where a [`menu_row`]'s label starts after its glyph: the 8pt inset, the 15pt
+/// glyph column, 9pt of air. A list row with a box in the glyph's place uses it too.
+pub const MENU_LABEL_X: f32 = 8.0 + 15.0 + 9.0;
 
 /// The air between a menu row's label and its accelerator; small so every fixed
 /// label stays whole (`a_long_reset_label_is_cut_inside_the_row_and_fixed_labels_are_whole`).
@@ -358,6 +362,24 @@ pub fn menu_sep(ui: &mut egui::Ui) {
         0,
         sep_ink(),
     );
+}
+
+/// A sentence inside a menu card, as a confirmation says what goes: wrapped, in
+/// the muted ink, inset as far as a row's glyph on both sides and with air above
+/// and below, so it neither touches the card's edge nor crowds the rows.
+pub fn menu_note(ui: &mut egui::Ui, text: &str) {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(8, 4))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(11.5)
+                        .color(theme::text::muted()),
+                )
+                .wrap(),
+            );
+        });
 }
 
 /// Where a menu of `size` opened at `at` actually goes, so that all of it stays

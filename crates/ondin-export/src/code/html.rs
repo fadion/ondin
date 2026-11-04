@@ -1,5 +1,6 @@
-//! The plain HTML/CSS emitter: `index.html`, one `styles.css`, `assets/` and
-//! `report.txt`. No components — an instance is written out as its layers.
+//! The plain HTML/CSS emitter: `index.html`, a `<name>.html` for each other page
+//! (`walk::Page::others`), one `styles.css`, `assets/` and `report.txt`. No
+//! components — an instance is written out as its layers.
 
 use super::dom::{self, Arg, Child, Element, Show, Syntax, When};
 use super::{BASE_CSS, CodeExport, CodeFile, walk};
@@ -9,10 +10,15 @@ use std::collections::HashMap;
 /// `origins` as a page, in the order given (later on top).
 pub fn html_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport {
     let page = walk::page(doc, res, origins, false);
-    let root = page.root.clone();
     let mut styles = BASE_CSS.to_string();
-    page.root.css(&mut styles);
-    files_of(page, root, styles)
+    let roots: Vec<Element> = std::iter::once(&page.root)
+        .chain(page.others.iter().map(|(_, r)| r))
+        .cloned()
+        .collect();
+    for root in &roots {
+        root.css(&mut styles);
+    }
+    files_of(page, roots, styles)
 }
 
 /// The React and Vue page drawn as plain HTML: each use as the tree its
@@ -23,6 +29,9 @@ pub fn html_of_components(doc: &Document, res: &Resolved, origins: &[NodeId]) ->
     let page = walk::page(doc, res, origins, true);
     let mut styles = BASE_CSS.to_string();
     page.root.css(&mut styles);
+    for (_, root) in &page.others {
+        root.css(&mut styles);
+    }
     // Classes are unique per file, so each component's are prefixed with its name.
     let mut components = HashMap::new();
     for c in &page.components {
@@ -39,8 +48,11 @@ pub fn html_of_components(doc: &Document, res: &Resolved, origins: &[NodeId]) ->
             .collect();
         components.insert(c.name.clone(), (bodies, defaults));
     }
-    let root = drawn(&page.root, &components, &Env::new()).unwrap_or_default();
-    files_of(page, root, styles)
+    let roots: Vec<Element> = std::iter::once(&page.root)
+        .chain(page.others.iter().map(|(_, r)| r))
+        .map(|r| drawn(r, &components, &Env::new()).unwrap_or_default())
+        .collect();
+    files_of(page, roots, styles)
 }
 
 /// What a component's props hold: each one's value, none of them [`Arg::Var`].
@@ -164,30 +176,37 @@ fn drawn(el: &Element, components: &Components, env: &Env) -> Option<Element> {
     Some(out)
 }
 
-/// `index.html` around `root`, `styles.css`, and the tail every emitter writes.
-fn files_of(page: walk::Page, root: Element, styles: String) -> CodeExport {
-    let mut body = String::new();
-    root.markup(&mut body, 1, Syntax::Html);
+/// `index.html` around the first of `roots`, a `<name>.html` around each of
+/// the page's others, the one `styles.css` they share, and the tail every
+/// emitter writes.
+fn files_of(page: walk::Page, roots: Vec<Element>, styles: String) -> CodeExport {
     let tokens_link = if page.tokens.is_some() {
         "<link rel=\"stylesheet\" href=\"tokens.css\">\n"
     } else {
         ""
     };
-    let index = format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>Ondin export</title>\n{tokens_link}<link rel=\"stylesheet\" href=\"styles.css\">\n\
-         </head>\n<body>\n{body}</body>\n</html>\n"
-    );
-    let files = vec![
-        CodeFile {
-            path: "index.html".into(),
-            bytes: index.into_bytes(),
-        },
-        CodeFile {
-            path: "styles.css".into(),
-            bytes: styles.into_bytes(),
-        },
-    ];
+    let paths = std::iter::once("index.html".to_string())
+        .chain(page.others.iter().map(|(name, _)| format!("{name}.html")));
+    let mut files: Vec<CodeFile> = paths
+        .zip(roots)
+        .map(|(path, root)| {
+            let mut body = String::new();
+            root.markup(&mut body, 1, Syntax::Html);
+            let doc = format!(
+                "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+                 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+                 <title>Ondin export</title>\n{tokens_link}<link rel=\"stylesheet\" href=\"styles.css\">\n\
+                 </head>\n<body>\n{body}</body>\n</html>\n"
+            );
+            CodeFile {
+                path,
+                bytes: doc.into_bytes(),
+            }
+        })
+        .collect();
+    files.push(CodeFile {
+        path: "styles.css".into(),
+        bytes: styles.into_bytes(),
+    });
     super::finish(files, page)
 }

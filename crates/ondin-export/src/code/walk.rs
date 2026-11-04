@@ -8,7 +8,7 @@
 
 use super::Report;
 use super::css::{self, px};
-use super::dom::{Arg, Child, Classes, Element, Instance, Live, When};
+use super::dom::{Arg, Child, Classes, Element, Instance, Live, When, slug};
 use super::image;
 use super::tokens::{self, Tokens};
 use crate::svg::fmt;
@@ -33,6 +33,10 @@ use std::rc::Rc;
 /// The page the walk builds, and what it saw on the way.
 pub(crate) struct Page {
     pub root: Element,
+    /// The other pages, each a frame picking its mode by width that was
+    /// exported beside other layers, filling the window: its file name (a
+    /// slug for HTML, a component name for React and Vue) and its root.
+    pub others: Vec<(String, Element)>,
     pub report: Report,
     /// Pictures the page links to, by path under the export's folder.
     pub assets: Vec<(String, Vec<u8>)>,
@@ -61,8 +65,13 @@ pub(crate) struct Component {
 impl Component {
     /// The page as a component of one tree and no properties, named `App`.
     pub fn page(root: Element) -> Self {
+        Self::page_named("App", root)
+    }
+
+    /// Another page, named `name`: one of [`Page::others`].
+    pub fn page_named(name: &str, root: Element) -> Self {
         Component {
-            name: "App".into(),
+            name: name.into(),
             dir: String::new(),
             bodies: vec![(Vec::new(), root)],
             props: Vec::new(),
@@ -164,8 +173,6 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         }
         None => (doc, res),
     };
-    let view = crate::extent(res, &crate::drawn_origins(doc, origins))
-        .unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
     let mut walk = Walk {
         doc,
         res,
@@ -185,79 +192,45 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         params_memo: RefCell::default(),
         inline_memo: RefCell::default(),
     };
-    let mut root = Element::new("div", walk.classes.mint("page", "page"));
-    root.set("position", "relative");
-    root.set("width", px(view.width()));
-    root.set("height", px(view.height()));
-    // What blends mixes with the page's own layers and never the document behind
-    // it, as on the canvas and in every other export.
-    if origins.iter().any(|id| res.blends_within(*id)) {
-        root.set("isolation", "isolate");
-    }
-    let offset = Affine::translate(-view.origin().to_vec2());
     // A frame that picks its mode by width is the window: written alone, it
     // fills it, and the media blocks read the window's width as the canvas
-    // reads the frame's. Beside others it stays at its own width.
-    let window = match origins {
-        [id] => doc.width_pick(*id).is_some().then_some(*id),
-        _ => {
-            for id in origins.iter().filter(|id| doc.width_pick(**id).is_some()) {
-                if let Some(node) = doc.get(*id) {
-                    walk.report.approximate(format!(
-                        "frame {}: it picks its mode by width, which the page reads from \
-                         the window; export it alone to write it filling the window",
-                        label(node)
-                    ));
-                }
+    // reads the frame's. Beside other layers each such frame is a page of its
+    // own; the first page holds the other layers, else the first such frame.
+    let picks: Vec<NodeId> = origins
+        .iter()
+        .copied()
+        .filter(|id| doc.width_pick(*id).is_some())
+        .collect();
+    let (main, own): (Vec<NodeId>, &[NodeId]) = match picks.as_slice() {
+        [] => (origins.to_vec(), &[]),
+        [first, rest @ ..] => {
+            let others: Vec<NodeId> = origins
+                .iter()
+                .copied()
+                .filter(|id| !picks.contains(id))
+                .collect();
+            match others.is_empty() {
+                true => (vec![*first], rest),
+                false => (others, picks.as_slice()),
             }
-            None
         }
     };
-    if window.is_some() {
-        root.set("width", "100%");
-        root.set("min-height", px(view.height()));
-        root.style.retain(|(p, _)| *p != "height");
-    }
-    for id in origins {
-        let Some(node) = doc.get(*id) else { continue };
-        // An origin's parent is not in the export: it is placed where it is drawn.
-        let parent = node
-            .parent()
-            .and_then(|p| res.world_transform(p))
-            .unwrap_or(Affine::IDENTITY);
-        let local = offset * parent * res.used_local_of(node);
-        if let Some(el) = walk.node(
-            *id,
-            Place::Free {
-                local,
-                boxed: false,
-            },
-        ) {
-            let mut el = el;
-            if window == Some(*id) {
-                el.set("left", "0px");
-                el.set("width", "100%");
+    let root = walk.page_root(&main);
+    // A page's file is named by its frame, apart from the first page's and,
+    // for React and Vue, every component's.
+    let mut html_names: HashSet<String> = ["index".to_string()].into();
+    let mut others = Vec::new();
+    for id in own {
+        let name = doc.get(*id).map(Node::name).unwrap_or_default();
+        let file = match &mut walk.components {
+            Some(c) => unique_file(component_name(name), "Page", &mut c.names),
+            None => {
+                let base = slug(name);
+                let base = if base.is_empty() { "page".into() } else { base };
+                unique(base, &mut html_names)
             }
-            // The modes its ancestors set, which the export does not hold.
-            let t = doc.variables();
-            let inherited = node
-                .parent()
-                .map(|p| doc.modes_at(p))
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|m| t.mode(*m).is_some() && t.default_of(*m) != Some(*m));
-            if node.modes().is_empty()
-                && let Some(mode) = walk.tokens.modes_attr(inherited)
-            {
-                if el.instance.is_some() {
-                    let mode = mode.to_string();
-                    el = walk.with_mode(el, mode);
-                } else {
-                    el.attrs.push(("data-mode", mode.to_string()));
-                }
-            }
-            root.children.push(Child::Element(Box::new(el)));
-        }
+        };
+        others.push((file, walk.page_root(&[*id])));
     }
     if !components && holds_marked_set(doc, origins) {
         walk.report.state(
@@ -269,6 +242,7 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
     let components = walk.components.map(|c| c.list).unwrap_or_default();
     Page {
         root,
+        others,
         report: walk.report,
         assets: walk.assets,
         tokens,
@@ -328,6 +302,77 @@ pub(super) fn label(node: &Node) -> String {
 }
 
 impl Walk<'_> {
+    /// One page's root holding `origins`, each placed where it is drawn,
+    /// measured from their extent. A lone frame picking its mode by width fills
+    /// the window instead: the root `width: 100%` with `min-height` its height,
+    /// the frame `left: 0; width: 100%`.
+    fn page_root(&mut self, origins: &[NodeId]) -> Element {
+        let (doc, res) = (self.doc, self.res);
+        let view = crate::extent(res, &crate::drawn_origins(doc, origins))
+            .unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
+        let mut root = Element::new("div", self.classes.mint("page", "page"));
+        root.set("position", "relative");
+        root.set("width", px(view.width()));
+        root.set("height", px(view.height()));
+        // What blends mixes with the page's own layers and never the document
+        // behind it, as on the canvas and in every other export.
+        if origins.iter().any(|id| res.blends_within(*id)) {
+            root.set("isolation", "isolate");
+        }
+        let offset = Affine::translate(-view.origin().to_vec2());
+        let window = match origins {
+            [id] => doc.width_pick(*id).is_some().then_some(*id),
+            _ => None,
+        };
+        if window.is_some() {
+            root.set("width", "100%");
+            root.set("min-height", px(view.height()));
+            root.style.retain(|(p, _)| *p != "height");
+        }
+        for id in origins {
+            let Some(node) = doc.get(*id) else { continue };
+            // An origin's parent is not in the export: it is placed where it is drawn.
+            let parent = node
+                .parent()
+                .and_then(|p| res.world_transform(p))
+                .unwrap_or(Affine::IDENTITY);
+            let local = offset * parent * res.used_local_of(node);
+            let Some(mut el) = self.node(
+                *id,
+                Place::Free {
+                    local,
+                    boxed: false,
+                },
+            ) else {
+                continue;
+            };
+            if window == Some(*id) {
+                el.set("left", "0px");
+                el.set("width", "100%");
+            }
+            // The modes its ancestors set, which the export does not hold.
+            let t = doc.variables();
+            let inherited = node
+                .parent()
+                .map(|p| doc.modes_at(p))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|m| t.mode(*m).is_some() && t.default_of(*m) != Some(*m));
+            if node.modes().is_empty()
+                && let Some(mode) = self.tokens.modes_attr(inherited)
+            {
+                if el.instance.is_some() {
+                    let mode = mode.to_string();
+                    el = self.with_mode(el, mode);
+                } else {
+                    el.attrs.push(("data-mode", mode.to_string()));
+                }
+            }
+            root.children.push(Child::Element(Box::new(el)));
+        }
+        root
+    }
+
     /// The element for `id` placed by `place`, or `None` for a layer that draws
     /// nothing here (hidden, or a mask, which its parent's picture carries).
     ///

@@ -1,6 +1,7 @@
 //! The Vue emitter: single-file components in TypeScript with scoped styles.
 //!
-//! `App.vue` is the page; each main an instance on it uses, or the set it is a
+//! `App.vue` is the page, and `<Name>.vue` beside it each other page
+//! (`walk::Page::others`); each main an instance on it uses, or the set it is a
 //! variant of, becomes `components/<Name>.vue` (a kit's in `components/<Kit>/`):
 //! its variant properties string
 //! unions choosing a variant's tree by `v-if`, its boolean and text properties
@@ -21,8 +22,14 @@ use std::fmt::Write as _;
 pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport {
     let page = walk::page(doc, res, origins, true);
     let tokens = page.tokens.is_some();
-    let app = Component::page(page.root.clone());
-    let all: Vec<&Component> = std::iter::once(&app).chain(&page.components).collect();
+    let pages: Vec<Component> = std::iter::once(Component::page(page.root.clone()))
+        .chain(
+            page.others
+                .iter()
+                .map(|(name, root)| Component::page_named(name, root.clone())),
+        )
+        .collect();
+    let all: Vec<&Component> = pages.iter().chain(&page.components).collect();
 
     // A used component's root carries its user's scope as well as its own, and
     // its user's class as well as its own, so each file's classes are settled
@@ -62,7 +69,7 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
     // A slot may draw any component, so its class keeps off all of theirs.
     let any: HashSet<String> = classes
         .iter()
-        .filter(|(name, _)| *name != "App")
+        .filter(|(name, _)| !pages.iter().any(|p| p.name == **name))
         .flat_map(|(_, c)| c.iter().cloned())
         .collect();
     for bodies in &mut trees {
@@ -75,9 +82,10 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
     let dirs = super::dirs(&page.components);
     let mut files = Vec::new();
     for (i, (c, bodies)) in all.iter().zip(trees).enumerate() {
-        let path = match i {
-            0 => "App.vue".to_string(),
-            _ => format!("{}/{}.vue", c.dir, c.name),
+        // The pages at the top, `App.vue` first.
+        let path = match c.dir.is_empty() {
+            true => format!("{}.vue", c.name),
+            false => format!("{}/{}.vue", c.dir, c.name),
         };
         files.push(CodeFile {
             path,

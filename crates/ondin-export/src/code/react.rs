@@ -1,6 +1,7 @@
 //! The React emitter: TypeScript components, each with a CSS module.
 //!
-//! `App.tsx` is the page; each main an instance on it uses, or the set it is a
+//! `App.tsx` is the page, and `<Name>.tsx` beside it each other page
+//! (`walk::Page::others`); each main an instance on it uses, or the set it is a
 //! variant of, becomes `components/<Name>.tsx` beside `<Name>.module.css` (a
 //! kit's in `components/<Kit>/`): its
 //! variant properties string unions, its boolean and text properties typed
@@ -36,6 +37,17 @@ pub fn react_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExpor
             bytes: BASE_CSS.as_bytes().to_vec(),
         },
     ];
+    for (name, root) in &page.others {
+        let other = Component::page_named(name, root.clone());
+        files.push(CodeFile {
+            path: format!("{name}.tsx"),
+            bytes: module(&other, tokens, &dirs).into_bytes(),
+        });
+        files.push(CodeFile {
+            path: format!("{name}.module.css"),
+            bytes: super::stylesheet(root, "./").into_bytes(),
+        });
+    }
     for c in &page.components {
         files.push(CodeFile {
             path: format!("{}/{}.tsx", c.dir, c.name),
@@ -66,7 +78,8 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
         bodies,
         props,
     } = c;
-    let is_app = name == "App";
+    // A page is the only file at the top, and takes no props.
+    let is_page = dir.is_empty();
     let up = super::up(dir);
     let (uses, images) = super::references(bodies.iter().map(|(_, e)| e));
     let uses = super::with_defaults(uses, props);
@@ -107,8 +120,8 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     }
     out.push('\n');
 
-    if is_app {
-        let _ = writeln!(out, "export default function App() {{");
+    if is_page {
+        let _ = writeln!(out, "export default function {name}() {{");
     } else {
         match live {
             // The element's own props, less those the component names.

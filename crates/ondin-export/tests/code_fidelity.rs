@@ -2138,6 +2138,83 @@ fn a_content_varying_by_mode_draws_each_modes_text() {
     assert_eq!(html.matches("and welcome").count(), 2, "{html}");
 }
 
+/// **Frames picking their mode by width beside other layers are pages of their
+/// own**, each filling the window: the other layers keep `index.html` (`App`),
+/// each frame its own file named by it, and nothing is reported.
+///
+/// flip: `walk::page` putting every origin on one page → fails at the
+/// `home.html` lookup.
+#[test]
+fn frames_picked_by_width_beside_others_are_pages_of_their_own() {
+    use ondin_core::variable::{CollectionId, Mode};
+    use ondin_export::code::{react::react_of, vue::vue_of};
+    let mut d = Doc::new();
+    let (mobile, tablet) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        collection: CollectionId::FIRST,
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    d.apply(vec![
+        mode(mobile, "Mobile", 0),
+        mode(tablet, "Tablet", 1),
+        Operation::SetBreakpoints {
+            id: CollectionId::FIRST,
+            breakpoints: Some([(mobile, 0.0), (tablet, 768.0)].into()),
+        },
+    ]);
+    d.frame(None, 0.0, 0.0, 900.0, 200.0, "Home");
+    d.frame(None, 1000.0, 0.0, 600.0, 300.0, "Pricing");
+    d.add(
+        None,
+        NodeKind::Rect {
+            size: Size::new(40.0, 40.0),
+            corner_radii: RoundedRectRadii::default(),
+            corner_smoothing: 0.0,
+        },
+        Affine::translate((0.0, 400.0)),
+        "Note",
+    );
+    let (doc, res) = d.done();
+    let origins = doc.get(doc.first_page()).unwrap().children().to_vec();
+    let export = html_of(&doc, &res, &origins);
+    assert!(export.approximated.is_empty(), "{:?}", export.approximated);
+    let file = |name: &str| {
+        String::from_utf8(
+            export
+                .file(name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .to_vec(),
+        )
+        .unwrap()
+    };
+    let (index, home, pricing) = (file("index.html"), file("home.html"), file("pricing.html"));
+    assert!(
+        index.contains("class=\"note\"") && !index.contains("class=\"home\""),
+        "{index}"
+    );
+    assert!(home.contains("class=\"home\""), "Home's page:\n{home}");
+    assert!(pricing.contains("class=\"pricing\""), "{pricing}");
+    let css = file("styles.css");
+    assert_eq!(
+        css.matches("width: 100%").count(),
+        4,
+        "each page and frame fills the window:\n{css}"
+    );
+    let react = react_of(&doc, &res, &origins);
+    for path in ["App.tsx", "Home.tsx", "Home.module.css", "Pricing.tsx"] {
+        assert!(react.file(path).is_some(), "React lacks {path}");
+    }
+    let home = String::from_utf8(react.file("Home.tsx").unwrap().to_vec()).unwrap();
+    assert!(home.contains("export default function Home() {"), "{home}");
+    let vue = vue_of(&doc, &res, &origins);
+    assert!(vue.file("Pricing.vue").is_some() && vue.file("App.vue").is_some());
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

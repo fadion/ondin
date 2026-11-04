@@ -562,8 +562,14 @@ fn footer(ui: &mut egui::Ui, commit: Option<(&str, FieldButton)>) -> Option<Deci
 /// always rightmost. Answers the index pressed; a `Disabled` button answers
 /// nothing.
 pub(crate) fn footer_buttons(ui: &mut egui::Ui, buttons: &[(&str, FieldButton)]) -> Option<usize> {
-    let mut pressed = None;
     ui.add_space(FOOTER_GAP);
+    footer_row(ui, buttons)
+}
+
+/// [`footer_buttons`]' row without the gap above, for a popover, whose fields sit
+/// closer than a dialog's.
+pub(crate) fn footer_row(ui: &mut egui::Ui, buttons: &[(&str, FieldButton)]) -> Option<usize> {
+    let mut pressed = None;
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         // A right-to-left row adds the rightmost first.

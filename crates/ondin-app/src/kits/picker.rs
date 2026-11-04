@@ -1909,29 +1909,22 @@ fn section_row(ui: &mut egui::Ui, label: &str, count: &str) {
 /// library* — the dashboard's *Kits* filter, where any file can be made one
 /// from its card. Answers whether *Open library* was clicked.
 fn empty_note(ui: &mut egui::Ui) -> bool {
-    let mut open = false;
-    ui.vertical_centered(|ui| {
-        ui.add_space(10.0);
-        ui.label(theme::icon_text(icon::PACKAGE, 18.0, theme::text::dim()));
-        ui.label(
-            egui::RichText::new("No kits in your library")
-                .size(ui::CONTROL_PT)
-                .color(color::text()),
-        );
-        ui.label(
-            egui::RichText::new(
-                "Any document can become one: open it and choose Make this a kit \
-                 from the document menu.",
-            )
-            .size(ui::SMALL_PT)
-            .color(theme::text::dim()),
-        );
-        ui.add_space(8.0);
-        open =
-            crate::settings::text_button(ui, "Open library", crate::ui::FieldButton::Off).clicked();
-        ui.add_space(10.0);
-    });
-    open
+    ui.add_space(10.0);
+    ui::empty_state(
+        ui,
+        Some(icon::PACKAGE),
+        "No kits in your library",
+        "Any document can become one: open it and choose Make this a kit from the \
+         document menu.",
+        |ui| {
+            ui.add_space(8.0);
+            let open =
+                crate::settings::text_button(ui, "Open library", crate::ui::FieldButton::Off)
+                    .clicked();
+            ui.add_space(10.0);
+            open
+        },
+    )
 }
 
 #[cfg(test)]

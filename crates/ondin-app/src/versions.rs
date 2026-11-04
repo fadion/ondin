@@ -870,8 +870,9 @@ fn day_row(ui: &mut egui::Ui, day: &str, date: &str) {
     );
 }
 
-/// Under Now with no versions: why there are none, beside the dashed rail. `pins`
-/// is the version-history preference: off, `Ctrl+S` pins nothing.
+/// Under Now with no versions: why there are none, beside the dashed rail, in
+/// [`crate::ui::empty_state`]'s sizes and inks but laid along the rail rather than
+/// centred. `pins` is the version-history preference: off, `Ctrl+S` pins nothing.
 fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
     let w = ui.available_width();
     let x0 = TIME_W + COL_GAP + RAIL_W + COL_GAP;
@@ -902,7 +903,7 @@ fn empty_rows(ui: &mut egui::Ui, filed: bool, pins: bool) {
             egui::Align2::LEFT_TOP,
             "No versions yet",
             egui::FontId::proportional(crate::ui::CONTROL_PT),
-            color::text(),
+            theme::text::strong(),
         );
     }
     let top = if filed {

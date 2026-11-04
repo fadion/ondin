@@ -3407,24 +3407,10 @@ fn style_row(
     }
 }
 
+/// The browser's empty state, under the tabs.
 fn empty(ui: &mut egui::Ui, head: &str, sub: &str) {
     ui.add_space(40.0);
-    ui.vertical_centered(|ui| {
-        ui.label(
-            egui::RichText::new(head)
-                .size(ui::CONTROL_PT)
-                .color(theme::text::strong()),
-        );
-        ui.add_space(-4.0);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(sub)
-                    .size(ui::SMALL_PT)
-                    .color(theme::text::dim()),
-            )
-            .wrap(),
-        );
-    });
+    ui::empty_state(ui, None, head, sub, |_| ());
 }
 
 /// The columns' x for mode `i`, scrolled.

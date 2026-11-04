@@ -362,27 +362,25 @@ impl OndinApp {
                 .color(theme::text::dim()),
             );
             ui.add_space(6.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let accept = crate::settings::text_button(
-                    ui,
-                    if ready { "Accept all" } else { "Loading…" },
-                    if ready {
-                        crate::ui::FieldButton::Primary
-                    } else {
-                        crate::ui::FieldButton::Disabled
-                    },
-                );
-                if accept.clicked() && ready {
-                    app.open_menu = TopMenu::None;
-                    app.accept_kit_updates(None);
-                }
-                if crate::settings::text_button(ui, "Later", crate::ui::FieldButton::Off).clicked()
-                {
+            let buttons = [
+                ("Later", crate::ui::FieldButton::Off),
+                if ready {
+                    ("Accept all", crate::ui::FieldButton::Primary)
+                } else {
+                    ("Loading…", crate::ui::FieldButton::Disabled)
+                },
+            ];
+            match crate::settings::footer_row(ui, &buttons) {
+                Some(0) => {
                     app.open_menu = TopMenu::None;
                     app.later_kit_updates();
                 }
-            });
+                Some(_) => {
+                    app.open_menu = TopMenu::None;
+                    app.accept_kit_updates(None);
+                }
+                None => {}
+            }
         });
     }
 

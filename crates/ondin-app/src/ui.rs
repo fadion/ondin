@@ -173,6 +173,44 @@ pub fn empty_note(ui: &mut egui::Ui, text: &str) -> egui::Response {
     )
 }
 
+/// What a whole surface says when it is empty, where [`empty_note`] is too
+/// little: an optional glyph, a [`CONTROL_PT`] heading in `text::strong()` and a
+/// [`SMALL_PT`] `text::dim()` line saying how to fill it, centred. `below` adds
+/// what follows inside the same centred column, such as a button. The caller sets
+/// the air above, which depends on the surface.
+pub fn empty_state<R>(
+    ui: &mut egui::Ui,
+    glyph: Option<&str>,
+    head: &str,
+    sub: &str,
+    below: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.vertical_centered(|ui| {
+        if let Some(g) = glyph {
+            ui.label(theme::icon_text(g, EMPTY_GLYPH_PT, theme::text::dim()));
+        }
+        ui.label(
+            egui::RichText::new(head)
+                .size(CONTROL_PT)
+                .color(theme::text::strong()),
+        );
+        ui.add_space(-4.0);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(sub)
+                    .size(SMALL_PT)
+                    .color(theme::text::dim()),
+            )
+            .wrap(),
+        );
+        below(ui)
+    })
+    .inner
+}
+
+/// An [`empty_state`]'s glyph: larger than a row's, since it stands alone.
+pub const EMPTY_GLYPH_PT: f32 = 18.0;
+
 /// An [`eyebrow`] painted rather than laid out, for a painter-drawn surface
 /// (a canvas popup's section head, a list's group head): the same capitals,
 /// size and ink. Answers the rect it inked.

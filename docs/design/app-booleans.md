@@ -69,8 +69,8 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
   only for `Subtract`; inert for the commutative three. `build::mask` takes the same argument with the
   same reorder. Once the container exists the key is not stored: re-designating is an
   `Operation::Reorder` to index 0 (`canvas::designate_key`).
-- `layers::subtract_base` marks `children[0]` of a `Subtract` with a faint `stack-simple` glyph in the
-  row's badge slot (shared `RowBadge`, `BADGE_ICON`), derived every frame. Only `Subtract`.
+- `layers::subtract_base` marks `children[0]` of a `Subtract` with a faint `diamond` glyph in the
+  row's badge slot (shared `RowBadge`, `BADGE_BASE`), derived every frame. Only `Subtract`.
 - Badge slot priority: mask (`icon::CIRCLE_HALF`) > frame size badge > subtract base mark. No row can want
   two (a frame cannot be a mask; operands are not painted).
 - **Switching the operation is a `GeometryPatch`**: children and paint stay, undo restores the previous

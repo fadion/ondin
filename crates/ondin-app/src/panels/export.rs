@@ -1492,7 +1492,7 @@ impl OndinApp {
                                 let row = ui.allocate_ui(egui::vec2(w, ui::MENU_ROW_H), |ui| {
                                     ui::menu_item(
                                         ui,
-                                        icon::STACK_SIMPLE,
+                                        icon::FLOPPY_DISK,
                                         &preset.name,
                                         ui::MENU_ROW_H,
                                     )

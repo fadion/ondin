@@ -1857,7 +1857,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
                 .unwrap_or_default();
             message(
                 ui,
-                icon::FILE,
+                icon::DOCUMENT,
                 &format!(
                     "{} · {folder} · {}",
                     source.kind.noun(),

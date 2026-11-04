@@ -377,7 +377,7 @@ enum RowBadge {
     Text(String),
     /// An icon glyph and the type size that puts it on the word's ink height.
     /// The size travels with the glyph because it differs per glyph
-    /// ([`BADGE_STACK`], [`BADGE_MASK`]).
+    /// ([`BADGE_BOUND`], [`BADGE_BASE`], [`BADGE_MASK`]).
     Icon(&'static str, f32),
 }
 
@@ -482,13 +482,17 @@ fn cover_row_end(p: &egui::Painter, row: egui::Rect, from: f32, ground: egui::Co
     p.add(egui::Shape::mesh(mesh));
 }
 
-/// Type size for the base operand's `stack-simple`, so it inks the same height as
-/// the worded badge beside it (`800 × 600` at 10.5). Measured from the galley's
+/// Type size for the subtract base's `diamond`, so it inks the same height as the
+/// worded badge beside it (`800 × 600` at 10.5). Measured from the galley's
 /// `uv_rect`; the two match at 100%–200% scaling (pixel snapping makes the
 /// neighbouring quarter points miss by a row), and
 /// `the_base_badge_inks_as_tall_as_the_worded_one` holds it. It matches the word,
 /// not the 15pt hover controls: a badge is an annotation.
-const BADGE_STACK: f32 = 11.25;
+const BADGE_BASE: f32 = 9.75;
+
+/// Type size for a bound property's `brackets-curly`. Not in the ink test: no
+/// quarter point puts the braces on the word's height at every scaling.
+const BADGE_BOUND: f32 = 11.25;
 
 /// Type size for a mask's `circle-half`, measured the same way; at 10.0 it inks
 /// the word's height at all four scalings (11.0 is too tall at 125% and 150%).
@@ -1716,7 +1720,7 @@ impl OndinApp {
                 n => format!("{n} variants"),
             }))
         } else if bound {
-            Some(RowBadge::Icon(icon::BRACKETS_CURLY, BADGE_STACK))
+            Some(RowBadge::Icon(icon::BRACKETS_CURLY, BADGE_BOUND))
         } else {
             // The frame's used size (§15 D868): where container layout put it.
             match self.session.resolved.used_kind_of(node) {
@@ -1725,7 +1729,7 @@ impl OndinApp {
                     size.width as i64, size.height as i64
                 ))),
                 _ => subtract_base(&self.session.doc, node)
-                    .then_some(RowBadge::Icon(icon::STACK_SIMPLE, BADGE_STACK)),
+                    .then_some(RowBadge::Icon(icon::DIAMOND, BADGE_BASE)),
             }
         };
         // (node borrow ends here — safe to mutate self below)
@@ -3272,7 +3276,7 @@ mod badge_ink_tests {
 
     /// Every glyph badge, at its own size, inks as tall as the worded badge across
     /// four display scalings. A new badge belongs in the loop with a measured size.
-    /// flip: `BADGE_STACK` at 12 → fails at 125%.
+    /// flip: `BADGE_BASE` at 10 → fails at 1.5×.
     #[test]
     fn the_base_badge_inks_as_tall_as_the_worded_one() {
         for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
@@ -3293,7 +3297,7 @@ mod badge_ink_tests {
                 egui::FontId::proportional(crate::ui::CAPTION_PT),
             );
             for (name, badge, size) in [
-                ("stack", icon::STACK_SIMPLE, BADGE_STACK),
+                ("diamond", icon::DIAMOND, BADGE_BASE),
                 ("half-circle", icon::CIRCLE_HALF, BADGE_MASK),
             ] {
                 let glyph = ink_height(&ctx, badge, theme::icon_font(size));

@@ -1557,7 +1557,7 @@ impl OndinApp {
         let cw = (block.max.x - x0 - gap * (SWATCHES - 1) as f32) / SWATCHES as f32;
         let rows = [
             (icon::CLOCK_COUNTER_CLOCKWISE, "Recent colours", &recent),
-            (icon::FILE, "In this document", &document),
+            (icon::PALETTE, "In this document", &document),
         ];
         let mut chosen = None;
         for (r, (glyph, tip, colours)) in rows.into_iter().enumerate() {

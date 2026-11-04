@@ -143,7 +143,7 @@ app-wide and kept across launches, so the colour just used is one click away in 
   (`write_stop_colour`, not a gradient handle's drag), a field edit, a swatch click, `write_slot_rgb` (a typed colour, a picker's eyedropper), the eyedropper's selection
   pick, the inspector's paint rows and the Type panel's colour field.
 - The Solid face's swatches are two rows of six (`document_swatches`): the recent colours (clock
-  glyph) above the document's own (`icon::FILE`, `document_palette`, most-used first). An empty place
+  glyph) above the document's own (`icon::PALETTE`, `document_palette`, most-used first). An empty place
   draws a faint outline, so the face does not grow the first time a colour is committed. A swatch
   sets the colour and the paint keeps its alpha.
 - **Every face is one height**, so nothing jumps under the pointer: the gradient faces' plane is 96pt

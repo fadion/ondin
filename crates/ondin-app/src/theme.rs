@@ -478,6 +478,8 @@ pub mod text {
 /// its reason, not on the module, so the next glyph to lose its last call site
 /// warns.
 pub mod icon {
+    /// The operand others are measured against: a boolean's base, the key layer,
+    /// the subtract base's badge in the layers tree.
     pub const DIAMOND: &str = "\u{e1ec}";
     pub const CARET_DOWN: &str = "\u{e136}";
     pub const CARET_RIGHT: &str = "\u{e13a}";
@@ -571,13 +573,14 @@ pub mod icon {
     pub const DOTS_THREE_VERTICAL: &str = "\u{e208}";
     /// The dashboard's *Recent*, and the picker's recent-colours row.
     pub const CLOCK_COUNTER_CLOCKWISE: &str = "\u{e1a0}";
-    /// The picker's row of the colours in this document.
+    /// A page: its identity, *Go to* / *Move to page*, a version's page groups,
+    /// *Add page*.
     pub const FILE: &str = "\u{e230}";
     /// The dashboard's *All files*, and the placeholder on a card with no
     /// thumbnail yet.
     pub const FILES: &str = "\u{e710}";
     /// A document, apart from a page ([`FILE`]): a sheet with lines of text. A
-    /// Library search's file result.
+    /// Library search's file result, a file picked for import.
     pub const DOCUMENT: &str = "\u{f01e}";
     /// A description, wherever one is written — a variable's, a main's: a card
     /// with lines of writing on it.
@@ -596,7 +599,7 @@ pub mod icon {
     /// A folder opened or revealed: the library folder, *Show in library*, *Show
     /// last export folder*, a project, History's *Opened*.
     pub const FOLDER_OPEN: &str = "\u{e256}";
-    pub const FLOPPY_DISK: &str = "\u{e248}"; // save
+    pub const FLOPPY_DISK: &str = "\u{e248}"; // save, and a saved export preset
     pub const MAGNIFYING_GLASS_MINUS: &str = "\u{e30e}";
     pub const X: &str = "\u{e4f6}"; // close / remove a paint row
     // The import card's: clearing its field, and the line under it.
@@ -882,7 +885,8 @@ pub mod icon {
     pub const SWATCHES: &str = "\u{e5b8}";
     /// A style card's *Create style…* (§15 D1063).
     pub const PLUS_SQUARE: &str = "\u{ed4a}";
-    /// The browser's `+` menu: *Colour variable* and *Number variable*.
+    /// Colours as a set: the browser's `+` menu's *Colour variable* and *Number
+    /// variable*, Group colors, the picker's row of this document's colours.
     pub const PALETTE: &str = "\u{e6c8}";
     pub const HASH: &str = "\u{e2a2}";
     /// A boolean variable: a switch, its knob on.

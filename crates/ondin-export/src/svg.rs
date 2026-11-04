@@ -128,10 +128,52 @@ pub(crate) fn svg_linking(
     view: Option<Rect>,
     faces: bool,
 ) -> Export {
+    svg_framed(doc, res, origins, linked, text, view, faces, false)
+}
+
+/// [`svg_linking`] with the view's corner moved to the origin, so the markup
+/// says nothing of where the origins sit in the world: code export's pictures,
+/// where the same icon in two variants must write the same file.
+pub(crate) fn svg_at_zero(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[NodeId],
+    linked: std::collections::HashMap<ondin_core::ImageId, String>,
+    text: ExportText,
+) -> Export {
+    svg_framed(doc, res, origins, linked, text, None, false, true)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the two public doors' options, passed through"
+)]
+fn svg_framed(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[NodeId],
+    linked: std::collections::HashMap<ondin_core::ImageId, String>,
+    text: ExportText,
+    view: Option<Rect>,
+    faces: bool,
+    at_zero: bool,
+) -> Export {
     // `crate::extent`, shared with the PNG writer so the two frame the same box.
     let view = view
         .or_else(|| crate::extent(res, origins))
         .unwrap_or_else(|| Rect::new(0.0, 0.0, 100.0, 100.0));
+    // Every region and transform is written relative to an origin's `outer`, so
+    // shifting it moves the whole drawing with the view.
+    let shift = match at_zero {
+        true => Affine::translate(-view.origin().to_vec2()),
+        false => Affine::IDENTITY,
+    };
+    let view = match at_zero {
+        true => Rect::from_origin_size((0.0, 0.0), view.size()),
+        false => view,
+    };
+    let origin_outer =
+        |doc: &Document, res: &Resolved, id: NodeId| shift * origin_outer(doc, res, id);
 
     // Defs first so the header can carry them; ids follow document order.
     let mut defs = Defs {

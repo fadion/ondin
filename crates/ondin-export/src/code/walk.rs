@@ -2380,8 +2380,10 @@ impl Walk<'_> {
         let mut linked = HashMap::new();
         let mut files = Vec::new();
         let mut under = vec![id];
+        let mut drawn = Vec::new();
         while let Some(at) = under.pop() {
             let Some(n) = self.doc.get(at) else { continue };
+            drawn.push(at);
             let paint = self.doc.resolved_paint(at, n.paint());
             let brushes = paint.fills.iter().map(|f| f.brush.drawn());
             for b in brushes.chain(paint.strokes.iter().map(|s| s.brush.drawn())) {
@@ -2395,14 +2397,14 @@ impl Walk<'_> {
             }
             under.extend(n.children());
         }
-        let svg = crate::svg::svg_linking(
+        // In its own space, so the same picture in two variants writes the same
+        // markup, and a variant tree pairs it with its counterpart.
+        let svg = crate::svg::svg_at_zero(
             self.doc,
             self.res,
             &[id],
             linked,
             ondin_core::ExportText::Live,
-            None,
-            false,
         );
         let mut pic = if svg.approximated.is_empty() {
             self.report.position(format!(
@@ -2416,10 +2418,11 @@ impl Walk<'_> {
                 }
             }
             let mut e = Element::new("svg", class.clone());
-            e.markup = Some(
-                svg.svg
-                    .replacen("<svg ", &format!("<svg class=\"{class}\" "), 1),
-            );
+            e.markup = Some(content_ids(&svg.svg, &drawn).replacen(
+                "<svg ",
+                &format!("<svg class=\"{class}\" "),
+                1,
+            ));
             e
         } else {
             for what in &svg.approximated {
@@ -2434,11 +2437,16 @@ impl Walk<'_> {
                 ..Default::default()
             };
             let raster = crate::png::raster_of(self.doc, self.res, &[id], &opts)?;
-            let path = format!("assets/{class}.png");
-            self.assets.push((
-                path.clone(),
-                crate::png::encode_rgba8(&raster.rgba, raster.width, raster.height),
-            ));
+            let bytes = crate::png::encode_rgba8(&raster.rgba, raster.width, raster.height);
+            // The same picture shares one file, so its uses pair across variants.
+            let path = match self.assets.iter().find(|(_, b)| *b == bytes) {
+                Some((p, _)) => p.clone(),
+                None => {
+                    let path = format!("assets/{class}.png");
+                    self.assets.push((path.clone(), bytes));
+                    path
+                }
+            };
             let mut e = Element::new("img", class.clone());
             e.attrs.push(("src", path));
             e.attrs.push(("alt", node.name().to_string()));
@@ -2500,6 +2508,32 @@ fn holds_marked_set(doc: &Document, origins: &[NodeId]) -> bool {
     ondin_core::build::subtree_nodes(doc, origins)
         .into_iter()
         .any(marked)
+}
+
+/// `svg` with each def id a layer of `drawn` named (`grad-<node>-…`, `fx-<node>`)
+/// renamed for the picture's content: the layer's place in `drawn` and a hash of
+/// the markup so renamed. The same picture drawn by another layer writes the same
+/// ids, so the two pair; a different one gets ids of its own, since inline SVGs
+/// on one page share one id space.
+fn content_ids(svg: &str, drawn: &[NodeId]) -> String {
+    // An id names its layer as `-<token>` followed by `-`, `"` or `)`.
+    let rename = |text: &str, from: &dyn Fn(usize) -> String, to: &dyn Fn(usize) -> String| {
+        let mut out = text.to_string();
+        for i in 0..drawn.len() {
+            for end in ['-', '"', ')'] {
+                out = out.replace(&format!("-{}{end}", from(i)), &format!("-{}{end}", to(i)));
+            }
+        }
+        out
+    };
+    let wire = |i: usize| drawn[i].to_wire().replace(':', "_");
+    let place = |i: usize| format!("p{i}");
+    let canonical = rename(svg, &wire, &place);
+    // FNV-1a, spelled out so an export's ids never change with the toolchain.
+    let h = canonical.bytes().fold(0x811c_9dc5_u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    });
+    rename(&canonical, &place, &|i| format!("{h:08x}_{i}"))
 }
 
 /// A marked set's root written as its element: a `<button type="button">`
@@ -3019,5 +3053,43 @@ mod tests {
         );
         assert_eq!(root.style.iter().filter(|(p, _)| *p == "border").count(), 1);
         assert_eq!(root.style.last().map(|(p, _)| *p), Some("border"));
+    }
+
+    /// A picture's def ids follow its content: the same picture drawn by two
+    /// layers writes the same ids, a different one other ids.
+    ///
+    /// flip: `content_ids` leaving the hash out of the ids → fails at "ids of
+    /// its own".
+    #[test]
+    fn a_pictures_ids_follow_its_content() {
+        let svg = |node: &str, fill: &str| {
+            format!(
+                "<svg><defs><linearGradient id=\"grad-{node}-fill0\">{fill}</linearGradient>\
+                 </defs><rect fill=\"url(#grad-{node}-fill0)\"/><g filter=\"url(#fx-{node})\"/></svg>"
+            )
+        };
+        let (a, b) = (
+            NodeId::from_wire("1:5").unwrap(),
+            NodeId::from_wire("1:9").unwrap(),
+        );
+        let one = content_ids(&svg("1_5", "red"), &[a]);
+        let same = content_ids(&svg("1_9", "red"), &[b]);
+        let other = content_ids(&svg("1_9", "blue"), &[b]);
+        assert_eq!(one, same, "the same picture, the same ids");
+        assert!(!one.contains("1_5"), "{one}");
+        let id = |s: &str| {
+            s.split("id=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        assert_ne!(id(&one), id(&other), "ids of its own: {one} / {other}");
+        assert!(
+            one.contains(&format!("url(#{})", id(&one))),
+            "refs follow: {one}"
+        );
     }
 }

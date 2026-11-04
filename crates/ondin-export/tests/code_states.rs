@@ -509,6 +509,64 @@ fn a_state_swaps_a_picture_that_differs() {
     );
 }
 
+/// The same picture in two variants at two places on the canvas writes the same
+/// markup, gradient ids and all, so a state that only recolours the background
+/// pairs the icon rather than swapping it.
+///
+/// flip: `Walk::picture` writing the SVG in world space (`svg_linking`), or
+/// keeping the node-named def ids (no `content_ids`) → each fails at "one
+/// picture".
+#[test]
+fn the_same_picture_pairs_across_variants() {
+    use ondin_core::peniko::{ColorStop, Gradient};
+    let ramp = || {
+        Brush::Gradient(ondin_core::GradientBrush {
+            gradient: Gradient {
+                stops: [
+                    ColorStop {
+                        offset: 0.0,
+                        color: Color::from_rgba8(230, 60, 40, 255).into(),
+                    },
+                    ColorStop {
+                        offset: 1.0,
+                        color: Color::from_rgba8(40, 90, 220, 255).into(),
+                    },
+                ]
+                .as_slice()
+                .into(),
+                ..Default::default()
+            },
+            transform: Affine::IDENTITY,
+            opacity: 1.0,
+        })
+    };
+    let (doc, inst) = chip(|doc, rest, hover| {
+        let kids = |v: NodeId| doc.get(v).unwrap().children().to_vec();
+        let (r, h) = (kids(rest), kids(hover));
+        let fill = |id| Operation::SetFills {
+            id,
+            fills: keyed_by_position([Fill {
+                brush: ramp().into(),
+                visible: true,
+            }]),
+        };
+        let ops = vec![fill(r[1]), fill(h[1]), paint(h[0], (0, 90, 200))];
+        doc.apply(&Transaction(ops)).unwrap();
+    });
+    let res = Resolved::rebuild(&doc);
+    let out = Target::React.export(&doc, &res, &[inst]);
+    let tsx = file(&out, "components/Chip.tsx");
+    assert_eq!(tsx.matches("<svg").count(), 1, "one picture: {tsx}");
+    assert!(tsx.contains("viewBox=\"0 0 "), "{tsx}");
+    assert!(
+        tsx.contains("url(#grad-"),
+        "the gradient's id is written: {tsx}"
+    );
+    let css = file(&out, "components/Chip.module.css");
+    assert!(!css.contains("display"), "nothing swapped: {css}");
+    assert!(out.approximated.is_empty(), "{:?}", out.approximated);
+}
+
 /// A state pairs with rest by the lineage key either recorded: here rest is the
 /// copy, and the state's renamed background is recoloured, not swapped.
 ///

@@ -928,6 +928,13 @@ impl OndinApp {
                                 .and_then(|c| c.min_width(mode.id))
                                 .filter(|_| i > 0)
                             {
+                                // A right-click cancel drops the draft, and is
+                                // answered first: egui may still report a change or
+                                // a drag stop on that frame, which would commit it.
+                                let cancelled = self.gesture_cancelled;
+                                if cancelled {
+                                    b.width_draft = None;
+                                }
                                 let mut w = match b.width_draft {
                                     Some((m, w)) if m == mode.id => w,
                                     _ => min,
@@ -948,7 +955,11 @@ impl OndinApp {
                                 );
                                 let resp =
                                     resp.on_hover_text(format!("{} from this width up", mode.name));
-                                if (resp.changed() && !resp.dragged()) || resp.drag_stopped() {
+                                let done =
+                                    (resp.changed() && !resp.dragged()) || resp.drag_stopped();
+                                if cancelled {
+                                    // Nothing lands; the field shows the minimum again.
+                                } else if done {
                                     b.width_draft = None;
                                     acts.push(Act::Breakpoint(mode.id, w));
                                 } else if resp.changed() {
@@ -1404,12 +1415,16 @@ impl OndinApp {
                 });
             fly = Some(card.rect);
         }
-        let pressed_elsewhere = ctx.input(|i| {
-            i.pointer.any_pressed()
-                && i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| !rect.contains(p) && !fly.is_some_and(|f| f.contains(p)))
-        });
+        // Not during a gesture: the right-click that cancels the breakpoint scrub
+        // lands wherever the drag took the pointer, and is not a press away.
+        let in_gesture = ctx.dragged_id().is_some() || self.gesture_cancelled;
+        let pressed_elsewhere = !in_gesture
+            && ctx.input(|i| {
+                i.pointer.any_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| !rect.contains(p) && !fly.is_some_and(|f| f.contains(p)))
+            });
         if close || pressed_elsewhere {
             b.menu = None;
         }
@@ -6539,6 +6554,78 @@ mod tests {
         assert!(!doc.variables().first_collection().by_width());
         assert_eq!(doc.get(home).unwrap().modes(), [modes[1]]);
         assert!(!width_inherits(doc, home, c));
+    }
+
+    /// A right-click cancelling the mode menu's breakpoint scrub drops the draft,
+    /// commits nothing, and leaves the menu open though it landed outside it.
+    ///
+    /// flip: `pressed_elsewhere` without its `in_gesture` test → fails at "the
+    /// menu stays open". The commit guard is not reached by this fixture: it has no
+    /// egui drag to report a stop.
+    #[test]
+    fn a_right_click_cancels_a_breakpoint_scrub_and_keeps_the_menu() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        app.var_act(Act::NewMode);
+        let c = CollectionId::FIRST;
+        app.var_act(Act::ByWidth(c, true));
+        let m = app.session.doc.variables().first_collection().modes[1].id;
+        let at = egui::pos2(400.0, 100.0);
+        app.var_browser.as_mut().unwrap().menu = Some((Menu::Mode(m), at));
+        frame(&mut app, &ctx);
+        // The state a scrub that a right-click just cancelled leaves, set directly.
+        app.var_browser.as_mut().unwrap().width_draft = Some((m, 1000.0));
+        app.gesture_cancelled = true;
+        let away = egui::pos2(1100.0, 700.0);
+        let _ = pass(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(away),
+                egui::Event::PointerButton {
+                    pos: away,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+            ],
+            |app, ctx| app.var_browser_ui(ctx),
+        );
+        let b = app.var_browser.as_ref().unwrap();
+        assert!(
+            matches!(b.menu, Some((Menu::Mode(x), _)) if x == m),
+            "the menu stays open"
+        );
+        assert_eq!(b.width_draft, None, "the draft is dropped");
+        assert_eq!(
+            app.session.doc.variables().first_collection().min_width(m),
+            Some(768.0),
+            "nothing is committed"
+        );
+
+        // The control: with no gesture, the same press away closes it.
+        app.gesture_cancelled = false;
+        let release = egui::Event::PointerButton {
+            pos: away,
+            button: egui::PointerButton::Secondary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        let mut press = release.clone();
+        if let egui::Event::PointerButton { pressed, .. } = &mut press {
+            *pressed = true;
+        }
+        let _ = pass(&ctx, &mut app, vec![release], |app, ctx| {
+            app.var_browser_ui(ctx)
+        });
+        let _ = pass(&ctx, &mut app, vec![press], |app, ctx| {
+            app.var_browser_ui(ctx)
+        });
+        assert!(
+            app.var_browser.as_ref().unwrap().menu.is_none(),
+            "a press away closes it"
+        );
     }
 
     /// **The `--` list offers only what is scoped to the field**, counts the

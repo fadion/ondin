@@ -489,19 +489,11 @@ impl OndinApp {
                 )
                 .wrap(),
             );
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
-                {
-                    cancel = true;
-                }
-                if crate::settings::text_button(ui, "Delete", crate::ui::FieldButton::Danger)
-                    .clicked()
-                {
-                    delete = true;
-                }
-            });
+            match crate::settings::danger_footer(ui, "Delete") {
+                Some(crate::settings::Decision::Save) => delete = true,
+                Some(crate::settings::Decision::Cancel) => cancel = true,
+                None => {}
+            }
         });
         if delete {
             self.pages.deleting = None;
@@ -1617,6 +1609,32 @@ mod tests {
         confirm_frame(ctx, app, vec![egui::Event::PointerMoved(at)]);
         confirm_frame(ctx, app, vec![button(true)]);
         confirm_frame(ctx, app, vec![button(false)]);
+    }
+
+    /// *Delete page?*'s footer puts its commit rightmost, as every footer does.
+    ///
+    /// flip: `settings::footer_buttons` adding its buttons in their own order to
+    /// its right-to-left row → fails at "Delete right of Cancel".
+    #[test]
+    fn the_delete_page_card_puts_delete_rightmost() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let (mut app, [_, second, ..]) = two_pages(&ctx);
+        app.pages.deleting = Some(second);
+        for _ in 0..3 {
+            confirm_frame(&ctx, &mut app, vec![]);
+        }
+        let shapes = confirm_frame(&ctx, &mut app, vec![]);
+        let x = |label: &str| {
+            shapes
+                .iter()
+                .find_map(|c| match &c.shape {
+                    egui::Shape::Text(t) if t.galley.text() == label => Some(t.pos.x),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{label:?} is drawn"))
+        };
+        assert!(x("Delete") > x("Cancel"), "Delete right of Cancel");
     }
 
     /// *Delete page?*'s *Delete* deletes the page it was asked about, not the

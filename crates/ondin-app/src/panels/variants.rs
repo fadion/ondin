@@ -1373,16 +1373,11 @@ impl OndinApp {
                 )
                 .wrap(),
             );
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                    cancel = true;
-                }
-                if crate::settings::text_button(ui, "Delete", FieldButton::Danger).clicked() {
-                    delete = true;
-                }
-            });
+            match crate::settings::danger_footer(ui, "Delete") {
+                Some(crate::settings::Decision::Save) => delete = true,
+                Some(crate::settings::Decision::Cancel) => cancel = true,
+                None => {}
+            }
         });
         if modal.should_close() {
             cancel = true;

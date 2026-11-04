@@ -401,19 +401,9 @@ impl OndinApp {
                 );
                 ui.add_space(4.0);
             }
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Stop sharing", crate::ui::FieldButton::Primary)
-                    .clicked()
-                {
-                    decision = Some(true);
-                }
-                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
-                {
-                    decision = Some(false);
-                }
-            });
+            if let Some(d) = crate::settings::modal_footer(ui, "Stop sharing", true) {
+                decision = Some(matches!(d, crate::settings::Decision::Save));
+            }
         });
         // `Escape` and the backdrop are *Cancel*, as on every card (§15 D525).
         if modal.should_close() {

@@ -5698,20 +5698,15 @@ impl OndinApp {
                         .color(theme::text::faint()),
                 );
             }
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Recover", crate::ui::FieldButton::Set)
-                    .clicked()
-                {
-                    decision = Some(RecoverChoice::Recover);
-                }
-                if crate::settings::text_button(ui, "Discard", crate::ui::FieldButton::Off)
-                    .clicked()
-                {
-                    decision = Some(RecoverChoice::Discard);
-                }
-            });
+            let buttons = [
+                ("Discard", crate::ui::FieldButton::Off),
+                ("Recover", crate::ui::FieldButton::Set),
+            ];
+            match crate::settings::footer_buttons(ui, &buttons) {
+                Some(0) => decision = Some(RecoverChoice::Discard),
+                Some(_) => decision = Some(RecoverChoice::Recover),
+                None => {}
+            }
         });
         // Escape and the backdrop are *Later*, never *Discard*.
         if modal.should_close() {
@@ -6132,28 +6127,17 @@ impl OndinApp {
                 ui.add_space(8.0);
                 unsaved_list(ui, &asked);
             }
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
-                {
-                    decision = Some(CloseChoice::Cancel);
-                }
-                if crate::settings::text_button(ui, "Discard", crate::ui::FieldButton::Danger)
-                    .clicked()
-                {
-                    decision = Some(CloseChoice::Discard);
-                }
-                if crate::settings::text_button(
-                    ui,
-                    "Save and close",
-                    crate::ui::FieldButton::Primary,
-                )
-                .clicked()
-                {
-                    decision = Some(CloseChoice::Save);
-                }
-            });
+            let buttons = [
+                ("Cancel", crate::ui::FieldButton::Off),
+                ("Discard", crate::ui::FieldButton::Danger),
+                ("Save and close", crate::ui::FieldButton::Primary),
+            ];
+            match crate::settings::footer_buttons(ui, &buttons) {
+                Some(0) => decision = Some(CloseChoice::Cancel),
+                Some(1) => decision = Some(CloseChoice::Discard),
+                Some(_) => decision = Some(CloseChoice::Save),
+                None => {}
+            }
         });
         // Escape and the backdrop mean *Cancel*; unread, Escape would fall through to the
         // editor's ladder beneath the card.

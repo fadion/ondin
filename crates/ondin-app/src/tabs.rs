@@ -1648,16 +1648,18 @@ impl OndinApp {
                         let w = 2.0 * 96.0 + 8.0;
                         ui.add_space((ui.available_width() - w).max(0.0) / 2.0);
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        retry = crate::settings::text_button(
-                            ui,
-                            "Try again",
-                            crate::ui::FieldButton::Primary,
-                        )
-                        .clicked();
+                        // The way out first and the commit rightmost, as every
+                        // footer (`settings::footer_buttons`).
                         close = crate::settings::text_button(
                             ui,
                             "Close tab",
                             crate::ui::FieldButton::Off,
+                        )
+                        .clicked();
+                        retry = crate::settings::text_button(
+                            ui,
+                            "Try again",
+                            crate::ui::FieldButton::Primary,
                         )
                         .clicked();
                     });

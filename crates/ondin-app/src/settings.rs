@@ -525,11 +525,7 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
 /// Returns the [`Decision`] a press made.
 ///
 /// Shared so every card's commit lights on the same rule for *edited*.
-pub(crate) fn modal_footer(
-    ui: &mut egui::Ui,
-    commit: &'static str,
-    enabled: bool,
-) -> Option<Decision> {
+pub(crate) fn modal_footer(ui: &mut egui::Ui, commit: &str, enabled: bool) -> Option<Decision> {
     let state = if enabled {
         FieldButton::Primary
     } else {
@@ -541,7 +537,7 @@ pub(crate) fn modal_footer(
 /// [`modal_footer`] for a card that destroys something: the commit red
 /// (`FieldButton::Danger`), the blue commits' twin on the other ramp, and always
 /// live — the card opening is the question.
-pub(crate) fn danger_footer(ui: &mut egui::Ui, commit: &'static str) -> Option<Decision> {
+pub(crate) fn danger_footer(ui: &mut egui::Ui, commit: &str) -> Option<Decision> {
     footer(ui, Some((commit, FieldButton::Danger)))
 }
 
@@ -552,23 +548,32 @@ pub(crate) fn cancel_footer(ui: &mut egui::Ui) -> bool {
 }
 
 /// The one footer row: *Cancel*, with `commit`'s label and state to its right.
-fn footer(ui: &mut egui::Ui, commit: Option<(&'static str, FieldButton)>) -> Option<Decision> {
-    let mut decision = None;
+fn footer(ui: &mut egui::Ui, commit: Option<(&str, FieldButton)>) -> Option<Decision> {
+    let mut buttons = vec![("Cancel", FieldButton::Off)];
+    buttons.extend(commit);
+    footer_buttons(ui, &buttons).map(|i| match i {
+        0 => Decision::Cancel,
+        _ => Decision::Save,
+    })
+}
+
+/// Every dialog's footer: `buttons` left to right, right-aligned after
+/// [`FOOTER_GAP`], the way out first and the commit last, so the commit is
+/// always rightmost. Answers the index pressed; a `Disabled` button answers
+/// nothing.
+pub(crate) fn footer_buttons(ui: &mut egui::Ui, buttons: &[(&str, FieldButton)]) -> Option<usize> {
+    let mut pressed = None;
     ui.add_space(FOOTER_GAP);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        // Rightmost: added first in a right-to-left row.
-        if let Some((label, state)) = commit
-            && text_button(ui, label, state).clicked()
-            && state != FieldButton::Disabled
-        {
-            decision = Some(Decision::Save);
-        }
-        if text_button(ui, "Cancel", FieldButton::Off).clicked() {
-            decision = Some(Decision::Cancel);
+        // A right-to-left row adds the rightmost first.
+        for (i, (label, state)) in buttons.iter().enumerate().rev() {
+            if text_button(ui, label, *state).clicked() && *state != FieldButton::Disabled {
+                pressed = Some(i);
+            }
         }
     });
-    decision
+    pressed
 }
 
 /// Which way the modal was closed. `None` for "still open" is the third state and

@@ -211,24 +211,15 @@ impl OndinApp {
                 });
                 ui.add_space(6.0);
             }
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if used.iter().any(|u| u.latest.is_some_and(|v| v > u.held))
-                    && crate::settings::text_button(
-                        ui,
-                        "Accept all",
-                        crate::ui::FieldButton::Primary,
-                    )
-                    .clicked()
-                {
-                    act = Some(Act::AcceptAll);
-                }
-                if crate::settings::text_button(ui, "Close", crate::ui::FieldButton::Off).clicked()
-                {
-                    act = Some(Act::Close);
-                }
-            });
+            let mut buttons = vec![("Close", crate::ui::FieldButton::Off)];
+            if used.iter().any(|u| u.latest.is_some_and(|v| v > u.held)) {
+                buttons.push(("Accept all", crate::ui::FieldButton::Primary));
+            }
+            match crate::settings::footer_buttons(ui, &buttons) {
+                Some(0) => act = Some(Act::Close),
+                Some(_) => act = Some(Act::AcceptAll),
+                None => {}
+            }
         });
         if modal.should_close() && act.is_none() {
             act = Some(Act::Close);
@@ -287,23 +278,9 @@ impl OndinApp {
                 .size(crate::ui::CONTROL_PT)
                 .color(theme::text::dim()),
             );
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                if crate::settings::text_button(
-                    ui,
-                    "Make all local",
-                    crate::ui::FieldButton::Primary,
-                )
-                .clicked()
-                {
-                    decision = Some(true);
-                }
-                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
-                {
-                    decision = Some(false);
-                }
-            });
+            if let Some(d) = crate::settings::modal_footer(ui, "Make all local", true) {
+                decision = Some(matches!(d, crate::settings::Decision::Save));
+            }
         });
         if modal.should_close() {
             decision = Some(false);

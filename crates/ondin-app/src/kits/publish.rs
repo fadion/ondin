@@ -275,24 +275,14 @@ impl OndinApp {
                 &mut draft.note,
                 "What changed, in a line. Shown with the update.",
             );
-            ui.add_space(crate::settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let verb = if first {
-                    format!("Publish {} component{}", c.count(), plural(c.count()))
-                } else {
-                    "Publish".to_string()
-                };
-                if crate::settings::text_button(ui, &verb, crate::ui::FieldButton::Primary)
-                    .clicked()
-                {
-                    decision = Some(true);
-                }
-                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
-                {
-                    decision = Some(false);
-                }
-            });
+            let verb = if first {
+                format!("Publish {} component{}", c.count(), plural(c.count()))
+            } else {
+                "Publish".to_string()
+            };
+            if let Some(d) = crate::settings::modal_footer(ui, &verb, true) {
+                decision = Some(matches!(d, crate::settings::Decision::Save));
+            }
         });
         // `Escape` and the backdrop are *Cancel*, as on every card (§15 D525).
         if modal.should_close() {

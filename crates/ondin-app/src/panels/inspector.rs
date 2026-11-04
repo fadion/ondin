@@ -3355,7 +3355,7 @@ impl OndinApp {
                     ui,
                     row,
                     MultiField::Rotation,
-                    Prefix::Icon(icon::ROTATE_RIGHT),
+                    Prefix::Icon(icon::ROTATION),
                     rotation.map(shown_degrees),
                 );
                 app.multi_number(
@@ -3543,7 +3543,7 @@ impl OndinApp {
         let (verb, glyph) = match field {
             MultiField::X | MultiField::Y => ("Move", icon::ARROWS_OUT_CARDINAL),
             MultiField::W | MultiField::H => ("Resize", icon::ARROWS_OUT),
-            MultiField::Rotation => ("Rotate", icon::ROTATE_RIGHT),
+            MultiField::Rotation => ("Rotate", icon::ROTATION),
             MultiField::Skew => ("Skew", icon::SKEW),
         };
         self.session.name_step(verb, glyph);
@@ -4351,7 +4351,7 @@ impl OndinApp {
                 let (ra, reset_r) = ui::value_field_marked(
                     ui,
                     row,
-                    Prefix::Icon(icon::ROTATE_RIGHT),
+                    Prefix::Icon(icon::ROTATION),
                     marks.r.as_ref().map(Mark::field),
                     &mut angle_deg,
                     Scrub::whole(0.5),
@@ -4381,7 +4381,7 @@ impl OndinApp {
                     }
                     None => d.remove::<AngleScrub>(scrub_id),
                 });
-                app.named_valve("Rotate", icon::ROTATE_RIGHT, &ra, tr);
+                app.named_valve("Rotate", icon::ROTATION, &ra, tr);
                 let mut skew_deg = shown_degrees(split.orientation.skew);
                 let rs = value_field(
                     ui,

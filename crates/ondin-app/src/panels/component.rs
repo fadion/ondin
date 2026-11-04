@@ -4278,13 +4278,12 @@ mod tests {
             NodeKind::Line { end } => *end,
             _ => panic!("a line"),
         };
-        // The rotation field's glyph: the first in X's column (the quarter-turn
-        // buttons below draw arrows too).
+        // The rotation field's glyph, in X's column.
         let rotation = |out: &egui::FullOutput| {
             let x = ink_of(out, "X").0;
             inks(out)
                 .into_iter()
-                .find(|(t, r, _)| t == icon::ROTATE_RIGHT && (r.center().x - x.x).abs() < 8.0)
+                .find(|(t, r, _)| t == icon::ROTATION && (r.center().x - x.x).abs() < 8.0)
                 .map(|(_, r, c)| (r.center(), c))
                 .expect("the rotation field's glyph")
         };
@@ -4336,7 +4335,7 @@ mod tests {
         let x = ink_of(&out, "X").0;
         let (r, r_ink) = inks(&out)
             .into_iter()
-            .find(|(t, rr, _)| t == icon::ROTATE_RIGHT && (rr.center().x - x.x).abs() < 8.0)
+            .find(|(t, rr, _)| t == icon::ROTATION && (rr.center().x - x.x).abs() < 8.0)
             .map(|(_, rr, c)| (rr.center(), c))
             .expect("the rotation field's glyph");
         assert_eq!(r_ink, theme::text::strong(), "R is overridden");

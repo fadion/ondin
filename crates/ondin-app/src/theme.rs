@@ -574,10 +574,13 @@ pub mod icon {
     pub const ALIGN_TOP: &str = "\u{e512}";
     pub const ALIGN_CENTER_VERTICAL: &str = "\u{e50c}";
     pub const ALIGN_BOTTOM: &str = "\u{e506}";
-    /// Rotation, wherever it is set — the rotation field, *Rotate 90° clockwise*, a
-    /// gradient's angle: an open arc with its arrowhead turning right.
+    /// *Rotate 90° clockwise*: an open arc with its arrowhead turning right.
     /// [`ROTATE_LEFT`] is the same drawing mirrored.
     pub const ROTATE_RIGHT: &str = "\u{f028}";
+    /// A rotation set freely — the rotation fields, a gradient's angle, the
+    /// *Rotate* steps: a 300° arc around a pivot dot, with [`ROTATE_RIGHT`]'s
+    /// head. The dot keeps it apart from reset's mirrored arc on the same field.
+    pub const ROTATION: &str = "\u{f044}";
     /// *Rotate 90° counter-clockwise*: [`ROTATE_RIGHT`] mirrored.
     pub const ROTATE_LEFT: &str = "\u{f029}";
     /// An ellipse's arc Start: a circle with its start radius and a dot where it
@@ -1130,6 +1133,7 @@ pub mod icon {
         ("align-bottom", ALIGN_BOTTOM),
         ("rotate-right", ROTATE_RIGHT),
         ("rotate-left", ROTATE_LEFT),
+        ("rotation", ROTATION),
         ("arc-start", ARC_START),
         ("chart-pie-slice", CHART_PIE_SLICE),
         ("circle-dashed", CIRCLE_DASHED),

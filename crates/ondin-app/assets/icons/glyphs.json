@@ -221,6 +221,7 @@
  { "name": "node-smooth", "codepoint": "U+F027", "stroke": "M2.5 13.5C4 6 12 6 13.5 13.5M3.5 7.75H12.5", "fill": "M6.75 6.5H9.25V9H6.75ZM2.6 7.75a0.9 0.9 0 1 0 1.8 0a0.9 0.9 0 1 0 -1.8 0ZM11.6 7.75a0.9 0.9 0 1 0 1.8 0a0.9 0.9 0 1 0 -1.8 0Z" },
  { "name": "rotate-right", "codepoint": "U+F028", "stroke": "M3.3 11A5.5 5.5 0 0 1 12.69 7.11M12.69 4.36V7.11H9.94" },
  { "name": "rotate-left", "codepoint": "U+F029", "stroke": "M3.3 11A5.5 5.5 0 0 1 12.69 7.11M12.69 4.36V7.11H9.94", "transform": "matrix(-1 0 0 1 16 0)" },
+ { "name": "rotation", "codepoint": "U+F044", "stroke": "M13.31 9.92A5.5 5.5 0 1 1 11.89 4.61M11.89 1.86V4.61H9.14", "fill": "M7 8.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0Z" },
  { "name": "export-sync", "codepoint": "U+F02A", "stroke": "M2.5 9V13A1.5 1.5 0 0 0 4 14.5H11A1.5 1.5 0 0 0 12.5 13V9M4.75 7.5A3 3 0 0 1 10.25 5.75M10.75 2.75V5.75H7.75" },
  { "name": "arc-start", "codepoint": "U+F02B", "stroke": "M2 8a6 6 0 1 0 12 0a6 6 0 1 0 -12 0ZM8 8V2", "fill": "M7 2a1 1 0 1 0 2 0a1 1 0 1 0 -2 0Z" },
  { "name": "tidy-up", "codepoint": "U+F02C", "stroke": "M2 4H5V7H2ZM6.5 4H9.5V7H6.5ZM11 4H14V7H11ZM2 11H14M3.5 9.5L2 11L3.5 12.5M12.5 9.5L14 11L12.5 12.5" },

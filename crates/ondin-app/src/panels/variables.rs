@@ -168,6 +168,8 @@ pub(crate) struct Browser {
     /// Whether the field `edit` names still has to take the keyboard.
     edit_focus: bool,
     menu: Option<(Menu, egui::Pos2)>,
+    /// The menu drawn last frame, so its measured size places it from then on.
+    menu_drawn: Option<Menu>,
     /// A variable menu's *Move to ▸* row while its list of collections is open
     /// beside it.
     move_to: Option<egui::Rect>,
@@ -759,10 +761,18 @@ impl OndinApp {
             Menu::KitMap(kit, _) => table.kits().get(kit).map_or(0, |k| k.modes.len()) as f32 + 1.5,
             Menu::Words(v, _) => table.get(*v).map_or(0, |v| flex_words(v).len()) as f32,
         };
-        let size = egui::vec2(menu_w, rows * MENU_ROW_H + 24.0);
+        // The estimate places only a menu's first frame; from then on it is placed
+        // by the size it painted at, since its rows come and go with what it acts on.
+        let estimate = egui::vec2(menu_w, rows * MENU_ROW_H + 24.0);
+        let area = egui::Id::new("var-browser-menu");
+        let size = match b.menu_drawn.as_ref() == Some(&menu) {
+            true => ui::painted_size(ctx, area).unwrap_or(estimate),
+            false => estimate,
+        };
+        b.menu_drawn = Some(menu.clone());
         let pos = ui::menu_place(ctx, at, size);
         let mut close = false;
-        let rect = egui::Area::new(egui::Id::new("var-browser-menu"))
+        let rect = egui::Area::new(area)
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .show(ctx, |ui| {
@@ -4638,7 +4648,8 @@ impl OndinApp {
             })
             .collect();
         let w = under.width().max(200.0);
-        let size = egui::vec2(w, (modes.len() as f32 + 1.0) * MENU_ROW_H + 18.0);
+        // *Inherit* or *By width*, a rule, then one row per mode.
+        let size = egui::vec2(w, ui::menu_height(modes.len() + 1, 1));
         let pos = ui::menu_place(ctx, under.left_bottom() + egui::vec2(0.0, 4.0), size);
         let mut pick: Option<Option<ModeId>> = None;
         let rect = egui::Area::new(egui::Id::new("frame-mode-menu"))
@@ -6547,6 +6558,16 @@ mod tests {
         let menu = texts(&ctx, |_| app.mode_menu_ui(&ctx));
         assert!(menu.iter().any(|t| t == "By width"), "{menu:?}");
         assert!(menu.iter().any(|t| t == "≥900"), "{menu:?}");
+        // Pins `ui::menu_height` to what the menu paints, not that `mode_menu_ui`
+        // places by it: an estimate put back there leaves this green.
+        let painted = ui::painted_size(&ctx, egui::Id::new("frame-mode-menu"))
+            .expect("the menu painted")
+            .y;
+        let computed = ui::menu_height(modes.len() + 1, 1);
+        assert!(
+            (painted - computed).abs() < 0.01,
+            "the mode menu is placed by its painted height: {computed} vs {painted}"
+        );
         app.mode_menu = None;
 
         app.var_act(Act::ByWidth(c, false));

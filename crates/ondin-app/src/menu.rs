@@ -2536,20 +2536,12 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
 /// Why a layer verb is not offered with nothing selected.
 pub const NEEDS_SELECTION: &str = "Select a layer first";
 
-/// The height a menu of these groups will paint at, in points.
-///
-/// Computed rather than measured, because [`crate::ui::menu_place`] needs the size
-/// before the `Area` is shown. Exact, since rows and separators are fixed heights.
+/// The height a menu of these groups will paint at, in points: one separator
+/// between each two groups, summed by [`crate::ui::menu_height_with`].
 pub fn height(groups: &[Vec<Row>], row_h: f32, gap: f32, sep_h: f32, pad: f32) -> f32 {
     let rows: usize = groups.iter().map(|g| g.len()).sum();
     let seps = groups.len().saturating_sub(1);
-    let gaps = (rows + seps).saturating_sub(1);
-    // The frame's stroke grows its outer rect, so the border counts.
-    crate::ui::MENU_BORDER * 2.0
-        + pad * 2.0
-        + rows as f32 * row_h
-        + seps as f32 * sep_h
-        + gaps as f32 * gap
+    crate::ui::menu_height_with(rows, seps, row_h, gap, sep_h, pad)
 }
 
 /// One keypress an open menu answers while it holds the keyboard

@@ -569,6 +569,34 @@ pub fn menu_note(ui: &mut egui::Ui, text: &str) {
         });
 }
 
+/// The height a menu card of `rows` rows and `seps` separators paints at, rows
+/// `gap` apart and padded `pad`, its border included. Exact, since rows and
+/// separators are fixed heights; [`menu_place`] needs it before the card is shown.
+pub fn menu_height_with(
+    rows: usize,
+    seps: usize,
+    row_h: f32,
+    gap: f32,
+    sep_h: f32,
+    pad: f32,
+) -> f32 {
+    let gaps = (rows + seps).saturating_sub(1);
+    // The frame's stroke grows its outer rect, so the border counts.
+    MENU_BORDER * 2.0 + pad * 2.0 + rows as f32 * row_h + seps as f32 * sep_h + gaps as f32 * gap
+}
+
+/// [`menu_height_with`] for a [`menu_frame`] of [`MENU_ROW_H`] rows 1pt apart,
+/// padded [`MENU_PAD`].
+pub fn menu_height(rows: usize, seps: usize) -> f32 {
+    menu_height_with(rows, seps, MENU_ROW_H, 1.0, MENU_SEP_H, MENU_PAD)
+}
+
+/// The size the `Area` `id` painted at last frame, for a menu whose rows vary too
+/// much to sum: `None` before it has painted once.
+pub fn painted_size(ctx: &egui::Context, id: egui::Id) -> Option<egui::Vec2> {
+    egui::AreaState::load(ctx, id).and_then(|s| s.size)
+}
+
 /// Where a menu of `size` opened at `at` actually goes, so that all of it stays
 /// on screen (`docs/context-menus.md` §8). `egui::Area::fixed_pos` neither flips
 /// nor clamps: flip, then round, then clamp, since rounding a clamped value can

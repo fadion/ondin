@@ -213,6 +213,66 @@ fn an_alias_and_its_target_share_a_type() {
     assert_eq!(at(&v, "space.alias.$type"), "dimension");
 }
 
+/// An alias scoped apart from its target declares its target's type, which a
+/// reference must resolve to, and the export says so; its scope still rides in
+/// the extension.
+///
+/// flip: `type_of` answering `own_type(v)` without following the alias → fails
+/// at `fade`'s `$type`.
+#[test]
+fn an_alias_scoped_apart_takes_its_targets_type() {
+    use ondin_core::variable::{Field, Scope};
+    let mut f = common::fixture();
+    let mut ids = IdSource::new(0xA2);
+    let m = ids.mint_mode();
+    let [base, fade] = [(); 2].map(|_| ids.mint_var());
+    let scoped = |op: Operation, scope: Scope| match op {
+        Operation::AddVariable { mut var } => {
+            var.scope = Some(scope);
+            Operation::AddVariable { var }
+        }
+        other => other,
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            add_mode(m, "Mode", 0),
+            scoped(
+                add_var(
+                    base,
+                    "space/4",
+                    VarKind::Number,
+                    vec![(m, Cell::Number(4.0))],
+                ),
+                Scope::of([Field::Spacing]),
+            ),
+            scoped(
+                add_var(fade, "fade", VarKind::Number, vec![(m, Cell::Alias(base))]),
+                Scope::of([Field::Opacity]),
+            ),
+        ]))
+        .unwrap();
+    let out = tokens(&f.doc, None);
+    let v = parse(&out.json);
+    assert_eq!(
+        at(&v, "space.4.$type"),
+        "dimension",
+        "the fixture: a dimension"
+    );
+    assert_eq!(at(&v, "fade.$type"), "dimension");
+    assert_eq!(at(&v, "fade.$value"), "{space.4}");
+    assert!(
+        !v["fade"]["$extensions"][EXTENSION]["scope"].is_null(),
+        "its own scope kept"
+    );
+    assert!(
+        out.notes
+            .iter()
+            .any(|n| n.starts_with("fade:") && n.contains("`dimension`")),
+        "noted: {:?}",
+        out.notes
+    );
+}
+
 /// A token whose path is also a group becomes that group's `$root`; a name with a
 /// reserved character is renamed and the rename noted; strings and booleans ride
 /// in the root's extension.

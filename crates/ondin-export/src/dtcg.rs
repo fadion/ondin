@@ -330,10 +330,34 @@ impl Writer<'_> {
         }
     }
 
-    /// The `$type` a token of `v` declares: its scope's, else its reads'. An
-    /// alias declares one too: its reads were handed to its target, so the two
-    /// agree unless a scope says otherwise.
+    /// The `$type` a token of `v` declares. An alias declares the type of the
+    /// token its reference ends at, since DTCG requires a reference to resolve
+    /// to a token of its own type; anything else, [`Self::own_type`].
     fn type_of(&self, v: &Variable) -> &'static str {
+        // Followed with a seen set: a chain could cycle across modes.
+        let mut seen = BTreeSet::new();
+        let mut at = v;
+        while let Some(to) = self.alias_target(at) {
+            if !seen.insert(at.id) {
+                break;
+            }
+            at = to;
+        }
+        self.own_type(at)
+    }
+
+    /// The exported variable `v`'s first aliasing cell refers to, in its
+    /// collection's mode order; `None` when no cell is a reference here.
+    fn alias_target(&self, v: &Variable) -> Option<&Variable> {
+        self.modes_of(v).iter().find_map(|m| match v.cells.get(m) {
+            Some(Cell::Alias(to)) if self.paths.contains_key(to) => self.t.get(*to),
+            _ => None,
+        })
+    }
+
+    /// The `$type` `v`'s own scope makes, else its reads': an alias's reads were
+    /// handed to its target.
+    fn own_type(&self, v: &Variable) -> &'static str {
         match v.kind {
             VarKind::Color => "color",
             _ if v.scope.is_some() => scope_type(v.scope),
@@ -350,6 +374,13 @@ impl Writer<'_> {
 
     fn variable_token(&mut self, v: &Variable) -> Json {
         let ty = self.type_of(v);
+        let own = self.own_type(v);
+        if v.scope.is_some() && own != ty {
+            self.note(format!(
+                "{}: its scope makes it `{own}`, but it aliases a `{ty}` token, so it is written as `{ty}`.",
+                v.name
+            ));
+        }
         let mut token = Map::new();
         token.insert("$type".to_string(), Json::String(ty.to_string()));
         let value = self

@@ -2066,6 +2066,78 @@ fn a_paragraph_spacing_of_its_own_stays_under_a_bound_default() {
     );
 }
 
+/// **A content that varies by mode draws each mode's text**: one wrapper per
+/// value, shown by a hidden token `initial` in its modes and `none` in the
+/// others, so the frame set to Dark draws Dark's two paragraphs and the other
+/// Light's one, as the canvas does.
+///
+/// flip: `Tokens::mode_block` writing every hidden token `initial` → 88.1, each
+/// frame drawing both texts.
+#[test]
+fn a_content_varying_by_mode_draws_each_modes_text() {
+    use ondin_core::variable::{Cell, Mode, TEXT_CONTENT, VarKind, Variable};
+    let mut d = Doc::new();
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        collection: ondin_core::variable::CollectionId::FIRST,
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    d.apply(vec![mode(light, "Light", 0), mode(dark, "Dark", 1)]);
+    let greeting = d.ids.mint_var();
+    d.apply(vec![Operation::AddVariable {
+        var: Variable {
+            id: greeting,
+            name: "greeting".into(),
+            kind: VarKind::String,
+            cells: [
+                (light, Cell::String("Hello".into())),
+                (dark, Cell::String("Good evening\nand welcome".into())),
+            ]
+            .into_iter()
+            .collect(),
+            scope: None,
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    }]);
+    for (i, set) in [None, Some(dark)].into_iter().enumerate() {
+        let f = d.frame(None, 0.0, i as f64 * 90.0, 260.0, 80.0, "Board");
+        d.apply(vec![Operation::SetModes {
+            id: f,
+            modes: set.into_iter().collect(),
+        }]);
+        let kind = text_node("", TextSizing::Auto, body_style(), |_| {});
+        let t = d.add(Some(f), kind, Affine::translate((12.0, 10.0)), "Greeting");
+        let ops = ondin_core::bind_text_ops(
+            &d.doc,
+            t,
+            ondin_core::variable::text_vars_at(TEXT_CONTENT, greeting),
+        );
+        d.apply(ops);
+    }
+    let (doc, res) = d.done();
+    holds_within("content_by_mode", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+    let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
+    let tokens =
+        String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+    for block in [
+        ":root, [data-mode=\"light\"] {\n  --greeting-light: initial;\n  --greeting-dark: none;\n}",
+        "[data-mode=\"dark\"] {\n  --greeting-light: none;\n  --greeting-dark: initial;\n}",
+    ] {
+        assert!(tokens.contains(block), "lacks {block:?}:\n{tokens}");
+    }
+    assert!(export.approximated.is_empty(), "{:?}", export.approximated);
+    let html = String::from_utf8(export.file("index.html").unwrap().to_vec()).unwrap();
+    assert_eq!(html.matches("Hello").count(), 2, "{html}");
+    assert_eq!(html.matches("and welcome").count(), 2, "{html}");
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

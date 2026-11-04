@@ -2068,8 +2068,6 @@ impl Walk<'_> {
             content,
             style,
             spans,
-            para_spans,
-            paragraph,
             block,
             sizing,
             ..
@@ -2130,8 +2128,18 @@ impl Walk<'_> {
             };
             el.set("letter-spacing", v);
         }
+        // A content that varies by mode is each mode's text, shown by a hidden
+        // token of that mode; a property's value replaces it anyway.
+        let prop = self
+            .bound
+            .get(&node.id())
+            .is_some_and(|b| b.kind == PropKind::Text);
+        let by_mode = content_var
+            .filter(|v| !prop && tokens::varies(self.doc, *v))
+            .and_then(|v| Some((v, tokens::strings_by_mode(self.doc, v)?)));
         if let Some(var) = content_var
             && tokens::varies(self.doc, var)
+            && by_mode.is_none()
         {
             self.report.approximate(format!(
                 "text {}: its content is bound to a variable and written for one mode",
@@ -2194,10 +2202,60 @@ impl Walk<'_> {
             self.report
                 .approximate(format!("text {}: right-to-left text", label(node)));
         }
+        let versions: Vec<(String, Option<String>)> = match by_mode {
+            Some((var, values)) => values
+                .into_iter()
+                .map(|(text, modes)| {
+                    let t = self.doc.variables();
+                    let show = self.tokens.shown_in(t, var, modes, "contents");
+                    (text, show)
+                })
+                .collect(),
+            None => vec![(content.to_string(), None)],
+        };
+        for (content, show) in versions {
+            let paras = self.paragraphs(el, node, &content, white_space, kind);
+            match show {
+                Some(display) => {
+                    let mut wrap = Element::new(
+                        "span",
+                        self.classes.mint(&format!("{} mode", el.class), "mode"),
+                    );
+                    wrap.set("display", display);
+                    wrap.children = paras;
+                    el.children.push(Child::Element(Box::new(wrap)));
+                }
+                None => el.children.extend(paras),
+            }
+        }
+    }
+
+    /// `content`'s paragraphs as text `node` (drawn as `kind`) writes them under
+    /// `el`: a `p` each holding its runs, the content cased as the canvas cases it.
+    fn paragraphs(
+        &mut self,
+        el: &Element,
+        node: &Node,
+        content: &str,
+        white_space: &str,
+        kind: &NodeKind,
+    ) -> Vec<Child> {
+        let NodeKind::Text {
+            style,
+            spans,
+            para_spans,
+            paragraph,
+            ..
+        } = kind
+        else {
+            return Vec::new();
+        };
+        let runs = spans.runs(style, content.len());
         // Length-preserving, so the runs' ranges index it as they do `content`.
         let cased = ondin_core::text::cased_text(content, &runs);
         let shown = cased.as_deref().unwrap_or(content);
-
+        let vars = node.text_vars();
+        let mut out = Vec::new();
         let mut start = 0;
         let mut first = true;
         for para in content.split('\n') {
@@ -2300,10 +2358,11 @@ impl Walk<'_> {
             if p.children.is_empty() {
                 p.children.push(Child::Break);
             }
-            el.children.push(Child::Element(Box::new(p)));
+            out.push(Child::Element(Box::new(p)));
             start = end + 1;
             first = false;
         }
+        out
     }
 
     /// One run's `content` in its own inline box where it needs one: for a face

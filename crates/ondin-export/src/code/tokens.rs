@@ -29,6 +29,11 @@ pub(crate) struct Tokens {
     names: BTreeMap<VarId, String>,
     modes: BTreeMap<ModeId, String>,
     used: BTreeSet<VarId>,
+    /// Every custom property name given out, so a hidden token takes a free one.
+    taken: HashSet<String>,
+    /// The hidden tokens [`Self::shown_in`] made: each one's variable, name,
+    /// collection, and the modes it shows in.
+    hidden: Vec<(VarId, String, variable::CollectionId, Vec<ModeId>)>,
 }
 
 impl Tokens {
@@ -67,6 +72,7 @@ impl Tokens {
             let kit = kit_name(v.kit().unwrap_or_default());
             names.insert(v.id, unique(format!("{}-{}", slug(&kit), slug(&v.name))));
         }
+        let names_taken: HashSet<String> = names.values().cloned().collect();
         let mut taken = HashSet::new();
         let mut unique = |base: String| {
             let base = if base.is_empty() {
@@ -102,7 +108,41 @@ impl Tokens {
             names,
             modes,
             used: BTreeSet::new(),
+            taken: names_taken,
+            hidden: Vec::new(),
         }
+    }
+
+    /// A hidden token read as a `display`: the element's own display `own` in
+    /// `modes` of `var`'s collection, hidden in its others — what shows one
+    /// mode's text of a content that varies by mode. Named after `var` and the
+    /// first of `modes`, and shared by every text of that variable.
+    pub fn shown_in(
+        &mut self,
+        t: &Variables,
+        var: VarId,
+        modes: Vec<ModeId>,
+        own: &str,
+    ) -> Option<String> {
+        if let Some((_, name, _, _)) = self
+            .hidden
+            .iter()
+            .find(|(v, _, _, m)| *v == var && *m == modes)
+        {
+            return Some(format!("var(--{name}, {own})"));
+        }
+        let c = t.collection_of(var)?.id;
+        let mode = modes.first().and_then(|m| self.mode(*m)).unwrap_or("mode");
+        let base = format!("{}-{mode}", self.name(var));
+        let mut name = base.clone();
+        let mut n = 1;
+        while !self.taken.insert(name.clone()) {
+            n += 1;
+            name = format!("{base}-{n}");
+        }
+        let out = format!("var(--{name}, {own})");
+        self.hidden.push((var, name, c, modes));
+        Some(out)
     }
 
     /// `var(--name)`, recording the variable as read.
@@ -177,7 +217,7 @@ impl Tokens {
     /// that mode maps to. A kit's own modes, which only a kit main's frame sets,
     /// get a block of that kit's variables.
     pub fn css(&self, doc: &Document) -> Option<String> {
-        if self.used.is_empty() {
+        if self.used.is_empty() && self.hidden.is_empty() {
             return None;
         }
         let t = doc.variables();
@@ -297,6 +337,17 @@ impl Tokens {
                 out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
             }
         }
+        // `initial` lets the fallback, the element's own display, win.
+        for (_, name, of, modes) in &self.hidden {
+            if let Some(m) = mode.filter(|_| *of == c.id) {
+                let value = if modes.contains(&m) {
+                    "initial"
+                } else {
+                    "none"
+                };
+                out.push_str(&format!("  --{name}: {value};\n"));
+            }
+        }
         out.push_str("}\n");
     }
 
@@ -360,4 +411,23 @@ fn keyword(s: &str) -> String {
 /// question for a binding written resolved, which then holds in one mode only.
 pub(crate) fn varies(doc: &Document, var: VarId) -> bool {
     doc.variables().every_value(var).len() > 1
+}
+
+/// String variable `var`'s values, each with the modes of its collection that
+/// hold it, in mode order — `None` for a kit's variable or one with an alias,
+/// whose value another collection's mode can decide.
+pub(crate) fn strings_by_mode(doc: &Document, var: VarId) -> Option<Vec<(String, Vec<ModeId>)>> {
+    let t = doc.variables();
+    let v = t.get(var).filter(|v| v.kit().is_none())?;
+    let mut out: Vec<(String, Vec<ModeId>)> = Vec::new();
+    for m in &t.collection_of(var)?.modes {
+        let Some(Cell::String(s)) = v.cells.get(&m.id) else {
+            return None;
+        };
+        match out.iter_mut().find(|(x, _)| x == s) {
+            Some((_, modes)) => modes.push(m.id),
+            None => out.push((s.clone(), vec![m.id])),
+        }
+    }
+    Some(out)
 }

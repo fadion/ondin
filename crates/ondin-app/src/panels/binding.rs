@@ -1251,7 +1251,7 @@ impl OndinApp {
             .fixed_pos(pos)
             .show(ctx, |ui| {
                 ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(LIST_W - 8.0);
+                    ui.set_width(ui::menu_inner_w(LIST_W, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     if c.own_search {
                         let resp = ui::search_box(
@@ -1529,7 +1529,7 @@ impl OndinApp {
             .fixed_pos(pos)
             .show(ctx, |ui| {
                 ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(220.0 - 8.0);
+                    ui.set_width(ui::menu_inner_w(220.0, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     // The keyboard's twins only on a field the keyboard types into
                     // — not on the eye (§15 D1059).

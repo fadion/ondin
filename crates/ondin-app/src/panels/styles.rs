@@ -888,7 +888,7 @@ impl OndinApp {
             .fixed_pos(pos)
             .show(ctx, |ui| {
                 ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(MENU_W - 8.0);
+                    ui.set_width(ui::menu_inner_w(MENU_W, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let a =
                         ui::menu_row(ui, ui::MenuRow::new(icon::SWATCHES, &apply), ui::MENU_ROW_H);
@@ -1003,7 +1003,7 @@ impl OndinApp {
             .fixed_pos(pos)
             .show(ctx, |ui| {
                 ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(PICKER_W - 8.0);
+                    ui.set_width(ui::menu_inner_w(PICKER_W, 4.0));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let search = ui::search_box(
                         ui,

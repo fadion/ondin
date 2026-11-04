@@ -4320,7 +4320,7 @@ pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
 
 /// The mode of collection `c` frame `id` inherits when it sets none of it — the
 /// nearest ancestor frame's that sets one or picks one by its width, and that
-/// frame, else the collection's default (D1038 (a)). What `id` would pick by its
+/// frame, else the collection's default. What `id` would pick by its
 /// own width is [`width_inherits`]'s.
 pub(crate) fn inherited_mode(
     doc: &Document,

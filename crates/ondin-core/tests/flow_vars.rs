@@ -364,3 +364,42 @@ fn a_string_naming_no_direction_detaches_at_the_commit() {
     );
     assert_eq!(direction(&f.doc, f.cards), FlexDirection::Row);
 }
+
+/// The cut lands on the direction drawn before the edit, not on the placeholder
+/// the binding stored: bound while Row, drawn Column, then cut to Column.
+/// flip: `keep_flow_bindings` taking the direction drawn after the edit → fails
+/// at "what it drew".
+#[test]
+fn a_cut_direction_keeps_what_it_drew() {
+    let mut f = fixture();
+    let wide = Some(Scope::of([Field::FlexDirection, Field::Content]));
+    let mut ops = variable::scope_ops(&f.doc, f.loose, wide);
+    ops.push(cell(f.loose, f.tablet, "Row"));
+    commit(&mut f.doc, ops);
+    let ops = build::bind_flow_ops(&f.doc, f.cards, 0, Some(f.loose));
+    commit(&mut f.doc, ops);
+    commit(&mut f.doc, vec![cell(f.loose, f.tablet, "Column")]);
+    assert_eq!(direction(&f.doc, f.cards), FlexDirection::Column);
+    commit(&mut f.doc, vec![cell(f.loose, f.tablet, "Go")]);
+    assert_eq!(f.doc.get(f.cards).unwrap().flow_vars()[0], None);
+    assert_eq!(
+        direction(&f.doc, f.cards),
+        FlexDirection::Column,
+        "what it drew"
+    );
+}
+
+/// Unscoping a direction's string to every field (`None`, which leaves out the
+/// fields that need a scope) detaches the direction, so the commit holds.
+/// flip: `remove_and_scope_ops` reading `None` as every field → fails at
+/// "unscoped".
+#[test]
+fn unscoping_a_direction_string_detaches_it() {
+    let mut f = fixture();
+    let ops = build::bind_flow_ops(&f.doc, f.cards, 0, Some(f.flow));
+    commit(&mut f.doc, ops);
+    let ops = variable::scope_ops(&f.doc, f.flow, None);
+    f.doc.apply(&Transaction(ops)).expect("unscoped");
+    assert_eq!(f.doc.get(f.cards).unwrap().flow_vars()[0], None);
+    assert_eq!(direction(&f.doc, f.cards), FlexDirection::Row);
+}

@@ -372,6 +372,34 @@ fn the_mode_verbs_keep_the_widths_whole() {
     assert_eq!(c.min_width(f.mobile), None);
 }
 
+/// Deleting a collection's last mode leaves it picked by width no more, so
+/// another collection may be.
+/// flip: `remove_mode_ops` keeping an empty set of widths → fails at "no modes".
+#[test]
+fn deleting_the_last_mode_unticks_the_collection() {
+    let mut f = fixture();
+    let modes: Vec<ModeId> = f
+        .doc
+        .variables()
+        .collection(f.bp)
+        .unwrap()
+        .modes
+        .iter()
+        .map(|m| m.id)
+        .collect();
+    // Its variables first, as `take` does: a variable needs a mode.
+    let vars: Vec<_> = f.doc.variables().iter().map(|v| v.id).collect();
+    let ops = variable::remove_ops(&f.doc, &vars);
+    f.doc.apply(&Transaction(ops)).expect("variables removed");
+    for m in modes {
+        let ops = variable::remove_mode_ops(&f.doc, m);
+        f.doc.apply(&Transaction(ops)).expect("removed");
+    }
+    let c = f.doc.variables().collection(f.bp).unwrap();
+    assert!(c.modes.is_empty());
+    assert!(!c.by_width(), "no modes");
+}
+
 /// *Duplicate collection* drops the tick, so the copy picks by nothing.
 #[test]
 fn a_duplicated_collection_is_not_picked_by_width() {

@@ -300,8 +300,7 @@ impl StyleValue {
                 .flat_map(|e| e.vars.iter().flatten().copied())
                 .collect(),
             StyleValue::Text(_) => Vec::new(),
-            // And a layout's gaps and padding (§15 D1075), its direction and
-            // wrap.
+            // And a layout's gaps and padding, its direction and wrap.
             StyleValue::Layout(l) => l
                 .spacing_vars
                 .iter()

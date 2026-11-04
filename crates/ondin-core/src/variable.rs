@@ -2065,9 +2065,10 @@ pub fn remove_and_scope_ops(
     let t = doc.variables();
     let gone = |v: VarId, f: Field| {
         removed.contains(&v)
-            || scoped
-                .iter()
-                .any(|(s, scope)| *s == v && scope.is_some_and(|x| !x.contains(f)))
+            || scoped.iter().any(|(s, scope)| {
+                // `None` is every field but those that need a scope.
+                *s == v && scope.map_or(f.needs_scope(), |x| !x.contains(f))
+            })
     };
     let mut ops = detach_ops(doc, &gone);
     let vars = removed;
@@ -2416,18 +2417,19 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
     let t = doc.variables();
     let mut ops = inherit_ops(doc, &[mode]);
     // A by-width collection drops the mode's width; the next takes the first's
-    // 0 when the first goes.
+    // 0 when the first goes, and with the last it is picked by width no more.
     if let Some(c) = t.collection_of_mode(mode)
         && let Some(b) = &c.breakpoints
     {
         let mut next = b.clone();
         next.remove(&mode);
-        if let Some(first) = c.modes.iter().find(|m| m.id != mode) {
+        let first = c.modes.iter().find(|m| m.id != mode);
+        if let Some(first) = first {
             next.insert(first.id, 0.0);
         }
         ops.push(crate::Operation::SetBreakpoints {
             id: c.id,
-            breakpoints: Some(next),
+            breakpoints: first.map(|_| next),
         });
     }
     // And every kit mapping's entry for it (§15 D1064), which would name a mode
@@ -2511,7 +2513,7 @@ pub fn frames_set_to(doc: &crate::Document, mode: ModeId) -> usize {
 
 /// A copy of mode `from` with its every cell, added at `index` of the list —
 /// *Duplicate mode* (after its source) and *New mode* (which copies the first
-/// mode and goes last, D1038 G) — reading every kit's column `from` reads, a
+/// mode and goes last) — reading every kit's column `from` reads, a
 /// mapping entry written where the copy's name would match another. In a
 /// collection picked by width the copy starts halfway to the next mode's width,
 /// or [`WIDTH_STEP`] past the last. Empty when `from` is not a mode.

@@ -4462,6 +4462,19 @@ pub fn kept_flow(
     out
 }
 
+/// Whether `op` writes a string variable's value, or an alias that may reach
+/// one — what can turn a bound flex direction or wrap in some mode.
+fn writes_strings(op: &Operation) -> bool {
+    use crate::variable::{Cell, VarKind};
+    let stringy = |c: &Cell| matches!(c, Cell::String(_) | Cell::Alias(_));
+    match op {
+        Operation::SetVariableCell { cell, .. } => stringy(cell),
+        Operation::SetVariable { var } => var.kind == VarKind::String,
+        Operation::AddMode { cells, .. } => cells.iter().any(|(_, c)| stringy(c)),
+        _ => false,
+    }
+}
+
 /// The two-half rule for a flex direction's and wrap's bindings, which ride in
 /// the layout: every `SetDisplay` rewritten by [`kept_flow`].
 ///
@@ -4493,13 +4506,11 @@ pub fn keep_flow_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
             Operation::InsertSubtree { nodes, .. } => {
                 judged.extend(nodes.iter().filter(|n| bound(n)).map(|n| n.id));
             }
-            Operation::SetVariableCell { .. }
-            | Operation::SetVariable { .. }
-            | Operation::AddMode { .. } => {
-                judged.extend(doc.node_map().values().filter(|n| bound(n)).map(|n| n.id));
-            }
             _ => {}
         }
+    }
+    if tx.0.iter().any(writes_strings) {
+        judged.extend(doc.node_map().values().filter(|n| bound(n)).map(|n| n.id));
     }
     if judged.is_empty() {
         return tx;
@@ -4516,9 +4527,14 @@ pub fn keep_flow_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
         let Some(Display::Flex(mut f)) = after.get(id).and_then(Node::display).cloned() else {
             continue;
         };
-        let drawn = match after.spacing_drawn_in(t, id, &Display::Flex(f), [None; 6]) {
-            Display::Flex(d) => d,
-            _ => f,
+        // What it drew before the edit, as a size binding detaches to: after a
+        // cell edit the word may name nothing, and the literal is a placeholder.
+        let drawn = match doc.resolved_display(id).as_deref() {
+            Some(Display::Flex(d)) => *d,
+            _ => match after.spacing_drawn_in(t, id, &Display::Flex(f), [None; 6]) {
+                Display::Flex(d) => d,
+                _ => f,
+            },
         };
         let names = |v: Option<crate::VarId>, field| {
             v.is_none_or(|v| variable::names_one_everywhere(t, v, field))
@@ -5323,16 +5339,6 @@ pub fn keep_size_bindings(
                     touched.extend(n.children().iter().copied());
                 }
             }
-            // A cell can turn a bound direction in some mode.
-            Operation::SetVariableCell { .. }
-            | Operation::SetVariable { .. }
-            | Operation::AddMode { .. } => {
-                for n in doc.node_map().values() {
-                    if !directions_bound(doc, n.id).is_empty() {
-                        touched.extend(n.children().iter().copied());
-                    }
-                }
-            }
             Operation::InsertSubtree { nodes, .. } => {
                 for n in nodes {
                     if !sets_vars.contains(&n.id) && n.size_vars.iter().any(Option::is_some) {
@@ -5341,6 +5347,15 @@ pub fn keep_size_bindings(
                 }
             }
             _ => {}
+        }
+    }
+    // A string cell can turn a bound direction in some mode.
+    if tx.0.iter().any(writes_strings) {
+        for n in doc.node_map().values() {
+            if matches!(n.display(), Some(crate::container::Display::Flex(f)) if f.direction_var.is_some())
+            {
+                touched.extend(n.children().iter().copied());
+            }
         }
     }
     touched.retain(|id| bound(*id));

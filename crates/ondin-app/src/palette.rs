@@ -1448,22 +1448,21 @@ fn more_row(ui: &mut egui::Ui, n: usize, lit: bool) -> egui::Response {
     resp
 }
 
-/// The list's place when nothing matches: one line naming the query back.
+/// The list's place when nothing matches: one line naming what was searched.
 fn no_match(ui: &mut egui::Ui, pal: &Palette) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::empty());
-    let q = pal.query.trim();
-    let text = match (pal.layers_only, q.is_empty()) {
-        (true, _) if crate::private::on() => crate::private::DECLINE_SEARCH.to_string(),
-        (true, true) => "This document has no layers".to_string(),
-        (true, false) => format!("No layer matches “{q}”"),
-        (false, _) => format!("No command or layer matches “{q}”"),
+    let text = match (pal.layers_only, pal.query.trim().is_empty()) {
+        (true, _) if crate::private::on() => crate::private::DECLINE_SEARCH,
+        (true, true) => "This document has no layers",
+        (true, false) => "No layers match",
+        (false, _) => "No commands or layers match",
     };
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(rect.with_min_x(rect.left() + 8.0))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| crate::ui::empty_note(ui, &text),
+        |ui| crate::ui::empty_note(ui, text),
     );
 }
 
@@ -1508,9 +1507,9 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     // The text's optical centre, a point above the box's.
     let y = rect.center().y - FOOTER_TEXT_LIFT;
     let keys = if layers_only {
-        "Enter select    Shift+Enter add    Tab commands    Esc close"
+        "Enter select · Shift+Enter add · Tab commands · Esc close"
     } else {
-        "↑↓ move    Enter run    Tab layers    Esc close"
+        "↑↓ move · Enter run · Tab layers · Esc close"
     };
     let keys_g = p.layout_no_wrap(keys.into(), font.clone(), theme::text::dim());
     let keys_w = keys_g.size().x;

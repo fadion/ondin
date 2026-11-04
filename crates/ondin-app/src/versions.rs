@@ -18,7 +18,7 @@ use crate::app::OndinApp;
 use crate::compare::{self, Pick};
 use crate::library::{clock, store};
 use crate::theme::{self, color, icon};
-use crate::version_diffs::{Brief, Counts, Later, Pair, Part, Summary, plural};
+use crate::version_diffs::{Brief, Counts, Later, Pair, Part, Summary};
 use eframe::egui;
 use ondin_core::diff::Status;
 use std::path::{Path, PathBuf};
@@ -287,7 +287,11 @@ fn summary_runs(s: &Stop, private: bool) -> Option<Vec<(String, egui::Color32)>>
         (Summary::Same, None) => quiet(format!("No changes since {before}")),
         (Summary::Same, Some(_)) => quiet(format!("Same as {before}")),
         (Summary::Size { pages, layers }, place) => {
-            let size = format!("{}, {}", plural(*pages, "page"), plural(*layers, "layer"));
+            let size = format!(
+                "{}, {}",
+                crate::ui::count(*pages, "page"),
+                crate::ui::count(*layers, "layer")
+            );
             match place {
                 None => vec![(size.replace(", ", " · "), theme::text::faint())],
                 Some(_) => quiet(format!("First version · {size}")),
@@ -1183,7 +1187,7 @@ impl OndinApp {
         let title = format!(
             "{} · {}",
             self.shown_title(),
-            plural(versions.len(), "version")
+            crate::ui::count(versions.len(), "version")
         );
         let mut close = false;
         let mut save_named = false;

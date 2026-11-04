@@ -586,40 +586,38 @@ impl OndinApp {
             .filter(|i| ondin_core::reset::drift(doc, *i).any())
             .count();
         let kits = waiting.len();
-        let plural = |n: usize| if n == 1 { "" } else { "s" };
         // Only the mains that changed (§15 D1036 (5)): a version-only publish
         // moves every main's version and changes none of them.
         let changed = update.changed.len();
         let mut toast = if changed == 0 {
             format!(
-                "Updated {kits} kit{} · no component you use changed · Ctrl+Z to undo",
-                plural(kits)
+                "Updated {} · no component you use changed · Ctrl+Z to undo",
+                ui::count(kits, "kit")
             )
         } else {
             format!(
-                "Updated {changed} component{} from {kits} kit{} · overrides kept on {kept} \
-                 instance{} · Ctrl+Z to undo",
-                plural(changed),
-                plural(kits),
-                plural(kept),
+                "Updated {} from {} · overrides kept on {} · Ctrl+Z to undo",
+                ui::count(changed, "component"),
+                ui::count(kits, "kit"),
+                ui::count(kept, "instance"),
             )
         };
         for (name, n) in &cut {
             toast = format!(
-                "{toast} · {n} instance{} of {name} detached — the kit removed it",
-                plural(*n)
+                "{toast} · {} of {name} detached — the kit removed it",
+                ui::count(*n, "instance")
             );
         }
         // And the kits' variables and styles (the notice's counts, §15 D1065): what came
         // new or changed, and what the kit removed — its users keeping the values.
         let tokens = |vars: usize, styles: usize| match (vars, styles) {
             (0, 0) => None,
-            (v, 0) => Some(format!("{v} variable{}", plural(v))),
-            (0, s) => Some(format!("{s} style{}", plural(s))),
+            (v, 0) => Some(ui::count(v, "variable")),
+            (0, s) => Some(ui::count(s, "style")),
             (v, s) => Some(format!(
-                "{v} variable{} and {s} style{}",
-                plural(v),
-                plural(s)
+                "{} and {}",
+                ui::count(v, "variable"),
+                ui::count(s, "style")
             )),
         };
         if let Some(t) = tokens(update.vars_changed.len(), update.styles_changed.len()) {

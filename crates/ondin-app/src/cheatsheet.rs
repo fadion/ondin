@@ -481,10 +481,7 @@ impl OndinApp {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     if all.is_empty() {
-                        crate::ui::empty_note(
-                            ui,
-                            &format!("No shortcut matches “{}”", sheet.filter.trim()),
-                        );
+                        crate::ui::empty_note(ui, "No shortcuts match");
                         return;
                     }
                     let columns = split_columns(&all, lead == Lead::Library, n);

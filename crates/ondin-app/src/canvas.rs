@@ -5964,7 +5964,7 @@ impl OndinApp {
             blink: Default::default(),
         });
         self.mode = Mode::TextInsert;
-        self.session.info("Type to edit; Esc to finish");
+        self.session.info("Type to edit · Esc to finish");
     }
 
     /// Create an empty **auto-width** text node and enter insert mode — the Text
@@ -6464,7 +6464,7 @@ impl OndinApp {
             blink: Default::default(),
         });
         self.mode = Mode::TextInsert;
-        self.session.info("Editing text; Esc to finish");
+        self.session.info("Editing text · Esc to finish");
     }
 
     /// What `id`'s span lists are kept against while it is edited, when a binding
@@ -9880,8 +9880,8 @@ fn drop_label(files: usize, svgs: usize, pdfs: usize, replacing: Option<&str>) -
         (1, None) if pdfs == 1 => "Import PDF".to_string(),
         (n, None) if svgs == n => format!("Import {n} SVGs"),
         (n, None) if pdfs == n => format!("Import {n} PDFs"),
-        (n, None) if svgs + pdfs == n => format!("Import {n} files"),
-        (n, None) if svgs + pdfs > 0 => format!("Place {n} files"),
+        (n, None) if svgs + pdfs == n => format!("Import {}", crate::ui::count(n, "file")),
+        (n, None) if svgs + pdfs > 0 => format!("Place {}", crate::ui::count(n, "file")),
         (1, None) => "Place image".to_string(),
         (n, None) => format!("Place {n} images"),
     }

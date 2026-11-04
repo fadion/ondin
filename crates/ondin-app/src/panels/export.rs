@@ -1366,7 +1366,7 @@ impl OndinApp {
                 ui::FieldButton::Off,
                 egui::vec2(w, CELL),
             )
-            .on_hover_text(format!("{} files in one archive", files.len()))
+            .on_hover_text(format!("{} in one archive", ui::count(files.len(), "file")))
             .clicked()
             {
                 self.run_export(files, true);

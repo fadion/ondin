@@ -64,8 +64,8 @@ impl OndinApp {
             format!("Nothing to publish · no changes since v{version}")
         } else {
             format!(
-                "{n} component{} changed since v{version} · {}",
-                plural(n),
+                "{} changed since v{version} · {}",
+                ui::count(n, "component"),
                 breakdown(&c)
             )
         };
@@ -210,8 +210,8 @@ impl OndinApp {
                         mark.version
                     ),
                     n => format!(
-                        "{n} component{} changed since v{}{when}{}.",
-                        plural(n),
+                        "{} changed since v{}{when}{}.",
+                        ui::count(n, "component"),
                         mark.version,
                         // And what else travels (§15 D1064's variables and
                         // styles beside the name and the order).
@@ -276,7 +276,7 @@ impl OndinApp {
                 "What changed, in a line. Shown with the update.",
             );
             let verb = if first {
-                format!("Publish {} component{}", c.count(), plural(c.count()))
+                format!("Publish {}", ui::count(c.count(), "component"))
             } else {
                 "Publish".to_string()
             };
@@ -347,10 +347,13 @@ impl OndinApp {
         self.session.info(match count {
             0 => format!("Published {name} v{version} · {other}{drafts}"),
             n if changes.as_ref().is_some_and(|c| c.tokens) => format!(
-                "Published {name} v{version} · {n} component{} and its variables and styles{drafts}",
-                plural(n)
+                "Published {name} v{version} · {} and its variables and styles{drafts}",
+                ui::count(n, "component")
             ),
-            n => format!("Published {name} v{version} · {n} component{}{drafts}", plural(n)),
+            n => format!(
+                "Published {name} v{version} · {}{drafts}",
+                ui::count(n, "component")
+            ),
         });
     }
 }
@@ -381,10 +384,6 @@ fn joined(parts: &[(bool, &str)]) -> String {
         [one] => one.to_string(),
         [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
-}
-
-fn plural(n: usize) -> &'static str {
-    if n == 1 { "" } else { "s" }
 }
 
 /// *1 added, 2 changed, 1 removed* — the parts that are not zero.
@@ -460,7 +459,7 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
         (None, true) => {
             // Its variants, not its children — a set may hold a plain layer too.
             let k = ondin_core::variant::variants(doc, id).len();
-            Some(format!("{k} variant{}", plural(k)))
+            Some(ui::count(k, "variant"))
         }
         (None, false) => None,
     };

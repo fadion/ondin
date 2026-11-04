@@ -3546,8 +3546,10 @@ impl OndinApp {
             return;
         }
         if !away.is_empty() {
-            self.session
-                .info(format!("Selected {} instance(s){away}", here.len()));
+            self.session.info(format!(
+                "Selected {}{away}",
+                crate::ui::count(here.len(), "instance")
+            ));
         }
         self.session.selection.set(here);
     }
@@ -4235,8 +4237,10 @@ impl OndinApp {
         )
         .unwrap_or(heading);
         self.stamp_clipboard(ctx, text.clone());
-        self.session
-            .info(format!("Copied {} layer(s)", templates.len()));
+        self.session.info(format!(
+            "Copied {}",
+            crate::ui::count(templates.len(), "layer")
+        ));
         self.clipboard = Some(Clip {
             subtrees: templates,
             kits,
@@ -4267,8 +4271,10 @@ impl OndinApp {
             .map(|g| format!("{} {}", g.axis.position_label(), g.position))
             .collect();
         self.stamp_clipboard(ctx, text.join(", "));
-        self.session
-            .info(format!("Copied {} guide(s)", guides.len()));
+        self.session.info(format!(
+            "Copied {}",
+            crate::ui::count(guides.len(), "guide")
+        ));
         self.guide_clipboard = Some(guides);
         self.clipboard = None;
         // Cleared with the payload it belongs to.
@@ -4312,9 +4318,10 @@ impl OndinApp {
         }
         self.select_pasted_guides(ids);
         self.session.info(match orphaned {
-            0 => format!("Pasted {n} guide(s)"),
+            0 => format!("Pasted {}", crate::ui::count(n, "guide")),
             orphaned => format!(
-                "Pasted {n} guide(s) — {orphaned} whose frame is gone are now on the canvas"
+                "Pasted {} — {orphaned} whose frame is gone are now on the canvas",
+                crate::ui::count(n, "guide")
             ),
         });
         true
@@ -4347,7 +4354,8 @@ impl OndinApp {
         let n = ops.len();
         if self.session.commit(Transaction(ops)) {
             self.select_pasted_guides(ids);
-            self.session.info(format!("Duplicated {n} guide(s)"));
+            self.session
+                .info(format!("Duplicated {}", crate::ui::count(n, "guide")));
         }
         true
     }
@@ -4408,8 +4416,9 @@ impl OndinApp {
                 if n == 1 { "" } else { "s" }
             ),
             (n, None) => format!(
-                "Cut {} layer(s) — {n} instance(s) will follow on paste",
-                d.count
+                "Cut {} — {} will follow on paste",
+                crate::ui::count(d.count, "layer"),
+                crate::ui::count(n, "instance")
             ),
         });
     }
@@ -4444,8 +4453,8 @@ impl OndinApp {
         let note = crate::panels::fidelity_clauses(&out.approximated, &out.round_trip);
         ctx.copy_text(out.svg);
         self.session.info(match note {
-            None => format!("Copied {n} layer(s) as SVG"),
-            Some(note) => format!("Copied {n} layer(s) as SVG — {note}"),
+            None => format!("Copied {} as SVG", crate::ui::count(n, "layer")),
+            Some(note) => format!("Copied {} as SVG — {note}", crate::ui::count(n, "layer")),
         });
     }
 
@@ -4465,8 +4474,10 @@ impl OndinApp {
         };
         let css = ondin_export::code::css_of(&self.session.doc, &self.session.resolved, &ids);
         ctx.copy_text(css);
-        self.session
-            .info(format!("Copied {} layer(s) as CSS", ids.len()));
+        self.session.info(format!(
+            "Copied {} as CSS",
+            crate::ui::count(ids.len(), "layer")
+        ));
     }
 
     /// *Copy as PNG* — the selection as a picture on the clipboard at `scale`×,
@@ -4538,9 +4549,10 @@ impl OndinApp {
         let wrote = with_clipboard(|c| c.set_image(image))
             .unwrap_or(Err(arboard::Error::ClipboardNotSupported));
         match wrote {
-            Ok(()) => self
-                .session
-                .info(format!("Copied {n} layer(s) as PNG, {w}×{h}")),
+            Ok(()) => self.session.info(format!(
+                "Copied {} as PNG, {w}×{h}",
+                crate::ui::count(n, "layer")
+            )),
             Err(e) => self
                 .session
                 .info(format!("Could not copy the picture: {e}")),
@@ -5082,7 +5094,7 @@ impl OndinApp {
         let tx = Transaction(ops);
         if self.session.commit(tx) && !created.is_empty() {
             let detached = landed_detached(&self.session.doc, &placements, &created);
-            let mut said = format!("{verb} {} layer(s)", created.len());
+            let mut said = format!("{verb} {}", crate::ui::count(created.len(), "layer"));
             if detached > 0 {
                 said.push_str(&format!(
                     " · {detached} instance{} detached — {} not in this document",
@@ -5177,7 +5189,7 @@ impl OndinApp {
             return false;
         }
         self.session
-            .info(format!("{verb} {} layer(s)", roots.len()));
+            .info(format!("{verb} {}", crate::ui::count(roots.len(), "layer")));
         self.session.selection.set(roots);
         true
     }
@@ -5196,11 +5208,16 @@ impl OndinApp {
                 if n == 1 { "" } else { "s" }
             ),
             (_, n @ 1.., None) => format!(
-                "Deleted {} layer(s) — {n} instance(s) detached · Ctrl+Z to undo",
-                d.count
+                "Deleted {} — {} detached · Ctrl+Z to undo",
+                crate::ui::count(d.count, "layer"),
+                crate::ui::count(n, "instance")
             ),
-            (0, _, _) => format!("Deleted {} layer(s)", d.count),
-            (n, _, _) => format!("Deleted {} layer(s) and {n} guide(s)", d.count),
+            (0, _, _) => format!("Deleted {}", crate::ui::count(d.count, "layer")),
+            (n, _, _) => format!(
+                "Deleted {} and {}",
+                crate::ui::count(d.count, "layer"),
+                crate::ui::count(n, "guide")
+            ),
         });
     }
 
@@ -7675,7 +7692,7 @@ impl OndinApp {
                 self.open_menu = TopMenu::None;
                 self.end_blend_preview();
                 self.session.info(if on {
-                    "Focus mode — Escape to leave"
+                    "Focus mode · Esc to leave"
                 } else {
                     "Left focus mode"
                 });
@@ -9315,7 +9332,7 @@ mod guide_copy_tests {
     }
 
     /// A locked paste still reports the guides it made, though they are not selected.
-    /// flip: count `selection.guides()` → fails at the locked "Pasted 3 guide(s)" assertion
+    /// flip: count `selection.guides()` → fails at the locked "Pasted 3 guides" assertion
     #[test]
     fn a_paste_counts_the_guides_it_made_even_when_they_cannot_be_selected() {
         let ctx = egui::Context::default();
@@ -9340,7 +9357,7 @@ mod guide_copy_tests {
             assert!(app.paste_guides(GUIDE_PASTE_OFFSET), "the paste ran");
             assert_eq!(
                 app.session.status().text,
-                "Pasted 3 guide(s)",
+                "Pasted 3 guides",
                 "locked = {locked}"
             );
             assert_eq!(
@@ -13739,7 +13756,7 @@ mod library_wiring_tests {
             for cs in shapes {
                 match &cs.shape {
                     egui::Shape::Rect(r) if r.stroke.width > 0.0 => outlines.push(r.rect),
-                    egui::Shape::Text(t) if t.galley.text().contains("RESTART") => {
+                    egui::Shape::Text(t) if t.galley.text().contains("Restart") => {
                         label = Some(t.pos + t.galley.size() / 2.0);
                     }
                     egui::Shape::Text(t) if t.galley.text() == crate::theme::icon::SLIDERS => {

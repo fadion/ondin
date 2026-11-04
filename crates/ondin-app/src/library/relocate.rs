@@ -83,20 +83,24 @@ impl Moved {
             let name = crate::private::document(&name, 0);
             return match self.failed.len() {
                 1 => format!(
-                    "Moved {} file(s); “{name}” could not be moved",
-                    self.documents()
+                    "Moved {}; “{name}” could not be moved",
+                    crate::ui::count(self.documents(), "file")
                 ),
                 n => format!(
-                    "Moved {} file(s); “{name}” and {} other(s) could not be moved",
-                    self.documents(),
-                    n - 1
+                    "Moved {}; “{name}” and {} could not be moved",
+                    crate::ui::count(self.documents(), "file"),
+                    crate::ui::count(n - 1, "other")
                 ),
             };
         }
         match (self.documents(), self.projects) {
             (0, 0) => "Nothing to move".into(),
-            (d, 0) => format!("Moved {d} file(s)"),
-            (d, p) => format!("Moved {d} file(s) and {p} project(s)"),
+            (d, 0) => format!("Moved {}", crate::ui::count(d, "file")),
+            (d, p) => format!(
+                "Moved {} and {}",
+                crate::ui::count(d, "file"),
+                crate::ui::count(p, "project")
+            ),
         }
     }
 }
@@ -684,7 +688,7 @@ mod tests {
         let line = moved.summary();
         crate::private::set(false);
         assert_eq!(
-            line, "Moved 0 file(s); “Document 1” could not be moved",
+            line, "Moved 0 files; “Document 1” could not be moved",
             "masked"
         );
         assert!(

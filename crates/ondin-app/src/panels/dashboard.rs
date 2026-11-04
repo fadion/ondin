@@ -836,7 +836,7 @@ impl OndinApp {
                     if private {
                         crate::private::DECLINE_SEARCH
                     } else {
-                        "No matches"
+                        "No files or projects match"
                     },
                     egui::FontId::proportional(ui::SMALL_PT),
                     theme::text::dim(),
@@ -1412,7 +1412,7 @@ impl OndinApp {
     // No `act` parameter: the two things this commits (`dash.deleting_project`,
     // `dash.edit_project`) open a card and mutate no list, so they bypass `Act`.
     fn dashboard_header(&mut self, ui: &mut egui::Ui, count: usize) {
-        let (heading, subheading) = self.heading();
+        let (heading, subheading) = self.heading(count);
         ui.horizontal(|ui| {
             // The tall item first: a `horizontal` row centres each item against the
             // height known when it is placed.
@@ -1423,7 +1423,7 @@ impl OndinApp {
                         .color(theme::text::strong()),
                 );
                 ui.label(
-                    egui::RichText::new(subheading.replace("{n}", &count.to_string()))
+                    egui::RichText::new(subheading)
                         .size(ui::SMALL_PT)
                         .color(theme::text::dim()),
                 );
@@ -1648,20 +1648,21 @@ impl OndinApp {
         }
     }
 
-    /// The title and the line under it, for the current nav. `{n}` in the
-    /// subheading is filled with the visible count by the caller.
-    fn heading(&self) -> (String, String) {
+    /// The title and the line under it, for the current nav, the line counting the
+    /// `n` items shown.
+    fn heading(&self, n: usize) -> (String, String) {
         let nav = &self.dash.nav;
+        let files = ui::count(n, "file");
         match nav {
             Nav::Recent => (nav.label().into(), "Picked up where you left off".into()),
-            Nav::All | Nav::Starred => (nav.label().into(), "{n} files".into()),
-            Nav::Kits => (nav.label().into(), "{n} kits".into()),
+            Nav::All | Nav::Starred => (nav.label().into(), files),
+            Nav::Kits => (nav.label().into(), ui::count(n, "kit")),
             Nav::Trash => (
                 nav.label().into(),
                 match self.prefs.trash_keep_days {
                     // The zero case says the opposite of "kept for 0 days".
-                    0 => "{n} files · deleted straight away".into(),
-                    d => format!("{{n}} files · kept for {d} days"),
+                    0 => format!("{files} · deleted straight away"),
+                    d => format!("{files} · kept for {d} days"),
                 },
             ),
             Nav::Project(id) => match self.library.projects.get(id) {
@@ -1673,10 +1674,10 @@ impl OndinApp {
                         .unwrap_or_else(|| "never".into());
                     (
                         self.library.shown_project(p),
-                        format!("{{n}} files · updated {touched}"),
+                        format!("{files} · updated {touched}"),
                     )
                 }
-                None => ("Project".into(), "{n} files".into()),
+                None => ("Project".into(), files),
             },
         }
     }
@@ -1815,7 +1816,7 @@ impl OndinApp {
         ui.painter().text(
             egui::pos2(rect.left() + PROJECT_PAD, rect.bottom() - PROJECT_PAD - 6.0),
             egui::Align2::LEFT_CENTER,
-            format!("{count} file(s) · {touched}"),
+            format!("{} · {touched}", ui::count(count, "file")),
             egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
@@ -2940,7 +2941,8 @@ impl OndinApp {
         self.dash.deleting_project = None;
         if failed > 0 {
             self.session.fail(format!(
-                "{failed} file(s) could not be moved — the project has been kept"
+                "{} could not be moved — the project has been kept",
+                ui::count(failed, "file")
             ));
         }
     }
@@ -3549,7 +3551,7 @@ impl OndinApp {
                 // the files go to the trash, which would soften the loudest control.
                 if ui::switch_row(
                     ui,
-                    &format!("Delete its {count} file(s) too"),
+                    &format!("Delete its {} too", ui::count(count, "file")),
                     !dp.keep_files,
                     settings::SWITCH_H,
                 )
@@ -4199,7 +4201,7 @@ impl OndinApp {
             );
             ui.add_space(settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                done |= settings::text_button(ui, "OK", FieldButton::Primary).clicked();
+                done |= settings::text_button(ui, "Close", FieldButton::Primary).clicked();
             });
         });
         if done || modal.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -7326,7 +7328,7 @@ mod tests {
         };
         let (_, _, label) = row(&mut app, &ctx).expect("the switch row is on the card");
         assert_eq!(
-            label, "Delete its 1 file(s) too",
+            label, "Delete its 1 file too",
             "the row counts the project's own documents"
         );
 
@@ -8687,7 +8689,7 @@ mod tests {
             }
 
             if staged {
-                let chip = find(&out, &|t| t.contains("RESTART")).expect("the chip is drawn");
+                let chip = find(&out, &|t| t.contains("Restart")).expect("the chip is drawn");
                 assert!(
                     !field.contains(chip),
                     "{width}: the field lies over the chip"

@@ -499,7 +499,7 @@ worded for the scope that plan was made for (`Plan::scope`).
   and count. The count reads *N of M change* at *Selection*, *N of M match* on a page, plus *· K
   pages* for all pages. A name that would come out empty keeps its own (*Would be empty · kept*,
   amber) and takes no number. An empty preview reads *Matching…* only until the first plan lands,
-  and *No layer matches* after it, also while a later keystroke's plan is in flight. Nothing on the
+  and *No layers match* after it, also while a later keystroke's plan is in flight. Nothing on the
   canvas changes until Rename.
 - **Renaming.** One transaction of `SetName`, one undo step named *Rename* with `TEXT_AA`; the
   status line says *Renamed N layers · Ctrl+Z to undo*. New names are cleaned as any typed name
@@ -555,7 +555,7 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when
   locked, a slashed eye when hidden, else `TEXT_AA` for a case-transformed run. A row a replace would
   skip is drawn at 45%. The footer reads *N matches in M layers · K inside an instance skipped · L
-  locked*. An empty list reads *Nothing in ‹the selection / this page / any page› matches* (`ui::empty_note`) with a
+  locked*. An empty list reads *No layers in ‹the selection / this page / any page› match* (`ui::empty_note`) with a
   button widening the scope (*Search this page*, *Search all pages*).
 - **Keys.** `Enter` in Find steps to the next match and `Shift+Enter` to the previous, round the
   ends; `Enter` in Replace replaces. The fields keep the keyboard (`return_key(None)`). `Escape` is a

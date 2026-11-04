@@ -149,19 +149,15 @@ pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static
 
 /// A style's short summary: `1 fill`, `1 · inside`, `2 shadows`.
 fn summary(doc: &Document, value: &StyleValue) -> String {
-    let plural = |n: usize, one: &str, many: &str| match n {
-        1 => format!("1 {one}"),
-        n => format!("{n} {many}"),
-    };
     match value {
-        StyleValue::Fills(v) => plural(v.len(), "fill", "fills"),
+        StyleValue::Fills(v) => ui::count(v.len(), "fill"),
         StyleValue::Strokes(v) => match v.as_slice() {
             [one] => format!(
                 "{} · {}",
                 number(width_shown(doc, one)),
                 format!("{:?}", one.align).to_lowercase()
             ),
-            v => plural(v.len(), "stroke", "strokes"),
+            v => ui::count(v.len(), "stroke"),
         },
         StyleValue::Effects(v) => {
             use ondin_core::EffectKind as K;
@@ -169,9 +165,9 @@ fn summary(doc: &Document, value: &StyleValue) -> String {
                 .iter()
                 .all(|e| matches!(e.kind, K::DropShadow(_) | K::InnerShadow(_)));
             if shadows && !v.is_empty() {
-                plural(v.len(), "shadow", "shadows")
+                ui::count(v.len(), "shadow")
             } else {
-                plural(v.len(), "effect", "effects")
+                ui::count(v.len(), "effect")
             }
         }
         // `Inter · 16` — the family and the size, what a type style is read by.
@@ -1021,7 +1017,7 @@ impl OndinApp {
                         let text = if doc.styles().of_slot(pk.slot).next().is_none() {
                             format!("No {slot_word} styles yet")
                         } else {
-                            "Nothing matches".to_string()
+                            "No styles match".to_string()
                         };
                         let note = ui.label(
                             egui::RichText::new(text)
@@ -1513,7 +1509,7 @@ mod tests {
 
     /// The picker is one height whether its search matches or not, so clearing a
     /// search that matched nothing brings the rows back into a full list.
-    /// flip: dropping the space `style_picker_ui` leaves after "Nothing matches"
+    /// flip: dropping the space `style_picker_ui` leaves after "No styles match"
     /// → fails at "matching nothing".
     #[test]
     fn the_picker_keeps_one_height_whatever_it_matches() {

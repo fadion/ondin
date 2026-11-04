@@ -1363,7 +1363,7 @@ impl OndinApp {
                         ui::empty_note(
                             ui,
                             if table.iter().any(|v| v.kind == c.key.kind()) {
-                                "No variable matches"
+                                "No variables match"
                             } else {
                                 match c.key.kind() {
                                     VarKind::Color => {
@@ -2237,7 +2237,7 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 if list.is_empty() && hidden == 0 {
                     let none = match table.iter().any(|v| v.kind == VarKind::Color) {
-                        true => "No variable matches",
+                        true => "No variables match",
                         false => "No colour variables yet — Shift+S to add one",
                     };
                     ui::empty_note(ui, none);
@@ -2767,7 +2767,7 @@ mod tests {
     }
 
     /// The variable list is one height whether its search matches or not, its
-    /// "No variable matches" note taking its room from the list.
+    /// "No variables match" note taking its room from the list.
     /// flip: `var_complete_ui` sizing the list at `VAR_LIST_H` whatever the notes
     /// above it took → fails at "matching nothing".
     #[test]

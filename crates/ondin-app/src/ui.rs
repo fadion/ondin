@@ -4717,6 +4717,19 @@ pub fn hex_of(c: ondin_core::peniko::Color) -> String {
     )
 }
 
+/// `n` and its noun, with an `s` past one: *1 layer*, *3 layers*.
+pub fn count(n: usize, what: &str) -> String {
+    match n {
+        1 => format!("1 {what}"),
+        n => format!("{n} {what}s"),
+    }
+}
+
+/// `n` and its noun, for a noun whose plural is not an added `s`: *1 match*, *2 matches*.
+pub fn count_as(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 /// How many characters a colour field accepts: room for any CSS colour anyone
 /// pastes (`crate::colour_text`), since a field that refuses to hold one refuses
 /// the paste outright.

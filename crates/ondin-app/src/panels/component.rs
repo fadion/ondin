@@ -1527,19 +1527,12 @@ fn drift_summary(d: Drift, p: PropDrift) -> String {
         });
     }
     if overrides > 0 {
-        parts.push(plural(overrides, "override"));
+        parts.push(ui::count(overrides, "override"));
     }
     if d.local > 0 {
-        parts.push(plural(d.local, "local layer"));
+        parts.push(ui::count(d.local, "local layer"));
     }
     parts.join(" · ")
-}
-
-fn plural(n: usize, what: &str) -> String {
-    match n {
-        1 => format!("1 {what}"),
-        n => format!("{n} {what}s"),
-    }
 }
 
 /// The face of an instance card — or a variant's, with `main` — the hexagon
@@ -1902,7 +1895,7 @@ fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> Na
             let count_w = instances.map_or(0.0, |n| {
                 ui.painter()
                     .layout_no_wrap(
-                        plural(n, "instance"),
+                        ui::count(n, "instance"),
                         egui::FontId::proportional(NAME_PT),
                         egui::Color32::WHITE,
                     )
@@ -2010,7 +2003,7 @@ const COUNT_GAP: f32 = 6.0;
 /// there is nothing to select: plain, dimmer still, no underline and no tooltip.
 /// Answers whether it was clicked.
 fn count_link(ui: &mut egui::Ui, instances: usize) -> bool {
-    let text = plural(instances, "instance");
+    let text = ui::count(instances, "instance");
     if instances == 0 {
         ui.label(
             egui::RichText::new(text)
@@ -2140,8 +2133,8 @@ fn mixed_line(ui: &mut egui::Ui, roots: &[NodeId], others: usize, act: &mut Opti
         ui.label(
             egui::RichText::new(format!(
                 "{} · {}",
-                plural(roots.len(), "instance"),
-                plural(others, "other layer")
+                ui::count(roots.len(), "instance"),
+                ui::count(others, "other layer")
             ))
             .size(ui::CONTROL_PT)
             .color(theme::text::strong()),

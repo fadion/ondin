@@ -211,13 +211,6 @@ fn short_name(doc: &Document, s: &Swatch) -> String {
     }
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
-    match n {
-        1 => format!("1 {one}"),
-        n => format!("{n} {many}"),
-    }
-}
-
 /// What a frame of the card asked for.
 enum Act {
     Close,
@@ -458,7 +451,7 @@ impl OndinApp {
             if merged.locked > 0 {
                 self.session.info(format!(
                     "Nothing merged · {} on locked layers",
-                    plural(merged.locked, "use is", "uses are")
+                    ui::count_as(merged.locked, "use is", "uses are")
                 ));
             }
             return;
@@ -473,9 +466,9 @@ impl OndinApp {
         }
         let mut said = format!(
             "Merged {} into {into} · {} on {}",
-            plural(colours, "colour", "colours"),
-            plural(merged.uses, "use", "uses"),
-            plural(merged.layers, "layer", "layers"),
+            ui::count(colours, "colour"),
+            ui::count(merged.uses, "use"),
+            ui::count(merged.layers, "layer"),
         );
         if merged.unbound > 0 {
             said.push_str(&format!(
@@ -609,7 +602,7 @@ fn caption(ui: &mut egui::Ui, r: &ColourReview, selected: bool, threshold: Thres
     let colours: usize = live.iter().map(|g| r.to_merge(g).0.members.len()).sum();
     let mut text = format!(
         "{} · {colours} colours could be {} · Δ ≤ {}",
-        plural(live.len(), "group", "groups"),
+        ui::count(live.len(), "group"),
         live.len(),
         threshold.limit()
     );
@@ -806,10 +799,10 @@ fn group_head(
     paint_patch(p, patch, &colours);
     let count = format!(
         "{} · {}",
-        plural(group.members.len(), "colour", "colours"),
+        ui::count(group.members.len(), "colour"),
         match r.settled(group) {
             true => "all skipped".to_string(),
-            false => plural(group.uses(census), "use", "uses"),
+            false => ui::count(group.uses(census), "use"),
         }
     );
     let cg = p.layout_no_wrap(
@@ -927,7 +920,7 @@ fn members(
         p.text(
             egui::pos2(uses_x + USES_W, y),
             egui::Align2::RIGHT_CENTER,
-            plural(s.uses, "use", "uses"),
+            ui::count(s.uses, "use"),
             egui::FontId::proportional(ui::SMALL_PT),
             theme::text::faint(),
         );
@@ -1003,7 +996,7 @@ fn foot(
     let (label, hint) = if new_var {
         (
             format!("Merge {} into a new variable…", raw.len()),
-            format!("Binds {}", plural(uses, "use", "uses")),
+            format!("Binds {}", ui::count(uses, "use")),
         )
     } else {
         let rewrites: usize = group
@@ -1013,7 +1006,7 @@ fn foot(
             .sum();
         (
             format!("Merge {merged} into {target_name}"),
-            format!("Rewrites {}", plural(rewrites, "use", "uses")),
+            format!("Rewrites {}", ui::count(rewrites, "use")),
         )
     };
     let live = if new_var { !raw.is_empty() } else { merged > 0 };
@@ -1187,8 +1180,8 @@ fn naming(
         _ => (
             format!(
                 "Binds all {} of the {} to it",
-                plural(uses, "use", "uses"),
-                plural(colours, "colour", "colours")
+                ui::count(uses, "use"),
+                ui::count(colours, "colour")
             ),
             theme::text::faint(),
         ),

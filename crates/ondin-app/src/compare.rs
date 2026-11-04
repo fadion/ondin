@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// What a refused edit says while a compare is open.
-pub(crate) const READ_ONLY: &str = "Comparing with a version — close it, or Escape, to edit";
+pub(crate) const READ_ONLY: &str = "Comparing with a version — close it, or press Esc, to edit";
 
 /// The marks' hues and the ink on their tags. Told apart by more than hue: added
 /// is solid with `+`, removed dashed with `−`, changed solid with `~`.
@@ -1096,7 +1096,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     // The marks are boxes round the changed layers, so the glyph is one. As tall as
     // the segmented track beside it.
     if crate::ui::field_button(ui, icon::BOUNDING_BOX, crate::ui::TOOLBAR_H, state)
-        .on_hover_text("Overlay: the change marks on the canvas · O")
+        .on_hover_text("Overlay: the change marks on the canvas (O)")
         .clicked()
     {
         *act = Some(Act::Overlay);
@@ -1108,7 +1108,7 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     // The contrast checker's count, position and steps.
     let n = c.rows.len();
     ui.label(
-        egui::RichText::new(plural(n, "change"))
+        egui::RichText::new(crate::ui::count(n, "change"))
             .size(crate::ui::Scale::Toolbar.text_pt())
             .color(color::text()),
     );
@@ -1133,29 +1133,22 @@ fn bar(ui: &mut egui::Ui, c: &Compare, private: bool, act: &mut Option<Act>) {
     });
     ui.spacing_mut().item_spacing.x = 2.0;
     if crate::ui::icon_button(ui, icon::CARET_LEFT, 24.0, 13.0, false, n > 0)
-        .on_hover_text("Previous change · Shift+Enter")
+        .on_hover_text("Previous change (Shift+Enter)")
         .clicked()
     {
         *act = Some(Act::Step(-1));
     }
     if crate::ui::icon_button(ui, icon::CARET_RIGHT, 24.0, 13.0, false, n > 0)
-        .on_hover_text("Next change · Enter")
+        .on_hover_text("Next change (Enter)")
         .clicked()
     {
         *act = Some(Act::Step(1));
     }
     if crate::ui::icon_button(ui, icon::X, 24.0, 13.0, false, true)
-        .on_hover_text("Leave the compare · Escape")
+        .on_hover_text("Leave the compare (Esc)")
         .clicked()
     {
         *act = Some(Act::Done);
-    }
-}
-
-fn plural(n: usize, what: &str) -> String {
-    match n {
-        1 => format!("1 {what}"),
-        n => format!("{n} {what}s"),
     }
 }
 
@@ -1163,7 +1156,10 @@ fn plural(n: usize, what: &str) -> String {
 /// many more off the canvas.
 fn card_head(ui: &mut egui::Ui, c: &Compare) {
     let layers: usize = c.groups.iter().map(|g| g.layers).sum();
-    let mut sum = vec![plural(layers, "layer"), plural(c.groups.len(), "page")];
+    let mut sum = vec![
+        crate::ui::count(layers, "layer"),
+        crate::ui::count(c.groups.len(), "page"),
+    ];
     if !c.off_canvas.is_empty() {
         sum.push(format!("{} more", c.off_canvas.len()));
     }
@@ -1338,7 +1334,7 @@ fn value_parts(c: &Change) -> Vec<(String, f32, egui::Color32, bool)> {
 /// The line under a row past its first `LINES_SHOWN`.
 fn more_line(n: usize) -> Change {
     Change {
-        what: format!("and {}", plural(n, "more change")),
+        what: format!("and {}", crate::ui::count(n, "more change")),
         before: None,
         after: None,
     }
@@ -1357,7 +1353,7 @@ fn value_lines(changes: &[Change], indent: f32, private: bool, cut: bool) -> Vec
     let mut out = Vec::new();
     if private {
         if !changes.is_empty() {
-            let what = plural(changes.len(), "change");
+            let what = crate::ui::count(changes.len(), "change");
             out.push(Line::Value(
                 Change {
                     what,

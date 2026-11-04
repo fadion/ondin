@@ -3566,7 +3566,8 @@ impl OndinApp {
                 let n = ops.len();
                 if self.session.commit(Transaction(ops)) {
                     self.session.selection.clear_guides();
-                    self.session.info(format!("Cleared {n} guide(s)"));
+                    self.session
+                        .info(format!("Cleared {}", crate::ui::count(n, "guide")));
                 }
             }
             Item::ShowCard(title) => self.reveal_card = Some(title),

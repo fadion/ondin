@@ -1542,7 +1542,8 @@ impl OndinApp {
         let n = ops.len();
         self.name_step_as(crate::menu::Item::ClearGuides);
         if n > 0 && self.session.commit(Transaction(ops)) {
-            self.session.info(format!("Removed {n} guide(s)"));
+            self.session
+                .info(format!("Removed {}", crate::ui::count(n, "guide")));
         }
     }
 

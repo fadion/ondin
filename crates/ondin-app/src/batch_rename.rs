@@ -364,7 +364,7 @@ impl Plan {
                 if find.is_empty() {
                     "No layers to rename"
                 } else {
-                    "No layer matches Find"
+                    "No layers match Find"
                 }
             } else if matched.iter().all(|n| **n == New::Empty) {
                 "Every new name would be empty"
@@ -1543,7 +1543,7 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::hover());
                 let note = if landed {
-                    "No layer matches"
+                    "No layers match"
                 } else {
                     "Matching…"
                 };
@@ -1690,7 +1690,7 @@ fn foot(ui: &mut egui::Ui, changes: usize, why_not: Option<&str>) -> Option<Act>
     ui.painter().text(
         egui::pos2(rect.left() + PAD, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        "Enter renames · Esc cancels",
+        "Enter rename · Esc cancel",
         egui::FontId::proportional(ui::CAPTION_PT),
         theme::text::faint(),
     );
@@ -2195,7 +2195,7 @@ mod tests {
         let mut bx = opened(&ctx, &mut app, "zzz", "x");
         assert_eq!(
             planned(&app, &bx).why_not("zzz").as_deref(),
-            Some("No layer matches Find")
+            Some("No layers match Find")
         );
         bx.s.find = "Card".into();
         bx.s.template = "".into();
@@ -2817,7 +2817,7 @@ mod tests {
         app.batch_rename.as_mut().unwrap().s.find = "zzz".into();
         let out = pass(&ctx, &mut app, Vec::new(), none);
         assert!(!painted(&out, "Matching…"), "no flash");
-        assert!(painted(&out, "No layer matches"));
+        assert!(painted(&out, "No layers match"));
     }
 
     /// While a new scope's plan is in flight, the count still describes the plan

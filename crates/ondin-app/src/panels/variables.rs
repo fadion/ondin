@@ -578,7 +578,7 @@ impl OndinApp {
                             ),
                             Tab::Variables if lines.is_empty() => empty(
                                 ui,
-                                "Nothing matches",
+                                "No variables match",
                                 if b.in_selection {
                                     "Turn off In selection to see them all."
                                 } else {
@@ -3067,7 +3067,7 @@ fn styles_tab(
     if groups.is_empty() {
         empty(
             ui,
-            "Nothing matches",
+            "No styles match",
             if b.in_selection {
                 "Turn off In selection to see them all."
             } else {

@@ -1011,7 +1011,7 @@ impl OndinApp {
     fn guide_header(&mut self, ui: &mut egui::Ui, guides: &[ondin_core::Guide]) {
         let title = match guides.len() {
             0 | 1 => "Guide".to_string(),
-            n => format!("{n} Guides"),
+            n => format!("{n} guides"),
         };
         identity_card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1512,7 +1512,7 @@ impl OndinApp {
         self.inspector_paint_panels(ui, PaintScope::Node(id), fresh);
     }
 
-    /// The identity card in point-editing mode: "Edit Path", and every action on
+    /// The identity card in point-editing mode: "Edit path", and every action on
     /// it dead.
     ///
     /// Disabled rather than absent, so they read as "not for this subject".
@@ -1522,7 +1522,7 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.x = 9.0;
                 identity_glyph(ui, icon::BEZIER_CURVE, color::accent_300());
                 ui.label(
-                    egui::RichText::new("Edit Path")
+                    egui::RichText::new("Edit path")
                         .size(ui::HEAD_PT)
                         .color(theme::text::strong()),
                 );
@@ -3005,7 +3005,7 @@ impl OndinApp {
         }
         let root = self.session.page;
         let mut select: Option<Vec<NodeId>> = None;
-        self.panel(ui, "Group Colors", None, |app, ui| {
+        self.panel(ui, "Group colours", None, |app, ui| {
             for use_ in &colors {
                 let key = use_.color.to_rgba8().to_u8_array();
                 let brush = Brush::Solid(use_.color);
@@ -14086,7 +14086,7 @@ mod frame_fill_tests {
                 .filter(|t| {
                     matches!(
                         t.as_str(),
-                        "FILL" | "STROKE" | "FRAME BACKGROUND" | "GROUP COLORS"
+                        "FILL" | "STROKE" | "FRAME BACKGROUND" | "GROUP COLOURS"
                     )
                 })
                 .collect();
@@ -14261,7 +14261,7 @@ mod frame_fill_tests {
             "and a frame draws exactly the same rows, with nothing over: {on_a_frame:?}"
         );
         assert!(
-            !on_a_frame.iter().any(|t| t == "GROUP COLORS"),
+            !on_a_frame.iter().any(|t| t == "GROUP COLOURS"),
             "an empty frame has no contents to list: {on_a_frame:?}"
         );
 
@@ -14318,7 +14318,7 @@ mod frame_fill_tests {
 
         let head = texts
             .iter()
-            .position(|t| t == "GROUP COLORS")
+            .position(|t| t == "GROUP COLOURS")
             .unwrap_or_else(|| panic!("a frame with a child gets a Group Colors card: {texts:?}"));
 
         let below: Vec<&String> = texts[head..]
@@ -14357,7 +14357,7 @@ mod frame_fill_tests {
         );
         let head = texts
             .iter()
-            .position(|t| t == "GROUP COLORS")
+            .position(|t| t == "GROUP COLOURS")
             .unwrap_or_else(|| panic!("a group with a child gets the card: {texts:?}"));
         assert!(
             texts[head..].iter().any(|t| t == child_ink),
@@ -20088,7 +20088,7 @@ mod subject_tests {
         app.session.selection.toggle_guide(v2);
         let agreeing = drawn(&ctx, &mut app);
         assert!(
-            agreeing.iter().any(|t| t == "2 Guides"),
+            agreeing.iter().any(|t| t == "2 guides"),
             "the fixture: two of them, in {agreeing:?}"
         );
         assert!(
@@ -20200,7 +20200,7 @@ mod subject_tests {
 
     /// Arming the Node tool over a path changes the subject to its points, Align card included.
     ///
-    /// flip: never taking the `edited_path` arm → fails at "Edit Path"; deleting `self.inspector_align(ui)` from `inspector_points` → fails at ALIGN.
+    /// flip: never taking the `edited_path` arm → fails at "Edit path"; deleting `self.inspector_align(ui)` from `inspector_points` → fails at ALIGN.
     #[test]
     fn arming_the_node_tool_over_a_path_changes_the_subject_to_its_points() {
         let ctx = egui::Context::default();
@@ -20232,7 +20232,7 @@ mod subject_tests {
 
         let layer = drawn(&ctx, &mut app);
         assert!(
-            !layer.iter().any(|t| t == "Edit Path"),
+            !layer.iter().any(|t| t == "Edit path"),
             "the fixture: the Select tool shows the layer, in {layer:?}"
         );
 
@@ -20244,7 +20244,7 @@ mod subject_tests {
         );
         let points = drawn(&ctx, &mut app);
         assert!(
-            points.iter().any(|t| t == "Edit Path"),
+            points.iter().any(|t| t == "Edit path"),
             "the point-editing identity card, in {points:?}"
         );
         assert!(

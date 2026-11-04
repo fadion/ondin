@@ -195,18 +195,11 @@ impl Brief {
         kinds
             .into_iter()
             .map(|(kind, n)| match kind {
-                "variable" | "mode" | "style" | "guide" | "image" => plural(n, kind),
+                "variable" | "mode" | "style" | "guide" | "image" => crate::ui::count(n, kind),
                 "kit" => "kit publish".into(),
                 other => other.to_string(),
             })
             .collect()
-    }
-}
-
-pub(crate) fn plural(n: usize, what: &str) -> String {
-    match n {
-        1 => format!("1 {what}"),
-        n => format!("{n} {what}s"),
     }
 }
 
@@ -286,7 +279,7 @@ pub(crate) fn summarize(older: Option<&Document>, newer: &Document) -> Summary {
             brief.counts.add(layer.status, 1);
             let what = match layer.status {
                 Status::Changed => whats(&layer.changes),
-                _ if layer.inside > 0 => plural(layer.inside + 1, "layer"),
+                _ if layer.inside > 0 => crate::ui::count(layer.inside + 1, "layer"),
                 _ => String::new(),
             };
             let above = &layer.trail[..layer.trail.len().saturating_sub(1)];
@@ -303,7 +296,7 @@ pub(crate) fn summarize(older: Option<&Document>, newer: &Document) -> Summary {
         for (line, folded) in line_of.into_values() {
             let l = &mut brief.lines[line];
             if folded > 0 && l.status == Status::Changed {
-                let inside = plural(folded, "layer") + " inside";
+                let inside = crate::ui::count(folded, "layer") + " inside";
                 l.what = match l.what.is_empty() {
                     true => inside,
                     false => format!("{}, {inside}", l.what),

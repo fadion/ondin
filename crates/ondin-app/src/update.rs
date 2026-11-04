@@ -434,7 +434,7 @@ pub(crate) fn chip(ui: &mut egui::Ui, state: &UpdateState) -> bool {
             egui::TextFormat::simple(theme::icon_font(Scale::Toolbar.glyph_pt()), color),
         );
         job.append(
-            &label.to_uppercase(),
+            &label,
             5.0,
             egui::TextFormat::simple(egui::FontId::proportional(Scale::Toolbar.text_pt()), color),
         );

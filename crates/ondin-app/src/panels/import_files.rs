@@ -737,7 +737,7 @@ fn adopt(
                 family.clone(),
                 ReportRow {
                     what: family,
-                    count: counted(runs, "run", "runs"),
+                    count: ui::count(runs, "run"),
                     how: format!("Not installed: drawn in {drawn_in} until it is"),
                 },
             ));
@@ -1838,7 +1838,7 @@ fn file_field(ui: &mut egui::Ui, card: &mut ImportCard, act: &mut Option<CardAct
             &format!(
                 "{} · {} · fetched just now",
                 source.name,
-                counted(source.census.pages.len(), "page", "pages")
+                ui::count(source.census.pages.len(), "page")
             ),
             color::saved(),
         ),
@@ -2181,7 +2181,7 @@ fn pages(ui: &mut egui::Ui, census: &Census, words: Words, keep: &mut [bool]) {
         .max_height(PAGES_MAX_H)
         .show(ui, |ui| {
             for (page, on) in census.pages.iter().zip(keep.iter_mut()) {
-                let meta = counted(page.frames, words.frames.0, words.frames.1);
+                let meta = ui::count_as(page.frames, words.frames.0, words.frames.1);
                 if check_row(ui, &page.name, &meta, "", *on, true) {
                     *on = !*on;
                 }
@@ -2250,11 +2250,6 @@ fn pictures(ui: &mut egui::Ui, count: usize, bytes: u64, o: &mut Options) {
     ) {
         o.leave_pictures = !o.leave_pictures;
     }
-}
-
-/// `n` and its noun, singular at one.
-fn counted(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// A [`ui::tick_box`], a count against the right margin and, when given, a

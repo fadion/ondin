@@ -418,7 +418,7 @@ fn swap_picker(
                 // say what they hold.
                 let found = options(if private { "" } else { &search });
                 if found.is_empty() {
-                    ui::empty_note(ui, "No main matches");
+                    ui::empty_note(ui, "No mains match");
                 }
                 // 🚨 **One height, whatever the list holds.** A popup is measured
                 // once, on its first frame, and can shrink but never grow back: a
@@ -1350,11 +1350,11 @@ impl OndinApp {
         let mut cancel = false;
         let detach = match pending.instances {
             0 => String::new(),
-            n => format!(" {} will detach.", plural(n, "instance")),
+            n => format!(" {} will detach.", ui::count(n, "instance")),
         };
         let body = format!(
             "{} {} “{}”, and {} deleted with it.{detach}",
-            plural(pending.variants, "variant"),
+            ui::count(pending.variants, "variant"),
             if pending.variants == 1 { "uses" } else { "use" },
             pending.name,
             if pending.variants == 1 { "is" } else { "are" },
@@ -3138,13 +3138,6 @@ fn fresh_name(props: &[Keyed<Property>], base: &str) -> String {
         .map(|k| format!("{base} {k}"))
         .find(|n| !taken(n))
         .expect("an unbounded range")
-}
-
-fn plural(n: usize, what: &str) -> String {
-    match n {
-        1 => format!("1 {what}"),
-        n => format!("{n} {what}s"),
-    }
 }
 
 /// A property row's chip over `roots` (§15 D1060; D1070's amendment for a Text

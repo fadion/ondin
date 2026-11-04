@@ -327,7 +327,7 @@ impl OndinApp {
             let said = format!(
                 "Replaced {} in {} · Ctrl+Z to undo",
                 done.matches,
-                plural(done.layers, "layer")
+                ui::count(done.layers, "layer")
             );
             self.session.info(said.clone());
             self.find.done = Some(said);
@@ -652,7 +652,7 @@ fn controls(ui: &mut egui::Ui, f: &mut FindBox, selected: usize, act: &mut Optio
         }
         ui.add_space(GAP_X);
         if ui::icon_button(ui, icon::X, BTN, 13.0, false, true)
-            .on_hover_text("Close (Escape)")
+            .on_hover_text("Close (Esc)")
             .clicked()
         {
             *act = Some(Act::Close);
@@ -782,7 +782,7 @@ fn list(
                     In::Page => "this page",
                     In::All => "any page",
                 };
-                ui::empty_note(ui, &format!("Nothing in {place} matches"));
+                ui::empty_note(ui, &format!("No layers in {place} match"));
                 let widen = match f.scope {
                     In::Selection => Some("Search this page"),
                     In::Page => Some("Search all pages"),
@@ -1006,8 +1006,8 @@ fn footer(ui: &mut egui::Ui, f: &FindBox) {
     layers.dedup();
     let mut said = format!(
         "{} in {}",
-        plural(hits.len(), "match"),
-        plural(layers.len(), "layer")
+        ui::count_as(hits.len(), "match", "matches"),
+        ui::count(layers.len(), "layer")
     );
     let skipped = hits
         .iter()
@@ -1032,14 +1032,6 @@ fn footer(ui: &mut egui::Ui, f: &FindBox) {
                     .color(theme::text::faint()),
             );
         });
-}
-
-fn plural(n: usize, what: &str) -> String {
-    match (n, what) {
-        (1, w) => format!("1 {w}"),
-        (n, "match") => format!("{n} matches"),
-        (n, w) => format!("{n} {w}s"),
-    }
 }
 
 /// A field with a glyph before it and an optional note at its end, `w` wide,

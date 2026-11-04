@@ -619,6 +619,155 @@ fn with_auto_layout(ctx: &egui::Context) -> OndinApp {
     app
 }
 
+/// A selected component set, `Size: Small, Large` × `State: Default, Hover,
+/// Pressed`, two variants at Default, with Hover tied (and Pressed by its name),
+/// so the Variants card shows its noted chips and its Element row.
+fn with_a_set(ctx: &egui::Context) -> OndinApp {
+    use ondin_core::variant::{self, Interaction, VariantProp, VariantSet};
+    let mut app = OndinApp::headless(ctx);
+    let mut ids = ondin_core::IdSource::new(0xA10);
+    app.session.adopt_document(Document::new(ids.mint()), None);
+    let ids = &mut app.session.ids;
+    let [set, small, large] = [(); 3].map(|_| ids.mint());
+    let parent = app.session.doc.first_page();
+    let frame = |id, parent, index, y: f64, name: &str| Operation::CreateNode {
+        id,
+        parent,
+        index,
+        kind: NodeKind::Artboard {
+            size: Size::new(80.0, 30.0),
+            corner_radii: Default::default(),
+            corner_smoothing: 0.0,
+        },
+        transform: Some(Affine::translate((10.0, y))),
+        name: Some(name.into()),
+    };
+    let mut ops = vec![
+        frame(set, parent, 0, 0.0, "Button"),
+        frame(small, set, 0, 10.0, "Small"),
+        frame(large, set, 1, 60.0, "Large"),
+    ];
+    for v in [small, large] {
+        ops.push(Operation::SetComponent {
+            id: v,
+            component: true,
+        });
+    }
+    ops.push(Operation::SetVariantSet {
+        id: set,
+        set: Some(VariantSet {
+            props: vec![
+                VariantProp::new("Size", vec!["Small".into(), "Large".into()]),
+                VariantProp::new(
+                    "State",
+                    vec!["Default".into(), "Hover".into(), "Pressed".into()],
+                ),
+            ],
+            ..Default::default()
+        }),
+    });
+    for (v, size) in [(small, "Small"), (large, "Large")] {
+        ops.push(Operation::SetVariant {
+            id: v,
+            values: vec![size.into(), "Default".into()],
+        });
+    }
+    app.session
+        .try_commit(Transaction(ops))
+        .expect("a component set");
+    let tie = variant::tie_state(&app.session.doc, set, 1, 1, Some(Interaction::Hover));
+    app.session
+        .try_commit(tie.expect("Hover ties"))
+        .expect("tied");
+    app.session.selection.set_one(set);
+    app
+}
+
+/// The centre of the text `label` painted in the inspector's column.
+fn painted_at(ctx: &egui::Context, app: &mut OndinApp, label: &str) -> egui::Pos2 {
+    let column = OndinApp::inspector_column(Rect::from_min_size(egui::Pos2::ZERO, SCREEN));
+    let out = settle(ctx, app);
+    let inks = texts(&out);
+    inks.iter()
+        .find(|t| t.text == label && column.contains(t.rect.center()))
+        .map(|t| t.rect.center())
+        .unwrap_or_else(|| {
+            let all: Vec<&str> = inks.iter().map(|t| t.text.as_str()).collect();
+            panic!("no {label:?} in the inspector: {all:?}")
+        })
+}
+
+/// Open the popup menu hanging from the clickable widget at `at` — the last
+/// registered there on the topmost layer, the one a click reaches — as its click
+/// would (`egui::Popup::menu` keys it `Popup::default_response_id`), the
+/// pointer left on the widget.
+fn open_popup_at(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
+    pass(ctx, app, vec![egui::Event::PointerMoved(at)]);
+    settle(ctx, app);
+    // Read the layer first: Context accessors never nest. Layers are a map, so
+    // only one layer's widgets come in an order.
+    let layer = ctx.layer_id_at(at).expect("a layer under the point");
+    let id = ctx.viewport(|v| {
+        v.this_pass
+            .widgets
+            .get_layer(layer)
+            .filter(|w| w.rect.contains(at) && w.sense.senses_click())
+            .last()
+            .map(|w| w.id)
+    });
+    egui::Popup::open_id(ctx, id.expect("a clickable widget").with("popup"));
+    settle(ctx, app);
+}
+
+/// What `open` brings up, as [`opened`] finds it, and apart from it the
+/// grounds its list rows paint under the pointer: each control `open` added,
+/// hovered in turn. A menu row paints no ground at rest, so only a sweep sees it.
+fn swept(
+    ctx: &egui::Context,
+    app: &mut OndinApp,
+    open: impl FnOnce(&egui::Context, &mut OndinApp),
+) -> (Vec<Ground>, Vec<Ground>) {
+    settle(ctx, app);
+    let before: Vec<Rect> = controls(ctx).iter().map(|c| c.rect).collect();
+    // A row `open` left lit (the one a flyout opens from) is a list row too.
+    let (mut rows, resting): (Vec<Ground>, Vec<Ground>) = opened(ctx, app, open)
+        .into_iter()
+        .partition(|g| g.fill == list_hover());
+    let added: Vec<Control> = controls(ctx)
+        .into_iter()
+        .filter(|c| c.enabled && !c.drags && !before.contains(&c.rect))
+        .collect();
+    for c in added {
+        pass(ctx, app, vec![egui::Event::PointerMoved(c.rect.center())]);
+        pass(ctx, app, Vec::new());
+        let out = pass(ctx, app, Vec::new());
+        let under = grounds(ctx, &out)
+            .into_iter()
+            .find(|g| holds(g.rect, c.rect) == Some(Holds::Whole));
+        if let Some(g) = under
+            && !resting.iter().chain(&rows).any(|r| r.rect == g.rect)
+        {
+            rows.push(g);
+        }
+    }
+    (resting, rows)
+}
+
+/// The fill `ui::menu_row` paints a list row under the pointer, its only ground.
+fn list_hover() -> Color32 {
+    color::text_a(20)
+}
+
+/// What is wrong with a list row's ground under the pointer, if anything: it
+/// must be a list row's height and corner, in the list hover and no hairline.
+fn row_fault(g: &Ground) -> Option<String> {
+    let rung = (g.rect.height() - ui::MENU_ROW_H).abs() <= SLOP && uniform(g.radius) == Some(4);
+    if !rung {
+        return Some("not a list row's height and corner".into());
+    }
+    (g.fill != list_hover() || g.stroke != Stroke::NONE).then(|| "not the list row's hover".into())
+}
+
 /// The control grounds in the inspector's column.
 fn inspector(ctx: &egui::Context, app: &mut OndinApp) -> Vec<Ground> {
     let column = OndinApp::inspector_column(Rect::from_min_size(egui::Pos2::ZERO, SCREEN));
@@ -824,7 +973,75 @@ fn every_control_ground_is_on_the_standard() {
     });
     assert_eq!(app.colour_review.groups_shown(), 1, "a group unfolded");
     check("colour review", app, found);
+    let mut app = with_a_set(&ctx);
+    let found = inspector(&ctx, &mut app);
+    check("variants card", app, found);
 
+    // A value chip's popup, then its *State ▸* flyout over it: list rows, whose
+    // ground is the hover alone, so each is swept.
+    let mut rows_seen: Vec<(&str, usize)> = Vec::new();
+    let mut rows_audit = |name: &'static str, rows: &[Ground], faults: &mut Vec<String>| {
+        for g in rows {
+            if std::env::var_os("ONDIN_AUDIT_DUMP").is_some() {
+                eprintln!("{name} row: {g}");
+            }
+            if let Some(why) = row_fault(g) {
+                faults.push(format!("{name}: {why}: {g}"));
+            }
+        }
+        rows_seen.push((name, rows.len()));
+    };
+    let chip = |c: &egui::Context, a: &mut OndinApp| {
+        let at = painted_at(c, a, "Hover");
+        open_popup_at(c, a, at);
+    };
+    let mut app = with_a_set(&ctx);
+    let (resting, popup_rows) = swept(&ctx, &mut app, chip);
+    audit(
+        "value chip popup",
+        &resting,
+        disabled_alpha(&ctx),
+        &mut faults,
+    );
+    hover(&ctx, &mut app, "value chip popup", &resting, &mut faults);
+    rows_audit("value chip popup", &popup_rows, &mut faults);
+    let mut app = with_a_set(&ctx);
+    let below = painted_at(&ctx, &mut app, "Hover").y;
+    chip(&ctx, &mut app);
+    let out = pass(&ctx, &mut app, Vec::new());
+    let menu = texts(&out).into_iter().any(|t| t.text == "Move earlier");
+    assert!(menu, "the chip's popup is open");
+    let (resting, rows) = swept(&ctx, &mut app, |c, a| {
+        let out = settle(c, a);
+        let state = texts(&out)
+            .into_iter()
+            .find(|t| t.text == "State" && t.rect.center().y > below)
+            .unwrap_or_else(|| {
+                let all: Vec<(String, f32)> = texts(&out)
+                    .into_iter()
+                    .map(|t| (t.text, t.rect.center().y))
+                    .collect();
+                panic!("the chip popup's State row, below {below}: {all:?}")
+            });
+        pass(c, a, vec![egui::Event::PointerMoved(state.rect.center())]);
+    });
+    audit("state flyout", &resting, disabled_alpha(&ctx), &mut faults);
+    rows_audit("state flyout", &rows, &mut faults);
+    // A list beside a menu's row is that menu's width.
+    let popup_w = popup_rows.first().map(|g| g.rect.width());
+    for g in rows.iter().filter(|g| Some(g.rect.width()) != popup_w) {
+        faults.push(format!(
+            "state flyout: a row {:.1} wide beside the popup's {popup_w:?}: {g}",
+            g.rect.width()
+        ));
+    }
+
+    for (name, n) in &rows_seen {
+        assert!(
+            *n > 2,
+            "{name}: the fixture is not in the state it is about — it swept {n} list rows"
+        );
+    }
     for (name, at_rest, hovered) in &seen {
         assert!(
             *at_rest > 2 && *hovered > 0,

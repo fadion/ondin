@@ -1180,7 +1180,10 @@ impl OndinApp {
                                 let ctx = ui.ctx().clone();
                                 let mut picked = false;
                                 let area = fly_at.with("area");
-                                ui::flyout(&ctx, area, at, CHIP_MENU_W, STATE_ROWS, |ui| {
+                                // The popup's rows are `CHIP_MENU_W` inside its
+                                // margin; the flyout's card is as wide outside.
+                                let w = CHIP_MENU_W + 2.0 * (ui::FLYOUT_PAD + ui::MENU_BORDER);
+                                ui::flyout(&ctx, area, at, w, STATE_ROWS, |ui| {
                                     picked = state_rows(ui, set, p, vi, &mut edits);
                                 });
                                 if picked {

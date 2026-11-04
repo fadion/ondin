@@ -1764,8 +1764,9 @@ fn variables_match_the_canvas_in_every_mode() {
 /// **A frame that picks its mode by width draws in the browser as on the
 /// canvas at each width**: written alone it fills the window, which the media
 /// blocks read as the canvas reads the frame — 600 wide is Mobile, 900 Tablet.
-/// A bound gap, colour and visibility each differ between the two, the hidden
-/// rect written with a `none`/`initial` token.
+/// A bound gap, colour, visibility and direction each differ between the two,
+/// the hidden rect written with a `none`/`initial` token and the direction with
+/// a bare `column`/`row` one.
 ///
 /// flip: `Tokens::css` writing the by-width collection's modes as `[data-mode]`
 /// blocks → 136.7 at the 900 page, which draws Mobile's colour and gap.
@@ -1830,7 +1831,19 @@ fn a_frame_picked_by_width_matches_the_canvas_at_each_width() {
             Cell::Boolean(false),
             Cell::Boolean(true),
         );
-        let f = d.frame(None, 0.0, 0.0, w, 120.0, "Home");
+        let flow = var(
+            &mut d,
+            "flow",
+            VarKind::String,
+            Cell::String("Column".into()),
+            Cell::String("Row".into()),
+        );
+        let mut v = d.doc.variables().get(flow).unwrap().clone();
+        v.scope = Some(ondin_core::variable::Scope::of([
+            ondin_core::variable::Field::FlexDirection,
+        ]));
+        d.apply(vec![Operation::SetVariable { var: v }]);
+        let f = d.frame(None, 0.0, 0.0, w, 240.0, "Home");
         d.fill(f, solid(250, 250, 250, 255));
         d.apply(vec![
             Operation::SetDisplay {
@@ -1865,6 +1878,8 @@ fn a_frame_picked_by_width_matches_the_canvas_at_each_width() {
                 }]);
             }
         }
+        let bind = ondin_core::build::bind_flow_ops(&d.doc, f, 0, Some(flow));
+        d.apply(bind);
         let (doc, res) = d.done();
         holds(&format!("breakpoint-{name}"), &doc, &res);
         let export = html_of(&doc, &res, doc.get(doc.first_page()).unwrap().children());
@@ -1883,7 +1898,10 @@ fn a_frame_picked_by_width_matches_the_canvas_at_each_width() {
             css.contains("display: var(--show-wide, block)"),
             "{name}: the visibility token:\n{css}"
         );
-        holds(&format!("breakpoint-{name}"), &doc, &res);
+        assert!(
+            css.contains("flex-direction: var(--flow)") && tokens.contains("--flow: column;"),
+            "{name}: the direction token, bare:\n{css}\n{tokens}"
+        );
     }
 }
 

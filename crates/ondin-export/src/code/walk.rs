@@ -1984,30 +1984,38 @@ impl Walk<'_> {
         match display {
             Display::Flex(f) => {
                 el.set("display", "flex");
-                if f.direction != FlexDirection::Row {
-                    el.set(
-                        "flex-direction",
-                        match f.direction {
-                            FlexDirection::Row => "row",
-                            FlexDirection::RowReverse => "row-reverse",
-                            FlexDirection::Column => "column",
-                            FlexDirection::ColumnReverse => "column-reverse",
-                        },
+                // A direction or wrap bound to a string that holds only their
+                // words is its token, written bare (`tokens::keywords`).
+                let direction = f
+                    .direction_var
+                    .filter(|v| self.tokens.keywords(self.doc, *v));
+                let wrap = f.wrap_var.filter(|v| self.tokens.keywords(self.doc, *v));
+                // Scoped wider, the string's words are not CSS's: drawn as now.
+                let loose = [(f.direction_var, direction), (f.wrap_var, wrap)]
+                    .into_iter()
+                    .any(|(b, k)| k.is_none() && b.is_some_and(|v| tokens::varies(self.doc, v)));
+                if loose {
+                    self.report.approximate(
+                        "a flex direction or wrap is bound to a string scoped wider than \
+                         them, and written for one mode"
+                            .to_string(),
                     );
                 }
-                if f.wrap != FlexWrap::NoWrap {
-                    el.set(
-                        "flex-wrap",
-                        match f.wrap {
-                            FlexWrap::NoWrap => "nowrap",
-                            FlexWrap::Wrap => "wrap",
-                            FlexWrap::WrapReverse => "wrap-reverse",
-                        },
-                    );
+                match direction {
+                    Some(v) => el.set("flex-direction", self.tokens.var(v)),
+                    None if f.direction != FlexDirection::Row => {
+                        el.set("flex-direction", f.direction.css())
+                    }
+                    None => {}
+                }
+                match wrap {
+                    Some(v) => el.set("flex-wrap", self.tokens.var(v)),
+                    None if f.wrap != FlexWrap::NoWrap => el.set("flex-wrap", f.wrap.css()),
+                    None => {}
                 }
                 el.set("justify-content", justify(f.justify_content));
                 el.set("align-items", align_items(f.align_items));
-                if f.wrap != FlexWrap::NoWrap {
+                if f.wrap != FlexWrap::NoWrap || wrap.is_some() {
                     el.set("align-content", align_content(f.align_content));
                 }
             }

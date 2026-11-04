@@ -127,6 +127,13 @@ impl Tokens {
         format!("calc({} / 100)", self.var(id))
     }
 
+    /// Whether string variable `id` is written bare, as CSS keywords: it is
+    /// scoped to flex directions or wraps alone, so it holds only their words
+    /// (`variable::holds_its_words`).
+    pub fn keywords(&self, doc: &Document, id: VarId) -> bool {
+        doc.variables().get(id).is_some_and(keywords)
+    }
+
     /// A boolean variable read as a `display`: hidden where it is false, the
     /// layer's own display `own` where it is true.
     pub fn shown(&mut self, id: VarId, own: &str) -> String {
@@ -245,8 +252,8 @@ impl Tokens {
                 for id in vars {
                     if let Some(value) = t
                         .get(id)
-                        .and_then(|v| v.cells.get(&m.id))
-                        .and_then(|c| self.value(c))
+                        .and_then(|v| Some((v, v.cells.get(&m.id)?)))
+                        .and_then(|(v, c)| self.value(v, c))
                     {
                         out.push_str(&format!("  --{}: {value};\n", self.name(id)));
                     }
@@ -285,7 +292,7 @@ impl Tokens {
             };
             if let Some(value) = col
                 .and_then(|c| v.cells.get(&c))
-                .and_then(|c| self.value(c))
+                .and_then(|c| self.value(v, c))
             {
                 out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
             }
@@ -312,13 +319,15 @@ impl Tokens {
         out
     }
 
-    /// One cell as a custom property's value. A boolean is a visibility:
-    /// `none` hides, and `initial` — the guaranteed-invalid value — makes
-    /// [`Self::shown`]'s fallback, the layer's own `display`, win.
-    fn value(&self, cell: &Cell) -> Option<String> {
+    /// One cell of variable `v` as a custom property's value. A boolean is a
+    /// visibility: `none` hides, and `initial` — the guaranteed-invalid value —
+    /// makes [`Self::shown`]'s fallback, the layer's own `display`, win. A
+    /// string of flex words is their CSS keyword, bare; any other is quoted.
+    fn value(&self, v: &variable::Variable, cell: &Cell) -> Option<String> {
         match cell {
             Cell::Color(c) => Some(super::css::color(*c, 1.0)),
             Cell::Number(n) => Some(fmt(*n)),
+            Cell::String(s) if keywords(v) => Some(keyword(s)),
             Cell::String(s) => Some(format!(
                 "\"{}\"",
                 s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -327,6 +336,24 @@ impl Tokens {
             Cell::Alias(to) => Some(format!("var(--{})", self.name(*to))),
         }
     }
+}
+
+/// [`Tokens::keywords`] of a variable in hand.
+fn keywords(v: &variable::Variable) -> bool {
+    v.kind == variable::VarKind::String
+        && v.scope
+            .is_some_and(|s| !s.is_empty() && s.fields().all(variable::Field::needs_scope))
+}
+
+/// A word a keyword string holds as CSS writes it: a direction's or a wrap's
+/// keyword, else the word itself.
+fn keyword(s: &str) -> String {
+    use ondin_core::container::{FlexDirection, FlexWrap};
+    FlexDirection::from_word(s)
+        .map(FlexDirection::css)
+        .or_else(|| FlexWrap::from_word(s).map(FlexWrap::css))
+        .unwrap_or(s)
+        .to_string()
 }
 
 /// Whether `var` takes more than one value across the document's modes — the

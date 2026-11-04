@@ -4825,7 +4825,7 @@ mod prefix_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut centres = Vec::new();
         let _ = ctx.run_ui(Default::default(), |ui| {
-            for g in [icon::CORNERS_OUT, icon::ARROW_CLOCKWISE, icon::SQUIRCLE] {
+            for g in [icon::CORNERS_OUT, icon::ROTATE_RIGHT, icon::SQUIRCLE] {
                 let lead = Prefix::Icon(g).galley(ui);
                 let top = prefix_top(&lead, 14.0).round();
                 let (ink_top, ink_bottom) = ink_rows(ui.ctx(), &lead);
@@ -5109,7 +5109,7 @@ mod tests {
     /// The prefix glyph is painted in both the resting and the keyboard face of a field.
     #[test]
     fn a_value_fields_prefix_survives_being_typed_into() {
-        for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ARROW_CLOCKWISE)] {
+        for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ROTATE_RIGHT)] {
             let ctx = egui::Context::default();
             theme::install(&ctx);
             paint_value_field(&ctx, prefix, None); // warm the font atlas
@@ -5139,7 +5139,7 @@ mod tests {
     /// Focusing a field does not move the value, and the only outline is the row's own.
     #[test]
     fn focusing_a_value_field_outlines_the_row_and_leaves_the_value_put() {
-        for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ARROW_CLOCKWISE)] {
+        for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ROTATE_RIGHT)] {
             let ctx = egui::Context::default();
             theme::install(&ctx);
             paint_value_field(&ctx, prefix, None); // warm the font atlas
@@ -5478,7 +5478,7 @@ mod tests {
         theme::install(&ctx);
         for prefix in [
             Prefix::Text("W"),
-            Prefix::Icon(icon::ARROW_CLOCKWISE),
+            Prefix::Icon(icon::ROTATE_RIGHT),
             Prefix::Label("flex-grow"),
         ] {
             paint_value_field(&ctx, prefix, None); // warm the font atlas
@@ -6884,8 +6884,8 @@ mod transform_row_tests {
                 ui.spacing_mut().item_spacing.x = GAP;
                 let quarter = (ui.available_width() - 3.0 * GAP) / 4.0;
                 for g in [
-                    icon::ARROW_COUNTER_CLOCKWISE,
-                    icon::ARROW_CLOCKWISE,
+                    icon::ROTATE_LEFT,
+                    icon::ROTATE_RIGHT,
                     icon::FLIP_HORIZONTAL,
                     icon::FLIP_VERTICAL,
                 ] {

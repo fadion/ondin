@@ -423,7 +423,7 @@ impl OndinApp {
             (Some((tx, _, _)), Some(grab)) if !tx.changes_nothing(&self.session.doc) => {
                 let (label, glyph) = match grab {
                     Grab::Corner(_) => ("Corner radius", icon::CORNERS_OUT),
-                    Grab::ArcStart => ("Start", icon::ARROW_CLOCKWISE),
+                    Grab::ArcStart => ("Start", icon::ARC_START),
                     Grab::ArcEnd => ("Sweep", icon::CHART_PIE_SLICE),
                     Grab::ArcRatio => ("Ratio", icon::CIRCLE_DASHED),
                 };

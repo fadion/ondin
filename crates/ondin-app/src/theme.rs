@@ -544,7 +544,15 @@ pub mod icon {
     pub const ALIGN_TOP: &str = "\u{e512}";
     pub const ALIGN_CENTER_VERTICAL: &str = "\u{e50c}";
     pub const ALIGN_BOTTOM: &str = "\u{e506}";
-    pub const ARROW_CLOCKWISE: &str = "\u{e036}";
+    /// Rotation, wherever it is set — the rotation field, *Rotate 90° clockwise*, a
+    /// gradient's angle: an open arc with its arrowhead turning right.
+    /// [`ROTATE_LEFT`] is the same drawing mirrored.
+    pub const ROTATE_RIGHT: &str = "\u{f028}";
+    /// *Rotate 90° counter-clockwise*: [`ROTATE_RIGHT`] mirrored.
+    pub const ROTATE_LEFT: &str = "\u{f029}";
+    /// An ellipse's arc Start: a circle with its start radius and a dot where it
+    /// meets the rim.
+    pub const ARC_START: &str = "\u{f02b}";
     /// An ellipse's Sweep.
     pub const CHART_PIE_SLICE: &str = "\u{e15a}";
     /// An ellipse's Ratio, the hole.
@@ -582,7 +590,7 @@ pub mod icon {
     pub const KNIFE: &str = "\u{e636}";
     /// The Select button's glyph while the marquee is a lasso.
     pub const LASSO: &str = "\u{edc6}";
-    pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{e038}"; // reset; rotate 90° counter-clockwise
+    pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{e038}"; // reset, restore, reopen
     pub const FOLDER_OPEN: &str = "\u{e256}";
     pub const FLOPPY_DISK: &str = "\u{e248}"; // save
     pub const MAGNIFYING_GLASS_MINUS: &str = "\u{e30e}";
@@ -597,7 +605,7 @@ pub mod icon {
     pub const FLIP_HORIZONTAL: &str = "\u{ed6a}";
     /// Mirror in y. See [`FLIP_HORIZONTAL`].
     pub const FLIP_VERTICAL: &str = "\u{ed6c}";
-    pub const ARROWS_CLOCKWISE: &str = "\u{e094}"; // reverse a gradient's stops
+    pub const ARROWS_CLOCKWISE: &str = "\u{e094}"; // reverse: a path's direction, a gradient's stops
     /// The dashboard's sort control, which is one button carrying whichever order
     /// is in force.
     ///
@@ -938,11 +946,14 @@ pub mod icon {
     /// that folder is being entered, this one is being made. One glyph for two
     /// verbs is the failure §15 D225 names.
     pub const FOLDER_SIMPLE: &str = "\u{e25a}";
+    /// *Re-export on save* — the Export menu's switch: a tray with a turning arrow
+    /// over it. Not `FLOPPY_DISK`, which is the same menu's *Save as a preset*.
+    pub const EXPORT_SYNC: &str = "\u{f02a}";
     /// *Replace and reset* — the Asset row that swaps the picture and throws the
     /// framing away (§15 D225).
     ///
     /// A broom, because every ring was taken: `ARROW_COUNTER_CLOCKWISE` is *Reset
-    /// crop*, `ARROWS_CLOCKWISE` is *reverse*, `ARROW_CLOCKWISE` is rotation. A
+    /// crop*, `ARROWS_CLOCKWISE` is *reverse*, `ROTATE_RIGHT` is rotation. A
     /// fourth ring would be two verbs with one picture.
     pub const BROOM: &str = "\u{ec54}";
     /// *Join*, on the path bar and in the context menu — two ends plugged together.
@@ -1022,7 +1033,9 @@ pub mod icon {
         ("align-top", ALIGN_TOP),
         ("align-center-vertical", ALIGN_CENTER_VERTICAL),
         ("align-bottom", ALIGN_BOTTOM),
-        ("arrow-clockwise", ARROW_CLOCKWISE),
+        ("rotate-right", ROTATE_RIGHT),
+        ("rotate-left", ROTATE_LEFT),
+        ("arc-start", ARC_START),
         ("chart-pie-slice", CHART_PIE_SLICE),
         ("circle-dashed", CIRCLE_DASHED),
         ("corners-out", CORNERS_OUT),
@@ -1187,6 +1200,7 @@ pub mod icon {
         ("memory", MEMORY),
         ("file-zip", FILE_ZIP),
         ("folder-simple", FOLDER_SIMPLE),
+        ("export-sync", EXPORT_SYNC),
         ("broom", BROOM),
         ("plugs-connected", PLUGS_CONNECTED),
         ("magic-wand", MAGIC_WAND),

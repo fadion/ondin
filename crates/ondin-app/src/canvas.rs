@@ -2750,7 +2750,7 @@ impl OndinApp {
                 ..
             } => {
                 let (tx, turn) = self.rotate_tx(target, pivot, start, world, shift);
-                self.session.name_step("Rotate", icon::ARROW_CLOCKWISE);
+                self.session.name_step("Rotate", icon::ROTATE_RIGHT);
                 if self.session.commit(tx) && matches!(target, Target::Selection) {
                     let was = self.session.selection.frame();
                     self.session.selection.set_frame(turn * was);

@@ -1259,13 +1259,13 @@ impl Item {
             Item::ColourReview => s("Colour review", icon::SWATCHES, None, Group::View),
             Item::RotateQuarter(false) => s(
                 "Rotate 90° counter-clockwise",
-                icon::ARROW_COUNTER_CLOCKWISE,
+                icon::ROTATE_LEFT,
                 None,
                 Group::Transform,
             ),
             Item::RotateQuarter(true) => s(
                 "Rotate 90° clockwise",
-                icon::ARROW_CLOCKWISE,
+                icon::ROTATE_RIGHT,
                 None,
                 Group::Transform,
             ),

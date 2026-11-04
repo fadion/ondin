@@ -3342,7 +3342,7 @@ impl OndinApp {
                     ui,
                     row,
                     MultiField::Rotation,
-                    Prefix::Icon(icon::ARROW_CLOCKWISE),
+                    Prefix::Icon(icon::ROTATE_RIGHT),
                     rotation.map(shown_degrees),
                 );
                 app.multi_number(
@@ -3399,8 +3399,8 @@ impl OndinApp {
                 ),
             };
             for (i, (glyph, turn)) in [
-                (icon::ARROW_COUNTER_CLOCKWISE, -std::f64::consts::FRAC_PI_2),
-                (icon::ARROW_CLOCKWISE, std::f64::consts::FRAC_PI_2),
+                (icon::ROTATE_LEFT, -std::f64::consts::FRAC_PI_2),
+                (icon::ROTATE_RIGHT, std::f64::consts::FRAC_PI_2),
             ]
             .into_iter()
             .enumerate()
@@ -3530,7 +3530,7 @@ impl OndinApp {
         let (verb, glyph) = match field {
             MultiField::X | MultiField::Y => ("Move", icon::ARROWS_OUT_CARDINAL),
             MultiField::W | MultiField::H => ("Resize", icon::ARROWS_OUT),
-            MultiField::Rotation => ("Rotate", icon::ARROW_CLOCKWISE),
+            MultiField::Rotation => ("Rotate", icon::ROTATE_RIGHT),
             MultiField::Skew => ("Skew", icon::ANGLE),
         };
         self.session.name_step(verb, glyph);
@@ -4342,7 +4342,7 @@ impl OndinApp {
                 let (ra, reset_r) = ui::value_field_marked(
                     ui,
                     row,
-                    Prefix::Icon(icon::ARROW_CLOCKWISE),
+                    Prefix::Icon(icon::ROTATE_RIGHT),
                     marks.r.as_ref().map(Mark::field),
                     &mut angle_deg,
                     Scrub::whole(0.5),
@@ -4372,7 +4372,7 @@ impl OndinApp {
                     }
                     None => d.remove::<AngleScrub>(scrub_id),
                 });
-                app.named_valve("Rotate", icon::ARROW_CLOCKWISE, &ra, tr);
+                app.named_valve("Rotate", icon::ROTATE_RIGHT, &ra, tr);
                 let mut skew_deg = shown_degrees(split.orientation.skew);
                 let rs = value_field(
                     ui,
@@ -5103,7 +5103,7 @@ impl OndinApp {
     ) {
         let (glyph, name, tip, v0, scrub, unit, decimals) = match k {
             0 => (
-                icon::ARROW_CLOCKWISE,
+                icon::ARC_START,
                 "Start",
                 "Where the arc starts, clockwise from three o'clock",
                 arc.start,

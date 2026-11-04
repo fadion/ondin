@@ -429,7 +429,7 @@ pub(crate) fn chip(ui: &mut egui::Ui, state: &UpdateState) -> bool {
     let galley = |ui: &egui::Ui, color| {
         let mut job = egui::text::LayoutJob::default();
         job.append(
-            icon::ARROW_CLOCKWISE,
+            icon::ARROW_CIRCLE_DOWN,
             0.0,
             egui::TextFormat::simple(theme::icon_font(Scale::Toolbar.glyph_pt()), color),
         );

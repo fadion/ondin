@@ -4284,7 +4284,7 @@ mod tests {
             let x = ink_of(out, "X").0;
             inks(out)
                 .into_iter()
-                .find(|(t, r, _)| t == icon::ARROW_CLOCKWISE && (r.center().x - x.x).abs() < 8.0)
+                .find(|(t, r, _)| t == icon::ROTATE_RIGHT && (r.center().x - x.x).abs() < 8.0)
                 .map(|(_, r, c)| (r.center(), c))
                 .expect("the rotation field's glyph")
         };
@@ -4336,7 +4336,7 @@ mod tests {
         let x = ink_of(&out, "X").0;
         let (r, r_ink) = inks(&out)
             .into_iter()
-            .find(|(t, rr, _)| t == icon::ARROW_CLOCKWISE && (rr.center().x - x.x).abs() < 8.0)
+            .find(|(t, rr, _)| t == icon::ROTATE_RIGHT && (rr.center().x - x.x).abs() < 8.0)
             .map(|(_, rr, c)| (rr.center(), c))
             .expect("the rotation field's glyph");
         assert_eq!(r_ink, theme::text::strong(), "R is overridden");

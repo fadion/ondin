@@ -675,7 +675,7 @@ impl OndinApp {
             let resp = ui::value_field(
                 ui,
                 egui::vec2(col, ROW_H),
-                ui::Prefix::Icon(icon::ARROW_CLOCKWISE),
+                ui::Prefix::Icon(icon::ROTATE_RIGHT),
                 &mut deg,
                 ui::Scrub::whole(0.5).range(0.0..=360.0),
                 |d| d.suffix("°").max_decimals(0),
@@ -722,7 +722,7 @@ impl OndinApp {
             let resp = ui::value_field(
                 ui,
                 egui::vec2(col, ROW_H),
-                ui::Prefix::Icon(icon::ARROW_CLOCKWISE),
+                ui::Prefix::Icon(icon::ROTATE_RIGHT),
                 &mut deg,
                 ui::Scrub::whole(0.5).range(0.0..=360.0),
                 |d| d.suffix("°").max_decimals(0),

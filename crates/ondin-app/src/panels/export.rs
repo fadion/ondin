@@ -1529,11 +1529,7 @@ impl OndinApp {
                     let on_save = self.prefs.export_on_save;
                     if ui::menu_row(
                         ui,
-                        // `ARROW_CLOCKWISE` also prefixes Transform's
-                        // rotation, but the two never appear together; it must not
-                        // be `FLOPPY_DISK`, which is *Save as a preset* above.
-                        ui::MenuRow::new(icon::ARROW_CLOCKWISE, "Re-export on save")
-                            .checked(on_save),
+                        ui::MenuRow::new(icon::EXPORT_SYNC, "Re-export on save").checked(on_save),
                         ui::MENU_ROW_H,
                     )
                     .on_hover_text("Every Ctrl+S rewrites the whole export set")

@@ -1293,6 +1293,8 @@ fn install_style_into(style: &mut egui::Style) {
     v.hyperlink_color = color::accent();
     v.window_stroke = Stroke::new(1.0, color::divider());
     v.window_corner_radius = CornerRadius::same(6);
+    // egui's default is darker and tighter than a menu's.
+    v.popup_shadow = crate::ui::MENU_SHADOW;
 
     // Selection (used by text fields, selectable_label highlight, etc.).
     v.selection.bg_fill = color::accent_800();

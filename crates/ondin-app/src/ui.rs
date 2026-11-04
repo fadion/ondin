@@ -98,15 +98,20 @@ pub fn menu_frame(pad: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(color::card())
         .stroke(egui::Stroke::new(MENU_BORDER, theme::color::text_a(15)))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 10],
-            blur: 24,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(82),
-        })
+        .shadow(MENU_SHADOW)
         .corner_radius(egui::CornerRadius::same(5))
         .inner_margin(egui::Margin::same(pad as i8))
 }
+
+/// The shadow under every floating card: [`menu_frame`]'s, and egui's own popups
+/// (a `ComboBox`'s list, a tooltip), which `theme::install` gives it so a
+/// dropdown's list and a menu cast the same shadow.
+pub const MENU_SHADOW: egui::epaint::Shadow = egui::epaint::Shadow {
+    offset: [0, 10],
+    blur: 24,
+    spread: 0,
+    color: egui::Color32::from_black_alpha(82),
+};
 
 /// The "heard you, working on it" pulse, as an opacity `t` seconds after the
 /// click: down to 50% over [`PULSE_RAMP`], held for [`PULSE_HOLD`], back to

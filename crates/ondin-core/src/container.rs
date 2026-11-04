@@ -646,7 +646,7 @@ pub struct Flex {
     #[serde(default, skip_serializing_if = "is_zero4")]
     pub padding: [f64; 4],
     /// The string variable `direction` is bound to, read where it is drawn
-    /// (`Document::flow_drawn_in`); `direction` is then a placeholder. Held
+    /// (`Document::spacing_drawn_in`); `direction` is then a placeholder. Held
     /// here, as an effect holds its bound numbers, so whatever writes the
     /// layout carries the binding with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

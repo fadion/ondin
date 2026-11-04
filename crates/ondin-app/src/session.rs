@@ -1478,8 +1478,10 @@ impl EditorSession {
         // A gap or a padding written over a bound slot, the same way.
         let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
         // A flex direction or wrap written over its binding, which rides in the
-        // layout and so is rewritten in place.
+        // layout and so is rewritten in place: the cut ones are read around it.
+        let flows = flows_bound(&tx);
         let tx = ondin_core::build::keep_flow_bindings(&self.doc, tx);
+        let flows_cut = flows_cut(&self.doc, &tx, &flows);
         // A visibility written over a bound layer.
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
         // An opacity written over a bound layer.
@@ -1517,7 +1519,12 @@ impl EditorSession {
         let user = tx.0.len();
         ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         let mut vars_cut = variables_detached(&self.doc, &tx, asked_ops, user);
-        for name in widths_cut.into_iter().chain(numbers_cut).chain(limits_cut) {
+        for name in widths_cut
+            .into_iter()
+            .chain(numbers_cut)
+            .chain(limits_cut)
+            .chain(flows_cut)
+        {
             if !vars_cut.contains(&name) {
                 vars_cut.push(name);
             }
@@ -2184,6 +2191,51 @@ fn stroke_widths_cut(
                 Operation::SetStrokes { id: n, strokes } if n == id => strokes
                     .iter()
                     .any(|s| s.id == *item && s.width_var.is_none()),
+                _ => false,
+            })
+        })
+        .filter_map(|(_, _, v)| table.get(*v).map(|x| x.name.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every flex direction or wrap `tx` writes bound, as (layer, slot, variable) —
+/// [`stroke_widths_bound`]' twin for `build::keep_flow_bindings`.
+fn flows_bound(tx: &Transaction) -> Vec<(NodeId, usize, ondin_core::VarId)> {
+    tx.0.iter()
+        .filter_map(|op| match op {
+            Operation::SetDisplay {
+                id,
+                display: Some(ondin_core::container::Display::Flex(f)),
+            } => Some((*id, f.flow_vars())),
+            _ => None,
+        })
+        .flat_map(|(id, vars)| {
+            vars.into_iter()
+                .enumerate()
+                .filter_map(move |(k, v)| v.map(|v| (id, k, v)))
+        })
+        .collect()
+}
+
+/// The variables `bound`'s directions and wraps lost in `tx`, the pass run —
+/// [`stroke_widths_cut`]'s twin.
+fn flows_cut(
+    doc: &Document,
+    tx: &Transaction,
+    bound: &[(NodeId, usize, ondin_core::VarId)],
+) -> Vec<String> {
+    let table = doc.variables();
+    let mut names: Vec<String> = bound
+        .iter()
+        .filter(|(id, k, _)| {
+            tx.0.iter().any(|op| match op {
+                Operation::SetDisplay {
+                    id: n,
+                    display: Some(ondin_core::container::Display::Flex(f)),
+                } if n == id => f.flow_vars()[*k].is_none(),
                 _ => false,
             })
         })

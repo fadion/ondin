@@ -2110,7 +2110,11 @@ impl Review {
         let mut out = Vec::new();
         let mut landed: Vec<CollectionId> = self.widths.iter().map(|(c, _)| *c).collect();
         landed.extend(t.by_width().map(|c| c.id));
+        landed.sort();
         landed.dedup();
+        // The one collection picked by width once applied: the document's, else
+        // the first the file's widths land on.
+        let mut picked = t.by_width().map(|c| c.id);
         for c in landed {
             let modes: Vec<&Mode> = t
                 .collection(c)
@@ -2140,7 +2144,10 @@ impl Review {
                     let w: Vec<f64> = modes.iter().map(|m| b[&m.id]).collect();
                     w.first() == Some(&0.0) && w.windows(2).all(|p| p[0] < p[1])
                 })
-                .filter(|_| t.by_width().is_none_or(|o| o.id == c));
+                .filter(|_| picked.is_none_or(|o| o == c));
+            if file.is_some() {
+                picked = Some(c);
+            }
             let next = file.or_else(|| {
                 let mut b = held.clone()?;
                 let mut last = modes

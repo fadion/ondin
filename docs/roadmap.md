@@ -15,11 +15,16 @@ reads true.
   controls are tab stops and some are painted rects that sense the pointer only. Every control and
   field joins the Tab order in reading order, with `ui::focus_ring` showing where focus is, and
   Return/Space acting on a focused button as a click does (`app-chrome.md`, *Two kinds of focus*).
-- **Breakpoints through modes.** A mode carries an optional `min-width`; `tokens.css` writes its block
-  as `@media (min-width: …)` instead of `[data-mode]`, and a frame set to *Mode: by width* picks its
-  mode from its own width, so resizing it previews the breakpoints. Covers what binds (gaps, padding,
-  sizes, radius, visibility, type numbers); a direction change needs an enum binding for flex
-  direction. Per-node overrides keyed by breakpoint are not the plan: every reader would take them.
+- **A size binding judged across every mode.** Binding a flex direction, or committing one of its
+  variable's cells, should detach any child's bound W/H that some mode makes computed, and say so;
+  today only the mode in force is judged (`build::keep_size_bindings`).
+- **A direction bound to a string that names none.** A string scoped wider than the flex families
+  whose cell names no direction or wrap should detach the binding at commit, and say so; today it
+  draws the literal (`Document::spacing_drawn_in`).
+- **Code export: two frames picking by width on one page** should write two pages, each filling the
+  window; today they are written side by side at their widths and reported.
+- **Code export: text content that varies by mode** as one span per mode, each shown by a hidden
+  per-mode token; today it is written for one mode and reported.
 
 ## Illustrations
 
@@ -65,6 +70,8 @@ Vector editing enough for icons, logos and simple illustrations without leaving 
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).
+- **Container queries for instances** — an instance picking its mode by its own size, as a top-level
+  frame picks by width; today instances never pick by width (`Document::picks_by_width`).
 - **Pairing a state's layer with rest's by hand** — *Pair with rest layer…* and *Unpair* on a
   layer inside a state variant, for a layer the lineage key and name path both miss. Today the
   Variants card's unpaired note and its *Select it* lead to fixing the layer itself

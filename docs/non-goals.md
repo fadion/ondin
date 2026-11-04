@@ -90,6 +90,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 
 - **Binding a `Path`'s corner radii** — unbindable by decision (§15 D1057).
 - **Editing a style with no users** — *Edit* works through a style's users (§15 D1063).
+- **Per-node overrides keyed by breakpoint** — every reader would take them; a collection picked by width carries breakpoints instead.
 - **A kit's collections in the variables browser's collection picker** — a kit's variables list under the document collection they map onto, and its modes are chosen through that mapping.
 
 ## Export

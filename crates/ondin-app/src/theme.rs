@@ -517,11 +517,17 @@ pub mod icon {
     pub const IMAGE: &str = "\u{e2ca}";
     pub const CIRCLE: &str = "\u{e18a}";
     pub const SQUARE: &str = "\u{e45e}";
+    /// View's *Outline*: a box drawn as a hairline with its four handles.
+    pub const OUTLINE_VIEW: &str = "\u{f040}";
     pub const TRIANGLE: &str = "\u{e4b0}"; // the polygon tool — it starts as one
     pub const STAR: &str = "\u{e46a}";
     pub const PLAY: &str = "\u{e3d0}"; // present mode
     pub const ASTERISK: &str = "\u{e0aa}"; // a star's point count
-    pub const ANGLE: &str = "\u{e7bc}"; // a star's inner ratio
+    pub const ANGLE: &str = "\u{e7bc}"; // a stroke's mitre limit
+    /// A star's inner ratio: a star with its inner radius drawn to a dot.
+    pub const STAR_RATIO: &str = "\u{f03b}";
+    /// Skew, field and steps: a box leaning over, its top corners marked.
+    pub const SKEW: &str = "\u{f03a}";
     pub const EYE: &str = "\u{e220}";
     pub const EYE_SLASH: &str = "\u{e224}";
     pub const LOCK_SIMPLE: &str = "\u{e308}";
@@ -795,6 +801,14 @@ pub mod icon {
     pub const BOUNDING_BOX: &str = "\u{e6ce}";
     /// A custom dash pattern, typed as a list.
     pub const LIST_DASHES: &str = "\u{e2f4}";
+    /// A dash's length: a span between two ticks, a dot past each end.
+    pub const DASH_LENGTH: &str = "\u{f03d}";
+    /// Where the dash pattern starts along the path: a row of dashes over an
+    /// arrow sliding it along.
+    pub const DASH_OFFSET: &str = "\u{f03e}";
+    /// A stroke's cap: a stroke's end, rounded, against a dotted line where the
+    /// path stops.
+    pub const STROKE_CAP: &str = "\u{f03c}";
     // The two horizontal sides, completing the set with `ARROW_UP`/`ARROW_DOWN`
     // above: each arrow points at the side whose width it sets.
     pub const ARROW_LEFT: &str = "\u{e058}";
@@ -817,8 +831,8 @@ pub mod icon {
     pub const ARROWS_HORIZONTAL: &str = "\u{eb06}";
     /// The **B** toggle and its chord, against [`STROKE_WEIGHT`]'s weight picker.
     pub const TEXT_BOLD: &str = "\u{e5be}";
-    /// A font's weight, wherever it is picked or bound: three rules, each
-    /// heavier than the one above.
+    /// A weight, wherever it is set or bound: a stroke's and a font's. Three
+    /// rules, each heavier than the one above.
     pub const STROKE_WEIGHT: &str = "\u{f025}";
     pub const TEXT_ITALIC: &str = "\u{e5c0}";
     pub const TEXT_UNDERLINE: &str = "\u{e5c4}";
@@ -936,9 +950,11 @@ pub mod icon {
     /// warning glyph, in neutral ink, no new hue.
     pub const WARNING: &str = "\u{e4e0}";
     /// A variable made or set — *Extract into variable…*, *New variable*, a
-    /// variable's value — and code: *Copy as CSS*, the code exports. Also a
-    /// component property's binding mark in the layers tree.
+    /// variable's value — and code: *Copy as CSS*, the code exports.
     pub const BRACKETS_CURLY: &str = "\u{e860}";
+    /// A layer a component property binds, its badge in the layers tree: the
+    /// instance's hexagon with a dot inside and a line out to the property.
+    pub const PROPERTY_BOUND: &str = "\u{f03f}";
     /// A component set's root element, the tag it is written out as: angle
     /// brackets and a slash.
     pub const CODE: &str = "\u{f01b}";
@@ -1063,11 +1079,14 @@ pub mod icon {
         ("image", IMAGE),
         ("circle", CIRCLE),
         ("square", SQUARE),
+        ("outline-view", OUTLINE_VIEW),
         ("triangle", TRIANGLE),
         ("star", STAR),
         ("play", PLAY),
         ("asterisk", ASTERISK),
         ("angle", ANGLE),
+        ("star-ratio", STAR_RATIO),
+        ("skew", SKEW),
         ("eye", EYE),
         ("eye-slash", EYE_SLASH),
         ("lock-simple", LOCK_SIMPLE),
@@ -1192,6 +1211,9 @@ pub mod icon {
         ("arrows-left-right", ARROWS_LEFT_RIGHT),
         ("bounding-box", BOUNDING_BOX),
         ("list-dashes", LIST_DASHES),
+        ("dash-length", DASH_LENGTH),
+        ("dash-offset", DASH_OFFSET),
+        ("stroke-cap", STROKE_CAP),
         ("arrow-left", ARROW_LEFT),
         ("arrow-right", ARROW_RIGHT),
         ("text-align-left", TEXT_ALIGN_LEFT),
@@ -1249,6 +1271,7 @@ pub mod icon {
         ("selection-all", SELECTION_ALL),
         ("warning", WARNING),
         ("brackets-curly", BRACKETS_CURLY),
+        ("property-bound", PROPERTY_BOUND),
         ("code", CODE),
         ("stack", STACK),
         ("stack-simple", STACK_SIMPLE),

@@ -3362,7 +3362,7 @@ impl OndinApp {
                     ui,
                     row,
                     MultiField::Skew,
-                    Prefix::Icon(icon::ANGLE),
+                    Prefix::Icon(icon::SKEW),
                     skew.map(shown_degrees),
                 );
             });
@@ -3544,7 +3544,7 @@ impl OndinApp {
             MultiField::X | MultiField::Y => ("Move", icon::ARROWS_OUT_CARDINAL),
             MultiField::W | MultiField::H => ("Resize", icon::ARROWS_OUT),
             MultiField::Rotation => ("Rotate", icon::ROTATE_RIGHT),
-            MultiField::Skew => ("Skew", icon::ANGLE),
+            MultiField::Skew => ("Skew", icon::SKEW),
         };
         self.session.name_step(verb, glyph);
         self.multi_valve(&resp, tx);
@@ -4386,7 +4386,7 @@ impl OndinApp {
                 let rs = value_field(
                     ui,
                     row,
-                    Prefix::Icon(icon::ANGLE),
+                    Prefix::Icon(icon::SKEW),
                     &mut skew_deg,
                     // Short of a quarter turn, where the matrix collapses.
                     Scrub::whole(0.5)
@@ -4405,7 +4405,7 @@ impl OndinApp {
                     ),
                     false => Transaction::default(),
                 };
-                app.named_valve("Skew", icon::ANGLE, &rs, ts);
+                app.named_valve("Skew", icon::SKEW, &rs, ts);
             });
             Self::quarters_row(app, ui, TurnScope::Node(id));
         });
@@ -5216,7 +5216,7 @@ impl OndinApp {
             let (rr, hit) = ui::value_field_marked(
                 ui,
                 egui::vec2(fw, 28.0),
-                Prefix::Icon(icon::ANGLE),
+                Prefix::Icon(icon::STAR_RATIO),
                 marks.ratio.as_ref().map(Mark::field),
                 &mut pct,
                 Scrub::fine(0.25, 1).range(MIN_INNER_RATIO * 100.0..=100.0),
@@ -5226,7 +5226,7 @@ impl OndinApp {
             self.reset_marked(hit, &marks.ratio);
             self.named_valve(
                 "Inner ratio",
-                icon::ANGLE,
+                icon::STAR_RATIO,
                 &rr,
                 Transaction(vec![Operation::SetGeometry {
                     id,
@@ -5701,7 +5701,7 @@ impl OndinApp {
                     ui.available_width() - 28.0 * 2.0 - ui::CARD_COL_GAP * 2.0,
                     28.0,
                 ),
-                Prefix::Icon(icon::LINE_SEGMENT),
+                Prefix::Icon(icon::STROKE_WEIGHT),
                 &mut width,
                 Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                 |d| {
@@ -5715,7 +5715,7 @@ impl OndinApp {
             if interacting(&rw) {
                 // Weight is master over per-side widths (`weight_all_tx`).
                 let tx = weight_all_tx(&self.session.doc, &ids, width);
-                self.named_valve("Stroke weight", icon::LINE_SEGMENT, &rw, tx);
+                self.named_valve("Stroke weight", icon::STROKE_WEIGHT, &rw, tx);
             }
             ui::field_button(
                 ui,
@@ -5787,7 +5787,7 @@ impl OndinApp {
                     let rw = value_field(
                         ui,
                         egui::vec2(field_w, 28.0),
-                        Prefix::Icon(icon::LINE_SEGMENT),
+                        Prefix::Icon(icon::STROKE_WEIGHT),
                         &mut width,
                         Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                         |d| d.custom_formatter(ui::number(2)),
@@ -6179,7 +6179,7 @@ impl OndinApp {
                                 let rl = value_field(
                                     ui,
                                     egui::vec2(fw, CELL),
-                                    Prefix::Icon(icon::RULER),
+                                    Prefix::Icon(icon::DASH_LENGTH),
                                     &mut length,
                                     Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                                     |d| d.custom_formatter(ui::number(2)),
@@ -6219,7 +6219,7 @@ impl OndinApp {
                         let resp = value_field(
                             ui,
                             egui::vec2(inner, CELL),
-                            Prefix::Icon(icon::ARROW_LINE_RIGHT),
+                            Prefix::Icon(icon::DASH_OFFSET),
                             &mut offset,
                             Scrub::whole(0.5).range(-ui::MAX_STROKE_WIDTH..=ui::MAX_STROKE_WIDTH),
                             |d| d.custom_formatter(ui::number(2)),
@@ -6238,7 +6238,7 @@ impl OndinApp {
                         egui::ComboBox::from_id_salt(("stroke-cap", index))
                             .icon(ui::combo_chevron)
                             .width(inner)
-                            .selected_text(ui::glyph_and_text(icon::LINE_SEGMENT, cap_label(cap)))
+                            .selected_text(ui::glyph_and_text(icon::STROKE_CAP, cap_label(cap)))
                             .show_ui(ui, |ui| {
                                 ui::menu_rows(ui);
                                 for c in [Cap::Butt, Cap::Round, Cap::Square] {
@@ -18244,7 +18244,7 @@ mod rhythm_tests {
             v
         };
         assert!(
-            glyphs(&out).iter().any(|t| t == icon::ARROW_LINE_RIGHT),
+            glyphs(&out).iter().any(|t| t == icon::DASH_OFFSET),
             "a dashed stroke's popover offers the dash offset"
         );
         app.stroke_menu = None;

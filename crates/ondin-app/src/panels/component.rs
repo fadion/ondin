@@ -4793,7 +4793,7 @@ mod tests {
         assert!(
             painted
                 .iter()
-                .any(|t| t == crate::theme::icon::BRACKETS_CURLY),
+                .any(|t| t == crate::theme::icon::PROPERTY_BOUND),
             "{painted:?}"
         );
     }

@@ -62,7 +62,7 @@ and `2x` buttons filling the row.
 **Rotation and skew** share a row at X/Y widths. Below, four equal buttons (`ui::field_button_sized`):
 turn 90° counter-clockwise, turn 90° clockwise, flip H, flip V.
 
-- **Skew** is clamped at `tools::MAX_SKEW` (±89°), with the `ANGLE` glyph. It reads `build::Basis::of` and rebuilds by replacing `skew` alone, keeping `angle` and `mirror` and multiplying the residual world-basis scale back on.
+- **Skew** is clamped at `tools::MAX_SKEW` (±89°), with the `SKEW` glyph. It reads `build::Basis::of` and rebuilds by replacing `skew` alone, keeping `angle` and `mirror` and multiplying the residual world-basis scale back on.
 - **Rotation** shows `Basis::of`'s angle at rest, a latched number during a gesture (§15 D206). It writes by composition (`inspector::turned_about`, `rotate_about · old_world`), never by rebuilding, which would spin a mirrored layer past ±90°. A `Line`'s rotation is the world-space start→end angle, written as the delta (typed minus shown) about the pivot.
 - **No `-0°`.** `inspector::shown_degrees` snaps magnitudes under 1e-9° to +0. Tests assert `is_sign_positive`, because `-0.0 == 0.0`.
 - **Quarter turns** go through `tools::rotate_node` about the pivot read from the committed tree (adding 90 to the field is wrong for mirrored and sheared layers). Mirrors use `build::flip`. Both cards draw the row through `inspector::quarters_row(TurnScope)`.

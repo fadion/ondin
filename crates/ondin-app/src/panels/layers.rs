@@ -490,9 +490,8 @@ fn cover_row_end(p: &egui::Painter, row: egui::Rect, from: f32, ground: egui::Co
 /// not the 15pt hover controls: a badge is an annotation.
 const BADGE_BASE: f32 = 9.75;
 
-/// Type size for a bound property's `brackets-curly`. Not in the ink test: no
-/// quarter point puts the braces on the word's height at every scaling.
-const BADGE_BOUND: f32 = 11.25;
+/// Type size for a bound layer's `property-bound`, measured the same way.
+const BADGE_BOUND: f32 = 11.0;
 
 /// Type size for a mask's `mask`, measured the same way; at 10.0 it inks
 /// the word's height at all four scalings (11.0 is too tall at 125% and 150%).
@@ -1720,7 +1719,7 @@ impl OndinApp {
                 n => format!("{n} variants"),
             }))
         } else if bound {
-            Some(RowBadge::Icon(icon::BRACKETS_CURLY, BADGE_BOUND))
+            Some(RowBadge::Icon(icon::PROPERTY_BOUND, BADGE_BOUND))
         } else {
             // The frame's used size (§15 D868): where container layout put it.
             match self.session.resolved.used_kind_of(node) {
@@ -3298,6 +3297,7 @@ mod badge_ink_tests {
             );
             for (name, badge, size) in [
                 ("diamond", icon::DIAMOND, BADGE_BASE),
+                ("property-bound", icon::PROPERTY_BOUND, BADGE_BOUND),
                 ("mask", icon::MASK, BADGE_MASK),
             ] {
                 let glyph = ink_height(&ctx, badge, theme::icon_font(size));

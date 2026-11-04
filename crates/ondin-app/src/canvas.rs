@@ -2670,7 +2670,7 @@ impl OndinApp {
             }
             Drag::LineEnd { id, which } => {
                 let tx = self.line_end_tx(id, which, world, shift);
-                self.session.name_step("Resize", icon::LINE_SEGMENT);
+                self.session.name_step("Resize", icon::ARROWS_OUT);
                 self.session.commit(tx);
             }
             Drag::RailOffset { id } => {
@@ -2736,7 +2736,7 @@ impl OndinApp {
                 ..
             } => {
                 let (tx, lean) = self.skew_tx(target, handle, press, world, shift);
-                self.session.name_step("Skew", icon::ANGLE);
+                self.session.name_step("Skew", icon::SKEW);
                 if self.session.commit(tx) && matches!(target, Target::Selection) {
                     // A set has no stored frame; keep its lean on the selection.
                     let was = self.session.selection.frame();

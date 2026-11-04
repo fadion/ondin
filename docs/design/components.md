@@ -797,8 +797,8 @@ override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offe
   hit route (`canvas::set_plus_at` asked before any pick, calling `OndinApp::add_variant`;
   `chrome_claims` keeps guides off it; `begin_select_drag` starts nothing on it), drawn after
   `draw_key_outline` (`draw_set_plus`).
-- **Layers**: the badge slot shows *N variants* on a collapsed set, `{}` on a layer bound to a property
-  of the owner above; priority mask → set count → `{}` → frame size / subtract base. A variant row is
+- **Layers**: the badge slot shows *N variants* on a collapsed set, `icon::PROPERTY_BOUND` on a layer bound
+  to a property of the owner above; priority mask → set count → bound → frame size / subtract base. A variant row is
   named by its values and wears the filled hexagon.
 - Values are renamed, moved and deleted from a chip's popup, never edited in place or dragged;
   binding is from one line, not `{}` buttons on layers/Appearance/Type; defining is through the

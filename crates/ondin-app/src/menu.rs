@@ -1020,7 +1020,7 @@ impl Item {
                     ViewSwitch::Grid => icon::GRID_FOUR,
                     // The glyph the Layout grid card already draws for columns.
                     ViewSwitch::LayoutGrid => icon::COLUMNS,
-                    ViewSwitch::Outline => icon::SQUARE,
+                    ViewSwitch::Outline => icon::OUTLINE_VIEW,
                     ViewSwitch::PixelPreview => icon::PIXEL_PREVIEW,
                     ViewSwitch::Lasso => icon::LASSO,
                     // Placeholders: no menu builds a row for these, and spelling

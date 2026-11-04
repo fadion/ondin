@@ -215,7 +215,7 @@ impl FieldKey {
             // The opacity field's own prefix.
             FieldKey::Opacity { .. } => icon::CHECKERBOARD,
             // The weight field's own prefix.
-            FieldKey::StrokeWidth { .. } => icon::LINE_SEGMENT,
+            FieldKey::StrokeWidth { .. } => icon::STROKE_WEIGHT,
             // The popover's own word prefixes.
             FieldKey::EffectNumber { slot: 0, .. } => "X",
             FieldKey::EffectNumber { slot: 1, .. } => "Y",

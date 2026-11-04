@@ -2664,8 +2664,6 @@ use ondin_core::{Operation, Transaction};
 const MENU_W: f32 = 210.0;
 /// The row height, shared with the View menu.
 const ROW_H: f32 = crate::ui::MENU_ROW_H;
-/// `menu_frame`'s inner margin, the same 5pt the dropdowns use.
-const MENU_PAD: f32 = 5.0;
 /// One separator as `ui::menu_sep` allocates it; agreeing with it keeps [`height`] exact.
 const SEP_H: f32 = crate::ui::MENU_SEP_H;
 
@@ -2847,7 +2845,10 @@ impl OndinApp {
             return;
         }
         // The card paints exactly `MENU_W`; the height adds its border in [`height`].
-        let size = egui::vec2(MENU_W, height(&groups, ROW_H, 1.0, SEP_H, MENU_PAD));
+        let size = egui::vec2(
+            MENU_W,
+            height(&groups, ROW_H, 1.0, SEP_H, crate::ui::MENU_PAD),
+        );
         let pos = crate::ui::menu_place(ctx, at, size);
 
         let mut chosen = None;
@@ -2928,8 +2929,8 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
+                crate::ui::menu_frame(crate::ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(MENU_W, crate::ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for (i, group) in groups.iter().enumerate() {
                         if i > 0 {
@@ -2973,7 +2974,7 @@ impl OndinApp {
             let rows = sub.iter().map(Vec::len).sum();
             let seps = sub.len().saturating_sub(1);
             let fly = crate::ui::flyout(sub_id, f.row, MENU_W)
-                .pad(MENU_PAD)
+                .pad(crate::ui::MENU_PAD)
                 .order(egui::Order::Foreground)
                 .show(ctx, (rows, seps), |ui| {
                     for (i, group) in sub.iter().enumerate() {
@@ -3788,7 +3789,7 @@ mod tests {
         };
 
         // `ui::menu_row`'s own anchors.
-        let inner = crate::ui::menu_inner_w(MENU_W, MENU_PAD);
+        let inner = crate::ui::menu_inner_w(MENU_W, crate::ui::MENU_PAD);
         let label_x = 8.0 + 15.0 + 9.0;
         let accel_x = inner - 8.0;
         const CLEAR: f32 = 4.0;
@@ -3834,8 +3835,8 @@ mod tests {
         ] {
             let painted = std::cell::Cell::new(0.0_f32);
             let _ = ctx.run_ui(Default::default(), |ui| {
-                let out = crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
+                let out = crate::ui::menu_frame(crate::ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(MENU_W, crate::ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for (g, rows) in shape.iter().enumerate() {
                         if g > 0 {
@@ -3865,7 +3866,7 @@ mod tests {
                 .iter()
                 .map(|n| (0..*n).map(|_| Row::new(Item::Copy)).collect())
                 .collect();
-            let computed = height(&groups, ROW_H, 1.0, SEP_H, MENU_PAD);
+            let computed = height(&groups, ROW_H, 1.0, SEP_H, crate::ui::MENU_PAD);
             assert!(
                 (computed - painted.get()).abs() < 0.01,
                 "{shape:?}: menu_place would put this at {computed} tall and it paints \
@@ -5900,7 +5901,7 @@ mod label_fit_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut row_right = 0.0;
         let out = ctx.run_ui(Default::default(), |ui| {
-            ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
+            ui.set_width(crate::ui::menu_inner_w(MENU_W, crate::ui::MENU_PAD));
             let row = crate::ui::MenuRow::new(icon::ARROW_COUNTER_CLOCKWISE, label).accel(accel);
             row_right = crate::ui::menu_row(ui, row, crate::ui::MENU_ROW_H)
                 .rect

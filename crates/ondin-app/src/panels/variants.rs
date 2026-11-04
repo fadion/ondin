@@ -418,11 +418,7 @@ fn swap_picker(
                 // say what they hold.
                 let found = options(if private { "" } else { &search });
                 if found.is_empty() {
-                    ui.label(
-                        egui::RichText::new("No main matches")
-                            .size(ui::CONTROL_PT)
-                            .color(theme::text::dim()),
-                    );
+                    ui::empty_note(ui, "No main matches");
                 }
                 // 🚨 **One height, whatever the list holds.** A popup is measured
                 // once, on its first frame, and can shrink but never grow back: a
@@ -992,9 +988,9 @@ impl OndinApp {
             // **A rule between two properties** (the maintainer's look, §15
             // D1006): a property's chips wrapped under its name sat as close to
             // the next property's name as to their own, so which chips were whose
-            // took reading. The Properties card's hairline (`card_rule`, D1000).
+            // took reading. The Properties card's hairline (`ui::card_rule`, D1000).
             if pi > 0 {
-                card_rule(ui);
+                ui::card_rule(ui);
             }
             ui.add_space(2.0);
             let marked = p.is_interaction();
@@ -2450,7 +2446,7 @@ impl OndinApp {
             let mut first = plain.is_empty();
             for p in &swaps {
                 if !std::mem::take(&mut first) {
-                    card_rule(ui);
+                    ui::card_rule(ui);
                 }
                 property_row(ui, doc, owner, p, &mut edits);
             }
@@ -2461,7 +2457,7 @@ impl OndinApp {
             // as something the card wanted done.
             let shown: Vec<NodeId> = slots.iter().filter(|(_, s)| *s).map(|(s, _)| *s).collect();
             if !shown.is_empty() {
-                card_rule(ui);
+                ui::card_rule(ui);
                 ui.label(ui::eyebrow("Shown from nested"));
                 for slot in &shown {
                     ui.horizontal(|ui| {
@@ -3059,19 +3055,6 @@ fn preferred_rows(
         next.push(m);
         write(edits, next);
     }
-}
-
-/// A hairline across the card between two groups of its rows (§15 D1000) — the
-/// card's own row gap above and below it, so a rule adds one gap and a line.
-fn card_rule(ui: &mut egui::Ui) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::empty());
-    let ppp = ui.ctx().pixels_per_point();
-    let y = ui::hairline_in_column(rect.center().y, ppp, 1.0);
-    ui.painter().line_segment(
-        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-        egui::Stroke::new(1.0, theme::color::text_a(26)),
-    );
 }
 
 /// A new swap property on `owner` bound to the nested instance `slot`, named for

@@ -7021,9 +7021,6 @@ pub(crate) fn top_bar_frame() -> egui::Frame {
         .inner_margin(egui::Margin::symmetric(14, 0))
 }
 
-/// Inner padding of every top-bar dropdown.
-const MENU_PAD: f32 = 5.0;
-
 /// The View menu's row that opens the panes beside it.
 const PANELS_ROW: &str = "Panels";
 
@@ -7369,8 +7366,8 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(width, MENU_PAD));
+                crate::ui::menu_frame(crate::ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(width, crate::ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     body(self, ui);
                 });
@@ -7470,7 +7467,7 @@ impl OndinApp {
                     .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
             };
-            let width = crate::ui::menu_check_width(&ctx, &labels, MENU_PAD, MENU_W);
+            let width = crate::ui::menu_check_width(&ctx, &labels, crate::ui::MENU_PAD, MENU_W);
             self.dropdown(&ctx, id, anchor, width, &head, |app, ui| {
                 // From [`ViewSwitch`], which the chords resolve to.
                 let switch = |app: &mut Self, ui: &mut egui::Ui, sw: ViewSwitch, label: &str| {
@@ -7568,9 +7565,9 @@ impl OndinApp {
             _ => sw.label(),
         };
         let labels: Vec<&str> = ViewSwitch::VIEW_PANELS.iter().map(|s| label(*s)).collect();
-        let w = crate::ui::menu_check_width(ctx, &labels, MENU_PAD, 120.0);
+        let w = crate::ui::menu_check_width(ctx, &labels, crate::ui::MENU_PAD, 120.0);
         crate::ui::flyout(id, row, w)
-            .pad(MENU_PAD)
+            .pad(crate::ui::MENU_PAD)
             .order(egui::Order::Foreground)
             .show(ctx, (labels.len(), 0), |ui| {
                 for sw in ViewSwitch::VIEW_PANELS {
@@ -7901,7 +7898,6 @@ impl OndinApp {
     /// answers whether that was clicked. **Interactable only then**: the rest of the
     /// time every click and drop passes through it to the canvas.
     fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) -> bool {
-        const MARGIN: f32 = 12.0;
         let status = self.session.status();
         let moded = self.mode != Mode::Normal;
         let exporting = self.exporting();
@@ -7936,7 +7932,10 @@ impl OndinApp {
             // Its own fade only: egui's appear fade would dim the mode.
             .fade_in(false)
             .pivot(egui::Align2::LEFT_BOTTOM)
-            .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN + beside, -MARGIN))
+            .fixed_pos(
+                canvas.left_bottom()
+                    + egui::vec2(crate::ui::SCREEN_MARGIN + beside, -crate::ui::SCREEN_MARGIN),
+            )
             .show(ctx, |ui| {
                 // The card fades only when the message is all it holds.
                 let message_fade = if stays {
@@ -8387,9 +8386,9 @@ impl OndinApp {
 
     /// The x an inspector popover starts at.
     pub(crate) fn popover_left(ctx: &egui::Context, width: f32) -> f32 {
-        const MARGIN: f32 = 12.0;
         let screen = ctx.input(|i| i.content_rect());
-        (Self::inspector_column(screen).left() - width - POPOVER_GAP).max(screen.min.x + MARGIN)
+        (Self::inspector_column(screen).left() - width - POPOVER_GAP)
+            .max(screen.min.x + crate::ui::SCREEN_MARGIN)
     }
 
     /// Where a panel's popover goes: clear of the inspector, to its left. Only `head`'s
@@ -14069,7 +14068,7 @@ mod library_wiring_tests {
         let card = ctx
             .memory(|m| m.area_rect(egui::Id::new("view-menu")))
             .expect("the View menu's area");
-        let inset = crate::app::MENU_PAD + crate::ui::MENU_BORDER + 8.0;
+        let inset = crate::ui::MENU_PAD + crate::ui::MENU_BORDER + 8.0;
         let rows = crate::input::ViewSwitch::VIEW_CANVAS
             .iter()
             .chain(&crate::input::ViewSwitch::VIEW_MODES)
@@ -14230,7 +14229,7 @@ mod library_wiring_tests {
         let list = ctx
             .memory(|m| m.area_rect(OndinApp::flyout_id("view-menu")))
             .expect("the list's area");
-        let row_left = card.left() + crate::ui::MENU_BORDER + crate::app::MENU_PAD;
+        let row_left = card.left() + crate::ui::MENU_BORDER + crate::ui::MENU_PAD;
         assert!(list.right() < row_left, "the list opens to the left");
 
         // Over the sliver between the list and the row, at both of its ends.

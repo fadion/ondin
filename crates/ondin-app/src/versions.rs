@@ -855,31 +855,14 @@ fn day_row(ui: &mut egui::Ui, day: &str, date: &str) {
         egui::Stroke::new(1.0, color::text_a(30)),
     );
     let x0 = rect.left() + TIME_W + COL_GAP + RAIL_W + COL_GAP;
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &day.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
-            color: theme::text::muted(),
-            extra_letter_spacing: 0.8,
-            ..Default::default()
-        },
-    );
-    job.append(
+    let y = rect.bottom() - 6.0;
+    let head = crate::ui::paint_eyebrow(p, egui::pos2(x0, y), egui::Align2::LEFT_BOTTOM, day);
+    p.text(
+        egui::pos2(head.right() + 7.0, y),
+        egui::Align2::LEFT_BOTTOM,
         date,
-        7.0,
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(crate::ui::CAPTION_PT),
-            color: theme::text::faint(),
-            ..Default::default()
-        },
-    );
-    let g = p.layout_job(job);
-    p.galley(
-        egui::pos2(x0, rect.bottom() - 6.0 - g.size().y),
-        g,
-        theme::text::muted(),
+        egui::FontId::proportional(crate::ui::CAPTION_PT),
+        theme::text::faint(),
     );
 }
 
@@ -952,8 +935,7 @@ fn card_head(ui: &mut egui::Ui, title: &str, progress: Option<(usize, usize)>) -
                 .truncate(),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // The settings card's ✕ (`settings::modal_title`).
-                let close = crate::ui::icon_button(ui, icon::X, 18.0, 14.0, false, true).clicked();
+                let close = crate::ui::close_button(ui).clicked();
                 if let Some((done, all)) = progress {
                     ui.label(
                         egui::RichText::new(format!("Comparing {done} of {all}"))

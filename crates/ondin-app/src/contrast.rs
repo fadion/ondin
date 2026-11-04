@@ -36,8 +36,6 @@ const PASS: egui::Color32 = egui::Color32::from_rgb(0x5c, 0xc0, 0x8a);
 /// A pass or skip chip's ground: the canvas's dark, mostly opaque, so the chip
 /// reads over any artwork.
 const CHIP: egui::Color32 = egui::Color32::from_rgba_premultiplied(25, 25, 28, 209);
-const BADGE_H: f32 = 19.0;
-const BADGE_PT: f32 = crate::ui::CAPTION_PT;
 /// The fix card's ratio readout: larger than the scale's titles, so the number
 /// reads first.
 const RATIO_PT: f32 = 15.0;
@@ -552,13 +550,14 @@ impl OndinApp {
             }
             let galley = painter.layout_no_wrap(
                 text,
-                egui::FontId::proportional(BADGE_PT),
+                egui::FontId::proportional(crate::ui::BADGE_PT),
                 egui::Color32::PLACEHOLDER,
             );
             let w = 6.0 + 11.0 + 4.0 + galley.size().x + 6.0;
+            let h = crate::ui::BADGE_FIELD_H;
             let mut r = egui::Rect::from_min_size(
-                egui::pos2(layer.left(), layer.top() - BADGE_LIFT - BADGE_H),
-                egui::vec2(w, BADGE_H),
+                egui::pos2(layer.left(), layer.top() - BADGE_LIFT - h),
+                egui::vec2(w, h),
             );
             if r.top() < canvas.top() + 2.0 {
                 r = r.translate(egui::vec2(0.0, canvas.top() + 2.0 - r.top()));
@@ -991,7 +990,7 @@ impl OndinApp {
                     if f.samples.len() > 1 {
                         card_modes(ui, &f, level);
                     }
-                    rule(ui);
+                    crate::ui::card_rule(ui);
                     egui::Frame::NONE
                         .inner_margin(egui::Margin {
                             left: 5,
@@ -1688,7 +1687,7 @@ fn card_head(ui: &mut egui::Ui, name: &str, f: &Finding, level: Level) {
                 });
             });
         });
-    rule(ui);
+    crate::ui::card_rule(ui);
 }
 
 fn card_colours(ui: &mut egui::Ui, f: &Finding, level: Level) {
@@ -1730,7 +1729,7 @@ fn card_colours(ui: &mut egui::Ui, f: &Finding, level: Level) {
 
 /// One row per mode: its colours and score, a fail marked by glyph and colour.
 fn card_modes(ui: &mut egui::Ui, f: &Finding, level: Level) {
-    rule(ui);
+    crate::ui::card_rule(ui);
     egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(5, 5))
         .show(ui, |ui| {
@@ -1855,12 +1854,6 @@ fn note(ui: &mut egui::Ui, text: &str) {
         );
     });
     ui.add_space(4.0);
-}
-
-fn rule(ui: &mut egui::Ui) {
-    let (r, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(r, 0.0, color::divider());
 }
 
 fn color32(c: Color) -> egui::Color32 {

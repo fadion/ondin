@@ -1039,7 +1039,7 @@ impl OndinApp {
                 ui.set_width(W);
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
                 palette_field(ui, &mut pal);
-                divider(ui);
+                crate::ui::card_rule(ui);
                 let mut index = 0usize;
                 egui::ScrollArea::vertical()
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -1079,7 +1079,7 @@ impl OndinApp {
                                 }
                             });
                     });
-                divider(ui);
+                crate::ui::card_rule(ui);
                 let flat = sections.iter().flat_map(|s| &s.entries);
                 let why = match flat.clone().nth(pal.highlight) {
                     Some(Entry::Cmd(c)) if !c.enabled => c.why,
@@ -1168,34 +1168,17 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
     );
 }
 
-/// The hairline between the field, the list and the footer.
-fn divider(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 1.0), egui::Sense::empty());
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::ZERO, theme::color::text_a(20));
-}
-
-/// A section's small-caps title.
+/// A section's eyebrow, sat 5pt above the section's first row.
 fn section_label(ui: &mut egui::Ui, title: &str) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), SECTION_H),
         egui::Sense::empty(),
     );
-    let mut job = egui::text::LayoutJob::single_section(
-        title.to_uppercase(),
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
-            color: theme::text::faint(),
-            extra_letter_spacing: 0.9,
-            ..Default::default()
-        },
-    );
-    job.wrap.max_rows = 1;
-    let galley = ui.painter().layout_job(job);
-    ui.painter().galley(
-        egui::pos2(rect.left() + 8.0, rect.bottom() - 5.0 - galley.size().y),
-        galley,
-        theme::text::faint(),
+    crate::ui::paint_eyebrow(
+        ui.painter(),
+        egui::pos2(rect.left() + 8.0, rect.bottom() - 5.0),
+        egui::Align2::LEFT_BOTTOM,
+        title,
     );
 }
 
@@ -1476,12 +1459,11 @@ fn no_match(ui: &mut egui::Ui, pal: &Palette) {
         (true, false) => format!("No layer matches “{q}”"),
         (false, _) => format!("No command or layer matches “{q}”"),
     };
-    ui.painter().text(
-        egui::pos2(rect.left() + 8.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        text,
-        egui::FontId::proportional(crate::ui::CONTROL_PT),
-        theme::text::dim(),
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect.with_min_x(rect.left() + 8.0))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| crate::ui::empty_note(ui, &text),
     );
 }
 

@@ -520,17 +520,8 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(color::raised())
-                    .corner_radius(8)
-                    .stroke(egui::Stroke::new(1.0, color::text_a(20)))
+                ui::card_frame()
                     .inner_margin(PAD)
-                    .shadow(egui::Shadow {
-                        offset: [0, 20],
-                        blur: 50,
-                        spread: 0,
-                        color: egui::Color32::from_black_alpha(128),
-                    })
                     .show(ui, |ui| {
                         ui.set_width(w - 2.0 * PAD);
                         ui.set_height(height - 2.0 * PAD);
@@ -775,8 +766,8 @@ impl OndinApp {
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(ui::menu_inner_w(menu_w, 4.0));
+                ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(ui::menu_inner_w(menu_w, ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let row = |ui: &mut egui::Ui, glyph: &str, label: &str| {
                         ui::menu_row(ui, ui::MenuRow::new(glyph, label), MENU_ROW_H).clicked()
@@ -2227,12 +2218,11 @@ fn collection_row(ui: &mut egui::Ui, c: &ondin_core::variable::Collection) {
         theme::icon_font(13.0),
         ink,
     );
-    p.text(
+    ui::paint_eyebrow(
+        p,
         egui::pos2(rect.left() + 20.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        c.name.to_uppercase(),
-        egui::FontId::proportional(ui::EYEBROW_PT),
-        ink,
+        &c.name,
     );
     let modes: Vec<&str> = c.modes.iter().map(|m| m.name.as_str()).collect();
     p.text(
@@ -3458,12 +3448,11 @@ fn header(
         rect.bottom() - 0.5,
         egui::Stroke::new(1.0, color::text_a(20)),
     );
-    ui.painter().text(
+    ui::paint_eyebrow(
+        ui.painter(),
         egui::pos2(rect.left() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        "NAME",
-        egui::FontId::proportional(ui::EYEBROW_PT),
-        theme::text::faint(),
+        "Name",
     );
     let clip = egui::Rect::from_x_y_ranges(rect.left() + NAME_W..=rect.right(), rect.y_range());
     for (i, m) in modes.iter().enumerate() {
@@ -4669,8 +4658,8 @@ impl OndinApp {
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(ui::menu_inner_w(w, 4.0));
+                ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(ui::menu_inner_w(w, ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let inherit = match by_width {
                         true => ui::MenuRow::new(icon::DEVICES, "By width"),

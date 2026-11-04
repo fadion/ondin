@@ -6423,7 +6423,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{s} painted: {painted:?}"))
                 .1
         };
-        let rule = crate::theme::color::text_a(26);
+        let rule = crate::theme::color::divider();
         let mut rules = Vec::new();
         fn walk(s: &egui::Shape, rule: egui::Color32, o: &mut Vec<f32>) {
             match s {

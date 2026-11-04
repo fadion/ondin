@@ -316,7 +316,7 @@ impl OndinApp {
                         caption(ui, r, selected, threshold);
                     });
                 ui.add_space(8.0);
-                divider(ui);
+                ui::card_rule(ui);
                 if r.seen.groups.is_empty() {
                     empty(ui, r, threshold);
                     return;
@@ -327,7 +327,7 @@ impl OndinApp {
                     .min(ui.available_height() - FOOT_H - 1.0)
                     .max(HEAD_H * 3.0);
                 let previewed = list(ui, doc, r, list_h, &mut act);
-                divider(ui);
+                ui::card_rule(ui);
                 foot(ui, doc, r, previewed, &mut act);
             });
         });
@@ -531,12 +531,6 @@ fn head(ui: &mut egui::Ui) -> bool {
     crate::settings::modal_title(&mut child, "Colour review")
 }
 
-/// A hairline across the whole card, between its parts.
-fn divider(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, color::divider());
-}
-
 /// The scope and the threshold, side by side.
 fn controls(
     ui: &mut egui::Ui,
@@ -643,27 +637,21 @@ fn empty(ui: &mut egui::Ui, r: &ColourReview, threshold: Threshold) {
             bottom: 18,
         })
         .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.spacing_mut().item_spacing.y = 6.0;
-                ui.label(
-                    egui::RichText::new(format!(
-                        "No near-identical colours at {}",
-                        threshold.label()
-                    ))
-                    .size(ui::CONTROL_PT)
-                    .color(theme::text::muted()),
-                );
-                let counted = match n {
-                    0 => format!("No colours in {place}"),
-                    1 => format!("1 colour in {place}"),
-                    n => format!("{n} colours in {place}, each one apart"),
-                };
-                ui.label(
-                    egui::RichText::new(counted)
-                        .size(ui::SMALL_PT)
-                        .color(theme::text::faint()),
-                );
-            });
+            ui.spacing_mut().item_spacing.y = 6.0;
+            ui::empty_note(
+                ui,
+                &format!("No near-identical colours at {}", threshold.label()),
+            );
+            let counted = match n {
+                0 => format!("No colours in {place}"),
+                1 => format!("1 colour in {place}"),
+                n => format!("{n} colours in {place}, each one apart"),
+            };
+            ui.label(
+                egui::RichText::new(counted)
+                    .size(ui::SMALL_PT)
+                    .color(theme::text::dim()),
+            );
         });
 }
 

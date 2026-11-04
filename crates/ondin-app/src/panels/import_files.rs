@@ -2068,13 +2068,7 @@ fn message(ui: &mut egui::Ui, glyph: &str, text: &str, col: egui::Color32) {
 /// The hairline between the field and the options.
 fn divider(ui: &mut egui::Ui) {
     ui.add_space(GROUP_GAP + 2.0);
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::empty());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        egui::Stroke::new(1.0, theme::color::divider()),
-    );
+    ui::card_rule(ui);
     ui.add_space(GROUP_GAP + 2.0);
 }
 

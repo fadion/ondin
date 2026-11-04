@@ -1153,9 +1153,8 @@ impl OndinApp {
     fn tab_menu(&mut self, ctx: &egui::Context) {
         use crate::menu::{Nav, navigate_index, pointer_moved};
         use crate::theme::icon;
-        use crate::ui::{MenuRow, menu_row};
+        use crate::ui::{MENU_PAD, MenuRow, menu_row};
         const W: f32 = 190.0;
-        const PAD: f32 = 5.0;
         let Some((id, at, opened)) = self.tabs.menu else {
             return;
         };
@@ -1224,14 +1223,14 @@ impl OndinApp {
         self.tabs.menu_highlight = highlight;
 
         // Four rows and a rule, the 1 pt gaps between the five, the padding and border.
-        let h = 4.0 * crate::ui::MENU_ROW_H + crate::ui::MENU_SEP_H + 4.0 + 2.0 * PAD + 2.0;
+        let h = 4.0 * crate::ui::MENU_ROW_H + crate::ui::MENU_SEP_H + 4.0 + 2.0 * MENU_PAD + 2.0;
         let pos = crate::ui::menu_place(ctx, at, egui::vec2(W, h));
         let menu = egui::Area::new(egui::Id::new("tab-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                crate::ui::menu_frame(PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(W, PAD));
+                crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(W, MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for (i, (which, glyph, label, why)) in rows.into_iter().enumerate() {
                         let mut row = MenuRow::new(glyph, label).enabled(why.is_none());
@@ -1484,7 +1483,7 @@ impl OndinApp {
         front: Option<TabId>,
     ) {
         use crate::theme::color;
-        const PAD: f32 = 5.0;
+        use crate::ui::MENU_PAD;
         let anchor = egui::pos2(
             head.rect.right() - OVERFLOW_W,
             head.rect.bottom() + crate::ui::MENU_GAP,
@@ -1494,8 +1493,8 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                crate::ui::menu_frame(PAD).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(OVERFLOW_W, PAD));
+                crate::ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(OVERFLOW_W, MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for info in infos {
                         let on = front == Some(info.id);

@@ -1038,11 +1038,11 @@ impl OndinApp {
                     checks(ui, &mut b.s, b.plan.skipped);
                 });
             ui.add_space(8.0);
-            divider(ui);
+            ui::card_rule(ui);
             // Labelled by the scope it was made for: until the new plan's first
             // part lands, the shown plan is the previous scope's.
             preview(ui, b.plan.scope.unwrap_or(b.s.scope), &b.plan, b.landed);
-            divider(ui);
+            ui::card_rule(ui);
             if let Some(a) = foot(ui, b.plan.changes.len(), why_not.as_deref()) {
                 act = a;
             }
@@ -1074,11 +1074,6 @@ enum Act {
     None,
     Rename,
     Cancel,
-}
-
-fn divider(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, color::divider());
 }
 
 /// The title row, the settings card's ([`crate::settings::modal_title`]) inside
@@ -1523,12 +1518,11 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 30.0), egui::Sense::hover());
     let p = ui.painter();
     let y = rect.bottom() - 10.0;
-    p.text(
+    ui::paint_eyebrow(
+        p,
         egui::pos2(rect.left() + PAD, y),
         egui::Align2::LEFT_CENTER,
-        "PREVIEW",
-        egui::FontId::proportional(ui::EYEBROW_PT),
-        theme::text::faint(),
+        "Preview",
     );
     p.text(
         egui::pos2(rect.right() - PAD, y),
@@ -1548,16 +1542,16 @@ fn preview(ui: &mut egui::Ui, scope: Scope, plan: &Plan, landed: bool) {
             if plan.rows.is_empty() {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(W - 12.0, ROW_H), egui::Sense::hover());
-                ui.painter().text(
-                    rect.left_center() + egui::vec2(8.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    if landed {
-                        "No layer matches"
-                    } else {
-                        "Matching…"
-                    },
-                    egui::FontId::proportional(ui::CONTROL_PT),
-                    theme::text::dim(),
+                let note = if landed {
+                    "No layer matches"
+                } else {
+                    "Matching…"
+                };
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(rect.with_min_x(rect.left() + 8.0))
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| ui::empty_note(ui, note),
                 );
                 return;
             }

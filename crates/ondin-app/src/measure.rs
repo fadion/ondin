@@ -87,6 +87,10 @@ impl Measure {
     }
 }
 
+/// The air around a measure's label pill, tighter than `ui::PILL_PAD`: the
+/// pill sits centred on the line it measures, so a short gap stays readable.
+pub const PILL_PAD: eframe::egui::Vec2 = eframe::egui::vec2(4.0, 2.0);
+
 /// A distance as the app quotes it: whole where it is whole, otherwise to two
 /// decimals with trailing zeros trimmed.
 ///
@@ -498,8 +502,8 @@ mod tests {
 
     /// The label pill stays narrow enough to centre on its own line: a measure
     /// shorter than the pill is covered by its label and only the end ticks show,
-    /// a fine trade only while that is a tight gap. The bounds are for `CAPTION_PT`
-    /// with `PAD`; re-check them if either moves.
+    /// a fine trade only while that is a tight gap. The bounds are for
+    /// `ui::BADGE_PT` with `PILL_PAD`; re-check them if either moves.
     #[test]
     fn the_label_pill_is_narrow_enough_to_centre_on_its_own_line() {
         let ctx = egui::Context::default();
@@ -511,12 +515,12 @@ mod tests {
             ctx.fonts_mut(|f| {
                 f.layout_no_wrap(
                     text.to_owned(),
-                    egui::FontId::proportional(crate::ui::CAPTION_PT),
+                    egui::FontId::proportional(crate::ui::BADGE_PT),
                     egui::Color32::WHITE,
                 )
                 .size()
                 .x
-            }) + 8.0 // `draw_measure`'s PAD, both sides
+            }) + 2.0 * super::PILL_PAD.x
         };
 
         let two = width(&label(40.0));

@@ -430,13 +430,13 @@ impl OndinApp {
                 act = Act::Cancel;
             }
             filters(ui, &t.review, &mut t.filter);
-            divider(ui);
+            ui::card_rule(ui);
             changed |= list(ui, &t.review, &mut t.ticked, t.filter, &mut t.collapsed);
             if let Some(note) = note(&t.review) {
-                divider(ui);
+                ui::card_rule(ui);
                 note_row(ui, &note);
             }
-            divider(ui);
+            ui::card_rule(ui);
             if let Some(a) = foot(ui, &mut t) {
                 act = a;
             }
@@ -502,11 +502,6 @@ fn tag(c: Change) -> (&'static str, egui::Color32, egui::Color32) {
     }
 }
 
-fn divider(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(W, 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, color::divider());
-}
-
 /// The title row: *Import tokens* in the settings card's title type, where the
 /// file is, and the card's close button; true when that is clicked.
 fn head(ui: &mut egui::Ui, path: &Path) -> bool {
@@ -539,13 +534,11 @@ fn head(ui: &mut egui::Ui, path: &Path) -> bool {
         theme::text::dim(),
     );
     let close = egui::Rect::from_center_size(
-        egui::pos2(rect.right() - PAD - 9.0, y),
-        egui::vec2(18.0, 18.0),
+        egui::pos2(rect.right() - PAD - ui::CLOSE_BUTTON_W / 2.0, y),
+        egui::Vec2::splat(ui::CLOSE_BUTTON_W),
     );
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(close));
-    ui::icon_button(&mut child, icon::X, 18.0, 14.0, false, true)
-        .on_hover_text("Cancel")
-        .clicked()
+    ui::close_button(&mut child).clicked()
 }
 
 /// The buttons that filter the list and carry the counts, *All* first: each a
@@ -656,13 +649,7 @@ fn list(
     let font = egui::FontId::proportional(ui::EYEBROW_PT);
     let y = head.center().y + 2.0;
     let name_x = head.left() + GAP + 8.0 + BOX_W + GAP;
-    p.text(
-        egui::pos2(name_x, y),
-        egui::Align2::LEFT_CENTER,
-        "TOKEN",
-        font.clone(),
-        theme::text::faint(),
-    );
+    ui::paint_eyebrow(p, egui::pos2(name_x, y), egui::Align2::LEFT_CENTER, "Token");
     let cols_x = head.right() - GAP - 8.0 - (cw + GAP) * r.columns.len() as f32 + GAP;
     for (i, c) in r.columns.iter().enumerate() {
         let mut job = egui::text::LayoutJob::simple_singleline(
@@ -693,12 +680,16 @@ fn list(
             if shown.is_empty() {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(W - 2.0 * GAP, ROW_H), egui::Sense::hover());
-                ui.painter().text(
-                    rect.left_center() + egui::vec2(8.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    "Nothing to change: the document already holds what the file says",
-                    egui::FontId::proportional(ui::CONTROL_PT),
-                    theme::text::dim(),
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(rect.with_min_x(rect.left() + 8.0))
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        ui::empty_note(
+                            ui,
+                            "Nothing to change: the document already holds what the file says",
+                        )
+                    },
                 );
                 return;
             }

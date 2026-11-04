@@ -204,7 +204,6 @@ impl OndinApp {
         let Some(head) = self.vision.as_ref().filter(|v| v.menu).map(|v| v.menu_at) else {
             return;
         };
-        const ITEM_H: f32 = 26.0;
         let at = head + egui::vec2(0.0, crate::ui::MENU_GAP);
         let current = Deficiency::from_key(&self.prefs.vision);
         let mut chosen = None;
@@ -212,12 +211,12 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(at)
             .show(ctx, |ui| {
-                crate::ui::menu_frame(5.0).show(ui, |ui| {
-                    ui.set_width(crate::ui::menu_inner_w(220.0, 5.0));
+                crate::ui::menu_frame(crate::ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(crate::ui::menu_inner_w(220.0, crate::ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     for d in Deficiency::ALL {
                         let label = format!("{}  ·  {}", d.label(), d.gloss());
-                        if crate::ui::menu_check(ui, &label, d == current, ITEM_H) {
+                        if crate::ui::menu_check(ui, &label, d == current, crate::ui::MENU_ROW_H) {
                             chosen = Some(d);
                         }
                     }

@@ -1279,8 +1279,8 @@ impl OndinApp {
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(ui::menu_inner_w(LIST_W, 4.0));
+                ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(ui::menu_inner_w(LIST_W, ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     if c.own_search {
                         let resp = ui::search_box(
@@ -1360,8 +1360,9 @@ impl OndinApp {
                         });
                         ui.add_space(4.0);
                     } else if list.is_empty() && hidden == 0 {
-                        ui.label(
-                            egui::RichText::new(if table.iter().any(|v| v.kind == c.key.kind()) {
+                        ui::empty_note(
+                            ui,
+                            if table.iter().any(|v| v.kind == c.key.kind()) {
                                 "No variable matches"
                             } else {
                                 match c.key.kind() {
@@ -1378,9 +1379,7 @@ impl OndinApp {
                                         "No string variables yet — Shift+S to add one"
                                     }
                                 }
-                            })
-                            .size(ui::SMALL_PT)
-                            .color(theme::text::dim()),
+                            },
                         );
                     }
                     // One height whatever the query matches, a note above the
@@ -1553,15 +1552,16 @@ impl OndinApp {
         };
         let bound = self.field_var(key).is_some();
         let mut close = false;
-        let size = egui::vec2(220.0, if bound { 3.0 } else { 2.0 } * ui::MENU_ROW_H + 8.0);
+        let rows = if bound { 3.0 } else { 2.0 };
+        let size = egui::vec2(220.0, rows * ui::MENU_ROW_H + 2.0 * ui::MENU_PAD);
         let pos = ui::menu_place(ctx, at, size);
         let mut act: Option<u8> = None;
         let rect = egui::Area::new(egui::Id::new("field-menu"))
             .order(egui::Order::Tooltip)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                ui::menu_frame(4.0).show(ui, |ui| {
-                    ui.set_width(ui::menu_inner_w(220.0, 4.0));
+                ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
+                    ui.set_width(ui::menu_inner_w(220.0, ui::MENU_PAD));
                     ui.spacing_mut().item_spacing.y = 1.0;
                     // The keyboard's twins only on a field the keyboard types into
                     // — not on the eye (§15 D1059).
@@ -2240,11 +2240,7 @@ impl OndinApp {
                         true => "No variable matches",
                         false => "No colour variables yet — Shift+S to add one",
                     };
-                    ui.label(
-                        egui::RichText::new(none)
-                            .size(ui::SMALL_PT)
-                            .color(theme::text::dim()),
-                    );
+                    ui::empty_note(ui, none);
                 }
                 // The document's own first, then each kit's under its name and
                 // the kit mark, its rows dimmed (§15 D1065).
@@ -2336,15 +2332,14 @@ pub(crate) enum FaceTarget {
 }
 
 /// A group's header in the picker's *Variables* face and the style picker: its
-/// path, uppercase and tracked, like a card's title.
+/// path as an eyebrow.
 pub(crate) fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FACE_HEAD_H), egui::Sense::hover());
-    ui.painter().text(
+    ui::paint_eyebrow(
+        ui.painter(),
         egui::pos2(rect.left() + 3.0, rect.center().y + 1.0),
         egui::Align2::LEFT_CENTER,
-        group.to_uppercase(),
-        egui::FontId::proportional(ui::EYEBROW_PT),
-        theme::text::faint(),
+        group,
     );
 }
 

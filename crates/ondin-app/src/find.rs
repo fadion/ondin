@@ -409,7 +409,7 @@ impl OndinApp {
             .pivot(egui::Align2::RIGHT_TOP)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                card_frame().show(ui, |ui| {
+                ui::card_frame().show(ui, |ui| {
                     ui.set_width(W);
                     ui.set_max_height(max_h);
                     ui.spacing_mut().item_spacing = egui::vec2(GAP_X, 8.0);
@@ -421,10 +421,10 @@ impl OndinApp {
                     if f.find.is_empty() {
                         return;
                     }
-                    rule(ui);
+                    ui::card_rule(ui);
                     list(ui, f, &names, &rows, &mut act);
                     if !f.found.hits.is_empty() {
-                        rule(ui);
+                        ui::card_rule(ui);
                         footer(ui, f);
                     }
                 });
@@ -782,11 +782,7 @@ fn list(
                     In::Page => "this page",
                     In::All => "any page",
                 };
-                ui.label(
-                    egui::RichText::new(format!("Nothing in {place} matches."))
-                        .size(ui::CONTROL_PT)
-                        .color(theme::text::muted()),
-                );
+                ui::empty_note(ui, &format!("Nothing in {place} matches"));
                 let widen = match f.scope {
                     In::Selection => Some("Search this page"),
                     In::Page => Some("Search all pages"),
@@ -884,12 +880,11 @@ fn page_head(ui: &mut egui::Ui, name: &str, count: usize) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::hover());
     let p = ui.painter();
-    p.text(
+    ui::paint_eyebrow(
+        p,
         rect.left_center() + egui::vec2(6.0, 0.0),
         egui::Align2::LEFT_CENTER,
-        name.to_uppercase(),
-        egui::FontId::proportional(ui::EYEBROW_PT),
-        theme::text::faint(),
+        name,
     );
     p.text(
         rect.right_center() - egui::vec2(6.0, 0.0),
@@ -1129,27 +1124,6 @@ fn field(
             ),
     );
     (resp, rect)
-}
-
-/// The ground, hairline and shadow of Find's card.
-pub(crate) fn card_frame() -> egui::Frame {
-    egui::Frame::NONE
-        .fill(color::card())
-        .corner_radius(8)
-        .stroke(egui::Stroke::new(1.0, color::text_a(16)))
-        .shadow(egui::Shadow {
-            offset: [0, 10],
-            blur: 24,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(82),
-        })
-}
-
-/// A hairline across the box.
-pub(crate) fn rule(ui: &mut egui::Ui) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, color::text_a(20));
 }
 
 #[cfg(test)]

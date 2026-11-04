@@ -1267,11 +1267,7 @@ impl OndinApp {
         // Every row, for the guides and the drop hint ([`TreeRow`]).
         let drawn = if searching && flat.is_empty() {
             ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("No layers match")
-                    .size(crate::ui::SMALL_PT)
-                    .color(theme::text::faint()),
-            );
+            crate::ui::empty_note(ui, "No layers match");
             Vec::new()
         } else {
             self.tree_rows(ui, &flat)

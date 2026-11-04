@@ -1373,7 +1373,7 @@ fn install_style_into(style: &mut egui::Style) {
     s.interact_size = egui::vec2(24.0, 24.0);
     s.icon_width = 15.0;
     s.icon_width_inner = 10.0;
-    s.menu_margin = egui::Margin::same(6);
+    s.menu_margin = egui::Margin::same(crate::ui::MENU_PAD as i8);
     s.indent = 16.0;
 }
 

@@ -103,6 +103,148 @@ pub fn menu_frame(pad: f32) -> egui::Frame {
         .inner_margin(egui::Margin::same(pad as i8))
 }
 
+/// The air inside a menu's card: [`menu_frame`]'s `pad` for a dropdown, a
+/// context menu or a bar's menu, and egui's own popup menus' (`theme`'s
+/// `menu_margin`), so a [`flyout`] beside any of them matches.
+pub const MENU_PAD: f32 = 5.0;
+
+/// The air inside a popover's card (the stroke, effect, type and grid popovers,
+/// the colour picker): wider than a menu's, since it holds fields.
+pub const POPOVER_PAD: f32 = 11.0;
+
+/// How far a floating card keeps from the screen's edge when it is placed.
+pub const SCREEN_MARGIN: f32 = 12.0;
+
+/// The ground of a card floating over everything (a popup over the canvas, a
+/// modal, Find, the variables browser and the insert picker): the card's fill,
+/// a `color::divider()` hairline, a 10pt corner and a shadow deeper than a
+/// menu's. No margin; the caller sets its own.
+pub fn card_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(color::card())
+        // The token, not its value, so retuning `color::divider()` moves the
+        // card's hairline too; no gate could catch a respelled copy.
+        .stroke(egui::Stroke::new(1.0, color::divider()))
+        .corner_radius(egui::CornerRadius::same(10))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 24],
+            blur: 60,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(128),
+        })
+}
+
+/// A hairline across a floating card or a pane, between its sections: one
+/// point of `color::divider()` the available width, on the device grid.
+/// Answers its rect, for a divider that also drags.
+pub fn card_rule(ui: &mut egui::Ui) -> egui::Rect {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    let ppp = ui.ctx().pixels_per_point();
+    let y = hairline_in_column(rect.center().y, ppp, 1.0);
+    ui.painter().line_segment(
+        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+        egui::Stroke::new(1.0, color::divider()),
+    );
+    rect
+}
+
+/// The width of a [`close_button`]'s box.
+pub const CLOSE_BUTTON_W: f32 = 18.0;
+
+/// The × that closes a popover, a dialog or a card over the canvas: one box,
+/// one glyph size and the one tooltip, *Close*. Escape closes them all, so the
+/// tooltip does not name it.
+pub fn close_button(ui: &mut egui::Ui) -> egui::Response {
+    icon_button(ui, icon::X, CLOSE_BUTTON_W, 13.0, false, true).on_hover_text("Close")
+}
+
+/// What a list says when it has nothing to show (a search that matched
+/// nothing, an empty list): one line of [`SMALL_PT`] `text::dim()`, at the
+/// rows' own inset, without a closing period.
+pub fn empty_note(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(SMALL_PT)
+                .color(theme::text::dim()),
+        )
+        .wrap(),
+    )
+}
+
+/// An [`eyebrow`] painted rather than laid out, for a painter-drawn surface
+/// (a canvas popup's section head, a list's group head): the same capitals,
+/// size and ink. Answers the rect it inked.
+pub fn paint_eyebrow(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    align: egui::Align2,
+    label: &str,
+) -> egui::Rect {
+    painter.text(
+        at,
+        align,
+        label.to_uppercase(),
+        egui::FontId::proportional(EYEBROW_PT),
+        theme::text::faint(),
+    )
+}
+
+/// The air around a [`canvas_pill`]'s word.
+pub const PILL_PAD: egui::Vec2 = egui::vec2(7.0, 3.0);
+
+/// The ink a [`canvas_pill`] on `hue` takes: each canvas mark's own.
+pub fn pill_ink(hue: egui::Color32) -> egui::Color32 {
+    if hue == color::COMPONENT {
+        color::COMPONENT_INK
+    } else if hue == color::MEASURE {
+        color::MEASURE_INK
+    } else {
+        color::BADGE_INK
+    }
+}
+
+/// The size a [`canvas_pill`] saying `text` takes, for a caller that places it
+/// by its size.
+pub fn canvas_pill_size(painter: &egui::Painter, text: &str) -> egui::Vec2 {
+    let font = egui::FontId::proportional(BADGE_PT);
+    let g = painter.layout_no_wrap(text.to_owned(), font, egui::Color32::PLACEHOLDER);
+    g.size() + PILL_PAD * 2.0
+}
+
+/// A word on a coloured pill over the canvas (the size badge, a measure, a
+/// spacing value, the pivot's name, the crop's *Done*, the drop label):
+/// [`BADGE_PT`] in [`pill_ink`] on `hue`, [`PILL_PAD`] around it, 4pt corners,
+/// placed at `at` by `align`. Answers its rect.
+pub fn canvas_pill(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    align: egui::Align2,
+    text: &str,
+    hue: egui::Color32,
+) -> egui::Rect {
+    canvas_pill_padded(painter, at, align, text, hue, PILL_PAD)
+}
+
+/// [`canvas_pill`] with its own air, for a pill that has to stay narrower
+/// than the rest (a measure's label, which sits on the line it measures).
+pub fn canvas_pill_padded(
+    painter: &egui::Painter,
+    at: egui::Pos2,
+    align: egui::Align2,
+    text: &str,
+    hue: egui::Color32,
+    pad: egui::Vec2,
+) -> egui::Rect {
+    let ink = pill_ink(hue);
+    let g = painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(BADGE_PT), ink);
+    let rect = align.anchor_size(at, g.size() + pad * 2.0);
+    painter.rect_filled(rect, egui::CornerRadius::same(4), hue);
+    painter.galley(rect.min + pad, g, ink);
+    rect
+}
+
 /// The shadow under every floating card: [`menu_frame`]'s, and egui's own popups
 /// (a `ComboBox`'s list, a tooltip), which `theme::install` gives it so a
 /// dropdown's list and a menu cast the same shadow.
@@ -524,9 +666,9 @@ pub fn submenu_check_row(
     resp
 }
 
-/// The air inside a [`flyout`]'s card by default: a popup menu's own (`theme`'s
-/// `menu_margin`), so a list beside a popup's row matches it.
-pub const FLYOUT_PAD: f32 = 6.0;
+/// The air inside a [`flyout`]'s card by default: a menu's own, so a list beside
+/// a menu's row matches it.
+pub const FLYOUT_PAD: f32 = MENU_PAD;
 
 /// The list a [`submenu_row`] at `row` opens beside it: a [`menu_frame`] card `w`
 /// wide, placed by [`flyout_place`]. [`Flyout::pad`] and [`Flyout::order`] match it

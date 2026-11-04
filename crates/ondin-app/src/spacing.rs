@@ -965,9 +965,9 @@ pub(crate) fn paint_pill(
     );
 }
 
-/// The value label beside the pointer, drawn as the size badge's pill;
-/// `var` a bound slot's variable, as a capsule after the word. The gradient
-/// handles' readout too.
+/// The value label beside the pointer, a [`crate::ui::canvas_pill`]'s type, air
+/// and ink; `var` a bound slot's variable, as a capsule after the word, which is
+/// why it is painted here. The gradient handles' readout too.
 pub(crate) fn paint_label(
     painter: &egui::Painter,
     at: egui::Pos2,
@@ -975,12 +975,9 @@ pub(crate) fn paint_label(
     var: Option<&str>,
     hue: egui::Color32,
 ) {
-    const PAD: egui::Vec2 = egui::vec2(7.0, 3.0);
-    let ink = match hue == color::COMPONENT {
-        true => color::COMPONENT_INK,
-        false => color::BADGE_INK,
-    };
-    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
+    const PAD: egui::Vec2 = crate::ui::PILL_PAD;
+    let ink = crate::ui::pill_ink(hue);
+    let font = egui::FontId::proportional(crate::ui::BADGE_PT);
     let word = painter.layout_no_wrap(text.to_owned(), font.clone(), ink);
     let cap = var.map(|v| painter.layout_no_wrap(v.to_owned(), font, ink));
     let cap_w = cap.as_ref().map_or(0.0, |g| g.size().x + 10.0);

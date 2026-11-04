@@ -555,7 +555,7 @@ Find and replace in what text layers say; layer names are batch rename's. The ru
   with the match lit, and the layer name, followed for a main with copies by `· N`, its copy count. Its tail is a lock when
   locked, a slashed eye when hidden, else `TEXT_AA` for a case-transformed run. A row a replace would
   skip is drawn at 45%. The footer reads *N matches in M layers · K inside an instance skipped · L
-  locked*. An empty list reads *Nothing in ‹the selection / this page / any page› matches.* with a
+  locked*. An empty list reads *Nothing in ‹the selection / this page / any page› matches* (`ui::empty_note`) with a
   button widening the scope (*Search this page*, *Search all pages*).
 - **Keys.** `Enter` in Find steps to the next match and `Shift+Enter` to the previous, round the
   ends; `Enter` in Replace replaces. The fields keep the keyboard (`return_key(None)`). `Escape` is a

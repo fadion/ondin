@@ -122,9 +122,7 @@ impl OndinApp {
     /// its height, kept as a preference. Not capped at the rows' height: History may
     /// be taller than its list, and Layers as short as its header.
     fn history_divider(&mut self, ui: &mut egui::Ui, folded: bool, max: f32) {
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, color::divider());
+        let rect = crate::ui::card_rule(ui);
         if folded {
             return;
         }

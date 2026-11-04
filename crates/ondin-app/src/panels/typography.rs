@@ -44,8 +44,8 @@ use crate::expr;
 use crate::input::TextChord;
 use crate::theme::{self, icon};
 use crate::ui::{
-    self, Prefix, Scrub, Suffix, field_button, field_row, icon_button, segment_glyph,
-    segment_label, segment_mixed, segmented, value_field, value_field_suffixed,
+    self, Prefix, Scrub, Suffix, field_button, field_row, segment_glyph, segment_label,
+    segment_mixed, segmented, value_field, value_field_suffixed,
 };
 use eframe::egui;
 use ondin_core::Brush;
@@ -447,9 +447,8 @@ const LOADING_DOT_PERIOD: f64 = 1.2;
 /// Popup geometry. Every tab draws into the same box, so the width is pinned: a
 /// card that resized itself would jump on each tab change.
 const MENU_W: f32 = crate::app::POPOVER_W;
-const MENU_PAD: f32 = 11.0;
 /// The room inside the padding and the border, which everything below divides up.
-const MENU_INNER: f32 = crate::ui::menu_inner_w(MENU_W, MENU_PAD);
+const MENU_INNER: f32 = crate::ui::menu_inner_w(MENU_W, ui::POPOVER_PAD);
 /// A field, and the side of the square buttons that sit beside one — the same
 /// height as the card the popup hangs beside.
 const CELL: f32 = ui::CONTROL_H;
@@ -479,13 +478,9 @@ const LIST_MAX_H: f32 = 104.0;
 const AXIS_FIELD_W: f32 = 74.0;
 /// One row of the OpenType feature list.
 const FEATURE_ROW_H: f32 = 22.0;
-/// The ✕ beside the tab strip, and so the width the strip gives up to it.
-const CLOSE_BUTTON_W: f32 = 18.0;
 /// The tab strip's own height — the segmented track, which paints 2px larger than
 /// its cells on every side.
 const TAB_STRIP_H: f32 = SEG_H + 4.0;
-/// How close to the window's edge the card is allowed to come.
-const SCREEN_MARGIN: f32 = 12.0;
 
 /// Whether a click on a family row is an edit — `None` for a re-pick of the family
 /// the subject is already in.
@@ -2050,23 +2045,23 @@ impl OndinApp {
         // The window less the chrome around the body; the border counts because a
         // `Frame`'s stroke grows its outer rect on both axes.
         let body_max_h = (screen.height()
-            - SCREEN_MARGIN * 2.0
+            - ui::SCREEN_MARGIN * 2.0
             - crate::ui::MENU_BORDER * 2.0
-            - MENU_PAD * 2.0
+            - ui::POPOVER_PAD * 2.0
             - TAB_STRIP_H
             - SECTION_GAP)
             .max(0.0);
         let menu = egui::Area::new(egui::Id::new("type-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
-            .constrain_to(screen.shrink(SCREEN_MARGIN))
+            .constrain_to(screen.shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
-                ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     ui.set_width(MENU_INNER);
                     ui.spacing_mut().item_spacing.y = SECTION_GAP;
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = COL_GAP;
-                        let track = MENU_INNER - CLOSE_BUTTON_W - COL_GAP;
+                        let track = MENU_INNER - ui::CLOSE_BUTTON_W - COL_GAP;
                         let current = TypeTab::ALL.iter().position(|t| *t == tab).unwrap_or(0);
                         if let Some(i) =
                             segmented(ui, track, SEG_H, 3, current, |p, i, rect, on| {
@@ -2075,10 +2070,7 @@ impl OndinApp {
                         {
                             self.type_menu = Some(TypeTab::ALL[i]);
                         }
-                        if icon_button(ui, icon::X, CLOSE_BUTTON_W, 13.0, false, true)
-                            .on_hover_text("Close")
-                            .clicked()
-                        {
+                        if ui::close_button(ui).clicked() {
                             close = true;
                         }
                     });
@@ -7726,7 +7718,7 @@ mod tests {
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        let track = MENU_INNER - CLOSE_BUTTON_W - COL_GAP;
+        let track = MENU_INNER - ui::CLOSE_BUTTON_W - COL_GAP;
         let cells = TypeTab::ALL.len() as f32;
         let cell_w = (track - 4.0 - 2.0 * (cells - 1.0)) / cells;
 

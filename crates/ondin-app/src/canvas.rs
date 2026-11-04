@@ -7424,7 +7424,6 @@ impl OndinApp {
     ) {
         /// Half the length of the tick across each end.
         const TICK_PX: f32 = 3.0;
-        const PAD: egui::Vec2 = egui::vec2(4.0, 2.0);
 
         let (a, b) = match m.axis {
             Axis::Horizontal => (Point::new(m.from, m.at), Point::new(m.to, m.at)),
@@ -7441,14 +7440,14 @@ impl OndinApp {
             painter.line_segment([end - across, end + across], stroke);
         }
 
-        let galley = painter.layout_no_wrap(
-            measure::label(m.distance()),
-            egui::FontId::proportional(crate::ui::CAPTION_PT),
-            color::MEASURE_INK,
+        crate::ui::canvas_pill_padded(
+            painter,
+            a + (b - a) * 0.5,
+            egui::Align2::CENTER_CENTER,
+            &measure::label(m.distance()),
+            color::MEASURE,
+            measure::PILL_PAD,
         );
-        let pill = egui::Rect::from_center_size(a + (b - a) * 0.5, galley.size() + PAD * 2.0);
-        painter.rect_filled(pill, egui::CornerRadius::same(3), color::MEASURE);
-        painter.galley(pill.min + PAD, galley, color::MEASURE_INK);
     }
 
     /// The world rectangle a chrome outline of `stroke` can put ink into: the
@@ -9346,19 +9345,12 @@ impl OndinApp {
     /// commits on release. An `Area` like [`Self::origin_fields`], so egui routes
     /// the press itself (`overlay_claim`); upright, as a widget cannot rotate.
     fn crop_exit_pill(&mut self, ui: &mut egui::Ui, rect: egui::Rect, ppp: f32) -> Option<()> {
-        /// The badge's own padding, and the hover wash over its ground.
-        const PAD: egui::Vec2 = egui::vec2(9.0, 3.0);
         // A white wash: the ground is the accent, so there is no darker tier.
         let hover = egui::Color32::from_white_alpha(26);
         let (id, _) = self.edited_image()?;
         let (edge, _) = self.badge_placement(rect, ppp, egui::Vec2::ZERO)?;
 
-        let galley = ui.painter().layout_no_wrap(
-            "Done".to_owned(),
-            egui::FontId::proportional(crate::ui::CAPTION_PT),
-            color::BADGE_INK,
-        );
-        let size = galley.size() + PAD * 2.0;
+        let size = crate::ui::canvas_pill_size(ui.painter(), "Done");
         // `HANDLE_PICK_PX` below the box, the size badge's gap, so the pill stays off the handles.
         let centre = badge_frame(edge, size, HANDLE_PICK_PX).origin;
 
@@ -9369,12 +9361,11 @@ impl OndinApp {
             .show(ui.ctx(), |ui| {
                 // Allocated: the `Area`'s own response never reports a hover.
                 let (r, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                let radius = egui::CornerRadius::same(4);
-                ui.painter().rect_filled(r, radius, color::BADGE);
-                if resp.hovered() {
-                    ui.painter().rect_filled(r, radius, hover);
-                }
-                ui.painter().galley(r.min + PAD, galley, color::BADGE_INK);
+                let hue = match resp.hovered() {
+                    true => color::BADGE.blend(hover),
+                    false => color::BADGE,
+                };
+                crate::ui::canvas_pill(ui.painter(), r.min, egui::Align2::LEFT_TOP, "Done", hue);
                 // No pointing hand (§9.2): the wash above is the hover answer.
                 done = resp.clicked();
             });
@@ -9822,15 +9813,13 @@ fn paint_pivot(painter: &egui::Painter, at: egui::Pos2, marker: Marker) {
 /// The name of the box position the marker is on, above it: "very nearly the
 /// top-left corner" looks identical to "the top-left corner" and behaves differently.
 fn paint_pivot_badge(painter: &egui::Painter, at: egui::Pos2, name: &str) {
-    const PAD: egui::Vec2 = egui::vec2(6.0, 2.0);
-    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
-    let galley = painter.layout_no_wrap(name.to_owned(), font, color::BADGE_INK);
-    let box_ = egui::Rect::from_center_size(
+    crate::ui::canvas_pill(
+        painter,
         at - egui::vec2(0.0, PIVOT_GLYPH_PX * 0.5 + 9.0),
-        galley.size() + PAD * 2.0,
+        egui::Align2::CENTER_CENTER,
+        name,
+        color::BADGE,
     );
-    painter.rect_filled(box_, egui::CornerRadius::same(4), color::BADGE);
-    painter.galley(box_.min + PAD, galley, color::BADGE_INK);
 }
 
 /// The desktop cursor in physical screen pixels, or `None` off Windows.
@@ -9925,14 +9914,8 @@ fn hovers_svg(file: &egui::HoveredFile) -> bool {
 /// Kept inside by hand: [`egui::Rect::clamp`] panics on a rect narrower than the
 /// pill.
 fn paint_drop_label(painter: &egui::Painter, canvas: egui::Rect, at: egui::Pos2, text: &str) {
-    const PAD: egui::Vec2 = egui::vec2(9.0, 5.0);
     const GAP: f32 = 8.0;
-    let galley = painter.layout_no_wrap(
-        text.to_owned(),
-        egui::FontId::proportional(crate::ui::SMALL_PT),
-        color::BADGE_INK,
-    );
-    let size = galley.size() + PAD * 2.0;
+    let size = crate::ui::canvas_pill_size(painter, text);
     // Half the room to move in, never negative, so the clamp's bounds cannot cross.
     let room = ((canvas.size() - size) * 0.5 - egui::Vec2::splat(GAP)).max(egui::Vec2::ZERO);
     let c = canvas.center();
@@ -9940,9 +9923,7 @@ fn paint_drop_label(painter: &egui::Painter, canvas: egui::Rect, at: egui::Pos2,
         at.x.clamp(c.x - room.x, c.x + room.x),
         at.y.clamp(c.y - room.y, c.y + room.y),
     );
-    let box_ = egui::Rect::from_center_size(at, size);
-    painter.rect_filled(box_, egui::CornerRadius::same(4), color::BADGE);
-    painter.galley(box_.min + PAD, galley, color::BADGE_INK);
+    crate::ui::canvas_pill(painter, at, egui::Align2::CENTER_CENTER, text, color::BADGE);
 }
 
 /// Whether an arrow key in a live text session moves the **caret**, or belongs
@@ -10239,7 +10220,9 @@ fn segment_readout(from: Point, to: Point) -> String {
 /// Paint the size pill under `oriented`, laid out in `frame`.
 ///
 /// Shared by a selection's badge and a shape being drawn. `hue` is the pill's
-/// ground (`color::BADGE`, or `color::COMPONENT`) and picks the ink.
+/// ground (`color::BADGE`, or `color::COMPONENT`) and picks the ink. A
+/// [`crate::ui::canvas_pill`]'s type, air and ink, painted here because it turns
+/// with the shape and can carry the lock.
 fn paint_size_pill(
     painter: &egui::Painter,
     edge: BadgeEdge,
@@ -10247,19 +10230,15 @@ fn paint_size_pill(
     locked: bool,
     hue: egui::Color32,
 ) {
-    /// Gap below the box, padding inside the pill, and the lock-to-text gap. The
-    /// gap cannot go below `HANDLE_PICK_PX`, or the pill covers a handle's grab area.
+    /// Gap below the box and the lock-to-text gap. The gap cannot go below
+    /// `HANDLE_PICK_PX`, or the pill covers a handle's grab area.
     const GAP: f32 = HANDLE_PICK_PX;
-    const PAD: egui::Vec2 = egui::vec2(7.0, 3.0);
+    const PAD: egui::Vec2 = crate::ui::PILL_PAD;
     const LOCK_GAP: f32 = 5.0;
     const LOCK_PT: f32 = 10.0;
 
-    let ink = if hue == color::COMPONENT {
-        color::COMPONENT_INK
-    } else {
-        color::BADGE_INK
-    };
-    let font = egui::FontId::proportional(crate::ui::CAPTION_PT);
+    let ink = crate::ui::pill_ink(hue);
+    let font = egui::FontId::proportional(crate::ui::BADGE_PT);
     let galley = painter.layout_no_wrap(label, font, ink);
     let lock_w = if locked { LOCK_PT + LOCK_GAP } else { 0.0 };
     let size = egui::vec2(

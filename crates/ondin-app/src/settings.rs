@@ -479,19 +479,7 @@ pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
 /// worn by every popup over the canvas, the command palette and Colour review
 /// among them.
 pub(crate) fn card_frame() -> egui::Frame {
-    egui::Frame::NONE
-        .fill(color::card())
-        // The token, not its value, so retuning `color::divider()` moves the
-        // modal hairline too; no gate could catch a respelled copy.
-        .stroke(egui::Stroke::new(1.0, theme::color::divider()))
-        .corner_radius(egui::CornerRadius::same(10))
-        // Deeper than a dropdown's: this floats over everything.
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 24],
-            blur: 60,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(128),
-        })
+    ui::card_frame()
 }
 
 /// The least room a card moved toward the canvas keeps from the window's edge.
@@ -515,7 +503,7 @@ fn card_centre_id() -> egui::Id {
 /// The title row every settings-shaped modal opens with: the name on the left, the
 /// ✕ against the right margin. Returns whether the ✕ was pressed.
 ///
-/// The ✕ is [`ui::icon_button`] at 18/14 in every card.
+/// The ✕ is [`ui::close_button`], as on every popover.
 pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
     ui.horizontal(|ui| {
         ui.label(
@@ -524,7 +512,7 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
                 .color(theme::text::strong()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui::icon_button(ui, icon::X, 18.0, 14.0, false, true).clicked()
+            ui::close_button(ui).clicked()
         })
         .inner
     })

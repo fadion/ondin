@@ -19,9 +19,6 @@ const MIN_H: f32 = 90.0;
 const MAX_H: f32 = 160.0;
 /// The card's padding around the map.
 const PAD: f32 = 6.0;
-/// From the canvas's left and bottom edges — the status bar's margin, so the two
-/// sit on one line.
-const MARGIN: f32 = 12.0;
 /// Between the card and the status bar beside it.
 const GAP: f32 = 8.0;
 /// The share of the fitted extent left clear around it, so a box at the edge of
@@ -176,7 +173,11 @@ impl OndinApp {
             .order(egui::Order::Middle)
             .fade_in(false)
             .pivot(egui::Align2::LEFT_BOTTOM)
-            .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN, -MARGIN))
+            // The status bar's margin too, so the two sit on one line.
+            .fixed_pos(
+                canvas.left_bottom()
+                    + egui::vec2(crate::ui::SCREEN_MARGIN, -crate::ui::SCREEN_MARGIN),
+            )
             .show(ctx, |ui| {
                 crate::ui::menu_frame(PAD).show(ui, |ui| {
                     let (map, resp) =

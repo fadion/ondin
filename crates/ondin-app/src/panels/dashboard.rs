@@ -143,7 +143,6 @@ fn anchored_menu(
     keys: &mut MenuKeys,
     paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
 ) -> MenuOutcome {
-    const PAD: f32 = 4.0;
     let mut chosen = None;
     match keys.nav.take() {
         Some(MenuNav::Move(step)) => {
@@ -156,7 +155,7 @@ fn anchored_menu(
         None => {}
     }
     let highlight = keys.highlight;
-    let h = rows as f32 * ui::MENU_ROW_H + 2.0 * PAD + 2.0 * ui::MENU_BORDER;
+    let h = rows as f32 * ui::MENU_ROW_H + 2.0 * ui::MENU_PAD + 2.0 * ui::MENU_BORDER;
     let pos = if anchor.size() == egui::Vec2::ZERO {
         ui::menu_place(ui.ctx(), anchor.min, egui::vec2(w, h))
     } else {
@@ -166,12 +165,12 @@ fn anchored_menu(
         .order(egui::Order::Foreground)
         .fixed_pos(pos);
     let inner = area.show(ui.ctx(), |ui| {
-        let card = ui::menu_frame(PAD).show(ui, |ui| {
+        let card = ui::menu_frame(ui::MENU_PAD).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut clicked = None;
             for i in 0..rows {
                 let (row, _) = ui.allocate_exact_size(
-                    egui::vec2(ui::menu_inner_w(w, PAD), ui::MENU_ROW_H),
+                    egui::vec2(ui::menu_inner_w(w, ui::MENU_PAD), ui::MENU_ROW_H),
                     egui::Sense::hover(),
                 );
                 let r = ui.interact(row, ui.id().with(i), egui::Sense::click());
@@ -973,7 +972,6 @@ impl OndinApp {
         height: f32,
         body: impl FnOnce(&mut egui::Ui, egui::Rect),
     ) -> egui::Rect {
-        const PAD: f32 = 4.0;
         egui::Area::new(egui::Id::new("library-search-results"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(
@@ -981,10 +979,10 @@ impl OndinApp {
                 anchor.bottom() + ui::DROPDOWN_GAP,
             ))
             .show(ui.ctx(), |ui| {
-                ui::menu_frame(PAD)
+                ui::menu_frame(ui::MENU_PAD)
                     .show(ui, |ui| {
                         let (rect, _) = ui.allocate_exact_size(
-                            egui::vec2(ui::menu_inner_w(anchor.width(), PAD), height),
+                            egui::vec2(ui::menu_inner_w(anchor.width(), ui::MENU_PAD), height),
                             egui::Sense::empty(),
                         );
                         body(ui, rect);
@@ -1299,7 +1297,7 @@ impl OndinApp {
                     if show_projects {
                         self.project_cards(ui);
                         ui.add_space(20.0);
-                        section_label(ui, "FILES");
+                        section_label(ui, "Files");
                         ui.add_space(6.0);
                     }
                     if entries.is_empty() && new_file.is_none() {
@@ -1727,7 +1725,7 @@ impl OndinApp {
 
     /// The row of project cards at the top of *Recent*.
     fn project_cards(&mut self, ui: &mut egui::Ui) {
-        section_label(ui, "PROJECTS");
+        section_label(ui, "Projects");
         ui.add_space(6.0);
         let gap = GRID_GAP;
         let cols = grid_cols(ui.available_width());
@@ -4346,16 +4344,15 @@ fn warn_caption(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// A section heading in the sidebar.
+/// A section heading in the sidebar and over the *Recent* grids: an eyebrow.
 fn section_label(ui: &mut egui::Ui, text: &str) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::empty());
-    ui.painter().text(
+    ui::paint_eyebrow(
+        ui.painter(),
         egui::pos2(rect.left() + 12.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::FontId::proportional(ui::CAPTION_PT),
-        theme::text::faint(),
     );
 }
 

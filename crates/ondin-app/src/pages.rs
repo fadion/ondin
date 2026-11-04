@@ -737,9 +737,7 @@ impl OndinApp {
     /// The divider under the section: a hairline, and — while the section is open —
     /// a band that drags the list's height, kept as a preference.
     fn pages_divider(&mut self, ui: &mut egui::Ui, folded: bool) {
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, color::divider());
+        let rect = crate::ui::card_rule(ui);
         if folded {
             return;
         }

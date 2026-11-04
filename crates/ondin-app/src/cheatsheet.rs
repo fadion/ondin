@@ -10,7 +10,7 @@
 use crate::app::OndinApp;
 use crate::input::{TextChord, ViewSwitch};
 use crate::menu::Item;
-use crate::theme::{self, color, icon};
+use crate::theme::{self, color};
 use crate::tools::Tool;
 use eframe::egui;
 use ondin_core::{BoolOp, build};
@@ -451,7 +451,7 @@ impl OndinApp {
                         .color(theme::text::strong()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if crate::ui::icon_button(ui, icon::X, 18.0, 14.0, false, true).clicked() {
+                    if crate::ui::close_button(ui).clicked() {
                         closed = true;
                     }
                     ui.add_space(12.0);
@@ -481,13 +481,9 @@ impl OndinApp {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     if all.is_empty() {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "No shortcut matches “{}”",
-                                sheet.filter.trim()
-                            ))
-                            .size(crate::ui::CONTROL_PT)
-                            .color(theme::text::dim()),
+                        crate::ui::empty_note(
+                            ui,
+                            &format!("No shortcut matches “{}”", sheet.filter.trim()),
                         );
                         return;
                     }
@@ -587,20 +583,14 @@ fn section_ui(ui: &mut egui::Ui, s: &Section, query: &[String], held: [bool; 3],
         egui::Sense::empty(),
     );
     let p = ui.painter();
-    let mut job = egui::text::LayoutJob::single_section(
-        s.title.to_uppercase(),
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
-            color: theme::text::faint(),
-            extra_letter_spacing: 0.5,
-            ..Default::default()
-        },
-    );
-    job.wrap.max_rows = 1;
-    let g = p.layout_job(job);
-    let w = g.size().x;
     let y = rect.top() + 4.0;
-    p.galley(egui::pos2(rect.left(), y), g, theme::text::faint());
+    let w = crate::ui::paint_eyebrow(
+        p,
+        egui::pos2(rect.left(), y),
+        egui::Align2::LEFT_TOP,
+        s.title,
+    )
+    .width();
     p.hline(
         (rect.left() + w + 10.0)..=rect.right(),
         y + 7.0,

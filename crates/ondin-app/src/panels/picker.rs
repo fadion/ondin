@@ -124,7 +124,6 @@ impl Picker {
 pub(super) const WIDTH: f32 = 272.0;
 /// Roughly the tallest face, for placing the window clear of the screen edge.
 pub(super) const HEIGHT_HINT: f32 = 320.0;
-const PAD: f32 = 11.0;
 /// The picker is one more card hanging beside the panel, so its rows are
 /// [`ui::CONTROL_H`] like the panel's and the two popovers'.
 const ROW_H: f32 = ui::CONTROL_H;
@@ -337,19 +336,7 @@ fn picker_window() -> egui::Window<'static> {
         // Above the inspector column, which is also a floating area: dragged
         // over it, the picker has to stay on top or it vanishes mid-edit.
         .order(egui::Order::Foreground)
-        .frame(
-            egui::Frame::NONE
-                .fill(color::card())
-                .stroke(egui::Stroke::new(1.0, theme::color::text_a(15)))
-                .shadow(egui::epaint::Shadow {
-                    offset: [0, 10],
-                    blur: 24,
-                    spread: 0,
-                    color: egui::Color32::from_black_alpha(72),
-                })
-                .corner_radius(egui::CornerRadius::same(5))
-                .inner_margin(egui::Margin::same(PAD as i8)),
-        )
+        .frame(ui::menu_frame(ui::POPOVER_PAD))
 }
 impl OndinApp {
     /// Draw the picker if one is open. Closes itself when its target has gone
@@ -456,7 +443,7 @@ impl OndinApp {
             window = window.current_pos(spawn);
         }
         window.show(ctx, |ui| {
-            ui.set_width(WIDTH - PAD * 2.0);
+            ui.set_width(WIDTH - ui::POPOVER_PAD * 2.0);
             // One number across every popover in the app.
             ui.spacing_mut().item_spacing.y = crate::ui::POPOVER_SECTION_GAP;
             close = self.picker_body(ui, node, slot, &brush, box_size);
@@ -504,7 +491,6 @@ impl OndinApp {
         // is another kind of paint. A bound paint opens on it; leaving it for *Solid*
         // detaches to the colour drawn, and for *Gradient* converts what is drawn,
         // which detaches too.
-        const CLOSE_W: f32 = 18.0;
         const TAB_GAP: f32 = 6.0;
         let gradients = slot.takes_gradients();
         // A variable's cell rides the same tab: a pick makes the cell an alias, and
@@ -549,7 +535,7 @@ impl OndinApp {
                 (false, PaintKind::Solid) => SOLID,
                 (false, _) => GRADIENT,
             };
-            let track = inner_w - CLOSE_W - TAB_GAP;
+            let track = inner_w - ui::CLOSE_BUTTON_W - TAB_GAP;
             let live = |i: usize| i != GRADIENT || gradients;
             let label = |i: usize| match i {
                 SOLID => "Solid",
@@ -603,7 +589,7 @@ impl OndinApp {
                 None => {}
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button(ui, icon::X, CLOSE_W, 14.0, false, true).clicked() {
+                if ui::close_button(ui).clicked() {
                     close = true;
                 }
             });
@@ -1072,7 +1058,7 @@ impl OndinApp {
     /// **The `+ 6.0` is the knob's room and it is only the vertical half.**
     /// [`slider_knob`] draws to radius 7.0 against a half-row of 7.5. On the
     /// horizontal axis it is unclamped: at `t = 0` and `t = 1` the knob hangs 7pt
-    /// past each end of the row, which stays inside the card's [`PAD`] of 11.
+    /// past each end of the row, which stays inside the card's [`ui::POPOVER_PAD`] of 11.
     /// `ui::slider` bounds the other axis (travel clamped to the rail).
     fn slider_track(&self, ui: &mut egui::Ui, width: f32) -> (egui::Rect, egui::Response) {
         let (row, resp) = ui.allocate_exact_size(
@@ -1901,8 +1887,8 @@ mod tests {
                 let _ = ctx.run_ui(input(), |_| {});
                 let spawn = egui::pos2(w - 500.0, h - 340.0);
                 let body = |ui: &mut egui::Ui| {
-                    ui.set_width(WIDTH - PAD * 2.0);
-                    ui.allocate_space(egui::vec2(WIDTH - PAD * 2.0, 270.0));
+                    ui.set_width(WIDTH - ui::POPOVER_PAD * 2.0);
+                    ui.allocate_space(egui::vec2(WIDTH - ui::POPOVER_PAD * 2.0, 270.0));
                 };
                 // Frame one: the picker has just opened, so it is positioned.
                 let _ = ctx.run_ui(input(), |_| {
@@ -3508,11 +3494,11 @@ mod grid_orphan_tests {
 
     /// **The knob hangs 7pt past each end of its row, and the card's padding is
     /// what catches it.** The vertical reach is bounded (7.0 in a 7.5 half-row);
-    /// the horizontal is not, and fits only because `PAD` is 11 — an accidental
-    /// clearance a layout change could spend. The ink is read out of the painter
-    /// rather than recomputed from constants.
+    /// the horizontal is not, and fits only because `ui::POPOVER_PAD` is 11 — an
+    /// accidental clearance a layout change could spend. The ink is read out of the
+    /// painter rather than recomputed from constants.
     ///
-    /// flip: `PAD` dropped to 6 → fails at the horizontal assertion; the knob's
+    /// flip: `ui::POPOVER_PAD` dropped to 6 → fails at the horizontal assertion; the knob's
     /// outer stroke radius grown from 6.5 to 8.0 → fails the vertical one.
     #[test]
     fn the_alpha_knob_stays_inside_the_cards_padding_at_both_ends() {
@@ -3559,10 +3545,12 @@ mod grid_orphan_tests {
                  rather than deleting"
             );
             assert!(
-                over <= PAD,
-                "{label}: the knob hangs {over}pt past the track against {PAD}pt \
+                over <= ui::POPOVER_PAD,
+                "{label}: the knob hangs {over}pt past the track against {}pt \
                  of card padding, so it is drawn outside the card. `slider_knob` \
-                 insets nothing — `PAD` is the only thing holding it in (§15 D766)"
+                 insets nothing — `ui::POPOVER_PAD` is the only thing holding it in \
+                 (§15 D766)",
+                ui::POPOVER_PAD
             );
         }
     }

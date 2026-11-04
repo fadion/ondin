@@ -1170,25 +1170,11 @@ fn card_head(ui: &mut egui::Ui, c: &Compare) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), egui::Sense::hover());
     let p = ui.painter();
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        "CHANGES",
-        0.0,
-        egui::TextFormat {
-            font_id: egui::FontId::proportional(crate::ui::EYEBROW_PT),
-            color: theme::text::dim(),
-            extra_letter_spacing: 1.0,
-            ..Default::default()
-        },
-    );
-    let head = p.layout_job(job);
-    p.galley(
-        egui::pos2(
-            rect.left() + ROW_PAD,
-            rect.top() + (12.0 - head.size().y) / 2.0,
-        ),
-        head,
-        theme::text::dim(),
+    crate::ui::paint_eyebrow(
+        p,
+        egui::pos2(rect.left() + ROW_PAD, rect.top() + 6.0),
+        egui::Align2::LEFT_CENTER,
+        "Changes",
     );
     p.text(
         egui::pos2(rect.right() - ROW_PAD, rect.top() + 6.0),

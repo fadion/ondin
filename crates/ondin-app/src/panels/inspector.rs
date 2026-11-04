@@ -6084,7 +6084,6 @@ impl OndinApp {
     ) -> Option<Stroke> {
         // Every popover's width, which the picker's clearance also reads.
         const MENU_W: f32 = crate::app::POPOVER_W;
-        const MENU_PAD: f32 = 11.0;
         /// One control height for all the chrome.
         const CELL: f32 = ui::CONTROL_H;
         if self.stroke_menu != Some(index) {
@@ -6106,13 +6105,13 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             // A low stroke row could otherwise hang the popover off the bottom.
-            .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
+            .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
-                ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     if locked {
                         super::styles::lock(ui);
                     }
-                    let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
+                    let inner = ui::menu_inner_w(MENU_W, ui::POPOVER_PAD);
                     ui.set_width(inner);
                     ui.spacing_mut().item_spacing.y = ui::POPOVER_SECTION_GAP;
 
@@ -6120,7 +6119,7 @@ impl OndinApp {
                     let style = s.dash_style();
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                        let tabs = inner - 18.0 - ui::CARD_COL_GAP;
+                        let tabs = inner - ui::CLOSE_BUTTON_W - ui::CARD_COL_GAP;
                         let current = DashStyle::ALL.iter().position(|d| *d == style).unwrap_or(0);
                         if let Some(i) = segmented(
                             ui,
@@ -6140,10 +6139,7 @@ impl OndinApp {
                             });
                             self.stroke_dash_text = None;
                         }
-                        if icon_button(ui, icon::X, 18.0, 13.0, false, true)
-                            .on_hover_text("Close")
-                            .clicked()
-                        {
+                        if ui::close_button(ui).clicked() {
                             close = true;
                         }
                     });
@@ -8152,7 +8148,6 @@ impl OndinApp {
         brush: &Brush,
     ) {
         const MENU_W: f32 = crate::app::POPOVER_W;
-        const MENU_PAD: f32 = 11.0;
         /// Every control's height.
         const CELL: f32 = ui::CONTROL_H;
         /// What a segmented track is asked for to paint [`CELL`]: `ui::segmented`
@@ -8186,10 +8181,10 @@ impl OndinApp {
         egui::Area::new(egui::Id::new(("image-edit", id)))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
-            .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
+            .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
-                ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                    let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
+                ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
+                    let inner = ui::menu_inner_w(MENU_W, ui::POPOVER_PAD);
                     ui.set_width(inner);
                     if locked {
                         super::styles::lock(ui);
@@ -9321,7 +9316,6 @@ impl OndinApp {
             return;
         };
         const MENU_W: f32 = crate::app::POPOVER_W;
-        const MENU_PAD: f32 = 11.0;
         /// The control height inside a popover.
         const CELL: f32 = ui::CONTROL_H;
         /// Between two fields on one line, as in the stroke popover.
@@ -9348,13 +9342,13 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             // A low row's popover would otherwise hang off the bottom.
-            .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
+            .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
-                ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     if locked {
                         super::styles::lock(ui);
                     }
-                    let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
+                    let inner = ui::menu_inner_w(MENU_W, ui::POPOVER_PAD);
                     ui.set_width(inner);
                     ui.spacing_mut().item_spacing.y = ui::POPOVER_SECTION_GAP;
                     let half = (inner - COL) * 0.5;
@@ -9368,7 +9362,7 @@ impl OndinApp {
                             egui::ComboBox::from_id_salt(("effect-kind", index))
                                 .icon(ui::combo_chevron)
                                 // `width` is what a combo paints, not what it reserves.
-                                .width(inner - 18.0 - COL)
+                                .width(inner - ui::CLOSE_BUTTON_W - COL)
                                 .selected_text(ui::glyph_and_text(
                                     effect_glyph(&effect.kind),
                                     effect.kind.label(),
@@ -9392,10 +9386,7 @@ impl OndinApp {
                                     }
                                 });
                         });
-                        if icon_button(ui, icon::X, 18.0, 13.0, false, true)
-                            .on_hover_text("Close")
-                            .clicked()
-                        {
+                        if ui::close_button(ui).clicked() {
                             close = true;
                         }
                     });
@@ -12218,7 +12209,8 @@ mod stroke_row_tests {
 
         let ctx = context();
         // Mirrors `image_card`'s own `(inner - ui::CARD_COL_GAP) / 2.0`.
-        let half = (ui::menu_inner_w(crate::app::POPOVER_W, 11.0) - ui::CARD_COL_GAP) / 2.0;
+        let half =
+            (ui::menu_inner_w(crate::app::POPOVER_W, ui::POPOVER_PAD) - ui::CARD_COL_GAP) / 2.0;
         let end = ink(&ctx, half, 9_999.99);
         assert!(
             end < half,
@@ -12259,7 +12251,7 @@ mod stroke_row_tests {
         fn column(ctx: &egui::Context, track_cell: f32, cell: f32) -> Column {
             let out = ctx.run_ui(Default::default(), |ui| {
                 // `POPOVER_W` less the card's padding and border: the `inner` its controls use.
-                ui.set_max_width(ui::menu_inner_w(crate::app::POPOVER_W, 11.0));
+                ui.set_max_width(ui::menu_inner_w(crate::app::POPOVER_W, ui::POPOVER_PAD));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = IMAGE_CARD_GAP;
                     let inner = ui.available_width();
@@ -12291,7 +12283,7 @@ mod stroke_row_tests {
             });
             // Picked by width, ordered by top, de-duplicated because a track paints its
             // box twice (ground, then hairline), which would shift `full[2]`.
-            let want = ui::menu_inner_w(crate::app::POPOVER_W, 11.0);
+            let want = ui::menu_inner_w(crate::app::POPOVER_W, ui::POPOVER_PAD);
             let mut full: Vec<egui::Rect> = Vec::new();
             for r in painted_rows(&out, 0.0..200.0) {
                 if (r.width() - want).abs() < 1.01 && !full.contains(&r) {
@@ -12606,17 +12598,16 @@ mod stroke_row_tests {
     #[test]
     fn the_settings_popup_fits_four_tabs_and_a_close_button() {
         const MENU_W: f32 = crate::app::POPOVER_W;
-        const MENU_PAD: f32 = 11.0;
-        let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
-        // Mirrors the popover's own `inner - 18.0 - ui::CARD_COL_GAP`.
-        let tabs = inner - 18.0 - ui::CARD_COL_GAP;
+        let inner = ui::menu_inner_w(MENU_W, ui::POPOVER_PAD);
+        // Mirrors the popover's own `inner - ui::CLOSE_BUTTON_W - ui::CARD_COL_GAP`.
+        let tabs = inner - ui::CLOSE_BUTTON_W - ui::CARD_COL_GAP;
         let cell = (tabs - 4.0 - 2.0 * 3.0) / 4.0;
         assert!(
             cell >= 44.0,
             "a {cell}px cell is too narrow for \"Custom\" at 10.5pt"
         );
         assert!(
-            tabs + ui::CARD_COL_GAP + 18.0 <= inner + 0.01,
+            tabs + ui::CARD_COL_GAP + ui::CLOSE_BUTTON_W <= inner + 0.01,
             "the tab row plus the close button overflows the popup"
         );
 
@@ -21182,9 +21173,9 @@ mod paint_write_tests {
         assert_eq!(
             popup_rows(&mut app),
             vec![
-                ("Centre".to_string(), egui::pos2(15.0, 41.5)),
-                ("Inside".to_string(), egui::pos2(15.0, 71.5)),
-                ("Outside".to_string(), egui::pos2(15.0, 101.5)),
+                ("Centre".to_string(), egui::pos2(14.0, 40.5)),
+                ("Inside".to_string(), egui::pos2(14.0, 70.5)),
+                ("Outside".to_string(), egui::pos2(14.0, 100.5)),
             ],
             "three real answers, no Mixed, at the mixed row's own coordinates"
         );

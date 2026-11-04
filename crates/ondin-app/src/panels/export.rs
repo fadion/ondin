@@ -66,16 +66,13 @@ const PREVIEW_INSET: f32 = 10.0;
 
 /// The card's width, shared with every other popover in the inspector.
 const POP_W: f32 = crate::app::POPOVER_W;
-const POP_PAD: f32 = 11.0;
 /// The room inside the padding and the border — `POP_W` is the width the card
 /// paints, not the room in it (§15 D307).
-const POP_INNER: f32 = ui::menu_inner_w(POP_W, POP_PAD);
+const POP_INNER: f32 = ui::menu_inner_w(POP_W, ui::POPOVER_PAD);
 /// A control inside the popover: every control's height.
 const POP_CELL: f32 = ui::CONTROL_H;
 /// Between one labelled section and the next — the shared one.
 const SECTION_GAP: f32 = ui::POPOVER_SECTION_GAP;
-/// The ✕ beside the card's eyebrow, shared with the type popup's.
-const CLOSE_W: f32 = 18.0;
 
 /// What one row asked for.
 #[derive(Default)]
@@ -894,9 +891,9 @@ impl OndinApp {
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             // Keeps the card on screen when its row is near the bottom.
-            .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
+            .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
-                ui::menu_frame(POP_PAD).show(ui, |ui| {
+                ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
                     ui.set_width(POP_INNER);
                     ui.spacing_mut().item_spacing.y = SECTION_GAP;
 
@@ -904,10 +901,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.label(ui::eyebrow("Export settings"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui::icon_button(ui, icon::X, CLOSE_W, 13.0, false, true)
-                                .on_hover_text("Close")
-                                .clicked()
-                            {
+                            if ui::close_button(ui).clicked() {
                                 close = true;
                             }
                         });
@@ -1405,7 +1399,6 @@ impl OndinApp {
             return;
         }
         const MENU_W: f32 = crate::app::POPOVER_W;
-        const MENU_PAD: f32 = 11.0;
         let ctx = ui.ctx().clone();
         let current = self.shared_exports(subjects);
         // Collected and applied after the `Area` closes: every one of these mutates
@@ -1416,10 +1409,10 @@ impl OndinApp {
         let menu = egui::Area::new(egui::Id::new("export-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
-            .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
+            .constrain_to(ctx.input(|i| i.content_rect()).shrink(ui::SCREEN_MARGIN))
             .show(&ctx, |ui| {
-                ui::menu_frame(MENU_PAD).show(ui, |ui| {
-                    ui.set_width(ui::menu_inner_w(MENU_W, MENU_PAD));
+                ui::menu_frame(ui::POPOVER_PAD).show(ui, |ui| {
+                    ui.set_width(ui::menu_inner_w(MENU_W, ui::POPOVER_PAD));
                     ui::popup_rows(ui);
 
                     if super::inspector::menu_action(

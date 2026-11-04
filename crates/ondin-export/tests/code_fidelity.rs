@@ -2215,6 +2215,83 @@ fn frames_picked_by_width_beside_others_are_pages_of_their_own() {
     assert!(vue.file("Pricing.vue").is_some() && vue.file("App.vue").is_some());
 }
 
+/// A layer that is not the window names the mode of the collection picked by
+/// width that it draws in, the default too, so a wide window's media block does
+/// not reach it; and a direction string aliasing a wider one reads that one's
+/// word bare, which `flex-direction` takes.
+///
+/// flip: the walk leaving out the default of the collection picked by width →
+/// fails at "pinned to Mobile"; `Tokens::value` quoting an aliased string →
+/// fails at "bare".
+#[test]
+fn a_layer_off_the_window_pins_its_width_mode_and_an_aliased_direction_is_bare() {
+    use ondin_core::variable::{Cell, CollectionId, Field, Mode, Scope, VarKind, Variable};
+    let mut d = Doc::new();
+    let (mobile, tablet) = (d.ids.mint_mode(), d.ids.mint_mode());
+    let mode = |id, name: &str, index| Operation::AddMode {
+        collection: CollectionId::FIRST,
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    let (label, dir) = (d.ids.mint_var(), d.ids.mint_var());
+    let string = |id, name: &str, a: Cell, b: Cell, scope: &[Field]| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::String,
+            cells: [(mobile, a), (tablet, b)].into_iter().collect(),
+            scope: Some(Scope::of(scope.iter().copied())),
+            origin: None,
+            forked: None,
+            description: String::new(),
+        },
+    };
+    d.apply(vec![
+        mode(mobile, "Mobile", 0),
+        mode(tablet, "Tablet", 1),
+        Operation::SetBreakpoints {
+            id: CollectionId::FIRST,
+            breakpoints: Some([(mobile, 0.0), (tablet, 768.0)].into()),
+        },
+        string(
+            label,
+            "label",
+            Cell::String("Column".into()),
+            Cell::String("Row".into()),
+            &[Field::FlexDirection, Field::Content],
+        ),
+        string(
+            dir,
+            "dir",
+            Cell::Alias(label),
+            Cell::Alias(label),
+            &[Field::FlexDirection],
+        ),
+    ]);
+    let home = d.frame(None, 0.0, 0.0, 375.0, 200.0, "Home");
+    let card = d.frame(Some(home), 10.0, 10.0, 200.0, 100.0, "Card");
+    d.apply(vec![Operation::SetDisplay {
+        id: card,
+        display: Some(Display::Flex(Flex::default())),
+    }]);
+    let ops = ondin_core::build::bind_flow_ops(&d.doc, card, 0, Some(dir));
+    d.apply(ops);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[card]);
+    let html = String::from_utf8(export.file("index.html").unwrap().to_vec()).unwrap();
+    assert!(
+        html.contains("data-mode=\"mobile\""),
+        "pinned to Mobile:\n{html}"
+    );
+    let tokens = String::from_utf8(export.file("tokens.css").unwrap().to_vec()).unwrap();
+    assert!(tokens.contains("--label: column;"), "bare:\n{tokens}");
+    assert!(tokens.contains("--dir: var(--label);"), "{tokens}");
+}
+
 /// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
 /// mirror, a turn or a misplaced crop all move something visible.
 fn picture_png() -> Vec<u8> {

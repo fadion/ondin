@@ -293,7 +293,7 @@ impl Tokens {
                     if let Some(value) = t
                         .get(id)
                         .and_then(|v| Some((v, v.cells.get(&m.id)?)))
-                        .and_then(|(v, c)| self.value(v, c))
+                        .and_then(|(v, c)| self.value(t, v, c))
                     {
                         out.push_str(&format!("  --{}: {value};\n", self.name(id)));
                     }
@@ -332,7 +332,7 @@ impl Tokens {
             };
             if let Some(value) = col
                 .and_then(|c| v.cells.get(&c))
-                .and_then(|c| self.value(v, c))
+                .and_then(|c| self.value(t, v, c))
             {
                 out.push_str(&format!("  --{}: {value};\n", self.name(*id)));
             }
@@ -373,12 +373,14 @@ impl Tokens {
     /// One cell of variable `v` as a custom property's value. A boolean is a
     /// visibility: `none` hides, and `initial` — the guaranteed-invalid value —
     /// makes [`Self::shown`]'s fallback, the layer's own `display`, win. A
-    /// string of flex words is their CSS keyword, bare; any other is quoted.
-    fn value(&self, v: &variable::Variable, cell: &Cell) -> Option<String> {
+    /// string of flex words is their CSS keyword, bare, and so is one a keyword
+    /// string aliases, which `flex-direction` reads through it; any other is
+    /// quoted.
+    fn value(&self, t: &Variables, v: &variable::Variable, cell: &Cell) -> Option<String> {
         match cell {
             Cell::Color(c) => Some(super::css::color(*c, 1.0)),
             Cell::Number(n) => Some(fmt(*n)),
-            Cell::String(s) if keywords(v) => Some(keyword(s)),
+            Cell::String(s) if keywords(v) || self.aliased_by_keywords(t, v.id) => Some(keyword(s)),
             Cell::String(s) => Some(format!(
                 "\"{}\"",
                 s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -386,6 +388,32 @@ impl Tokens {
             Cell::Boolean(b) => Some(if *b { "initial" } else { "none" }.into()),
             Cell::Alias(to) => Some(format!("var(--{})", self.name(*to))),
         }
+    }
+
+    /// Whether `id` is reached through aliases from a keyword string the export
+    /// reads ([`keywords`]).
+    fn aliased_by_keywords(&self, t: &Variables, id: VarId) -> bool {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<VarId> = self
+            .used
+            .iter()
+            .copied()
+            .filter(|u| t.get(*u).is_some_and(keywords))
+            .collect();
+        while let Some(at) = stack.pop() {
+            if !seen.insert(at) {
+                continue;
+            }
+            for c in t.get(at).into_iter().flat_map(|v| v.cells.values()) {
+                if let Cell::Alias(next) = c {
+                    if *next == id {
+                        return true;
+                    }
+                    stack.push(*next);
+                }
+            }
+        }
+        false
     }
 }
 

@@ -350,14 +350,24 @@ impl Walk<'_> {
                 el.set("left", "0px");
                 el.set("width", "100%");
             }
-            // The modes its ancestors set, which the export does not hold.
+            // The modes its ancestors set, which the export does not hold. The
+            // collection picked by width answers to the window, so a layer that is
+            // not the window names its mode there even when it is the default.
             let t = doc.variables();
-            let inherited = node
+            let by_width = t.by_width().filter(|_| window != Some(*id));
+            let mut inherited: Vec<_> = node
                 .parent()
                 .map(|p| doc.modes_at(p))
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|m| t.mode(*m).is_some() && t.default_of(*m) != Some(*m));
+                .filter(|m| t.mode(*m).is_some() && t.default_of(*m) != Some(*m))
+                .collect();
+            if let Some(c) = by_width
+                && !inherited.iter().any(|m| c.has(*m))
+                && let Some(m) = doc.mode_at(*id, c.id)
+            {
+                inherited.push(m);
+            }
             if node.modes().is_empty()
                 && let Some(mode) = self.tokens.modes_attr(inherited)
             {
